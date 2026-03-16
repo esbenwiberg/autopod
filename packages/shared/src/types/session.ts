@@ -31,6 +31,7 @@ export interface Session {
   lastValidationResult: ValidationResult | null;
   pendingEscalation: EscalationRequest | null;
   escalationCount: number;
+  skipValidation: boolean;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;

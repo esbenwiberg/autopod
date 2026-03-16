@@ -18,9 +18,14 @@
     "dev": "tsup --watch"
   },
   "dependencies": {
-    "@autopod/shared": "workspace:*"
+    "@autopod/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "pino": "^9.6.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
+    "pino-pretty": "^13.0.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"

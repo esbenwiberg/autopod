@@ -19,14 +19,22 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@autopod/escalation-mcp": "workspace:^",
     "@autopod/shared": "workspace:*",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/websocket": "^11.2.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^11.7.0",
     "fastify": "^5.2.1",
-    "pino": "^9.6.0"
+    "pino": "^9.6.0",
+    "slugify": "^1.6.8",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.1",
     "pino-pretty": "^13.0.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.3",
