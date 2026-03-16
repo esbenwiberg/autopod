@@ -11,6 +11,8 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import { validateTransition, isTerminalState, canReceiveMessage, canKill } from './state-machine.js';
 import { generateClaudeMd } from './claude-md-generator.js';
+import { formatFeedback } from './feedback-formatter.js';
+import { buildCorrectionMessage } from './correction-context.js';
 
 export interface SessionManagerDependencies {
   sessionRepo: SessionRepository;
@@ -33,7 +35,7 @@ export interface SessionManager {
   handleCompletion(sessionId: string): Promise<void>;
   sendMessage(sessionId: string, message: string): Promise<void>;
   approveSession(sessionId: string): void;
-  rejectSession(sessionId: string, reason?: string): void;
+  rejectSession(sessionId: string, reason?: string): Promise<void>;
   killSession(sessionId: string): Promise<void>;
   triggerValidation(sessionId: string): Promise<void>;
   getSession(sessionId: string): Session;
@@ -276,11 +278,36 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       logger.info({ sessionId }, 'Session approved and completed');
     },
 
-    rejectSession(sessionId: string, reason?: string): void {
+    async rejectSession(sessionId: string, reason?: string): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
-      // From validated, transition back to running (agent reworks)
+      const previousStatus = session.status as 'validated' | 'failed';
+
+      // Reset validation attempts — human is giving a fresh chance
+      sessionRepo.update(sessionId, {
+        validationAttempts: 0,
+        lastValidationResult: null,
+      });
+
+      // Build rejection feedback message for the agent
+      const rejectionMessage = formatFeedback({
+        type: 'human_rejection',
+        feedback: reason ?? 'Changes rejected. Please try again.',
+        task: session.task,
+        previousStatus,
+        attempt: 0,
+        maxAttempts: session.maxValidationAttempts,
+      });
+
+      // Transition to running
       transition(session, 'running');
-      logger.info({ sessionId, reason }, 'Session rejected, returning to running');
+
+      // Resume agent with rejection feedback
+      const runtime = runtimeRegistry.get(session.runtime);
+      const events = runtime.resume(sessionId, rejectionMessage);
+      await this.consumeAgentEvents(sessionId, events);
+      await this.handleCompletion(sessionId);
+
+      logger.info({ sessionId, reason, previousStatus }, 'Session rejected, resuming agent with feedback');
     },
 
     async killSession(sessionId: string): Promise<void> {
@@ -388,8 +415,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         if (result.overall === 'pass') {
           transition(s2, 'validated');
         } else if (attempt < profile.maxValidationAttempts) {
-          // Return to running for another attempt
+          // Build correction message with structured feedback for the agent
+          const correctionMessage = await buildCorrectionMessage(
+            s2, profile, result, containerManager,
+          );
+
+          // Transition back to running for retry
           transition(s2, 'running');
+
+          // Resume the agent with correction feedback
+          const runtime = runtimeRegistry.get(s2.runtime);
+          const events = runtime.resume(sessionId, correctionMessage);
+          await this.consumeAgentEvents(sessionId, events);
+          await this.handleCompletion(sessionId);
+
+          logger.info({
+            sessionId,
+            attempt,
+            maxAttempts: profile.maxValidationAttempts,
+          }, 'Retrying after validation failure');
         } else {
           transition(s2, 'failed');
         }

@@ -53,7 +53,7 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
   app.post('/sessions/:sessionId/reject', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
     const body = (request.body ?? {}) as { reason?: string };
-    sessionManager.rejectSession(sessionId, body.reason);
+    await sessionManager.rejectSession(sessionId, body.reason);
     return { ok: true };
   });
 

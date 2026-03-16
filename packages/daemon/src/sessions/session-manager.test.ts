@@ -80,6 +80,7 @@ function createMockContainerManager(): ContainerManager {
     kill: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
+    execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
   };
 }
 
@@ -440,7 +441,8 @@ describe('SessionManager', () => {
   });
 
   describe('rejectSession', () => {
-    it('transitions validated session back to running', () => {
+    it('resumes agent with rejection feedback and completes cycle', async () => {
+      // With passing validation, rejection triggers: resume → agent → validation pass → validated
       const ctx = createTestContext();
       const manager = createSessionManager(ctx.deps);
 
@@ -450,13 +452,60 @@ describe('SessionManager', () => {
       );
       ctx.sessionRepo.update(session.id, { status: 'validated' });
 
-      manager.rejectSession(session.id, 'Not good enough');
+      await manager.rejectSession(session.id, 'Button color wrong');
 
-      const rejected = manager.getSession(session.id);
-      expect(rejected.status).toBe('running');
+      // Agent was resumed with the rejection feedback
+      expect(ctx.runtime.resume).toHaveBeenCalledWith(
+        session.id,
+        expect.stringContaining('Button color wrong'),
+      );
+      expect(ctx.runtime.resume).toHaveBeenCalledWith(
+        session.id,
+        expect.stringContaining('Rejected by Reviewer'),
+      );
+
+      // Full cycle completes: rejection → agent runs → validation passes → validated
+      const result = manager.getSession(session.id);
+      expect(result.status).toBe('validated');
     });
 
-    it('throws for invalid state transition', () => {
+    it('resets validation attempts before resuming agent', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, { status: 'validated', validationAttempts: 2 });
+
+      await manager.rejectSession(session.id, 'Needs more work');
+
+      // Validation attempts were reset (then incremented by 1 during the new validation cycle)
+      const result = manager.getSession(session.id);
+      expect(result.validationAttempts).toBe(1);
+      expect(result.status).toBe('validated');
+    });
+
+    it('allows rejection from failed state', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, { status: 'failed', validationAttempts: 3 });
+
+      await manager.rejectSession(session.id, 'Try a different approach');
+
+      // Agent was given another chance; with passing validation mock it ends up validated
+      expect(ctx.runtime.resume).toHaveBeenCalled();
+      const result = manager.getSession(session.id);
+      expect(result.status).toBe('validated');
+    });
+
+    it('throws for invalid state transition', async () => {
       const ctx = createTestContext();
       const manager = createSessionManager(ctx.deps);
 
@@ -466,7 +515,7 @@ describe('SessionManager', () => {
       );
 
       // queued -> running is not a valid transition
-      expect(() => manager.rejectSession(session.id)).toThrow(InvalidStateTransitionError);
+      await expect(manager.rejectSession(session.id)).rejects.toThrow(InvalidStateTransitionError);
     });
   });
 
@@ -587,7 +636,8 @@ describe('SessionManager', () => {
       expect(result.status).toBe('failed');
     });
 
-    it('returns to running when validation fails with retries remaining', async () => {
+    it('retries with correction feedback until max attempts exhausted', async () => {
+      // With always-failing validation, the retry loop exhausts all attempts
       const ctx = createTestContext({ overall: 'fail' });
       const manager = createSessionManager(ctx.deps);
 
@@ -603,8 +653,38 @@ describe('SessionManager', () => {
 
       await manager.triggerValidation(session.id);
 
+      // Agent was resumed with correction feedback for each retry (attempts 1 and 2)
+      expect(ctx.runtime.resume).toHaveBeenCalledWith(
+        session.id,
+        expect.stringContaining('Validation Failed'),
+      );
+      // 2 retries before exhaustion (attempt 1 → retry, attempt 2 → retry, attempt 3 → failed)
+      expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
+
       const result = manager.getSession(session.id);
-      expect(result.status).toBe('running');
+      expect(result.status).toBe('failed');
+      expect(result.validationAttempts).toBe(3);
+    });
+
+    it('does not resume agent on final attempt failure', async () => {
+      const ctx = createTestContext({ overall: 'fail' });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 2, // this is the last attempt
+      });
+
+      await manager.triggerValidation(session.id);
+
+      // No resume — max retries exhausted on this attempt
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(manager.getSession(session.id).status).toBe('failed');
     });
   });
 
