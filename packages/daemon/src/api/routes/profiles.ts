@@ -1,8 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { AutopodError } from '@autopod/shared';
 import type { ProfileStore } from '../../profiles/index.js';
+import type { ImageBuilder } from '../../images/index.js';
 
-export function profileRoutes(app: FastifyInstance, profileStore: ProfileStore): void {
+export function profileRoutes(
+  app: FastifyInstance,
+  profileStore: ProfileStore,
+  imageBuilder?: ImageBuilder,
+): void {
   // POST /profiles — create profile
   app.post('/profiles', async (request, reply) => {
     const profile = profileStore.create(request.body as Record<string, unknown>);
@@ -34,11 +39,26 @@ export function profileRoutes(app: FastifyInstance, profileStore: ProfileStore):
     reply.status(204);
   });
 
-  // POST /profiles/:name/warm — warm profile (stub)
+  // POST /profiles/:name/warm — build warm Docker image
   app.post('/profiles/:name/warm', async (request, _reply) => {
     const { name } = request.params as { name: string };
-    // Verify profile exists
-    profileStore.get(name);
-    throw new AutopodError('Warm images not yet implemented', 'NOT_IMPLEMENTED', 501);
+    const { rebuild, gitPat } = (request.body ?? {}) as { rebuild?: boolean; gitPat?: string };
+    const profile = profileStore.get(name);
+
+    if (!imageBuilder) {
+      throw new AutopodError(
+        'Image warming is not configured (missing Docker/ACR config)',
+        'NOT_CONFIGURED',
+        501,
+      );
+    }
+
+    const result = await imageBuilder.buildWarmImage(profile, { rebuild, gitPat });
+    return {
+      tag: result.tag,
+      digest: result.digest,
+      sizeMb: Math.floor(result.size / 1_048_576),
+      buildDuration: result.buildDuration,
+    };
   });
 }

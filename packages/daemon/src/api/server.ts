@@ -16,6 +16,7 @@ import { sessionRoutes } from './routes/sessions.js';
 import { profileRoutes } from './routes/profiles.js';
 import { websocketHandler } from './websocket.js';
 import { mcpHandler } from './mcp-handler.js';
+import type { ImageBuilder } from '../images/index.js';
 import './types.js';
 
 export interface ServerDependencies {
@@ -26,6 +27,7 @@ export interface ServerDependencies {
   eventRepo: EventRepository;
   sessionBridge: SessionBridge;
   pendingRequestsBySession: Map<string, PendingRequests>;
+  imageBuilder?: ImageBuilder;
   logLevel?: string;
   prettyLog?: boolean;
 }
@@ -55,7 +57,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   // Routes
   healthRoutes(app);
   sessionRoutes(app, deps.sessionManager);
-  profileRoutes(app, deps.profileStore);
+  profileRoutes(app, deps.profileStore, deps.imageBuilder);
 
   // WebSocket handler
   websocketHandler(app, deps.authModule, deps.eventBus, deps.eventRepo);
