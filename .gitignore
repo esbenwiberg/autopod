@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.turbo/
+*.db
+*.db-journal
+.env
+.env.local
+coverage/
+.pnpm-store/

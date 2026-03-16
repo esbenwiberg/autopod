@@ -1,0 +1,9 @@
+{
+  "name": "@autopod/e2e",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "echo 'No e2e tests yet'"
+  }
+}

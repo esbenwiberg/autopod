@@ -1,0 +1,35 @@
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g pnpm@9
+
+WORKDIR /app
+
+# Copy workspace config
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json tsconfig.base.json ./
+
+# Copy all package.json files for install
+COPY packages/shared/package.json packages/shared/
+COPY packages/daemon/package.json packages/daemon/
+COPY packages/cli/package.json packages/cli/
+COPY packages/validator/package.json packages/validator/
+COPY packages/escalation-mcp/package.json packages/escalation-mcp/
+
+RUN pnpm install --frozen-lockfile || pnpm install
+
+# Copy source
+COPY packages/shared/ packages/shared/
+COPY packages/daemon/ packages/daemon/
+COPY packages/cli/ packages/cli/
+COPY packages/validator/ packages/validator/
+COPY packages/escalation-mcp/ packages/escalation-mcp/
+
+# Build
+RUN pnpm build
+
+EXPOSE 3100
+
+CMD ["node", "packages/daemon/dist/index.js"]

@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile.daemon.dev
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./packages/daemon/src:/app/packages/daemon/src:ro
+      - ./packages/shared/src:/app/packages/shared/src:ro
+      - daemon-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - PORT=3100
+      - HOST=0.0.0.0
+      - DB_PATH=/app/data/autopod.db
+      - LOG_LEVEL=debug
+      - NODE_ENV=development
+      # These are required but not used in Phase 1
+      - ENTRA_CLIENT_ID=placeholder
+      - ENTRA_TENANT_ID=placeholder
+    restart: unless-stopped
+
+volumes:
+  daemon-data:
