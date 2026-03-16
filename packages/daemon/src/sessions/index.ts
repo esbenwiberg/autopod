@@ -1,0 +1,8 @@
+export { createSessionManager, type SessionManager, type SessionManagerDependencies } from './session-manager.js';
+export { createEventBus, type EventBus, type EventSubscriber } from './event-bus.js';
+export { createSessionQueue, type SessionQueue } from './session-queue.js';
+export { createSessionRepository, type SessionRepository, type NewSession, type SessionUpdates, type SessionFilters } from './session-repository.js';
+export { createEventRepository, type EventRepository, type StoredEvent } from './event-repository.js';
+export { createEscalationRepository, type EscalationRepository, type EscalationRow } from './escalation-repository.js';
+export { validateTransition, isTerminalState, canReceiveMessage, canKill } from './state-machine.js';
+export { generateClaudeMd } from './claude-md-generator.js';

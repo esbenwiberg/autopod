@@ -1,0 +1,24 @@
+FROM node:22-slim
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd --gid 1000 autopod && \
+    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod
+
+# Global tools
+RUN npm install -g pnpm@9
+
+# Working directory
+WORKDIR /workspace
+RUN chown autopod:autopod /workspace
+
+USER autopod
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-3000}/health || exit 1

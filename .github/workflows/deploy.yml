@@ -1,0 +1,145 @@
+name: Deploy Autopod
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+permissions:
+  id-token: write # OIDC for Azure login
+  contents: read
+
+env:
+  ACR_NAME_DEV: autopoddevacr
+  ACR_NAME_PROD: autopodprodacr
+  RESOURCE_GROUP_DEV: autopod-dev-rg
+  RESOURCE_GROUP_PROD: autopod-prod-rg
+
+jobs:
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "environment=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set ACR name
+        id: acr
+        run: |
+          if [ "${{ steps.env.outputs.environment }}" = "prod" ]; then
+            echo "name=${{ env.ACR_NAME_PROD }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ env.ACR_NAME_DEV }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login to ACR
+        run: az acr login --name ${{ steps.acr.outputs.name }}
+
+      - name: Docker image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.acr.outputs.name }}.azurecr.io/autopod/daemon
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ steps.acr.outputs.name }}.azurecr.io/autopod/daemon:buildcache
+          cache-to: type=registry,ref=${{ steps.acr.outputs.name }}.azurecr.io/autopod/daemon:buildcache,mode=max
+
+  deploy:
+    name: Deploy Infrastructure
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "environment=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set resource group
+        id: rg
+        run: |
+          if [ "${{ steps.env.outputs.environment }}" = "prod" ]; then
+            echo "name=${{ env.RESOURCE_GROUP_PROD }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ env.RESOURCE_GROUP_DEV }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy Bicep
+        uses: azure/arm-deploy@v2
+        with:
+          resourceGroupName: ${{ steps.rg.outputs.name }}
+          template: infra/main.bicep
+          parameters: >-
+            infra/parameters/${{ steps.env.outputs.environment }}.bicepparam
+            daemonImageTag=${{ needs.build-and-push.outputs.image-tag }}
+
+      - name: Health check
+        run: |
+          FQDN=$(az containerapp show \
+            --name autopod-${{ steps.env.outputs.environment }}-daemon \
+            --resource-group ${{ steps.rg.outputs.name }} \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+
+          echo "Checking health at https://${FQDN}/health"
+
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "https://${FQDN}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i/30: HTTP $STATUS — waiting 10s..."
+            sleep 10
+          done
+
+          echo "Health check failed after 30 attempts"
+          exit 1

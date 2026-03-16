@@ -1,0 +1,72 @@
+import type { EscalationRequest, EscalationResponse } from './escalation.js';
+import type { AgentEvent } from './runtime.js';
+import type { SessionStatus, SessionSummary } from './session.js';
+import type { ValidationResult } from './validation.js';
+
+export type SystemEvent =
+  | SessionCreatedEvent
+  | SessionStatusChangedEvent
+  | AgentActivityEvent
+  | ValidationStartedEvent
+  | ValidationCompletedEvent
+  | EscalationCreatedEvent
+  | EscalationResolvedEvent
+  | SessionCompletedEvent;
+
+export interface SessionCreatedEvent {
+  type: 'session.created';
+  timestamp: string;
+  session: SessionSummary;
+}
+
+export interface SessionStatusChangedEvent {
+  type: 'session.status_changed';
+  timestamp: string;
+  sessionId: string;
+  previousStatus: SessionStatus;
+  newStatus: SessionStatus;
+}
+
+export interface AgentActivityEvent {
+  type: 'session.agent_activity';
+  timestamp: string;
+  sessionId: string;
+  event: AgentEvent;
+}
+
+export interface ValidationStartedEvent {
+  type: 'session.validation_started';
+  timestamp: string;
+  sessionId: string;
+  attempt: number;
+}
+
+export interface ValidationCompletedEvent {
+  type: 'session.validation_completed';
+  timestamp: string;
+  sessionId: string;
+  result: ValidationResult;
+}
+
+export interface EscalationCreatedEvent {
+  type: 'session.escalation_created';
+  timestamp: string;
+  sessionId: string;
+  escalation: EscalationRequest;
+}
+
+export interface EscalationResolvedEvent {
+  type: 'session.escalation_resolved';
+  timestamp: string;
+  sessionId: string;
+  escalationId: string;
+  response: EscalationResponse;
+}
+
+export interface SessionCompletedEvent {
+  type: 'session.completed';
+  timestamp: string;
+  sessionId: string;
+  finalStatus: 'complete' | 'killed';
+  summary: SessionSummary;
+}

@@ -1,0 +1,119 @@
+import React, { createContext, useContext, useCallback, useState, useRef } from 'react';
+import { Box, Text } from 'ink';
+import type { AgentEvent, SystemEvent } from '@autopod/shared';
+import { useSessionState } from './hooks/useSessionState.js';
+import type { UseSessionStateReturn } from './hooks/useSessionState.js';
+import { useWebSocket } from './hooks/useWebSocket.js';
+import { Dashboard } from './Dashboard.js';
+
+export interface DashboardConfig {
+  daemonUrl: string;
+  token: string;
+}
+
+// Context for child components to access session state
+const SessionStateContext = createContext<UseSessionStateReturn | null>(null);
+
+export function useSessionContext(): UseSessionStateReturn {
+  const ctx = useContext(SessionStateContext);
+  if (!ctx) throw new Error('useSessionContext must be used within App');
+  return ctx;
+}
+
+interface AppProps {
+  config: DashboardConfig;
+}
+
+export function App({ config }: AppProps): React.ReactElement {
+  const [agentEvents, setAgentEvents] = useState<Map<string, AgentEvent[]>>(new Map());
+  const sessionState = useSessionState({
+    daemonUrl: config.daemonUrl,
+    token: config.token,
+  });
+
+  const sessionStateRef = useRef(sessionState);
+  sessionStateRef.current = sessionState;
+
+  const handleEvent = useCallback((event: SystemEvent) => {
+    sessionStateRef.current.handleEvent(event);
+
+    // Track agent activity events per session
+    if (event.type === 'session.agent_activity') {
+      setAgentEvents((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(event.sessionId) ?? [];
+        next.set(event.sessionId, [...existing, event.event]);
+        return next;
+      });
+    }
+
+    // Clean up agent events for completed sessions
+    if (event.type === 'session.completed') {
+      setAgentEvents((prev) => {
+        if (!prev.has(event.sessionId)) return prev;
+        const next = new Map(prev);
+        next.delete(event.sessionId);
+        return next;
+      });
+    }
+  }, []);
+
+  const handleConnect = useCallback(() => {
+    void sessionStateRef.current.refresh();
+  }, []);
+
+  const handleDisconnect = useCallback(() => {
+    // State is preserved; we just show the connection status change
+  }, []);
+
+  const wsUrl = config.daemonUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws';
+
+  const ws = useWebSocket({
+    url: wsUrl,
+    token: config.token,
+    onEvent: handleEvent,
+    onConnect: handleConnect,
+    onDisconnect: handleDisconnect,
+  });
+
+  return (
+    <SessionStateContext.Provider value={sessionState}>
+      <ErrorBoundary>
+        <Dashboard
+          sessionState={sessionState}
+          ws={ws}
+          agentEvents={agentEvents}
+        />
+      </ErrorBoundary>
+    </SessionStateContext.Provider>
+  );
+}
+
+// Simple error boundary
+interface ErrorBoundaryState {
+  error: string | null;
+}
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error: error.message };
+  }
+
+  render(): React.ReactNode {
+    if (this.state.error) {
+      return (
+        <Box flexDirection="column" paddingX={1}>
+          <Text color="red" bold>Dashboard Error</Text>
+          <Text color="red">{this.state.error}</Text>
+          <Text dimColor>Press Ctrl+C to exit</Text>
+        </Box>
+      );
+    }
+    return this.props.children;
+  }
+}

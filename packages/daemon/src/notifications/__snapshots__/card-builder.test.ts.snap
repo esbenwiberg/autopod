@@ -1,0 +1,225 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Card Builder > buildErrorCard > matches snapshot 1`] = `
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "body": [
+    {
+      "color": "attention",
+      "size": "Medium",
+      "text": "Fatal Error",
+      "type": "TextBlock",
+      "weight": "Bolder",
+    },
+    {
+      "size": "Small",
+      "text": "Add dark mode toggle",
+      "type": "TextBlock",
+      "wrap": true,
+    },
+    {
+      "color": "Attention",
+      "text": "Container OOM killed",
+      "type": "TextBlock",
+      "wrap": true,
+    },
+    {
+      "facts": [
+        {
+          "title": "Profile",
+          "value": "my-app",
+        },
+        {
+          "title": "Session",
+          "value": "sess-abc123",
+        },
+        {
+          "title": "Fatal",
+          "value": "Yes",
+        },
+      ],
+      "type": "FactSet",
+    },
+  ],
+  "type": "AdaptiveCard",
+  "version": "1.5",
+}
+`;
+
+exports[`Card Builder > buildFailedCard > matches snapshot 1`] = `
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "body": [
+    {
+      "color": "attention",
+      "size": "Medium",
+      "text": "Validation Failed",
+      "type": "TextBlock",
+      "weight": "Bolder",
+    },
+    {
+      "size": "Small",
+      "text": "Add dark mode toggle",
+      "type": "TextBlock",
+      "wrap": true,
+    },
+    {
+      "color": "Attention",
+      "text": "Build failed with exit code 1",
+      "type": "TextBlock",
+      "wrap": true,
+    },
+    {
+      "facts": [
+        {
+          "title": "Attempt",
+          "value": "2",
+        },
+        {
+          "title": "Profile",
+          "value": "my-app",
+        },
+        {
+          "title": "Session",
+          "value": "sess-abc123",
+        },
+      ],
+      "type": "FactSet",
+    },
+    {
+      "color": "Accent",
+      "fontType": "Monospace",
+      "size": "Small",
+      "spacing": "Small",
+      "text": "\`ap reject sess-abc123\`",
+      "type": "TextBlock",
+    },
+  ],
+  "type": "AdaptiveCard",
+  "version": "1.5",
+}
+`;
+
+exports[`Card Builder > buildNeedsInputCard > matches snapshot 1`] = `
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "body": [
+    {
+      "color": "warning",
+      "size": "Medium",
+      "text": "Human Input Needed",
+      "type": "TextBlock",
+      "weight": "Bolder",
+    },
+    {
+      "size": "Small",
+      "text": "Add dark mode toggle",
+      "type": "TextBlock",
+      "wrap": true,
+    },
+    {
+      "text": "Pick a color",
+      "type": "TextBlock",
+      "wrap": true,
+    },
+    {
+      "facts": [
+        {
+          "title": "Profile",
+          "value": "my-app",
+        },
+        {
+          "title": "Session",
+          "value": "sess-abc123",
+        },
+        {
+          "title": "Type",
+          "value": "ask_human",
+        },
+      ],
+      "type": "FactSet",
+    },
+    {
+      "color": "Accent",
+      "fontType": "Monospace",
+      "size": "Small",
+      "spacing": "Small",
+      "text": "\`ap tell sess-abc123 "<response>"\`",
+      "type": "TextBlock",
+    },
+  ],
+  "type": "AdaptiveCard",
+  "version": "1.5",
+}
+`;
+
+exports[`Card Builder > buildValidatedCard > matches snapshot 1`] = `
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "actions": [
+    {
+      "title": "Open Preview",
+      "type": "Action.OpenUrl",
+      "url": "https://preview.example.com/sess-abc123",
+    },
+  ],
+  "body": [
+    {
+      "color": "good",
+      "size": "Medium",
+      "text": "Session Validated",
+      "type": "TextBlock",
+      "weight": "Bolder",
+    },
+    {
+      "size": "Small",
+      "text": "Add dark mode toggle",
+      "type": "TextBlock",
+      "wrap": true,
+    },
+    {
+      "facts": [
+        {
+          "title": "Profile",
+          "value": "my-app",
+        },
+        {
+          "title": "Duration",
+          "value": "1m 35s",
+        },
+        {
+          "title": "Files Changed",
+          "value": "5",
+        },
+        {
+          "title": "Lines",
+          "value": "+120 / -30",
+        },
+        {
+          "title": "Session",
+          "value": "sess-abc123",
+        },
+      ],
+      "type": "FactSet",
+    },
+    {
+      "color": "Accent",
+      "fontType": "Monospace",
+      "size": "Small",
+      "spacing": "Small",
+      "text": "\`ap diff sess-abc123\`",
+      "type": "TextBlock",
+    },
+    {
+      "color": "Accent",
+      "fontType": "Monospace",
+      "size": "Small",
+      "spacing": "Small",
+      "text": "\`ap approve sess-abc123\`",
+      "type": "TextBlock",
+    },
+  ],
+  "type": "AdaptiveCard",
+  "version": "1.5",
+}
+`;
