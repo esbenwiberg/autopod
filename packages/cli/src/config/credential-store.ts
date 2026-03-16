@@ -11,9 +11,6 @@ function getCredentialsPath(): string {
 
 export function readCredentials(): AuthToken | null {
   const credPath = getCredentialsPath();
-  if (!fs.existsSync(credPath)) {
-    return null;
-  }
 
   try {
     const raw = fs.readFileSync(credPath, 'utf-8');
@@ -32,9 +29,7 @@ export function readCredentials(): AuthToken | null {
 
 export function writeCredentials(token: AuthToken): void {
   const dir = getConfigDir();
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  fs.mkdirSync(dir, { recursive: true });
 
   const credPath = getCredentialsPath();
   fs.writeFileSync(credPath, JSON.stringify(token, null, 2), { mode: 0o600 });
@@ -42,7 +37,9 @@ export function writeCredentials(token: AuthToken): void {
 
 export function deleteCredentials(): void {
   const credPath = getCredentialsPath();
-  if (fs.existsSync(credPath)) {
+  try {
     fs.unlinkSync(credPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
 }

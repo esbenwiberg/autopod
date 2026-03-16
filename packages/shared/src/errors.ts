@@ -72,6 +72,13 @@ export class ValidationError extends AutopodError {
   }
 }
 
+export class EscalationNotFoundError extends AutopodError {
+  constructor(id: string) {
+    super(`Escalation ${id} not found`, 'ESCALATION_NOT_FOUND', 404);
+    this.name = 'EscalationNotFoundError';
+  }
+}
+
 export class RuntimeError extends AutopodError {
   constructor(
     message: string,

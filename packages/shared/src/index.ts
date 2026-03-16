@@ -86,6 +86,7 @@ export {
   ProfileExistsError,
   ContainerError,
   ValidationError,
+  EscalationNotFoundError,
   RuntimeError,
 } from './errors.js';
 

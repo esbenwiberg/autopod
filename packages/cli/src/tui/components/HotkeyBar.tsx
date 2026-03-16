@@ -24,10 +24,6 @@ function getHotkeys(status: SessionStatus | null): Hotkey[] {
 
   switch (status) {
     case 'running':
-      contextual.push({ key: 't', label: 'tell' });
-      contextual.push({ key: 'l', label: 'logs' });
-      contextual.push({ key: 'x', label: 'kill' });
-      break;
     case 'awaiting_input':
       contextual.push({ key: 't', label: 'tell' });
       contextual.push({ key: 'l', label: 'logs' });

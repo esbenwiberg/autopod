@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { EscalationRequest, EscalationResponse, EscalationType } from '@autopod/shared';
-import { AutopodError } from '@autopod/shared';
+import { EscalationNotFoundError } from '@autopod/shared';
 
 export interface EscalationRow {
   id: string;
@@ -49,7 +49,7 @@ export function createEscalationRepository(db: Database.Database): EscalationRep
         | Record<string, unknown>
         | undefined;
       if (!row) {
-        throw new AutopodError(`Escalation ${id} not found`, 'ESCALATION_NOT_FOUND', 404);
+        throw new EscalationNotFoundError(id);
       }
       return rowToEscalation(row);
     },
@@ -66,7 +66,7 @@ export function createEscalationRepository(db: Database.Database): EscalationRep
         });
 
       if (result.changes === 0) {
-        throw new AutopodError(`Escalation ${id} not found`, 'ESCALATION_NOT_FOUND', 404);
+        throw new EscalationNotFoundError(id);
       }
     },
 

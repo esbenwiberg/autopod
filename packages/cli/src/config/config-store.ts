@@ -8,16 +8,11 @@ const CONFIG_DIR = path.join(os.homedir(), '.autopod');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.yaml');
 
 function ensureDir(): void {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  }
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
 }
 
 export function getAll(): CliConfig {
   ensureDir();
-  if (!fs.existsSync(CONFIG_PATH)) {
-    return { ...DEFAULT_CONFIG };
-  }
 
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
@@ -28,8 +23,10 @@ export function getAll(): CliConfig {
       return { ...DEFAULT_CONFIG };
     }
     return { ...DEFAULT_CONFIG, ...result.data };
-  } catch {
-    console.warn(`Warning: Could not read config at ${CONFIG_PATH}, using defaults`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn(`Warning: Could not read config at ${CONFIG_PATH}, using defaults`);
+    }
     return { ...DEFAULT_CONFIG };
   }
 }

@@ -68,29 +68,25 @@ export function websocketHandler(
           client.subscriptions.add(msg.sessionId);
           client.unsubscribers.set(msg.sessionId, unsub);
           socket.send(JSON.stringify({ type: 'subscribed', sessionId: msg.sessionId }));
-        }
-
-        if (msg.type === 'unsubscribe' && msg.sessionId) {
+        } else if (msg.type === 'unsubscribe' && msg.sessionId) {
           const unsub = client.unsubscribers.get(msg.sessionId);
           if (unsub) unsub();
           client.subscriptions.delete(msg.sessionId);
           client.unsubscribers.delete(msg.sessionId);
           socket.send(JSON.stringify({ type: 'unsubscribed', sessionId: msg.sessionId }));
-        }
-
-        if (msg.type === 'subscribe_all') {
+        } else if (msg.type === 'subscribe_all') {
           const unsub = eventBus.subscribe(sendEvent);
           client.subscriptions.add('*');
           client.unsubscribers.set('*', unsub);
           socket.send(JSON.stringify({ type: 'subscribed_all' }));
-        }
-
-        // Replay events since a given ID
-        if (msg.type === 'replay' && typeof msg.lastEventId === 'number') {
+        } else if (msg.type === 'replay' && typeof msg.lastEventId === 'number') {
           const events = eventRepo.getSince(msg.lastEventId);
           for (const stored of events) {
             socket.send(JSON.stringify({ ...stored.payload, _eventId: stored.id }));
           }
+        } else if (!['subscribe', 'unsubscribe', 'subscribe_all', 'replay'].includes(msg.type)) {
+          request.log.warn({ msgType: msg.type }, 'Unknown WS message type');
+          socket.send(JSON.stringify({ type: 'error', message: `Unknown message type: ${msg.type}` }));
         }
       } catch (err) {
         request.log.warn({ err }, 'Invalid WS message');

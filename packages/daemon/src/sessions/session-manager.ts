@@ -49,9 +49,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     enqueueSession, mcpBaseUrl, logger,
   } = deps;
 
-  /** Tracks which sessions had skipValidation set (not on Session type). */
-  const skipValidationMap = new Map<string, boolean>();
-
   function transition(session: Session, to: SessionStatus, extraUpdates?: Partial<SessionUpdates>): Session {
     validateTransition(session.id, session.status, to);
     const previousStatus = session.status;
@@ -75,8 +72,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const model = request.model ?? profile.defaultModel;
       const runtime = request.runtime ?? profile.defaultRuntime;
       const skipValidation = request.skipValidation ?? false;
-
-      skipValidationMap.set(id, skipValidation);
 
       sessionRepo.insert({
         id,
@@ -219,8 +214,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       // Skip validation if requested
-      const skipValidation = skipValidationMap.get(sessionId) ?? false;
-      if (skipValidation) {
+      if (session.skipValidation) {
         transition(session, 'validating');
         const s2 = sessionRepo.getOrThrow(sessionId);
         transition(s2, 'validated');

@@ -29,7 +29,6 @@ interface ClientConfig {
 export class AutopodClient {
   private baseUrl: string;
   private getToken: () => Promise<string>;
-  private retried = false;
 
   constructor(config: ClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, '');
@@ -142,9 +141,8 @@ export class AutopodClient {
       throw new DaemonUnreachableError(this.baseUrl);
     }
 
-    if (response.status === 401 && !this.retried) {
-      this.retried = true;
-      // Let the caller handle token refresh via getToken
+    if (response.status === 401) {
+      // Single retry with fresh token
       try {
         token = await this.getToken();
         response = await fetch(url, {
@@ -159,7 +157,6 @@ export class AutopodClient {
         throw new AuthError('Token refresh failed. Try: ap login');
       }
     }
-    this.retried = false;
 
     if (!response.ok) {
       await this.handleError(response, path);

@@ -46,6 +46,16 @@ export function App({ config }: AppProps): React.ReactElement {
         return next;
       });
     }
+
+    // Clean up agent events for completed sessions
+    if (event.type === 'session.completed') {
+      setAgentEvents((prev) => {
+        if (!prev.has(event.sessionId)) return prev;
+        const next = new Map(prev);
+        next.delete(event.sessionId);
+        return next;
+      });
+    }
   }, []);
 
   const handleConnect = useCallback(() => {
