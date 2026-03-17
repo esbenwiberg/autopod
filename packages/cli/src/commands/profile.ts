@@ -70,6 +70,19 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         if (data.validationPages.length > 0) {
           console.log(`${chalk.bold('Pages:')}      ${data.validationPages.map((p) => p.path).join(', ')}`);
         }
+        if (data.mcpServers && data.mcpServers.length > 0) {
+          console.log(`${chalk.bold('MCP servers:')}`);
+          for (const s of data.mcpServers) {
+            console.log(`  ${chalk.cyan(s.name)} ${chalk.dim(s.url)}${s.description ? ` — ${s.description}` : ''}`);
+          }
+        }
+        if (data.claudeMdSections && data.claudeMdSections.length > 0) {
+          console.log(`${chalk.bold('CLAUDE.md sections:')}`);
+          for (const s of data.claudeMdSections) {
+            const source = s.fetch ? chalk.dim('(dynamic)') : chalk.dim('(static)');
+            console.log(`  ${chalk.cyan(s.heading)} ${source} priority=${s.priority ?? 50}`);
+          }
+        }
         if (data.warmImageTag) {
           console.log(`${chalk.bold('Warm image:')} ${data.warmImageTag} (${data.warmImageBuiltAt ?? 'unknown'})`);
         }
@@ -101,6 +114,8 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           autoPauseAfter: 3,
           humanResponseTimeout: 3600,
         },
+        mcpServers: [],
+        claudeMdSections: [],
         extends: null,
       };
 

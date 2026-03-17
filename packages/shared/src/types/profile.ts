@@ -1,4 +1,5 @@
 import type { RuntimeType } from './runtime.js';
+import type { InjectedMcpServer, InjectedClaudeMdSection } from './injection.js';
 
 export type StackTemplate = 'node22' | 'node22-pw' | 'dotnet9' | 'python312' | 'custom';
 
@@ -20,6 +21,10 @@ export interface Profile {
   extends: string | null;
   warmImageTag: string | null;
   warmImageBuiltAt: string | null;
+  /** Additional MCP servers for sessions using this profile */
+  mcpServers: InjectedMcpServer[];
+  /** Additional CLAUDE.md sections for sessions using this profile */
+  claudeMdSections: InjectedClaudeMdSection[];
   createdAt: string;
   updatedAt: string;
 }

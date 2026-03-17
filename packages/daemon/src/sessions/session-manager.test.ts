@@ -167,6 +167,8 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         extends: null,
         warmImageTag: null,
         warmImageBuiltAt: null,
+        mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]'),
+        claudeMdSections: JSON.parse((row.claude_md_sections as string) ?? '[]'),
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -197,6 +199,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
     validationEngine,
     enqueueSession: (id) => enqueuedSessions.push(id),
     mcpBaseUrl: 'http://localhost:8080',
+    daemonConfig: { mcpServers: [], claudeMdSections: [] },
     logger,
   };
 

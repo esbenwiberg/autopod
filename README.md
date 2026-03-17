@@ -105,6 +105,7 @@ queued --> provisioning --> running --> validating --> validated --> approved --
 - **Git-native** — Every session gets its own branch, PR created on approve
 - **Correction loops** — Reject with feedback, agent retries from where it left off
 - **On-demand previews** — `ap open <id>` spins up a live preview of any session's work
+- **Session injection** — Plug in external MCP servers and CLAUDE.md content at daemon or profile level (e.g., Prism codebase context)
 
 ---
 
@@ -376,6 +377,74 @@ escalation:
     maxCalls: 5                   # Max AI-to-AI escalations per session
   autoPauseAfter: 3              # Auto-escalate after N consecutive failures
   humanResponseTimeout: 3600000  # 1 hour before auto-killing stalled session
+```
+
+### Session Injection (MCP Servers & CLAUDE.md)
+
+Profiles can inject additional MCP servers and CLAUDE.md content sections into agent sessions. This is how you plug in external tools (like [Prism](https://github.com/esbenwiberg/prism) for codebase context) without modifying autopod itself.
+
+Injections work at two tiers with merge semantics:
+
+```
+Daemon config (defaults for all sessions)
+    ↓ merge
+Profile config (repo-specific overrides/additions)
+    ↓ result
+Session receives the merged set
+```
+
+Profile entries override daemon entries with the same key (`name` for MCP servers, `heading` for sections).
+
+#### MCP servers
+
+Add external MCP servers that agents can call at runtime:
+
+```yaml
+mcpServers:
+  - name: prism
+    url: "https://prism.internal/mcp"
+    headers:
+      Authorization: "Bearer ${PRISM_API_KEY}"
+    description: "Codebase context powered by Prism. Use these tools to understand the codebase before making changes."
+    toolHints:
+      - "Call get_file_context before modifying any file"
+      - "Call get_related_files to find blast radius of your changes"
+      - "Call get_architecture_overview for system-level orientation"
+```
+
+#### CLAUDE.md sections
+
+Inject content into the generated CLAUDE.md — either static or dynamically fetched at provisioning time:
+
+```yaml
+claudeMdSections:
+  # Static section
+  - heading: "Coding Standards"
+    priority: 20
+    content: "Always use TypeScript strict mode. Never use `any`."
+
+  # Dynamic section — fetched from an API when the session starts
+  - heading: "Codebase Architecture"
+    priority: 10
+    maxTokens: 4000
+    fetch:
+      url: "https://prism.internal/api/projects/org/my-app/context/arch"
+      authorization: "Bearer prism_abc123"
+      body: { "maxTokens": 4000 }
+      timeoutMs: 10000
+```
+
+- **Priority** controls document order (lower = higher in CLAUDE.md, default: 50)
+- **Dynamic sections** are fetched via POST at provisioning time; if the fetch fails, the section falls back to static `content` (if set) or is silently skipped
+- **maxTokens** limits dynamic content length (~4 chars/token heuristic)
+
+#### Daemon-level defaults
+
+Set MCP servers and sections that apply to all sessions via environment variables:
+
+```bash
+DAEMON_MCP_SERVERS='[{"name":"prism","url":"https://prism.internal/mcp"}]'
+DAEMON_CLAUDE_MD_SECTIONS='[{"heading":"Company Rules","content":"...","priority":5}]'
 ```
 
 ---

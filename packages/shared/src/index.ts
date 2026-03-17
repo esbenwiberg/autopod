@@ -15,6 +15,11 @@ export type {
 } from './types/profile.js';
 
 export type {
+  InjectedMcpServer,
+  InjectedClaudeMdSection,
+} from './types/injection.js';
+
+export type {
   RuntimeType,
   Runtime,
   SpawnConfig,
@@ -116,6 +121,11 @@ export {
   createProfileSchema,
   updateProfileSchema,
 } from './schemas/profile.schema.js';
+
+export {
+  injectedMcpServerSchema,
+  injectedClaudeMdSectionSchema,
+} from './schemas/injection.schema.js';
 
 export {
   daemonConfigSchema,
