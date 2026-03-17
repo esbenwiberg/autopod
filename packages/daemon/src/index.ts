@@ -134,6 +134,10 @@ sessionManager = createSessionManager({
   validationEngine,
   enqueueSession: (id) => sessionQueue.enqueue(id),
   mcpBaseUrl: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`,
+  daemonConfig: {
+    mcpServers: JSON.parse(process.env.DAEMON_MCP_SERVERS ?? '[]'),
+    claudeMdSections: JSON.parse(process.env.DAEMON_CLAUDE_MD_SECTIONS ?? '[]'),
+  },
   logger,
 });
 

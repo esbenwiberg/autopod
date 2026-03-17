@@ -5,4 +5,6 @@ export { createSessionRepository, type SessionRepository, type NewSession, type 
 export { createEventRepository, type EventRepository, type StoredEvent } from './event-repository.js';
 export { createEscalationRepository, type EscalationRepository, type EscalationRow } from './escalation-repository.js';
 export { validateTransition, isTerminalState, canReceiveMessage, canKill } from './state-machine.js';
-export { generateClaudeMd } from './claude-md-generator.js';
+export { generateClaudeMd, type ClaudeMdOptions } from './claude-md-generator.js';
+export { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
+export { resolveSections, type ResolvedSection } from './section-resolver.js';

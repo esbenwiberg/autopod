@@ -135,6 +135,7 @@ describe('Integration', () => {
       validationEngine,
       enqueueSession: (id) => sessionQueue.enqueue(id),
       mcpBaseUrl: 'http://localhost:3100',
+      daemonConfig: { mcpServers: [], claudeMdSections: [] },
       logger,
     });
 
