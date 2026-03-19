@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it, beforeEach } from 'vitest';
-import { ProfileExistsError, ProfileNotFoundError, AutopodError } from '@autopod/shared';
+import { ProfileExistsError, ProfileNotFoundError } from '@autopod/shared';
 import { createProfileStore, type ProfileStore } from './profile-store.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
@@ -87,7 +87,7 @@ describe('ProfileStore', () => {
       expect(profile.healthPath).toBe('/health');
       expect(profile.healthTimeout).toBe(60);
       expect(profile.validationPages).toHaveLength(1);
-      expect(profile.validationPages[0].assertions).toHaveLength(1);
+      expect(profile.validationPages[0]!.assertions).toHaveLength(1);
       expect(profile.maxValidationAttempts).toBe(5);
       expect(profile.defaultModel).toBe('sonnet');
       expect(profile.customInstructions).toBe('Be careful');
@@ -151,8 +151,8 @@ describe('ProfileStore', () => {
 
       const profiles = store.list();
       expect(profiles).toHaveLength(2);
-      expect(profiles[0].name).toBe('app-a');
-      expect(profiles[1].name).toBe('app-b');
+      expect(profiles[0]!.name).toBe('app-a');
+      expect(profiles[1]!.name).toBe('app-b');
     });
 
     it('should return profiles with inheritance resolved', () => {
@@ -185,7 +185,7 @@ describe('ProfileStore', () => {
     it('should update updatedAt timestamp', () => {
       store.create(validInput);
       // Read raw to get the DB-assigned createdAt
-      const before = store.getRaw('my-app').updatedAt;
+      store.getRaw('my-app').updatedAt;
       // Force a different timestamp by manipulating the DB directly
       db.prepare("UPDATE profiles SET updated_at = '2020-01-01T00:00:00.000Z' WHERE name = 'my-app'").run();
       const updated = store.update('my-app', { buildCommand: 'pnpm build' });

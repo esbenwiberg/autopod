@@ -206,8 +206,8 @@ describe('CodexStreamParser', () => {
         events.push(event);
       }
       expect(events).toHaveLength(2);
-      expect(events[0].type).toBe('status');
-      expect(events[1].type).toBe('complete');
+      expect(events[0]!.type).toBe('status');
+      expect(events[1]!.type).toBe('complete');
     });
 
     it('skips empty lines', async () => {

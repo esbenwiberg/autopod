@@ -54,6 +54,7 @@ function createMockSession(overrides?: Partial<Session>): Session {
     status: 'running',
     model: 'claude-sonnet',
     runtime: 'claude',
+    executionTarget: 'local',
     branch: 'feature/add-button',
     containerId: null,
     worktreePath: null,

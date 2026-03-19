@@ -1,0 +1,272 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+import type { TaskReviewResult, ValidationResult } from '@autopod/shared';
+import type { Logger } from 'pino';
+
+import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Local validation engine with build, health check, and AI task review.
+ *
+ * Page validation is intentionally skipped — it requires a browser (Playwright),
+ * which is not available in this sandbox environment.
+ */
+export function createLocalValidationEngine(
+  containerManager: ContainerManager,
+  logger?: Logger,
+): ValidationEngine {
+  const log = logger?.child({ component: 'local-validation-engine' });
+
+  return {
+    async validate(config: ValidationEngineConfig): Promise<ValidationResult> {
+      const startTime = Date.now();
+
+      // ── Phase 1: Build ──────────────────────────────────────────────
+      const buildResult = await runBuild(containerManager, config, log);
+
+      // ── Phase 2: Health check ───────────────────────────────────────
+      const healthResult = buildResult.status === 'pass'
+        ? await runHealthCheck(containerManager, config, log)
+        : { status: 'fail' as const, url: config.previewUrl + config.healthPath, responseCode: null, duration: 0 };
+
+      // ── Phase 3: Page validation (SKIPPED) ──────────────────────────
+      // Playwright/Chromium cannot run in this sandbox environment.
+      // Page validation requires a real browser — returning empty array.
+      const pages: ValidationResult['smoke']['pages'] = [];
+
+      // ── Phase 4: AI Task Review ─────────────────────────────────────
+      const taskReview = await runTaskReview(config, log);
+
+      // ── Phase 5: Overall result ─────────────────────────────────────
+      const smokeStatus = buildResult.status === 'pass' && healthResult.status === 'pass'
+        ? 'pass' as const
+        : 'fail' as const;
+
+      const overall = smokeStatus === 'pass' && (taskReview === null || taskReview.status !== 'fail')
+        ? 'pass' as const
+        : 'fail' as const;
+
+      const duration = Date.now() - startTime;
+
+      return {
+        sessionId: config.sessionId,
+        attempt: config.attempt,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: smokeStatus,
+          build: buildResult,
+          health: healthResult,
+          pages,
+        },
+        taskReview,
+        overall,
+        duration,
+      };
+    },
+  };
+}
+
+// ── Build phase ─────────────────────────────────────────────────────────────
+
+async function runBuild(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+) {
+  if (!config.buildCommand) {
+    log?.info('no build command configured, skipping build');
+    return { status: 'pass' as const, output: '', duration: 0 };
+  }
+
+  const buildStart = Date.now();
+  log?.info({ buildCommand: config.buildCommand }, 'running build');
+
+  const result = await containerManager.execInContainer(
+    config.containerId,
+    ['sh', '-c', config.buildCommand],
+    { cwd: '/workspace', timeout: 120_000 },
+  );
+
+  const duration = Date.now() - buildStart;
+  const output = (result.stdout + '\n' + result.stderr).trim();
+  const status = result.exitCode === 0 ? 'pass' as const : 'fail' as const;
+
+  if (status === 'fail') {
+    log?.warn({ exitCode: result.exitCode, duration }, 'build failed');
+  } else {
+    log?.info({ duration }, 'build passed');
+  }
+
+  return {
+    status,
+    output: output.slice(0, 10_000), // Cap output size
+    duration,
+  };
+}
+
+// ── Health check phase ──────────────────────────────────────────────────────
+
+async function runHealthCheck(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+) {
+  if (!config.startCommand) {
+    log?.info('no start command configured, skipping health check');
+    return { status: 'pass' as const, url: config.previewUrl + config.healthPath, responseCode: null, duration: 0 };
+  }
+
+  const healthStart = Date.now();
+  const url = config.previewUrl + config.healthPath;
+  const timeoutMs = config.healthTimeout * 1_000;
+
+  log?.info({ startCommand: config.startCommand, url, timeoutMs }, 'starting app for health check');
+
+  // Start the app in the background so it doesn't block
+  // Fire-and-forget: we don't await the long-running server process
+  containerManager.execInContainer(
+    config.containerId,
+    ['sh', '-c', config.startCommand + ' &'],
+    { cwd: '/workspace' },
+  ).catch((err) => {
+    log?.warn({ err }, 'background start command errored (may be expected for long-running processes)');
+  });
+
+  // Poll for health
+  const pollIntervalMs = 2_000;
+  let lastResponseCode: number | null = null;
+
+  while (Date.now() - healthStart < timeoutMs) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(5_000),
+      });
+      lastResponseCode = response.status;
+
+      if (response.status === 200) {
+        const duration = Date.now() - healthStart;
+        log?.info({ url, duration }, 'health check passed');
+        return { status: 'pass' as const, url, responseCode: 200, duration };
+      }
+
+      log?.debug({ url, status: response.status }, 'health check got non-200, retrying');
+    } catch {
+      log?.debug({ url }, 'health check fetch failed, retrying');
+    }
+
+    // Wait before next poll, but don't overshoot the timeout
+    const remaining = timeoutMs - (Date.now() - healthStart);
+    if (remaining > 0) {
+      await sleep(Math.min(pollIntervalMs, remaining));
+    }
+  }
+
+  const duration = Date.now() - healthStart;
+  log?.warn({ url, lastResponseCode, duration }, 'health check timed out');
+
+  return { status: 'fail' as const, url, responseCode: lastResponseCode, duration };
+}
+
+// ── AI Task Review phase ────────────────────────────────────────────────────
+
+async function runTaskReview(
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<TaskReviewResult | null> {
+  if (!config.reviewerModel || !config.diff || !config.task) {
+    log?.info('skipping task review (missing reviewerModel, diff, or task)');
+    return null;
+  }
+
+  log?.info({ model: config.reviewerModel }, 'running AI task review');
+
+  const prompt = `You are reviewing code changes for correctness.
+
+Task: ${config.task}
+
+Diff:
+${config.diff}
+
+Review the changes and respond with a JSON object:
+{
+  "status": "pass" | "fail" | "uncertain",
+  "reasoning": "brief explanation",
+  "issues": ["list of specific issues found, if any"]
+}
+
+Respond ONLY with the JSON object, no markdown fences or extra text.`;
+
+  try {
+    const { stdout } = await execFileAsync('claude', [
+      '-p', prompt,
+      '--model', config.reviewerModel,
+      '--output-format', 'text',
+    ], {
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024, // 1 MB
+    });
+
+    const parsed = parseReviewJson(stdout.trim());
+    if (!parsed) {
+      log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
+      return null;
+    }
+
+    log?.info({ status: parsed.status, issueCount: parsed.issues.length }, 'task review complete');
+
+    return {
+      status: parsed.status,
+      reasoning: parsed.reasoning,
+      issues: parsed.issues,
+      model: config.reviewerModel,
+      screenshots: [], // No browser screenshots available
+      diff: config.diff,
+    };
+  } catch (err) {
+    log?.warn({ err }, 'task review failed, continuing without review');
+    return null;
+  }
+}
+
+/**
+ * Attempts to parse the reviewer's JSON response, tolerating markdown fences
+ * and other common LLM output quirks.
+ */
+function parseReviewJson(raw: string): { status: 'pass' | 'fail' | 'uncertain'; reasoning: string; issues: string[] } | null {
+  // Strip markdown code fences if present
+  let cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
+
+  // Try to extract a JSON object if there's extra text around it
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned);
+
+    // Validate shape
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!['pass', 'fail', 'uncertain'].includes(parsed.status)) return null;
+    if (typeof parsed.reasoning !== 'string') return null;
+    if (!Array.isArray(parsed.issues)) return null;
+
+    return {
+      status: parsed.status,
+      reasoning: parsed.reasoning,
+      issues: parsed.issues.map(String),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

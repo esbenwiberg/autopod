@@ -9,10 +9,13 @@ import {
   type NewSession,
 } from './session-repository.js';
 
-const MIGRATION_SQL = fs.readFileSync(
-  path.resolve(import.meta.dirname, '../db/migrations/001_initial.sql'),
-  'utf-8',
-);
+const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
+const MIGRATION_SQL = fs
+  .readdirSync(migrationsDir)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf-8'))
+  .join('\n');
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
@@ -35,6 +38,7 @@ const validSession: NewSession = {
   status: 'queued',
   model: 'opus',
   runtime: 'claude',
+  executionTarget: 'local',
   branch: 'feature/dark-mode',
   userId: 'user-1',
   maxValidationAttempts: 3,
@@ -133,7 +137,7 @@ describe('SessionRepository', () => {
 
     it('should update updatedAt timestamp', () => {
       repo.insert(validSession);
-      const before = repo.getOrThrow('sess-001').updatedAt;
+      repo.getOrThrow('sess-001').updatedAt;
       // Force a known old timestamp
       db.prepare("UPDATE sessions SET updated_at = '2020-01-01T00:00:00.000Z' WHERE id = 'sess-001'").run();
       repo.update('sess-001', { status: 'running' });
@@ -211,8 +215,8 @@ describe('SessionRepository', () => {
       const sessions = repo.list();
       expect(sessions).toHaveLength(2);
       // Most recent first
-      expect(sessions[0].id).toBe('sess-002');
-      expect(sessions[1].id).toBe('sess-001');
+      expect(sessions[0]!.id).toBe('sess-002');
+      expect(sessions[1]!.id).toBe('sess-001');
     });
 
     it('should return empty array when no sessions', () => {
@@ -229,7 +233,7 @@ describe('SessionRepository', () => {
 
       const filtered = repo.list({ profileName: 'test-app' });
       expect(filtered).toHaveLength(1);
-      expect(filtered[0].profileName).toBe('test-app');
+      expect(filtered[0]!.profileName).toBe('test-app');
     });
 
     it('should filter by status', () => {
@@ -237,7 +241,7 @@ describe('SessionRepository', () => {
       repo.insert({ ...validSession, id: 'sess-002', status: 'running' as const });
       const filtered = repo.list({ status: 'queued' });
       expect(filtered).toHaveLength(1);
-      expect(filtered[0].status).toBe('queued');
+      expect(filtered[0]!.status).toBe('queued');
     });
 
     it('should filter by userId', () => {
@@ -245,7 +249,7 @@ describe('SessionRepository', () => {
       repo.insert({ ...validSession, id: 'sess-002', userId: 'user-2' });
       const filtered = repo.list({ userId: 'user-1' });
       expect(filtered).toHaveLength(1);
-      expect(filtered[0].userId).toBe('user-1');
+      expect(filtered[0]!.userId).toBe('user-1');
     });
 
     it('should combine multiple filters', () => {
@@ -255,7 +259,7 @@ describe('SessionRepository', () => {
 
       const filtered = repo.list({ status: 'queued', userId: 'user-1' });
       expect(filtered).toHaveLength(1);
-      expect(filtered[0].id).toBe('sess-001');
+      expect(filtered[0]!.id).toBe('sess-001');
     });
   });
 

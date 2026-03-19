@@ -3,7 +3,7 @@ export type RuntimeType = 'claude' | 'codex';
 export interface Runtime {
   type: RuntimeType;
   spawn(config: SpawnConfig): AsyncIterable<AgentEvent>;
-  resume(sessionId: string, message: string): AsyncIterable<AgentEvent>;
+  resume(sessionId: string, message: string, containerId: string): AsyncIterable<AgentEvent>;
   abort(sessionId: string): Promise<void>;
 }
 
@@ -12,6 +12,7 @@ export interface SpawnConfig {
   task: string;
   model: string;
   workDir: string;
+  containerId: string;
   customInstructions?: string;
   env: Record<string, string>;
   mcpServers?: McpServerConfig[];

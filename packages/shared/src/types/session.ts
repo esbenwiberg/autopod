@@ -1,5 +1,6 @@
 import type { EscalationRequest } from './escalation.js';
 import type { RuntimeType } from './runtime.js';
+import type { ExecutionTarget } from './profile.js';
 import type { ValidationResult } from './validation.js';
 
 export type SessionStatus =
@@ -23,6 +24,7 @@ export interface Session {
   status: SessionStatus;
   model: string;
   runtime: RuntimeType;
+  executionTarget: ExecutionTarget;
   branch: string;
   containerId: string | null;
   worktreePath: string | null;
@@ -48,6 +50,7 @@ export interface CreateSessionRequest {
   task: string;
   model?: string;
   runtime?: RuntimeType;
+  executionTarget?: ExecutionTarget;
   branch?: string;
   skipValidation?: boolean;
 }

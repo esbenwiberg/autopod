@@ -63,7 +63,8 @@ function getEventText(event: AgentEvent): string {
     case 'error':
       return event.message;
     case 'escalation':
-      return `${event.escalationType}: ${event.payload.question ?? event.payload.description ?? ''}`;
+      const ep = event.payload;
+      return `${event.escalationType}: ${'question' in ep ? ep.question : 'description' in ep ? ep.description : ''}`;
     default:
       return '';
   }

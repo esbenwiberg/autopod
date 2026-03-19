@@ -42,6 +42,7 @@ export const createProfileSchema = z.object({
   maxValidationAttempts: z.number().int().min(1).max(10).default(3),
   defaultModel: z.string().default('opus'),
   defaultRuntime: z.enum(['claude', 'codex']).default('claude'),
+  executionTarget: z.enum(['local', 'aci']).default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),
   escalation: escalationConfigSchema.default({}),
   extends: z.string().nullable().default(null),

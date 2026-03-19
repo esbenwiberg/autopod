@@ -16,6 +16,7 @@ function mockSession(overrides: Partial<Session> = {}): Session {
     status: 'validating',
     model: 'opus',
     runtime: 'claude',
+    executionTarget: 'local',
     branch: 'autopod/sess-1',
     containerId: 'ctr-abc',
     worktreePath: '/tmp/worktree/sess-1',
@@ -52,11 +53,14 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',
+    executionTarget: 'local',
     customInstructions: null,
     escalation: { askHuman: true, askAi: { enabled: true, model: 'sonnet', maxCalls: 5 }, autoPauseAfter: 3, humanResponseTimeout: 3600 },
     extends: null,
     warmImageTag: null,
     warmImageBuiltAt: null,
+    mcpServers: [],
+    claudeMdSections: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,
@@ -113,6 +117,7 @@ function mockContainerManager(diff = '+added line\n-removed line'): ContainerMan
     writeFile: vi.fn(),
     getStatus: vi.fn(),
     execInContainer: vi.fn().mockResolvedValue({ stdout: diff, stderr: '', exitCode: 0 }),
+    execStreaming: vi.fn(),
   };
 }
 

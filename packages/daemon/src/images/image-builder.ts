@@ -68,8 +68,8 @@ export class ImageBuilder {
 
     // 3. Tag with timestamp for rollback
     const image = this.docker.getImage(tag);
-    const [repo, _version] = timestampTag.split(':');
-    await image.tag({ repo, tag: timestampTag.split(':')[1] });
+    const [repo = '', tsTag = 'latest'] = timestampTag.split(':');
+    await image.tag({ repo, tag: tsTag });
 
     // 4. Push to ACR (both latest + timestamped)
     logger.info({ tag }, 'Pushing to ACR');

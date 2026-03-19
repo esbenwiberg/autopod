@@ -38,6 +38,13 @@ export function generateDockerfile(options: DockerfileOptions): string {
   // Install dependencies
   lines.push('', '# Install dependencies', `RUN ${installCommand}`);
 
+  // Install agent CLIs so they're ready at container start (zero cold-start)
+  lines.push(
+    '',
+    '# Install agent CLIs into the image',
+    'RUN npm install -g @anthropic-ai/claude-code @openai/codex 2>/dev/null || true',
+  );
+
   // Pre-warm build caches
   lines.push(
     '',

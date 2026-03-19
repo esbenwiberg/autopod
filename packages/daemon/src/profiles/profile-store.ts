@@ -37,6 +37,7 @@ function rowToProfile(row: Record<string, unknown>): Profile {
     maxValidationAttempts: row.max_validation_attempts as number,
     defaultModel: row.default_model as string,
     defaultRuntime: row.default_runtime as Profile['defaultRuntime'],
+    executionTarget: (row.execution_target as Profile['executionTarget']) ?? 'local',
     customInstructions: (row.custom_instructions as string) ?? null,
     escalation: JSON.parse(row.escalation_config as string) as EscalationConfig,
     extends: (row.extends as string) ?? null,
@@ -100,12 +101,12 @@ export function createProfileStore(db: Database.Database): ProfileStore {
         INSERT INTO profiles (
           name, repo_url, default_branch, template, build_command, start_command,
           health_path, health_timeout, validation_pages, max_validation_attempts,
-          default_model, default_runtime, custom_instructions, escalation_config,
+          default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, mcp_servers, claude_md_sections, created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
-          @defaultModel, @defaultRuntime, @customInstructions, @escalationConfig,
+          @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @mcpServers, @claudeMdSections, @createdAt, @updatedAt
         )
       `).run({
@@ -121,6 +122,7 @@ export function createProfileStore(db: Database.Database): ProfileStore {
         maxValidationAttempts: parsed.maxValidationAttempts,
         defaultModel: parsed.defaultModel,
         defaultRuntime: parsed.defaultRuntime,
+        executionTarget: parsed.executionTarget,
         customInstructions: parsed.customInstructions,
         escalationConfig: JSON.stringify(parsed.escalation),
         extends: parsed.extends,
@@ -183,6 +185,7 @@ export function createProfileStore(db: Database.Database): ProfileStore {
       if (parsed.maxValidationAttempts !== undefined) { setClauses.push('max_validation_attempts = @maxValidationAttempts'); fieldMap.maxValidationAttempts = parsed.maxValidationAttempts; }
       if (parsed.defaultModel !== undefined) { setClauses.push('default_model = @defaultModel'); fieldMap.defaultModel = parsed.defaultModel; }
       if (parsed.defaultRuntime !== undefined) { setClauses.push('default_runtime = @defaultRuntime'); fieldMap.defaultRuntime = parsed.defaultRuntime; }
+      if (parsed.executionTarget !== undefined) { setClauses.push('execution_target = @executionTarget'); fieldMap.executionTarget = parsed.executionTarget; }
       if (parsed.customInstructions !== undefined) { setClauses.push('custom_instructions = @customInstructions'); fieldMap.customInstructions = parsed.customInstructions; }
       if (parsed.escalation !== undefined) { setClauses.push('escalation_config = @escalationConfig'); fieldMap.escalationConfig = JSON.stringify(parsed.escalation); }
       if (parsed.extends !== undefined) { setClauses.push('extends = @extends'); fieldMap.extends = parsed.extends; }

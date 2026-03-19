@@ -123,6 +123,7 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
               status: event.session.status,
               model: event.session.model,
               runtime: event.session.runtime,
+              executionTarget: 'local',
               branch: '',
               containerId: null,
               worktreePath: null,

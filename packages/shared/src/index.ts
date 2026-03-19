@@ -9,6 +9,7 @@ export type {
 export type {
   Profile,
   StackTemplate,
+  ExecutionTarget,
   ValidationPage,
   PageAssertion,
   EscalationConfig,

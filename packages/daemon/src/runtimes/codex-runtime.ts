@@ -1,22 +1,24 @@
 import type { Runtime, SpawnConfig, AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { CodexStreamParser } from './codex-stream-parser.js';
 
-const ABORT_GRACE_PERIOD_MS = 5_000;
-
-type SpawnFn = typeof nodeSpawn;
-
+/**
+ * Codex CLI runtime adapter.
+ *
+ * Runs `codex` CLI inside a Docker container via `containerManager.execStreaming()`
+ * and parses the JSONL output via CodexStreamParser.
+ */
 export class CodexRuntime implements Runtime {
   readonly type = 'codex' as const;
 
-  private processes = new Map<string, ChildProcess>();
+  private handles = new Map<string, StreamingExecResult>();
   private logger: Logger;
-  private spawnFn: SpawnFn;
+  private containerManager: ContainerManager;
 
-  constructor(logger: Logger, spawnFn: SpawnFn = nodeSpawn) {
+  constructor(logger: Logger, containerManager: ContainerManager) {
     this.logger = logger;
-    this.spawnFn = spawnFn;
+    this.containerManager = containerManager;
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
@@ -25,30 +27,27 @@ export class CodexRuntime implements Runtime {
     this.logger.info({
       component: 'codex-runtime',
       sessionId: config.sessionId,
+      containerId: config.containerId,
       args,
-      msg: 'Spawning codex process',
+      msg: 'Spawning codex in container',
     });
 
-    const proc = this.spawnFn('codex', args, {
-      cwd: config.workDir,
-      env: {
-        ...process.env,
-        ...config.env,
-        // Codex CLI uses OPENAI_API_KEY from env
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const handle = await this.containerManager.execStreaming(
+      config.containerId,
+      ['codex', ...args],
+      { cwd: config.workDir, env: config.env },
+    );
 
-    this.processes.set(config.sessionId, proc);
+    this.handles.set(config.sessionId, handle);
 
     try {
-      yield* CodexStreamParser.parse(proc.stdout!, config.sessionId, this.logger);
+      yield* CodexStreamParser.parse(handle.stdout, config.sessionId, this.logger);
     } finally {
-      this.processes.delete(config.sessionId);
+      this.handles.delete(config.sessionId);
     }
 
     // Check exit code after stream is consumed
-    const exitCode = await this.waitForExit(proc);
+    const exitCode = await handle.exitCode;
     if (exitCode !== 0) {
       yield {
         type: 'error',
@@ -59,7 +58,7 @@ export class CodexRuntime implements Runtime {
     }
   }
 
-  async *resume(sessionId: string, message: string): AsyncIterable<AgentEvent> {
+  async *resume(sessionId: string, message: string, containerId: string): AsyncIterable<AgentEvent> {
     // Codex CLI doesn't have native session resumption.
     // We pass the message as a follow-up task in full-auto mode.
     const args = [
@@ -72,50 +71,38 @@ export class CodexRuntime implements Runtime {
     this.logger.info({
       component: 'codex-runtime',
       sessionId,
-      msg: 'Resuming codex with follow-up message',
+      containerId,
+      msg: 'Resuming codex with follow-up message in container',
     });
 
-    const proc = this.spawnFn('codex', args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const handle = await this.containerManager.execStreaming(
+      containerId,
+      ['codex', ...args],
+      { cwd: '/workspace' },
+    );
 
-    this.processes.set(sessionId, proc);
+    this.handles.set(sessionId, handle);
 
     try {
-      yield* CodexStreamParser.parse(proc.stdout!, sessionId, this.logger);
+      yield* CodexStreamParser.parse(handle.stdout, sessionId, this.logger);
     } finally {
-      this.processes.delete(sessionId);
+      this.handles.delete(sessionId);
     }
   }
 
   async abort(sessionId: string): Promise<void> {
-    const proc = this.processes.get(sessionId);
-    if (!proc) {
+    const handle = this.handles.get(sessionId);
+    if (!handle) {
       this.logger.warn({
         component: 'codex-runtime',
         sessionId,
-        msg: 'No process found to abort',
+        msg: 'No exec handle found to abort',
       });
       return;
     }
 
-    // Graceful shutdown: SIGTERM first, SIGKILL after timeout
-    proc.kill('SIGTERM');
-
-    const killTimeout = setTimeout(() => {
-      if (!proc.killed) {
-        proc.kill('SIGKILL');
-        this.logger.warn({
-          component: 'codex-runtime',
-          sessionId,
-          msg: 'Codex process did not exit after SIGTERM, sent SIGKILL',
-        });
-      }
-    }, ABORT_GRACE_PERIOD_MS);
-
-    await this.waitForExit(proc);
-    clearTimeout(killTimeout);
-    this.processes.delete(sessionId);
+    await handle.kill();
+    this.handles.delete(sessionId);
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
@@ -126,15 +113,5 @@ export class CodexRuntime implements Runtime {
       '--full-auto',
       '--json',
     ];
-  }
-
-  private waitForExit(proc: ChildProcess): Promise<number> {
-    return new Promise((resolve) => {
-      if (proc.exitCode !== null) {
-        resolve(proc.exitCode);
-        return;
-      }
-      proc.on('exit', (code) => resolve(code ?? 1));
-    });
   }
 }

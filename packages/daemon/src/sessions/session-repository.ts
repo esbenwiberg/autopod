@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { Session, SessionStatus } from '@autopod/shared';
+import type { Session, SessionStatus, ExecutionTarget } from '@autopod/shared';
 import { SessionNotFoundError } from '@autopod/shared';
 
 export interface NewSession {
@@ -9,6 +9,7 @@ export interface NewSession {
   status: SessionStatus;
   model: string;
   runtime: string;
+  executionTarget: ExecutionTarget;
   branch: string;
   userId: string;
   maxValidationAttempts: number;
@@ -54,6 +55,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     status: row.status as SessionStatus,
     model: row.model as string,
     runtime: row.runtime as Session['runtime'],
+    executionTarget: (row.execution_target as Session['executionTarget']) ?? 'local',
     branch: row.branch as string,
     containerId: (row.container_id as string) ?? null,
     worktreePath: (row.worktree_path as string) ?? null,
@@ -84,10 +86,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
     insert(session: NewSession): void {
       db.prepare(`
         INSERT INTO sessions (
-          id, profile_name, task, status, model, runtime, branch,
+          id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation
         ) VALUES (
-          @id, @profileName, @task, @status, @model, @runtime, @branch,
+          @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation
         )
       `).run({
@@ -97,6 +99,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         status: session.status,
         model: session.model,
         runtime: session.runtime,
+        executionTarget: session.executionTarget,
         branch: session.branch,
         userId: session.userId,
         maxValidationAttempts: session.maxValidationAttempts,

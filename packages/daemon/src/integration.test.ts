@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import type { JwtPayload, SessionStatus } from '@autopod/shared';
+import type { JwtPayload } from '@autopod/shared';
 import { createProfileStore } from './profiles/index.js';
 import {
   createSessionRepository,
@@ -17,10 +17,13 @@ import type { AuthModule } from './interfaces/index.js';
 import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
 
-const MIGRATION_SQL = fs.readFileSync(
-  path.resolve(import.meta.dirname, 'db/migrations/001_initial.sql'),
-  'utf-8',
-);
+const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
+const MIGRATION_SQL = fs
+  .readdirSync(migrationsDir)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf-8'))
+  .join('\n');
 
 const logger = pino({ level: 'silent' });
 
@@ -76,6 +79,8 @@ describe('Integration', () => {
       kill: vi.fn().mockResolvedValue(undefined),
       writeFile: vi.fn().mockResolvedValue(undefined),
       getStatus: vi.fn().mockResolvedValue('running' as const),
+      execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+      execStreaming: vi.fn(),
     };
 
     const worktreeManager = {
@@ -129,7 +134,7 @@ describe('Integration', () => {
       escalationRepo,
       profileStore,
       eventBus,
-      containerManager,
+      containerManagerFactory: { get: vi.fn(() => containerManager) },
       worktreeManager,
       runtimeRegistry,
       validationEngine,

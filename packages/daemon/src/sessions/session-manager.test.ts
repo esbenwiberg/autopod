@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import pino from 'pino';
-import type { Runtime, AgentEvent, ValidationResult } from '@autopod/shared';
+import type { Runtime, AgentEvent, ValidationResult, StackTemplate, RuntimeType } from '@autopod/shared';
 import { SessionNotFoundError, InvalidStateTransitionError, AutopodError } from '@autopod/shared';
 import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
@@ -68,8 +68,8 @@ function insertTestProfile(db: Database.Database, name = 'test-profile') {
 function createMockRuntime(): Runtime {
   return {
     type: 'claude',
-    spawn: vi.fn(function* () {} as () => AsyncIterable<AgentEvent>),
-    resume: vi.fn(function* () {} as () => AsyncIterable<AgentEvent>),
+    spawn: vi.fn(async function* () {} as () => AsyncIterable<AgentEvent>),
+    resume: vi.fn(async function* () {} as () => AsyncIterable<AgentEvent>),
     abort: vi.fn(async () => {}),
   };
 }
@@ -81,6 +81,7 @@ function createMockContainerManager(): ContainerManager {
     writeFile: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    execStreaming: vi.fn(),
   };
 }
 
@@ -153,7 +154,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         name: row.name as string,
         repoUrl: row.repo_url as string,
         defaultBranch: row.default_branch as string,
-        template: row.template,
+        template: row.template as StackTemplate,
         buildCommand: row.build_command as string,
         startCommand: row.start_command as string,
         healthPath: row.health_path as string,
@@ -161,9 +162,10 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         validationPages: JSON.parse(row.validation_pages as string),
         maxValidationAttempts: row.max_validation_attempts as number,
         defaultModel: row.default_model as string,
-        defaultRuntime: row.default_runtime,
+        defaultRuntime: row.default_runtime as RuntimeType,
         customInstructions: (row.custom_instructions as string) ?? null,
         escalation: JSON.parse(row.escalation_config as string),
+        executionTarget: 'local' as const,
         extends: null,
         warmImageTag: null,
         warmImageBuiltAt: null,
@@ -193,7 +195,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
     escalationRepo,
     profileStore,
     eventBus,
-    containerManager,
+    containerManagerFactory: { get: vi.fn(() => containerManager) },
     worktreeManager,
     runtimeRegistry,
     validationEngine,
@@ -324,7 +326,7 @@ describe('SessionManager', () => {
 
       const sessions = manager.listSessions({ userId: 'user-1' });
       expect(sessions).toHaveLength(1);
-      expect(sessions[0].userId).toBe('user-1');
+      expect(sessions[0]!.userId).toBe('user-1');
     });
   });
 
@@ -403,7 +405,7 @@ describe('SessionManager', () => {
   });
 
   describe('approveSession', () => {
-    it('transitions validated -> approved -> merging -> complete', () => {
+    it('transitions validated -> approved -> merging -> complete', async () => {
       const ctx = createTestContext();
       const manager = createSessionManager(ctx.deps);
 
@@ -415,14 +417,14 @@ describe('SessionManager', () => {
       // Move to validated state
       ctx.sessionRepo.update(session.id, { status: 'validated' });
 
-      manager.approveSession(session.id);
+      await manager.approveSession(session.id);
 
       const approved = manager.getSession(session.id);
       expect(approved.status).toBe('complete');
       expect(approved.completedAt).not.toBeNull();
     });
 
-    it('emits session.completed event', () => {
+    it('emits session.completed event', async () => {
       const ctx = createTestContext();
       const manager = createSessionManager(ctx.deps);
 
@@ -435,11 +437,29 @@ describe('SessionManager', () => {
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
 
-      manager.approveSession(session.id);
+      await manager.approveSession(session.id);
 
       const completedEvent = events.find((e: any) => e.type === 'session.completed') as any;
       expect(completedEvent).toBeDefined();
       expect(completedEvent.finalStatus).toBe('complete');
+    });
+
+    it('calls worktreeManager.mergeBranch when worktreePath exists', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt' });
+
+      await manager.approveSession(session.id);
+
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
+        worktreePath: '/tmp/wt',
+        targetBranch: 'main',
+      });
     });
   });
 
@@ -457,15 +477,12 @@ describe('SessionManager', () => {
 
       await manager.rejectSession(session.id, 'Button color wrong');
 
-      // Agent was resumed with the rejection feedback
-      expect(ctx.runtime.resume).toHaveBeenCalledWith(
-        session.id,
-        expect.stringContaining('Button color wrong'),
-      );
-      expect(ctx.runtime.resume).toHaveBeenCalledWith(
-        session.id,
-        expect.stringContaining('Rejected by Reviewer'),
-      );
+      // Agent was resumed with the rejection feedback (3rd arg is containerId)
+      const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
+      expect(resumeCalls.length).toBeGreaterThanOrEqual(1);
+      const resumeMessage = resumeCalls[0]![1] as string;
+      expect(resumeMessage).toContain('Button color wrong');
+      expect(resumeMessage).toContain('Rejected by Reviewer');
 
       // Full cycle completes: rejection → agent runs → validation passes → validated
       const result = manager.getSession(session.id);
@@ -657,10 +674,9 @@ describe('SessionManager', () => {
       await manager.triggerValidation(session.id);
 
       // Agent was resumed with correction feedback for each retry (attempts 1 and 2)
-      expect(ctx.runtime.resume).toHaveBeenCalledWith(
-        session.id,
-        expect.stringContaining('Validation Failed'),
-      );
+      const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
+      expect(resumeCalls.length).toBe(2);
+      expect(resumeCalls[0]![1]).toContain('Validation Failed');
       // 2 retries before exhaustion (attempt 1 → retry, attempt 2 → retry, attempt 3 → failed)
       expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
 

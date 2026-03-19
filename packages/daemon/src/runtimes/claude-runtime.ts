@@ -1,0 +1,164 @@
+import type { Runtime, SpawnConfig, AgentEvent } from '@autopod/shared';
+import type { Logger } from 'pino';
+import { randomUUID } from 'node:crypto';
+import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
+import { ClaudeStreamParser } from './claude-stream-parser.js';
+
+/**
+ * Claude CLI runtime adapter.
+ *
+ * Runs `claude` CLI inside a Docker container via `containerManager.execStreaming()`
+ * and parses the NDJSON output via ClaudeStreamParser.
+ */
+export class ClaudeRuntime implements Runtime {
+  readonly type = 'claude' as const;
+
+  private handles = new Map<string, StreamingExecResult>();
+  /** Maps autopod sessionId → Claude CLI session_id for resume support. */
+  private claudeSessionIds = new Map<string, string>();
+  private logger: Logger;
+  private containerManager: ContainerManager;
+
+  constructor(logger: Logger, containerManager: ContainerManager) {
+    this.logger = logger;
+    this.containerManager = containerManager;
+  }
+
+  async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    const args = this.buildSpawnArgs(config);
+
+    this.logger.info({
+      component: 'claude-runtime',
+      sessionId: config.sessionId,
+      containerId: config.containerId,
+      args,
+      msg: 'Spawning claude in container',
+    });
+
+    const handle = await this.containerManager.execStreaming(
+      config.containerId,
+      ['claude', ...args],
+      { cwd: config.workDir, env: config.env },
+    );
+
+    this.handles.set(config.sessionId, handle);
+
+    try {
+      for await (const event of ClaudeStreamParser.parse(handle.stdout, config.sessionId, this.logger)) {
+        // Capture Claude's session ID from init events for resume support
+        if (event.type === 'status' && event.message.includes('Claude session initialized')) {
+          const match = event.message.match(/\(([^)]+)\)$/);
+          if (match?.[1]) {
+            this.claudeSessionIds.set(config.sessionId, match[1]);
+          }
+        }
+        yield event;
+      }
+    } finally {
+      this.handles.delete(config.sessionId);
+    }
+
+    // Check exit code after stream is consumed
+    const exitCode = await handle.exitCode;
+    if (exitCode !== 0) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: `Claude process exited with code ${exitCode}`,
+        fatal: true,
+      };
+    }
+  }
+
+  async *resume(sessionId: string, message: string, containerId: string): AsyncIterable<AgentEvent> {
+    const claudeSessionId = this.claudeSessionIds.get(sessionId);
+    const args = this.buildResumeArgs(message, claudeSessionId);
+
+    this.logger.info({
+      component: 'claude-runtime',
+      sessionId,
+      containerId,
+      claudeSessionId,
+      msg: 'Resuming claude session in container',
+    });
+
+    const handle = await this.containerManager.execStreaming(
+      containerId,
+      ['claude', ...args],
+      { cwd: '/workspace' },
+    );
+
+    this.handles.set(sessionId, handle);
+
+    try {
+      for await (const event of ClaudeStreamParser.parse(handle.stdout, sessionId, this.logger)) {
+        // Update Claude session ID on resume too
+        if (event.type === 'status' && event.message.includes('Claude session initialized')) {
+          const match = event.message.match(/\(([^)]+)\)$/);
+          if (match?.[1]) {
+            this.claudeSessionIds.set(sessionId, match[1]);
+          }
+        }
+        yield event;
+      }
+    } finally {
+      this.handles.delete(sessionId);
+    }
+  }
+
+  async abort(sessionId: string): Promise<void> {
+    const handle = this.handles.get(sessionId);
+    if (!handle) {
+      this.logger.warn({
+        component: 'claude-runtime',
+        sessionId,
+        msg: 'No exec handle found to abort',
+      });
+      return;
+    }
+
+    await handle.kill();
+    this.handles.delete(sessionId);
+    this.claudeSessionIds.delete(sessionId);
+  }
+
+  private buildSpawnArgs(config: SpawnConfig): string[] {
+    const args = [
+      '-p', config.task,
+      '--model', config.model,
+      '--output-format', 'stream-json',
+      '--permission-mode', 'bypassPermissions',
+    ];
+
+    // Deterministic session ID for tracking
+    args.push('--session-id', randomUUID());
+
+    // MCP server configuration
+    if (config.mcpServers && config.mcpServers.length > 0) {
+      const mcpConfig: Record<string, { url: string; headers?: Record<string, string> }> = {};
+      for (const server of config.mcpServers) {
+        mcpConfig[server.name] = {
+          url: server.url,
+          ...(server.headers && { headers: server.headers }),
+        };
+      }
+      args.push('--mcp-config', JSON.stringify(mcpConfig));
+    }
+
+    return args;
+  }
+
+  private buildResumeArgs(message: string, claudeSessionId?: string): string[] {
+    const args = [
+      '-p', message,
+      '--output-format', 'stream-json',
+      '--permission-mode', 'bypassPermissions',
+    ];
+
+    if (claudeSessionId) {
+      args.push('--resume', claudeSessionId);
+    }
+
+    return args;
+  }
+}
