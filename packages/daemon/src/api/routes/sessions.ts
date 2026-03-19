@@ -45,7 +45,7 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
   // POST /sessions/:sessionId/approve — approve session
   app.post('/sessions/:sessionId/approve', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
-    sessionManager.approveSession(sessionId);
+    await sessionManager.approveSession(sessionId);
     return { ok: true };
   });
 

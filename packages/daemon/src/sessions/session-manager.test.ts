@@ -403,7 +403,7 @@ describe('SessionManager', () => {
   });
 
   describe('approveSession', () => {
-    it('transitions validated -> approved -> merging -> complete', () => {
+    it('transitions validated -> approved -> merging -> complete', async () => {
       const ctx = createTestContext();
       const manager = createSessionManager(ctx.deps);
 
@@ -415,14 +415,14 @@ describe('SessionManager', () => {
       // Move to validated state
       ctx.sessionRepo.update(session.id, { status: 'validated' });
 
-      manager.approveSession(session.id);
+      await manager.approveSession(session.id);
 
       const approved = manager.getSession(session.id);
       expect(approved.status).toBe('complete');
       expect(approved.completedAt).not.toBeNull();
     });
 
-    it('emits session.completed event', () => {
+    it('emits session.completed event', async () => {
       const ctx = createTestContext();
       const manager = createSessionManager(ctx.deps);
 
@@ -435,11 +435,29 @@ describe('SessionManager', () => {
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
 
-      manager.approveSession(session.id);
+      await manager.approveSession(session.id);
 
       const completedEvent = events.find((e: any) => e.type === 'session.completed') as any;
       expect(completedEvent).toBeDefined();
       expect(completedEvent.finalStatus).toBe('complete');
+    });
+
+    it('calls worktreeManager.mergeBranch when worktreePath exists', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt' });
+
+      await manager.approveSession(session.id);
+
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
+        worktreePath: '/tmp/wt',
+        targetBranch: 'main',
+      });
     });
   });
 

@@ -57,9 +57,27 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     },
 
     async callReviewerModel(sessionId: string, question: string, context?: string): Promise<string> {
-      // Stub — real implementation would call the reviewer model API
-      logger.info({ sessionId, question: question.slice(0, 100) }, 'Reviewer model called (stub)');
-      return `AI review response for: ${question}`;
+      const model = this.getReviewerModel(sessionId);
+      const prompt = context ? `Context:\n${context}\n\nQuestion:\n${question}` : question;
+
+      logger.info({ sessionId, model, question: question.slice(0, 100) }, 'Calling reviewer model');
+
+      try {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const execFileAsync = promisify(execFile);
+
+        const { stdout } = await execFileAsync('claude', [
+          '-p', prompt,
+          '--model', model,
+          '--output-format', 'text',
+        ], { timeout: 60_000 });
+
+        return stdout.trim();
+      } catch (err) {
+        logger.error({ err, sessionId }, 'Reviewer model call failed');
+        return `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
     },
 
     incrementEscalationCount(sessionId: string): void {

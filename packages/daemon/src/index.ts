@@ -17,6 +17,10 @@ import {
 import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createServer } from './api/server.js';
 import type { AuthModule } from './interfaces/index.js';
+import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
+import { LocalContainerManager } from './containers/local-container-manager.js';
+import { createRuntimeRegistry, ClaudeRuntime, CodexRuntime } from './runtimes/index.js';
+import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -90,27 +94,13 @@ const authModule: AuthModule = {
   },
 };
 
-const containerManager = {
-  async spawn() { throw new Error('Container manager not implemented'); return '' as string; },
-  async kill() { throw new Error('Container manager not implemented'); },
-  async writeFile() { throw new Error('Container manager not implemented'); },
-  async getStatus() { return 'unknown' as const; },
-};
-
-const worktreeManager = {
-  async create() { throw new Error('Worktree manager not implemented'); return '' as string; },
-  async cleanup() { throw new Error('Worktree manager not implemented'); },
-  async getDiffStats() { return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 }; },
-  async mergeBranch() { throw new Error('Worktree manager not implemented'); },
-};
-
-const runtimeRegistry = {
-  get() { throw new Error('Runtime registry not implemented'); },
-};
-
-const validationEngine = {
-  async validate() { throw new Error('Validation engine not implemented'); },
-};
+const worktreeManager = new LocalWorktreeManager({ logger });
+const containerManager = new LocalContainerManager(logger);
+const runtimeRegistry = createRuntimeRegistry([
+  new ClaudeRuntime(logger),
+  new CodexRuntime(logger),
+]);
+const validationEngine = createLocalValidationEngine(containerManager);
 
 // Session queue + manager (circular dep resolved via closure)
 let sessionManager: ReturnType<typeof createSessionManager>;

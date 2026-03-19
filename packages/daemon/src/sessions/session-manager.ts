@@ -38,7 +38,7 @@ export interface SessionManager {
   consumeAgentEvents(sessionId: string, events: AsyncIterable<AgentEvent>): Promise<void>;
   handleCompletion(sessionId: string): Promise<void>;
   sendMessage(sessionId: string, message: string): Promise<void>;
-  approveSession(sessionId: string): void;
+  approveSession(sessionId: string): Promise<void>;
   rejectSession(sessionId: string, reason?: string): Promise<void>;
   killSession(sessionId: string): Promise<void>;
   triggerValidation(sessionId: string): Promise<void>;
@@ -133,6 +133,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           image: profile.template,
           sessionId,
           env: { SESSION_ID: sessionId },
+          volumes: [{ host: worktreePath, container: '/workspace' }],
         });
 
         session = transition(session, 'running', {
@@ -264,12 +265,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       await this.handleCompletion(sessionId);
     },
 
-    approveSession(sessionId: string): void {
+    async approveSession(sessionId: string): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
       const s1 = transition(session, 'approved');
       const s2 = transition(s1, 'merging');
 
-      // Merge would happen async — for now just complete
+      // Push the branch to origin
+      if (session.worktreePath) {
+        try {
+          const profile = profileStore.get(session.profileName);
+          await worktreeManager.mergeBranch({
+            worktreePath: session.worktreePath,
+            targetBranch: profile.defaultBranch,
+          });
+        } catch (err) {
+          logger.error({ err, sessionId }, 'Failed to push branch during approval');
+          // Don't block completion — branch push is best-effort
+        }
+      }
+
       transition(s2, 'complete', { completedAt: new Date().toISOString() });
 
       eventBus.emit({
