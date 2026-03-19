@@ -32,9 +32,10 @@ export function createNudgeRepository(db: Database.Database): NudgeRepository {
 
       if (!row) return { hasMessage: false };
 
-      db.prepare(
-        'UPDATE nudge_messages SET consumed = 1, consumed_at = ? WHERE id = ?',
-      ).run(new Date().toISOString(), row.id);
+      db.prepare('UPDATE nudge_messages SET consumed = 1, consumed_at = ? WHERE id = ?').run(
+        new Date().toISOString(),
+        row.id,
+      );
 
       return { hasMessage: true, message: row.message };
     },

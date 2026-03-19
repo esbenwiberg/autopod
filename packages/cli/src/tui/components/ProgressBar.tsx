@@ -1,5 +1,5 @@
-import React from 'react';
 import { Box, Text } from 'ink';
+import type React from 'react';
 
 interface ProgressBarProps {
   currentPhase: number;
@@ -34,7 +34,13 @@ function getPhaseColor(phase: string): string {
   return 'cyan';
 }
 
-export function ProgressBar({ currentPhase, totalPhases, phase, description, width = 20 }: ProgressBarProps): React.ReactElement {
+export function ProgressBar({
+  currentPhase,
+  totalPhases,
+  phase,
+  description,
+  width = 20,
+}: ProgressBarProps): React.ReactElement {
   const filled = Math.round((currentPhase / totalPhases) * width);
   const empty = width - filled;
   const color = getPhaseColor(phase);
@@ -46,11 +52,16 @@ export function ProgressBar({ currentPhase, totalPhases, phase, description, wid
       <Box>
         <Text dimColor>{'Progress: '}</Text>
         <Text color={color}>{bar}</Text>
-        <Text> {currentPhase}/{totalPhases}</Text>
+        <Text>
+          {' '}
+          {currentPhase}/{totalPhases}
+        </Text>
       </Box>
       <Box>
         <Text dimColor>{'Phase:    '}</Text>
-        <Text color={color} bold>{phase}</Text>
+        <Text color={color} bold>
+          {phase}
+        </Text>
         <Text dimColor> — {description}</Text>
       </Box>
     </Box>

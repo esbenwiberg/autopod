@@ -1,6 +1,6 @@
-import React from 'react';
-import { Box, Text } from 'ink';
 import type { AgentEvent } from '@autopod/shared';
+import { Box, Text } from 'ink';
+import type React from 'react';
 
 interface MetricsBarProps {
   events: AgentEvent[];
@@ -11,13 +11,17 @@ interface MetricsBarProps {
   linesRemoved: number;
 }
 
-export function MetricsBar({ events, startedAt, filesChanged, linesAdded, linesRemoved }: MetricsBarProps): React.ReactElement {
+export function MetricsBar({
+  events,
+  startedAt,
+  filesChanged,
+  linesAdded,
+  linesRemoved,
+}: MetricsBarProps): React.ReactElement {
   const toolCount = events.filter((e) => e.type === 'tool_use').length;
   const fileEvents = events.filter((e) => e.type === 'file_change').length;
 
-  const duration = startedAt
-    ? formatElapsed(Date.now() - new Date(startedAt).getTime())
-    : '-';
+  const duration = startedAt ? formatElapsed(Date.now() - new Date(startedAt).getTime()) : '-';
 
   return (
     <Box gap={2}>

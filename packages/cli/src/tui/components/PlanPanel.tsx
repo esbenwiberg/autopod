@@ -1,5 +1,5 @@
-import React from 'react';
 import { Box, Text } from 'ink';
+import type React from 'react';
 
 interface PlanPanelProps {
   summary: string;
@@ -10,7 +10,9 @@ interface PlanPanelProps {
 export function PlanPanel({ summary, steps, currentPhase }: PlanPanelProps): React.ReactElement {
   return (
     <Box flexDirection="column">
-      <Text bold dimColor>Plan</Text>
+      <Text bold dimColor>
+        Plan
+      </Text>
       <Text>{summary}</Text>
       {steps.map((step, i) => {
         const stepNum = i + 1;
@@ -18,8 +20,11 @@ export function PlanPanel({ summary, steps, currentPhase }: PlanPanelProps): Rea
         const isDone = currentPhase !== undefined && stepNum < currentPhase;
 
         return (
-          <Box key={i}>
-            <Text color={isCurrent ? 'cyan' : isDone ? 'green' : undefined} dimColor={!isCurrent && !isDone}>
+          <Box key={`step-${stepNum}`}>
+            <Text
+              color={isCurrent ? 'cyan' : isDone ? 'green' : undefined}
+              dimColor={!isCurrent && !isDone}
+            >
               {isCurrent ? '\u25B8 ' : isDone ? '\u2713 ' : '  '}
               {stepNum}. {step}
             </Text>
