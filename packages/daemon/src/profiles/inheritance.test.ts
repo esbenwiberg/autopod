@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { EscalationConfig, Profile } from '@autopod/shared';
+import type { Profile } from '@autopod/shared';
 import { resolveInheritance, validateInheritanceChain } from './inheritance.js';
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {

@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import pino from 'pino';
-import type { Runtime, AgentEvent, ValidationResult } from '@autopod/shared';
+import type { Runtime, AgentEvent, ValidationResult, StackTemplate, RuntimeType } from '@autopod/shared';
 import { SessionNotFoundError, InvalidStateTransitionError, AutopodError } from '@autopod/shared';
 import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
@@ -68,8 +68,8 @@ function insertTestProfile(db: Database.Database, name = 'test-profile') {
 function createMockRuntime(): Runtime {
   return {
     type: 'claude',
-    spawn: vi.fn(function* () {} as () => AsyncIterable<AgentEvent>),
-    resume: vi.fn(function* () {} as () => AsyncIterable<AgentEvent>),
+    spawn: vi.fn(async function* () {} as () => AsyncIterable<AgentEvent>),
+    resume: vi.fn(async function* () {} as () => AsyncIterable<AgentEvent>),
     abort: vi.fn(async () => {}),
   };
 }
@@ -153,7 +153,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         name: row.name as string,
         repoUrl: row.repo_url as string,
         defaultBranch: row.default_branch as string,
-        template: row.template,
+        template: row.template as StackTemplate,
         buildCommand: row.build_command as string,
         startCommand: row.start_command as string,
         healthPath: row.health_path as string,
@@ -161,7 +161,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         validationPages: JSON.parse(row.validation_pages as string),
         maxValidationAttempts: row.max_validation_attempts as number,
         defaultModel: row.default_model as string,
-        defaultRuntime: row.default_runtime,
+        defaultRuntime: row.default_runtime as RuntimeType,
         customInstructions: (row.custom_instructions as string) ?? null,
         escalation: JSON.parse(row.escalation_config as string),
         extends: null,
@@ -324,7 +324,7 @@ describe('SessionManager', () => {
 
       const sessions = manager.listSessions({ userId: 'user-1' });
       expect(sessions).toHaveLength(1);
-      expect(sessions[0].userId).toBe('user-1');
+      expect(sessions[0]!.userId).toBe('user-1');
     });
   });
 

@@ -42,8 +42,8 @@ describe('mergeMcpServers', () => {
     ];
     const result = mergeMcpServers(daemon, profile);
     expect(result).toHaveLength(1);
-    expect(result[0].url).toBe('https://prism.io/v2/mcp');
-    expect(result[0].description).toBe('profile version');
+    expect(result[0]!.url).toBe('https://prism.io/v2/mcp');
+    expect(result[0]!.description).toBe('profile version');
   });
 });
 
@@ -68,7 +68,7 @@ describe('mergeClaudeMdSections', () => {
     ];
     const result = mergeClaudeMdSections(daemon, profile);
     expect(result).toHaveLength(1);
-    expect(result[0].content).toBe('microservices');
+    expect(result[0]!.content).toBe('microservices');
   });
 
   it('sorts by priority (lower number first)', () => {
@@ -91,7 +91,7 @@ describe('mergeClaudeMdSections', () => {
       { heading: 'Middle', content: 'b' }, // default priority 50
     ];
     const result = mergeClaudeMdSections(daemon, profile);
-    expect(result[0].heading).toBe('First');
-    expect(result[1].heading).toBe('Middle');
+    expect(result[0]!.heading).toBe('First');
+    expect(result[1]!.heading).toBe('Middle');
   });
 });

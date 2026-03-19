@@ -86,8 +86,8 @@ describe('CodexRuntime', () => {
       }
 
       expect(events).toHaveLength(2);
-      expect(events[0].type).toBe('status');
-      expect(events[1].type).toBe('complete');
+      expect(events[0]!.type).toBe('status');
+      expect(events[1]!.type).toBe('complete');
 
       expect(spawnFn).toHaveBeenCalledWith(
         'codex',
@@ -163,7 +163,7 @@ describe('CodexRuntime', () => {
         expect.any(Object),
       );
       expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('complete');
+      expect(events[0]!.type).toBe('complete');
     });
   });
 

@@ -57,6 +57,8 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     extends: null,
     warmImageTag: null,
     warmImageBuiltAt: null,
+    mcpServers: [],
+    claudeMdSections: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,

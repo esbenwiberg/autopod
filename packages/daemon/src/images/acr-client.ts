@@ -86,7 +86,7 @@ export class AcrClient {
   /** Check if an image exists in ACR. */
   async exists(tag: string): Promise<boolean> {
     try {
-      const [repo, version] = tag.split(':');
+      const [repo = '', version] = tag.split(':');
       const artifact = this.registryClient.getArtifact(repo, version || 'latest');
       await artifact.getManifestProperties();
       return true;

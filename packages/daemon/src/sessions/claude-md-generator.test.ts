@@ -50,6 +50,7 @@ function makeSession(overrides?: Partial<Session>): Session {
     lastValidationResult: null,
     pendingEscalation: null,
     escalationCount: 0,
+    skipValidation: false,
     createdAt: '2026-01-01T00:00:00Z',
     startedAt: null,
     completedAt: null,

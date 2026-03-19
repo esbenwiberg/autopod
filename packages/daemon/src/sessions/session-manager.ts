@@ -1,7 +1,6 @@
 import type { Logger } from 'pino';
 import type {
   Session, CreateSessionRequest, SessionStatus, AgentEvent,
-  ValidationResult, Profile,
   DaemonConfig,
 } from '@autopod/shared';
 import { generateId, AutopodError } from '@autopod/shared';
@@ -48,7 +47,7 @@ export interface SessionManager {
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
   const {
-    sessionRepo, escalationRepo, profileStore, eventBus,
+    sessionRepo, escalationRepo: _escalationRepo, profileStore, eventBus,
     containerManager, worktreeManager, runtimeRegistry, validationEngine,
     enqueueSession, mcpBaseUrl, daemonConfig, logger,
   } = deps;
@@ -218,8 +217,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     async handleCompletion(sessionId: string): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
       if (isTerminalState(session.status)) return;
-
-      const profile = profileStore.get(session.profileName);
 
       // Get diff stats
       if (session.worktreePath) {

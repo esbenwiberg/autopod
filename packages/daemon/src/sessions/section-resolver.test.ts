@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { InjectedClaudeMdSection } from '@autopod/shared';
 import pino from 'pino';
-import { resolveSections, type ResolvedSection } from './section-resolver.js';
+import { resolveSections } from './section-resolver.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -9,7 +9,7 @@ describe('resolveSections', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    fetchSpy = vi.spyOn(globalThis, 'fetch') as any;
   });
 
   afterEach(() => {
@@ -39,7 +39,7 @@ describe('resolveSections', () => {
       { heading: 'Rules', content: 'test' },
     ];
     const result = await resolveSections(sections, logger);
-    expect(result[0].priority).toBe(50);
+    expect(result[0]!.priority).toBe(50);
   });
 
   it('fetches dynamic content', async () => {
@@ -54,7 +54,7 @@ describe('resolveSections', () => {
 
     const result = await resolveSections(sections, logger);
     expect(result).toHaveLength(1);
-    expect(result[0].content).toBe('Dynamic content here');
+    expect(result[0]!.content).toBe('Dynamic content here');
     expect(fetchSpy).toHaveBeenCalledWith(
       'https://prism.io/api/context',
       expect.objectContaining({ method: 'POST' }),
@@ -73,7 +73,7 @@ describe('resolveSections', () => {
     ];
 
     const result = await resolveSections(sections, logger);
-    expect(result[0].content).toBe('static part\n\nfetched part');
+    expect(result[0]!.content).toBe('static part\n\nfetched part');
   });
 
   it('sends authorization header when configured', async () => {
@@ -122,7 +122,7 @@ describe('resolveSections', () => {
 
     const result = await resolveSections(sections, logger);
     expect(result).toHaveLength(1);
-    expect(result[0].content).toBe('fallback content');
+    expect(result[0]!.content).toBe('fallback content');
   });
 
   it('falls back to static content on network error', async () => {
@@ -138,7 +138,7 @@ describe('resolveSections', () => {
 
     const result = await resolveSections(sections, logger);
     expect(result).toHaveLength(1);
-    expect(result[0].content).toBe('static fallback');
+    expect(result[0]!.content).toBe('static fallback');
   });
 
   it('truncates long dynamic content to token budget', async () => {
@@ -154,8 +154,8 @@ describe('resolveSections', () => {
     ];
 
     const result = await resolveSections(sections, logger);
-    expect(result[0].content.length).toBeLessThanOrEqual(4000 + 20); // +buffer for "(truncated)" suffix
-    expect(result[0].content).toContain('(truncated)');
+    expect(result[0]!.content.length).toBeLessThanOrEqual(4000 + 20); // +buffer for "(truncated)" suffix
+    expect(result[0]!.content).toContain('(truncated)');
   });
 
   it('resolves multiple sections in parallel', async () => {

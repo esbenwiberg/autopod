@@ -15,7 +15,7 @@ export interface SessionBridgeDependencies {
 }
 
 export function createSessionBridge(deps: SessionBridgeDependencies): SessionBridge {
-  const { sessionManager, escalationRepo, profileStore, pendingRequestsBySession, logger } = deps;
+  const { sessionManager, escalationRepo, profileStore, pendingRequestsBySession: _pendingRequestsBySession, logger } = deps;
 
   return {
     createEscalation(escalation: EscalationRequest): void {
