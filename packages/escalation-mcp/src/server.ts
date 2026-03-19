@@ -5,6 +5,9 @@ import { PendingRequests } from './pending-requests.js';
 import { askHuman } from './tools/ask-human.js';
 import { askAi } from './tools/ask-ai.js';
 import { reportBlocker } from './tools/report-blocker.js';
+import { reportPlan } from './tools/report-plan.js';
+import { reportProgress } from './tools/report-progress.js';
+import { checkMessages } from './tools/check-messages.js';
 
 export interface EscalationMcpDeps {
   sessionId: string;
@@ -64,6 +67,44 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
     async (input) => {
       const response = await reportBlocker(sessionId, input, bridge, pendingRequests);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'report_plan',
+    'Report your implementation plan before writing any code. Fire-and-forget — does not block.',
+    {
+      summary: z.string().describe('A one-line summary of your approach'),
+      steps: z.array(z.string()).describe('Numbered steps you plan to take'),
+    },
+    async (input) => {
+      const response = await reportPlan(sessionId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'report_progress',
+    'Report a phase transition in your work. Fire-and-forget — does not block.',
+    {
+      phase: z.string().describe('Name of the current phase (e.g., "Implementation", "Testing")'),
+      description: z.string().describe('Brief description of what you are doing in this phase'),
+      currentPhase: z.number().int().min(1).describe('Current phase number (1-based)'),
+      totalPhases: z.number().int().min(1).describe('Total number of phases'),
+    },
+    async (input) => {
+      const response = await reportProgress(sessionId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'check_messages',
+    'Check if the human has sent you a message. Call between phases. Returns immediately.',
+    {},
+    async () => {
+      const response = await checkMessages(sessionId, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
