@@ -67,6 +67,7 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
   // claudeMdSections: merge by heading (parent first, child overrides)
   resolved.claudeMdSections = mergeClaudeMdSections(parent.claudeMdSections, child.claudeMdSections);
 
+
   return resolved;
 }
 

@@ -1,6 +1,7 @@
 import type { Logger } from 'pino';
 import type {
   Session, CreateSessionRequest, SessionStatus, AgentEvent,
+  ValidationResult, Profile,
   DaemonConfig,
 } from '@autopod/shared';
 import { generateId, AutopodError } from '@autopod/shared';
@@ -160,6 +161,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           { name: 'escalation', url: mcpUrl },
           ...mergedMcpServers.map(s => ({ name: s.name, url: s.url, headers: s.headers })),
         ];
+
 
         // Start the agent
         const runtime = runtimeRegistry.get(session.runtime);
