@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import type { TaskReviewResult, ValidationResult, PageResult } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { TaskReviewResult, ValidationResult, PageResult } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 
 import type { ContainerManager } from '../interfaces/container-manager.js';

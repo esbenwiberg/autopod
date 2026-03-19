@@ -95,6 +95,9 @@ importers:
       '@autopod/shared':
         specifier: workspace:*
         version: link:../shared
+      '@autopod/validator':
+        specifier: workspace:*
+        version: link:../validator
       '@azure/arm-containerinstance':
         specifier: ^9.1.0
         version: 9.1.0

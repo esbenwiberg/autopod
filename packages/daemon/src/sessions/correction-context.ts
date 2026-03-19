@@ -43,13 +43,13 @@ export async function buildCorrectionContext(
   const screenshotDescriptions: string[] = [];
 
   // Page validation failures
-  const failedPages = validationResult.smoke.pages.filter(p => p.status === 'fail');
+  const failedPages = validationResult.smoke.pages.filter((p) => p.status === 'fail');
   for (const page of failedPages) {
     const parts: string[] = [`Page ${page.path} failed:`];
     if (page.consoleErrors.length > 0) {
       parts.push(`  Console errors: ${page.consoleErrors.slice(0, 5).join('; ')}`);
     }
-    const failedAssertions = page.assertions.filter(a => !a.passed);
+    const failedAssertions = page.assertions.filter((a) => !a.passed);
     for (const a of failedAssertions) {
       parts.push(`  Assertion failed: ${a.selector} (${a.type}) — expected "${a.expected}", got "${a.actual}"`);
     }

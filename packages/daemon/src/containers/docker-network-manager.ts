@@ -1,6 +1,6 @@
+import type { InjectedMcpServer, NetworkPolicy } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
-import type { NetworkPolicy, InjectedMcpServer } from '@autopod/shared';
 
 const NETWORK_NAME = 'autopod-net';
 
@@ -121,7 +121,9 @@ export class DockerNetworkManager {
         lines.push(`ALLOWED_IPS="$ALLOWED_IPS ${host}"`);
       } else {
         // Resolve hostname — use getent for reliability, fall back to nslookup
-        lines.push(`for ip in $(getent ahosts "${host}" 2>/dev/null | awk '{print $1}' | sort -u); do`);
+        lines.push(
+          `for ip in $(getent ahosts "${host}" 2>/dev/null | awk '{print $1}' | sort -u); do`,
+        );
         lines.push(`  ALLOWED_IPS="$ALLOWED_IPS $ip"`);
         lines.push('done');
       }
