@@ -16,6 +16,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',
+    executionTarget: 'local',
     customInstructions: null,
     escalation: {
       askHuman: true,

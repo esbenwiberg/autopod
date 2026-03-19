@@ -81,6 +81,7 @@ function createMockContainerManager(): ContainerManager {
     writeFile: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    execStreaming: vi.fn(),
   };
 }
 
@@ -164,6 +165,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         defaultRuntime: row.default_runtime as RuntimeType,
         customInstructions: (row.custom_instructions as string) ?? null,
         escalation: JSON.parse(row.escalation_config as string),
+        executionTarget: 'local' as const,
         extends: null,
         warmImageTag: null,
         warmImageBuiltAt: null,
@@ -193,7 +195,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
     escalationRepo,
     profileStore,
     eventBus,
-    containerManager,
+    containerManagerFactory: { get: vi.fn(() => containerManager) },
     worktreeManager,
     runtimeRegistry,
     validationEngine,
@@ -475,15 +477,12 @@ describe('SessionManager', () => {
 
       await manager.rejectSession(session.id, 'Button color wrong');
 
-      // Agent was resumed with the rejection feedback
-      expect(ctx.runtime.resume).toHaveBeenCalledWith(
-        session.id,
-        expect.stringContaining('Button color wrong'),
-      );
-      expect(ctx.runtime.resume).toHaveBeenCalledWith(
-        session.id,
-        expect.stringContaining('Rejected by Reviewer'),
-      );
+      // Agent was resumed with the rejection feedback (3rd arg is containerId)
+      const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
+      expect(resumeCalls.length).toBeGreaterThanOrEqual(1);
+      const resumeMessage = resumeCalls[0]![1] as string;
+      expect(resumeMessage).toContain('Button color wrong');
+      expect(resumeMessage).toContain('Rejected by Reviewer');
 
       // Full cycle completes: rejection → agent runs → validation passes → validated
       const result = manager.getSession(session.id);
@@ -675,10 +674,9 @@ describe('SessionManager', () => {
       await manager.triggerValidation(session.id);
 
       // Agent was resumed with correction feedback for each retry (attempts 1 and 2)
-      expect(ctx.runtime.resume).toHaveBeenCalledWith(
-        session.id,
-        expect.stringContaining('Validation Failed'),
-      );
+      const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
+      expect(resumeCalls.length).toBe(2);
+      expect(resumeCalls[0]![1]).toContain('Validation Failed');
       // 2 retries before exhaustion (attempt 1 → retry, attempt 2 → retry, attempt 3 → failed)
       expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
 

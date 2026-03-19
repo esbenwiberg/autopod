@@ -1,42 +1,48 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import pino from 'pino';
-import { EventEmitter, Readable } from 'node:stream';
+import { PassThrough } from 'node:stream';
+import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { CodexRuntime } from './codex-runtime.js';
 
 const logger = pino({ level: 'silent' });
 
-// Mock child process that simulates codex CLI
-function createMockProcess(options?: { exitCode?: number; ignoreSignals?: boolean }) {
-  const stdout = new Readable({ read() {} });
-  const stderr = new Readable({ read() {} });
-  const proc = new EventEmitter() as any;
-  proc.stdout = stdout;
-  proc.stderr = stderr;
-  proc.stdin = { write: vi.fn(), end: vi.fn() };
-  proc.pid = 12345;
-  proc.killed = false;
-  proc.exitCode = null;
-
-  proc.kill = vi.fn((signal?: string) => {
-    if (options?.ignoreSignals && signal === 'SIGTERM') return;
-    proc.killed = true;
-    proc.exitCode = options?.exitCode ?? 0;
-    process.nextTick(() => proc.emit('exit', proc.exitCode));
+function createMockHandle(options?: { exitCode?: number }): StreamingExecResult {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  let resolveExitCode: (code: number) => void;
+  const exitCodePromise = new Promise<number>((resolve) => {
+    resolveExitCode = resolve;
   });
 
-  // Helper: end stdout and emit process exit (simulates normal completion)
-  proc.finish = (code?: number) => {
-    proc.stdout.push(null);
-    const exitCode = code ?? options?.exitCode ?? 0;
-    proc.exitCode = exitCode;
-    process.nextTick(() => proc.emit('exit', exitCode));
+  const handle: StreamingExecResult = {
+    stdout,
+    stderr,
+    exitCode: exitCodePromise,
+    kill: vi.fn(async () => {
+      stdout.destroy();
+      stderr.destroy();
+      resolveExitCode!(options?.exitCode ?? 137);
+    }),
   };
 
-  return proc;
+  // Helper to finish the stream: push null on stdout and resolve exitCode
+  (handle as any).finish = (code?: number) => {
+    stdout.push(null);
+    resolveExitCode!(code ?? options?.exitCode ?? 0);
+  };
+
+  return handle;
 }
 
-function createMockSpawn(mockProc: any) {
-  return vi.fn(() => mockProc) as any;
+function createMockContainerManager(handle: StreamingExecResult): ContainerManager {
+  return {
+    spawn: vi.fn(async () => 'container-123'),
+    kill: vi.fn(async () => {}),
+    writeFile: vi.fn(async () => {}),
+    getStatus: vi.fn(async () => 'running' as const),
+    execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    execStreaming: vi.fn(async () => handle),
+  };
 }
 
 describe('CodexRuntime', () => {
@@ -46,12 +52,15 @@ describe('CodexRuntime', () => {
 
   describe('buildSpawnArgs', () => {
     it('builds correct args from config', () => {
-      const runtime = new CodexRuntime(logger);
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
       const args = (runtime as any).buildSpawnArgs({
         sessionId: 'abc123',
         task: 'Fix the bug',
         model: 'o3-mini',
         workDir: '/workspace',
+        containerId: 'container-123',
         env: {},
       });
       expect(args).toEqual([
@@ -63,15 +72,15 @@ describe('CodexRuntime', () => {
   });
 
   describe('spawn', () => {
-    it('spawns codex process and yields events from stdout', async () => {
-      const mockProc = createMockProcess();
-      const spawnFn = createMockSpawn(mockProc);
-      const runtime = new CodexRuntime(logger, spawnFn);
+    it('calls execStreaming and yields events from stdout', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
 
       setTimeout(() => {
-        mockProc.stdout.push('{"type":"task_start","message":"Starting"}\n');
-        mockProc.stdout.push('{"type":"task_complete","result":"Done"}\n');
-        mockProc.finish(0);
+        (handle.stdout as PassThrough).write('{"type":"task_start","message":"Starting"}\n');
+        (handle.stdout as PassThrough).write('{"type":"task_complete","result":"Done"}\n');
+        (handle as any).finish(0);
       }, 10);
 
       const events = [];
@@ -80,6 +89,7 @@ describe('CodexRuntime', () => {
         task: 'Do the thing',
         model: 'o3-mini',
         workDir: '/workspace',
+        containerId: 'container-123',
         env: {},
       })) {
         events.push(event);
@@ -89,19 +99,20 @@ describe('CodexRuntime', () => {
       expect(events[0]!.type).toBe('status');
       expect(events[1]!.type).toBe('complete');
 
-      expect(spawnFn).toHaveBeenCalledWith(
-        'codex',
-        ['exec', 'Do the thing', '--model', 'o3-mini', '--full-auto', '--json'],
+      expect(cm.execStreaming).toHaveBeenCalledWith(
+        'container-123',
+        ['codex', 'exec', 'Do the thing', '--model', 'o3-mini', '--full-auto', '--json'],
         expect.objectContaining({ cwd: '/workspace' }),
       );
     });
 
     it('yields error event on non-zero exit code', async () => {
-      const mockProc = createMockProcess({ exitCode: 1 });
-      const runtime = new CodexRuntime(logger, createMockSpawn(mockProc));
+      const handle = createMockHandle({ exitCode: 1 });
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
 
       setTimeout(() => {
-        mockProc.finish(1);
+        (handle as any).finish(1);
       }, 10);
 
       const events = [];
@@ -110,6 +121,7 @@ describe('CodexRuntime', () => {
         task: 'Fail',
         model: 'o3-mini',
         workDir: '/workspace',
+        containerId: 'container-123',
         env: {},
       })) {
         events.push(event);
@@ -121,12 +133,13 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).fatal).toBe(true);
     });
 
-    it('cleans up process tracking after completion', async () => {
-      const mockProc = createMockProcess();
-      const runtime = new CodexRuntime(logger, createMockSpawn(mockProc));
+    it('cleans up handle tracking after completion', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
 
       setTimeout(() => {
-        mockProc.finish(0);
+        (handle as any).finish(0);
       }, 10);
 
       for await (const _ of runtime.spawn({
@@ -134,32 +147,35 @@ describe('CodexRuntime', () => {
         task: 'test',
         model: 'o3-mini',
         workDir: '/workspace',
+        containerId: 'container-123',
         env: {},
       })) { /* consume */ }
 
-      expect((runtime as any).processes.has('track-test')).toBe(false);
+      expect((runtime as any).handles.has('track-test')).toBe(false);
     });
   });
 
   describe('resume', () => {
-    it('spawns codex with message as task in full-auto mode', async () => {
-      const mockProc = createMockProcess();
-      const spawnFn = createMockSpawn(mockProc);
-      const runtime = new CodexRuntime(logger, spawnFn);
+    it('calls execStreaming with message as task in full-auto mode', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
 
       setTimeout(() => {
-        mockProc.stdout.push('{"type":"task_complete","result":"Fixed"}\n');
-        mockProc.stdout.push(null);
+        (handle.stdout as PassThrough).write('{"type":"task_complete","result":"Fixed"}\n');
+        (handle.stdout as PassThrough).push(null);
+        // Resolve exitCode after stdout ends
+        (handle as any).finish(0);
       }, 10);
 
       const events = [];
-      for await (const event of runtime.resume('sess-1', 'Fix the validation errors')) {
+      for await (const event of runtime.resume('sess-1', 'Fix the validation errors', 'container-123')) {
         events.push(event);
       }
 
-      expect(spawnFn).toHaveBeenCalledWith(
-        'codex',
-        ['exec', 'Fix the validation errors', '--full-auto', '--json'],
+      expect(cm.execStreaming).toHaveBeenCalledWith(
+        'container-123',
+        ['codex', 'exec', 'Fix the validation errors', '--full-auto', '--json'],
         expect.any(Object),
       );
       expect(events).toHaveLength(1);
@@ -168,44 +184,23 @@ describe('CodexRuntime', () => {
   });
 
   describe('abort', () => {
-    it('sends SIGTERM to the tracked process', async () => {
-      const mockProc = createMockProcess();
-      const runtime = new CodexRuntime(logger);
-      (runtime as any).processes.set('sess-1', mockProc);
+    it('calls handle.kill() for the tracked session', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
+      (runtime as any).handles.set('sess-1', handle);
 
       await runtime.abort('sess-1');
 
-      expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
-      expect((runtime as any).processes.has('sess-1')).toBe(false);
+      expect(handle.kill).toHaveBeenCalled();
+      expect((runtime as any).handles.has('sess-1')).toBe(false);
     });
 
-    it('is a no-op when no process is tracked', async () => {
-      const runtime = new CodexRuntime(logger);
+    it('is a no-op when no handle is tracked', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
       await runtime.abort('nonexistent');
-    });
-
-    it('sends SIGKILL after timeout if SIGTERM is ignored', async () => {
-      vi.useFakeTimers();
-      const mockProc = createMockProcess({ ignoreSignals: true });
-      const runtime = new CodexRuntime(logger);
-      (runtime as any).processes.set('sess-1', mockProc);
-
-      const abortPromise = runtime.abort('sess-1');
-
-      expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(mockProc.kill).not.toHaveBeenCalledWith('SIGKILL');
-
-      vi.advanceTimersByTime(5_000);
-
-      expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');
-
-      vi.useRealTimers();
-
-      // Resolve the abort promise by emitting exit
-      mockProc.killed = true;
-      mockProc.exitCode = 137;
-      mockProc.emit('exit', 137);
-      await abortPromise;
     });
   });
 });

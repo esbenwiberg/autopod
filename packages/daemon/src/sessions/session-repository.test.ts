@@ -9,10 +9,13 @@ import {
   type NewSession,
 } from './session-repository.js';
 
-const MIGRATION_SQL = fs.readFileSync(
-  path.resolve(import.meta.dirname, '../db/migrations/001_initial.sql'),
-  'utf-8',
-);
+const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
+const MIGRATION_SQL = fs
+  .readdirSync(migrationsDir)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf-8'))
+  .join('\n');
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
@@ -35,6 +38,7 @@ const validSession: NewSession = {
   status: 'queued',
   model: 'opus',
   runtime: 'claude',
+  executionTarget: 'local',
   branch: 'feature/dark-mode',
   userId: 'user-1',
   maxValidationAttempts: 3,

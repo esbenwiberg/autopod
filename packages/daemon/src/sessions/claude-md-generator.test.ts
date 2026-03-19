@@ -16,6 +16,7 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',
+    executionTarget: 'local',
     customInstructions: null,
     escalation: {
       askHuman: true,
@@ -42,6 +43,7 @@ function makeSession(overrides?: Partial<Session>): Session {
     status: 'running',
     model: 'opus',
     runtime: 'claude',
+    executionTarget: 'local',
     branch: 'autopod/abc12345',
     containerId: null,
     worktreePath: null,

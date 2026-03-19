@@ -80,6 +80,7 @@ describe('Integration', () => {
       writeFile: vi.fn().mockResolvedValue(undefined),
       getStatus: vi.fn().mockResolvedValue('running' as const),
       execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+      execStreaming: vi.fn(),
     };
 
     const worktreeManager = {
@@ -133,7 +134,7 @@ describe('Integration', () => {
       escalationRepo,
       profileStore,
       eventBus,
-      containerManager,
+      containerManagerFactory: { get: vi.fn(() => containerManager) },
       worktreeManager,
       runtimeRegistry,
       validationEngine,
