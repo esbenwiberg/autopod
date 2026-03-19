@@ -15,6 +15,7 @@ import { formatFeedback } from './feedback-formatter.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
 import { resolveSections } from './section-resolver.js';
+import { collectScreenshots, buildGitHubImageUrl } from '../validation/screenshot-collector.js';
 
 /** Allocate a random host port in range 10000–59999 for container port mapping. */
 function allocateHostPort(): number {
@@ -503,6 +504,23 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           diff: '', // would come from worktreeManager
         });
 
+        // Collect screenshots from the host worktree (volume-mounted from container)
+        if (session.worktreePath && result.smoke.pages.length > 0) {
+          try {
+            const screenshots = await collectScreenshots(session.worktreePath, result.smoke.pages);
+            // Enrich page results with base64 data for Teams notifications
+            for (const ss of screenshots) {
+              const page = result.smoke.pages.find((p) => p.path === ss.pagePath);
+              if (page) {
+                page.screenshotBase64 = ss.base64;
+              }
+            }
+            logger.info({ sessionId, count: screenshots.length }, 'Collected validation screenshots');
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to collect screenshots');
+          }
+        }
+
         sessionRepo.update(sessionId, { lastValidationResult: result });
 
         eventBus.emit({
@@ -517,7 +535,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           // Push branch and create PR before transitioning to validated
           let prUrl: string | null = null;
           if (prManager && s2.worktreePath) {
-            // Push branch first so `gh pr create --head` can reference it
+            // Commit screenshots to the branch so they're visible in the PR
+            try {
+              await worktreeManager.commitFiles(
+                s2.worktreePath,
+                ['.autopod/screenshots'],
+                'chore: add validation screenshots',
+              );
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to commit screenshots');
+            }
+
+            // Push branch so `gh pr create --head` can reference it
             try {
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
@@ -526,6 +555,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             } catch (err) {
               logger.warn({ err, sessionId }, 'Failed to push branch for PR');
             }
+
+            // Build screenshot URLs for the PR body
+            const screenshotRefs = result.smoke.pages
+              .filter((p) => p.screenshotPath)
+              .map((p) => ({
+                pagePath: p.path,
+                imageUrl: buildGitHubImageUrl(
+                  profile.repoUrl,
+                  s2.branch,
+                  p.screenshotPath.replace(/^\/workspace\//, ''),
+                ),
+              }));
 
             try {
               prUrl = await prManager.createPr({
@@ -540,6 +581,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 linesAdded: s2.linesAdded,
                 linesRemoved: s2.linesRemoved,
                 previewUrl: s2.previewUrl,
+                screenshots: screenshotRefs,
               });
             } catch (err) {
               logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');

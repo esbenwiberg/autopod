@@ -21,6 +21,8 @@ export interface CreatePrConfig {
   linesRemoved: number;
   /** Preview URL if available */
   previewUrl: string | null;
+  /** Screenshot references for PR body */
+  screenshots?: Array<{ pagePath: string; imageUrl: string }>;
 }
 
 export interface MergePrConfig {

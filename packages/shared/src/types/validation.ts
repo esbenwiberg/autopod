@@ -34,6 +34,8 @@ export interface PageResult {
   path: string;
   status: 'pass' | 'fail';
   screenshotPath: string;
+  /** Base64-encoded PNG screenshot (populated after collection from host filesystem) */
+  screenshotBase64?: string;
   consoleErrors: string[];
   assertions: AssertionResult[];
   loadTime: number;

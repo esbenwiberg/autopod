@@ -20,4 +20,6 @@ export interface WorktreeManager {
   cleanup(worktreePath: string): Promise<void>;
   getDiffStats(worktreePath: string): Promise<DiffStats>;
   mergeBranch(config: MergeBranchConfig): Promise<void>;
+  /** Stage and commit specific paths (e.g. screenshot artifacts). No-op if nothing to commit. */
+  commitFiles(worktreePath: string, paths: string[], message: string): Promise<void>;
 }

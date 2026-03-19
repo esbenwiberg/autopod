@@ -21,6 +21,7 @@ describe('Card Builder', () => {
       type: 'session_validated',
       previewUrl: 'https://preview.example.com/sess-abc123',
       prUrl: 'https://github.com/org/repo/pull/42',
+      screenshots: [],
       filesChanged: 5,
       linesAdded: 120,
       linesRemoved: 30,

@@ -115,9 +115,29 @@ export function buildValidatedCard(notification: SessionValidatedNotification): 
     headerBlock('Session Validated', 'good'),
     taskTitle(notification),
     sessionFacts(facts),
-    cliHint(`ap diff ${notification.sessionId}`),
-    cliHint(`ap approve ${notification.sessionId}`),
   ];
+
+  // Inline screenshots (base64 PNGs)
+  if (notification.screenshots && notification.screenshots.length > 0) {
+    for (const ss of notification.screenshots) {
+      body.push({
+        type: 'TextBlock',
+        text: `Page: ${ss.pagePath}`,
+        size: 'Small',
+        weight: 'Bolder',
+        spacing: 'Medium',
+      });
+      body.push({
+        type: 'Image',
+        url: `data:image/png;base64,${ss.base64}`,
+        size: 'Large',
+        altText: `Screenshot of ${ss.pagePath}`,
+      });
+    }
+  }
+
+  body.push(cliHint(`ap diff ${notification.sessionId}`));
+  body.push(cliHint(`ap approve ${notification.sessionId}`));
 
   const actions: AdaptiveCardAction[] = [];
   if (notification.prUrl) {

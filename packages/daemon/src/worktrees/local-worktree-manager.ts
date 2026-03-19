@@ -143,6 +143,29 @@ export class LocalWorktreeManager implements WorktreeManager {
     await execFileAsync('git', ['push', 'origin', 'HEAD'], { cwd: worktreePath });
   }
 
+  async commitFiles(worktreePath: string, paths: string[], message: string): Promise<void> {
+    if (paths.length === 0) return;
+
+    try {
+      // Stage the specific paths
+      await execFileAsync('git', ['add', ...paths], { cwd: worktreePath });
+
+      // Check if there's anything staged
+      try {
+        await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: worktreePath });
+        // Exit 0 means nothing staged — skip commit
+        return;
+      } catch {
+        // Exit non-zero means there ARE staged changes — commit them
+      }
+
+      await execFileAsync('git', ['commit', '-m', message], { cwd: worktreePath });
+      this.logger.info({ worktreePath, fileCount: paths.length }, 'Committed files');
+    } catch (err) {
+      this.logger.warn({ err, worktreePath }, 'Failed to commit files');
+    }
+  }
+
   // --- Private helpers ---
 
   private sanitizeRepoUrl(url: string): string {

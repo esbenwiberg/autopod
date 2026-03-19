@@ -1,5 +1,12 @@
 import type { ValidationResult } from '@autopod/shared';
 
+export interface ScreenshotRef {
+  /** Page path (e.g. '/', '/about') */
+  pagePath: string;
+  /** Full URL to the screenshot image (GitHub raw URL) */
+  imageUrl: string;
+}
+
 export interface PrBodyConfig {
   task: string;
   sessionId: string;
@@ -9,6 +16,8 @@ export interface PrBodyConfig {
   linesAdded: number;
   linesRemoved: number;
   previewUrl: string | null;
+  /** Screenshot references for embedding in the PR body */
+  screenshots?: ScreenshotRef[];
 }
 
 export function buildPrTitle(task: string): string {
@@ -62,6 +71,14 @@ export function buildPrBody(config: PrBodyConfig): string {
     `- **Files changed:** ${filesChanged}\n` +
     `- **Lines:** +${linesAdded} / -${linesRemoved}`,
   );
+
+  // Screenshots
+  if (config.screenshots && config.screenshots.length > 0) {
+    const imgs = config.screenshots.map(
+      (s) => `### \`${s.pagePath}\`\n![${s.pagePath}](${s.imageUrl})`,
+    );
+    sections.push(`## Screenshots\n\n${imgs.join('\n\n')}`);
+  }
 
   // Preview
   if (previewUrl) {

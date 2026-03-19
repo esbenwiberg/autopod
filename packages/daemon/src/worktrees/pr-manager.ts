@@ -35,6 +35,7 @@ export class GhPrManager implements PrManager {
       linesAdded: config.linesAdded,
       linesRemoved: config.linesRemoved,
       previewUrl: config.previewUrl,
+      screenshots: config.screenshots,
     });
 
     this.logger.info(
