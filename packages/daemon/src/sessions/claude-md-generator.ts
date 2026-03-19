@@ -35,9 +35,15 @@ export function generateClaudeMd(
   // MCP Servers section
   lines.push('## MCP Servers');
   lines.push('');
-  lines.push('### Escalation (ask for help)');
+  lines.push('### Escalation & Monitoring');
   lines.push(`- URL: ${mcpServerUrl}`);
-  lines.push('- Tools: ask_human (ask the human for input), ask_ai (consult another AI), report_blocker (report a blocking issue)');
+  lines.push('- Tools:');
+  lines.push('  - ask_human — ask the human for input');
+  lines.push('  - ask_ai — consult another AI');
+  lines.push('  - report_blocker — report a blocking issue');
+  lines.push('  - report_plan — declare your implementation plan (fire-and-forget)');
+  lines.push('  - report_progress — report phase transitions (fire-and-forget)');
+  lines.push('  - check_messages — poll for human nudge messages (non-blocking)');
   lines.push('');
 
   const injectedMcpServers = options?.injectedMcpServers ?? [];
@@ -83,6 +89,17 @@ export function generateClaudeMd(
     lines.push(profile.customInstructions);
     lines.push('');
   }
+
+  lines.push('## Workflow Requirements');
+  lines.push('');
+  lines.push('1. **Plan first**: Before writing any code, call `report_plan` with your approach and numbered steps.');
+  lines.push('2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.');
+  lines.push('3. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.');
+  lines.push('4. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:');
+  lines.push('   - Exploration → Implementation → Testing → Cleanup');
+  lines.push('   - Analysis → Design → Build → Verify');
+  lines.push('   - Investigation → Fix → Test → Document');
+  lines.push('');
 
   lines.push('## Guidelines');
   lines.push('');
