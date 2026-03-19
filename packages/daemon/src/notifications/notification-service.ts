@@ -90,6 +90,7 @@ export function createNotificationService(deps: {
         task: session.task,
         timestamp: event.timestamp,
         previewUrl: session.previewUrl,
+        prUrl: session.prUrl,
         filesChanged: session.filesChanged,
         linesAdded: session.linesAdded,
         linesRemoved: session.linesRemoved,

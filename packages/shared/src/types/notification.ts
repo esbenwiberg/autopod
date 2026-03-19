@@ -18,6 +18,7 @@ export interface NotificationPayload {
 export interface SessionValidatedNotification extends NotificationPayload {
   type: 'session_validated';
   previewUrl: string | null;
+  prUrl: string | null;
   filesChanged: number;
   linesAdded: number;
   linesRemoved: number;

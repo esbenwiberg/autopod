@@ -158,6 +158,11 @@ exports[`Card Builder > buildValidatedCard > matches snapshot 1`] = `
   "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
   "actions": [
     {
+      "title": "View Pull Request",
+      "type": "Action.OpenUrl",
+      "url": "https://github.com/org/repo/pull/42",
+    },
+    {
       "title": "Open Preview",
       "type": "Action.OpenUrl",
       "url": "https://preview.example.com/sess-abc123",

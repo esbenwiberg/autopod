@@ -43,6 +43,7 @@ export interface Session {
   linesAdded: number;
   linesRemoved: number;
   previewUrl: string | null;
+  prUrl: string | null;
 }
 
 export interface CreateSessionRequest {

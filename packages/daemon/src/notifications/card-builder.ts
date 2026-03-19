@@ -74,6 +74,14 @@ function previewAction(url: string): AdaptiveCardAction {
   };
 }
 
+function prAction(url: string): AdaptiveCardAction {
+  return {
+    type: 'Action.OpenUrl',
+    title: 'View Pull Request',
+    url,
+  };
+}
+
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -112,6 +120,9 @@ export function buildValidatedCard(notification: SessionValidatedNotification): 
   ];
 
   const actions: AdaptiveCardAction[] = [];
+  if (notification.prUrl) {
+    actions.push(prAction(notification.prUrl));
+  }
   if (notification.previewUrl) {
     actions.push(previewAction(notification.previewUrl));
   }

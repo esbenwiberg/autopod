@@ -20,6 +20,7 @@ describe('Card Builder', () => {
       ...basePayload,
       type: 'session_validated',
       previewUrl: 'https://preview.example.com/sess-abc123',
+      prUrl: 'https://github.com/org/repo/pull/42',
       filesChanged: 5,
       linesAdded: 120,
       linesRemoved: 30,
@@ -51,17 +52,26 @@ describe('Card Builder', () => {
       expect(facts.find((f) => f.title === 'Session')?.value).toBe('sess-abc123');
     });
 
-    it('includes preview URL action when present', () => {
+    it('includes PR and preview URL actions when present', () => {
       const card = buildValidatedCard(notification);
       expect(card.actions).toBeDefined();
-      expect(card.actions!.length).toBe(1);
-      expect(card.actions![0]!.title).toBe('Open Preview');
-      expect(card.actions![0]!.url).toBe('https://preview.example.com/sess-abc123');
+      expect(card.actions!.length).toBe(2);
+      expect(card.actions![0]!.title).toBe('View Pull Request');
+      expect(card.actions![0]!.url).toBe('https://github.com/org/repo/pull/42');
+      expect(card.actions![1]!.title).toBe('Open Preview');
+      expect(card.actions![1]!.url).toBe('https://preview.example.com/sess-abc123');
     });
 
-    it('omits actions when no preview URL', () => {
-      const card = buildValidatedCard({ ...notification, previewUrl: null });
+    it('omits actions when no PR URL and no preview URL', () => {
+      const card = buildValidatedCard({ ...notification, previewUrl: null, prUrl: null });
       expect(card.actions).toBeUndefined();
+    });
+
+    it('includes only PR action when no preview URL', () => {
+      const card = buildValidatedCard({ ...notification, previewUrl: null });
+      expect(card.actions).toBeDefined();
+      expect(card.actions!.length).toBe(1);
+      expect(card.actions![0]!.title).toBe('View Pull Request');
     });
 
     it('includes CLI hints', () => {

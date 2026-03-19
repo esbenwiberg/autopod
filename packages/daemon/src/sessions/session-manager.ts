@@ -5,7 +5,7 @@ import type {
 } from '@autopod/shared';
 import { generateId, AutopodError } from '@autopod/shared';
 import type { ProfileStore } from '../profiles/index.js';
-import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine } from '../interfaces/index.js';
+import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine, PrManager } from '../interfaces/index.js';
 import type { SessionRepository, SessionUpdates } from './session-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -39,6 +39,7 @@ export interface SessionManagerDependencies {
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
   networkManager?: NetworkManager;
+  prManager?: PrManager;
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
@@ -51,7 +52,7 @@ export interface SessionManager {
   consumeAgentEvents(sessionId: string, events: AsyncIterable<AgentEvent>): Promise<void>;
   handleCompletion(sessionId: string): Promise<void>;
   sendMessage(sessionId: string, message: string): Promise<void>;
-  approveSession(sessionId: string): Promise<void>;
+  approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void>;
   rejectSession(sessionId: string, reason?: string): Promise<void>;
   killSession(sessionId: string): Promise<void>;
   triggerValidation(sessionId: string): Promise<void>;
@@ -63,7 +64,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   const {
     sessionRepo, escalationRepo: _escalationRepo, profileStore, eventBus,
     containerManagerFactory, worktreeManager, runtimeRegistry, validationEngine,
-    networkManager, enqueueSession, mcpBaseUrl, daemonConfig, logger,
+    networkManager, prManager, enqueueSession, mcpBaseUrl, daemonConfig, logger,
   } = deps;
 
   function transition(session: Session, to: SessionStatus, extraUpdates?: Partial<SessionUpdates>): Session {
@@ -310,13 +311,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       await this.handleCompletion(sessionId);
     },
 
-    async approveSession(sessionId: string): Promise<void> {
+    async approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
       const s1 = transition(session, 'approved');
       const s2 = transition(s1, 'merging');
 
-      // Push the branch to origin
-      if (session.worktreePath) {
+      // Merge the PR if one was created, otherwise fall back to branch push
+      if (session.prUrl && prManager && session.worktreePath) {
+        try {
+          await prManager.mergePr({
+            worktreePath: session.worktreePath,
+            prUrl: session.prUrl,
+            squash: options?.squash,
+          });
+        } catch (err) {
+          logger.error({ err, sessionId, prUrl: session.prUrl }, 'Failed to merge PR');
+          // Don't block completion — merge is best-effort
+        }
+      } else if (session.worktreePath) {
+        // Fallback: push branch directly (no PR was created)
         try {
           const profile = profileStore.get(session.profileName);
           await worktreeManager.mergeBranch({
@@ -349,7 +362,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         },
       });
 
-      logger.info({ sessionId }, 'Session approved and completed');
+      logger.info({ sessionId, prUrl: session.prUrl }, 'Session approved and completed');
     },
 
     async rejectSession(sessionId: string, reason?: string): Promise<void> {
@@ -488,7 +501,39 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         const s2 = sessionRepo.getOrThrow(sessionId);
         if (result.overall === 'pass') {
-          transition(s2, 'validated');
+          // Push branch and create PR before transitioning to validated
+          let prUrl: string | null = null;
+          if (prManager && s2.worktreePath) {
+            // Push branch first so `gh pr create --head` can reference it
+            try {
+              await worktreeManager.mergeBranch({
+                worktreePath: s2.worktreePath,
+                targetBranch: profile.defaultBranch,
+              });
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to push branch for PR');
+            }
+
+            try {
+              prUrl = await prManager.createPr({
+                worktreePath: s2.worktreePath,
+                branch: s2.branch,
+                baseBranch: profile.defaultBranch,
+                sessionId,
+                task: s2.task,
+                profileName: s2.profileName,
+                validationResult: result,
+                filesChanged: s2.filesChanged,
+                linesAdded: s2.linesAdded,
+                linesRemoved: s2.linesRemoved,
+                previewUrl: s2.previewUrl,
+              });
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');
+            }
+          }
+
+          transition(s2, 'validated', { prUrl });
         } else if (attempt < profile.maxValidationAttempts) {
           // Build correction message with structured feedback for the agent
           const cm = containerManagerFactory.get(s2.executionTarget);
