@@ -105,6 +105,27 @@ export class CodexRuntime implements Runtime {
     this.handles.delete(sessionId);
   }
 
+  async suspend(sessionId: string): Promise<void> {
+    const handle = this.handles.get(sessionId);
+    if (!handle) {
+      this.logger.warn({
+        component: 'codex-runtime',
+        sessionId,
+        msg: 'No exec handle found to suspend',
+      });
+      return;
+    }
+
+    this.logger.info({
+      component: 'codex-runtime',
+      sessionId,
+      msg: 'Suspending codex session',
+    });
+
+    await handle.kill();
+    this.handles.delete(sessionId);
+  }
+
   private buildSpawnArgs(config: SpawnConfig): string[] {
     return [
       'exec',

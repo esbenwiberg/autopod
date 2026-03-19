@@ -122,6 +122,37 @@ export class ClaudeRuntime implements Runtime {
     this.claudeSessionIds.delete(sessionId);
   }
 
+  async suspend(sessionId: string): Promise<void> {
+    const handle = this.handles.get(sessionId);
+    if (!handle) {
+      this.logger.warn({
+        component: 'claude-runtime',
+        sessionId,
+        msg: 'No exec handle found to suspend',
+      });
+      return;
+    }
+
+    this.logger.info({
+      component: 'claude-runtime',
+      sessionId,
+      claudeSessionId: this.claudeSessionIds.get(sessionId),
+      msg: 'Suspending claude session (preserving session ID for resume)',
+    });
+
+    await handle.kill();
+    this.handles.delete(sessionId);
+    // NOTE: claudeSessionIds is NOT deleted — that's the whole point of suspend vs abort
+  }
+
+  getClaudeSessionId(sessionId: string): string | undefined {
+    return this.claudeSessionIds.get(sessionId);
+  }
+
+  setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
+    this.claudeSessionIds.set(sessionId, claudeSessionId);
+  }
+
   private buildSpawnArgs(config: SpawnConfig): string[] {
     const args = [
       '-p', config.task,
