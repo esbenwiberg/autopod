@@ -3,19 +3,21 @@ import type { EscalationRequest, EscalationResponse } from '@autopod/shared';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type { SessionManager } from './session-manager.js';
 import type { EscalationRepository } from './escalation-repository.js';
+import type { NudgeRepository } from './nudge-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { Logger } from 'pino';
 
 export interface SessionBridgeDependencies {
   sessionManager: SessionManager;
   escalationRepo: EscalationRepository;
+  nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
   pendingRequestsBySession: Map<string, PendingRequests>;
   logger: Logger;
 }
 
 export function createSessionBridge(deps: SessionBridgeDependencies): SessionBridge {
-  const { sessionManager, escalationRepo, profileStore, pendingRequestsBySession: _pendingRequestsBySession, logger } = deps;
+  const { sessionManager, escalationRepo, nudgeRepo, profileStore, pendingRequestsBySession: _pendingRequestsBySession, logger } = deps;
 
   return {
     createEscalation(escalation: EscalationRequest): void {
@@ -85,6 +87,22 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       // The session manager tracks escalation count via session updates
       // This is a no-op here since the session manager handles it via consumeAgentEvents
       logger.debug({ sessionId, currentCount: session.escalationCount }, 'Escalation count incremented');
+    },
+
+    reportPlan(sessionId: string, summary: string, steps: string[]): void {
+      logger.info({ sessionId, summary, stepCount: steps.length }, 'Agent reported plan');
+      // Plan is persisted via the AgentPlanEvent flowing through consumeAgentEvents
+      // but we also emit it as an agent activity event from the MCP bridge
+      // The event bus handles this — the MCP tool response triggers an event in the stream
+    },
+
+    reportProgress(sessionId: string, phase: string, description: string, currentPhase: number, totalPhases: number): void {
+      logger.info({ sessionId, phase, currentPhase, totalPhases }, 'Agent reported progress');
+      // Progress is persisted via the AgentProgressEvent flowing through consumeAgentEvents
+    },
+
+    consumeMessages(sessionId: string): { hasMessage: boolean; message?: string } {
+      return nudgeRepo.consumeNext(sessionId);
     },
   };
 }
