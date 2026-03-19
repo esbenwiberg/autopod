@@ -16,6 +16,14 @@ import { buildCorrectionMessage } from './correction-context.js';
 import { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
 import { resolveSections } from './section-resolver.js';
 
+/** Allocate a random host port in range 10000–59999 for container port mapping. */
+function allocateHostPort(): number {
+  return 10_000 + Math.floor(Math.random() * 50_000);
+}
+
+/** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
+const CONTAINER_APP_PORT = 3000;
+
 export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
 }
@@ -164,20 +172,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }
 
-        // Spawn container
+        // Allocate a host port for the container's app server
+        const hostPort = allocateHostPort();
+
+        // Spawn container with port mapping so daemon + user can reach the app
         const containerId = await containerManager.spawn({
           image: profile.template,
           sessionId,
-          env: { SESSION_ID: sessionId },
+          env: { SESSION_ID: sessionId, PORT: String(CONTAINER_APP_PORT) },
+          ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
           volumes: [{ host: worktreePath, container: '/workspace' }],
           networkName,
           firewallScript,
         });
 
+        const previewUrl = `http://localhost:${hostPort}`;
         session = transition(session, 'running', {
           containerId,
           worktreePath,
-          previewUrl: 'http://localhost:3000', // placeholder
+          previewUrl,
         });
 
         // Merge daemon + profile injections
@@ -479,7 +492,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const result = await validationEngine.validate({
           sessionId,
           containerId: session.containerId!,
-          previewUrl: session.previewUrl ?? 'http://localhost:3000',
+          previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
           buildCommand: profile.buildCommand,
           startCommand: profile.startCommand,
           healthPath: profile.healthPath,
