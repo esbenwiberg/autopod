@@ -83,6 +83,11 @@ export function createNotificationService(deps: {
       const notificationType: NotificationType = 'session_validated';
       if (!canSendForSession(event.sessionId, notificationType, session.profileName)) return;
 
+      // Extract screenshots from page results for Teams card
+      const screenshots = event.result.smoke.pages
+        .filter((p) => p.screenshotBase64)
+        .map((p) => ({ pagePath: p.path, base64: p.screenshotBase64! }));
+
       const notification: SessionValidatedNotification = {
         type: notificationType,
         sessionId: session.id,
@@ -90,6 +95,8 @@ export function createNotificationService(deps: {
         task: session.task,
         timestamp: event.timestamp,
         previewUrl: session.previewUrl,
+        prUrl: session.prUrl,
+        screenshots,
         filesChanged: session.filesChanged,
         linesAdded: session.linesAdded,
         linesRemoved: session.linesRemoved,

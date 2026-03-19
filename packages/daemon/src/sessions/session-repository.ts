@@ -36,6 +36,7 @@ export interface SessionUpdates {
   linesAdded?: number;
   linesRemoved?: number;
   previewUrl?: string | null;
+  prUrl?: string | null;
 }
 
 export interface SessionRepository {
@@ -78,6 +79,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     linesAdded: row.lines_added as number,
     linesRemoved: row.lines_removed as number,
     previewUrl: (row.preview_url as string) ?? null,
+    prUrl: (row.pr_url as string) ?? null,
   };
 }
 
@@ -176,6 +178,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.previewUrl !== undefined) {
         setClauses.push('preview_url = @previewUrl');
         params.previewUrl = changes.previewUrl;
+      }
+      if (changes.prUrl !== undefined) {
+        setClauses.push('pr_url = @prUrl');
+        params.prUrl = changes.prUrl;
       }
 
       if (setClauses.length === 0) return;

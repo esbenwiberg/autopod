@@ -5,7 +5,7 @@ import type {
 } from '@autopod/shared';
 import { generateId, AutopodError } from '@autopod/shared';
 import type { ProfileStore } from '../profiles/index.js';
-import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine } from '../interfaces/index.js';
+import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine, PrManager } from '../interfaces/index.js';
 import type { SessionRepository, SessionUpdates } from './session-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -15,6 +15,15 @@ import { formatFeedback } from './feedback-formatter.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
 import { resolveSections } from './section-resolver.js';
+import { collectScreenshots, buildGitHubImageUrl } from '../validation/screenshot-collector.js';
+
+/** Allocate a random host port in range 10000–59999 for container port mapping. */
+function allocateHostPort(): number {
+  return 10_000 + Math.floor(Math.random() * 50_000);
+}
+
+/** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
+const CONTAINER_APP_PORT = 3000;
 
 export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
@@ -39,6 +48,7 @@ export interface SessionManagerDependencies {
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
   networkManager?: NetworkManager;
+  prManager?: PrManager;
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
@@ -51,7 +61,7 @@ export interface SessionManager {
   consumeAgentEvents(sessionId: string, events: AsyncIterable<AgentEvent>): Promise<void>;
   handleCompletion(sessionId: string): Promise<void>;
   sendMessage(sessionId: string, message: string): Promise<void>;
-  approveSession(sessionId: string): Promise<void>;
+  approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void>;
   rejectSession(sessionId: string, reason?: string): Promise<void>;
   killSession(sessionId: string): Promise<void>;
   triggerValidation(sessionId: string): Promise<void>;
@@ -63,7 +73,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   const {
     sessionRepo, escalationRepo: _escalationRepo, profileStore, eventBus,
     containerManagerFactory, worktreeManager, runtimeRegistry, validationEngine,
-    networkManager, enqueueSession, mcpBaseUrl, daemonConfig, logger,
+    networkManager, prManager, enqueueSession, mcpBaseUrl, daemonConfig, logger,
   } = deps;
 
   function transition(session: Session, to: SessionStatus, extraUpdates?: Partial<SessionUpdates>): Session {
@@ -163,20 +173,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }
 
-        // Spawn container
+        // Allocate a host port for the container's app server
+        const hostPort = allocateHostPort();
+
+        // Spawn container with port mapping so daemon + user can reach the app
         const containerId = await containerManager.spawn({
           image: profile.template,
           sessionId,
-          env: { SESSION_ID: sessionId },
+          env: { SESSION_ID: sessionId, PORT: String(CONTAINER_APP_PORT) },
+          ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
           volumes: [{ host: worktreePath, container: '/workspace' }],
           networkName,
           firewallScript,
         });
 
+        const previewUrl = `http://localhost:${hostPort}`;
         session = transition(session, 'running', {
           containerId,
           worktreePath,
-          previewUrl: 'http://localhost:3000', // placeholder
+          previewUrl,
         });
 
         // Merge daemon + profile injections
@@ -310,13 +325,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       await this.handleCompletion(sessionId);
     },
 
-    async approveSession(sessionId: string): Promise<void> {
+    async approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
       const s1 = transition(session, 'approved');
       const s2 = transition(s1, 'merging');
 
-      // Push the branch to origin
-      if (session.worktreePath) {
+      // Merge the PR if one was created, otherwise fall back to branch push
+      if (session.prUrl && prManager && session.worktreePath) {
+        try {
+          await prManager.mergePr({
+            worktreePath: session.worktreePath,
+            prUrl: session.prUrl,
+            squash: options?.squash,
+          });
+        } catch (err) {
+          logger.error({ err, sessionId, prUrl: session.prUrl }, 'Failed to merge PR');
+          // Don't block completion — merge is best-effort
+        }
+      } else if (session.worktreePath) {
+        // Fallback: push branch directly (no PR was created)
         try {
           const profile = profileStore.get(session.profileName);
           await worktreeManager.mergeBranch({
@@ -349,7 +376,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         },
       });
 
-      logger.info({ sessionId }, 'Session approved and completed');
+      logger.info({ sessionId, prUrl: session.prUrl }, 'Session approved and completed');
     },
 
     async rejectSession(sessionId: string, reason?: string): Promise<void> {
@@ -466,7 +493,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const result = await validationEngine.validate({
           sessionId,
           containerId: session.containerId!,
-          previewUrl: session.previewUrl ?? 'http://localhost:3000',
+          previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
           buildCommand: profile.buildCommand,
           startCommand: profile.startCommand,
           healthPath: profile.healthPath,
@@ -476,6 +503,23 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           task: session.task,
           diff: '', // would come from worktreeManager
         });
+
+        // Collect screenshots from the host worktree (volume-mounted from container)
+        if (session.worktreePath && result.smoke.pages.length > 0) {
+          try {
+            const screenshots = await collectScreenshots(session.worktreePath, result.smoke.pages);
+            // Enrich page results with base64 data for Teams notifications
+            for (const ss of screenshots) {
+              const page = result.smoke.pages.find((p) => p.path === ss.pagePath);
+              if (page) {
+                page.screenshotBase64 = ss.base64;
+              }
+            }
+            logger.info({ sessionId, count: screenshots.length }, 'Collected validation screenshots');
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to collect screenshots');
+          }
+        }
 
         sessionRepo.update(sessionId, { lastValidationResult: result });
 
@@ -488,7 +532,63 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         const s2 = sessionRepo.getOrThrow(sessionId);
         if (result.overall === 'pass') {
-          transition(s2, 'validated');
+          // Push branch and create PR before transitioning to validated
+          let prUrl: string | null = null;
+          if (prManager && s2.worktreePath) {
+            // Commit screenshots to the branch so they're visible in the PR
+            try {
+              await worktreeManager.commitFiles(
+                s2.worktreePath,
+                ['.autopod/screenshots'],
+                'chore: add validation screenshots',
+              );
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to commit screenshots');
+            }
+
+            // Push branch so `gh pr create --head` can reference it
+            try {
+              await worktreeManager.mergeBranch({
+                worktreePath: s2.worktreePath,
+                targetBranch: profile.defaultBranch,
+              });
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to push branch for PR');
+            }
+
+            // Build screenshot URLs for the PR body
+            const screenshotRefs = result.smoke.pages
+              .filter((p) => p.screenshotPath)
+              .map((p) => ({
+                pagePath: p.path,
+                imageUrl: buildGitHubImageUrl(
+                  profile.repoUrl,
+                  s2.branch,
+                  p.screenshotPath.replace(/^\/workspace\//, ''),
+                ),
+              }));
+
+            try {
+              prUrl = await prManager.createPr({
+                worktreePath: s2.worktreePath,
+                branch: s2.branch,
+                baseBranch: profile.defaultBranch,
+                sessionId,
+                task: s2.task,
+                profileName: s2.profileName,
+                validationResult: result,
+                filesChanged: s2.filesChanged,
+                linesAdded: s2.linesAdded,
+                linesRemoved: s2.linesRemoved,
+                previewUrl: s2.previewUrl,
+                screenshots: screenshotRefs,
+              });
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');
+            }
+          }
+
+          transition(s2, 'validated', { prUrl });
         } else if (attempt < profile.maxValidationAttempts) {
           // Build correction message with structured feedback for the agent
           const cm = containerManagerFactory.get(s2.executionTarget);

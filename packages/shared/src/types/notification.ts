@@ -18,6 +18,9 @@ export interface NotificationPayload {
 export interface SessionValidatedNotification extends NotificationPayload {
   type: 'session_validated';
   previewUrl: string | null;
+  prUrl: string | null;
+  /** Validation screenshots as base64 PNGs (page path → base64 data) */
+  screenshots: Array<{ pagePath: string; base64: string }>;
   filesChanged: number;
   linesAdded: number;
   linesRemoved: number;

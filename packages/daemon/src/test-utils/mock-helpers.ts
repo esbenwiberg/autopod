@@ -119,6 +119,7 @@ export function createMockWorktreeManager(): WorktreeManager {
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
     mergeBranch: vi.fn(async () => {}),
+    commitFiles: vi.fn(async () => {}),
   };
 }
 

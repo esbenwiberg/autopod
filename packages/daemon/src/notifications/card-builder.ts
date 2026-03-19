@@ -74,6 +74,14 @@ function previewAction(url: string): AdaptiveCardAction {
   };
 }
 
+function prAction(url: string): AdaptiveCardAction {
+  return {
+    type: 'Action.OpenUrl',
+    title: 'View Pull Request',
+    url,
+  };
+}
+
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -107,11 +115,34 @@ export function buildValidatedCard(notification: SessionValidatedNotification): 
     headerBlock('Session Validated', 'good'),
     taskTitle(notification),
     sessionFacts(facts),
-    cliHint(`ap diff ${notification.sessionId}`),
-    cliHint(`ap approve ${notification.sessionId}`),
   ];
 
+  // Inline screenshots (base64 PNGs)
+  if (notification.screenshots && notification.screenshots.length > 0) {
+    for (const ss of notification.screenshots) {
+      body.push({
+        type: 'TextBlock',
+        text: `Page: ${ss.pagePath}`,
+        size: 'Small',
+        weight: 'Bolder',
+        spacing: 'Medium',
+      });
+      body.push({
+        type: 'Image',
+        url: `data:image/png;base64,${ss.base64}`,
+        size: 'Large',
+        altText: `Screenshot of ${ss.pagePath}`,
+      });
+    }
+  }
+
+  body.push(cliHint(`ap diff ${notification.sessionId}`));
+  body.push(cliHint(`ap approve ${notification.sessionId}`));
+
   const actions: AdaptiveCardAction[] = [];
+  if (notification.prUrl) {
+    actions.push(prAction(notification.prUrl));
+  }
   if (notification.previewUrl) {
     actions.push(previewAction(notification.previewUrl));
   }

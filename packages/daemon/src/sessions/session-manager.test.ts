@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import pino from 'pino';
 import type { Runtime, AgentEvent, ValidationResult, StackTemplate, RuntimeType } from '@autopod/shared';
 import { SessionNotFoundError, InvalidStateTransitionError, AutopodError } from '@autopod/shared';
-import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine } from '../interfaces/index.js';
+import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine, PrManager } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createSessionRepository } from './session-repository.js';
 import { createEventRepository } from './event-repository.js';
@@ -91,12 +91,20 @@ function createMockWorktreeManager(): WorktreeManager {
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
     mergeBranch: vi.fn(async () => {}),
+    commitFiles: vi.fn(async () => {}),
   };
 }
 
 function createMockRuntimeRegistry(runtime: Runtime): RuntimeRegistry {
   return {
     get: vi.fn(() => runtime),
+  };
+}
+
+function createMockPrManager(): PrManager {
+  return {
+    createPr: vi.fn(async () => 'https://github.com/org/repo/pull/42'),
+    mergePr: vi.fn(async () => {}),
   };
 }
 
@@ -130,6 +138,7 @@ interface TestContext {
   worktreeManager: WorktreeManager;
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
+  prManager: PrManager;
   runtime: Runtime;
   enqueuedSessions: string[];
   deps: SessionManagerDependencies;
@@ -187,6 +196,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
   const worktreeManager = createMockWorktreeManager();
   const runtimeRegistry = createMockRuntimeRegistry(runtime);
   const validationEngine = createMockValidationEngine(validationResult);
+  const prManager = createMockPrManager();
 
   const enqueuedSessions: string[] = [];
 
@@ -199,6 +209,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
     worktreeManager,
     runtimeRegistry,
     validationEngine,
+    prManager,
     enqueueSession: (id) => enqueuedSessions.push(id),
     mcpBaseUrl: 'http://localhost:8080',
     daemonConfig: { mcpServers: [], claudeMdSections: [] },
@@ -215,6 +226,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
     worktreeManager,
     runtimeRegistry,
     validationEngine,
+    prManager,
     runtime,
     enqueuedSessions,
     deps,
@@ -444,7 +456,53 @@ describe('SessionManager', () => {
       expect(completedEvent.finalStatus).toBe('complete');
     });
 
-    it('calls worktreeManager.mergeBranch when worktreePath exists', async () => {
+    it('merges PR when prUrl exists', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
+
+      await manager.approveSession(session.id);
+
+      expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
+        worktreePath: '/tmp/wt',
+        prUrl: 'https://github.com/org/repo/pull/42',
+        squash: undefined,
+      });
+      // Should NOT fall back to direct branch push
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    });
+
+    it('passes squash option to PR merge', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
+
+      await manager.approveSession(session.id, { squash: true });
+
+      expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+        expect.objectContaining({ squash: true }),
+      );
+    });
+
+    it('falls back to branch push when no prUrl', async () => {
       const ctx = createTestContext();
       const manager = createSessionManager(ctx.deps);
 
@@ -460,6 +518,7 @@ describe('SessionManager', () => {
         worktreePath: '/tmp/wt',
         targetBranch: 'main',
       });
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
     });
   });
 
@@ -627,12 +686,63 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Add feature' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'running', containerId: 'ctr-1' });
+      ctx.sessionRepo.update(session.id, { status: 'running', containerId: 'ctr-1', worktreePath: '/tmp/wt' });
 
       await manager.triggerValidation(session.id);
 
       const result = manager.getSession(session.id);
       expect(result.status).toBe('validated');
+    });
+
+    it('pushes branch and creates PR on validation pass', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, { status: 'running', containerId: 'ctr-1', worktreePath: '/tmp/wt' });
+
+      await manager.triggerValidation(session.id);
+
+      // Branch was pushed
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
+        worktreePath: '/tmp/wt',
+        targetBranch: 'main',
+      });
+
+      // PR was created
+      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: session.id,
+          task: 'Add feature',
+          profileName: 'test-profile',
+          baseBranch: 'main',
+        }),
+      );
+
+      // PR URL stored on session
+      const result = manager.getSession(session.id);
+      expect(result.prUrl).toBe('https://github.com/org/repo/pull/42');
+    });
+
+    it('still validates even if PR creation fails', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      (ctx.prManager.createPr as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('gh not found'));
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, { status: 'running', containerId: 'ctr-1', worktreePath: '/tmp/wt' });
+
+      await manager.triggerValidation(session.id);
+
+      const result = manager.getSession(session.id);
+      expect(result.status).toBe('validated');
+      expect(result.prUrl).toBeNull();
     });
 
     it('transitions to failed after max validation attempts', async () => {
