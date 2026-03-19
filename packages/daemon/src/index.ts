@@ -19,6 +19,7 @@ import { createServer } from './api/server.js';
 import type { AuthModule } from './interfaces/index.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
+import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { createRuntimeRegistry, ClaudeRuntime, CodexRuntime } from './runtimes/index.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { createNotificationService, createTeamsAdapter, createRateLimiter } from './notifications/index.js';
@@ -115,6 +116,7 @@ try {
 }
 
 const containerManager: ContainerManager = new DockerContainerManager({ docker, logger });
+const networkManager = new DockerNetworkManager({ docker, logger });
 
 let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
 if (ACR_REGISTRY_URL) {
@@ -188,6 +190,7 @@ sessionManager = createSessionManager({
   worktreeManager,
   runtimeRegistry,
   validationEngine,
+  networkManager,
   enqueueSession: (id) => sessionQueue.enqueue(id),
   mcpBaseUrl: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`,
   daemonConfig: {

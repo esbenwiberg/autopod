@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
+    iptables \
     # Playwright Chromium dependencies
     libnss3 \
     libatk-bridge2.0-0 \

@@ -21,6 +21,7 @@
   "dependencies": {
     "@autopod/escalation-mcp": "workspace:^",
     "@autopod/shared": "workspace:*",
+    "@autopod/validator": "workspace:*",
     "@azure/arm-containerinstance": "^9.1.0",
     "@azure/container-registry": "^1.1.0",
     "@azure/identity": "^4.6.0",

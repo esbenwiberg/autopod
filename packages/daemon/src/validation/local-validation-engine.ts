@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import type { TaskReviewResult, ValidationResult } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { TaskReviewResult, ValidationResult, PageResult } from '@autopod/shared';
+import { generateValidationScript, parsePageResults } from '@autopod/validator';
 
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
@@ -33,16 +34,17 @@ export function createLocalValidationEngine(
         ? await runHealthCheck(containerManager, config, log)
         : { status: 'fail' as const, url: config.previewUrl + config.healthPath, responseCode: null, duration: 0 };
 
-      // ── Phase 3: Page validation (SKIPPED) ──────────────────────────
-      // Playwright/Chromium cannot run in this sandbox environment.
-      // Page validation requires a real browser — returning empty array.
-      const pages: ValidationResult['smoke']['pages'] = [];
+      // ── Phase 3: Page validation ─────────────────────────────────────
+      const pages: PageResult[] = (healthResult.status === 'pass' && config.validationPages.length > 0)
+        ? await runPageValidation(containerManager, config, log)
+        : [];
 
       // ── Phase 4: AI Task Review ─────────────────────────────────────
       const taskReview = await runTaskReview(config, log);
 
       // ── Phase 5: Overall result ─────────────────────────────────────
-      const smokeStatus = buildResult.status === 'pass' && healthResult.status === 'pass'
+      const pagesPass = pages.length === 0 || pages.every(p => p.status === 'pass');
+      const smokeStatus = buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass
         ? 'pass' as const
         : 'fail' as const;
 
@@ -169,6 +171,66 @@ async function runHealthCheck(
   log?.warn({ url, lastResponseCode, duration }, 'health check timed out');
 
   return { status: 'fail' as const, url, responseCode: lastResponseCode, duration };
+}
+
+// ── Page validation phase ───────────────────────────────────────────────────
+
+async function runPageValidation(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<PageResult[]> {
+  log?.info({ pageCount: config.validationPages.length }, 'running page validation');
+
+  const script = generateValidationScript({
+    baseUrl: config.previewUrl,
+    pages: config.validationPages,
+    screenshotDir: '/workspace/.autopod/screenshots',
+    navigationTimeout: 30_000,
+    maxConsoleErrors: 50,
+  });
+
+  // Write the script to the container
+  const scriptPath = '/tmp/autopod-page-validation.mjs';
+  try {
+    await containerManager.writeFile(config.containerId, scriptPath, script);
+  } catch (err) {
+    log?.warn({ err }, 'failed to write validation script to container');
+    return [makeSyntheticFailure('/', `Failed to write validation script: ${err}`)];
+  }
+
+  // Execute the script inside the container
+  try {
+    const result = await containerManager.execInContainer(
+      config.containerId,
+      ['node', scriptPath],
+      { cwd: '/workspace', timeout: config.validationPages.length * 45_000 },
+    );
+
+    const pages = parsePageResults(result.stdout);
+
+    if (pages.length === 0 && result.exitCode !== 0) {
+      log?.warn({ exitCode: result.exitCode, stderr: result.stderr.slice(0, 1000) }, 'page validation script crashed');
+      return [makeSyntheticFailure('/', `Script crashed (exit ${result.exitCode}): ${result.stderr.slice(0, 500)}`)];
+    }
+
+    log?.info({ pageCount: pages.length, passCount: pages.filter(p => p.status === 'pass').length }, 'page validation complete');
+    return pages;
+  } catch (err) {
+    log?.warn({ err }, 'page validation exec failed');
+    return [makeSyntheticFailure('/', `Exec failed: ${err}`)];
+  }
+}
+
+function makeSyntheticFailure(path: string, error: string): PageResult {
+  return {
+    path,
+    status: 'fail',
+    screenshotPath: '',
+    consoleErrors: [error],
+    assertions: [],
+    loadTime: 0,
+  };
 }
 
 // ── AI Task Review phase ────────────────────────────────────────────────────

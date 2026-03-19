@@ -12,6 +12,12 @@ const validationPageSchema = z.object({
   assertions: z.array(pageAssertionSchema).optional(),
 });
 
+const networkPolicySchema = z.object({
+  enabled: z.boolean(),
+  allowedHosts: z.array(z.string().min(1)).default([]),
+  replaceDefaults: z.boolean().optional(),
+});
+
 const escalationConfigSchema = z.object({
   askHuman: z.boolean().default(true),
   askAi: z
@@ -48,6 +54,7 @@ export const createProfileSchema = z.object({
   extends: z.string().nullable().default(null),
   mcpServers: z.array(injectedMcpServerSchema).default([]),
   claudeMdSections: z.array(injectedClaudeMdSectionSchema).default([]),
+  networkPolicy: networkPolicySchema.nullable().default(null),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });

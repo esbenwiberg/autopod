@@ -1,7 +1,7 @@
 import type { Logger } from 'pino';
 import type {
   Session, CreateSessionRequest, SessionStatus, AgentEvent,
-  DaemonConfig, ExecutionTarget,
+  DaemonConfig, ExecutionTarget, NetworkPolicy, InjectedMcpServer,
 } from '@autopod/shared';
 import { generateId, AutopodError } from '@autopod/shared';
 import type { ProfileStore } from '../profiles/index.js';
@@ -20,6 +20,15 @@ export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
 }
 
+export interface NetworkManager {
+  buildNetworkConfig(
+    policy: NetworkPolicy | null,
+    mcpServers: InjectedMcpServer[],
+    daemonGatewayIp: string,
+  ): Promise<{ networkName: string; firewallScript: string } | null>;
+  getGatewayIp(): Promise<string>;
+}
+
 export interface SessionManagerDependencies {
   sessionRepo: SessionRepository;
   escalationRepo: EscalationRepository;
@@ -29,6 +38,7 @@ export interface SessionManagerDependencies {
   worktreeManager: WorktreeManager;
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
+  networkManager?: NetworkManager;
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
@@ -53,7 +63,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   const {
     sessionRepo, escalationRepo: _escalationRepo, profileStore, eventBus,
     containerManagerFactory, worktreeManager, runtimeRegistry, validationEngine,
-    enqueueSession, mcpBaseUrl, daemonConfig, logger,
+    networkManager, enqueueSession, mcpBaseUrl, daemonConfig, logger,
   } = deps;
 
   function transition(session: Session, to: SessionStatus, extraUpdates?: Partial<SessionUpdates>): Session {
@@ -136,12 +146,31 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Select container manager based on execution target
         const containerManager = containerManagerFactory.get(session.executionTarget);
 
+        // Compute network isolation config (Docker only, opt-in via profile)
+        let networkName: string | undefined;
+        let firewallScript: string | undefined;
+        if (networkManager && session.executionTarget === 'local' && profile.networkPolicy?.enabled) {
+          const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
+          const gatewayIp = await networkManager.getGatewayIp();
+          const netConfig = await networkManager.buildNetworkConfig(
+            profile.networkPolicy,
+            mergedServers,
+            gatewayIp,
+          );
+          if (netConfig) {
+            networkName = netConfig.networkName;
+            firewallScript = netConfig.firewallScript;
+          }
+        }
+
         // Spawn container
         const containerId = await containerManager.spawn({
           image: profile.template,
           sessionId,
           env: { SESSION_ID: sessionId },
           volumes: [{ host: worktreePath, container: '/workspace' }],
+          networkName,
+          firewallScript,
         });
 
         session = transition(session, 'running', {
