@@ -1,3 +1,5 @@
+import type { Readable } from 'node:stream';
+
 export interface ContainerSpawnConfig {
   image: string;
   sessionId: string;
@@ -17,10 +19,22 @@ export interface ExecOptions {
   timeout?: number;
 }
 
+export interface StreamingExecResult {
+  stdout: Readable;
+  stderr: Readable;
+  exitCode: Promise<number>;
+  kill(): Promise<void>;
+}
+
 export interface ContainerManager {
   spawn(config: ContainerSpawnConfig): Promise<string>; // returns containerId
   kill(containerId: string): Promise<void>;
   writeFile(containerId: string, path: string, content: string): Promise<void>;
   getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'>;
   execInContainer(containerId: string, command: string[], options?: ExecOptions): Promise<ExecResult>;
+  execStreaming(
+    containerId: string,
+    command: string[],
+    options?: ExecOptions & { env?: Record<string, string> },
+  ): Promise<StreamingExecResult>;
 }

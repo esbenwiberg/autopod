@@ -1,31 +1,27 @@
 import type { Runtime, SpawnConfig, AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
-
-const ABORT_GRACE_PERIOD_MS = 5_000;
-
-type SpawnFn = typeof nodeSpawn;
 
 /**
  * Claude CLI runtime adapter.
  *
- * Spawns `claude` CLI with `--output-format stream-json` and parses
- * the NDJSON output via ClaudeStreamParser. Mirrors CodexRuntime pattern.
+ * Runs `claude` CLI inside a Docker container via `containerManager.execStreaming()`
+ * and parses the NDJSON output via ClaudeStreamParser.
  */
 export class ClaudeRuntime implements Runtime {
   readonly type = 'claude' as const;
 
-  private processes = new Map<string, ChildProcess>();
+  private handles = new Map<string, StreamingExecResult>();
   /** Maps autopod sessionId → Claude CLI session_id for resume support. */
   private claudeSessionIds = new Map<string, string>();
   private logger: Logger;
-  private spawnFn: SpawnFn;
+  private containerManager: ContainerManager;
 
-  constructor(logger: Logger, spawnFn: SpawnFn = nodeSpawn) {
+  constructor(logger: Logger, containerManager: ContainerManager) {
     this.logger = logger;
-    this.spawnFn = spawnFn;
+    this.containerManager = containerManager;
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
@@ -34,27 +30,21 @@ export class ClaudeRuntime implements Runtime {
     this.logger.info({
       component: 'claude-runtime',
       sessionId: config.sessionId,
+      containerId: config.containerId,
       args,
-      msg: 'Spawning claude process',
+      msg: 'Spawning claude in container',
     });
 
-    const proc = this.spawnFn('claude', args, {
-      cwd: config.workDir,
-      env: {
-        ...process.env,
-        ...config.env,
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const handle = await this.containerManager.execStreaming(
+      config.containerId,
+      ['claude', ...args],
+      { cwd: config.workDir, env: config.env },
+    );
 
-    this.processes.set(config.sessionId, proc);
-
-    if (!proc.stdout) {
-      throw new Error('Claude process stdout not available');
-    }
+    this.handles.set(config.sessionId, handle);
 
     try {
-      for await (const event of ClaudeStreamParser.parse(proc.stdout, config.sessionId, this.logger)) {
+      for await (const event of ClaudeStreamParser.parse(handle.stdout, config.sessionId, this.logger)) {
         // Capture Claude's session ID from init events for resume support
         if (event.type === 'status' && event.message.includes('Claude session initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
@@ -65,11 +55,11 @@ export class ClaudeRuntime implements Runtime {
         yield event;
       }
     } finally {
-      this.processes.delete(config.sessionId);
+      this.handles.delete(config.sessionId);
     }
 
     // Check exit code after stream is consumed
-    const exitCode = await this.waitForExit(proc);
+    const exitCode = await handle.exitCode;
     if (exitCode !== 0) {
       yield {
         type: 'error',
@@ -80,29 +70,28 @@ export class ClaudeRuntime implements Runtime {
     }
   }
 
-  async *resume(sessionId: string, message: string): AsyncIterable<AgentEvent> {
+  async *resume(sessionId: string, message: string, containerId: string): AsyncIterable<AgentEvent> {
     const claudeSessionId = this.claudeSessionIds.get(sessionId);
     const args = this.buildResumeArgs(message, claudeSessionId);
 
     this.logger.info({
       component: 'claude-runtime',
       sessionId,
+      containerId,
       claudeSessionId,
-      msg: 'Resuming claude session',
+      msg: 'Resuming claude session in container',
     });
 
-    const proc = this.spawnFn('claude', args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const handle = await this.containerManager.execStreaming(
+      containerId,
+      ['claude', ...args],
+      { cwd: '/workspace' },
+    );
 
-    this.processes.set(sessionId, proc);
-
-    if (!proc.stdout) {
-      throw new Error('Claude process stdout not available');
-    }
+    this.handles.set(sessionId, handle);
 
     try {
-      for await (const event of ClaudeStreamParser.parse(proc.stdout, sessionId, this.logger)) {
+      for await (const event of ClaudeStreamParser.parse(handle.stdout, sessionId, this.logger)) {
         // Update Claude session ID on resume too
         if (event.type === 'status' && event.message.includes('Claude session initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
@@ -113,38 +102,23 @@ export class ClaudeRuntime implements Runtime {
         yield event;
       }
     } finally {
-      this.processes.delete(sessionId);
+      this.handles.delete(sessionId);
     }
   }
 
   async abort(sessionId: string): Promise<void> {
-    const proc = this.processes.get(sessionId);
-    if (!proc) {
+    const handle = this.handles.get(sessionId);
+    if (!handle) {
       this.logger.warn({
         component: 'claude-runtime',
         sessionId,
-        msg: 'No process found to abort',
+        msg: 'No exec handle found to abort',
       });
       return;
     }
 
-    // Graceful shutdown: SIGTERM first, SIGKILL after timeout
-    proc.kill('SIGTERM');
-
-    const killTimeout = setTimeout(() => {
-      if (!proc.killed) {
-        proc.kill('SIGKILL');
-        this.logger.warn({
-          component: 'claude-runtime',
-          sessionId,
-          msg: 'Claude process did not exit after SIGTERM, sent SIGKILL',
-        });
-      }
-    }, ABORT_GRACE_PERIOD_MS);
-
-    await this.waitForExit(proc);
-    clearTimeout(killTimeout);
-    this.processes.delete(sessionId);
+    await handle.kill();
+    this.handles.delete(sessionId);
     this.claudeSessionIds.delete(sessionId);
   }
 
@@ -186,15 +160,5 @@ export class ClaudeRuntime implements Runtime {
     }
 
     return args;
-  }
-
-  private waitForExit(proc: ChildProcess): Promise<number> {
-    return new Promise((resolve) => {
-      if (proc.exitCode !== null) {
-        resolve(proc.exitCode);
-        return;
-      }
-      proc.on('exit', (code) => resolve(code ?? 1));
-    });
   }
 }

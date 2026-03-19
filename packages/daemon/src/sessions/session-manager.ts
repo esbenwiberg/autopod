@@ -1,7 +1,7 @@
 import type { Logger } from 'pino';
 import type {
   Session, CreateSessionRequest, SessionStatus, AgentEvent,
-  DaemonConfig,
+  DaemonConfig, ExecutionTarget,
 } from '@autopod/shared';
 import { generateId, AutopodError } from '@autopod/shared';
 import type { ProfileStore } from '../profiles/index.js';
@@ -16,12 +16,16 @@ import { buildCorrectionMessage } from './correction-context.js';
 import { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
 import { resolveSections } from './section-resolver.js';
 
+export interface ContainerManagerFactory {
+  get(target: ExecutionTarget): ContainerManager;
+}
+
 export interface SessionManagerDependencies {
   sessionRepo: SessionRepository;
   escalationRepo: EscalationRepository;
   profileStore: ProfileStore;
   eventBus: EventBus;
-  containerManager: ContainerManager;
+  containerManagerFactory: ContainerManagerFactory;
   worktreeManager: WorktreeManager;
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
@@ -48,7 +52,7 @@ export interface SessionManager {
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
   const {
     sessionRepo, escalationRepo: _escalationRepo, profileStore, eventBus,
-    containerManager, worktreeManager, runtimeRegistry, validationEngine,
+    containerManagerFactory, worktreeManager, runtimeRegistry, validationEngine,
     enqueueSession, mcpBaseUrl, daemonConfig, logger,
   } = deps;
 
@@ -74,6 +78,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const branch = request.branch ?? `autopod/${id}`;
       const model = request.model ?? profile.defaultModel;
       const runtime = request.runtime ?? profile.defaultRuntime;
+      const executionTarget = request.executionTarget ?? profile.executionTarget;
       const skipValidation = request.skipValidation ?? false;
 
       sessionRepo.insert({
@@ -83,6 +88,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         status: 'queued',
         model,
         runtime,
+        executionTarget,
         branch,
         userId,
         maxValidationAttempts: profile.maxValidationAttempts,
@@ -127,6 +133,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           baseBranch: profile.defaultBranch,
         });
 
+        // Select container manager based on execution target
+        const containerManager = containerManagerFactory.get(session.executionTarget);
+
         // Spawn container
         const containerId = await containerManager.spawn({
           image: profile.template,
@@ -163,15 +172,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         ];
 
 
-        // Start the agent
+        // Build secret env for container exec (API keys injected at exec time, not container level)
+        const secretEnv: Record<string, string> = { SESSION_ID: sessionId };
+        if (session.runtime === 'claude' && process.env.ANTHROPIC_API_KEY) {
+          secretEnv.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+        }
+        if (session.runtime === 'codex' && process.env.OPENAI_API_KEY) {
+          secretEnv.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+        }
+
+        // Start the agent inside the container
         const runtime = runtimeRegistry.get(session.runtime);
         const events = runtime.spawn({
           sessionId,
           task: session.task,
           model: session.model,
-          workDir: worktreePath,
+          workDir: '/workspace',
+          containerId,
           customInstructions: profile.customInstructions ?? undefined,
-          env: { SESSION_ID: sessionId },
+          env: secretEnv,
           mcpServers,
         });
 
@@ -257,7 +276,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       transition(session, 'running', { pendingEscalation: null });
 
       const runtime = runtimeRegistry.get(session.runtime);
-      const events = runtime.resume(sessionId, message);
+      const events = runtime.resume(sessionId, message, session.containerId!);
       await this.consumeAgentEvents(sessionId, events);
       await this.handleCompletion(sessionId);
     },
@@ -329,7 +348,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
       // Resume agent with rejection feedback
       const runtime = runtimeRegistry.get(session.runtime);
-      const events = runtime.resume(sessionId, rejectionMessage);
+      const events = runtime.resume(sessionId, rejectionMessage, session.containerId!);
       await this.consumeAgentEvents(sessionId, events);
       await this.handleCompletion(sessionId);
 
@@ -351,7 +370,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // Kill container
       if (session.containerId) {
         try {
-          await containerManager.kill(session.containerId);
+          const cm = containerManagerFactory.get(session.executionTarget);
+          await cm.kill(session.containerId);
         } catch (err) {
           logger.warn({ err, sessionId }, 'Failed to kill container');
         }
@@ -442,8 +462,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           transition(s2, 'validated');
         } else if (attempt < profile.maxValidationAttempts) {
           // Build correction message with structured feedback for the agent
+          const cm = containerManagerFactory.get(s2.executionTarget);
           const correctionMessage = await buildCorrectionMessage(
-            s2, profile, result, containerManager,
+            s2, profile, result, cm,
           );
 
           // Transition back to running for retry
@@ -451,7 +472,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
           // Resume the agent with correction feedback
           const runtime = runtimeRegistry.get(s2.runtime);
-          const events = runtime.resume(sessionId, correctionMessage);
+          const events = runtime.resume(sessionId, correctionMessage, s2.containerId!);
           await this.consumeAgentEvents(sessionId, events);
           await this.handleCompletion(sessionId);
 

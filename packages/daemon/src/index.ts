@@ -18,7 +18,6 @@ import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createServer } from './api/server.js';
 import type { AuthModule } from './interfaces/index.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
-import { LocalContainerManager } from './containers/local-container-manager.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { createRuntimeRegistry, ClaudeRuntime, CodexRuntime } from './runtimes/index.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
@@ -35,7 +34,6 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
-const CONTAINER_RUNTIME = process.env.AUTOPOD_CONTAINER_RUNTIME ?? 'local'; // 'local' | 'docker'
 const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
 
 // Logger
@@ -103,32 +101,33 @@ const authModule: AuthModule = {
 
 const worktreeManager = new LocalWorktreeManager({ logger });
 
-// Container manager: Docker for isolated builds, or filesystem passthrough for local dev
-let containerManager: ContainerManager;
+// Docker is required — all agent work runs inside containers
+const Dockerode = (await import('dockerode')).default;
+const docker = new Dockerode();
+
+// Verify Docker is reachable before proceeding
+try {
+  await docker.ping();
+  logger.info('Docker connection verified');
+} catch (err) {
+  logger.fatal({ err }, 'autopod requires Docker Desktop — docker.ping() failed');
+  process.exit(1);
+}
+
+const containerManager: ContainerManager = new DockerContainerManager({ docker, logger });
+
 let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
-
-if (CONTAINER_RUNTIME === 'docker') {
-  const Dockerode = (await import('dockerode')).default;
-  const docker = new Dockerode();
-  containerManager = new DockerContainerManager({ docker, logger });
-  logger.info('Using Docker container runtime');
-
-  // Wire up ImageBuilder when Docker + ACR are available
-  if (ACR_REGISTRY_URL) {
-    const { AcrClient } = await import('./images/acr-client.js');
-    const { ImageBuilder } = await import('./images/image-builder.js');
-    const acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, docker);
-    imageBuilder = new ImageBuilder({ docker, acr, profileStore });
-    logger.info({ acrRegistry: ACR_REGISTRY_URL }, 'Image warming enabled');
-  }
-} else {
-  containerManager = new LocalContainerManager(logger);
-  logger.info('Using local filesystem container runtime');
+if (ACR_REGISTRY_URL) {
+  const { AcrClient } = await import('./images/acr-client.js');
+  const { ImageBuilder } = await import('./images/image-builder.js');
+  const acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, docker);
+  imageBuilder = new ImageBuilder({ docker, acr, profileStore });
+  logger.info({ acrRegistry: ACR_REGISTRY_URL }, 'Image warming enabled');
 }
 
 const runtimeRegistry = createRuntimeRegistry([
-  new ClaudeRuntime(logger),
-  new CodexRuntime(logger),
+  new ClaudeRuntime(logger, containerManager),
+  new CodexRuntime(logger, containerManager),
 ]);
 const validationEngine = createLocalValidationEngine(containerManager, logger);
 
@@ -143,12 +142,23 @@ const sessionQueue = createSessionQueue(
   logger,
 );
 
+// Container manager factory — ACI manager wired up in Phase 4
+const containerManagerFactory = {
+  get(target: import('@autopod/shared').ExecutionTarget) {
+    if (target === 'aci') {
+      // ACI container manager will be wired here once implemented
+      throw new Error('ACI execution target not yet available — use "local"');
+    }
+    return containerManager;
+  },
+};
+
 sessionManager = createSessionManager({
   sessionRepo,
   escalationRepo,
   profileStore,
   eventBus,
-  containerManager,
+  containerManagerFactory,
   worktreeManager,
   runtimeRegistry,
   validationEngine,

@@ -5,6 +5,7 @@ export const createSessionRequestSchema = z.object({
   task: z.string().min(1).max(10_000),
   model: z.string().min(1).max(32).optional(),
   runtime: z.enum(['claude', 'codex']).optional(),
+  executionTarget: z.enum(['local', 'aci']).optional(),
   branch: z
     .string()
     .min(1)

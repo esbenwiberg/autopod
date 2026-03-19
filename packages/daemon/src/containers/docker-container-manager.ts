@@ -1,4 +1,4 @@
-import { Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import Dockerode from 'dockerode';
 import * as tar from 'tar-stream';
 import type { Logger } from 'pino';
@@ -7,6 +7,7 @@ import type {
   ContainerSpawnConfig,
   ExecResult,
   ExecOptions,
+  StreamingExecResult,
 } from '../interfaces/container-manager.js';
 
 interface DockerContainerManagerOptions {
@@ -158,6 +159,73 @@ export class DockerContainerManager implements ContainerManager {
 
     this.logger.debug({ containerId, command, exitCode }, 'Exec completed');
     return { stdout, stderr, exitCode };
+  }
+
+  async execStreaming(
+    containerId: string,
+    command: string[],
+    options?: ExecOptions & { env?: Record<string, string> },
+  ): Promise<StreamingExecResult> {
+    const container = this.docker.getContainer(containerId);
+
+    const envList = options?.env
+      ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
+      : undefined;
+
+    const exec = await container.exec({
+      Cmd: command,
+      AttachStdout: true,
+      AttachStderr: true,
+      ...(options?.cwd ? { WorkingDir: options.cwd } : {}),
+      ...(envList ? { Env: envList } : {}),
+    });
+
+    const muxStream = await exec.start({ hijack: true, stdin: false });
+
+    const stdoutStream = new PassThrough();
+    const stderrStream = new PassThrough();
+
+    // Demux the Docker multiplexed stream into separate stdout/stderr
+    this.docker.modem.demuxStream(muxStream, stdoutStream, stderrStream);
+
+    // When the mux stream ends, close both output streams
+    (muxStream as NodeJS.ReadableStream & { on: Function }).on('end', () => {
+      stdoutStream.end();
+      stderrStream.end();
+    });
+    (muxStream as NodeJS.ReadableStream & { on: Function }).on('error', (err: Error) => {
+      stdoutStream.destroy(err);
+      stderrStream.destroy(err);
+    });
+
+    // Resolve exit code once the stream closes and we can inspect the exec
+    const exitCode = new Promise<number>((resolve) => {
+      const checkExit = async () => {
+        try {
+          const inspection = await exec.inspect();
+          resolve(inspection.ExitCode ?? 1);
+        } catch {
+          resolve(1);
+        }
+      };
+
+      (muxStream as NodeJS.ReadableStream & { on: Function }).on('end', checkExit);
+      // If stream errors, also try to get exit code
+      (muxStream as NodeJS.ReadableStream & { on: Function }).on('error', checkExit);
+    });
+
+    const kill = async () => {
+      // Destroy the mux stream to abort the exec
+      if ('destroy' in muxStream && typeof (muxStream as any).destroy === 'function') {
+        (muxStream as any).destroy();
+      }
+      stdoutStream.destroy();
+      stderrStream.destroy();
+    };
+
+    this.logger.info({ containerId, command }, 'Streaming exec started');
+
+    return { stdout: stdoutStream, stderr: stderrStream, exitCode, kill };
   }
 }
 

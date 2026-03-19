@@ -1,6 +1,8 @@
 import type { RuntimeType } from './runtime.js';
 import type { InjectedMcpServer, InjectedClaudeMdSection } from './injection.js';
 
+export type ExecutionTarget = 'local' | 'aci';
+
 export type StackTemplate = 'node22' | 'node22-pw' | 'dotnet9' | 'python312' | 'custom';
 
 export interface Profile {
@@ -16,6 +18,7 @@ export interface Profile {
   maxValidationAttempts: number;
   defaultModel: string;
   defaultRuntime: RuntimeType;
+  executionTarget: ExecutionTarget;
   customInstructions: string | null;
   escalation: EscalationConfig;
   extends: string | null;
