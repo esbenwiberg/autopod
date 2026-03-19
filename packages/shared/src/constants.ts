@@ -14,8 +14,9 @@ export const EVENT_LOG_RETENTION_DAYS = 30;
 export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
   queued: ['provisioning', 'killing'],
   provisioning: ['running', 'killing'],
-  running: ['awaiting_input', 'validating', 'killing'],
+  running: ['awaiting_input', 'validating', 'paused', 'killing'],
   awaiting_input: ['running', 'killing'],
+  paused: ['running', 'killing'],
   validating: ['validated', 'running', 'failed'],
   validated: ['approved', 'running'],
   failed: ['running', 'killing'],

@@ -33,6 +33,8 @@ export type {
   AgentCompleteEvent,
   AgentErrorEvent,
   AgentEscalationEvent,
+  AgentPlanEvent,
+  AgentProgressEvent,
 } from './types/runtime.js';
 
 export type {

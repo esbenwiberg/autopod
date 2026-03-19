@@ -5,6 +5,7 @@ export interface Runtime {
   spawn(config: SpawnConfig): AsyncIterable<AgentEvent>;
   resume(sessionId: string, message: string, containerId: string): AsyncIterable<AgentEvent>;
   abort(sessionId: string): Promise<void>;
+  suspend(sessionId: string): Promise<void>;
 }
 
 export interface SpawnConfig {
@@ -30,7 +31,9 @@ export type AgentEvent =
   | AgentFileChangeEvent
   | AgentCompleteEvent
   | AgentErrorEvent
-  | AgentEscalationEvent;
+  | AgentEscalationEvent
+  | AgentPlanEvent
+  | AgentProgressEvent;
 
 export interface AgentStatusEvent {
   type: 'status';
@@ -72,4 +75,20 @@ export interface AgentEscalationEvent {
   timestamp: string;
   escalationType: 'ask_human' | 'ask_ai' | 'report_blocker';
   payload: import('./escalation.js').EscalationRequest;
+}
+
+export interface AgentPlanEvent {
+  type: 'plan';
+  timestamp: string;
+  summary: string;
+  steps: string[];
+}
+
+export interface AgentProgressEvent {
+  type: 'progress';
+  timestamp: string;
+  phase: string;
+  description: string;
+  currentPhase: number;
+  totalPhases: number;
 }

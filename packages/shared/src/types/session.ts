@@ -14,6 +14,7 @@ export type SessionStatus =
   | 'approved'
   | 'merging'
   | 'complete'
+  | 'paused'
   | 'killing'
   | 'killed';
 
@@ -44,6 +45,9 @@ export interface Session {
   linesRemoved: number;
   previewUrl: string | null;
   prUrl: string | null;
+  plan: { summary: string; steps: string[] } | null;
+  progress: { phase: string; description: string; currentPhase: number; totalPhases: number } | null;
+  claudeSessionId: string | null;
 }
 
 export interface CreateSessionRequest {

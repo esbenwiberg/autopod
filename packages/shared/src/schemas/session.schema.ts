@@ -26,6 +26,7 @@ export const sessionStatusSchema = z.enum([
   'approved',
   'merging',
   'complete',
+  'paused',
   'killing',
   'killed',
 ]);
