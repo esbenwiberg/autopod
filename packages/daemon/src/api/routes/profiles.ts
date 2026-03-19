@@ -26,11 +26,13 @@ export function profileRoutes(
     return profileStore.get(name);
   });
 
-  // PUT /profiles/:name — update profile
-  app.put('/profiles/:name', async (request) => {
+  // PUT/PATCH /profiles/:name — update profile
+  const updateHandler = async (request: import('fastify').FastifyRequest) => {
     const { name } = request.params as { name: string };
     return profileStore.update(name, request.body as Record<string, unknown>);
-  });
+  };
+  app.put('/profiles/:name', updateHandler);
+  app.patch('/profiles/:name', updateHandler);
 
   // DELETE /profiles/:name — delete profile
   app.delete('/profiles/:name', async (request, reply) => {

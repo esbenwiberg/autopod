@@ -19,10 +19,12 @@ import { createServer } from './api/server.js';
 import type { AuthModule } from './interfaces/index.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { LocalContainerManager } from './containers/local-container-manager.js';
+import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { createRuntimeRegistry, ClaudeRuntime, CodexRuntime } from './runtimes/index.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { createNotificationService, createTeamsAdapter, createRateLimiter } from './notifications/index.js';
 import type { NotificationConfig } from './notifications/index.js';
+import type { ContainerManager } from './interfaces/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +35,8 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
+const CONTAINER_RUNTIME = process.env.AUTOPOD_CONTAINER_RUNTIME ?? 'local'; // 'local' | 'docker'
+const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
 
 // Logger
 const logger = pino({
@@ -61,7 +65,7 @@ const escalationRepo = createEscalationRepository(db);
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);
 
-// Stub M1-M4 interfaces (real implementations plug in later)
+// Auth module (dev stub — real Entra ID module plugs in for production)
 const authModule: AuthModule = {
   async validateToken(_token: string) {
     // Stub: accept any token in dev, reject all in prod
@@ -98,12 +102,35 @@ const authModule: AuthModule = {
 };
 
 const worktreeManager = new LocalWorktreeManager({ logger });
-const containerManager = new LocalContainerManager(logger);
+
+// Container manager: Docker for isolated builds, or filesystem passthrough for local dev
+let containerManager: ContainerManager;
+let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
+
+if (CONTAINER_RUNTIME === 'docker') {
+  const Dockerode = (await import('dockerode')).default;
+  const docker = new Dockerode();
+  containerManager = new DockerContainerManager({ docker, logger });
+  logger.info('Using Docker container runtime');
+
+  // Wire up ImageBuilder when Docker + ACR are available
+  if (ACR_REGISTRY_URL) {
+    const { AcrClient } = await import('./images/acr-client.js');
+    const { ImageBuilder } = await import('./images/image-builder.js');
+    const acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, docker);
+    imageBuilder = new ImageBuilder({ docker, acr, profileStore });
+    logger.info({ acrRegistry: ACR_REGISTRY_URL }, 'Image warming enabled');
+  }
+} else {
+  containerManager = new LocalContainerManager(logger);
+  logger.info('Using local filesystem container runtime');
+}
+
 const runtimeRegistry = createRuntimeRegistry([
   new ClaudeRuntime(logger),
   new CodexRuntime(logger),
 ]);
-const validationEngine = createLocalValidationEngine(containerManager);
+const validationEngine = createLocalValidationEngine(containerManager, logger);
 
 // Session queue + manager (circular dep resolved via closure)
 let sessionManager: ReturnType<typeof createSessionManager>;
@@ -173,6 +200,7 @@ const app = await createServer({
   eventRepo,
   sessionBridge,
   pendingRequestsBySession,
+  imageBuilder,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
 });

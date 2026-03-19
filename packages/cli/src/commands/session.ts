@@ -102,7 +102,8 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
         if (s.pendingEscalation) {
           console.log(chalk.yellow.bold('\nPending escalation:'));
           console.log(`  Type: ${s.pendingEscalation.type}`);
-          console.log(`  Message: ${s.pendingEscalation.payload.message}`);
+          const p = s.pendingEscalation.payload;
+          console.log(`  Message: ${'question' in p ? p.question : 'description' in p ? p.description : ''}`);
         }
         if (s.lastValidationResult) {
           const vr = s.lastValidationResult;

@@ -13,10 +13,7 @@ const SCOPES = ['api://autopod/.default'];
 
 export class MsalClient {
   private pca: PublicClientApplication;
-  private clientId: string;
-
   constructor(clientId: string, tenantId: string) {
-    this.clientId = clientId;
     const config: Configuration = {
       auth: {
         clientId,
