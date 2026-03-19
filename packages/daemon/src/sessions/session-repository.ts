@@ -37,6 +37,9 @@ export interface SessionUpdates {
   linesRemoved?: number;
   previewUrl?: string | null;
   prUrl?: string | null;
+  plan?: { summary: string; steps: string[] } | null;
+  progress?: { phase: string; description: string; currentPhase: number; totalPhases: number } | null;
+  claudeSessionId?: string | null;
 }
 
 export interface SessionRepository {
@@ -80,6 +83,9 @@ function rowToSession(row: Record<string, unknown>): Session {
     linesRemoved: row.lines_removed as number,
     previewUrl: (row.preview_url as string) ?? null,
     prUrl: (row.pr_url as string) ?? null,
+    plan: row.plan ? JSON.parse(row.plan as string) : null,
+    progress: row.progress ? JSON.parse(row.progress as string) : null,
+    claudeSessionId: (row.claude_session_id as string) ?? null,
   };
 }
 
@@ -182,6 +188,18 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.prUrl !== undefined) {
         setClauses.push('pr_url = @prUrl');
         params.prUrl = changes.prUrl;
+      }
+      if (changes.plan !== undefined) {
+        setClauses.push('plan = @plan');
+        params.plan = changes.plan !== null ? JSON.stringify(changes.plan) : null;
+      }
+      if (changes.progress !== undefined) {
+        setClauses.push('progress = @progress');
+        params.progress = changes.progress !== null ? JSON.stringify(changes.progress) : null;
+      }
+      if (changes.claudeSessionId !== undefined) {
+        setClauses.push('claude_session_id = @claudeSessionId');
+        params.claudeSessionId = changes.claudeSessionId;
       }
 
       if (setClauses.length === 0) return;
