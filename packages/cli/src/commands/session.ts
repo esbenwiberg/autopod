@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import type { Session } from '@autopod/shared';
+import type { Session, SystemEvent, AgentActivityEvent } from '@autopod/shared';
 import type { AutopodClient } from '../api/client.js';
 import { withSpinner } from '../output/spinner.js';
 import { withJsonOutput } from '../output/json.js';
@@ -117,14 +117,46 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .command('logs <id>')
     .description('Show session logs')
     .option('--build', 'Show build logs instead of agent logs')
-    .option('-f, --follow', 'Follow log output (TODO: requires WebSocket)')
+    .option('-f, --follow', 'Follow log output in real-time via WebSocket')
     .action(async (id: string, opts: { build?: boolean; follow?: boolean }) => {
       const client = getClient();
       const resolvedId = await resolveSessionId(client, id);
 
       if (opts.follow) {
-        // TODO: Implement WebSocket-based log streaming
-        console.log(chalk.yellow('--follow is not yet implemented. Showing current logs.'));
+        const WebSocket = (await import('ws')).default;
+        const token = await client.fetchToken();
+        const wsUrl = client.getWebSocketUrl(`/events?token=${encodeURIComponent(token)}`);
+        const ws = new WebSocket(wsUrl);
+
+        ws.on('open', () => {
+          ws.send(JSON.stringify({ type: 'subscribe', sessionId: resolvedId }));
+          console.log(chalk.dim(`Following session ${resolvedId.slice(0, 8)}… (Ctrl+C to stop)\n`));
+        });
+
+        ws.on('message', (data: Buffer) => {
+          try {
+            const event = JSON.parse(data.toString()) as { type: string };
+            // Skip subscribe/unsubscribe confirmations
+            if (['subscribed', 'unsubscribed', 'subscribed_all', 'error'].includes(event.type)) return;
+            formatLogEvent(event as SystemEvent);
+          } catch {
+            // Ignore malformed messages
+          }
+        });
+
+        ws.on('close', () => process.exit(0));
+        ws.on('error', (err: Error) => {
+          console.error(chalk.red(`WebSocket error: ${err.message}`));
+          process.exit(1);
+        });
+
+        process.on('SIGINT', () => {
+          ws.close();
+          process.exit(0);
+        });
+
+        // Keep the process alive — the event loop stays open via the WebSocket
+        return;
       }
 
       const logs = await withSpinner('Fetching logs...', () =>
@@ -223,4 +255,95 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
       );
       console.log(chalk.red(`Session ${resolvedId} killed.`));
     });
+}
+
+function formatTimestamp(ts: string): string {
+  try {
+    const d = new Date(ts);
+    return chalk.dim(d.toLocaleTimeString());
+  } catch {
+    return chalk.dim(ts);
+  }
+}
+
+function formatLogEvent(event: SystemEvent & { type: string }): void {
+  const ts = 'timestamp' in event ? formatTimestamp((event as { timestamp: string }).timestamp) : '';
+
+  switch (event.type) {
+    case 'session.agent_activity': {
+      const activity = event as AgentActivityEvent;
+      const inner = activity.event;
+      switch (inner.type) {
+        case 'status':
+          console.log(`${ts} ${chalk.dim(inner.message)}`);
+          break;
+        case 'tool_use': {
+          const inputSummary = Object.keys(inner.input).length > 0
+            ? chalk.dim(` ${JSON.stringify(inner.input).slice(0, 80)}`)
+            : '';
+          console.log(`${ts} ${chalk.cyan(`[tool] ${inner.tool}`)}${inputSummary}`);
+          break;
+        }
+        case 'file_change': {
+          const actionColor = inner.action === 'delete' ? chalk.red : inner.action === 'create' ? chalk.green : chalk.yellow;
+          console.log(`${ts} ${actionColor(`[${inner.action}]`)} ${inner.path}`);
+          break;
+        }
+        case 'complete':
+          console.log(`${ts} ${chalk.green.bold('Agent completed:')} ${inner.result}`);
+          break;
+        case 'error':
+          console.log(`${ts} ${chalk.red(inner.fatal ? '[FATAL] ' : '[error] ')}${inner.message}`);
+          break;
+        case 'escalation': {
+          const p = inner.payload.payload;
+          const desc = 'question' in p ? p.question : p.description;
+          console.log(`${ts} ${chalk.yellow.bold(`[escalation: ${inner.escalationType}]`)} ${desc}`);
+          break;
+        }
+        default:
+          console.log(`${ts} ${chalk.dim(JSON.stringify(inner))}`);
+      }
+      break;
+    }
+    case 'session.status_changed': {
+      const sc = event as import('@autopod/shared').SessionStatusChangedEvent;
+      console.log(`${ts} ${chalk.blue(`Status: ${sc.previousStatus} → ${sc.newStatus}`)}`);
+      break;
+    }
+    case 'session.validation_started': {
+      const vs = event as import('@autopod/shared').ValidationStartedEvent;
+      console.log(`${ts} ${chalk.blue(`Validation started (attempt ${vs.attempt})`)}`);
+      break;
+    }
+    case 'session.validation_completed': {
+      const vc = event as import('@autopod/shared').ValidationCompletedEvent;
+      const color = vc.result.overall === 'pass' ? chalk.green : chalk.red;
+      console.log(`${ts} ${color(`Validation ${vc.result.overall.toUpperCase()}`)} (attempt ${vc.result.attempt})`);
+      break;
+    }
+    case 'session.escalation_created': {
+      const ec = event as import('@autopod/shared').EscalationCreatedEvent;
+      const desc = 'question' in ec.escalation.payload ? ec.escalation.payload.question : ec.escalation.payload.description;
+      console.log(`${ts} ${chalk.yellow.bold(`[escalation: ${ec.escalation.type}]`)} ${desc}`);
+      break;
+    }
+    case 'session.escalation_resolved': {
+      console.log(`${ts} ${chalk.green('Escalation resolved')}`);
+      break;
+    }
+    case 'session.completed': {
+      const comp = event as import('@autopod/shared').SessionCompletedEvent;
+      const color = comp.finalStatus === 'complete' ? chalk.green.bold : chalk.red.bold;
+      console.log(`${ts} ${color(`Session ${comp.finalStatus}`)}`);
+      break;
+    }
+    case 'session.created': {
+      const cr = event as import('@autopod/shared').SessionCreatedEvent;
+      console.log(`${ts} ${chalk.blue('Session created:')} ${cr.session.id.slice(0, 8)}`);
+      break;
+    }
+    default:
+      console.log(`${ts} ${chalk.dim(JSON.stringify(event))}`);
+  }
 }

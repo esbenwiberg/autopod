@@ -116,6 +116,15 @@ export class AutopodClient {
     return this.request<{ status: string; version: string }>('GET', '/health');
   }
 
+  // WebSocket helpers
+  async fetchToken(): Promise<string> {
+    return this.getToken();
+  }
+
+  getWebSocketUrl(path: string): string {
+    return this.baseUrl.replace(/^http/, 'ws') + path;
+  }
+
   // Internal
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = `${this.baseUrl}${path}`;
