@@ -142,6 +142,10 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
               linesAdded: 0,
               linesRemoved: 0,
               previewUrl: null,
+              prUrl: null,
+              plan: null,
+              progress: null,
+              claudeSessionId: null,
             },
           ]),
         );

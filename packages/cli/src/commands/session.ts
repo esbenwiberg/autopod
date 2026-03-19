@@ -99,6 +99,19 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
         if (s.previewUrl) {
           console.log(`${chalk.bold('Preview:')}      ${s.previewUrl}`);
         }
+        if (s.plan) {
+          console.log(chalk.bold('\nPlan:'));
+          console.log(`  ${s.plan.summary}`);
+          s.plan.steps.forEach((step, i) => {
+            const isCurrent = s.progress && i + 1 === s.progress.currentPhase;
+            const prefix = isCurrent ? chalk.cyan('→') : chalk.dim('·');
+            console.log(`  ${prefix} ${i + 1}. ${step}`);
+          });
+        }
+        if (s.progress) {
+          console.log(`${chalk.bold('Progress:')}     ${s.progress.currentPhase}/${s.progress.totalPhases} — ${s.progress.phase}`);
+          console.log(`${chalk.bold('Phase:')}        ${chalk.dim(s.progress.description)}`);
+        }
         if (s.pendingEscalation) {
           console.log(chalk.yellow.bold('\nPending escalation:'));
           console.log(`  Type: ${s.pendingEscalation.type}`);
@@ -164,6 +177,33 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
         client.getSessionLogs(resolvedId, opts.build),
       );
       process.stdout.write(logs);
+    });
+
+  // ap pause
+  program
+    .command('pause <id>')
+    .description('Pause a running session (container stays alive, agent suspended)')
+    .action(async (id: string) => {
+      const client = getClient();
+      const resolvedId = await resolveSessionId(client, id);
+      await withSpinner('Pausing session...', () =>
+        client.pauseSession(resolvedId),
+      );
+      console.log(chalk.yellow(`Session ${resolvedId} paused.`));
+      console.log(chalk.dim('Resume with: ap tell <id> "<message>"'));
+    });
+
+  // ap nudge
+  program
+    .command('nudge <id> <message>')
+    .description('Send a soft message to a running agent (picked up via check_messages)')
+    .action(async (id: string, message: string) => {
+      const client = getClient();
+      const resolvedId = await resolveSessionId(client, id);
+      await withSpinner('Sending nudge...', () =>
+        client.nudgeSession(resolvedId, message),
+      );
+      console.log(chalk.green('Nudge queued. Agent will see it on next check_messages call.'));
     });
 
   // ap tell
@@ -302,6 +342,15 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
           console.log(`${ts} ${chalk.yellow.bold(`[escalation: ${inner.escalationType}]`)} ${desc}`);
           break;
         }
+        case 'plan':
+          console.log(`${ts} ${chalk.magenta.bold('[plan]')} ${inner.summary}`);
+          inner.steps.forEach((step: string, i: number) => {
+            console.log(`${ts}   ${chalk.dim(`${i + 1}.`)} ${step}`);
+          });
+          break;
+        case 'progress':
+          console.log(`${ts} ${chalk.blue.bold(`[progress ${inner.currentPhase}/${inner.totalPhases}]`)} ${inner.phase} — ${inner.description}`);
+          break;
         default:
           console.log(`${ts} ${chalk.dim(JSON.stringify(inner))}`);
       }

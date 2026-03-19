@@ -57,6 +57,21 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
     return { ok: true };
   });
 
+  // POST /sessions/:sessionId/pause — pause a running session
+  app.post('/sessions/:sessionId/pause', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    await sessionManager.pauseSession(sessionId);
+    return { ok: true };
+  });
+
+  // POST /sessions/:sessionId/nudge — queue a soft message for a running agent
+  app.post('/sessions/:sessionId/nudge', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const { message } = sendMessageSchema.parse(request.body);
+    sessionManager.nudgeSession(sessionId, message);
+    return { ok: true };
+  });
+
   // POST /sessions/:sessionId/kill — kill session
   app.post('/sessions/:sessionId/kill', async (request) => {
     const { sessionId } = request.params as { sessionId: string };

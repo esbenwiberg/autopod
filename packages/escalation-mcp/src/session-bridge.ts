@@ -10,4 +10,7 @@ export interface SessionBridge {
   getReviewerModel(sessionId: string): string;
   callReviewerModel(sessionId: string, question: string, context?: string): Promise<string>;
   incrementEscalationCount(sessionId: string): void;
+  reportPlan(sessionId: string, summary: string, steps: string[]): void;
+  reportProgress(sessionId: string, phase: string, description: string, currentPhase: number, totalPhases: number): void;
+  consumeMessages(sessionId: string): { hasMessage: boolean; message?: string };
 }

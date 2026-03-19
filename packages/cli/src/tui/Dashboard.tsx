@@ -31,7 +31,8 @@ type UIMode =
   | { type: 'confirm_retry'; session: Session }
   | { type: 'confirm_bulk_approve'; count: number }
   | { type: 'confirm_bulk_kill'; count: number }
-  | { type: 'filter_input' };
+  | { type: 'filter_input' }
+  | { type: 'nudge_input' };
 
 interface DashboardProps {
   sessionState: UseSessionStateReturn;
@@ -102,6 +103,27 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
       await client.sendMessage(currentSessionId, message);
     } catch {
       showToast('Failed to send message', 'red');
+    }
+    setMode({ type: 'normal' });
+  }, [currentSessionId, client, showToast]);
+
+  const handlePause = useCallback(async () => {
+    if (!currentSessionId) return;
+    try {
+      await client.pauseSession(currentSessionId);
+      showToast('Session paused', 'yellow');
+    } catch {
+      showToast('Failed to pause session', 'red');
+    }
+  }, [currentSessionId, client, showToast]);
+
+  const handleNudge = useCallback(async (message: string) => {
+    if (!currentSessionId) return;
+    try {
+      await client.nudgeSession(currentSessionId, message);
+      showToast('Nudge sent', 'green');
+    } catch {
+      showToast('Failed to send nudge', 'red');
     }
     setMode({ type: 'normal' });
   }, [currentSessionId, client, showToast]);
@@ -186,8 +208,18 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
       up: () => selection.moveUp(),
       down: () => selection.moveDown(),
       t: () => {
-        if (currentSession?.status === 'running' || currentSession?.status === 'awaiting_input') {
+        if (currentSession?.status === 'running' || currentSession?.status === 'awaiting_input' || currentSession?.status === 'paused') {
           setMode({ type: 'tell_input' });
+        }
+      },
+      p: () => {
+        if (currentSession?.status === 'running') {
+          void handlePause();
+        }
+      },
+      u: () => {
+        if (currentSession?.status === 'running') {
+          setMode({ type: 'nudge_input' });
         }
       },
       d: () => {
@@ -255,7 +287,7 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         exit();
       },
     }),
-    [selection, currentSession, currentSessionId, selectedSession, sessions, ws, exit, client, showToast, filterText],
+    [selection, currentSession, currentSessionId, selectedSession, sessions, ws, exit, client, showToast, filterText, handlePause, handleNudge],
   );
 
   useKeyboard(keyHandlers, !isOverlayActive);
@@ -422,6 +454,14 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         <ConfirmDialog
           message={`Kill all ${mode.count} failed sessions?`}
           onConfirm={() => void handleBulkKill()}
+          onCancel={() => setMode({ type: 'normal' })}
+        />
+      )}
+
+      {mode.type === 'nudge_input' && (
+        <InlineInput
+          prompt="Nudge message (agent picks up on next check_messages):"
+          onSubmit={(msg) => void handleNudge(msg)}
           onCancel={() => setMode({ type: 'normal' })}
         />
       )}

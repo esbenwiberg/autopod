@@ -26,6 +26,17 @@ function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean)
 
   switch (status) {
     case 'running':
+      contextual.push({ key: 'p', label: 'pause' });
+      contextual.push({ key: 'u', label: 'nudge' });
+      contextual.push({ key: 't', label: 'tell' });
+      contextual.push({ key: 'l', label: 'logs' });
+      contextual.push({ key: 'x', label: 'kill' });
+      break;
+    case 'paused':
+      contextual.push({ key: 't', label: 'tell/resume' });
+      contextual.push({ key: 'l', label: 'logs' });
+      contextual.push({ key: 'x', label: 'kill' });
+      break;
     case 'awaiting_input':
       contextual.push({ key: 't', label: 'tell' });
       contextual.push({ key: 'l', label: 'logs' });

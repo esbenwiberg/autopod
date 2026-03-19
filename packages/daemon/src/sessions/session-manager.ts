@@ -9,7 +9,8 @@ import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngi
 import type { SessionRepository, SessionUpdates } from './session-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
-import { validateTransition, isTerminalState, canReceiveMessage, canKill } from './state-machine.js';
+import { validateTransition, isTerminalState, canReceiveMessage, canKill, canPause, canNudge } from './state-machine.js';
+import type { NudgeRepository } from './nudge-repository.js';
 import { generateClaudeMd } from './claude-md-generator.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { buildCorrectionMessage } from './correction-context.js';
@@ -41,6 +42,7 @@ export interface NetworkManager {
 export interface SessionManagerDependencies {
   sessionRepo: SessionRepository;
   escalationRepo: EscalationRepository;
+  nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
@@ -63,6 +65,8 @@ export interface SessionManager {
   sendMessage(sessionId: string, message: string): Promise<void>;
   approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void>;
   rejectSession(sessionId: string, reason?: string): Promise<void>;
+  pauseSession(sessionId: string): Promise<void>;
+  nudgeSession(sessionId: string, message: string): void;
   killSession(sessionId: string): Promise<void>;
   triggerValidation(sessionId: string): Promise<void>;
   getSession(sessionId: string): Session;
@@ -71,7 +75,7 @@ export interface SessionManager {
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
   const {
-    sessionRepo, escalationRepo: _escalationRepo, profileStore, eventBus,
+    sessionRepo, escalationRepo: _escalationRepo, nudgeRepo, profileStore, eventBus,
     containerManagerFactory, worktreeManager, runtimeRegistry, validationEngine,
     networkManager, prManager, enqueueSession, mcpBaseUrl, daemonConfig, logger,
   } = deps;
@@ -273,6 +277,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               escalationCount: session.escalationCount + 1,
             });
           }
+        } else if (event.type === 'plan') {
+          sessionRepo.update(sessionId, {
+            plan: { summary: event.summary, steps: event.steps },
+          });
+        } else if (event.type === 'progress') {
+          sessionRepo.update(sessionId, {
+            progress: {
+              phase: event.phase,
+              description: event.description,
+              currentPhase: event.currentPhase,
+              totalPhases: event.totalPhases,
+            },
+          });
+        } else if (event.type === 'status' && event.message.includes('Claude session initialized')) {
+          // Persist claude session ID to DB for pause/resume survival across daemon restarts
+          const match = event.message.match(/\(([^)]+)\)$/);
+          if (match?.[1]) {
+            sessionRepo.update(sessionId, { claudeSessionId: match[1] });
+          }
         }
       }
     },
@@ -409,6 +432,38 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       await this.handleCompletion(sessionId);
 
       logger.info({ sessionId, reason, previousStatus }, 'Session rejected, resuming agent with feedback');
+    },
+
+    async pauseSession(sessionId: string): Promise<void> {
+      const session = sessionRepo.getOrThrow(sessionId);
+      if (!canPause(session.status)) {
+        throw new AutopodError(
+          `Cannot pause session ${sessionId} in status ${session.status}`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      // Suspend the runtime (kills stream but preserves session ID)
+      const runtime = runtimeRegistry.get(session.runtime);
+      await runtime.suspend(sessionId);
+
+      transition(session, 'paused');
+      logger.info({ sessionId }, 'Session paused');
+    },
+
+    nudgeSession(sessionId: string, message: string): void {
+      const session = sessionRepo.getOrThrow(sessionId);
+      if (!canNudge(session.status)) {
+        throw new AutopodError(
+          `Cannot nudge session ${sessionId} in status ${session.status}`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      nudgeRepo.queue(sessionId, message);
+      logger.info({ sessionId }, 'Nudge message queued');
     },
 
     async killSession(sessionId: string): Promise<void> {

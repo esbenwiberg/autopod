@@ -13,7 +13,15 @@ export function isTerminalState(status: SessionStatus): boolean {
 }
 
 export function canReceiveMessage(status: SessionStatus): boolean {
-  return status === 'awaiting_input';
+  return status === 'awaiting_input' || status === 'paused';
+}
+
+export function canPause(status: SessionStatus): boolean {
+  return status === 'running';
+}
+
+export function canNudge(status: SessionStatus): boolean {
+  return status === 'running';
 }
 
 export function canKill(status: SessionStatus): boolean {

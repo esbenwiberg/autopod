@@ -68,6 +68,14 @@ export class AutopodClient {
     await this.request<void>('POST', `/sessions/${id}/reject`, { feedback });
   }
 
+  async pauseSession(id: string): Promise<void> {
+    await this.request<void>('POST', `/sessions/${id}/pause`);
+  }
+
+  async nudgeSession(id: string, message: string): Promise<void> {
+    await this.request<void>('POST', `/sessions/${id}/nudge`, { message });
+  }
+
   async killSession(id: string): Promise<void> {
     await this.request<void>('POST', `/sessions/${id}/kill`);
   }

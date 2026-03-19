@@ -10,6 +10,7 @@ import {
   createSessionRepository,
   createEventRepository,
   createEscalationRepository,
+  createNudgeRepository,
   createEventBus,
   createSessionQueue,
   createSessionManager,
@@ -60,6 +61,7 @@ const profileStore = createProfileStore(db);
 const sessionRepo = createSessionRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
+const nudgeRepo = createNudgeRepository(db);
 
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);
@@ -184,6 +186,7 @@ const containerManagerFactory = {
 sessionManager = createSessionManager({
   sessionRepo,
   escalationRepo,
+  nudgeRepo,
   profileStore,
   eventBus,
   containerManagerFactory,
@@ -205,6 +208,7 @@ const pendingRequestsBySession = new Map<string, PendingRequests>();
 const sessionBridge = createSessionBridge({
   sessionManager,
   escalationRepo,
+  nudgeRepo,
   profileStore,
   pendingRequestsBySession,
   logger,
