@@ -39,8 +39,24 @@ export async function buildCorrectionContext(
   // 2. Determine which step failed first
   const failedStep = determineFailedStep(validationResult);
 
-  // 3. If task review failed, grab text descriptions of what went wrong
+  // 3. Grab text descriptions of what went wrong
   const screenshotDescriptions: string[] = [];
+
+  // Page validation failures
+  const failedPages = validationResult.smoke.pages.filter(p => p.status === 'fail');
+  for (const page of failedPages) {
+    const parts: string[] = [`Page ${page.path} failed:`];
+    if (page.consoleErrors.length > 0) {
+      parts.push(`  Console errors: ${page.consoleErrors.slice(0, 5).join('; ')}`);
+    }
+    const failedAssertions = page.assertions.filter(a => !a.passed);
+    for (const a of failedAssertions) {
+      parts.push(`  Assertion failed: ${a.selector} (${a.type}) — expected "${a.expected}", got "${a.actual}"`);
+    }
+    screenshotDescriptions.push(parts.join('\n'));
+  }
+
+  // Task review issues
   if (validationResult.taskReview?.status === 'fail') {
     screenshotDescriptions.push(...validationResult.taskReview.issues);
   }
