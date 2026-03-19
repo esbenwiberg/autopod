@@ -21,6 +21,8 @@ import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { LocalContainerManager } from './containers/local-container-manager.js';
 import { createRuntimeRegistry, ClaudeRuntime, CodexRuntime } from './runtimes/index.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
+import { createNotificationService, createTeamsAdapter, createRateLimiter } from './notifications/index.js';
+import type { NotificationConfig } from './notifications/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +32,7 @@ const PORT = Number.parseInt(process.env.PORT ?? '3100', 10);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
+const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 
 // Logger
 const logger = pino({
@@ -141,6 +144,26 @@ const sessionBridge = createSessionBridge({
   logger,
 });
 
+// Notifications (opt-in via TEAMS_WEBHOOK_URL)
+const notificationConfig: NotificationConfig = TEAMS_WEBHOOK_URL
+  ? {
+      teams: {
+        webhookUrl: TEAMS_WEBHOOK_URL,
+        enabledEvents: ['session_validated', 'session_failed', 'session_needs_input', 'session_error'],
+      },
+    }
+  : {};
+
+const notificationService = createNotificationService({
+  eventBus,
+  config: notificationConfig,
+  teamsAdapter: createTeamsAdapter(TEAMS_WEBHOOK_URL ?? '', logger),
+  rateLimiter: createRateLimiter(),
+  sessionLookup: sessionManager,
+  logger,
+});
+notificationService.start();
+
 // Server
 const app = await createServer({
   authModule,
@@ -169,6 +192,9 @@ async function shutdown(signal: string) {
 
   // Stop accepting new requests
   await app.close();
+
+  // Stop notifications
+  notificationService.stop();
 
   // Drain session queue
   await sessionQueue.drain();
