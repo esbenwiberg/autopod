@@ -4,6 +4,10 @@ import type { SessionStatus } from '@autopod/shared';
 
 interface HotkeyBarProps {
   sessionStatus: SessionStatus | null;
+  hasPreviewUrl: boolean;
+  hasValidated: boolean;
+  hasFailed: boolean;
+  hasFilter: boolean;
 }
 
 interface Hotkey {
@@ -11,14 +15,12 @@ interface Hotkey {
   label: string;
 }
 
-function getHotkeys(status: SessionStatus | null): Hotkey[] {
+function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean): Hotkey[] {
   const base: Hotkey[] = [
-    { key: '\u2191\u2193', label: 'navigate' },
+    { key: '↑↓', label: 'navigate' },
   ];
 
-  if (!status) {
-    return [...base, { key: 'q', label: 'quit' }];
-  }
+  if (!status) return base;
 
   const contextual: Hotkey[] = [];
 
@@ -33,7 +35,7 @@ function getHotkeys(status: SessionStatus | null): Hotkey[] {
       contextual.push({ key: 'a', label: 'approve' });
       contextual.push({ key: 'r', label: 'reject' });
       contextual.push({ key: 'd', label: 'diff' });
-      contextual.push({ key: 'o', label: 'open' });
+      if (hasPreviewUrl) contextual.push({ key: 'o', label: 'open' });
       break;
     case 'validating':
       contextual.push({ key: 'l', label: 'logs' });
@@ -43,18 +45,36 @@ function getHotkeys(status: SessionStatus | null): Hotkey[] {
       contextual.push({ key: 'd', label: 'diff' });
       contextual.push({ key: 'l', label: 'logs' });
       contextual.push({ key: 'v', label: 'validate' });
+      contextual.push({ key: 'R', label: 'retry' });
+      break;
+    case 'killed':
+      contextual.push({ key: 'l', label: 'logs' });
+      contextual.push({ key: 'R', label: 'retry' });
       break;
     default:
       contextual.push({ key: 'l', label: 'logs' });
       break;
   }
 
-  return [...base, ...contextual, { key: 'q', label: 'quit' }];
+  return [...base, ...contextual];
 }
 
-export function HotkeyBar({ sessionStatus }: HotkeyBarProps): React.ReactElement {
-  const hotkeys = getHotkeys(sessionStatus);
+function getGlobalHotkeys(hasValidated: boolean, hasFailed: boolean, hasFilter: boolean): Hotkey[] {
+  const hotkeys: Hotkey[] = [
+    { key: 'n', label: 'new' },
+  ];
 
+  if (hasValidated) hotkeys.push({ key: 'A', label: 'approve-all' });
+  if (hasFailed) hotkeys.push({ key: 'X', label: 'kill-failed' });
+
+  hotkeys.push({ key: '/', label: 'filter' });
+  if (hasFilter) hotkeys.push({ key: 'Esc', label: 'clear filter' });
+  hotkeys.push({ key: 'q', label: 'quit' });
+
+  return hotkeys;
+}
+
+function HotkeyRow({ hotkeys }: { hotkeys: Hotkey[] }): React.ReactElement {
   return (
     <Box paddingX={1} gap={1}>
       {hotkeys.map((hk) => (
@@ -63,6 +83,18 @@ export function HotkeyBar({ sessionStatus }: HotkeyBarProps): React.ReactElement
           <Text> {hk.label}</Text>
         </Box>
       ))}
+    </Box>
+  );
+}
+
+export function HotkeyBar({ sessionStatus, hasPreviewUrl, hasValidated, hasFailed, hasFilter }: HotkeyBarProps): React.ReactElement {
+  const sessionHotkeys = getSessionHotkeys(sessionStatus, hasPreviewUrl);
+  const globalHotkeys = getGlobalHotkeys(hasValidated, hasFailed, hasFilter);
+
+  return (
+    <Box flexDirection="column">
+      <HotkeyRow hotkeys={sessionHotkeys} />
+      <HotkeyRow hotkeys={globalHotkeys} />
     </Box>
   );
 }

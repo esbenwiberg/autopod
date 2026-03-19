@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useCallback, useState, useRef } from 'react';
+import React, { createContext, useContext, useCallback, useState, useRef, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import type { AgentEvent, SystemEvent } from '@autopod/shared';
 import { useSessionState } from './hooks/useSessionState.js';
 import type { UseSessionStateReturn } from './hooks/useSessionState.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { Dashboard } from './Dashboard.js';
+import { AutopodClient } from '../api/client.js';
 
 export interface DashboardConfig {
   daemonUrl: string;
@@ -20,11 +21,25 @@ export function useSessionContext(): UseSessionStateReturn {
   return ctx;
 }
 
+// Context for AutopodClient
+const ClientContext = createContext<AutopodClient | null>(null);
+
+export function useClient(): AutopodClient {
+  const ctx = useContext(ClientContext);
+  if (!ctx) throw new Error('useClient must be used within App');
+  return ctx;
+}
+
 interface AppProps {
   config: DashboardConfig;
 }
 
 export function App({ config }: AppProps): React.ReactElement {
+  const client = useMemo(() => new AutopodClient({
+    baseUrl: config.daemonUrl,
+    getToken: () => Promise.resolve(config.token),
+  }), [config.daemonUrl, config.token]);
+
   const [agentEvents, setAgentEvents] = useState<Map<string, AgentEvent[]>>(new Map());
   const sessionState = useSessionState({
     daemonUrl: config.daemonUrl,
@@ -77,15 +92,17 @@ export function App({ config }: AppProps): React.ReactElement {
   });
 
   return (
-    <SessionStateContext.Provider value={sessionState}>
-      <ErrorBoundary>
-        <Dashboard
-          sessionState={sessionState}
-          ws={ws}
-          agentEvents={agentEvents}
-        />
-      </ErrorBoundary>
-    </SessionStateContext.Provider>
+    <ClientContext.Provider value={client}>
+      <SessionStateContext.Provider value={sessionState}>
+        <ErrorBoundary>
+          <Dashboard
+            sessionState={sessionState}
+            ws={ws}
+            agentEvents={agentEvents}
+          />
+        </ErrorBoundary>
+      </SessionStateContext.Provider>
+    </ClientContext.Provider>
   );
 }
 
