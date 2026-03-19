@@ -89,11 +89,12 @@ paused  → killing   (via `ap kill`)
 ```
 
 ### `ap pause <id>`
-1. Calls `runtime.abort(sessionId)` — kills the exec stream
+1. Calls `runtime.suspend(sessionId)` — kills the exec stream but **preserves Claude session ID** (NOT `abort()` which clears it)
 2. **Keeps container + worktree alive** (critical — don't destroy the workspace)
 3. Transitions session: `running → paused`
-4. Stores the Claude/Codex session ID for later resume
+4. Claude session ID already persisted to SQLite (survives daemon restart)
 5. Emits `SessionStatusChangedEvent` → TUI shows "PAUSED" badge
+6. **Accepted risk:** if agent was mid-tool-call, worktree may have dirty state — agent sorts it out on resume via `--resume` conversation history
 
 ### `ap tell <id> "<message>"` (extended)
 Currently only works on `awaiting_input`. Extend to also work on `paused`:
@@ -118,8 +119,9 @@ Currently only works on `awaiting_input`. Extend to also work on `paused`:
 - `packages/shared/src/types/session.ts` — add `paused` status
 - `packages/daemon/src/sessions/session-manager.ts` — add `pauseSession()`, extend `sendMessage()` for paused state, add `nudgeSession()` + message queue
 - `packages/daemon/src/api/routes/sessions.ts` — add `POST /sessions/:id/pause`, `POST /sessions/:id/nudge`
-- `packages/daemon/src/runtimes/claude-runtime.ts` — ensure abort preserves session ID mapping
-- `packages/daemon/src/runtimes/codex-runtime.ts` — same
+- `packages/daemon/src/runtimes/claude-runtime.ts` — add `suspend()` method (kills stream, preserves session ID), persist `claudeSessionId` to DB
+- `packages/daemon/src/runtimes/codex-runtime.ts` — same pattern
+- `packages/daemon/src/sessions/session-manager.ts` — refactor event loop to be re-entrant (separate stream consumption from session lifecycle)
 - `packages/cli/src/commands/session.ts` — add `ap pause`, `ap nudge` commands
 - `packages/cli/src/tui/Dashboard.tsx` — add `p` and `u` hotkeys
 - `packages/escalation-mcp/src/tools/check-messages.ts` — reads from message queue
@@ -132,10 +134,7 @@ Currently only works on `awaiting_input`. Extend to also work on `paused`:
 ### Progress bar component
 - Segmented bar below each session in the table (or in detail panel)
 - Segments colored by phase type (heuristic mapping: planning=red, implementing=orange, testing=blue, validating=green)
-- Falls back to **activity-based inference** if agent doesn't call `report_progress`:
-  - Lots of `Read`/`Grep` → "exploring" (red)
-  - `Edit`/`Write` calls → "implementing" (orange)
-  - `Bash` calls → "testing/building" (blue)
+- If agent doesn't call `report_progress`, shows "no progress reported" — honest > misleading
 - Shows `currentPhase / totalPhases` as text alongside bar
 
 ### Plan display
@@ -182,7 +181,7 @@ Update the instruction template injected into every agent container:
    - Investigation → Fix → Test → Document
 ```
 
-This is **guidance, not enforcement** — we rely on the agent's cooperation. If an agent ignores it, the activity-based heuristic progress still works.
+This is **guidance, not enforcement** — we rely on the agent's cooperation. If an agent ignores it, the TUI shows "no progress reported" honestly.
 
 ### Provider-agnostic note
 These instructions work for any model/runtime that supports MCP tool calling. The CLAUDE.md format is just markdown — no provider-specific syntax.
@@ -193,26 +192,56 @@ These instructions work for any model/runtime that supports MCP tool calling. Th
 
 | Step | What | Why first |
 |------|-------|-----------|
-| 1 | New event types in shared | Everything depends on the type definitions |
-| 2 | MCP tools (report_plan, report_progress, check_messages) | Foundation — agents need these before TUI can show anything |
-| 3 | DB migration + session repository changes | Persist plans, progress, message queue |
-| 4 | Session manager changes (new event handling, pause, nudge) | Core orchestration logic |
-| 5 | API routes (pause, nudge) | Expose to CLI |
-| 6 | CLI commands (ap pause, ap nudge) | User-facing commands |
-| 7 | CLAUDE.md template updates | Tell agents about the new tools |
-| 8 | TUI components (progress bar, plan panel, metrics) | Visual layer — last because it consumes everything above |
-| 9 | TUI keyboard shortcuts (p, u) | Wire up pause/nudge in dashboard |
+| 1 | New event types in shared + `paused` status | Everything depends on the type definitions |
+| 2 | DB migration (`006_progress.sql`) — plan, progress, message queue, `claude_session_id` | Single migration covering all new persistence |
+| 3 | MCP tools (report_plan, report_progress, check_messages) | Foundation — agents need these before TUI can show anything |
+| 4 | Session repository changes | Persist plans, progress, read/write message queue |
+| 5 | Runtime refactor: add `suspend()` to claude-runtime + codex-runtime, persist session IDs to DB | Prerequisite for pause — must separate from destructive `abort()` |
+| 6 | Session manager: refactor event loop for re-entry + handle new events + pause/nudge logic | Core orchestration — depends on runtime + repo changes |
+| 7 | API routes (pause, nudge) | Expose to CLI |
+| 8 | CLI commands (ap pause, ap nudge) | User-facing commands |
+| 9 | CLAUDE.md template updates | Tell agents about the new tools |
+| 10 | TUI components (progress bar, plan panel, metrics, PAUSED badge) | Visual layer — last because it consumes everything above |
+| 11 | TUI keyboard shortcuts (p, u) | Wire up pause/nudge in dashboard |
 
 ---
 
-## Open Questions
+## Resolved Decisions
 
-1. **Should `check_messages` be mandatory or optional?** If optional, agents that ignore it can only be hard-paused. If mandatory (enforced via instructions), it adds overhead to every session but enables smooth nudging.
+1. **`check_messages` is optional.** You can't force an LLM to call a tool — CLAUDE.md is guidance, not enforcement. Agents that ignore it can only be hard-paused. That's fine.
 
-2. **Progress bar segments — fixed colors or agent-defined?** Could let agents pass a `category` field (e.g., "planning", "coding", "testing") and map to colors, or keep it simple with position-based coloring.
+2. **Progress bar colors: agent-defined category string, mapped to colors on the TUI side.** Small default palette. Not worth overthinking.
 
-3. **Message queue persistence** — SQLite table vs in-memory Map? SQLite survives daemon restarts but adds complexity. In-memory is simpler but messages lost on crash.
+3. **Message queue: SQLite.** Already use it for everything else. Losing nudge messages on daemon crash is worse UX than one extra table.
 
-4. **Token counting** — Claude's NDJSON stream includes usage in the `result` event, but only at the end. For live token count, we'd need to estimate from content length mid-stream. Worth the complexity?
+4. **Token counting: final only (from `result` event).** No mid-stream estimation — noisy and misleading. Can add later if people actually ask for it.
 
-5. **Should `report_plan` block until acknowledged?** Currently proposed as fire-and-forget. Could optionally block so the human can approve the plan before the agent starts coding (like a lightweight gate). This would be powerful but adds latency to every session start.
+5. **`report_plan`: fire-and-forget.** Plan approval can be a separate opt-in feature later (`ap plan-gate`). Don't tax every session with latency.
+
+6. **Activity-based progress inference: cut from Phase 3.** Inferring "exploring" from Read/Grep is wrong too often (agents read files during implementation, run bash during exploration). Show "no progress reported" honestly instead. Can add heuristics later if there's demand, but ripping out misleading UX is harder than adding a feature.
+
+---
+
+## Architectural Risks & Mitigations
+
+### 1. Pause requires a new `suspend()` path — not reuse of `abort()`
+
+Current `abort()` in `claude-runtime.ts` calls `handle.kill()` **and clears `claudeSessionIds`** — that's the resume ticket gone. Must split into:
+- **`abort()`** (destructive): current behavior, tears everything down
+- **`suspend()`** (preserving): kills the stream but **preserves** the Claude session ID mapping
+
+### 2. Claude session IDs must be persisted to SQLite
+
+`claudeSessionIds` is an in-memory `Map`. Daemon crash = all session IDs gone = no resume for paused sessions. Store `claude_session_id` in the sessions table. Include in `006_progress.sql` migration.
+
+### 3. Event consumption loop needs refactoring for re-entry
+
+`consumeAgentEvents()` is a tight `for await...of` over the stream. Pause kills the stream, resume spawns a new one. But `processSession()` does provisioning → spawn → consume in sequence. Need to separate "consume events from a stream" from "process a session end-to-end" so resume can re-enter the event loop without re-provisioning.
+
+### 4. Dirty state on pause (mid-tool-call) — accepted risk
+
+If pause fires while the agent is mid-`Edit`, the worktree may have half-written files. **Decision: accept it.** The agent sorts it out on resume — Claude's `--resume` carries conversation history, so it knows what it was doing. Document this behavior.
+
+### 5. `check_messages` hop count is acceptable
+
+Flow: agent → MCP tool → escalation server → SessionBridge → daemon → SQLite → back (4 hops). Fine for correctness. Agents call it between phases, not in a tight loop. Not a bottleneck.
