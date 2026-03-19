@@ -1,17 +1,21 @@
 import type { Command } from 'commander';
-import chalk from 'chalk';
+import * as configStore from '../config/config-store.js';
+import { getToken } from '../auth/token-manager.js';
+import { renderDashboard } from '../tui/index.js';
 
 export function registerWatchCommand(program: Command): void {
   program
     .command('watch')
-    .description('Open the TUI dashboard (requires @autopod/tui)')
-    .option('--theme <theme>', 'Color theme (dark or light)', 'dark')
-    .option('--refresh <ms>', 'Refresh interval in milliseconds', '2000')
-    .action((_opts: { theme?: string; refresh?: string }) => {
-      // M10 will provide the TUI implementation
-      console.log(chalk.yellow('The TUI dashboard is not yet available.'));
-      console.log(chalk.dim('It will be implemented in M10 (TUI Dashboard).'));
-      console.log(chalk.dim('For now, use: ap ls --json | jq'));
-      process.exit(0);
+    .alias('dashboard')
+    .description('Open the TUI dashboard')
+    .action(async () => {
+      const daemonUrl = configStore.get('daemon');
+      if (!daemonUrl) {
+        console.error('No daemon configured. Run: ap connect <url>');
+        process.exit(5);
+      }
+
+      const token = await getToken();
+      renderDashboard({ daemonUrl, token });
     });
 }
