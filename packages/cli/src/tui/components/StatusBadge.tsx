@@ -24,6 +24,7 @@ const STATUS_MAP: Record<SessionStatus, StatusStyle> = {
   approved:       { symbol: '\u2713', color: 'green',    bold: true,  dimColor: false },
   merging:        { symbol: '\u27F3', color: 'green',    bold: false, dimColor: false },
   complete:       { symbol: '\u2713', color: 'green',    bold: false, dimColor: true },
+  paused:         { symbol: '\u23F8', color: 'yellow',   bold: true,  dimColor: false },
   killing:        { symbol: '\u27F3', color: 'red',      bold: false, dimColor: true },
   killed:         { symbol: '\u2717', color: 'red',      bold: false, dimColor: true },
 };

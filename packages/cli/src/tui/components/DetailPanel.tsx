@@ -3,6 +3,9 @@ import { Box, Text } from 'ink';
 import type { Session, AgentEvent } from '@autopod/shared';
 import { StatusBadge } from './StatusBadge.js';
 import { ActivityFeed } from './ActivityFeed.js';
+import { ProgressBar } from './ProgressBar.js';
+import { PlanPanel } from './PlanPanel.js';
+import { MetricsBar } from './MetricsBar.js';
 
 interface DetailPanelProps {
   session: Session | null;
@@ -74,6 +77,43 @@ export function DetailPanel({ session, events, maxActivityLines }: DetailPanelPr
           </Box>
         )}
       </Box>
+
+      {/* Progress bar */}
+      {session.progress && (
+        <Box marginTop={1}>
+          <ProgressBar
+            currentPhase={session.progress.currentPhase}
+            totalPhases={session.progress.totalPhases}
+            phase={session.progress.phase}
+            description={session.progress.description}
+          />
+        </Box>
+      )}
+
+      {/* Plan */}
+      {session.plan && (
+        <Box marginTop={1}>
+          <PlanPanel
+            summary={session.plan.summary}
+            steps={session.plan.steps}
+            currentPhase={session.progress?.currentPhase}
+          />
+        </Box>
+      )}
+
+      {/* Metrics */}
+      {(session.status === 'running' || session.status === 'paused') && (
+        <Box marginTop={1}>
+          <MetricsBar
+            events={events}
+            startedAt={session.startedAt}
+            completedAt={session.completedAt}
+            filesChanged={session.filesChanged}
+            linesAdded={session.linesAdded}
+            linesRemoved={session.linesRemoved}
+          />
+        </Box>
+      )}
 
       {/* Validation summary */}
       {validation && (
