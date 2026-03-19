@@ -1,6 +1,19 @@
-import type { Profile, Session } from '@autopod/shared';
+import type { Profile, Session, InjectedMcpServer } from '@autopod/shared';
+import type { ResolvedSection } from './section-resolver.js';
 
-export function generateClaudeMd(profile: Profile, session: Session, mcpServerUrl: string): string {
+export interface ClaudeMdOptions {
+  /** Resolved (already fetched) content sections to inject */
+  injectedSections?: ResolvedSection[];
+  /** MCP servers beyond the built-in escalation server */
+  injectedMcpServers?: InjectedMcpServer[];
+}
+
+export function generateClaudeMd(
+  profile: Profile,
+  session: Session,
+  mcpServerUrl: string,
+  options?: ClaudeMdOptions,
+): string {
   const lines: string[] = [];
 
   lines.push('# Autopod Session');
@@ -10,12 +23,38 @@ export function generateClaudeMd(profile: Profile, session: Session, mcpServerUr
   lines.push(`Task: ${session.task}`);
   lines.push('');
 
-  lines.push('## MCP Server');
+  // Injected sections (sorted by priority — earlier = higher in document)
+  const injectedSections = options?.injectedSections ?? [];
+  for (const section of injectedSections) {
+    lines.push(`## ${section.heading}`);
+    lines.push('');
+    lines.push(section.content);
+    lines.push('');
+  }
+
+  // MCP Servers section
+  lines.push('## MCP Servers');
   lines.push('');
-  lines.push('An escalation MCP server is available for when you need help:');
+  lines.push('### Escalation (ask for help)');
   lines.push(`- URL: ${mcpServerUrl}`);
   lines.push('- Tools: ask_human (ask the human for input), ask_ai (consult another AI), report_blocker (report a blocking issue)');
   lines.push('');
+
+  const injectedMcpServers = options?.injectedMcpServers ?? [];
+  for (const server of injectedMcpServers) {
+    lines.push(`### ${server.name}`);
+    if (server.description) {
+      lines.push(server.description);
+    }
+    lines.push(`- URL: ${server.url}`);
+    if (server.toolHints) {
+      for (const hint of server.toolHints) {
+        lines.push(`- ${hint}`);
+      }
+    }
+    lines.push('');
+  }
+
 
   lines.push('## Build & Run');
   lines.push('');

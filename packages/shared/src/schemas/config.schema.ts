@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { injectedMcpServerSchema, injectedClaudeMdSectionSchema } from './injection.schema.js';
 
 export const daemonConfigSchema = z.object({
   port: z.number().int().min(1).max(65535).default(3100),
@@ -18,6 +19,11 @@ export const daemonConfigSchema = z.object({
 
   // Notifications
   teamsWebhookUrl: z.string().url().optional(),
+
+  /** MCP servers injected into every session (unless overridden by profile) */
+  mcpServers: z.array(injectedMcpServerSchema).default([]),
+  /** CLAUDE.md sections injected into every session (unless overridden by profile) */
+  claudeMdSections: z.array(injectedClaudeMdSectionSchema).default([]),
 });
 
 export type DaemonConfig = z.infer<typeof daemonConfigSchema>;

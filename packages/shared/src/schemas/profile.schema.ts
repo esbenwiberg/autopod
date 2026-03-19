@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { injectedMcpServerSchema, injectedClaudeMdSectionSchema } from './injection.schema.js';
 
 const pageAssertionSchema = z.object({
   selector: z.string().min(1),
@@ -44,6 +45,8 @@ export const createProfileSchema = z.object({
   customInstructions: z.string().max(50_000).nullable().default(null),
   escalation: escalationConfigSchema.default({}),
   extends: z.string().nullable().default(null),
+  mcpServers: z.array(injectedMcpServerSchema).default([]),
+  claudeMdSections: z.array(injectedClaudeMdSectionSchema).default([]),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });

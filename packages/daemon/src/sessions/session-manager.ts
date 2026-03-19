@@ -2,6 +2,7 @@ import type { Logger } from 'pino';
 import type {
   Session, CreateSessionRequest, SessionStatus, AgentEvent,
   ValidationResult, Profile,
+  DaemonConfig,
 } from '@autopod/shared';
 import { generateId, AutopodError } from '@autopod/shared';
 import type { ProfileStore } from '../profiles/index.js';
@@ -13,6 +14,8 @@ import { validateTransition, isTerminalState, canReceiveMessage, canKill } from 
 import { generateClaudeMd } from './claude-md-generator.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { buildCorrectionMessage } from './correction-context.js';
+import { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
+import { resolveSections } from './section-resolver.js';
 
 export interface SessionManagerDependencies {
   sessionRepo: SessionRepository;
@@ -25,6 +28,7 @@ export interface SessionManagerDependencies {
   validationEngine: ValidationEngine;
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
+  daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
   logger: Logger;
 }
 
@@ -46,7 +50,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   const {
     sessionRepo, escalationRepo, profileStore, eventBus,
     containerManager, worktreeManager, runtimeRegistry, validationEngine,
-    enqueueSession, mcpBaseUrl, logger,
+    enqueueSession, mcpBaseUrl, daemonConfig, logger,
   } = deps;
 
   function transition(session: Session, to: SessionStatus, extraUpdates?: Partial<SessionUpdates>): Session {
@@ -137,10 +141,27 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           previewUrl: 'http://localhost:3000', // placeholder
         });
 
+        // Merge daemon + profile injections
+        const mergedMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
+        const mergedSections = mergeClaudeMdSections(daemonConfig.claudeMdSections, profile.claudeMdSections);
+
+        // Resolve dynamic sections (fetches URLs, respects token budgets)
+        const resolvedSections = await resolveSections(mergedSections, logger);
+
         // Generate CLAUDE.md and write to container
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
-        const claudeMd = generateClaudeMd(profile, session, mcpUrl);
+        const claudeMd = generateClaudeMd(profile, session, mcpUrl, {
+          injectedSections: resolvedSections,
+          injectedMcpServers: mergedMcpServers,
+        });
         await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', claudeMd);
+
+        // Build MCP server list for runtime
+        const mcpServers = [
+          { name: 'escalation', url: mcpUrl },
+          ...mergedMcpServers.map(s => ({ name: s.name, url: s.url, headers: s.headers })),
+        ];
+
 
         // Start the agent
         const runtime = runtimeRegistry.get(session.runtime);
@@ -151,7 +172,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           workDir: worktreePath,
           customInstructions: profile.customInstructions ?? undefined,
           env: { SESSION_ID: sessionId },
-          mcpServers: [{ name: 'escalation', url: mcpUrl }],
+          mcpServers,
         });
 
         await this.consumeAgentEvents(sessionId, events);

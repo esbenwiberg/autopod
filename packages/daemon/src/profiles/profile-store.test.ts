@@ -5,15 +5,16 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { ProfileExistsError, ProfileNotFoundError, AutopodError } from '@autopod/shared';
 import { createProfileStore, type ProfileStore } from './profile-store.js';
 
-const MIGRATION_SQL = fs.readFileSync(
-  path.resolve(import.meta.dirname, '../db/migrations/001_initial.sql'),
-  'utf-8',
-);
+const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  db.exec(MIGRATION_SQL);
+  const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+  for (const file of files) {
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    db.exec(sql);
+  }
   return db;
 }
 
