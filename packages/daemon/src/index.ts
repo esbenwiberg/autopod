@@ -142,12 +142,38 @@ const sessionQueue = createSessionQueue(
   logger,
 );
 
-// Container manager factory — ACI manager wired up in Phase 4
+// ACI container manager (opt-in via env vars)
+const ACI_SUBSCRIPTION_ID = process.env.AZURE_SUBSCRIPTION_ID;
+const ACI_RESOURCE_GROUP = process.env.AZURE_RESOURCE_GROUP;
+const ACI_LOCATION = process.env.AZURE_LOCATION ?? 'westeurope';
+const ACI_ACR_USERNAME = process.env.ACR_USERNAME;
+const ACI_ACR_PASSWORD = process.env.ACR_PASSWORD;
+
+let aciContainerManager: import('./containers/aci-container-manager.js').AciContainerManager | undefined;
+if (ACI_SUBSCRIPTION_ID && ACI_RESOURCE_GROUP && ACR_REGISTRY_URL && ACI_ACR_USERNAME && ACI_ACR_PASSWORD) {
+  const { AciContainerManager } = await import('./containers/aci-container-manager.js');
+  aciContainerManager = new AciContainerManager({
+    subscriptionId: ACI_SUBSCRIPTION_ID,
+    resourceGroup: ACI_RESOURCE_GROUP,
+    acrRegistryUrl: ACR_REGISTRY_URL,
+    acrUsername: ACI_ACR_USERNAME,
+    acrPassword: ACI_ACR_PASSWORD,
+    location: ACI_LOCATION,
+  }, logger);
+  logger.info({ subscriptionId: ACI_SUBSCRIPTION_ID, resourceGroup: ACI_RESOURCE_GROUP }, 'ACI execution target enabled');
+}
+
+// Container manager factory — routes to Docker (local) or ACI based on execution target
 const containerManagerFactory = {
   get(target: import('@autopod/shared').ExecutionTarget) {
     if (target === 'aci') {
-      // ACI container manager will be wired here once implemented
-      throw new Error('ACI execution target not yet available — use "local"');
+      if (!aciContainerManager) {
+        throw new Error(
+          'ACI execution target requested but not configured. ' +
+          'Set AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, ACR_REGISTRY_URL, ACR_USERNAME, ACR_PASSWORD.',
+        );
+      }
+      return aciContainerManager;
     }
     return containerManager;
   },
@@ -222,6 +248,23 @@ try {
 } catch (err) {
   app.log.fatal(err, 'Failed to start daemon');
   process.exit(1);
+}
+
+// Reconcile ACI sessions after startup (non-blocking — errors are logged, not fatal)
+if (aciContainerManager) {
+  const { reconcileAciSessions } = await import('./sessions/reconciler.js');
+  reconcileAciSessions({
+    sessionRepo,
+    eventBus,
+    aciContainerManager,
+    onReconnected: async (sessionId, _containerId) => {
+      // Re-trigger completion handling for reconnected sessions
+      await sessionManager.handleCompletion(sessionId);
+    },
+    logger,
+  }).catch((err) => {
+    logger.error({ err }, 'ACI session reconciliation failed');
+  });
 }
 
 // Graceful shutdown
