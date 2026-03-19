@@ -13,6 +13,7 @@ export type {
   ValidationPage,
   PageAssertion,
   EscalationConfig,
+  NetworkPolicy,
 } from './types/profile.js';
 
 export type {

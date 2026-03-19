@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { EscalationConfig, InjectedMcpServer, InjectedClaudeMdSection, Profile, ValidationPage } from '@autopod/shared';
+import type { EscalationConfig, InjectedMcpServer, InjectedClaudeMdSection, NetworkPolicy, Profile, ValidationPage } from '@autopod/shared';
 import {
   AutopodError,
   ProfileExistsError,
@@ -45,6 +45,7 @@ function rowToProfile(row: Record<string, unknown>): Profile {
     warmImageBuiltAt: (row.warm_image_built_at as string) ?? null,
     mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]') as InjectedMcpServer[],
     claudeMdSections: JSON.parse((row.claude_md_sections as string) ?? '[]') as InjectedClaudeMdSection[],
+    networkPolicy: row.network_policy ? JSON.parse(row.network_policy as string) as NetworkPolicy : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -102,12 +103,12 @@ export function createProfileStore(db: Database.Database): ProfileStore {
           name, repo_url, default_branch, template, build_command, start_command,
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
-          extends, mcp_servers, claude_md_sections, created_at, updated_at
+          extends, mcp_servers, claude_md_sections, network_policy, created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
-          @extends, @mcpServers, @claudeMdSections, @createdAt, @updatedAt
+          @extends, @mcpServers, @claudeMdSections, @networkPolicy, @createdAt, @updatedAt
         )
       `).run({
         name: parsed.name,
@@ -128,6 +129,7 @@ export function createProfileStore(db: Database.Database): ProfileStore {
         extends: parsed.extends,
         mcpServers: JSON.stringify(parsed.mcpServers),
         claudeMdSections: JSON.stringify(parsed.claudeMdSections),
+        networkPolicy: parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -191,6 +193,7 @@ export function createProfileStore(db: Database.Database): ProfileStore {
       if (parsed.extends !== undefined) { setClauses.push('extends = @extends'); fieldMap.extends = parsed.extends; }
       if (parsed.mcpServers !== undefined) { setClauses.push('mcp_servers = @mcpServers'); fieldMap.mcpServers = JSON.stringify(parsed.mcpServers); }
       if (parsed.claudeMdSections !== undefined) { setClauses.push('claude_md_sections = @claudeMdSections'); fieldMap.claudeMdSections = JSON.stringify(parsed.claudeMdSections); }
+      if (parsed.networkPolicy !== undefined) { setClauses.push('network_policy = @networkPolicy'); fieldMap.networkPolicy = parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null; }
 
       if (setClauses.length === 0) {
         return this.get(name);

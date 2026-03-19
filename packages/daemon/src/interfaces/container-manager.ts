@@ -6,6 +6,10 @@ export interface ContainerSpawnConfig {
   env: Record<string, string>;
   ports?: { container: number; host: number }[];
   volumes?: { host: string; container: string }[];
+  /** Docker network name for network isolation */
+  networkName?: string;
+  /** Firewall script to execute after container start (iptables rules) */
+  firewallScript?: string;
 }
 
 export interface ExecResult {

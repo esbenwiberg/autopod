@@ -28,6 +28,8 @@ export interface Profile {
   mcpServers: InjectedMcpServer[];
   /** Additional CLAUDE.md sections for sessions using this profile */
   claudeMdSections: InjectedClaudeMdSection[];
+  /** Optional network isolation policy for containers */
+  networkPolicy: NetworkPolicy | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,6 +43,14 @@ export interface PageAssertion {
   selector: string;
   type: 'exists' | 'text_contains' | 'visible' | 'count';
   value?: string;
+}
+
+export interface NetworkPolicy {
+  enabled: boolean;
+  /** Additional hosts beyond defaults (api.anthropic.com, registry.npmjs.org, etc.) */
+  allowedHosts: string[];
+  /** If true, replace the default allowlist entirely (advanced) */
+  replaceDefaults?: boolean;
 }
 
 export interface EscalationConfig {

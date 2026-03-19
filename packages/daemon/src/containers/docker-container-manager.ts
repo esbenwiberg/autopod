@@ -52,6 +52,19 @@ export class DockerContainerManager implements ContainerManager {
       'Creating Docker container',
     );
 
+    // Network isolation: attach to named network + add NET_ADMIN for iptables
+    const hostConfig: Record<string, unknown> = {
+      Binds: binds.length > 0 ? binds : undefined,
+      PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
+      AutoRemove: false,
+    };
+
+    if (config.networkName) {
+      hostConfig.NetworkMode = config.networkName;
+      // NET_ADMIN required for iptables firewall rules inside the container
+      hostConfig.CapAdd = ['NET_ADMIN'];
+    }
+
     const container = await this.docker.createContainer({
       Image: config.image,
       name: containerName,
@@ -59,16 +72,23 @@ export class DockerContainerManager implements ContainerManager {
       Cmd: ['sleep', 'infinity'],
       WorkingDir: '/workspace',
       ExposedPorts: exposedPorts,
-      HostConfig: {
-        Binds: binds.length > 0 ? binds : undefined,
-        PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
-        AutoRemove: false,
-      },
+      HostConfig: hostConfig,
     });
 
     await container.start();
 
     this.logger.info({ containerId: container.id, containerName }, 'Docker container started');
+
+    // Apply firewall rules if provided
+    if (config.firewallScript) {
+      try {
+        await this.applyFirewall(container.id, config.firewallScript);
+      } catch (err) {
+        // Graceful degradation — log warning but don't fail the spawn
+        this.logger.warn({ err, containerId: container.id }, 'Failed to apply firewall rules, continuing without network isolation');
+      }
+    }
+
     return container.id;
   }
 
@@ -226,6 +246,31 @@ export class DockerContainerManager implements ContainerManager {
     this.logger.info({ containerId, command }, 'Streaming exec started');
 
     return { stdout: stdoutStream, stderr: stderrStream, exitCode, kill };
+  }
+
+  private async applyFirewall(containerId: string, script: string): Promise<void> {
+    // Write script to container
+    await this.writeFile(containerId, '/tmp/firewall.sh', script);
+
+    // Execute as root (iptables requires root)
+    const container = this.docker.getContainer(containerId);
+    const exec = await container.exec({
+      Cmd: ['sh', '/tmp/firewall.sh'],
+      AttachStdout: true,
+      AttachStderr: true,
+      User: 'root',
+    });
+
+    const stream = await exec.start({ hijack: true, stdin: false });
+    const { stdout, stderr } = await collectDemuxedOutput(stream, this.docker, 30_000);
+
+    const inspection = await exec.inspect();
+    if (inspection.ExitCode !== 0) {
+      this.logger.warn({ exitCode: inspection.ExitCode, stderr, stdout }, 'Firewall script exited with non-zero code');
+      throw new Error(`Firewall script failed with exit code ${inspection.ExitCode}`);
+    }
+
+    this.logger.info({ containerId, stdout: stdout.trim() }, 'Firewall rules applied');
   }
 }
 
