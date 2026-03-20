@@ -1,7 +1,7 @@
-import type { FastifyInstance } from 'fastify';
 import { AutopodError } from '@autopod/shared';
-import type { ProfileStore } from '../../profiles/index.js';
+import type { FastifyInstance } from 'fastify';
 import type { ImageBuilder } from '../../images/index.js';
+import type { ProfileStore } from '../../profiles/index.js';
 
 export function profileRoutes(
   app: FastifyInstance,

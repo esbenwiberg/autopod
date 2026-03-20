@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createActionAuditRepository } from './audit-repository.js';
 
 const PROFILE_NAME = 'test-profile';
@@ -150,7 +150,9 @@ describe('ActionAuditRepository', () => {
 
   it('multiple sessions do not leak across queries', () => {
     const otherSessionId = 'sess-002';
-    db.exec(`INSERT INTO sessions (id, profile_name, task) VALUES ('${otherSessionId}', '${PROFILE_NAME}', 'other task')`);
+    db.exec(
+      `INSERT INTO sessions (id, profile_name, task) VALUES ('${otherSessionId}', '${PROFILE_NAME}', 'other task')`,
+    );
 
     repo.insert(makeEntry({ actionName: 'action-a' }));
     repo.insert(makeEntry({ sessionId: otherSessionId, actionName: 'action-b' }));

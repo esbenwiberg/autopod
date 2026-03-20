@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
 import type { Profile, Session } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
 import { generateClaudeMd } from './claude-md-generator.js';
 
 function makeProfile(overrides?: Partial<Profile>): Profile {

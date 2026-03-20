@@ -8,7 +8,7 @@ export function withJsonOutput<T>(
   humanRenderer: (data: T) => void,
 ): void {
   if (opts.json) {
-    process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+    process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
   } else {
     humanRenderer(data);
   }

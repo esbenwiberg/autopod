@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
-import type { PrManager, CreatePrConfig, MergePrConfig } from '../interfaces/pr-manager.js';
-import { buildPrTitle, buildPrBody } from './pr-body-builder.js';
+import type { CreatePrConfig, MergePrConfig, PrManager } from '../interfaces/pr-manager.js';
+import { buildPrBody, buildPrTitle } from './pr-body-builder.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,11 +44,16 @@ export class GhPrManager implements PrManager {
     );
 
     const args = [
-      'pr', 'create',
-      '--head', config.branch,
-      '--base', config.baseBranch,
-      '--title', title,
-      '--body', body,
+      'pr',
+      'create',
+      '--head',
+      config.branch,
+      '--base',
+      config.baseBranch,
+      '--title',
+      title,
+      '--body',
+      body,
     ];
 
     try {
@@ -68,13 +73,18 @@ export class GhPrManager implements PrManager {
 
   async mergePr(config: MergePrConfig): Promise<void> {
     const args = [
-      'pr', 'merge', config.prUrl,
+      'pr',
+      'merge',
+      config.prUrl,
       config.squash ? '--squash' : '--merge',
       '--delete-branch',
       '--auto',
     ];
 
-    this.logger.info({ prUrl: config.prUrl, squash: config.squash ?? false }, 'Merging pull request');
+    this.logger.info(
+      { prUrl: config.prUrl, squash: config.squash ?? false },
+      'Merging pull request',
+    );
 
     try {
       await execFileAsync('gh', args, {

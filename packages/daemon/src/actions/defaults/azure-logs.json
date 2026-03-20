@@ -5,9 +5,18 @@
     "group": "azure-logs",
     "handler": "azure-logs",
     "params": {
-      "workspace_id": { "type": "string", "required": true, "description": "Log Analytics workspace ID" },
+      "workspace_id": {
+        "type": "string",
+        "required": true,
+        "description": "Log Analytics workspace ID"
+      },
       "query": { "type": "string", "required": true, "description": "KQL query" },
-      "timespan": { "type": "string", "required": false, "default": "PT1H", "description": "ISO 8601 duration (default: last hour)" }
+      "timespan": {
+        "type": "string",
+        "required": false,
+        "default": "PT1H",
+        "description": "ISO 8601 duration (default: last hour)"
+      }
     },
     "response": {
       "fields": ["tables"]
@@ -19,9 +28,18 @@
     "group": "azure-logs",
     "handler": "azure-logs",
     "params": {
-      "app_id": { "type": "string", "required": true, "description": "Application Insights app ID" },
+      "app_id": {
+        "type": "string",
+        "required": true,
+        "description": "Application Insights app ID"
+      },
       "query": { "type": "string", "required": true, "description": "KQL query" },
-      "timespan": { "type": "string", "required": false, "default": "PT1H", "description": "ISO 8601 duration (default: last hour)" }
+      "timespan": {
+        "type": "string",
+        "required": false,
+        "default": "PT1H",
+        "description": "ISO 8601 duration (default: last hour)"
+      }
     },
     "response": {
       "fields": ["tables"]
@@ -33,10 +51,23 @@
     "group": "azure-logs",
     "handler": "azure-logs",
     "params": {
-      "resource_group": { "type": "string", "required": true, "description": "Azure resource group" },
+      "resource_group": {
+        "type": "string",
+        "required": true,
+        "description": "Azure resource group"
+      },
       "container_app": { "type": "string", "required": true, "description": "Container app name" },
-      "timespan": { "type": "string", "required": false, "default": "PT1H", "description": "ISO 8601 duration (default: last hour)" },
-      "filter": { "type": "string", "required": false, "description": "Optional KQL filter expression" }
+      "timespan": {
+        "type": "string",
+        "required": false,
+        "default": "PT1H",
+        "description": "ISO 8601 duration (default: last hour)"
+      },
+      "filter": {
+        "type": "string",
+        "required": false,
+        "description": "Optional KQL filter expression"
+      }
     },
     "response": {
       "fields": ["tables"]

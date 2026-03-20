@@ -1,16 +1,16 @@
-import type { Command } from 'commander';
+import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
-import chalk from 'chalk';
-import { parse, stringify } from 'yaml';
 import type { Profile } from '@autopod/shared';
 import { createProfileSchema, updateProfileSchema } from '@autopod/shared';
+import chalk from 'chalk';
+import type { Command } from 'commander';
+import { parse, stringify } from 'yaml';
 import type { AutopodClient } from '../api/client.js';
-import { withSpinner } from '../output/spinner.js';
 import { withJsonOutput } from '../output/json.js';
-import { renderTable, type ColumnDef } from '../output/table.js';
+import { withSpinner } from '../output/spinner.js';
+import { type ColumnDef, renderTable } from '../output/table.js';
 
 const profileColumns: ColumnDef<Profile>[] = [
   { header: 'Name', key: 'name', width: 20 },
@@ -29,9 +29,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
     .option('--json', 'Output as JSON')
     .action(async (opts: { json?: boolean }) => {
       const client = getClient();
-      const profiles = await withSpinner('Fetching profiles...', () =>
-        client.listProfiles(),
-      );
+      const profiles = await withSpinner('Fetching profiles...', () => client.listProfiles());
 
       withJsonOutput(opts, profiles, (data) => {
         if (data.length === 0) {
@@ -48,9 +46,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
     .option('--json', 'Output as JSON')
     .action(async (name: string, opts: { json?: boolean }) => {
       const client = getClient();
-      const p = await withSpinner('Fetching profile...', () =>
-        client.getProfile(name),
-      );
+      const p = await withSpinner('Fetching profile...', () => client.getProfile(name));
 
       withJsonOutput(opts, p, (data) => {
         console.log(chalk.bold.cyan(`Profile: ${data.name}`));
@@ -60,7 +56,9 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Template:')}   ${data.template}`);
         console.log(`${chalk.bold('Build:')}      ${data.buildCommand}`);
         console.log(`${chalk.bold('Start:')}      ${data.startCommand}`);
-        console.log(`${chalk.bold('Health:')}     ${data.healthPath} (${data.healthTimeout}s timeout)`);
+        console.log(
+          `${chalk.bold('Health:')}     ${data.healthPath} (${data.healthTimeout}s timeout)`,
+        );
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
         console.log(`${chalk.bold('Max retries:')} ${data.maxValidationAttempts}`);
@@ -68,12 +66,16 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           console.log(`${chalk.bold('Extends:')}    ${data.extends}`);
         }
         if (data.validationPages.length > 0) {
-          console.log(`${chalk.bold('Pages:')}      ${data.validationPages.map((p) => p.path).join(', ')}`);
+          console.log(
+            `${chalk.bold('Pages:')}      ${data.validationPages.map((p) => p.path).join(', ')}`,
+          );
         }
         if (data.mcpServers && data.mcpServers.length > 0) {
           console.log(`${chalk.bold('MCP servers:')}`);
           for (const s of data.mcpServers) {
-            console.log(`  ${chalk.cyan(s.name)} ${chalk.dim(s.url)}${s.description ? ` — ${s.description}` : ''}`);
+            console.log(
+              `  ${chalk.cyan(s.name)} ${chalk.dim(s.url)}${s.description ? ` — ${s.description}` : ''}`,
+            );
           }
         }
         if (data.claudeMdSections && data.claudeMdSections.length > 0) {
@@ -84,7 +86,9 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           }
         }
         if (data.warmImageTag) {
-          console.log(`${chalk.bold('Warm image:')} ${data.warmImageTag} (${data.warmImageBuiltAt ?? 'unknown'})`);
+          console.log(
+            `${chalk.bold('Warm image:')} ${data.warmImageTag} (${data.warmImageBuiltAt ?? 'unknown'})`,
+          );
         }
       });
     });
@@ -126,9 +130,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       }
 
       const parsed = createProfileSchema.parse(edited);
-      const created = await withSpinner('Creating profile...', () =>
-        client.createProfile(parsed),
-      );
+      const created = await withSpinner('Creating profile...', () => client.createProfile(parsed));
       console.log(chalk.green(`Profile "${created.name}" created.`));
     });
 
@@ -140,7 +142,13 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       const existing = await client.getProfile(name);
 
       // Strip server-managed fields for editing
-      const { createdAt: _c, updatedAt: _u, warmImageTag: _w, warmImageBuiltAt: _wb, ...editable } = existing;
+      const {
+        createdAt: _c,
+        updatedAt: _u,
+        warmImageTag: _w,
+        warmImageBuiltAt: _wb,
+        ...editable
+      } = existing;
 
       const edited = await openInEditor(editable);
       if (!edited) {
@@ -150,9 +158,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
 
       const { name: _n, ...updates } = edited as Record<string, unknown>;
       const parsed = updateProfileSchema.parse(updates);
-      await withSpinner('Updating profile...', () =>
-        client.updateProfile(name, parsed),
-      );
+      await withSpinner('Updating profile...', () => client.updateProfile(name, parsed));
       console.log(chalk.green(`Profile "${name}" updated.`));
     });
 

@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Command } from 'commander';
-import { registerSessionCommands } from './session.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
+import { registerSessionCommands } from './session.js';
 
 // Mock ora to avoid TTY issues in tests
 vi.mock('ora', () => ({

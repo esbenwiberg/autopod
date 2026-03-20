@@ -1,13 +1,18 @@
-import type { ActionDefinition, ActionPolicy, ActionRequest, ActionResponse } from '@autopod/shared';
+import type {
+  ActionDefinition,
+  ActionPolicy,
+  ActionRequest,
+  ActionResponse,
+} from '@autopod/shared';
 import { processContentDeep } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionRegistry } from './action-registry.js';
 import type { ActionAuditRepository } from './audit-repository.js';
-import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
-import { createGitHubHandler } from './handlers/github-handler.js';
+import { createGenericHttpHandler } from './generic-http-handler.js';
 import { createAdoHandler } from './handlers/ado-handler.js';
 import { createAzureLogsHandler } from './handlers/azure-logs-handler.js';
-import { createGenericHttpHandler } from './generic-http-handler.js';
+import { createGitHubHandler } from './handlers/github-handler.js';
+import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
 
 export interface ActionEngine {
   /** Execute an action for a session */
@@ -44,18 +49,33 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       const action = registry.getAction(actionName, policy);
       if (!action) {
         log.warn({ sessionId, actionName }, 'Action not found or not enabled');
-        return { success: false, error: `Action '${actionName}' not found or not enabled for this profile`, sanitized: false, quarantined: false };
+        return {
+          success: false,
+          error: `Action '${actionName}' not found or not enabled for this profile`,
+          sanitized: false,
+          quarantined: false,
+        };
       }
 
       // 2. Check overrides (approval required, resource restrictions)
       const override = (policy.actionOverrides ?? []).find((o) => o.action === actionName);
       if (override?.requiresApproval) {
-        return { success: false, error: `Action '${actionName}' requires human approval`, sanitized: false, quarantined: false };
+        return {
+          success: false,
+          error: `Action '${actionName}' requires human approval`,
+          sanitized: false,
+          quarantined: false,
+        };
       }
       if (override?.allowedResources?.length) {
         const resource = (params.repo as string) ?? (params.org as string);
         if (resource && !override.allowedResources.includes(resource)) {
-          return { success: false, error: `Action '${actionName}' not allowed for resource '${resource}'`, sanitized: false, quarantined: false };
+          return {
+            success: false,
+            error: `Action '${actionName}' not allowed for resource '${resource}'`,
+            sanitized: false,
+            quarantined: false,
+          };
         }
       }
 
@@ -71,7 +91,12 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       // 5. Dispatch to handler
       const handler = handlers[action.handler];
       if (!handler) {
-        return { success: false, error: `No handler registered for '${action.handler}'`, sanitized: false, quarantined: false };
+        return {
+          success: false,
+          error: `No handler registered for '${action.handler}'`,
+          sanitized: false,
+          quarantined: false,
+        };
       }
 
       let rawData: unknown;
@@ -94,7 +119,12 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       }
 
       // 6. Process content (quarantine → PII sanitize)
-      const { result: processedData, sanitized, quarantined, threats } = processContentDeep(
+      const {
+        result: processedData,
+        sanitized,
+        quarantined,
+        threats,
+      } = processContentDeep(
         rawData,
         {
           sanitization: policy.sanitization,
@@ -115,10 +145,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
         quarantineScore: threatScore,
       });
 
-      log.info(
-        { sessionId, actionName, sanitized, quarantined, threatScore },
-        'Action executed',
-      );
+      log.info({ sessionId, actionName, sanitized, quarantined, threatScore }, 'Action executed');
 
       return { success: true, data: processedData, sanitized, quarantined };
     },
@@ -156,7 +183,10 @@ function validateParams(action: ActionDefinition, params: Record<string, unknown
   return null;
 }
 
-function applyDefaults(action: ActionDefinition, params: Record<string, unknown>): Record<string, unknown> {
+function applyDefaults(
+  action: ActionDefinition,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
   const resolved = { ...params };
   for (const [name, def] of Object.entries(action.params)) {
     if (resolved[name] === undefined && def.default !== undefined) {

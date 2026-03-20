@@ -1,5 +1,5 @@
-import chalk from 'chalk';
 import type { SessionStatus } from '@autopod/shared';
+import chalk from 'chalk';
 
 interface StatusStyle {
   color: (text: string) => string;

@@ -41,10 +41,7 @@ export function sanitizeDeep(
   config: DataSanitizationConfig,
   extraRedactFields?: string[],
 ): unknown {
-  const redactFieldSet = new Set([
-    ...REDACT_FIELD_NAMES,
-    ...(extraRedactFields ?? []),
-  ]);
+  const redactFieldSet = new Set([...REDACT_FIELD_NAMES, ...(extraRedactFields ?? [])]);
 
   return walk(obj, config, redactFieldSet);
 }

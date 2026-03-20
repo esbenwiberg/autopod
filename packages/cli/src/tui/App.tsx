@@ -1,11 +1,11 @@
-import React, { createContext, useContext, useCallback, useState, useRef, useMemo } from 'react';
-import { Box, Text } from 'ink';
 import type { AgentEvent, SystemEvent } from '@autopod/shared';
+import { Box, Text } from 'ink';
+import React, { createContext, useContext, useCallback, useState, useRef, useMemo } from 'react';
+import { AutopodClient } from '../api/client.js';
+import { Dashboard } from './Dashboard.js';
 import { useSessionState } from './hooks/useSessionState.js';
 import type { UseSessionStateReturn } from './hooks/useSessionState.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
-import { Dashboard } from './Dashboard.js';
-import { AutopodClient } from '../api/client.js';
 
 export interface DashboardConfig {
   daemonUrl: string;
@@ -35,10 +35,14 @@ interface AppProps {
 }
 
 export function App({ config }: AppProps): React.ReactElement {
-  const client = useMemo(() => new AutopodClient({
-    baseUrl: config.daemonUrl,
-    getToken: () => Promise.resolve(config.token),
-  }), [config.daemonUrl, config.token]);
+  const client = useMemo(
+    () =>
+      new AutopodClient({
+        baseUrl: config.daemonUrl,
+        getToken: () => Promise.resolve(config.token),
+      }),
+    [config.daemonUrl, config.token],
+  );
 
   const [agentEvents, setAgentEvents] = useState<Map<string, AgentEvent[]>>(new Map());
   const sessionState = useSessionState({
@@ -81,7 +85,7 @@ export function App({ config }: AppProps): React.ReactElement {
     // State is preserved; we just show the connection status change
   }, []);
 
-  const wsUrl = config.daemonUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws';
+  const wsUrl = `${config.daemonUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/ws`;
 
   const ws = useWebSocket({
     url: wsUrl,
@@ -95,11 +99,7 @@ export function App({ config }: AppProps): React.ReactElement {
     <ClientContext.Provider value={client}>
       <SessionStateContext.Provider value={sessionState}>
         <ErrorBoundary>
-          <Dashboard
-            sessionState={sessionState}
-            ws={ws}
-            agentEvents={agentEvents}
-          />
+          <Dashboard sessionState={sessionState} ws={ws} agentEvents={agentEvents} />
         </ErrorBoundary>
       </SessionStateContext.Provider>
     </ClientContext.Provider>
@@ -125,7 +125,9 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
     if (this.state.error) {
       return (
         <Box flexDirection="column" paddingX={1}>
-          <Text color="red" bold>Dashboard Error</Text>
+          <Text color="red" bold>
+            Dashboard Error
+          </Text>
           <Text color="red">{this.state.error}</Text>
           <Text dimColor>Press Ctrl+C to exit</Text>
         </Box>

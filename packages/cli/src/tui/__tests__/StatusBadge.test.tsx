@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { render } from 'ink-testing-library';
-import { StatusBadge } from '../components/StatusBadge.js';
 import type { SessionStatus } from '@autopod/shared';
+import { render } from 'ink-testing-library';
+import { describe, expect, it } from 'vitest';
+import { StatusBadge } from '../components/StatusBadge.js';
 
 const ALL_STATUSES: SessionStatus[] = [
   'queued',

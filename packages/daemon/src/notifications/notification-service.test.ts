@@ -1,18 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Logger } from 'pino';
 import type {
-  SystemEvent,
-  Session,
-  ValidationCompletedEvent,
   EscalationCreatedEvent,
+  Session,
   SessionStatusChangedEvent,
+  SystemEvent,
+  ValidationCompletedEvent,
 } from '@autopod/shared';
+import type { Logger } from 'pino';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventBus } from '../sessions/event-bus.js';
-import type { TeamsAdapter } from './teams-adapter.js';
-import type { RateLimiter } from './rate-limiter.js';
-import type { NotificationConfig } from './types.js';
 import type { SessionLookup } from './notification-service.js';
 import { createNotificationService } from './notification-service.js';
+import type { RateLimiter } from './rate-limiter.js';
+import type { TeamsAdapter } from './teams-adapter.js';
+import type { NotificationConfig } from './types.js';
 
 function createMockLogger(): Logger {
   return {
@@ -37,11 +37,15 @@ function createMockEventBus(): EventBus & { emit: (event: SystemEvent) => number
     },
     subscribe(subscriber: (event: SystemEvent) => void): () => void {
       subscribers.add(subscriber);
-      return () => { subscribers.delete(subscriber); };
+      return () => {
+        subscribers.delete(subscriber);
+      };
     },
     subscribeToSession(_sessionId: string, subscriber: (event: SystemEvent) => void): () => void {
       subscribers.add(subscriber);
-      return () => { subscribers.delete(subscriber); };
+      return () => {
+        subscribers.delete(subscriber);
+      };
     },
   };
 }
@@ -98,13 +102,25 @@ describe('NotificationService', () => {
     config = {
       teams: {
         webhookUrl: 'https://webhook.example.com',
-        enabledEvents: ['session_validated', 'session_failed', 'session_needs_input', 'session_error'],
+        enabledEvents: [
+          'session_validated',
+          'session_failed',
+          'session_needs_input',
+          'session_error',
+        ],
       },
     };
   });
 
   function createService() {
-    return createNotificationService({ eventBus, config, teamsAdapter, rateLimiter, sessionLookup, logger });
+    return createNotificationService({
+      eventBus,
+      config,
+      teamsAdapter,
+      rateLimiter,
+      sessionLookup,
+      logger,
+    });
   }
 
   describe('start/stop', () => {
@@ -141,7 +157,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'pass',
             build: { status: 'pass', output: '', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,
@@ -170,7 +191,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'pass',
             build: { status: 'pass', output: '', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,
@@ -185,8 +211,8 @@ describe('NotificationService', () => {
         expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
       });
 
-      const card = vi.mocked(teamsAdapter.send).mock.calls[0]![0]!;
-      expect(card.body[0]!.text).toContain('Validated');
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0]!;
+      expect(card.body[0]?.text).toContain('Validated');
     });
 
     it('sends failed card on fail', async () => {
@@ -204,7 +230,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'fail',
             build: { status: 'fail', output: 'Error', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,
@@ -218,8 +249,8 @@ describe('NotificationService', () => {
         expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
       });
 
-      const card = vi.mocked(teamsAdapter.send).mock.calls[0]![0]!;
-      expect(card.body[0]!.text).toContain('Failed');
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0]!;
+      expect(card.body[0]?.text).toContain('Failed');
     });
   });
 
@@ -247,8 +278,8 @@ describe('NotificationService', () => {
         expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
       });
 
-      const card = vi.mocked(teamsAdapter.send).mock.calls[0]![0]!;
-      expect(card.body[0]!.text).toContain('Input');
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0]!;
+      expect(card.body[0]?.text).toContain('Input');
     });
 
     it('does NOT send for ask_ai escalation', async () => {
@@ -318,8 +349,8 @@ describe('NotificationService', () => {
         expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
       });
 
-      const card = vi.mocked(teamsAdapter.send).mock.calls[0]![0]!;
-      expect(card.body[0]!.text).toContain('Error');
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0]!;
+      expect(card.body[0]?.text).toContain('Error');
     });
 
     it('does not send for non-failed status changes', async () => {
@@ -391,7 +422,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'pass',
             build: { status: 'pass', output: '', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,
@@ -431,7 +467,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'pass',
             build: { status: 'pass', output: '', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,
@@ -467,7 +508,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'pass',
             build: { status: 'pass', output: '', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,
@@ -496,7 +542,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'pass',
             build: { status: 'pass', output: '', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,
@@ -530,7 +581,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'pass',
             build: { status: 'pass', output: '', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,
@@ -569,7 +625,12 @@ describe('NotificationService', () => {
           smoke: {
             status: 'pass',
             build: { status: 'pass', output: '', duration: 1000 },
-            health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 100,
+            },
             pages: [],
           },
           taskReview: null,

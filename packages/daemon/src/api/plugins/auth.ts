@@ -1,5 +1,5 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { AuthError } from '@autopod/shared';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AuthModule } from '../../interfaces/index.js';
 
 export function authPlugin(app: FastifyInstance, authModule: AuthModule): void {

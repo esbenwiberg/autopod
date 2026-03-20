@@ -9,12 +9,7 @@ const KNOWN_MODELS = ['opus', 'sonnet', 'haiku', 'gpt-5.2', 'codex'];
 const KNOWN_RUNTIMES = ['claude', 'codex'];
 const VALID_TEMPLATES: StackTemplate[] = ['node22', 'node22-pw', 'dotnet9', 'python312', 'custom'];
 
-const DANGEROUS_PATTERNS = [
-  /rm\s+-rf\s+\//,
-  /\bsudo\b/,
-  /curl\s.*\|\s*bash/,
-  /wget\s.*\|\s*bash/,
-];
+const DANGEROUS_PATTERNS = [/rm\s+-rf\s+\//, /\bsudo\b/, /curl\s.*\|\s*bash/, /wget\s.*\|\s*bash/];
 
 export function validateProfile(input: Record<string, unknown>): ProfileValidationResult {
   const errors: string[] = [];
@@ -26,7 +21,9 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   } else if (name.length > 50) {
     errors.push('name must be 50 characters or fewer');
   } else if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
-    errors.push('name must be lowercase alphanumeric with hyphens, cannot start or end with a hyphen');
+    errors.push(
+      'name must be lowercase alphanumeric with hyphens, cannot start or end with a hyphen',
+    );
   }
 
   // Repo URL
@@ -102,7 +99,11 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   // Max validation attempts
   const maxValidationAttempts = input.maxValidationAttempts;
   if (maxValidationAttempts !== undefined) {
-    if (typeof maxValidationAttempts !== 'number' || maxValidationAttempts < 1 || maxValidationAttempts > 10) {
+    if (
+      typeof maxValidationAttempts !== 'number' ||
+      maxValidationAttempts < 1 ||
+      maxValidationAttempts > 10
+    ) {
       errors.push('maxValidationAttempts must be between 1 and 10');
     }
   }

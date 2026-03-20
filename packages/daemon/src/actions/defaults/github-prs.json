@@ -9,7 +9,17 @@
       "pr_number": { "type": "number", "required": true, "description": "PR number" }
     },
     "response": {
-      "fields": ["title", "body", "state", "labels", "head", "base", "mergeable", "created_at", "updated_at"],
+      "fields": [
+        "title",
+        "body",
+        "state",
+        "labels",
+        "head",
+        "base",
+        "mergeable",
+        "created_at",
+        "updated_at"
+      ],
       "redactFields": ["user.login", "user.email", "merged_by.login"]
     }
   },
@@ -36,7 +46,11 @@
     "params": {
       "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
       "pr_number": { "type": "number", "required": true, "description": "PR number" },
-      "file_path": { "type": "string", "required": false, "description": "Filter diff to a specific file path" }
+      "file_path": {
+        "type": "string",
+        "required": false,
+        "description": "Filter diff to a specific file path"
+      }
     },
     "response": {
       "fields": ["filename", "status", "additions", "deletions", "patch"]

@@ -1,5 +1,5 @@
-import { DefaultAzureCredential } from '@azure/identity';
 import { ContainerRegistryClient } from '@azure/container-registry';
+import { DefaultAzureCredential } from '@azure/identity';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 

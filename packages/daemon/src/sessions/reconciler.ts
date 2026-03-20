@@ -1,8 +1,8 @@
-import type { Logger } from 'pino';
 import type { Session } from '@autopod/shared';
+import type { Logger } from 'pino';
 import type { AciContainerManager } from '../containers/aci-container-manager.js';
-import type { SessionRepository } from './session-repository.js';
 import type { EventBus } from './event-bus.js';
+import type { SessionRepository } from './session-repository.js';
 
 export interface ReconcilerDependencies {
   sessionRepo: SessionRepository;
@@ -23,9 +23,7 @@ export async function reconcileAciSessions(deps: ReconcilerDependencies): Promis
 
   // Find all running ACI sessions
   const runningSessions = sessionRepo.list({ status: 'running' });
-  const aciSessions = runningSessions.filter(
-    (s) => s.executionTarget === 'aci' && s.containerId,
-  );
+  const aciSessions = runningSessions.filter((s) => s.executionTarget === 'aci' && s.containerId);
 
   if (aciSessions.length === 0) {
     logger.info('No ACI sessions to reconcile');
@@ -44,12 +42,10 @@ export async function reconcileAciSessions(deps: ReconcilerDependencies): Promis
   }
 }
 
-async function reconcileSession(
-  session: Session,
-  deps: ReconcilerDependencies,
-): Promise<void> {
+async function reconcileSession(session: Session, deps: ReconcilerDependencies): Promise<void> {
   const { aciContainerManager, sessionRepo, eventBus, onReconnected, logger } = deps;
-  const containerId = session.containerId!;
+  if (!session.containerId) return;
+  const containerId = session.containerId;
 
   const status = await aciContainerManager.getStatus(containerId);
 
@@ -121,9 +117,7 @@ function markSessionFailed(
         status: 'killed',
         model: session.model,
         runtime: session.runtime,
-        duration: session.startedAt
-          ? Date.now() - new Date(session.startedAt).getTime()
-          : null,
+        duration: session.startedAt ? Date.now() - new Date(session.startedAt).getTime() : null,
         filesChanged: session.filesChanged,
         createdAt: session.createdAt,
       },

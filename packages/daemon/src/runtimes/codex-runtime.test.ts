@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import pino from 'pino';
 import { PassThrough } from 'node:stream';
+import pino from 'pino';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { CodexRuntime } from './codex-runtime.js';
 
@@ -21,14 +21,14 @@ function createMockHandle(options?: { exitCode?: number }): StreamingExecResult 
     kill: vi.fn(async () => {
       stdout.destroy();
       stderr.destroy();
-      resolveExitCode!(options?.exitCode ?? 137);
+      resolveExitCode?.(options?.exitCode ?? 137);
     }),
   };
 
   // Helper to finish the stream: push null on stdout and resolve exitCode
   (handle as any).finish = (code?: number) => {
     stdout.push(null);
-    resolveExitCode!(code ?? options?.exitCode ?? 0);
+    resolveExitCode?.(code ?? options?.exitCode ?? 0);
   };
 
   return handle;
@@ -63,11 +63,7 @@ describe('CodexRuntime', () => {
         containerId: 'container-123',
         env: {},
       });
-      expect(args).toEqual([
-        'exec', 'Fix the bug',
-        '--model', 'o3-mini',
-        '--full-auto', '--json',
-      ]);
+      expect(args).toEqual(['exec', 'Fix the bug', '--model', 'o3-mini', '--full-auto', '--json']);
     });
   });
 
@@ -96,8 +92,8 @@ describe('CodexRuntime', () => {
       }
 
       expect(events).toHaveLength(2);
-      expect(events[0]!.type).toBe('status');
-      expect(events[1]!.type).toBe('complete');
+      expect(events[0]?.type).toBe('status');
+      expect(events[1]?.type).toBe('complete');
 
       expect(cm.execStreaming).toHaveBeenCalledWith(
         'container-123',
@@ -127,7 +123,7 @@ describe('CodexRuntime', () => {
         events.push(event);
       }
 
-      const errorEvent = events.find(e => e.type === 'error');
+      const errorEvent = events.find((e) => e.type === 'error');
       expect(errorEvent).toBeDefined();
       expect((errorEvent as any).message).toContain('exited with code 1');
       expect((errorEvent as any).fatal).toBe(true);
@@ -149,7 +145,9 @@ describe('CodexRuntime', () => {
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
-      })) { /* consume */ }
+      })) {
+        /* consume */
+      }
 
       expect((runtime as any).handles.has('track-test')).toBe(false);
     });
@@ -169,7 +167,11 @@ describe('CodexRuntime', () => {
       }, 10);
 
       const events = [];
-      for await (const event of runtime.resume('sess-1', 'Fix the validation errors', 'container-123')) {
+      for await (const event of runtime.resume(
+        'sess-1',
+        'Fix the validation errors',
+        'container-123',
+      )) {
         events.push(event);
       }
 
@@ -179,7 +181,7 @@ describe('CodexRuntime', () => {
         expect.any(Object),
       );
       expect(events).toHaveLength(1);
-      expect(events[0]!.type).toBe('complete');
+      expect(events[0]?.type).toBe('complete');
     });
   });
 

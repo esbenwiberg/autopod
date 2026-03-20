@@ -1,6 +1,11 @@
 import type { ActionDefinition, AuthConfig } from '@autopod/shared';
 import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
-import { fetchWithTimeout, pickFields, pickFieldsArray, resolveResultPath } from './handlers/handler.js';
+import {
+  fetchWithTimeout,
+  pickFields,
+  pickFieldsArray,
+  resolveResultPath,
+} from './handlers/handler.js';
 
 export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
   const { logger, getSecret } = config;

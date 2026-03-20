@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Session, SessionStatus, SystemEvent } from '@autopod/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface UseSessionStateOptions {
   daemonUrl: string;
@@ -17,7 +17,13 @@ export interface UseSessionStateReturn {
   handleEvent: (event: SystemEvent) => void;
 }
 
-const ACTIVE_STATUSES: SessionStatus[] = ['running', 'awaiting_input', 'validating', 'provisioning', 'queued'];
+const ACTIVE_STATUSES: SessionStatus[] = [
+  'running',
+  'awaiting_input',
+  'validating',
+  'provisioning',
+  'queued',
+];
 
 function isActive(status: SessionStatus): boolean {
   return ACTIVE_STATUSES.includes(status);
@@ -155,7 +161,9 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
         setSessions((prev) =>
           sortSessions(
             prev.map((s) =>
-              s.id === event.sessionId ? { ...s, status: event.newStatus, updatedAt: event.timestamp } : s,
+              s.id === event.sessionId
+                ? { ...s, status: event.newStatus, updatedAt: event.timestamp }
+                : s,
             ),
           ),
         );
@@ -166,7 +174,12 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
           sortSessions(
             prev.map((s) =>
               s.id === event.sessionId
-                ? { ...s, status: event.finalStatus, completedAt: event.timestamp, updatedAt: event.timestamp }
+                ? {
+                    ...s,
+                    status: event.finalStatus,
+                    completedAt: event.timestamp,
+                    updatedAt: event.timestamp,
+                  }
                 : s,
             ),
           ),

@@ -1,6 +1,6 @@
-import type { SessionBridge } from '../session-bridge.js';
 import { generateId } from '@autopod/shared';
 import type { EscalationRequest } from '@autopod/shared';
+import type { SessionBridge } from '../session-bridge.js';
 
 export interface AskAiInput {
   question: string;

@@ -21,7 +21,12 @@
     "params": {
       "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
       "query": { "type": "string", "required": true, "description": "Search query" },
-      "state": { "type": "string", "required": false, "enum": ["open", "closed", "all"], "default": "open" },
+      "state": {
+        "type": "string",
+        "required": false,
+        "enum": ["open", "closed", "all"],
+        "default": "open"
+      },
       "max_results": { "type": "number", "required": false, "default": 10 }
     },
     "response": {

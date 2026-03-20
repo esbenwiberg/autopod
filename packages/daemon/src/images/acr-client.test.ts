@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock Azure SDK modules — must be before import
 const mockGetToken = vi.fn().mockResolvedValue({ token: 'mock-token-xyz' });
@@ -23,7 +23,11 @@ import { AcrClient } from './acr-client.js';
 
 function createMockDocker() {
   const followProgressCb = vi.fn(
-    (_stream: unknown, onComplete: (err: Error | null) => void, onProgress?: (event: any) => void) => {
+    (
+      _stream: unknown,
+      onComplete: (err: Error | null) => void,
+      onProgress?: (event: any) => void,
+    ) => {
       if (onProgress) {
         onProgress({ aux: { Digest: 'sha256:deadbeef' } });
       }

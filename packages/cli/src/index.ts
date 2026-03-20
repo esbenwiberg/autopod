@@ -1,14 +1,14 @@
 import { Command } from 'commander';
 import { AutopodClient } from './api/client.js';
-import * as configStore from './config/config-store.js';
 import { getToken, initMsal } from './auth/token-manager.js';
-import { handleError } from './utils/error-handler.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerDaemonCommands } from './commands/daemon.js';
 import { registerProfileCommands } from './commands/profile.js';
 import { registerSessionCommands } from './commands/session.js';
 import { registerValidateCommands } from './commands/validate.js';
 import { registerWatchCommand } from './commands/watch.js';
+import * as configStore from './config/config-store.js';
+import { handleError } from './utils/error-handler.js';
 
 const program = new Command();
 

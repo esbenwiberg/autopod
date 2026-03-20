@@ -1,9 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import {
-  PII_PATTERNS,
-  INJECTION_PATTERNS,
-  REDACT_FIELD_NAMES,
-} from './patterns.js';
+import { describe, expect, it } from 'vitest';
+import { INJECTION_PATTERNS, PII_PATTERNS, REDACT_FIELD_NAMES } from './patterns.js';
 
 // Helper: find a PII pattern by name
 const pii = (name: string) => {
@@ -34,19 +30,19 @@ describe('PII_PATTERNS', () => {
     });
 
     it('matches GitHub personal access tokens (ghp_)', () => {
-      expect(matches(regex, 'ghp_' + 'a'.repeat(36))).toBe(true);
+      expect(matches(regex, `ghp_${'a'.repeat(36)}`)).toBe(true);
     });
 
     it('matches GitHub OAuth tokens (gho_)', () => {
-      expect(matches(regex, 'gho_' + 'B'.repeat(36))).toBe(true);
+      expect(matches(regex, `gho_${'B'.repeat(36)}`)).toBe(true);
     });
 
     it('matches GitHub server tokens (ghs_)', () => {
-      expect(matches(regex, 'ghs_' + 'x'.repeat(36))).toBe(true);
+      expect(matches(regex, `ghs_${'x'.repeat(36)}`)).toBe(true);
     });
 
     it('matches GitHub refresh tokens (ghr_)', () => {
-      expect(matches(regex, 'ghr_' + '1'.repeat(36))).toBe(true);
+      expect(matches(regex, `ghr_${'1'.repeat(36)}`)).toBe(true);
     });
 
     it('matches Slack bot tokens (xoxb-)', () => {
@@ -118,7 +114,7 @@ describe('PII_PATTERNS', () => {
     const { regex, replacement, presets } = pii('azure-connection-string');
 
     it('matches AccountKey with base64 value', () => {
-      const key = 'AccountKey=' + 'a'.repeat(44);
+      const key = `AccountKey=${'a'.repeat(44)}`;
       expect(matches(regex, key)).toBe(true);
     });
 
@@ -251,9 +247,7 @@ describe('PII_PATTERNS', () => {
     });
 
     it('relaxed preset only includes api-key, aws-access-key, azure-connection-string', () => {
-      const relaxed = PII_PATTERNS.filter((p) => p.presets.includes('relaxed')).map(
-        (p) => p.name,
-      );
+      const relaxed = PII_PATTERNS.filter((p) => p.presets.includes('relaxed')).map((p) => p.name);
       expect(relaxed).toEqual(
         expect.arrayContaining(['api-key', 'aws-access-key', 'azure-connection-string']),
       );

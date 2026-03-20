@@ -1,6 +1,6 @@
-import React from 'react';
-import { Box, Text } from 'ink';
 import type { Session } from '@autopod/shared';
+import { Box, Text } from 'ink';
+import type React from 'react';
 import type { ColumnWidths } from '../utils/layout.js';
 import { truncate } from '../utils/truncate.js';
 import { StatusBadge } from './StatusBadge.js';

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import type React from 'react';
+import { useState } from 'react';
 
 interface ListPickerProps<T> {
   title: string;
@@ -41,7 +42,9 @@ export function ListPicker<T>({
   if (items.length === 0) {
     return (
       <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
-        <Text bold color="cyan">{title}</Text>
+        <Text bold color="cyan">
+          {title}
+        </Text>
         <Text dimColor>No items available</Text>
         <Text dimColor>Esc to close</Text>
       </Box>
@@ -49,14 +52,19 @@ export function ListPicker<T>({
   }
 
   // Compute scroll window
-  const windowStart = Math.max(0, Math.min(selectedIndex - Math.floor(maxVisible / 2), items.length - maxVisible));
+  const windowStart = Math.max(
+    0,
+    Math.min(selectedIndex - Math.floor(maxVisible / 2), items.length - maxVisible),
+  );
   const windowEnd = Math.min(items.length, windowStart + maxVisible);
   const visibleItems = items.slice(windowStart, windowEnd);
 
   return (
     <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
-      <Text bold color="cyan">{title}</Text>
-      {windowStart > 0 && <Text dimColor>  ↑ {windowStart} more</Text>}
+      <Text bold color="cyan">
+        {title}
+      </Text>
+      {windowStart > 0 && <Text dimColor> ↑ {windowStart} more</Text>}
       {visibleItems.map((item, i) => {
         const realIndex = windowStart + i;
         const isSelected = realIndex === selectedIndex;
@@ -67,7 +75,7 @@ export function ListPicker<T>({
           </Box>
         );
       })}
-      {windowEnd < items.length && <Text dimColor>  ↓ {items.length - windowEnd} more</Text>}
+      {windowEnd < items.length && <Text dimColor> ↓ {items.length - windowEnd} more</Text>}
       <Text dimColor>↑↓ navigate, Enter to select, Esc to cancel</Text>
     </Box>
   );

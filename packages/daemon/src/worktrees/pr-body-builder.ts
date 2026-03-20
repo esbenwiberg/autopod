@@ -29,7 +29,16 @@ export function buildPrTitle(task: string): string {
 }
 
 export function buildPrBody(config: PrBodyConfig): string {
-  const { task, sessionId, profileName, validationResult, filesChanged, linesAdded, linesRemoved, previewUrl } = config;
+  const {
+    task,
+    sessionId,
+    profileName,
+    validationResult,
+    filesChanged,
+    linesAdded,
+    linesRemoved,
+    previewUrl,
+  } = config;
 
   const sections: string[] = [];
 
@@ -41,17 +50,19 @@ export function buildPrBody(config: PrBodyConfig): string {
     const v = validationResult;
     const lines: string[] = ['## Validation'];
 
-    const icon = (status: string) => status === 'pass' ? '✅' : '❌';
+    const icon = (status: string) => (status === 'pass' ? '✅' : '❌');
 
-    lines.push(`\n| Phase | Status |`);
-    lines.push(`|-------|--------|`);
+    lines.push('\n| Phase | Status |');
+    lines.push('|-------|--------|');
     lines.push(`| Build | ${icon(v.smoke.build.status)} ${v.smoke.build.status} |`);
     lines.push(`| Health check | ${icon(v.smoke.health.status)} ${v.smoke.health.status} |`);
 
     if (v.smoke.pages.length > 0) {
       const passed = v.smoke.pages.filter((p: { status: string }) => p.status === 'pass').length;
       const pageStatus = passed === v.smoke.pages.length ? 'pass' : 'fail';
-      lines.push(`| Page validation | ${icon(pageStatus)} ${passed}/${v.smoke.pages.length} pages passed |`);
+      lines.push(
+        `| Page validation | ${icon(pageStatus)} ${passed}/${v.smoke.pages.length} pages passed |`,
+      );
     }
 
     if (v.taskReview) {
@@ -61,15 +72,15 @@ export function buildPrBody(config: PrBodyConfig): string {
       }
     }
 
-    lines.push(`\n**Overall: ${icon(v.overall)} ${v.overall}** (attempt ${v.attempt}, ${formatDuration(v.duration)})`);
+    lines.push(
+      `\n**Overall: ${icon(v.overall)} ${v.overall}** (attempt ${v.attempt}, ${formatDuration(v.duration)})`,
+    );
     sections.push(lines.join('\n'));
   }
 
   // Stats
   sections.push(
-    `## Stats\n\n` +
-    `- **Files changed:** ${filesChanged}\n` +
-    `- **Lines:** +${linesAdded} / -${linesRemoved}`,
+    `## Stats\n\n- **Files changed:** ${filesChanged}\n- **Lines:** +${linesAdded} / -${linesRemoved}`,
   );
 
   // Screenshots
@@ -87,9 +98,7 @@ export function buildPrBody(config: PrBodyConfig): string {
 
   // Footer
   sections.push(
-    `---\n` +
-    `🤖 Created by [autopod](https://github.com/esbenwiberg/autopod) ` +
-    `session \`${sessionId}\` (profile: \`${profileName}\`)`,
+    `---\n🤖 Created by [autopod](https://github.com/esbenwiberg/autopod) session \`${sessionId}\` (profile: \`${profileName}\`)`,
   );
 
   return sections.join('\n\n');

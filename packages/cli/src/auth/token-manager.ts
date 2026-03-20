@@ -1,6 +1,10 @@
 import { AuthError } from '@autopod/shared';
 import type { AuthToken } from '@autopod/shared';
-import { readCredentials, writeCredentials, deleteCredentials } from '../config/credential-store.js';
+import {
+  deleteCredentials,
+  readCredentials,
+  writeCredentials,
+} from '../config/credential-store.js';
 import { MsalClient } from './msal-client.js';
 
 let msalClient: MsalClient | null = null;

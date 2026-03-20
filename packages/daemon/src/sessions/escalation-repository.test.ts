@@ -1,13 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
-import { describe, expect, it, beforeEach } from 'vitest';
 import type { EscalationRequest, EscalationResponse } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
-import {
-  createEscalationRepository,
-  type EscalationRepository,
-} from './escalation-repository.js';
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { type EscalationRepository, createEscalationRepository } from './escalation-repository.js';
 
 const MIGRATION_SQL = fs.readFileSync(
   path.resolve(import.meta.dirname, '../db/migrations/001_initial.sql'),

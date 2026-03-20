@@ -1,6 +1,6 @@
-import type { Logger } from 'pino';
 import type { InjectedClaudeMdSection, ProcessContentConfig } from '@autopod/shared';
 import { processContent } from '@autopod/shared';
+import type { Logger } from 'pino';
 
 export interface ResolvedSection {
   heading: string;
@@ -23,13 +23,11 @@ export async function resolveSections(
   logger: Logger,
   options?: ResolveSectionsOptions,
 ): Promise<ResolvedSection[]> {
-  const results = await Promise.allSettled(
-    sections.map(s => resolveOne(s, logger, options)),
-  );
+  const results = await Promise.allSettled(sections.map((s) => resolveOne(s, logger, options)));
 
   return results
     .filter((r): r is PromiseFulfilledResult<ResolvedSection | null> => r.status === 'fulfilled')
-    .map(r => r.value)
+    .map((r) => r.value)
     .filter((s): s is ResolvedSection => s !== null);
 }
 
@@ -49,14 +47,11 @@ async function resolveOne(
   if (section.fetch) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        section.fetch.timeoutMs ?? 10_000,
-      );
+      const timeout = setTimeout(() => controller.abort(), section.fetch.timeoutMs ?? 10_000);
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (section.fetch.authorization) {
-        headers['Authorization'] = section.fetch.authorization;
+        headers.Authorization = section.fetch.authorization;
       }
 
       const res = await fetch(section.fetch.url, {
@@ -80,17 +75,17 @@ async function resolveOne(
           const processed = processContent(text, options.contentProcessing);
           text = processed.text;
           if (processed.quarantined) {
-            logger.warn({ heading: section.heading }, 'Fetched CLAUDE.md section content quarantined');
+            logger.warn(
+              { heading: section.heading },
+              'Fetched CLAUDE.md section content quarantined',
+            );
           }
         }
         const truncated = truncateToTokenBudget(text, section.maxTokens ?? 4000);
         parts.push(truncated);
       }
     } catch (err) {
-      logger.warn(
-        { err, heading: section.heading },
-        'CLAUDE.md section fetch error — skipping',
-      );
+      logger.warn({ err, heading: section.heading }, 'CLAUDE.md section fetch error — skipping');
     }
   }
 
@@ -107,5 +102,5 @@ async function resolveOne(
 function truncateToTokenBudget(text: string, maxTokens: number): string {
   const maxChars = maxTokens * 4;
   if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars) + '\n\n(truncated)';
+  return `${text.slice(0, maxChars)}\n\n(truncated)`;
 }

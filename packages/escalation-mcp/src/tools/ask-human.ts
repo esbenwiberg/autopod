@@ -1,7 +1,7 @@
-import type { PendingRequests } from '../pending-requests.js';
-import type { SessionBridge } from '../session-bridge.js';
 import { generateId } from '@autopod/shared';
 import type { EscalationRequest } from '@autopod/shared';
+import type { PendingRequests } from '../pending-requests.js';
+import type { SessionBridge } from '../session-bridge.js';
 
 export interface AskHumanInput {
   question: string;

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock os.homedir to use a temp directory
 const tmpDir = path.join(os.tmpdir(), `autopod-test-${Date.now()}`);
@@ -64,8 +64,6 @@ describe('ConfigStore', () => {
   });
 
   it('rejects invalid config via setAll', () => {
-    expect(() =>
-      setAll({ daemon: 'not-a-url' }),
-    ).toThrow();
+    expect(() => setAll({ daemon: 'not-a-url' })).toThrow();
   });
 });

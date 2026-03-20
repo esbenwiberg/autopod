@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { injectedMcpServerSchema, injectedClaudeMdSectionSchema } from './injection.schema.js';
+import { injectedClaudeMdSectionSchema, injectedMcpServerSchema } from './injection.schema.js';
 
 export const daemonConfigSchema = z.object({
   port: z.number().int().min(1).max(65535).default(3100),

@@ -1,12 +1,17 @@
 import type { SessionBridge } from '@autopod/escalation-mcp';
-import type { EscalationRequest, EscalationResponse, ActionResponse, ActionDefinition } from '@autopod/shared';
 import type { PendingRequests } from '@autopod/escalation-mcp';
-import type { SessionManager } from './session-manager.js';
+import type {
+  ActionDefinition,
+  ActionResponse,
+  EscalationRequest,
+  EscalationResponse,
+} from '@autopod/shared';
+import type { Logger } from 'pino';
+import type { ActionEngine } from '../actions/action-engine.js';
+import type { ProfileStore } from '../profiles/index.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
-import type { ProfileStore } from '../profiles/index.js';
-import type { ActionEngine } from '../actions/action-engine.js';
-import type { Logger } from 'pino';
+import type { SessionManager } from './session-manager.js';
 
 export interface SessionBridgeDependencies {
   sessionManager: SessionManager;
@@ -19,12 +24,23 @@ export interface SessionBridgeDependencies {
 }
 
 export function createSessionBridge(deps: SessionBridgeDependencies): SessionBridge {
-  const { sessionManager, escalationRepo, nudgeRepo, profileStore, actionEngine, pendingRequestsBySession: _pendingRequestsBySession, logger } = deps;
+  const {
+    sessionManager,
+    escalationRepo,
+    nudgeRepo,
+    profileStore,
+    actionEngine,
+    pendingRequestsBySession: _pendingRequestsBySession,
+    logger,
+  } = deps;
 
   return {
     createEscalation(escalation: EscalationRequest): void {
       escalationRepo.insert(escalation);
-      logger.info({ escalationId: escalation.id, sessionId: escalation.sessionId, type: escalation.type }, 'Escalation created');
+      logger.info(
+        { escalationId: escalation.id, sessionId: escalation.sessionId, type: escalation.type },
+        'Escalation created',
+      );
     },
 
     resolveEscalation(escalationId: string, response: EscalationResponse): void {
@@ -60,7 +76,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       return profile.escalation.askAi.model;
     },
 
-    async callReviewerModel(sessionId: string, question: string, context?: string): Promise<string> {
+    async callReviewerModel(
+      sessionId: string,
+      question: string,
+      context?: string,
+    ): Promise<string> {
       const model = this.getReviewerModel(sessionId);
       const prompt = context ? `Context:\n${context}\n\nQuestion:\n${question}` : question;
 
@@ -71,11 +91,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         const { promisify } = await import('node:util');
         const execFileAsync = promisify(execFile);
 
-        const { stdout } = await execFileAsync('claude', [
-          '-p', prompt,
-          '--model', model,
-          '--output-format', 'text',
-        ], { timeout: 60_000 });
+        const { stdout } = await execFileAsync(
+          'claude',
+          ['-p', prompt, '--model', model, '--output-format', 'text'],
+          { timeout: 60_000 },
+        );
 
         return stdout.trim();
       } catch (err) {
@@ -88,7 +108,10 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       const session = sessionManager.getSession(sessionId);
       // The session manager tracks escalation count via session updates
       // This is a no-op here since the session manager handles it via consumeAgentEvents
-      logger.debug({ sessionId, currentCount: session.escalationCount }, 'Escalation count incremented');
+      logger.debug(
+        { sessionId, currentCount: session.escalationCount },
+        'Escalation count incremented',
+      );
     },
 
     reportPlan(sessionId: string, summary: string, steps: string[]): void {
@@ -98,7 +121,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       // The event bus handles this — the MCP tool response triggers an event in the stream
     },
 
-    reportProgress(sessionId: string, phase: string, description: string, currentPhase: number, totalPhases: number): void {
+    reportProgress(
+      sessionId: string,
+      phase: string,
+      description: string,
+      currentPhase: number,
+      totalPhases: number,
+    ): void {
       logger.info({ sessionId, phase, currentPhase, totalPhases }, 'Agent reported progress');
       // Progress is persisted via the AgentProgressEvent flowing through consumeAgentEvents
     },
@@ -107,16 +136,30 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       return nudgeRepo.consumeNext(sessionId);
     },
 
-    async executeAction(sessionId: string, actionName: string, params: Record<string, unknown>): Promise<ActionResponse> {
+    async executeAction(
+      sessionId: string,
+      actionName: string,
+      params: Record<string, unknown>,
+    ): Promise<ActionResponse> {
       if (!actionEngine) {
-        return { success: false, error: 'Action engine not configured', sanitized: false, quarantined: false };
+        return {
+          success: false,
+          error: 'Action engine not configured',
+          sanitized: false,
+          quarantined: false,
+        };
       }
 
       const session = sessionManager.getSession(sessionId);
       const profile = profileStore.get(session.profileName);
 
       if (!profile.actionPolicy) {
-        return { success: false, error: 'No action policy configured for this profile', sanitized: false, quarantined: false };
+        return {
+          success: false,
+          error: 'No action policy configured for this profile',
+          sanitized: false,
+          quarantined: false,
+        };
       }
 
       logger.info({ sessionId, actionName }, 'Executing action via bridge');

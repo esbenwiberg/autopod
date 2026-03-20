@@ -7,10 +7,13 @@ export interface NotificationConfig {
 export interface TeamsNotificationConfig {
   webhookUrl: string;
   enabledEvents: NotificationType[];
-  profileOverrides?: Record<string, {
-    enabled: boolean;
-    events?: NotificationType[];
-  }>;
+  profileOverrides?: Record<
+    string,
+    {
+      enabled: boolean;
+      events?: NotificationType[];
+    }
+  >;
 }
 
 export interface NotificationDecision {

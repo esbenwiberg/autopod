@@ -1,11 +1,16 @@
-import { describe, it, expect } from 'vitest';
 import type {
-  SessionValidatedNotification,
+  SessionErrorNotification,
   SessionFailedNotification,
   SessionNeedsInputNotification,
-  SessionErrorNotification,
+  SessionValidatedNotification,
 } from '@autopod/shared';
-import { buildValidatedCard, buildFailedCard, buildNeedsInputCard, buildErrorCard } from './card-builder.js';
+import { describe, expect, it } from 'vitest';
+import {
+  buildErrorCard,
+  buildFailedCard,
+  buildNeedsInputCard,
+  buildValidatedCard,
+} from './card-builder.js';
 
 describe('Card Builder', () => {
   const basePayload = {
@@ -47,7 +52,7 @@ describe('Card Builder', () => {
       const card = buildValidatedCard(notification);
       const factSet = card.body.find((b) => b.type === 'FactSet');
       expect(factSet).toBeDefined();
-      const facts = factSet!.facts as Array<{ title: string; value: string }>;
+      const facts = factSet?.facts as Array<{ title: string; value: string }>;
       expect(facts.find((f) => f.title === 'Profile')?.value).toBe('my-app');
       expect(facts.find((f) => f.title === 'Files Changed')?.value).toBe('5');
       expect(facts.find((f) => f.title === 'Session')?.value).toBe('sess-abc123');
@@ -56,11 +61,11 @@ describe('Card Builder', () => {
     it('includes PR and preview URL actions when present', () => {
       const card = buildValidatedCard(notification);
       expect(card.actions).toBeDefined();
-      expect(card.actions!.length).toBe(2);
-      expect(card.actions![0]!.title).toBe('View Pull Request');
-      expect(card.actions![0]!.url).toBe('https://github.com/org/repo/pull/42');
-      expect(card.actions![1]!.title).toBe('Open Preview');
-      expect(card.actions![1]!.url).toBe('https://preview.example.com/sess-abc123');
+      expect(card.actions?.length).toBe(2);
+      expect(card.actions?.[0]?.title).toBe('View Pull Request');
+      expect(card.actions?.[0]?.url).toBe('https://github.com/org/repo/pull/42');
+      expect(card.actions?.[1]?.title).toBe('Open Preview');
+      expect(card.actions?.[1]?.url).toBe('https://preview.example.com/sess-abc123');
     });
 
     it('omits actions when no PR URL and no preview URL', () => {
@@ -71,16 +76,16 @@ describe('Card Builder', () => {
     it('includes only PR action when no preview URL', () => {
       const card = buildValidatedCard({ ...notification, previewUrl: null });
       expect(card.actions).toBeDefined();
-      expect(card.actions!.length).toBe(1);
-      expect(card.actions![0]!.title).toBe('View Pull Request');
+      expect(card.actions?.length).toBe(1);
+      expect(card.actions?.[0]?.title).toBe('View Pull Request');
     });
 
     it('includes CLI hints', () => {
       const card = buildValidatedCard(notification);
       const cliHints = card.body.filter((b) => b.fontType === 'Monospace');
       expect(cliHints.length).toBe(2);
-      expect(cliHints[0]!.text).toContain('ap diff');
-      expect(cliHints[1]!.text).toContain('ap approve');
+      expect(cliHints[0]?.text).toContain('ap diff');
+      expect(cliHints[1]?.text).toContain('ap approve');
     });
 
     it('matches snapshot', () => {
@@ -101,7 +106,12 @@ describe('Card Builder', () => {
         smoke: {
           status: 'fail',
           build: { status: 'fail', output: 'Error: Module not found', duration: 5000 },
-          health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 500 },
+          health: {
+            status: 'pass',
+            url: 'http://localhost:3000',
+            responseCode: 200,
+            duration: 500,
+          },
           pages: [],
         },
         taskReview: null,
@@ -129,7 +139,7 @@ describe('Card Builder', () => {
       const card = buildFailedCard(notification);
       const factSet = card.body.find((b) => b.type === 'FactSet');
       expect(factSet).toBeDefined();
-      const facts = factSet!.facts as Array<{ title: string; value: string }>;
+      const facts = factSet?.facts as Array<{ title: string; value: string }>;
       expect(facts.find((f) => f.title === 'Attempt')?.value).toBe('2');
     });
 
@@ -171,7 +181,9 @@ describe('Card Builder', () => {
       expect(header.text).toContain('Input');
 
       // Question should appear
-      const questionBlock = card.body.find((b) => b.text === 'Should I use CSS modules or Tailwind?');
+      const questionBlock = card.body.find(
+        (b) => b.text === 'Should I use CSS modules or Tailwind?',
+      );
       expect(questionBlock).toBeDefined();
 
       // Options should appear
@@ -205,7 +217,9 @@ describe('Card Builder', () => {
       const descBlock = card.body.find((b) => b.text === 'Cannot access database');
       expect(descBlock).toBeDefined();
 
-      const needsBlock = card.body.find((b) => (b.text as string)?.includes('Database credentials'));
+      const needsBlock = card.body.find((b) =>
+        (b.text as string)?.includes('Database credentials'),
+      );
       expect(needsBlock).toBeDefined();
     });
 
@@ -244,12 +258,12 @@ describe('Card Builder', () => {
 
     it('shows Fatal Error for fatal errors', () => {
       const card = buildErrorCard(notification);
-      expect(card.body[0]!.text).toContain('Fatal');
+      expect(card.body[0]?.text).toContain('Fatal');
     });
 
     it('shows Session Error for non-fatal errors', () => {
       const card = buildErrorCard({ ...notification, fatal: false });
-      expect(card.body[0]!.text).toBe('Session Error');
+      expect(card.body[0]?.text).toBe('Session Error');
     });
 
     it('includes error message and fatal flag', () => {
@@ -258,7 +272,7 @@ describe('Card Builder', () => {
       expect(errorBlock).toBeDefined();
 
       const factSet = card.body.find((b) => b.type === 'FactSet');
-      const facts = factSet!.facts as Array<{ title: string; value: string }>;
+      const facts = factSet?.facts as Array<{ title: string; value: string }>;
       expect(facts.find((f) => f.title === 'Fatal')?.value).toBe('Yes');
     });
 

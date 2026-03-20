@@ -1,9 +1,9 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ActionDefinition, ActionPolicy } from '@autopod/shared';
 import { actionDefinitionSchema } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULTS_DIR = join(__dirname, '..', 'actions', 'defaults');
@@ -23,9 +23,7 @@ export function createActionRegistry(logger: Logger): ActionRegistry {
   return {
     getAvailableActions(policy: ActionPolicy): ActionDefinition[] {
       const enabledGroups = new Set(policy.enabledGroups);
-      const overrides = new Map(
-        (policy.actionOverrides ?? []).map((o) => [o.action, o]),
-      );
+      const overrides = new Map((policy.actionOverrides ?? []).map((o) => [o.action, o]));
 
       // Filter built-in actions by enabled groups + overrides
       const builtIn = defaults.filter((action) => {
@@ -79,7 +77,10 @@ function loadDefaults(logger: Logger): ActionDefinition[] {
         if (result.success) {
           actions.push(result.data as ActionDefinition);
         } else {
-          logger.warn({ file, errors: result.error.issues }, 'Invalid action definition — skipping');
+          logger.warn(
+            { file, errors: result.error.issues },
+            'Invalid action definition — skipping',
+          );
         }
       }
     } catch (err) {

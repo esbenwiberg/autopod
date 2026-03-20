@@ -56,7 +56,9 @@ export function createGitHubHandler(config: HandlerConfig): ActionHandler {
 
   async function paginate(path: string, maxResults: number): Promise<unknown[]> {
     const perPage = Math.min(maxResults, 100);
-    const data = (await githubFetch(`${path}${path.includes('?') ? '&' : '?'}per_page=${perPage}`)) as unknown[];
+    const data = (await githubFetch(
+      `${path}${path.includes('?') ? '&' : '?'}per_page=${perPage}`,
+    )) as unknown[];
     return Array.isArray(data) ? data.slice(0, maxResults) : [data];
   }
 
@@ -80,13 +82,18 @@ export function createGitHubHandler(config: HandlerConfig): ActionHandler {
           const state = (params.state as string) ?? 'open';
           const max = (params.max_results as number) ?? 10;
           const query = encodeURIComponent(`${params.query} repo:${repo} is:issue state:${state}`);
-          const data = (await githubFetch(`/search/issues?q=${query}&per_page=${max}`)) as { items: unknown[] };
+          const data = (await githubFetch(`/search/issues?q=${query}&per_page=${max}`)) as {
+            items: unknown[];
+          };
           return pickFieldsArray(data.items ?? [], action.response.fields);
         }
 
         case 'read_issue_comments': {
           const max = (params.max_results as number) ?? 20;
-          const items = await paginate(`/repos/${owner}/${name}/issues/${params.issue_number}/comments`, max);
+          const items = await paginate(
+            `/repos/${owner}/${name}/issues/${params.issue_number}/comments`,
+            max,
+          );
           return pickFieldsArray(items, action.response.fields);
         }
 
@@ -97,7 +104,10 @@ export function createGitHubHandler(config: HandlerConfig): ActionHandler {
 
         case 'read_pr_comments': {
           const max = (params.max_results as number) ?? 20;
-          const items = await paginate(`/repos/${owner}/${name}/pulls/${params.pr_number}/comments`, max);
+          const items = await paginate(
+            `/repos/${owner}/${name}/pulls/${params.pr_number}/comments`,
+            max,
+          );
           return pickFieldsArray(items, action.response.fields);
         }
 

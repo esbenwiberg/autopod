@@ -1,4 +1,4 @@
-import type { ValidationResult, EscalationResponse } from '@autopod/shared';
+import type { EscalationResponse, ValidationResult } from '@autopod/shared';
 
 export interface FeedbackOptions {
   task: string;
@@ -63,7 +63,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
   }
 
   // Page-level failures
-  const failedPages = result.smoke.pages.filter(p => p.status === 'fail');
+  const failedPages = result.smoke.pages.filter((p) => p.status === 'fail');
   if (failedPages.length > 0) {
     lines.push('### Page Failures');
     for (const page of failedPages) {
@@ -74,11 +74,13 @@ function formatValidationFailure(input: ValidationFeedback): string {
           lines.push(`- ${err}`);
         }
       }
-      const failedAssertions = page.assertions.filter(a => !a.passed);
+      const failedAssertions = page.assertions.filter((a) => !a.passed);
       if (failedAssertions.length > 0) {
         lines.push('Failed assertions:');
         for (const a of failedAssertions) {
-          lines.push(`- \`${a.selector}\` (${a.type}): expected \`${a.expected}\`, got \`${a.actual}\``);
+          lines.push(
+            `- \`${a.selector}\` (${a.type}): expected \`${a.expected}\`, got \`${a.actual}\``,
+          );
         }
       }
       lines.push('');
@@ -139,7 +141,9 @@ function formatEscalationResponse(input: EscalationFeedback): string {
   lines.push('');
   lines.push(`**Your question**: ${question}`);
   lines.push('');
-  lines.push(`**Response** (from ${response.respondedBy}${response.model ? `, ${response.model}` : ''}):`);
+  lines.push(
+    `**Response** (from ${response.respondedBy}${response.model ? `, ${response.model}` : ''}):`,
+  );
   lines.push(response.response);
 
   return lines.join('\n');

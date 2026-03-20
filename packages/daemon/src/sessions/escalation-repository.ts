@@ -1,6 +1,6 @@
-import type Database from 'better-sqlite3';
 import type { EscalationRequest, EscalationResponse, EscalationType } from '@autopod/shared';
 import { EscalationNotFoundError } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 
 export interface EscalationRow {
   id: string;

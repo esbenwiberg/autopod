@@ -1,11 +1,40 @@
-export { createSessionManager, type SessionManager, type SessionManagerDependencies } from './session-manager.js';
+export {
+  createSessionManager,
+  type SessionManager,
+  type SessionManagerDependencies,
+} from './session-manager.js';
 export { createEventBus, type EventBus, type EventSubscriber } from './event-bus.js';
 export { createSessionQueue, type SessionQueue } from './session-queue.js';
-export { createSessionRepository, type SessionRepository, type NewSession, type SessionUpdates, type SessionFilters } from './session-repository.js';
-export { createEventRepository, type EventRepository, type StoredEvent } from './event-repository.js';
-export { createEscalationRepository, type EscalationRepository, type EscalationRow } from './escalation-repository.js';
-export { createNudgeRepository, type NudgeRepository, type NudgeMessage } from './nudge-repository.js';
-export { validateTransition, isTerminalState, canReceiveMessage, canKill, canPause, canNudge } from './state-machine.js';
+export {
+  createSessionRepository,
+  type SessionRepository,
+  type NewSession,
+  type SessionUpdates,
+  type SessionFilters,
+} from './session-repository.js';
+export {
+  createEventRepository,
+  type EventRepository,
+  type StoredEvent,
+} from './event-repository.js';
+export {
+  createEscalationRepository,
+  type EscalationRepository,
+  type EscalationRow,
+} from './escalation-repository.js';
+export {
+  createNudgeRepository,
+  type NudgeRepository,
+  type NudgeMessage,
+} from './nudge-repository.js';
+export {
+  validateTransition,
+  isTerminalState,
+  canReceiveMessage,
+  canKill,
+  canPause,
+  canNudge,
+} from './state-machine.js';
 export { generateClaudeMd, type ClaudeMdOptions } from './claude-md-generator.js';
 export { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
 export { resolveSections, type ResolvedSection } from './section-resolver.js';

@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { createActionRegistry } from './action-registry.js';
 import type { ActionDefinition, ActionPolicy } from '@autopod/shared';
 import pino from 'pino';
+import { describe, expect, it } from 'vitest';
+import { createActionRegistry } from './action-registry.js';
 
 const logger = pino({ level: 'silent' });
 

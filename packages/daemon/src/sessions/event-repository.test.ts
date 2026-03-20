@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
-import { describe, expect, it, beforeEach } from 'vitest';
 import type { SystemEvent } from '@autopod/shared';
-import { createEventRepository, type EventRepository } from './event-repository.js';
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { type EventRepository, createEventRepository } from './event-repository.js';
 
 const MIGRATION_SQL = fs.readFileSync(
   path.resolve(import.meta.dirname, '../db/migrations/001_initial.sql'),
@@ -75,7 +75,7 @@ describe('EventRepository', () => {
       repo.insert(event);
       const events = repo.getForSession('sess-001');
       expect(events).toHaveLength(1);
-      expect(events[0]!.sessionId).toBe('sess-001');
+      expect(events[0]?.sessionId).toBe('sess-001');
     });
 
     it('should extract sessionId from session.created event via session.id', () => {
@@ -109,8 +109,8 @@ describe('EventRepository', () => {
       };
       repo.insert(event);
       const stored = repo.getForSession('sess-001');
-      expect(stored[0]!.payload).toEqual(event);
-      expect(stored[0]!.type).toBe('session.status_changed');
+      expect(stored[0]?.payload).toEqual(event);
+      expect(stored[0]?.type).toBe('session.status_changed');
     });
   });
 
@@ -129,7 +129,7 @@ describe('EventRepository', () => {
 
       const events = repo.getSince(id1);
       expect(events).toHaveLength(2);
-      expect(events[0]!.id).toBe(id2);
+      expect(events[0]?.id).toBe(id2);
     });
 
     it('should return empty array when no events after lastId', () => {
@@ -169,8 +169,8 @@ describe('EventRepository', () => {
       repo.insert(event);
       repo.insert(event);
       const events = repo.getSince(0);
-      expect(events[0]!.id).toBeLessThan(events[1]!.id);
-      expect(events[1]!.id).toBeLessThan(events[2]!.id);
+      expect(events[0]?.id).toBeLessThan(events[1]?.id);
+      expect(events[1]?.id).toBeLessThan(events[2]?.id);
     });
   });
 

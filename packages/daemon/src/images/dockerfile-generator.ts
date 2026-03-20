@@ -6,11 +6,11 @@ export interface DockerfileOptions {
 }
 
 const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
-  'node22': 'autopod-node22:latest',
+  node22: 'autopod-node22:latest',
   'node22-pw': 'autopod-node22-pw:latest',
-  'dotnet9': 'autopod-dotnet9:latest',
-  'python312': 'autopod-python312:latest',
-  'custom': 'autopod-node22:latest',
+  dotnet9: 'autopod-dotnet9:latest',
+  python312: 'autopod-python312:latest',
+  custom: 'autopod-node22:latest',
 };
 
 export function generateDockerfile(options: DockerfileOptions): string {

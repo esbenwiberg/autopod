@@ -1,23 +1,28 @@
-import type { Logger } from 'pino';
 import type {
-  SystemEvent,
+  EscalationCreatedEvent,
   NotificationType,
-  SessionValidatedNotification,
+  ProcessContentConfig,
+  Session,
+  SessionErrorNotification,
   SessionFailedNotification,
   SessionNeedsInputNotification,
-  SessionErrorNotification,
-  ValidationCompletedEvent,
-  EscalationCreatedEvent,
   SessionStatusChangedEvent,
-  Session,
-  ProcessContentConfig,
+  SessionValidatedNotification,
+  SystemEvent,
+  ValidationCompletedEvent,
 } from '@autopod/shared';
 import { sanitize } from '@autopod/shared';
+import type { Logger } from 'pino';
 import type { EventBus } from '../sessions/event-bus.js';
-import type { NotificationConfig } from './types.js';
-import type { TeamsAdapter } from './teams-adapter.js';
+import {
+  buildErrorCard,
+  buildFailedCard,
+  buildNeedsInputCard,
+  buildValidatedCard,
+} from './card-builder.js';
 import type { RateLimiter } from './rate-limiter.js';
-import { buildValidatedCard, buildFailedCard, buildNeedsInputCard, buildErrorCard } from './card-builder.js';
+import type { TeamsAdapter } from './teams-adapter.js';
+import type { NotificationConfig } from './types.js';
 
 export interface SessionLookup {
   getSession(sessionId: string): Session;
@@ -38,7 +43,8 @@ export function createNotificationService(deps: {
   /** Content processing config — sanitizes notification payloads (task descriptions, escalation content) */
   contentProcessing?: ProcessContentConfig;
 }): NotificationService {
-  const { eventBus, config, teamsAdapter, rateLimiter, sessionLookup, logger, contentProcessing } = deps;
+  const { eventBus, config, teamsAdapter, rateLimiter, sessionLookup, logger, contentProcessing } =
+    deps;
 
   /** Sanitize a string for notification display (strip PII) */
   function sanitizeText(text: string): string {
@@ -61,7 +67,11 @@ export function createNotificationService(deps: {
     return teamsConfig.enabledEvents.includes(type);
   }
 
-  function canSendForSession(sessionId: string, notificationType: NotificationType, profileName: string): boolean {
+  function canSendForSession(
+    sessionId: string,
+    notificationType: NotificationType,
+    profileName: string,
+  ): boolean {
     if (!isEventEnabled(notificationType, profileName)) {
       logger.debug({ sessionId, notificationType }, 'Notification type not enabled');
       return false;
@@ -120,10 +130,12 @@ export function createNotificationService(deps: {
       const notificationType: NotificationType = 'session_failed';
       if (!canSendForSession(event.sessionId, notificationType, session.profileName)) return;
 
-      const reason = event.result.taskReview?.reasoning
-        ?? event.result.smoke.build.status === 'fail' ? 'Build failed'
-        : event.result.smoke.health.status === 'fail' ? 'Health check failed'
-        : 'Validation failed';
+      const reason =
+        (event.result.taskReview?.reasoning ?? event.result.smoke.build.status === 'fail')
+          ? 'Build failed'
+          : event.result.smoke.health.status === 'fail'
+            ? 'Health check failed'
+            : 'Validation failed';
 
       const notification: SessionFailedNotification = {
         type: notificationType,
@@ -223,10 +235,7 @@ export function createNotificationService(deps: {
 
       const unsub = eventBus.subscribe(handleEvent);
       unsubscribers.push(unsub);
-      logger.info(
-        { enabledEvents: config.teams.enabledEvents },
-        'Notification service started',
-      );
+      logger.info({ enabledEvents: config.teams.enabledEvents }, 'Notification service started');
     },
 
     stop(): void {

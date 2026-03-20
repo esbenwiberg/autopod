@@ -1,6 +1,6 @@
-import type { Command } from 'commander';
 import chalk from 'chalk';
-import { getMsalClient, clear, getCurrentUser } from '../auth/token-manager.js';
+import type { Command } from 'commander';
+import { clear, getCurrentUser, getMsalClient } from '../auth/token-manager.js';
 import { writeCredentials } from '../config/credential-store.js';
 import { withSpinner } from '../output/spinner.js';
 

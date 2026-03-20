@@ -342,7 +342,7 @@ export function createProfileStore(db: Database.Database): ProfileStore {
         .get(name) as { count: number };
 
       if (activeCount.count > 0) {
-        throw new AutopodError(`Cannot delete profile with active sessions`, 'PROFILE_IN_USE', 409);
+        throw new AutopodError('Cannot delete profile with active sessions', 'PROFILE_IN_USE', 409);
       }
 
       // Check if other profiles extend this one

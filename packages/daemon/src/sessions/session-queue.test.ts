@@ -1,13 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
-import { createSessionQueue } from './session-queue.js';
 import pino from 'pino';
+import { describe, expect, it, vi } from 'vitest';
+import { createSessionQueue } from './session-queue.js';
 
 const logger = pino({ level: 'silent' });
 
 describe('session-queue', () => {
   it('processes enqueued sessions', async () => {
     const processed: string[] = [];
-    const processor = vi.fn(async (id: string) => { processed.push(id); });
+    const processor = vi.fn(async (id: string) => {
+      processed.push(id);
+    });
 
     const queue = createSessionQueue(2, processor, logger);
     queue.enqueue('s1');
@@ -43,7 +45,9 @@ describe('session-queue', () => {
 
   it('reports pending and processing counts', async () => {
     let resolveFirst!: () => void;
-    const firstPromise = new Promise<void>((r) => { resolveFirst = r; });
+    const firstPromise = new Promise<void>((r) => {
+      resolveFirst = r;
+    });
 
     const processor = vi.fn(async (_id: string) => {
       await firstPromise;
@@ -94,7 +98,9 @@ describe('session-queue', () => {
 
   it('processes items in FIFO order', async () => {
     const processed: string[] = [];
-    const processor = vi.fn(async (id: string) => { processed.push(id); });
+    const processor = vi.fn(async (id: string) => {
+      processed.push(id);
+    });
 
     const queue = createSessionQueue(1, processor, logger);
     queue.enqueue('a');

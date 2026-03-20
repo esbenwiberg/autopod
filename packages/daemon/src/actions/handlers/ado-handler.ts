@@ -86,7 +86,7 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
 
           if (state) wiql += ` AND [System.State] = '${state.replace(/'/g, "''")}'`;
           if (type) wiql += ` AND [System.WorkItemType] = '${type.replace(/'/g, "''")}'`;
-          wiql += ` ORDER BY [System.ChangedDate] DESC`;
+          wiql += ' ORDER BY [System.ChangedDate] DESC';
 
           const wiqlResult = (await adoPost(
             `https://dev.azure.com/${org}/${project}/_apis/wit/wiql?api-version=${ADO_API_VERSION}&$top=${max}`,

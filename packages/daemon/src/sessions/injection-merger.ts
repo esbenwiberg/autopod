@@ -1,4 +1,4 @@
-import type { InjectedMcpServer, InjectedClaudeMdSection } from '@autopod/shared';
+import type { InjectedClaudeMdSection, InjectedMcpServer } from '@autopod/shared';
 
 /**
  * Merge daemon-level and profile-level MCP server injections.

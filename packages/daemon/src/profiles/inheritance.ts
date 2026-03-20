@@ -1,6 +1,6 @@
 import type { EscalationConfig, Profile } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
-import { mergeMcpServers, mergeClaudeMdSections } from '../sessions/injection-merger.js';
+import { mergeClaudeMdSections, mergeMcpServers } from '../sessions/injection-merger.js';
 
 const MAX_INHERITANCE_DEPTH = 5;
 
@@ -65,8 +65,10 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
   resolved.mcpServers = mergeMcpServers(parent.mcpServers, child.mcpServers);
 
   // claudeMdSections: merge by heading (parent first, child overrides)
-  resolved.claudeMdSections = mergeClaudeMdSections(parent.claudeMdSections, child.claudeMdSections);
-
+  resolved.claudeMdSections = mergeClaudeMdSections(
+    parent.claudeMdSections,
+    child.claudeMdSections,
+  );
 
   return resolved;
 }

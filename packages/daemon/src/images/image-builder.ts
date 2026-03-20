@@ -2,9 +2,9 @@ import type { Profile } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 import { pack as tarPack } from 'tar-stream';
-import { generateDockerfile } from './dockerfile-generator.js';
-import type { AcrClient } from './acr-client.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { AcrClient } from './acr-client.js';
+import { generateDockerfile } from './dockerfile-generator.js';
 
 const logger = pino({ name: 'autopod' }).child({ component: 'image-builder' });
 

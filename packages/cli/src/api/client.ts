@@ -1,18 +1,13 @@
-import { fetch } from 'undici';
 import {
-  AutopodError,
   AuthError,
-  SessionNotFoundError,
-  ProfileNotFoundError,
+  AutopodError,
   InvalidStateTransitionError,
+  ProfileNotFoundError,
+  SessionNotFoundError,
   ValidationError,
 } from '@autopod/shared';
-import type {
-  Session,
-  CreateSessionRequest,
-  Profile,
-  SessionStatus,
-} from '@autopod/shared';
+import type { CreateSessionRequest, Profile, Session, SessionStatus } from '@autopod/shared';
+import { fetch } from 'undici';
 
 export class DaemonUnreachableError extends AutopodError {
   constructor(url: string) {
@@ -191,8 +186,12 @@ export class AutopodClient {
     return (await response.json()) as T;
   }
 
-  private async handleError(response: Awaited<ReturnType<typeof fetch>>, path: string): Promise<never> {
-    let errorBody: { message?: string; code?: string; from?: SessionStatus; to?: SessionStatus } = {};
+  private async handleError(
+    response: Awaited<ReturnType<typeof fetch>>,
+    path: string,
+  ): Promise<never> {
+    let errorBody: { message?: string; code?: string; from?: SessionStatus; to?: SessionStatus } =
+      {};
     try {
       errorBody = (await response.json()) as typeof errorBody;
     } catch {

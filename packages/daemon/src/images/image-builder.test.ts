@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Profile } from '@autopod/shared';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImageBuilder } from './image-builder.js';
 
 function mockProfile(overrides: Partial<Profile> = {}): Profile {
@@ -181,7 +181,9 @@ describe('ImageBuilder', () => {
         profileStore: mockProfileStore,
       });
 
-      expect(builder.isStale(mockProfile({ warmImageBuiltAt: new Date().toISOString() }))).toBe(false);
+      expect(builder.isStale(mockProfile({ warmImageBuiltAt: new Date().toISOString() }))).toBe(
+        false,
+      );
     });
   });
 

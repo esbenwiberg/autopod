@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import WebSocket from 'ws';
 import type { SystemEvent } from '@autopod/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import WebSocket from 'ws';
 
 export interface UseWebSocketOptions {
   url: string;
@@ -57,60 +57,66 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     }
     if (wsRef.current) {
       wsRef.current.removeAllListeners();
-      if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+      if (
+        wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING
+      ) {
         wsRef.current.close();
       }
       wsRef.current = null;
     }
   }, []);
 
-  const connect = useCallback((attempt: number) => {
-    if (!mountedRef.current) return;
-
-    cleanup();
-
-    const separator = url.includes('?') ? '&' : '?';
-    const wsUrl = `${url}${separator}token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.on('open', () => {
+  const connect = useCallback(
+    (attempt: number) => {
       if (!mountedRef.current) return;
-      setConnected(true);
-      setReconnecting(false);
-      setReconnectAttempt(0);
-      onConnectRef.current();
-    });
 
-    ws.on('message', (data: WebSocket.RawData) => {
-      if (!mountedRef.current) return;
-      try {
-        const event = JSON.parse(data.toString()) as SystemEvent;
-        onEventRef.current(event);
-      } catch {
-        // Silently ignore malformed messages
-      }
-    });
+      cleanup();
 
-    ws.on('close', () => {
-      if (!mountedRef.current || intentionalCloseRef.current) return;
-      setConnected(false);
-      onDisconnectRef.current();
+      const separator = url.includes('?') ? '&' : '?';
+      const wsUrl = `${url}${separator}token=${encodeURIComponent(token)}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
 
-      const nextAttempt = attempt + 1;
-      setReconnecting(true);
-      setReconnectAttempt(nextAttempt);
+      ws.on('open', () => {
+        if (!mountedRef.current) return;
+        setConnected(true);
+        setReconnecting(false);
+        setReconnectAttempt(0);
+        onConnectRef.current();
+      });
 
-      const delay = getBackoff(attempt);
-      reconnectTimerRef.current = setTimeout(() => {
-        connect(nextAttempt);
-      }, delay);
-    });
+      ws.on('message', (data: WebSocket.RawData) => {
+        if (!mountedRef.current) return;
+        try {
+          const event = JSON.parse(data.toString()) as SystemEvent;
+          onEventRef.current(event);
+        } catch {
+          // Silently ignore malformed messages
+        }
+      });
 
-    ws.on('error', () => {
-      // The 'close' handler will fire after this and handle reconnection
-    });
-  }, [url, token, cleanup]);
+      ws.on('close', () => {
+        if (!mountedRef.current || intentionalCloseRef.current) return;
+        setConnected(false);
+        onDisconnectRef.current();
+
+        const nextAttempt = attempt + 1;
+        setReconnecting(true);
+        setReconnectAttempt(nextAttempt);
+
+        const delay = getBackoff(attempt);
+        reconnectTimerRef.current = setTimeout(() => {
+          connect(nextAttempt);
+        }, delay);
+      });
+
+      ws.on('error', () => {
+        // The 'close' handler will fire after this and handle reconnection
+      });
+    },
+    [url, token, cleanup],
+  );
 
   useEffect(() => {
     mountedRef.current = true;

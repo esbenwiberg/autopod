@@ -1,13 +1,13 @@
-import { describe, it, expect } from 'vitest';
 import { Readable } from 'node:stream';
-import pino from 'pino';
 import type { AgentEvent } from '@autopod/shared';
+import pino from 'pino';
+import { describe, expect, it } from 'vitest';
 import { CodexStreamParser } from './codex-stream-parser.js';
 
 const logger = pino({ level: 'silent' });
 
 function createMockStream(lines: string[]): Readable {
-  return Readable.from(lines.map(l => l + '\n'));
+  return Readable.from(lines.map((l) => `${l}\n`));
 }
 
 describe('CodexStreamParser', () => {
@@ -25,10 +25,7 @@ describe('CodexStreamParser', () => {
     });
 
     it('defaults task_start message when missing', () => {
-      const event = CodexStreamParser.mapEvent(
-        { type: 'task_start' },
-        'test-id',
-      );
+      const event = CodexStreamParser.mapEvent({ type: 'task_start' }, 'test-id');
       expect(event).toEqual({
         type: 'status',
         timestamp: expect.any(String),
@@ -206,8 +203,8 @@ describe('CodexStreamParser', () => {
         events.push(event);
       }
       expect(events).toHaveLength(2);
-      expect(events[0]!.type).toBe('status');
-      expect(events[1]!.type).toBe('complete');
+      expect(events[0]?.type).toBe('status');
+      expect(events[1]?.type).toBe('complete');
     });
 
     it('skips empty lines', async () => {

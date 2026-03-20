@@ -153,7 +153,7 @@ describe('Session Lifecycle E2E', () => {
 
       // Agent was resumed with correction feedback after first failure
       expect(ctx.runtime.resume).toHaveBeenCalledTimes(1);
-      const correctionMessage = vi.mocked(ctx.runtime.resume).mock.calls[0]![1] as string;
+      const correctionMessage = vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1] as string;
       expect(correctionMessage).toContain('Validation Failed');
 
       // PR was still created after second attempt passed
@@ -308,7 +308,7 @@ describe('Session Lifecycle E2E', () => {
       expect(afterReject.validationAttempts).toBe(1); // was reset then re-validated
 
       // Agent was resumed with rejection feedback
-      const resumeMsg = vi.mocked(ctx.runtime.resume).mock.calls[0]![1] as string;
+      const resumeMsg = vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1] as string;
       expect(resumeMsg).toContain('Header color should be blue, not red');
     });
   });
@@ -583,7 +583,7 @@ describe('Session Lifecycle E2E', () => {
       // Listing with filter
       const user1Sessions = manager.listSessions({ userId: 'user-1' });
       expect(user1Sessions).toHaveLength(1);
-      expect(user1Sessions[0]!.task).toBe('Task A');
+      expect(user1Sessions[0]?.task).toBe('Task A');
     });
   });
 
@@ -638,7 +638,7 @@ describe('Session Lifecycle E2E', () => {
       const writeFileCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
       const claudeMdCall = writeFileCalls.find((c) => c[1] === '/workspace/CLAUDE.md');
       expect(claudeMdCall).toBeDefined();
-      const claudeMdContent = claudeMdCall![2] as string;
+      const claudeMdContent = claudeMdCall?.[2] as string;
       expect(claudeMdContent).toContain('search_docs');
     });
   });
@@ -662,7 +662,7 @@ describe('Session Lifecycle E2E', () => {
       // Verify nudge was queued in the DB
       const pending = ctx.nudgeRepo.listPending(session.id);
       expect(pending).toHaveLength(1);
-      expect(pending[0]!.message).toBe('Hey, how is it going?');
+      expect(pending[0]?.message).toBe('Hey, how is it going?');
 
       // Session state should not change
       expect(manager.getSession(session.id).status).toBe('running');

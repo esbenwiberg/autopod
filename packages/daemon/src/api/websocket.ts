@@ -1,8 +1,8 @@
+import type { SystemEvent } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../interfaces/index.js';
 import type { EventBus, EventRepository } from '../sessions/index.js';
-import type { SystemEvent } from '@autopod/shared';
 
 interface WsClient {
   ws: WebSocket;
@@ -86,7 +86,9 @@ export function websocketHandler(
           }
         } else if (!['subscribe', 'unsubscribe', 'subscribe_all', 'replay'].includes(msg.type)) {
           request.log.warn({ msgType: msg.type }, 'Unknown WS message type');
-          socket.send(JSON.stringify({ type: 'error', message: `Unknown message type: ${msg.type}` }));
+          socket.send(
+            JSON.stringify({ type: 'error', message: `Unknown message type: ${msg.type}` }),
+          );
         }
       } catch (err) {
         request.log.warn({ err }, 'Invalid WS message');
