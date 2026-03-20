@@ -23,6 +23,8 @@ import { createSessionRepository } from '../sessions/session-repository.js';
 import { createEventRepository } from '../sessions/event-repository.js';
 import { createEscalationRepository } from '../sessions/escalation-repository.js';
 import { createEventBus } from '../sessions/event-bus.js';
+import { createNudgeRepository } from '../sessions/nudge-repository.js';
+import type { NudgeRepository } from '../sessions/nudge-repository.js';
 import type { SessionManagerDependencies } from '../sessions/session-manager.js';
 import type { SessionRepository } from '../sessions/session-repository.js';
 import type { EscalationRepository } from '../sessions/escalation-repository.js';
@@ -260,6 +262,7 @@ export interface TestContext {
   db: Database.Database;
   sessionRepo: SessionRepository;
   escalationRepo: EscalationRepository;
+  nudgeRepo: NudgeRepository;
   eventBus: EventBus;
   profileStore: ProfileStore;
   containerManager: ContainerManager;
@@ -282,6 +285,7 @@ export function createTestContext(opts?: {
   const sessionRepo = createSessionRepository(db);
   const eventRepo = createEventRepository(db);
   const escalationRepo = createEscalationRepository(db);
+  const nudgeRepo = createNudgeRepository(db);
   const eventBus = createEventBus(eventRepo, logger);
   const profileStore = createMockProfileStore(db);
 
@@ -296,6 +300,7 @@ export function createTestContext(opts?: {
   const deps: SessionManagerDependencies = {
     sessionRepo,
     escalationRepo,
+    nudgeRepo,
     profileStore,
     eventBus,
     containerManagerFactory: { get: vi.fn(() => containerManager) },
@@ -312,6 +317,7 @@ export function createTestContext(opts?: {
     db,
     sessionRepo,
     escalationRepo,
+    nudgeRepo,
     eventBus,
     profileStore,
     containerManager,
