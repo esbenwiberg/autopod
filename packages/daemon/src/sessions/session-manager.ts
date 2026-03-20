@@ -128,7 +128,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
    */
   async function getResumeEnv(session: Session): Promise<Record<string, string> | undefined> {
     const profile = profileStore.get(session.profileName);
-    const provider = profile.modelProvider ?? 'anthropic';
+    const provider = profile.modelProvider;
     // Only MAX provider needs fresh env on resume (token rotation)
     if (provider !== 'max') return undefined;
     const result = await buildProviderEnv(profile, session.id, logger);
@@ -314,20 +314,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           ...providerResult.env,
         };
 
-        // Fallback: if provider didn't set keys, use daemon env (backwards compat)
-        if (
-          session.runtime === 'claude' &&
-          !secretEnv.ANTHROPIC_API_KEY &&
-          !providerResult.containerFiles.length &&
-          process.env.ANTHROPIC_API_KEY
-        ) {
-          secretEnv.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-        }
-        if (
-          session.runtime === 'codex' &&
-          !secretEnv.OPENAI_API_KEY &&
-          process.env.OPENAI_API_KEY
-        ) {
+        // Codex runtime uses its own key from daemon env
+        if (session.runtime === 'codex' && process.env.OPENAI_API_KEY) {
           secretEnv.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
         }
 

@@ -37,7 +37,7 @@ export interface Profile {
   /** Output mode — 'pr' for code changes, 'artifact' for research/output collection */
   outputMode: OutputMode;
   /** Model provider — determines how the daemon authenticates with the AI backend */
-  modelProvider: ModelProvider | null;
+  modelProvider: ModelProvider;
   /** Provider-specific credentials (OAuth tokens for MAX, endpoint config for Foundry, etc.) */
   providerCredentials: ProviderCredentials | null;
   createdAt: string;

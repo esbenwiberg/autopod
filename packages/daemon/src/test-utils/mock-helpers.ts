@@ -109,6 +109,7 @@ export function createMockContainerManager(): ContainerManager {
     spawn: vi.fn(async () => 'container-123'),
     kill: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
+    readFile: vi.fn(async () => ''),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     execStreaming: vi.fn(),
@@ -214,6 +215,8 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         networkPolicy: row.network_policy ? JSON.parse(row.network_policy as string) : null,
         actionPolicy: row.action_policy ? JSON.parse(row.action_policy as string) : null,
         outputMode: (row.output_mode as 'pr' | 'artifact') ?? 'pr',
+        modelProvider: (row.model_provider as 'anthropic' | 'max' | 'foundry') ?? 'anthropic',
+        providerCredentials: row.provider_credentials ? JSON.parse(row.provider_credentials as string) : null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };

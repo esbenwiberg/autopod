@@ -14,7 +14,7 @@ export async function buildProviderEnv(
   _sessionId: string,
   logger: Logger,
 ): Promise<ProviderEnvResult> {
-  const provider = profile.modelProvider ?? 'anthropic';
+  const provider = profile.modelProvider;
 
   switch (provider) {
     case 'anthropic':

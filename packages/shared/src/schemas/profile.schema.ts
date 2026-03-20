@@ -89,7 +89,7 @@ export const createProfileSchema = z.object({
   networkPolicy: networkPolicySchema.nullable().default(null),
   actionPolicy: actionPolicySchema.nullable().default(null),
   outputMode: outputModeSchema.default('pr'),
-  modelProvider: modelProviderSchema.nullable().default(null),
+  modelProvider: modelProviderSchema.default('anthropic'),
   providerCredentials: providerCredentialsSchema.nullable().default(null),
 });
 

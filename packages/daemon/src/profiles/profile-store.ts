@@ -63,7 +63,7 @@ function rowToProfile(row: Record<string, unknown>): Profile {
       ? (JSON.parse(row.action_policy as string) as ActionPolicy)
       : null,
     outputMode: (row.output_mode as Profile['outputMode']) ?? 'pr',
-    modelProvider: (row.model_provider as Profile['modelProvider']) ?? null,
+    modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
     providerCredentials: row.provider_credentials
       ? (JSON.parse(row.provider_credentials as string) as ProviderCredentials)
       : null,
@@ -163,7 +163,7 @@ export function createProfileStore(db: Database.Database): ProfileStore {
         networkPolicy: parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null,
         actionPolicy: parsed.actionPolicy ? JSON.stringify(parsed.actionPolicy) : null,
         outputMode: parsed.outputMode,
-        modelProvider: parsed.modelProvider ?? null,
+        modelProvider: parsed.modelProvider,
         providerCredentials: parsed.providerCredentials
           ? JSON.stringify(parsed.providerCredentials)
           : null,
