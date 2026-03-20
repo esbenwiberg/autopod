@@ -10,7 +10,9 @@ import type {
   EscalationCreatedEvent,
   SessionStatusChangedEvent,
   Session,
+  ProcessContentConfig,
 } from '@autopod/shared';
+import { sanitize } from '@autopod/shared';
 import type { EventBus } from '../sessions/event-bus.js';
 import type { NotificationConfig } from './types.js';
 import type { TeamsAdapter } from './teams-adapter.js';
@@ -33,8 +35,16 @@ export function createNotificationService(deps: {
   rateLimiter: RateLimiter;
   sessionLookup: SessionLookup;
   logger: Logger;
+  /** Content processing config — sanitizes notification payloads (task descriptions, escalation content) */
+  contentProcessing?: ProcessContentConfig;
 }): NotificationService {
-  const { eventBus, config, teamsAdapter, rateLimiter, sessionLookup, logger } = deps;
+  const { eventBus, config, teamsAdapter, rateLimiter, sessionLookup, logger, contentProcessing } = deps;
+
+  /** Sanitize a string for notification display (strip PII) */
+  function sanitizeText(text: string): string {
+    if (!contentProcessing?.sanitization) return text;
+    return sanitize(text, contentProcessing.sanitization);
+  }
   const unsubscribers: Array<() => void> = [];
 
   function isEventEnabled(type: NotificationType, profileName: string): boolean {
@@ -92,7 +102,7 @@ export function createNotificationService(deps: {
         type: notificationType,
         sessionId: session.id,
         profileName: session.profileName,
-        task: session.task,
+        task: sanitizeText(session.task),
         timestamp: event.timestamp,
         previewUrl: session.previewUrl,
         prUrl: session.prUrl,
@@ -119,9 +129,9 @@ export function createNotificationService(deps: {
         type: notificationType,
         sessionId: session.id,
         profileName: session.profileName,
-        task: session.task,
+        task: sanitizeText(session.task),
         timestamp: event.timestamp,
-        reason,
+        reason: sanitizeText(reason),
         validationResult: event.result,
         screenshotUrl: null,
       };
@@ -146,7 +156,7 @@ export function createNotificationService(deps: {
       type: notificationType,
       sessionId: session.id,
       profileName: session.profileName,
-      task: session.task,
+      task: sanitizeText(session.task),
       timestamp: event.timestamp,
       escalation: event.escalation,
     };
@@ -169,7 +179,7 @@ export function createNotificationService(deps: {
       type: notificationType,
       sessionId: session.id,
       profileName: session.profileName,
-      task: session.task,
+      task: sanitizeText(session.task),
       timestamp: event.timestamp,
       error: 'Session entered failed state',
       fatal: true,

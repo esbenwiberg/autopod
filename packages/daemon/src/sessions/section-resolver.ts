@@ -1,5 +1,6 @@
 import type { Logger } from 'pino';
-import type { InjectedClaudeMdSection } from '@autopod/shared';
+import type { InjectedClaudeMdSection, ProcessContentConfig } from '@autopod/shared';
+import { processContent } from '@autopod/shared';
 
 export interface ResolvedSection {
   heading: string;
@@ -7,16 +8,23 @@ export interface ResolvedSection {
   priority: number;
 }
 
+export interface ResolveSectionsOptions {
+  /** Content processing config for sanitizing fetched content */
+  contentProcessing?: ProcessContentConfig;
+}
+
 /**
  * Resolve CLAUDE.md sections — fetches dynamic content where configured.
  * Never throws. Failed fetches are logged and silently skipped (or fall back to static content).
+ * Fetched content is processed through quarantine + PII sanitization if configured.
  */
 export async function resolveSections(
   sections: InjectedClaudeMdSection[],
   logger: Logger,
+  options?: ResolveSectionsOptions,
 ): Promise<ResolvedSection[]> {
   const results = await Promise.allSettled(
-    sections.map(s => resolveOne(s, logger)),
+    sections.map(s => resolveOne(s, logger, options)),
   );
 
   return results
@@ -28,6 +36,7 @@ export async function resolveSections(
 async function resolveOne(
   section: InjectedClaudeMdSection,
   logger: Logger,
+  options?: ResolveSectionsOptions,
 ): Promise<ResolvedSection | null> {
   const parts: string[] = [];
 
@@ -65,7 +74,15 @@ async function resolveOne(
           'CLAUDE.md section fetch failed',
         );
       } else {
-        const text = await res.text();
+        let text = await res.text();
+        // Sanitize fetched content — external sources are untrusted
+        if (options?.contentProcessing) {
+          const processed = processContent(text, options.contentProcessing);
+          text = processed.text;
+          if (processed.quarantined) {
+            logger.warn({ heading: section.heading }, 'Fetched CLAUDE.md section content quarantined');
+          }
+        }
         const truncated = truncateToTokenBudget(text, section.maxTokens ?? 4000);
         parts.push(truncated);
       }

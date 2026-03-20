@@ -1,4 +1,5 @@
-import type { SystemEvent } from '@autopod/shared';
+import type { SystemEvent, ProcessContentConfig } from '@autopod/shared';
+import { processContentDeep } from '@autopod/shared';
 import type { EventRepository } from './event-repository.js';
 import type { Logger } from 'pino';
 
@@ -10,7 +11,12 @@ export interface EventBus {
   subscribeToSession(sessionId: string, subscriber: EventSubscriber): () => void;
 }
 
-export function createEventBus(eventRepo: EventRepository, logger: Logger): EventBus {
+export interface EventBusOptions {
+  /** Content processing config for sanitizing event payloads before broadcast */
+  contentProcessing?: ProcessContentConfig;
+}
+
+export function createEventBus(eventRepo: EventRepository, logger: Logger, options?: EventBusOptions): EventBus {
   const globalSubscribers = new Set<EventSubscriber>();
   const sessionSubscribers = new Map<string, Set<EventSubscriber>>();
 
@@ -22,12 +28,18 @@ export function createEventBus(eventRepo: EventRepository, logger: Logger): Even
 
   return {
     emit(event: SystemEvent): number {
-      // Persist first
+      // Persist first (raw event — audit trail gets the unmodified version)
       const id = eventRepo.insert(event);
+
+      // Sanitize event payload before broadcasting to subscribers
+      // This prevents PII/injection content from leaking via WebSocket broadcasts
+      const sanitizedEvent = options?.contentProcessing
+        ? processContentDeep(event, options.contentProcessing).result as SystemEvent
+        : event;
 
       // Broadcast to global subscribers
       for (const sub of globalSubscribers) {
-        try { sub(event); } catch (err) { logger.error({ err }, 'Event subscriber error'); }
+        try { sub(sanitizedEvent); } catch (err) { logger.error({ err }, 'Event subscriber error'); }
       }
 
       // Broadcast to session-scoped subscribers
@@ -36,7 +48,7 @@ export function createEventBus(eventRepo: EventRepository, logger: Logger): Even
         const subs = sessionSubscribers.get(sessionId);
         if (subs) {
           for (const sub of subs) {
-            try { sub(event); } catch (err) { logger.error({ err }, 'Session subscriber error'); }
+            try { sub(sanitizedEvent); } catch (err) { logger.error({ err }, 'Session subscriber error'); }
           }
         }
       }
