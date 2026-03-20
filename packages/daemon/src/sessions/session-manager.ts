@@ -1,22 +1,43 @@
+import type {
+  AgentEvent,
+  CreateSessionRequest,
+  DaemonConfig,
+  ExecutionTarget,
+  InjectedMcpServer,
+  NetworkPolicy,
+  Session,
+  SessionStatus,
+} from '@autopod/shared';
+import { AutopodError, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type {
-  Session, CreateSessionRequest, SessionStatus, AgentEvent,
-  DaemonConfig, ExecutionTarget, NetworkPolicy, InjectedMcpServer,
-} from '@autopod/shared';
-import { generateId, AutopodError } from '@autopod/shared';
+  ContainerManager,
+  PrManager,
+  RuntimeRegistry,
+  ValidationEngine,
+  WorktreeManager,
+} from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
-import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine, PrManager } from '../interfaces/index.js';
-import type { SessionRepository, SessionUpdates } from './session-repository.js';
+import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
+import type { ProviderEnvResult } from '../providers/index.js';
+import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
+import { generateClaudeMd } from './claude-md-generator.js';
+import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
-import { validateTransition, isTerminalState, canReceiveMessage, canKill, canPause, canNudge } from './state-machine.js';
-import type { NudgeRepository } from './nudge-repository.js';
-import { generateClaudeMd } from './claude-md-generator.js';
 import { formatFeedback } from './feedback-formatter.js';
-import { buildCorrectionMessage } from './correction-context.js';
-import { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
+import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
+import type { NudgeRepository } from './nudge-repository.js';
 import { resolveSections } from './section-resolver.js';
-import { collectScreenshots, buildGitHubImageUrl } from '../validation/screenshot-collector.js';
+import type { SessionRepository, SessionUpdates } from './session-repository.js';
+import {
+  canKill,
+  canNudge,
+  canPause,
+  canReceiveMessage,
+  isTerminalState,
+  validateTransition,
+} from './state-machine.js';
 
 /** Allocate a random host port in range 10000–59999 for container port mapping. */
 function allocateHostPort(): number {
@@ -51,7 +72,11 @@ export interface SessionManagerDependencies {
   validationEngine: ValidationEngine;
   networkManager?: NetworkManager;
   prManager?: PrManager;
-  actionEngine?: { getAvailableActions: (policy: import('@autopod/shared').ActionPolicy) => import('@autopod/shared').ActionDefinition[] };
+  actionEngine?: {
+    getAvailableActions: (
+      policy: import('@autopod/shared').ActionPolicy,
+    ) => import('@autopod/shared').ActionDefinition[];
+  };
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
@@ -71,17 +96,57 @@ export interface SessionManager {
   killSession(sessionId: string): Promise<void>;
   triggerValidation(sessionId: string): Promise<void>;
   getSession(sessionId: string): Session;
-  listSessions(filters?: { profileName?: string; status?: SessionStatus; userId?: string }): Session[];
+  listSessions(filters?: {
+    profileName?: string;
+    status?: SessionStatus;
+    userId?: string;
+  }): Session[];
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
   const {
-    sessionRepo, escalationRepo: _escalationRepo, nudgeRepo, profileStore, eventBus,
-    containerManagerFactory, worktreeManager, runtimeRegistry, validationEngine,
-    networkManager, prManager, enqueueSession, mcpBaseUrl, daemonConfig, logger,
+    sessionRepo,
+    escalationRepo: _escalationRepo,
+    nudgeRepo,
+    profileStore,
+    eventBus,
+    containerManagerFactory,
+    worktreeManager,
+    runtimeRegistry,
+    validationEngine,
+    networkManager,
+    prManager,
+    enqueueSession,
+    mcpBaseUrl,
+    daemonConfig,
+    logger,
   } = deps;
 
-  function transition(session: Session, to: SessionStatus, extraUpdates?: Partial<SessionUpdates>): Session {
+  /**
+   * Build provider env for resume calls.
+   * Needed because OAuth tokens may have been rotated since the initial spawn.
+   */
+  async function getResumeEnv(session: Session): Promise<Record<string, string> | undefined> {
+    const profile = profileStore.get(session.profileName);
+    const provider = profile.modelProvider ?? 'anthropic';
+    // Only MAX provider needs fresh env on resume (token rotation)
+    if (provider !== 'max') return undefined;
+    const result = await buildProviderEnv(profile, session.id, logger);
+    // Also re-write credential files to container in case tokens were rotated
+    if (result.containerFiles.length > 0 && session.containerId) {
+      const cm = containerManagerFactory.get(session.executionTarget);
+      for (const file of result.containerFiles) {
+        await cm.writeFile(session.containerId, file.path, file.content);
+      }
+    }
+    return { SESSION_ID: session.id, ...result.env };
+  }
+
+  function transition(
+    session: Session,
+    to: SessionStatus,
+    extraUpdates?: Partial<SessionUpdates>,
+  ): Session {
     validateTransition(session.id, session.status, to);
     const previousStatus = session.status;
     const updates: SessionUpdates = { status: to, ...extraUpdates };
@@ -164,7 +229,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Compute network isolation config (Docker only, opt-in via profile)
         let networkName: string | undefined;
         let firewallScript: string | undefined;
-        if (networkManager && session.executionTarget === 'local' && profile.networkPolicy?.enabled) {
+        if (
+          networkManager &&
+          session.executionTarget === 'local' &&
+          profile.networkPolicy?.enabled
+        ) {
           const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
           const gatewayIp = await networkManager.getGatewayIp();
           const netConfig = await networkManager.buildNetworkConfig(
@@ -201,11 +270,14 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Merge daemon + profile injections
         const mergedMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
-        const mergedSections = mergeClaudeMdSections(daemonConfig.claudeMdSections, profile.claudeMdSections);
+        const mergedSections = mergeClaudeMdSections(
+          daemonConfig.claudeMdSections,
+          profile.claudeMdSections,
+        );
 
         // Rewrite injected MCP server URLs to route through daemon proxy
         // Agent sees proxy URLs, daemon handles auth injection + PII stripping
-        const proxiedMcpServers = mergedMcpServers.map(s => ({
+        const proxiedMcpServers = mergedMcpServers.map((s) => ({
           ...s,
           url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(s.name)}/${sessionId}`,
           // Don't expose auth headers to agent — proxy injects them
@@ -232,17 +304,36 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Build MCP server list for runtime
         const mcpServers = [
           { name: 'escalation', url: mcpUrl },
-          ...proxiedMcpServers.map(s => ({ name: s.name, url: s.url, headers: s.headers })),
+          ...proxiedMcpServers.map((s) => ({ name: s.name, url: s.url, headers: s.headers })),
         ];
 
+        // Build provider-aware env (API keys, OAuth creds, Foundry config)
+        const providerResult = await buildProviderEnv(profile, sessionId, logger);
+        const secretEnv: Record<string, string> = {
+          SESSION_ID: sessionId,
+          ...providerResult.env,
+        };
 
-        // Build secret env for container exec (API keys injected at exec time, not container level)
-        const secretEnv: Record<string, string> = { SESSION_ID: sessionId };
-        if (session.runtime === 'claude' && process.env.ANTHROPIC_API_KEY) {
+        // Fallback: if provider didn't set keys, use daemon env (backwards compat)
+        if (
+          session.runtime === 'claude' &&
+          !secretEnv.ANTHROPIC_API_KEY &&
+          !providerResult.containerFiles.length &&
+          process.env.ANTHROPIC_API_KEY
+        ) {
           secretEnv.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
         }
-        if (session.runtime === 'codex' && process.env.OPENAI_API_KEY) {
+        if (
+          session.runtime === 'codex' &&
+          !secretEnv.OPENAI_API_KEY &&
+          process.env.OPENAI_API_KEY
+        ) {
           secretEnv.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+        }
+
+        // Write provider credential files to container (e.g., OAuth .credentials.json for MAX)
+        for (const file of providerResult.containerFiles) {
+          await containerManager.writeFile(containerId, file.path, file.content);
         }
 
         // Start the agent inside the container
@@ -259,6 +350,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         });
 
         await this.consumeAgentEvents(sessionId, events);
+
+        // Persist rotated OAuth credentials if provider requires it (MAX/PRO token rotation)
+        if (providerResult.requiresPostExecPersistence) {
+          try {
+            await persistRefreshedCredentials(
+              containerId,
+              containerManager,
+              profileStore,
+              session.profileName,
+              logger,
+            );
+          } catch (err) {
+            logger.warn(
+              { err, sessionId },
+              'Failed to persist refreshed credentials — session still succeeded',
+            );
+          }
+        }
+
         await this.handleCompletion(sessionId);
       } catch (err) {
         logger.error({ err, sessionId }, 'Session processing error');
@@ -272,7 +382,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               transition(session, 'killed', { completedAt: new Date().toISOString() });
             }
           }
-        } catch { /* swallow — best effort */ }
+        } catch {
+          /* swallow — best effort */
+        }
       }
     },
 
@@ -306,7 +418,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               totalPhases: event.totalPhases,
             },
           });
-        } else if (event.type === 'status' && event.message.includes('Claude session initialized')) {
+        } else if (
+          event.type === 'status' &&
+          event.message.includes('Claude session initialized')
+        ) {
           // Persist claude session ID to DB for pause/resume survival across daemon restarts
           const match = event.message.match(/\(([^)]+)\)$/);
           if (match?.[1]) {
@@ -358,8 +473,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
       transition(session, 'running', { pendingEscalation: null });
 
+      const resumeEnv = await getResumeEnv(session);
       const runtime = runtimeRegistry.get(session.runtime);
-      const events = runtime.resume(sessionId, message, session.containerId!);
+      const events = runtime.resume(sessionId, message, session.containerId!, resumeEnv);
       await this.consumeAgentEvents(sessionId, events);
       await this.handleCompletion(sessionId);
     },
@@ -442,12 +558,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       transition(session, 'running');
 
       // Resume agent with rejection feedback
+      const resumeEnv = await getResumeEnv(session);
       const runtime = runtimeRegistry.get(session.runtime);
-      const events = runtime.resume(sessionId, rejectionMessage, session.containerId!);
+      const events = runtime.resume(sessionId, rejectionMessage, session.containerId!, resumeEnv);
       await this.consumeAgentEvents(sessionId, events);
       await this.handleCompletion(sessionId);
 
-      logger.info({ sessionId, reason, previousStatus }, 'Session rejected, resuming agent with feedback');
+      logger.info(
+        { sessionId, reason, previousStatus },
+        'Session rejected, resuming agent with feedback',
+      );
     },
 
     async pauseSession(sessionId: string): Promise<void> {
@@ -586,7 +706,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 page.screenshotBase64 = ss.base64;
               }
             }
-            logger.info({ sessionId, count: screenshots.length }, 'Collected validation screenshots');
+            logger.info(
+              { sessionId, count: screenshots.length },
+              'Collected validation screenshots',
+            );
           } catch (err) {
             logger.warn({ err, sessionId }, 'Failed to collect screenshots');
           }
@@ -663,24 +786,26 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         } else if (attempt < profile.maxValidationAttempts) {
           // Build correction message with structured feedback for the agent
           const cm = containerManagerFactory.get(s2.executionTarget);
-          const correctionMessage = await buildCorrectionMessage(
-            s2, profile, result, cm,
-          );
+          const correctionMessage = await buildCorrectionMessage(s2, profile, result, cm);
 
           // Transition back to running for retry
           transition(s2, 'running');
 
           // Resume the agent with correction feedback
+          const resumeEnv = await getResumeEnv(s2);
           const runtime = runtimeRegistry.get(s2.runtime);
-          const events = runtime.resume(sessionId, correctionMessage, s2.containerId!);
+          const events = runtime.resume(sessionId, correctionMessage, s2.containerId!, resumeEnv);
           await this.consumeAgentEvents(sessionId, events);
           await this.handleCompletion(sessionId);
 
-          logger.info({
-            sessionId,
-            attempt,
-            maxAttempts: profile.maxValidationAttempts,
-          }, 'Retrying after validation failure');
+          logger.info(
+            {
+              sessionId,
+              attempt,
+              maxAttempts: profile.maxValidationAttempts,
+            },
+            'Retrying after validation failure',
+          );
         } else {
           transition(s2, 'failed');
         }

@@ -1,6 +1,37 @@
 import { z } from 'zod';
-import { injectedMcpServerSchema, injectedClaudeMdSectionSchema } from './injection.schema.js';
 import { actionPolicySchema, outputModeSchema } from './action-definition.schema.js';
+import { injectedClaudeMdSectionSchema, injectedMcpServerSchema } from './injection.schema.js';
+
+// ---------------------------------------------------------------------------
+// Model provider credentials schemas
+// ---------------------------------------------------------------------------
+
+export const modelProviderSchema = z.enum(['anthropic', 'max', 'foundry']);
+
+const anthropicCredentialsSchema = z.object({
+  provider: z.literal('anthropic'),
+});
+
+const maxCredentialsSchema = z.object({
+  provider: z.literal('max'),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+  expiresAt: z.string().min(1),
+  clientId: z.string().optional(),
+});
+
+const foundryCredentialsSchema = z.object({
+  provider: z.literal('foundry'),
+  endpoint: z.string().url(),
+  projectId: z.string().min(1),
+  apiKey: z.string().optional(),
+});
+
+export const providerCredentialsSchema = z.discriminatedUnion('provider', [
+  anthropicCredentialsSchema,
+  maxCredentialsSchema,
+  foundryCredentialsSchema,
+]);
 
 const pageAssertionSchema = z.object({
   selector: z.string().min(1),
@@ -58,6 +89,8 @@ export const createProfileSchema = z.object({
   networkPolicy: networkPolicySchema.nullable().default(null),
   actionPolicy: actionPolicySchema.nullable().default(null),
   outputMode: outputModeSchema.default('pr'),
+  modelProvider: modelProviderSchema.nullable().default(null),
+  providerCredentials: providerCredentialsSchema.nullable().default(null),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });

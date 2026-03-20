@@ -3,7 +3,12 @@ export type RuntimeType = 'claude' | 'codex';
 export interface Runtime {
   type: RuntimeType;
   spawn(config: SpawnConfig): AsyncIterable<AgentEvent>;
-  resume(sessionId: string, message: string, containerId: string): AsyncIterable<AgentEvent>;
+  resume(
+    sessionId: string,
+    message: string,
+    containerId: string,
+    env?: Record<string, string>,
+  ): AsyncIterable<AgentEvent>;
   abort(sessionId: string): Promise<void>;
   suspend(sessionId: string): Promise<void>;
 }

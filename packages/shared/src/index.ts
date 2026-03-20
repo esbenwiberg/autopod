@@ -39,6 +39,14 @@ export type {
 } from './types/injection.js';
 
 export type {
+  ModelProvider,
+  ProviderCredentials,
+  AnthropicCredentials,
+  MaxCredentials,
+  FoundryCredentials,
+} from './types/model-provider.js';
+
+export type {
   RuntimeType,
   Runtime,
   SpawnConfig,
@@ -141,6 +149,8 @@ export {
 export {
   createProfileSchema,
   updateProfileSchema,
+  modelProviderSchema,
+  providerCredentialsSchema,
 } from './schemas/profile.schema.js';
 
 export {

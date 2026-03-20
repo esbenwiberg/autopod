@@ -1,3 +1,11 @@
+import type {
+  ActionPolicy,
+  AgentEscalationEvent,
+  AgentEvent,
+  SystemEvent,
+  ValidationResult,
+} from '@autopod/shared';
+import pino from 'pino';
 /**
  * Session Lifecycle E2E Tests
  *
@@ -12,31 +20,23 @@
  * Each scenario exercises the real orchestration code path — not HTTP routes,
  * but the same code that HTTP routes call.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type {
-  AgentEvent,
-  AgentEscalationEvent,
-  ValidationResult,
-  SystemEvent,
-  ActionPolicy,
-} from '@autopod/shared';
-import {
-  createTestContext,
-  createMockRuntime,
-  createPassingValidationResult,
-  createFailingValidationResult,
-  statusEvent,
-  completeEvent,
-  escalationEvent,
-  insertTestProfile,
-  type TestContext,
-} from '../test-utils/mock-helpers.js';
-import { createSessionManager, type SessionManager } from './session-manager.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createActionEngine } from '../actions/action-engine.js';
 import { createActionRegistry } from '../actions/action-registry.js';
 import { createActionAuditRepository } from '../actions/audit-repository.js';
-import { createActionEngine } from '../actions/action-engine.js';
 import type { PrManager } from '../interfaces/index.js';
-import pino from 'pino';
+import {
+  type TestContext,
+  completeEvent,
+  createFailingValidationResult,
+  createMockRuntime,
+  createPassingValidationResult,
+  createTestContext,
+  escalationEvent,
+  insertTestProfile,
+  statusEvent,
+} from '../test-utils/mock-helpers.js';
+import { type SessionManager, createSessionManager } from './session-manager.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -55,8 +55,9 @@ function collectEvents(ctx: TestContext): SystemEvent[] {
 
 function statusTransitions(events: SystemEvent[]): Array<{ from: string; to: string }> {
   return events
-    .filter((e): e is SystemEvent & { type: 'session.status_changed' } =>
-      e.type === 'session.status_changed',
+    .filter(
+      (e): e is SystemEvent & { type: 'session.status_changed' } =>
+        e.type === 'session.status_changed',
     )
     .map((e) => ({ from: (e as any).previousStatus, to: (e as any).newStatus }));
 }
@@ -278,6 +279,7 @@ describe('Session Lifecycle E2E', () => {
         session.id,
         'Use PostgreSQL',
         'ctr-1',
+        undefined, // no provider env for default anthropic provider
       );
     });
   });
@@ -612,7 +614,11 @@ describe('Session Lifecycle E2E', () => {
               group: 'custom',
               handler: 'http',
               params: { query: { type: 'string', required: true, description: 'Search query' } },
-              endpoint: { url: 'https://docs.example.com/search', method: 'GET', auth: { type: 'none' } },
+              endpoint: {
+                url: 'https://docs.example.com/search',
+                method: 'GET',
+                auth: { type: 'none' },
+              },
               response: { fields: ['title', 'url'] },
             },
           ],

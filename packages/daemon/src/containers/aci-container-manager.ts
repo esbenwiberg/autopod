@@ -1,15 +1,15 @@
 import { PassThrough } from 'node:stream';
-import { DefaultAzureCredential } from '@azure/identity';
 import {
-  ContainerInstanceManagementClient,
   type ContainerGroup,
+  ContainerInstanceManagementClient,
 } from '@azure/arm-containerinstance';
+import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
 import type {
   ContainerManager,
   ContainerSpawnConfig,
-  ExecResult,
   ExecOptions,
+  ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 
@@ -55,7 +55,10 @@ export class AciContainerManager implements ContainerManager {
   private config: Required<AciContainerManagerConfig>;
   private logger: Logger;
   /** Tracks active log poll intervals for cleanup. */
-  private activePolls = new Map<string, { timer: ReturnType<typeof setInterval>; aborted: boolean }>();
+  private activePolls = new Map<
+    string,
+    { timer: ReturnType<typeof setInterval>; aborted: boolean }
+  >();
 
   constructor(config: AciContainerManagerConfig, logger: Logger) {
     this.config = {
@@ -145,10 +148,7 @@ export class AciContainerManager implements ContainerManager {
     }
 
     try {
-      await this.client.containerGroups.beginDeleteAndWait(
-        this.config.resourceGroup,
-        containerId,
-      );
+      await this.client.containerGroups.beginDeleteAndWait(this.config.resourceGroup, containerId);
       this.logger.info({ containerId }, 'ACI container group deleted');
     } catch (err: unknown) {
       // Swallow 404 — container group may already be gone
@@ -171,12 +171,22 @@ export class AciContainerManager implements ContainerManager {
     this.logger.debug({ containerId, filePath }, 'File written to ACI container');
   }
 
+  async readFile(containerId: string, filePath: string): Promise<string> {
+    // ACI doesn't have a file archive API — read via exec + base64 to avoid encoding issues
+    const result = await this.execInContainer(containerId, [
+      'sh',
+      '-c',
+      `cat "${filePath}" | base64`,
+    ]);
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to read file ${filePath} from ACI container: ${result.stderr}`);
+    }
+    return Buffer.from(result.stdout.trim(), 'base64').toString('utf-8');
+  }
+
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
     try {
-      const group = await this.client.containerGroups.get(
-        this.config.resourceGroup,
-        containerId,
-      );
+      const group = await this.client.containerGroups.get(this.config.resourceGroup, containerId);
 
       const state = group.containers?.[0]?.instanceView?.currentState?.state?.toLowerCase();
       if (state === 'running' || state === 'waiting') return 'running';
@@ -258,22 +268,21 @@ export class AciContainerManager implements ContainerManager {
     let lastLogLength = 0;
 
     // Start the command in the background via exec
-    this.client.containers.executeCommand(
-      this.config.resourceGroup,
-      containerId,
-      'agent',
-      {
+    this.client.containers
+      .executeCommand(this.config.resourceGroup, containerId, 'agent', {
         command: `/bin/sh -c '${wrappedCommand.replace(/'/g, "'\\''")}'`,
         terminalSize: { rows: 24, cols: 80 },
-      },
-    ).catch((err: unknown) => {
-      if (!aborted) {
-        this.logger.error({ containerId, err }, 'ACI exec command failed');
-        stderrStream.write(`ACI exec failed: ${err instanceof Error ? err.message : String(err)}\n`);
-        stderrStream.end();
-        stdoutStream.end();
-      }
-    });
+      })
+      .catch((err: unknown) => {
+        if (!aborted) {
+          this.logger.error({ containerId, err }, 'ACI exec command failed');
+          stderrStream.write(
+            `ACI exec failed: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+          stderrStream.end();
+          stdoutStream.end();
+        }
+      });
 
     // Poll container logs to get the output stream
     const exitCodePromise = new Promise<number>((resolve) => {

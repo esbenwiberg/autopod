@@ -1,4 +1,4 @@
-import type { Runtime, SpawnConfig, AgentEvent } from '@autopod/shared';
+import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { CodexStreamParser } from './codex-stream-parser.js';
@@ -58,15 +58,15 @@ export class CodexRuntime implements Runtime {
     }
   }
 
-  async *resume(sessionId: string, message: string, containerId: string): AsyncIterable<AgentEvent> {
+  async *resume(
+    sessionId: string,
+    message: string,
+    containerId: string,
+    env?: Record<string, string>,
+  ): AsyncIterable<AgentEvent> {
     // Codex CLI doesn't have native session resumption.
     // We pass the message as a follow-up task in full-auto mode.
-    const args = [
-      'exec',
-      message,
-      '--full-auto',
-      '--json',
-    ];
+    const args = ['exec', message, '--full-auto', '--json'];
 
     this.logger.info({
       component: 'codex-runtime',
@@ -75,11 +75,10 @@ export class CodexRuntime implements Runtime {
       msg: 'Resuming codex with follow-up message in container',
     });
 
-    const handle = await this.containerManager.execStreaming(
-      containerId,
-      ['codex', ...args],
-      { cwd: '/workspace' },
-    );
+    const handle = await this.containerManager.execStreaming(containerId, ['codex', ...args], {
+      cwd: '/workspace',
+      ...(env ? { env } : {}),
+    });
 
     this.handles.set(sessionId, handle);
 
@@ -127,12 +126,6 @@ export class CodexRuntime implements Runtime {
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
-    return [
-      'exec',
-      config.task,
-      '--model', config.model,
-      '--full-auto',
-      '--json',
-    ];
+    return ['exec', config.task, '--model', config.model, '--full-auto', '--json'];
   }
 }

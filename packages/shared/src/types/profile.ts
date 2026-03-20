@@ -1,6 +1,7 @@
-import type { RuntimeType } from './runtime.js';
-import type { InjectedMcpServer, InjectedClaudeMdSection } from './injection.js';
 import type { ActionPolicy, OutputMode } from './actions.js';
+import type { InjectedClaudeMdSection, InjectedMcpServer } from './injection.js';
+import type { ModelProvider, ProviderCredentials } from './model-provider.js';
+import type { RuntimeType } from './runtime.js';
 
 export type ExecutionTarget = 'local' | 'aci';
 
@@ -35,6 +36,10 @@ export interface Profile {
   actionPolicy: ActionPolicy | null;
   /** Output mode — 'pr' for code changes, 'artifact' for research/output collection */
   outputMode: OutputMode;
+  /** Model provider — determines how the daemon authenticates with the AI backend */
+  modelProvider: ModelProvider | null;
+  /** Provider-specific credentials (OAuth tokens for MAX, endpoint config for Foundry, etc.) */
+  providerCredentials: ProviderCredentials | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -1,12 +1,12 @@
 import { PassThrough, Writable } from 'node:stream';
 import Dockerode from 'dockerode';
-import * as tar from 'tar-stream';
 import type { Logger } from 'pino';
+import * as tar from 'tar-stream';
 import type {
   ContainerManager,
   ContainerSpawnConfig,
-  ExecResult,
   ExecOptions,
+  ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 
@@ -85,7 +85,10 @@ export class DockerContainerManager implements ContainerManager {
         await this.applyFirewall(container.id, config.firewallScript);
       } catch (err) {
         // Graceful degradation — log warning but don't fail the spawn
-        this.logger.warn({ err, containerId: container.id }, 'Failed to apply firewall rules, continuing without network isolation');
+        this.logger.warn(
+          { err, containerId: container.id },
+          'Failed to apply firewall rules, continuing without network isolation',
+        );
       }
     }
 
@@ -143,6 +146,31 @@ export class DockerContainerManager implements ContainerManager {
 
     await container.putArchive(tarBuffer, { path: '/' });
     this.logger.debug({ containerId, filePath }, 'File written to container');
+  }
+
+  async readFile(containerId: string, filePath: string): Promise<string> {
+    const container = this.docker.getContainer(containerId);
+
+    // getArchive returns a tar stream of the file/directory at the given path
+    const archiveStream = await container.getArchive({ path: filePath });
+
+    // Extract the single file from the tar archive
+    const extract = tar.extract();
+    const chunks: Buffer[] = [];
+
+    return new Promise<string>((resolve, reject) => {
+      extract.on('entry', (_header, stream, next) => {
+        stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+        stream.on('end', next);
+        stream.on('error', reject);
+      });
+      extract.on('finish', () => {
+        resolve(Buffer.concat(chunks).toString('utf-8'));
+      });
+      extract.on('error', reject);
+
+      (archiveStream as NodeJS.ReadableStream).pipe(extract);
+    });
   }
 
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
@@ -266,7 +294,10 @@ export class DockerContainerManager implements ContainerManager {
 
     const inspection = await exec.inspect();
     if (inspection.ExitCode !== 0) {
-      this.logger.warn({ exitCode: inspection.ExitCode, stderr, stdout }, 'Firewall script exited with non-zero code');
+      this.logger.warn(
+        { exitCode: inspection.ExitCode, stderr, stdout },
+        'Firewall script exited with non-zero code',
+      );
       throw new Error(`Firewall script failed with exit code ${inspection.ExitCode}`);
     }
 

@@ -1,5 +1,13 @@
-import type Database from 'better-sqlite3';
-import type { ActionPolicy, EscalationConfig, InjectedMcpServer, InjectedClaudeMdSection, NetworkPolicy, Profile, ValidationPage } from '@autopod/shared';
+import type {
+  ActionPolicy,
+  EscalationConfig,
+  InjectedClaudeMdSection,
+  InjectedMcpServer,
+  NetworkPolicy,
+  Profile,
+  ProviderCredentials,
+  ValidationPage,
+} from '@autopod/shared';
 import {
   AutopodError,
   ProfileExistsError,
@@ -7,6 +15,7 @@ import {
   createProfileSchema,
   updateProfileSchema,
 } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 import pino from 'pino';
 import { resolveInheritance, validateInheritanceChain } from './inheritance.js';
 
@@ -44,10 +53,20 @@ function rowToProfile(row: Record<string, unknown>): Profile {
     warmImageTag: (row.warm_image_tag as string) ?? null,
     warmImageBuiltAt: (row.warm_image_built_at as string) ?? null,
     mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]') as InjectedMcpServer[],
-    claudeMdSections: JSON.parse((row.claude_md_sections as string) ?? '[]') as InjectedClaudeMdSection[],
-    networkPolicy: row.network_policy ? JSON.parse(row.network_policy as string) as NetworkPolicy : null,
-    actionPolicy: row.action_policy ? JSON.parse(row.action_policy as string) as ActionPolicy : null,
+    claudeMdSections: JSON.parse(
+      (row.claude_md_sections as string) ?? '[]',
+    ) as InjectedClaudeMdSection[],
+    networkPolicy: row.network_policy
+      ? (JSON.parse(row.network_policy as string) as NetworkPolicy)
+      : null,
+    actionPolicy: row.action_policy
+      ? (JSON.parse(row.action_policy as string) as ActionPolicy)
+      : null,
     outputMode: (row.output_mode as Profile['outputMode']) ?? 'pr',
+    modelProvider: (row.model_provider as Profile['modelProvider']) ?? null,
+    providerCredentials: row.provider_credentials
+      ? (JSON.parse(row.provider_credentials as string) as ProviderCredentials)
+      : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -68,7 +87,11 @@ export function createProfileStore(db: Database.Database): ProfileStore {
     if (!profile.extends) return profile;
 
     if (depth >= 5) {
-      throw new AutopodError('Inheritance chain too deep (max 5 levels)', 'INHERITANCE_TOO_DEEP', 400);
+      throw new AutopodError(
+        'Inheritance chain too deep (max 5 levels)',
+        'INHERITANCE_TOO_DEEP',
+        400,
+      );
     }
 
     const parent = fetchRaw(profile.extends);
@@ -94,7 +117,9 @@ export function createProfileStore(db: Database.Database): ProfileStore {
 
       // If extends is set, verify parent exists
       if (parsed.extends) {
-        const parentExists = db.prepare('SELECT 1 FROM profiles WHERE name = ?').get(parsed.extends);
+        const parentExists = db
+          .prepare('SELECT 1 FROM profiles WHERE name = ?')
+          .get(parsed.extends);
         if (!parentExists) throw new ProfileNotFoundError(parsed.extends);
       }
 
@@ -106,12 +131,14 @@ export function createProfileStore(db: Database.Database): ProfileStore {
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, mcp_servers, claude_md_sections, network_policy, action_policy, output_mode,
+          model_provider, provider_credentials,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @mcpServers, @claudeMdSections, @networkPolicy, @actionPolicy, @outputMode,
+          @modelProvider, @providerCredentials,
           @createdAt, @updatedAt
         )
       `).run({
@@ -136,6 +163,10 @@ export function createProfileStore(db: Database.Database): ProfileStore {
         networkPolicy: parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null,
         actionPolicy: parsed.actionPolicy ? JSON.stringify(parsed.actionPolicy) : null,
         outputMode: parsed.outputMode,
+        modelProvider: parsed.modelProvider ?? null,
+        providerCredentials: parsed.providerCredentials
+          ? JSON.stringify(parsed.providerCredentials)
+          : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -159,7 +190,10 @@ export function createProfileStore(db: Database.Database): ProfileStore {
     },
 
     list(): Profile[] {
-      const rows = db.prepare('SELECT * FROM profiles ORDER BY name').all() as Record<string, unknown>[];
+      const rows = db.prepare('SELECT * FROM profiles ORDER BY name').all() as Record<
+        string,
+        unknown
+      >[];
       return rows.map((row) => {
         const profile = rowToProfile(row);
         return profile.extends ? resolve(profile) : profile;
@@ -174,7 +208,9 @@ export function createProfileStore(db: Database.Database): ProfileStore {
 
       // If extends is being changed, verify new parent exists
       if (parsed.extends !== undefined && parsed.extends !== null) {
-        const parentExists = db.prepare('SELECT 1 FROM profiles WHERE name = ?').get(parsed.extends);
+        const parentExists = db
+          .prepare('SELECT 1 FROM profiles WHERE name = ?')
+          .get(parsed.extends);
         if (!parentExists) throw new ProfileNotFoundError(parsed.extends);
       }
 
@@ -182,26 +218,96 @@ export function createProfileStore(db: Database.Database): ProfileStore {
       const fieldMap: Record<string, unknown> = {};
       const setClauses: string[] = [];
 
-      if (parsed.repoUrl !== undefined) { setClauses.push('repo_url = @repoUrl'); fieldMap.repoUrl = parsed.repoUrl; }
-      if (parsed.defaultBranch !== undefined) { setClauses.push('default_branch = @defaultBranch'); fieldMap.defaultBranch = parsed.defaultBranch; }
-      if (parsed.template !== undefined) { setClauses.push('template = @template'); fieldMap.template = parsed.template; }
-      if (parsed.buildCommand !== undefined) { setClauses.push('build_command = @buildCommand'); fieldMap.buildCommand = parsed.buildCommand; }
-      if (parsed.startCommand !== undefined) { setClauses.push('start_command = @startCommand'); fieldMap.startCommand = parsed.startCommand; }
-      if (parsed.healthPath !== undefined) { setClauses.push('health_path = @healthPath'); fieldMap.healthPath = parsed.healthPath; }
-      if (parsed.healthTimeout !== undefined) { setClauses.push('health_timeout = @healthTimeout'); fieldMap.healthTimeout = parsed.healthTimeout; }
-      if (parsed.validationPages !== undefined) { setClauses.push('validation_pages = @validationPages'); fieldMap.validationPages = JSON.stringify(parsed.validationPages); }
-      if (parsed.maxValidationAttempts !== undefined) { setClauses.push('max_validation_attempts = @maxValidationAttempts'); fieldMap.maxValidationAttempts = parsed.maxValidationAttempts; }
-      if (parsed.defaultModel !== undefined) { setClauses.push('default_model = @defaultModel'); fieldMap.defaultModel = parsed.defaultModel; }
-      if (parsed.defaultRuntime !== undefined) { setClauses.push('default_runtime = @defaultRuntime'); fieldMap.defaultRuntime = parsed.defaultRuntime; }
-      if (parsed.executionTarget !== undefined) { setClauses.push('execution_target = @executionTarget'); fieldMap.executionTarget = parsed.executionTarget; }
-      if (parsed.customInstructions !== undefined) { setClauses.push('custom_instructions = @customInstructions'); fieldMap.customInstructions = parsed.customInstructions; }
-      if (parsed.escalation !== undefined) { setClauses.push('escalation_config = @escalationConfig'); fieldMap.escalationConfig = JSON.stringify(parsed.escalation); }
-      if (parsed.extends !== undefined) { setClauses.push('extends = @extends'); fieldMap.extends = parsed.extends; }
-      if (parsed.mcpServers !== undefined) { setClauses.push('mcp_servers = @mcpServers'); fieldMap.mcpServers = JSON.stringify(parsed.mcpServers); }
-      if (parsed.claudeMdSections !== undefined) { setClauses.push('claude_md_sections = @claudeMdSections'); fieldMap.claudeMdSections = JSON.stringify(parsed.claudeMdSections); }
-      if (parsed.networkPolicy !== undefined) { setClauses.push('network_policy = @networkPolicy'); fieldMap.networkPolicy = parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null; }
-      if (parsed.actionPolicy !== undefined) { setClauses.push('action_policy = @actionPolicy'); fieldMap.actionPolicy = parsed.actionPolicy ? JSON.stringify(parsed.actionPolicy) : null; }
-      if (parsed.outputMode !== undefined) { setClauses.push('output_mode = @outputMode'); fieldMap.outputMode = parsed.outputMode; }
+      if (parsed.repoUrl !== undefined) {
+        setClauses.push('repo_url = @repoUrl');
+        fieldMap.repoUrl = parsed.repoUrl;
+      }
+      if (parsed.defaultBranch !== undefined) {
+        setClauses.push('default_branch = @defaultBranch');
+        fieldMap.defaultBranch = parsed.defaultBranch;
+      }
+      if (parsed.template !== undefined) {
+        setClauses.push('template = @template');
+        fieldMap.template = parsed.template;
+      }
+      if (parsed.buildCommand !== undefined) {
+        setClauses.push('build_command = @buildCommand');
+        fieldMap.buildCommand = parsed.buildCommand;
+      }
+      if (parsed.startCommand !== undefined) {
+        setClauses.push('start_command = @startCommand');
+        fieldMap.startCommand = parsed.startCommand;
+      }
+      if (parsed.healthPath !== undefined) {
+        setClauses.push('health_path = @healthPath');
+        fieldMap.healthPath = parsed.healthPath;
+      }
+      if (parsed.healthTimeout !== undefined) {
+        setClauses.push('health_timeout = @healthTimeout');
+        fieldMap.healthTimeout = parsed.healthTimeout;
+      }
+      if (parsed.validationPages !== undefined) {
+        setClauses.push('validation_pages = @validationPages');
+        fieldMap.validationPages = JSON.stringify(parsed.validationPages);
+      }
+      if (parsed.maxValidationAttempts !== undefined) {
+        setClauses.push('max_validation_attempts = @maxValidationAttempts');
+        fieldMap.maxValidationAttempts = parsed.maxValidationAttempts;
+      }
+      if (parsed.defaultModel !== undefined) {
+        setClauses.push('default_model = @defaultModel');
+        fieldMap.defaultModel = parsed.defaultModel;
+      }
+      if (parsed.defaultRuntime !== undefined) {
+        setClauses.push('default_runtime = @defaultRuntime');
+        fieldMap.defaultRuntime = parsed.defaultRuntime;
+      }
+      if (parsed.executionTarget !== undefined) {
+        setClauses.push('execution_target = @executionTarget');
+        fieldMap.executionTarget = parsed.executionTarget;
+      }
+      if (parsed.customInstructions !== undefined) {
+        setClauses.push('custom_instructions = @customInstructions');
+        fieldMap.customInstructions = parsed.customInstructions;
+      }
+      if (parsed.escalation !== undefined) {
+        setClauses.push('escalation_config = @escalationConfig');
+        fieldMap.escalationConfig = JSON.stringify(parsed.escalation);
+      }
+      if (parsed.extends !== undefined) {
+        setClauses.push('extends = @extends');
+        fieldMap.extends = parsed.extends;
+      }
+      if (parsed.mcpServers !== undefined) {
+        setClauses.push('mcp_servers = @mcpServers');
+        fieldMap.mcpServers = JSON.stringify(parsed.mcpServers);
+      }
+      if (parsed.claudeMdSections !== undefined) {
+        setClauses.push('claude_md_sections = @claudeMdSections');
+        fieldMap.claudeMdSections = JSON.stringify(parsed.claudeMdSections);
+      }
+      if (parsed.networkPolicy !== undefined) {
+        setClauses.push('network_policy = @networkPolicy');
+        fieldMap.networkPolicy = parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null;
+      }
+      if (parsed.actionPolicy !== undefined) {
+        setClauses.push('action_policy = @actionPolicy');
+        fieldMap.actionPolicy = parsed.actionPolicy ? JSON.stringify(parsed.actionPolicy) : null;
+      }
+      if (parsed.outputMode !== undefined) {
+        setClauses.push('output_mode = @outputMode');
+        fieldMap.outputMode = parsed.outputMode;
+      }
+      if (parsed.modelProvider !== undefined) {
+        setClauses.push('model_provider = @modelProvider');
+        fieldMap.modelProvider = parsed.modelProvider;
+      }
+      if (parsed.providerCredentials !== undefined) {
+        setClauses.push('provider_credentials = @providerCredentials');
+        fieldMap.providerCredentials = parsed.providerCredentials
+          ? JSON.stringify(parsed.providerCredentials)
+          : null;
+      }
 
       if (setClauses.length === 0) {
         return this.get(name);
@@ -214,7 +320,13 @@ export function createProfileStore(db: Database.Database): ProfileStore {
 
       db.prepare(`UPDATE profiles SET ${setClauses.join(', ')} WHERE name = @name`).run(fieldMap);
 
-      logger.info({ name, fields: Object.keys(parsed).filter((k) => parsed[k as keyof typeof parsed] !== undefined) }, 'Profile updated');
+      logger.info(
+        {
+          name,
+          fields: Object.keys(parsed).filter((k) => parsed[k as keyof typeof parsed] !== undefined),
+        },
+        'Profile updated',
+      );
       return this.get(name);
     },
 
@@ -223,20 +335,20 @@ export function createProfileStore(db: Database.Database): ProfileStore {
       fetchRaw(name);
 
       // Check for active sessions
-      const activeCount = db.prepare(
-        `SELECT COUNT(*) as count FROM sessions WHERE profile_name = ? AND status NOT IN ('complete', 'killed')`,
-      ).get(name) as { count: number };
+      const activeCount = db
+        .prepare(
+          `SELECT COUNT(*) as count FROM sessions WHERE profile_name = ? AND status NOT IN ('complete', 'killed')`,
+        )
+        .get(name) as { count: number };
 
       if (activeCount.count > 0) {
-        throw new AutopodError(
-          `Cannot delete profile with active sessions`,
-          'PROFILE_IN_USE',
-          409,
-        );
+        throw new AutopodError(`Cannot delete profile with active sessions`, 'PROFILE_IN_USE', 409);
       }
 
       // Check if other profiles extend this one
-      const children = db.prepare('SELECT name FROM profiles WHERE extends = ?').all(name) as { name: string }[];
+      const children = db.prepare('SELECT name FROM profiles WHERE extends = ?').all(name) as {
+        name: string;
+      }[];
       if (children.length > 0) {
         const childNames = children.map((c) => c.name).join(', ');
         throw new AutopodError(
