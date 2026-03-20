@@ -183,6 +183,8 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         networkPolicy: null,
         actionPolicy: null,
         outputMode: 'pr' as const,
+        modelProvider: (row.model_provider as 'anthropic' | 'max' | 'foundry') ?? 'anthropic',
+        providerCredentials: row.provider_credentials ? JSON.parse(row.provider_credentials as string) : null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };

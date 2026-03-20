@@ -1,6 +1,6 @@
-import type { Runtime, SpawnConfig, AgentEvent } from '@autopod/shared';
-import type { Logger } from 'pino';
 import { randomUUID } from 'node:crypto';
+import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
+import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
 
@@ -44,7 +44,11 @@ export class ClaudeRuntime implements Runtime {
     this.handles.set(config.sessionId, handle);
 
     try {
-      for await (const event of ClaudeStreamParser.parse(handle.stdout, config.sessionId, this.logger)) {
+      for await (const event of ClaudeStreamParser.parse(
+        handle.stdout,
+        config.sessionId,
+        this.logger,
+      )) {
         // Capture Claude's session ID from init events for resume support
         if (event.type === 'status' && event.message.includes('Claude session initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
@@ -70,7 +74,12 @@ export class ClaudeRuntime implements Runtime {
     }
   }
 
-  async *resume(sessionId: string, message: string, containerId: string): AsyncIterable<AgentEvent> {
+  async *resume(
+    sessionId: string,
+    message: string,
+    containerId: string,
+    env?: Record<string, string>,
+  ): AsyncIterable<AgentEvent> {
     const claudeSessionId = this.claudeSessionIds.get(sessionId);
     const args = this.buildResumeArgs(message, claudeSessionId);
 
@@ -82,11 +91,10 @@ export class ClaudeRuntime implements Runtime {
       msg: 'Resuming claude session in container',
     });
 
-    const handle = await this.containerManager.execStreaming(
-      containerId,
-      ['claude', ...args],
-      { cwd: '/workspace' },
-    );
+    const handle = await this.containerManager.execStreaming(containerId, ['claude', ...args], {
+      cwd: '/workspace',
+      ...(env ? { env } : {}),
+    });
 
     this.handles.set(sessionId, handle);
 
@@ -155,10 +163,14 @@ export class ClaudeRuntime implements Runtime {
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
     const args = [
-      '-p', config.task,
-      '--model', config.model,
-      '--output-format', 'stream-json',
-      '--permission-mode', 'bypassPermissions',
+      '-p',
+      config.task,
+      '--model',
+      config.model,
+      '--output-format',
+      'stream-json',
+      '--permission-mode',
+      'bypassPermissions',
     ];
 
     // Deterministic session ID for tracking
@@ -181,9 +193,12 @@ export class ClaudeRuntime implements Runtime {
 
   private buildResumeArgs(message: string, claudeSessionId?: string): string[] {
     const args = [
-      '-p', message,
-      '--output-format', 'stream-json',
-      '--permission-mode', 'bypassPermissions',
+      '-p',
+      message,
+      '--output-format',
+      'stream-json',
+      '--permission-mode',
+      'bypassPermissions',
     ];
 
     if (claudeSessionId) {

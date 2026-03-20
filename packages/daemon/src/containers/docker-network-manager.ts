@@ -12,6 +12,8 @@ export const DEFAULT_ALLOWED_HOSTS = [
   'github.com',
   'objects.githubusercontent.com',
   'raw.githubusercontent.com',
+  // Required for MAX/PRO OAuth token refresh (Claude Code refreshes internally)
+  'platform.claude.com',
 ];
 
 interface DockerNetworkManagerOptions {

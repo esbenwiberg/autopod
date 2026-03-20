@@ -34,8 +34,13 @@ export interface ContainerManager {
   spawn(config: ContainerSpawnConfig): Promise<string>; // returns containerId
   kill(containerId: string): Promise<void>;
   writeFile(containerId: string, path: string, content: string): Promise<void>;
+  readFile(containerId: string, path: string): Promise<string>;
   getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'>;
-  execInContainer(containerId: string, command: string[], options?: ExecOptions): Promise<ExecResult>;
+  execInContainer(
+    containerId: string,
+    command: string[],
+    options?: ExecOptions,
+  ): Promise<ExecResult>;
   execStreaming(
     containerId: string,
     command: string[],
