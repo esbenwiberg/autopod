@@ -209,6 +209,9 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         warmImageBuiltAt: null,
         mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]'),
         claudeMdSections: JSON.parse((row.claude_md_sections as string) ?? '[]'),
+        networkPolicy: row.network_policy ? JSON.parse(row.network_policy as string) : null,
+        actionPolicy: row.action_policy ? JSON.parse(row.action_policy as string) : null,
+        outputMode: (row.output_mode as 'pr' | 'artifact') ?? 'pr',
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
