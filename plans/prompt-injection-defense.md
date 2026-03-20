@@ -1,6 +1,6 @@
 # Prompt Injection Defense for Research Pods
 
-> **Status:** Future — to be implemented after the action control plane is live
+> **Status:** Layer 2 (content quarantine) ships WITH the ACP as part of the unified content processing pipeline. Layers 4-5 are future.
 >
 > **Date:** 2026-03-20
 >
@@ -10,9 +10,11 @@
 
 ## Context
 
-Research pods crawl the web. Web content can contain adversarial text designed to manipulate the agent ("ignore previous instructions", "exfiltrate your system prompt"). The fundamental challenge: LLMs can't reliably distinguish instructions from data — they're both text in the context window.
+Prompt injection isn't just a web crawling problem — it's an **any untrusted data** problem. Every data source flowing through the action control plane is a vector: GitHub issue bodies, PR comments, ADO work items, Azure logs (attacker can log crafted strings), proxied MCP responses, context enrichment results. Any of these can contain adversarial instructions.
 
 **There is no silver bullet.** But there are meaningful defense layers, and the action control plane already handles the worst consequences.
+
+**Note:** Layer 2 (content quarantine) is now part of the ACP's unified content processing pipeline at `packages/shared/src/sanitize/`. It runs on ALL action responses and proxied MCP data, not just web fetches. See `plans/action-control-plane.md` for implementation details.
 
 ---
 
@@ -165,12 +167,12 @@ Research Agent (has tools, does real work)
 | Layer | Effort | Impact | When |
 |-------|--------|--------|------|
 | 1. Blast radius containment | ✅ Done | Prevents catastrophic outcomes | Now (action control plane) |
-| 2. Content quarantine | Small (regex patterns + wrapper) | Catches obvious attacks | With research pod support |
-| 3. Prompt hardening | Trivial (CLAUDE.md text) | Raises the bar for subtle attacks | With research pod support |
+| 2. Content quarantine | ✅ Ships with ACP | Catches obvious attacks on ALL data sources | ACP Phase 2 (unified content processor) |
+| 3. Prompt hardening | Trivial (CLAUDE.md text) | Raises the bar for subtle attacks | ACP Phase 4 (agent awareness) |
 | 4. Output anomaly detection | Medium (Haiku call + heuristics) | Catches compromised output | After we see real usage patterns |
 | 5. Dual-context pattern | Large (two-phase sessions) | Near-complete injection defense | Only if needed for high-security use cases |
 
-**Layers 2+3 should ship with the research pod feature.** Layers 4+5 are follow-ups based on real-world signal.
+**Layers 1-3 ship with the ACP.** Content quarantine runs on every action response and MCP proxy response — not just web fetches. Layers 4+5 are follow-ups based on real-world signal.
 
 ---
 
