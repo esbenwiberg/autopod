@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { injectedMcpServerSchema, injectedClaudeMdSectionSchema } from './injection.schema.js';
+import { actionPolicySchema, outputModeSchema } from './action-definition.schema.js';
 
 const pageAssertionSchema = z.object({
   selector: z.string().min(1),
@@ -55,6 +56,8 @@ export const createProfileSchema = z.object({
   mcpServers: z.array(injectedMcpServerSchema).default([]),
   claudeMdSections: z.array(injectedClaudeMdSectionSchema).default([]),
   networkPolicy: networkPolicySchema.nullable().default(null),
+  actionPolicy: actionPolicySchema.nullable().default(null),
+  outputMode: outputModeSchema.default('pr'),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });

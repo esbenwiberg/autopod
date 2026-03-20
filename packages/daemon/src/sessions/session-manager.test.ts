@@ -180,6 +180,9 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         warmImageBuiltAt: null,
         mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]'),
         claudeMdSections: JSON.parse((row.claude_md_sections as string) ?? '[]'),
+        networkPolicy: null,
+        actionPolicy: null,
+        outputMode: 'pr' as const,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };

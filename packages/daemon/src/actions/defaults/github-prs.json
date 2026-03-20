@@ -1,0 +1,45 @@
+[
+  {
+    "name": "read_pr",
+    "description": "Read a GitHub pull request. Returns sanitized content.",
+    "group": "github-prs",
+    "handler": "github",
+    "params": {
+      "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
+      "pr_number": { "type": "number", "required": true, "description": "PR number" }
+    },
+    "response": {
+      "fields": ["title", "body", "state", "labels", "head", "base", "mergeable", "created_at", "updated_at"],
+      "redactFields": ["user.login", "user.email", "merged_by.login"]
+    }
+  },
+  {
+    "name": "read_pr_comments",
+    "description": "Read review comments on a GitHub pull request.",
+    "group": "github-prs",
+    "handler": "github",
+    "params": {
+      "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
+      "pr_number": { "type": "number", "required": true, "description": "PR number" },
+      "max_results": { "type": "number", "required": false, "default": 20 }
+    },
+    "response": {
+      "fields": ["body", "path", "position", "created_at"],
+      "redactFields": ["user.login", "user.email"]
+    }
+  },
+  {
+    "name": "read_pr_diff",
+    "description": "Read the diff of a GitHub pull request.",
+    "group": "github-prs",
+    "handler": "github",
+    "params": {
+      "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
+      "pr_number": { "type": "number", "required": true, "description": "PR number" },
+      "file_path": { "type": "string", "required": false, "description": "Filter diff to a specific file path" }
+    },
+    "response": {
+      "fields": ["filename", "status", "additions", "deletions", "patch"]
+    }
+  }
+]

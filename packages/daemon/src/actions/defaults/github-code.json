@@ -1,0 +1,31 @@
+[
+  {
+    "name": "read_file",
+    "description": "Read a file from a GitHub repository.",
+    "group": "github-code",
+    "handler": "github",
+    "params": {
+      "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
+      "path": { "type": "string", "required": true, "description": "File path within the repo" },
+      "ref": { "type": "string", "required": false, "description": "Git ref (branch, tag, or SHA)" }
+    },
+    "response": {
+      "fields": ["content", "path", "size", "sha"]
+    }
+  },
+  {
+    "name": "search_code",
+    "description": "Search code in a GitHub repository.",
+    "group": "github-code",
+    "handler": "github",
+    "params": {
+      "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
+      "query": { "type": "string", "required": true, "description": "Search query (code search syntax)" },
+      "max_results": { "type": "number", "required": false, "default": 10 }
+    },
+    "response": {
+      "fields": ["path", "repository", "text_matches"],
+      "redactFields": ["repository.owner.login"]
+    }
+  }
+]

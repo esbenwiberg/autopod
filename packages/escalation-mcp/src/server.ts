@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { SessionBridge } from './session-bridge.js';
+import type { ActionDefinition } from '@autopod/shared';
 import { PendingRequests } from './pending-requests.js';
 import { askHuman } from './tools/ask-human.js';
 import { askAi } from './tools/ask-ai.js';
@@ -8,17 +9,20 @@ import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
 import { checkMessages } from './tools/check-messages.js';
+import { executeAction } from './tools/actions.js';
 
 export interface EscalationMcpDeps {
   sessionId: string;
   bridge: SessionBridge;
+  /** Actions available for this session (pre-resolved from profile) */
+  availableActions?: ActionDefinition[];
 }
 
 export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   server: McpServer;
   pendingRequests: PendingRequests;
 } {
-  const { sessionId, bridge } = deps;
+  const { sessionId, bridge, availableActions } = deps;
   const pendingRequests = new PendingRequests();
 
   const server = new McpServer({
@@ -109,5 +113,59 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
   );
 
+  // ─── Dynamic action tools ────────────────────────────────────
+  // Register one MCP tool per available action from the profile's action policy
+  if (availableActions) {
+    for (const action of availableActions) {
+      const zodShape = buildZodShape(action);
+      server.tool(
+        action.name,
+        action.description,
+        zodShape,
+        async (input) => {
+          const response = await executeAction(sessionId, action.name, input as Record<string, unknown>, bridge);
+          return { content: [{ type: 'text' as const, text: response }] };
+        },
+      );
+    }
+  }
+
   return { server, pendingRequests };
+}
+
+/**
+ * Build a Zod shape from an ActionDefinition's params.
+ * Maps our ParamDef types to Zod validators.
+ */
+function buildZodShape(action: ActionDefinition): Record<string, z.ZodTypeAny> {
+  const shape: Record<string, z.ZodTypeAny> = {};
+
+  for (const [name, def] of Object.entries(action.params)) {
+    let schema: z.ZodTypeAny;
+
+    switch (def.type) {
+      case 'number':
+        schema = z.number().describe(def.description);
+        break;
+      case 'boolean':
+        schema = z.boolean().describe(def.description);
+        break;
+      case 'string':
+      default:
+        if (def.enum) {
+          schema = z.enum(def.enum as [string, ...string[]]).describe(def.description);
+        } else {
+          schema = z.string().describe(def.description);
+        }
+        break;
+    }
+
+    if (!def.required) {
+      schema = schema.optional();
+    }
+
+    shape[name] = schema;
+  }
+
+  return shape;
 }

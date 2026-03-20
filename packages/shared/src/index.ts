@@ -17,6 +17,23 @@ export type {
 } from './types/profile.js';
 
 export type {
+  ActionGroup,
+  ActionHandler,
+  AuthConfig,
+  ParamDef,
+  ActionDefinition,
+  ActionOverride,
+  SanitizationPreset,
+  DataSanitizationConfig,
+  QuarantineConfig,
+  ActionPolicy,
+  OutputMode,
+  ActionRequest,
+  ActionResponse,
+  ActionAuditEntry,
+} from './types/actions.js';
+
+export type {
   InjectedMcpServer,
   InjectedClaudeMdSection,
 } from './types/injection.js';
@@ -127,6 +144,20 @@ export {
 } from './schemas/profile.schema.js';
 
 export {
+  actionDefinitionSchema,
+  actionPolicySchema,
+  actionOverrideSchema,
+  actionGroupSchema,
+  actionHandlerSchema,
+  authConfigSchema,
+  paramDefSchema,
+  dataSanitizationConfigSchema,
+  quarantineConfigSchema,
+  outputModeSchema,
+  sanitizationPresetSchema,
+} from './schemas/action-definition.schema.js';
+
+export {
   injectedMcpServerSchema,
   injectedClaudeMdSectionSchema,
 } from './schemas/injection.schema.js';
@@ -135,6 +166,28 @@ export {
   daemonConfigSchema,
   type DaemonConfig,
 } from './schemas/config.schema.js';
+
+// Sanitize + quarantine pipeline
+export {
+  sanitize,
+  sanitizeDeep,
+  getPresetConfig,
+  quarantine,
+  processContent,
+  processContentDeep,
+  PII_PATTERNS,
+  INJECTION_PATTERNS,
+  REDACT_FIELD_NAMES,
+} from './sanitize/index.js';
+
+export type {
+  PiiPattern,
+  InjectionPattern,
+  QuarantineResult,
+  ThreatIndicator,
+  ProcessedContent,
+  ProcessContentConfig,
+} from './sanitize/index.js';
 
 // ID generation utility
 export { generateId } from './id.js';
