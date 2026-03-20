@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Logger } from 'pino';
-import { createTeamsAdapter } from './teams-adapter.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AdaptiveCard } from './card-builder.js';
+import { createTeamsAdapter } from './teams-adapter.js';
 
 const mockLogger = {
   warn: vi.fn(),
@@ -56,9 +56,9 @@ describe('TeamsAdapter', () => {
   });
 
   it('returns false and logs warning on non-OK response', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response('Bad Request', { status: 400, statusText: 'Bad Request' }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('Bad Request', { status: 400, statusText: 'Bad Request' }));
 
     const adapter = createTeamsAdapter('https://webhook.example.com/incoming', mockLogger);
     const result = await adapter.send(testCard);

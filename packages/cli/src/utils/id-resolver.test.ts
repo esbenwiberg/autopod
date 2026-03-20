@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolveSessionId } from './id-resolver.js';
 import { SessionNotFoundError } from '@autopod/shared';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
+import { resolveSessionId } from './id-resolver.js';
 
 describe('resolveSessionId', () => {
   const mockClient = {
@@ -19,9 +19,7 @@ describe('resolveSessionId', () => {
   });
 
   it('rejects IDs shorter than 3 characters', async () => {
-    await expect(resolveSessionId(mockClient, 'ab')).rejects.toThrow(
-      'at least 3 characters',
-    );
+    await expect(resolveSessionId(mockClient, 'ab')).rejects.toThrow('at least 3 characters');
   });
 
   it('resolves partial ID to full ID', async () => {

@@ -1,5 +1,5 @@
-import type { SessionBridge } from '../session-bridge.js';
 import type { ActionDefinition } from '@autopod/shared';
+import type { SessionBridge } from '../session-bridge.js';
 
 /**
  * Execute an action tool call from the agent.
@@ -33,7 +33,9 @@ export async function executeAction(
  * Get the Zod-compatible schema params for an action definition.
  * Used for dynamic MCP tool registration.
  */
-export function actionParamsToZodShape(action: ActionDefinition): Record<string, { type: string; description: string; optional: boolean }> {
+export function actionParamsToZodShape(
+  action: ActionDefinition,
+): Record<string, { type: string; description: string; optional: boolean }> {
   const shape: Record<string, { type: string; description: string; optional: boolean }> = {};
   for (const [name, def] of Object.entries(action.params)) {
     shape[name] = {

@@ -1,11 +1,11 @@
-import type { Command } from 'commander';
+import type { AgentActivityEvent, Session, SystemEvent } from '@autopod/shared';
 import chalk from 'chalk';
-import type { Session, SystemEvent, AgentActivityEvent } from '@autopod/shared';
+import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
-import { withSpinner } from '../output/spinner.js';
+import { formatDurationFromDates, formatStatus } from '../output/colors.js';
 import { withJsonOutput } from '../output/json.js';
-import { renderTable, type ColumnDef } from '../output/table.js';
-import { formatStatus, formatDurationFromDates } from '../output/colors.js';
+import { withSpinner } from '../output/spinner.js';
+import { type ColumnDef, renderTable } from '../output/table.js';
 import { resolveSessionId } from '../utils/id-resolver.js';
 
 const sessionColumns: ColumnDef<Session>[] = [
@@ -13,7 +13,11 @@ const sessionColumns: ColumnDef<Session>[] = [
   { header: 'Profile', key: 'profileName', width: 16 },
   { header: 'Status', formatter: (s) => formatStatus(s.status), width: 18 },
   { header: 'Task', formatter: (s) => truncate(s.task, 40), width: 42 },
-  { header: 'Duration', formatter: (s) => formatDurationFromDates(s.startedAt, s.completedAt), width: 10 },
+  {
+    header: 'Duration',
+    formatter: (s) => formatDurationFromDates(s.startedAt, s.completedAt),
+    width: 10,
+  },
   { header: 'Files', formatter: (s) => String(s.filesChanged), width: 7 },
 ];
 
@@ -31,25 +35,31 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--skip-validation', 'Skip validation phase')
-    .action(async (profile: string, task: string, opts: { model?: string; runtime?: string; branch?: string; skipValidation?: boolean }) => {
-      const client = getClient();
-      const session = await withSpinner('Starting session...', () =>
-        client.createSession({
-          profileName: profile,
-          task,
-          model: opts.model,
-          runtime: opts.runtime as 'claude' | 'codex' | undefined,
-          branch: opts.branch,
-          skipValidation: opts.skipValidation,
-        }),
-      );
+    .action(
+      async (
+        profile: string,
+        task: string,
+        opts: { model?: string; runtime?: string; branch?: string; skipValidation?: boolean },
+      ) => {
+        const client = getClient();
+        const session = await withSpinner('Starting session...', () =>
+          client.createSession({
+            profileName: profile,
+            task,
+            model: opts.model,
+            runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            branch: opts.branch,
+            skipValidation: opts.skipValidation,
+          }),
+        );
 
-      console.log(chalk.green(`Session ${chalk.bold(session.id)} created.`));
-      console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
-      console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
-      console.log(`${chalk.bold('Branch:')}   ${session.branch}`);
-      console.log(chalk.dim(`Track progress: ap status ${session.id.slice(0, 8)}`));
-    });
+        console.log(chalk.green(`Session ${chalk.bold(session.id)} created.`));
+        console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
+        console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
+        console.log(`${chalk.bold('Branch:')}   ${session.branch}`);
+        console.log(chalk.dim(`Track progress: ap status ${session.id.slice(0, 8)}`));
+      },
+    );
 
   // ap ls
   program
@@ -92,10 +102,16 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Model:')}        ${s.model}`);
         console.log(`${chalk.bold('Runtime:')}      ${s.runtime}`);
         console.log(`${chalk.bold('Branch:')}       ${s.branch}`);
-        console.log(`${chalk.bold('Duration:')}     ${formatDurationFromDates(s.startedAt, s.completedAt)}`);
-        console.log(`${chalk.bold('Validations:')}  ${s.validationAttempts}/${s.maxValidationAttempts}`);
+        console.log(
+          `${chalk.bold('Duration:')}     ${formatDurationFromDates(s.startedAt, s.completedAt)}`,
+        );
+        console.log(
+          `${chalk.bold('Validations:')}  ${s.validationAttempts}/${s.maxValidationAttempts}`,
+        );
         console.log(`${chalk.bold('Escalations:')}  ${s.escalationCount}`);
-        console.log(`${chalk.bold('Changes:')}      ${s.filesChanged} files (+${s.linesAdded} -${s.linesRemoved})`);
+        console.log(
+          `${chalk.bold('Changes:')}      ${s.filesChanged} files (+${s.linesAdded} -${s.linesRemoved})`,
+        );
         if (s.previewUrl) {
           console.log(`${chalk.bold('Preview:')}      ${s.previewUrl}`);
         }
@@ -109,19 +125,25 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
           });
         }
         if (s.progress) {
-          console.log(`${chalk.bold('Progress:')}     ${s.progress.currentPhase}/${s.progress.totalPhases} — ${s.progress.phase}`);
+          console.log(
+            `${chalk.bold('Progress:')}     ${s.progress.currentPhase}/${s.progress.totalPhases} — ${s.progress.phase}`,
+          );
           console.log(`${chalk.bold('Phase:')}        ${chalk.dim(s.progress.description)}`);
         }
         if (s.pendingEscalation) {
           console.log(chalk.yellow.bold('\nPending escalation:'));
           console.log(`  Type: ${s.pendingEscalation.type}`);
           const p = s.pendingEscalation.payload;
-          console.log(`  Message: ${'question' in p ? p.question : 'description' in p ? p.description : ''}`);
+          console.log(
+            `  Message: ${'question' in p ? p.question : 'description' in p ? p.description : ''}`,
+          );
         }
         if (s.lastValidationResult) {
           const vr = s.lastValidationResult;
           const color = vr.overall === 'pass' ? chalk.green : chalk.red;
-          console.log(`\n${chalk.bold('Last validation:')} ${color(vr.overall.toUpperCase())} (attempt ${vr.attempt})`);
+          console.log(
+            `\n${chalk.bold('Last validation:')} ${color(vr.overall.toUpperCase())} (attempt ${vr.attempt})`,
+          );
         }
       });
     });
@@ -151,7 +173,8 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
           try {
             const event = JSON.parse(data.toString()) as { type: string };
             // Skip subscribe/unsubscribe confirmations
-            if (['subscribed', 'unsubscribed', 'subscribed_all', 'error'].includes(event.type)) return;
+            if (['subscribed', 'unsubscribed', 'subscribed_all', 'error'].includes(event.type))
+              return;
             formatLogEvent(event as SystemEvent);
           } catch {
             // Ignore malformed messages
@@ -186,9 +209,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .action(async (id: string) => {
       const client = getClient();
       const resolvedId = await resolveSessionId(client, id);
-      await withSpinner('Pausing session...', () =>
-        client.pauseSession(resolvedId),
-      );
+      await withSpinner('Pausing session...', () => client.pauseSession(resolvedId));
       console.log(chalk.yellow(`Session ${resolvedId} paused.`));
       console.log(chalk.dim('Resume with: ap tell <id> "<message>"'));
     });
@@ -200,9 +221,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .action(async (id: string, message: string) => {
       const client = getClient();
       const resolvedId = await resolveSessionId(client, id);
-      await withSpinner('Sending nudge...', () =>
-        client.nudgeSession(resolvedId, message),
-      );
+      await withSpinner('Sending nudge...', () => client.nudgeSession(resolvedId, message));
       console.log(chalk.green('Nudge queued. Agent will see it on next check_messages call.'));
     });
 
@@ -213,9 +232,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .action(async (id: string, message: string) => {
       const client = getClient();
       const resolvedId = await resolveSessionId(client, id);
-      await withSpinner('Sending message...', () =>
-        client.sendMessage(resolvedId, message),
-      );
+      await withSpinner('Sending message...', () => client.sendMessage(resolvedId, message));
       console.log(chalk.green('Message sent.'));
     });
 
@@ -235,7 +252,11 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
         if (result.approved.length === 0) {
           console.log(chalk.dim('No validated sessions to approve.'));
         } else {
-          console.log(chalk.green(`Approved ${result.approved.length} session(s): ${result.approved.join(', ')}`));
+          console.log(
+            chalk.green(
+              `Approved ${result.approved.length} session(s): ${result.approved.join(', ')}`,
+            ),
+          );
         }
         return;
       }
@@ -259,9 +280,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .action(async (id: string, feedback: string) => {
       const client = getClient();
       const resolvedId = await resolveSessionId(client, id);
-      await withSpinner('Rejecting session...', () =>
-        client.rejectSession(resolvedId, feedback),
-      );
+      await withSpinner('Rejecting session...', () => client.rejectSession(resolvedId, feedback));
       console.log(chalk.yellow(`Session ${resolvedId} rejected with feedback.`));
     });
 
@@ -280,7 +299,9 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
         if (result.killed.length === 0) {
           console.log(chalk.dim('No failed sessions to kill.'));
         } else {
-          console.log(chalk.red(`Killed ${result.killed.length} session(s): ${result.killed.join(', ')}`));
+          console.log(
+            chalk.red(`Killed ${result.killed.length} session(s): ${result.killed.join(', ')}`),
+          );
         }
         return;
       }
@@ -291,9 +312,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
       }
 
       const resolvedId = await resolveSessionId(client, id);
-      await withSpinner('Killing session...', () =>
-        client.killSession(resolvedId),
-      );
+      await withSpinner('Killing session...', () => client.killSession(resolvedId));
       console.log(chalk.red(`Session ${resolvedId} killed.`));
     });
 }
@@ -308,7 +327,8 @@ function formatTimestamp(ts: string): string {
 }
 
 function formatLogEvent(event: SystemEvent & { type: string }): void {
-  const ts = 'timestamp' in event ? formatTimestamp((event as { timestamp: string }).timestamp) : '';
+  const ts =
+    'timestamp' in event ? formatTimestamp((event as { timestamp: string }).timestamp) : '';
 
   switch (event.type) {
     case 'session.agent_activity': {
@@ -319,14 +339,20 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
           console.log(`${ts} ${chalk.dim(inner.message)}`);
           break;
         case 'tool_use': {
-          const inputSummary = Object.keys(inner.input).length > 0
-            ? chalk.dim(` ${JSON.stringify(inner.input).slice(0, 80)}`)
-            : '';
+          const inputSummary =
+            Object.keys(inner.input).length > 0
+              ? chalk.dim(` ${JSON.stringify(inner.input).slice(0, 80)}`)
+              : '';
           console.log(`${ts} ${chalk.cyan(`[tool] ${inner.tool}`)}${inputSummary}`);
           break;
         }
         case 'file_change': {
-          const actionColor = inner.action === 'delete' ? chalk.red : inner.action === 'create' ? chalk.green : chalk.yellow;
+          const actionColor =
+            inner.action === 'delete'
+              ? chalk.red
+              : inner.action === 'create'
+                ? chalk.green
+                : chalk.yellow;
           console.log(`${ts} ${actionColor(`[${inner.action}]`)} ${inner.path}`);
           break;
         }
@@ -339,7 +365,9 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
         case 'escalation': {
           const p = inner.payload.payload;
           const desc = 'question' in p ? p.question : p.description;
-          console.log(`${ts} ${chalk.yellow.bold(`[escalation: ${inner.escalationType}]`)} ${desc}`);
+          console.log(
+            `${ts} ${chalk.yellow.bold(`[escalation: ${inner.escalationType}]`)} ${desc}`,
+          );
           break;
         }
         case 'plan':
@@ -349,7 +377,9 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
           });
           break;
         case 'progress':
-          console.log(`${ts} ${chalk.blue.bold(`[progress ${inner.currentPhase}/${inner.totalPhases}]`)} ${inner.phase} — ${inner.description}`);
+          console.log(
+            `${ts} ${chalk.blue.bold(`[progress ${inner.currentPhase}/${inner.totalPhases}]`)} ${inner.phase} — ${inner.description}`,
+          );
           break;
         default:
           console.log(`${ts} ${chalk.dim(JSON.stringify(inner))}`);
@@ -369,12 +399,17 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
     case 'session.validation_completed': {
       const vc = event as import('@autopod/shared').ValidationCompletedEvent;
       const color = vc.result.overall === 'pass' ? chalk.green : chalk.red;
-      console.log(`${ts} ${color(`Validation ${vc.result.overall.toUpperCase()}`)} (attempt ${vc.result.attempt})`);
+      console.log(
+        `${ts} ${color(`Validation ${vc.result.overall.toUpperCase()}`)} (attempt ${vc.result.attempt})`,
+      );
       break;
     }
     case 'session.escalation_created': {
       const ec = event as import('@autopod/shared').EscalationCreatedEvent;
-      const desc = 'question' in ec.escalation.payload ? ec.escalation.payload.question : ec.escalation.payload.description;
+      const desc =
+        'question' in ec.escalation.payload
+          ? ec.escalation.payload.question
+          : ec.escalation.payload.description;
       console.log(`${ts} ${chalk.yellow.bold(`[escalation: ${ec.escalation.type}]`)} ${desc}`);
       break;
     }

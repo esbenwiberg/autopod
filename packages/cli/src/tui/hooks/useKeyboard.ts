@@ -16,13 +16,13 @@ export function useKeyboard(handlers: Record<string, () => void>, enabled: boole
       if (!enabled) return;
 
       if (key.upArrow || input === 'k') {
-        handlers['up']?.();
+        handlers.up?.();
       } else if (key.downArrow || input === 'j') {
-        handlers['down']?.();
+        handlers.down?.();
       } else if (key.return) {
-        handlers['enter']?.();
+        handlers.enter?.();
       } else if (key.escape) {
-        handlers['escape']?.();
+        handlers.escape?.();
       } else {
         const handler = handlers[input];
         if (handler) handler();

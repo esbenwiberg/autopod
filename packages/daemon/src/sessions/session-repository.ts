@@ -1,6 +1,6 @@
-import type Database from 'better-sqlite3';
-import type { Session, SessionStatus, ExecutionTarget } from '@autopod/shared';
+import type { ExecutionTarget, Session, SessionStatus } from '@autopod/shared';
 import { SessionNotFoundError } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 
 export interface NewSession {
   id: string;
@@ -38,7 +38,12 @@ export interface SessionUpdates {
   previewUrl?: string | null;
   prUrl?: string | null;
   plan?: { summary: string; steps: string[] } | null;
-  progress?: { phase: string; description: string; currentPhase: number; totalPhases: number } | null;
+  progress?: {
+    phase: string;
+    description: string;
+    currentPhase: number;
+    totalPhases: number;
+  } | null;
   claudeSessionId?: string | null;
 }
 
@@ -68,9 +73,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     lastValidationResult: row.last_validation_result
       ? JSON.parse(row.last_validation_result as string)
       : null,
-    pendingEscalation: row.pending_escalation
-      ? JSON.parse(row.pending_escalation as string)
-      : null,
+    pendingEscalation: row.pending_escalation ? JSON.parse(row.pending_escalation as string) : null,
     escalationCount: row.escalation_count as number,
     skipValidation: Boolean(row.skip_validation),
     createdAt: row.created_at as string,
@@ -153,9 +156,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.pendingEscalation !== undefined) {
         setClauses.push('pending_escalation = @pendingEscalation');
         params.pendingEscalation =
-          changes.pendingEscalation !== null
-            ? JSON.stringify(changes.pendingEscalation)
-            : null;
+          changes.pendingEscalation !== null ? JSON.stringify(changes.pendingEscalation) : null;
       }
       if (changes.escalationCount !== undefined) {
         setClauses.push('escalation_count = @escalationCount');

@@ -1,31 +1,35 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import pino from 'pino';
 import type { PendingRequests } from '@autopod/escalation-mcp';
-import { createDatabase } from './db/connection.js';
-import { runMigrations } from './db/migrate.js';
-import { createProfileStore } from './profiles/index.js';
-import {
-  createSessionRepository,
-  createEventRepository,
-  createEscalationRepository,
-  createNudgeRepository,
-  createEventBus,
-  createSessionQueue,
-  createSessionManager,
-} from './sessions/index.js';
-import { createSessionBridge } from './sessions/session-bridge-impl.js';
+import pino from 'pino';
 import { createServer } from './api/server.js';
-import type { AuthModule } from './interfaces/index.js';
-import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
-import { createRuntimeRegistry, ClaudeRuntime, CodexRuntime } from './runtimes/index.js';
-import { createLocalValidationEngine } from './validation/local-validation-engine.js';
-import { createNotificationService, createTeamsAdapter, createRateLimiter } from './notifications/index.js';
-import type { NotificationConfig } from './notifications/index.js';
+import { createDatabase } from './db/connection.js';
+import { runMigrations } from './db/migrate.js';
+import type { AuthModule } from './interfaces/index.js';
 import type { ContainerManager } from './interfaces/index.js';
+import {
+  createNotificationService,
+  createRateLimiter,
+  createTeamsAdapter,
+} from './notifications/index.js';
+import type { NotificationConfig } from './notifications/index.js';
+import { createProfileStore } from './profiles/index.js';
+import { ClaudeRuntime, CodexRuntime, createRuntimeRegistry } from './runtimes/index.js';
+import {
+  createEscalationRepository,
+  createEventBus,
+  createEventRepository,
+  createNudgeRepository,
+  createSessionManager,
+  createSessionQueue,
+  createSessionRepository,
+} from './sessions/index.js';
+import { createSessionBridge } from './sessions/session-bridge-impl.js';
+import { createLocalValidationEngine } from './validation/local-validation-engine.js';
+import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -153,18 +157,32 @@ const ACI_LOCATION = process.env.AZURE_LOCATION ?? 'westeurope';
 const ACI_ACR_USERNAME = process.env.ACR_USERNAME;
 const ACI_ACR_PASSWORD = process.env.ACR_PASSWORD;
 
-let aciContainerManager: import('./containers/aci-container-manager.js').AciContainerManager | undefined;
-if (ACI_SUBSCRIPTION_ID && ACI_RESOURCE_GROUP && ACR_REGISTRY_URL && ACI_ACR_USERNAME && ACI_ACR_PASSWORD) {
+let aciContainerManager:
+  | import('./containers/aci-container-manager.js').AciContainerManager
+  | undefined;
+if (
+  ACI_SUBSCRIPTION_ID &&
+  ACI_RESOURCE_GROUP &&
+  ACR_REGISTRY_URL &&
+  ACI_ACR_USERNAME &&
+  ACI_ACR_PASSWORD
+) {
   const { AciContainerManager } = await import('./containers/aci-container-manager.js');
-  aciContainerManager = new AciContainerManager({
-    subscriptionId: ACI_SUBSCRIPTION_ID,
-    resourceGroup: ACI_RESOURCE_GROUP,
-    acrRegistryUrl: ACR_REGISTRY_URL,
-    acrUsername: ACI_ACR_USERNAME,
-    acrPassword: ACI_ACR_PASSWORD,
-    location: ACI_LOCATION,
-  }, logger);
-  logger.info({ subscriptionId: ACI_SUBSCRIPTION_ID, resourceGroup: ACI_RESOURCE_GROUP }, 'ACI execution target enabled');
+  aciContainerManager = new AciContainerManager(
+    {
+      subscriptionId: ACI_SUBSCRIPTION_ID,
+      resourceGroup: ACI_RESOURCE_GROUP,
+      acrRegistryUrl: ACR_REGISTRY_URL,
+      acrUsername: ACI_ACR_USERNAME,
+      acrPassword: ACI_ACR_PASSWORD,
+      location: ACI_LOCATION,
+    },
+    logger,
+  );
+  logger.info(
+    { subscriptionId: ACI_SUBSCRIPTION_ID, resourceGroup: ACI_RESOURCE_GROUP },
+    'ACI execution target enabled',
+  );
 }
 
 // Container manager factory — routes to Docker (local) or ACI based on execution target
@@ -174,7 +192,7 @@ const containerManagerFactory = {
       if (!aciContainerManager) {
         throw new Error(
           'ACI execution target requested but not configured. ' +
-          'Set AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, ACR_REGISTRY_URL, ACR_USERNAME, ACR_PASSWORD.',
+            'Set AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, ACR_REGISTRY_URL, ACR_USERNAME, ACR_PASSWORD.',
         );
       }
       return aciContainerManager;
@@ -219,7 +237,12 @@ const notificationConfig: NotificationConfig = TEAMS_WEBHOOK_URL
   ? {
       teams: {
         webhookUrl: TEAMS_WEBHOOK_URL,
-        enabledEvents: ['session_validated', 'session_failed', 'session_needs_input', 'session_error'],
+        enabledEvents: [
+          'session_validated',
+          'session_failed',
+          'session_needs_input',
+          'session_error',
+        ],
       },
     }
   : {};

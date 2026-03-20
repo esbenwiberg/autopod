@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import type { Logger } from 'pino';
-import type { TaskReviewResult, ValidationResult, PageResult } from '@autopod/shared';
+import type { PageResult, TaskReviewResult, ValidationResult } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
+import type { Logger } from 'pino';
 
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
@@ -30,27 +30,36 @@ export function createLocalValidationEngine(
       const buildResult = await runBuild(containerManager, config, log);
 
       // ── Phase 2: Health check ───────────────────────────────────────
-      const healthResult = buildResult.status === 'pass'
-        ? await runHealthCheck(containerManager, config, log)
-        : { status: 'fail' as const, url: config.previewUrl + config.healthPath, responseCode: null, duration: 0 };
+      const healthResult =
+        buildResult.status === 'pass'
+          ? await runHealthCheck(containerManager, config, log)
+          : {
+              status: 'fail' as const,
+              url: config.previewUrl + config.healthPath,
+              responseCode: null,
+              duration: 0,
+            };
 
       // ── Phase 3: Page validation ─────────────────────────────────────
-      const pages: PageResult[] = (healthResult.status === 'pass' && config.validationPages.length > 0)
-        ? await runPageValidation(containerManager, config, log)
-        : [];
+      const pages: PageResult[] =
+        healthResult.status === 'pass' && config.validationPages.length > 0
+          ? await runPageValidation(containerManager, config, log)
+          : [];
 
       // ── Phase 4: AI Task Review ─────────────────────────────────────
       const taskReview = await runTaskReview(config, log);
 
       // ── Phase 5: Overall result ─────────────────────────────────────
-      const pagesPass = pages.length === 0 || pages.every(p => p.status === 'pass');
-      const smokeStatus = buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass
-        ? 'pass' as const
-        : 'fail' as const;
+      const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
+      const smokeStatus =
+        buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass
+          ? ('pass' as const)
+          : ('fail' as const);
 
-      const overall = smokeStatus === 'pass' && (taskReview === null || taskReview.status !== 'fail')
-        ? 'pass' as const
-        : 'fail' as const;
+      const overall =
+        smokeStatus === 'pass' && (taskReview === null || taskReview.status !== 'fail')
+          ? ('pass' as const)
+          : ('fail' as const);
 
       const duration = Date.now() - startTime;
 
@@ -94,8 +103,8 @@ async function runBuild(
   );
 
   const duration = Date.now() - buildStart;
-  const output = (result.stdout + '\n' + result.stderr).trim();
-  const status = result.exitCode === 0 ? 'pass' as const : 'fail' as const;
+  const output = `${result.stdout}\n${result.stderr}`.trim();
+  const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
 
   if (status === 'fail') {
     log?.warn({ exitCode: result.exitCode, duration }, 'build failed');
@@ -119,7 +128,12 @@ async function runHealthCheck(
 ) {
   if (!config.startCommand) {
     log?.info('no start command configured, skipping health check');
-    return { status: 'pass' as const, url: config.previewUrl + config.healthPath, responseCode: null, duration: 0 };
+    return {
+      status: 'pass' as const,
+      url: config.previewUrl + config.healthPath,
+      responseCode: null,
+      duration: 0,
+    };
   }
 
   const healthStart = Date.now();
@@ -130,13 +144,16 @@ async function runHealthCheck(
 
   // Start the app in the background so it doesn't block
   // Fire-and-forget: we don't await the long-running server process
-  containerManager.execInContainer(
-    config.containerId,
-    ['sh', '-c', config.startCommand + ' &'],
-    { cwd: '/workspace' },
-  ).catch((err) => {
-    log?.warn({ err }, 'background start command errored (may be expected for long-running processes)');
-  });
+  containerManager
+    .execInContainer(config.containerId, ['sh', '-c', `${config.startCommand} &`], {
+      cwd: '/workspace',
+    })
+    .catch((err) => {
+      log?.warn(
+        { err },
+        'background start command errored (may be expected for long-running processes)',
+      );
+    });
 
   // Poll for health
   const pollIntervalMs = 2_000;
@@ -210,11 +227,22 @@ async function runPageValidation(
     const pages = parsePageResults(result.stdout);
 
     if (pages.length === 0 && result.exitCode !== 0) {
-      log?.warn({ exitCode: result.exitCode, stderr: result.stderr.slice(0, 1000) }, 'page validation script crashed');
-      return [makeSyntheticFailure('/', `Script crashed (exit ${result.exitCode}): ${result.stderr.slice(0, 500)}`)];
+      log?.warn(
+        { exitCode: result.exitCode, stderr: result.stderr.slice(0, 1000) },
+        'page validation script crashed',
+      );
+      return [
+        makeSyntheticFailure(
+          '/',
+          `Script crashed (exit ${result.exitCode}): ${result.stderr.slice(0, 500)}`,
+        ),
+      ];
     }
 
-    log?.info({ pageCount: pages.length, passCount: pages.filter(p => p.status === 'pass').length }, 'page validation complete');
+    log?.info(
+      { pageCount: pages.length, passCount: pages.filter((p) => p.status === 'pass').length },
+      'page validation complete',
+    );
     return pages;
   } catch (err) {
     log?.warn({ err }, 'page validation exec failed');
@@ -263,14 +291,14 @@ Review the changes and respond with a JSON object:
 Respond ONLY with the JSON object, no markdown fences or extra text.`;
 
   try {
-    const { stdout } = await execFileAsync('claude', [
-      '-p', prompt,
-      '--model', config.reviewerModel,
-      '--output-format', 'text',
-    ], {
-      timeout: 120_000,
-      maxBuffer: 1024 * 1024, // 1 MB
-    });
+    const { stdout } = await execFileAsync(
+      'claude',
+      ['-p', prompt, '--model', config.reviewerModel, '--output-format', 'text'],
+      {
+        timeout: 120_000,
+        maxBuffer: 1024 * 1024, // 1 MB
+      },
+    );
 
     const parsed = parseReviewJson(stdout.trim());
     if (!parsed) {
@@ -298,9 +326,14 @@ Respond ONLY with the JSON object, no markdown fences or extra text.`;
  * Attempts to parse the reviewer's JSON response, tolerating markdown fences
  * and other common LLM output quirks.
  */
-function parseReviewJson(raw: string): { status: 'pass' | 'fail' | 'uncertain'; reasoning: string; issues: string[] } | null {
+function parseReviewJson(
+  raw: string,
+): { status: 'pass' | 'fail' | 'uncertain'; reasoning: string; issues: string[] } | null {
   // Strip markdown code fences if present
-  let cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
+  let cleaned = raw
+    .replace(/^```(?:json)?\s*/m, '')
+    .replace(/\s*```$/m, '')
+    .trim();
 
   // Try to extract a JSON object if there's extra text around it
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);

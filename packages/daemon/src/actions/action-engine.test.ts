@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createActionEngine, type ActionEngine } from './action-engine.js';
-import type { ActionRegistry } from './action-registry.js';
-import type { ActionAuditRepository } from './audit-repository.js';
 import type { ActionDefinition, ActionPolicy } from '@autopod/shared';
 import pino from 'pino';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { type ActionEngine, createActionEngine } from './action-engine.js';
+import type { ActionRegistry } from './action-registry.js';
+import type { ActionAuditRepository } from './audit-repository.js';
 
 // ─── Test helpers ───────────────────────────────────────────────
 
@@ -58,7 +58,8 @@ describe('ActionEngine', () => {
       auditRepo,
       logger: pino({ level: 'silent' }),
       getSecret: (ref) => {
-        if (ref === 'GITHUB_TOKEN' || ref === 'github-pat') return 'ghp_test_token_000000000000000000000000000000';
+        if (ref === 'GITHUB_TOKEN' || ref === 'github-pat')
+          return 'ghp_test_token_000000000000000000000000000000';
         if (ref === 'ADO_PAT' || ref === 'ado-pat') return 'test-ado-pat';
         return undefined;
       },
@@ -85,7 +86,11 @@ describe('ActionEngine', () => {
 
   it('returns error for wrong param type', async () => {
     const result = await engine.execute(
-      { sessionId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo', issue_number: 'not-a-number' } },
+      {
+        sessionId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/repo', issue_number: 'not-a-number' },
+      },
       testPolicy,
     );
     expect(result.success).toBe(false);
@@ -99,7 +104,11 @@ describe('ActionEngine', () => {
     };
 
     const result = await engine.execute(
-      { sessionId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo', issue_number: 1 } },
+      {
+        sessionId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/repo', issue_number: 1 },
+      },
       policyWithApproval,
     );
     expect(result.success).toBe(false);
@@ -113,7 +122,11 @@ describe('ActionEngine', () => {
     };
 
     const result = await engine.execute(
-      { sessionId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/forbidden-repo', issue_number: 1 } },
+      {
+        sessionId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/forbidden-repo', issue_number: 1 },
+      },
       policyWithResource,
     );
     expect(result.success).toBe(false);
@@ -128,7 +141,11 @@ describe('ActionEngine', () => {
 
     // This will fail because we don't have a real GitHub API, but it should get past the resource check
     const result = await engine.execute(
-      { sessionId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/allowed-repo', issue_number: 1 } },
+      {
+        sessionId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/allowed-repo', issue_number: 1 },
+      },
       policyWithResource,
     );
     // Will fail at the handler level (network), but should NOT fail at resource check
@@ -139,13 +156,20 @@ describe('ActionEngine', () => {
     // Use a custom action with http handler that we can't actually call,
     // so this tests the error audit path
     const result = await engine.execute(
-      { sessionId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo', issue_number: 1 } },
+      {
+        sessionId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/repo', issue_number: 1 },
+      },
       testPolicy,
     );
 
     // Handler will fail (no real API), so audit entry should be for error
     expect(auditRepo.insert).toHaveBeenCalled();
-    const auditCall = (auditRepo.insert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<string, unknown>;
+    const auditCall = (auditRepo.insert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
     expect(auditCall?.sessionId).toBe('sess-1');
     expect(auditCall?.actionName).toBe('read_issue');
   });
@@ -166,7 +190,12 @@ describe('ActionEngine', () => {
       params: {
         repo: { type: 'string', required: true, description: 'Repo' },
         query: { type: 'string', required: true, description: 'Query' },
-        state: { type: 'string', required: false, description: 'State', enum: ['open', 'closed', 'all'] },
+        state: {
+          type: 'string',
+          required: false,
+          description: 'State',
+          enum: ['open', 'closed', 'all'],
+        },
       },
       response: { fields: ['number', 'title'] },
     };
@@ -179,7 +208,11 @@ describe('ActionEngine', () => {
     });
 
     const result = await engine.execute(
-      { sessionId: 'sess-1', actionName: 'search_issues', params: { repo: 'org/repo', query: 'bug', state: 'invalid' } },
+      {
+        sessionId: 'sess-1',
+        actionName: 'search_issues',
+        params: { repo: 'org/repo', query: 'bug', state: 'invalid' },
+      },
       { ...testPolicy },
     );
     expect(result.success).toBe(false);

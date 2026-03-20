@@ -1,11 +1,11 @@
-import React from 'react';
+import type { AgentEvent, Session } from '@autopod/shared';
 import { Box, Text } from 'ink';
-import type { Session, AgentEvent } from '@autopod/shared';
-import { StatusBadge } from './StatusBadge.js';
+import type React from 'react';
 import { ActivityFeed } from './ActivityFeed.js';
-import { ProgressBar } from './ProgressBar.js';
-import { PlanPanel } from './PlanPanel.js';
 import { MetricsBar } from './MetricsBar.js';
+import { PlanPanel } from './PlanPanel.js';
+import { ProgressBar } from './ProgressBar.js';
+import { StatusBadge } from './StatusBadge.js';
 
 interface DetailPanelProps {
   session: Session | null;
@@ -23,7 +23,11 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
   return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
 }
 
-export function DetailPanel({ session, events, maxActivityLines }: DetailPanelProps): React.ReactElement {
+export function DetailPanel({
+  session,
+  events,
+  maxActivityLines,
+}: DetailPanelProps): React.ReactElement {
   if (!session) {
     return (
       <Box paddingX={1} paddingY={1}>
@@ -118,7 +122,9 @@ export function DetailPanel({ session, events, maxActivityLines }: DetailPanelPr
       {/* Validation summary */}
       {validation && (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold dimColor>Validation (attempt {validation.attempt})</Text>
+          <Text bold dimColor>
+            Validation (attempt {validation.attempt})
+          </Text>
           <Box>
             <Text dimColor>{'Result:   '}</Text>
             <Text color={validation.overall === 'pass' ? 'green' : 'red'}>
@@ -134,7 +140,15 @@ export function DetailPanel({ session, events, maxActivityLines }: DetailPanelPr
           {validation.taskReview && (
             <Box>
               <Text dimColor>{'Review:   '}</Text>
-              <Text color={validation.taskReview.status === 'pass' ? 'green' : validation.taskReview.status === 'fail' ? 'red' : 'yellow'}>
+              <Text
+                color={
+                  validation.taskReview.status === 'pass'
+                    ? 'green'
+                    : validation.taskReview.status === 'fail'
+                      ? 'red'
+                      : 'yellow'
+                }
+              >
                 {validation.taskReview.status}
               </Text>
             </Box>

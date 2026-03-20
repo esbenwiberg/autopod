@@ -1,6 +1,6 @@
 import type { DataSanitizationConfig, QuarantineConfig } from '../types/actions.js';
+import { type ThreatIndicator, quarantine } from './quarantine.js';
 import { sanitize, sanitizeDeep } from './sanitize.js';
-import { quarantine, type ThreatIndicator } from './quarantine.js';
 
 export interface ProcessedContent {
   /** The processed text */

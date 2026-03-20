@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import pino from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAzureLogsHandler } from './azure-logs-handler.js';
 
 function mockResponse(
@@ -26,11 +26,7 @@ function makeAction(name: string, fields: string[] = []): any {
   };
 }
 
-function makeTableResponse(
-  columns: string[],
-  rows: unknown[][],
-  tableName = 'PrimaryResult',
-) {
+function makeTableResponse(columns: string[], rows: unknown[][], tableName = 'PrimaryResult') {
   return {
     tables: [
       {
@@ -69,7 +65,7 @@ describe('createAzureLogsHandler', () => {
     });
 
     const calledOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
-    const authHeader = (calledOpts.headers as Record<string, string>)['Authorization'];
+    const authHeader = (calledOpts.headers as Record<string, string>).Authorization;
     expect(authHeader).toBe('Bearer bearer-token-123');
   });
 
@@ -98,9 +94,7 @@ describe('createAzureLogsHandler', () => {
   });
 
   it('query_logs uses custom timespan when provided', async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(
-      mockResponse(makeTableResponse([], [])),
-    );
+    vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse(makeTableResponse([], [])));
 
     const handler = createAzureLogsHandler({
       logger,
@@ -119,9 +113,7 @@ describe('createAzureLogsHandler', () => {
   });
 
   it('read_app_insights calls correct URL', async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(
-      mockResponse(makeTableResponse([], [])),
-    );
+    vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse(makeTableResponse([], [])));
 
     const handler = createAzureLogsHandler({
       logger,
@@ -138,9 +130,7 @@ describe('createAzureLogsHandler', () => {
   });
 
   it('read_container_logs builds KQL query with single-quote escaping', async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(
-      mockResponse(makeTableResponse([], [])),
-    );
+    vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse(makeTableResponse([], [])));
 
     const handler = createAzureLogsHandler({
       logger,
@@ -162,7 +152,15 @@ describe('createAzureLogsHandler', () => {
 
   it('formatTables converts tabular response to named tables with row objects', async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(
-      mockResponse(makeTableResponse(['Name', 'Value'], [['alpha', 1], ['beta', 2]])),
+      mockResponse(
+        makeTableResponse(
+          ['Name', 'Value'],
+          [
+            ['alpha', 1],
+            ['beta', 2],
+          ],
+        ),
+      ),
     );
 
     const handler = createAzureLogsHandler({
@@ -186,9 +184,7 @@ describe('createAzureLogsHandler', () => {
   });
 
   it('formatTables handles empty tables', async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(
-      mockResponse(makeTableResponse(['Id'], [])),
-    );
+    vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse(makeTableResponse(['Id'], [])));
 
     const handler = createAzureLogsHandler({
       logger,

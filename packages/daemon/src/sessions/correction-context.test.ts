@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { Session, ValidationResult, Profile } from '@autopod/shared';
+import type { Profile, Session, ValidationResult } from '@autopod/shared';
+import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/index.js';
 import {
   buildCorrectionContext,
@@ -55,7 +55,12 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     defaultRuntime: 'claude',
     executionTarget: 'local',
     customInstructions: null,
-    escalation: { askHuman: true, askAi: { enabled: true, model: 'sonnet', maxCalls: 5 }, autoPauseAfter: 3, humanResponseTimeout: 3600 },
+    escalation: {
+      askHuman: true,
+      askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
+      autoPauseAfter: 3,
+      humanResponseTimeout: 3600,
+    },
     extends: null,
     warmImageTag: null,
     warmImageBuiltAt: null,
@@ -70,19 +75,22 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
   };
 }
 
-function mockValidationResult(overrides: {
-  buildFailed?: boolean;
-  healthFailed?: boolean;
-  pageFailed?: boolean;
-  taskReviewFailed?: boolean;
-  issues?: string[];
-} = {}): ValidationResult {
+function mockValidationResult(
+  overrides: {
+    buildFailed?: boolean;
+    healthFailed?: boolean;
+    pageFailed?: boolean;
+    taskReviewFailed?: boolean;
+    issues?: string[];
+  } = {},
+): ValidationResult {
   return {
     sessionId: 'sess-1',
     attempt: 1,
     timestamp: new Date().toISOString(),
     smoke: {
-      status: overrides.buildFailed || overrides.healthFailed || overrides.pageFailed ? 'fail' : 'pass',
+      status:
+        overrides.buildFailed || overrides.healthFailed || overrides.pageFailed ? 'fail' : 'pass',
       build: {
         status: overrides.buildFailed ? 'fail' : 'pass',
         output: overrides.buildFailed ? 'Build error' : '',
@@ -95,7 +103,16 @@ function mockValidationResult(overrides: {
         duration: 50,
       },
       pages: overrides.pageFailed
-        ? [{ path: '/', status: 'fail' as const, screenshotPath: '', consoleErrors: [], assertions: [], loadTime: 100 }]
+        ? [
+            {
+              path: '/',
+              status: 'fail' as const,
+              screenshotPath: '',
+              consoleErrors: [],
+              assertions: [],
+              loadTime: 100,
+            },
+          ]
         : [],
     },
     taskReview: overrides.taskReviewFailed
@@ -138,11 +155,15 @@ describe('determineFailedStep', () => {
   });
 
   it('returns task_review when everything else passes', () => {
-    expect(determineFailedStep(mockValidationResult({ taskReviewFailed: true }))).toBe('task_review');
+    expect(determineFailedStep(mockValidationResult({ taskReviewFailed: true }))).toBe(
+      'task_review',
+    );
   });
 
   it('prioritizes build over health', () => {
-    expect(determineFailedStep(mockValidationResult({ buildFailed: true, healthFailed: true }))).toBe('build');
+    expect(
+      determineFailedStep(mockValidationResult({ buildFailed: true, healthFailed: true })),
+    ).toBe('build');
   });
 });
 
@@ -168,20 +189,24 @@ describe('buildCorrectionContext', () => {
   it('includes previous diff from container', async () => {
     const cm = mockContainerManager('+added line\n-removed line');
     const context = await buildCorrectionContext(
-      mockSession(), mockProfile(), mockValidationResult({ buildFailed: true }), cm,
+      mockSession(),
+      mockProfile(),
+      mockValidationResult({ buildFailed: true }),
+      cm,
     );
     expect(context.previousDiff).toContain('+added line');
-    expect(cm.execInContainer).toHaveBeenCalledWith(
-      'ctr-abc',
-      ['git', 'diff', 'HEAD~1'],
-      { cwd: '/tmp/worktree/sess-1' },
-    );
+    expect(cm.execInContainer).toHaveBeenCalledWith('ctr-abc', ['git', 'diff', 'HEAD~1'], {
+      cwd: '/tmp/worktree/sess-1',
+    });
   });
 
   it('handles missing containerId gracefully', async () => {
     const cm = mockContainerManager();
     const context = await buildCorrectionContext(
-      mockSession({ containerId: null }), mockProfile(), mockValidationResult({ buildFailed: true }), cm,
+      mockSession({ containerId: null }),
+      mockProfile(),
+      mockValidationResult({ buildFailed: true }),
+      cm,
     );
     expect(context.previousDiff).toBe('');
     expect(cm.execInContainer).not.toHaveBeenCalled();
@@ -201,7 +226,10 @@ describe('buildCorrectionContext', () => {
   it('sets empty screenshot descriptions when no task review failure', async () => {
     const cm = mockContainerManager();
     const context = await buildCorrectionContext(
-      mockSession(), mockProfile(), mockValidationResult({ buildFailed: true }), cm,
+      mockSession(),
+      mockProfile(),
+      mockValidationResult({ buildFailed: true }),
+      cm,
     );
     expect(context.screenshotDescriptions).toEqual([]);
   });
@@ -210,7 +238,10 @@ describe('buildCorrectionContext', () => {
     const cm = mockContainerManager();
     (cm.execInContainer as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no commits'));
     const context = await buildCorrectionContext(
-      mockSession(), mockProfile(), mockValidationResult({ buildFailed: true }), cm,
+      mockSession(),
+      mockProfile(),
+      mockValidationResult({ buildFailed: true }),
+      cm,
     );
     expect(context.previousDiff).toBe('');
   });
@@ -220,7 +251,10 @@ describe('buildCorrectionMessage', () => {
   it('includes validation feedback', async () => {
     const cm = mockContainerManager('');
     const message = await buildCorrectionMessage(
-      mockSession(), mockProfile(), mockValidationResult({ buildFailed: true }), cm,
+      mockSession(),
+      mockProfile(),
+      mockValidationResult({ buildFailed: true }),
+      cm,
     );
     expect(message).toContain('Validation Failed');
     expect(message).toContain('Build Errors');
@@ -229,7 +263,10 @@ describe('buildCorrectionMessage', () => {
   it('includes diff context when available', async () => {
     const cm = mockContainerManager('+const x = 1;');
     const message = await buildCorrectionMessage(
-      mockSession(), mockProfile(), mockValidationResult({ buildFailed: true }), cm,
+      mockSession(),
+      mockProfile(),
+      mockValidationResult({ buildFailed: true }),
+      cm,
     );
     expect(message).toContain('Your Changes So Far');
     expect(message).toContain('+const x = 1;');
@@ -250,7 +287,10 @@ describe('buildCorrectionMessage', () => {
   it('omits diff section when diff is empty', async () => {
     const cm = mockContainerManager('');
     const message = await buildCorrectionMessage(
-      mockSession(), mockProfile(), mockValidationResult({ buildFailed: true }), cm,
+      mockSession(),
+      mockProfile(),
+      mockValidationResult({ buildFailed: true }),
+      cm,
     );
     expect(message).not.toContain('Your Changes So Far');
   });
@@ -258,7 +298,10 @@ describe('buildCorrectionMessage', () => {
   it('omits instructions section when profile has none', async () => {
     const cm = mockContainerManager('');
     const message = await buildCorrectionMessage(
-      mockSession(), mockProfile(), mockValidationResult({ buildFailed: true }), cm,
+      mockSession(),
+      mockProfile(),
+      mockValidationResult({ buildFailed: true }),
+      cm,
     );
     expect(message).not.toContain('Project Instructions');
   });

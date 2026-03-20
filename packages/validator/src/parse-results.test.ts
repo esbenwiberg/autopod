@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { parsePageResults } from './parse-results.js';
 
 const PASS_RESULT = {
@@ -26,14 +26,14 @@ describe('parsePageResults', () => {
 
   it('extracts JSON from noisy output', () => {
     const noise = 'Debugger listening on ws://127.0.0.1:9229\nSome warning\n';
-    const stdout = noise + wrap(JSON.stringify([PASS_RESULT])) + '\nCleanup done.\n';
+    const stdout = `${noise + wrap(JSON.stringify([PASS_RESULT]))}\nCleanup done.\n`;
     const results = parsePageResults(stdout);
     expect(results).toHaveLength(1);
     expect(results[0].path).toBe('/');
   });
 
   it('falls back to array detection when markers absent', () => {
-    const stdout = 'some junk\n' + JSON.stringify([PASS_RESULT]) + '\nmore junk';
+    const stdout = `some junk\n${JSON.stringify([PASS_RESULT])}\nmore junk`;
     const results = parsePageResults(stdout);
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('pass');
@@ -65,13 +65,25 @@ describe('parsePageResults', () => {
   it('parses multiple page results correctly', () => {
     const pages = [
       { ...PASS_RESULT, path: '/home', loadTime: 100 },
-      { ...PASS_RESULT, path: '/about', status: 'fail', consoleErrors: ['TypeError: x is undefined'], loadTime: 400 },
+      {
+        ...PASS_RESULT,
+        path: '/about',
+        status: 'fail',
+        consoleErrors: ['TypeError: x is undefined'],
+        loadTime: 400,
+      },
       {
         ...PASS_RESULT,
         path: '/contact',
         assertions: [
           { selector: 'h1', type: 'exists', expected: undefined, actual: '1', passed: true },
-          { selector: '.form', type: 'visible', expected: undefined, actual: 'hidden', passed: false },
+          {
+            selector: '.form',
+            type: 'visible',
+            expected: undefined,
+            actual: 'hidden',
+            passed: false,
+          },
         ],
       },
     ];

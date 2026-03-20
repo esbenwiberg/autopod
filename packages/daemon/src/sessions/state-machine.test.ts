@@ -1,6 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { validateTransition, isTerminalState, canReceiveMessage, canKill } from './state-machine.js';
 import { InvalidStateTransitionError } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
+import {
+  canKill,
+  canReceiveMessage,
+  isTerminalState,
+  validateTransition,
+} from './state-machine.js';
 
 describe('state-machine', () => {
   describe('validateTransition', () => {
@@ -25,10 +30,18 @@ describe('state-machine', () => {
     });
 
     it('throws InvalidStateTransitionError for invalid transitions', () => {
-      expect(() => validateTransition('s1', 'queued', 'running')).toThrow(InvalidStateTransitionError);
-      expect(() => validateTransition('s1', 'complete', 'running')).toThrow(InvalidStateTransitionError);
-      expect(() => validateTransition('s1', 'killed', 'running')).toThrow(InvalidStateTransitionError);
-      expect(() => validateTransition('s1', 'approved', 'killing')).toThrow(InvalidStateTransitionError);
+      expect(() => validateTransition('s1', 'queued', 'running')).toThrow(
+        InvalidStateTransitionError,
+      );
+      expect(() => validateTransition('s1', 'complete', 'running')).toThrow(
+        InvalidStateTransitionError,
+      );
+      expect(() => validateTransition('s1', 'killed', 'running')).toThrow(
+        InvalidStateTransitionError,
+      );
+      expect(() => validateTransition('s1', 'approved', 'killing')).toThrow(
+        InvalidStateTransitionError,
+      );
     });
 
     it('includes session id in error', () => {

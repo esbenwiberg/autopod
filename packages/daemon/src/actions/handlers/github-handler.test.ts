@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import pino from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGitHubHandler } from './github-handler.js';
 
 function mockResponse(
@@ -62,9 +62,7 @@ describe('createGitHubHandler', () => {
   });
 
   it('accepts token from github-pat fallback', async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(
-      mockResponse({ number: 1, title: 'Test' }),
-    );
+    vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse({ number: 1, title: 'Test' }));
 
     const handler = createGitHubHandler({
       logger,
@@ -105,10 +103,10 @@ describe('createGitHubHandler', () => {
       getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
     });
 
-    const result = await handler.execute(
-      makeAction('read_issue', ['number', 'title', 'state']),
-      { repo: 'octocat/hello-world', issue_number: 42 },
-    );
+    const result = await handler.execute(makeAction('read_issue', ['number', 'title', 'state']), {
+      repo: 'octocat/hello-world',
+      issue_number: 42,
+    });
 
     expect(global.fetch).toHaveBeenCalledWith(
       'https://api.github.com/repos/octocat/hello-world/issues/42',
@@ -139,7 +137,9 @@ describe('createGitHubHandler', () => {
     const calledUrl = vi.mocked(global.fetch).mock.calls[0][0] as string;
     // Query should be URL-encoded and include repo + state
     expect(calledUrl).toContain('/search/issues?q=');
-    expect(calledUrl).toContain(encodeURIComponent('bug fix repo:octocat/hello-world is:issue state:closed'));
+    expect(calledUrl).toContain(
+      encodeURIComponent('bug fix repo:octocat/hello-world is:issue state:closed'),
+    );
   });
 
   it('read_file decodes base64 content', async () => {
@@ -153,10 +153,10 @@ describe('createGitHubHandler', () => {
       getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
     });
 
-    const result: any = await handler.execute(
-      makeAction('read_file', ['content', 'path']),
-      { repo: 'octocat/hello-world', path: 'src/index.js' },
-    );
+    const result: any = await handler.execute(makeAction('read_file', ['content', 'path']), {
+      repo: 'octocat/hello-world',
+      path: 'src/index.js',
+    });
 
     expect(result.content).toBe(rawContent);
   });
@@ -174,10 +174,11 @@ describe('createGitHubHandler', () => {
       getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
     });
 
-    const result: any = await handler.execute(
-      makeAction('read_pr_diff', ['filename', 'patch']),
-      { repo: 'octocat/hello-world', pr_number: 1, file_path: 'src/foo.ts' },
-    );
+    const result: any = await handler.execute(makeAction('read_pr_diff', ['filename', 'patch']), {
+      repo: 'octocat/hello-world',
+      pr_number: 1,
+      file_path: 'src/foo.ts',
+    });
 
     expect(result).toHaveLength(1);
     expect(result[0].filename).toBe('src/foo.ts');

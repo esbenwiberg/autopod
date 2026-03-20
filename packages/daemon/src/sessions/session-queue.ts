@@ -26,7 +26,8 @@ export function createSessionQueue(
   async function processNext() {
     if (activeCount >= maxConcurrency || queue.length === 0) return;
 
-    const sessionId = queue.shift()!;
+    const sessionId = queue.shift();
+    if (!sessionId) return;
     activeCount++;
     logger.info({ sessionId, activeCount, queued: queue.length }, 'Processing session');
 
@@ -46,11 +47,17 @@ export function createSessionQueue(
       queue.push(sessionId);
       processNext();
     },
-    get pending() { return queue.length; },
-    get processing() { return activeCount; },
+    get pending() {
+      return queue.length;
+    },
+    get processing() {
+      return activeCount;
+    },
     async drain() {
       if (activeCount === 0 && queue.length === 0) return;
-      return new Promise<void>((resolve) => { drainResolvers.push(resolve); });
+      return new Promise<void>((resolve) => {
+        drainResolvers.push(resolve);
+      });
     },
   };
 }

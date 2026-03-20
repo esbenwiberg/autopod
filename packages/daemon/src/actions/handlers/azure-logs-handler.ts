@@ -27,11 +27,18 @@ export function createAzureLogsHandler(config: HandlerConfig): ActionHandler {
       const tokenResponse = await credential.getToken('https://api.loganalytics.io/.default');
       return tokenResponse.token;
     } catch (err) {
-      throw new Error(`Azure auth failed — configure AZURE_MONITOR_TOKEN or ensure Managed Identity is available: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `Azure auth failed — configure AZURE_MONITOR_TOKEN or ensure Managed Identity is available: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
-  async function queryApi(apiBase: string, resourcePath: string, query: string, timespan: string): Promise<unknown> {
+  async function queryApi(
+    apiBase: string,
+    resourcePath: string,
+    query: string,
+    timespan: string,
+  ): Promise<unknown> {
     const token = await getToken();
 
     const response = await fetchWithTimeout(`${apiBase}${resourcePath}/query`, {
@@ -49,7 +56,9 @@ export function createAzureLogsHandler(config: HandlerConfig): ActionHandler {
       throw new Error(`Azure Monitor ${response.status}: ${body.slice(0, 200)}`);
     }
 
-    const data = (await response.json()) as { tables: Array<{ name: string; columns: Array<{ name: string }>; rows: unknown[][] }> };
+    const data = (await response.json()) as {
+      tables: Array<{ name: string; columns: Array<{ name: string }>; rows: unknown[][] }>;
+    };
 
     // Convert tabular format to more readable objects
     return { tables: formatTables(data.tables) };

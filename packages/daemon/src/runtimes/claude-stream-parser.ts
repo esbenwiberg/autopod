@@ -1,6 +1,6 @@
-import type { AgentEvent } from '@autopod/shared';
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
+import type { AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 
 /**
@@ -68,11 +68,7 @@ export class ClaudeStreamParser {
    * - result                   → AgentCompleteEvent
    * - error                    → AgentErrorEvent
    */
-  static mapEvent(
-    event: ClaudeStreamEvent,
-    sessionId: string,
-    logger?: Logger,
-  ): AgentEvent | null {
+  static mapEvent(event: ClaudeStreamEvent, sessionId: string, logger?: Logger): AgentEvent | null {
     const ts = new Date().toISOString();
 
     switch (event.type) {
@@ -135,11 +131,15 @@ export class ClaudeStreamParser {
       }
 
       case 'result': {
-        const resultText = event.result
-          ?? (event.content && Array.isArray(event.content)
-            ? event.content.map(b => b.text).filter(Boolean).join('\n')
-            : undefined)
-          ?? 'Claude agent completed';
+        const resultText =
+          event.result ??
+          (event.content && Array.isArray(event.content)
+            ? event.content
+                .map((b) => b.text)
+                .filter(Boolean)
+                .join('\n')
+            : undefined) ??
+          'Claude agent completed';
         return {
           type: 'complete',
           timestamp: ts,

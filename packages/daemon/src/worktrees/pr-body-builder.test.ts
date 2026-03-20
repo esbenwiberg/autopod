@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { buildPrTitle, buildPrBody, type PrBodyConfig } from './pr-body-builder.js';
 import type { ValidationResult } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
+import { type PrBodyConfig, buildPrBody, buildPrTitle } from './pr-body-builder.js';
 
 describe('buildPrTitle', () => {
   it('prefixes with feat: when no conventional commit prefix', () => {
@@ -10,11 +10,14 @@ describe('buildPrTitle', () => {
   it('preserves existing conventional commit prefix', () => {
     expect(buildPrTitle('fix: resolve login crash')).toBe('fix: resolve login crash');
     expect(buildPrTitle('chore: update dependencies')).toBe('chore: update dependencies');
-    expect(buildPrTitle('refactor(auth): simplify token refresh')).toBe('refactor(auth): simplify token refresh');
+    expect(buildPrTitle('refactor(auth): simplify token refresh')).toBe(
+      'refactor(auth): simplify token refresh',
+    );
   });
 
   it('truncates at 70 chars', () => {
-    const longTask = 'Add a comprehensive dark mode toggle with persistent user preferences and system theme detection';
+    const longTask =
+      'Add a comprehensive dark mode toggle with persistent user preferences and system theme detection';
     const title = buildPrTitle(longTask);
     expect(title.length).toBeLessThanOrEqual(70);
     expect(title).toMatch(/\.\.\.$/);
@@ -132,8 +135,20 @@ describe('buildPrBody', () => {
         health: { status: 'pass', url: 'http://localhost:3000', responseCode: 200, duration: 500 },
         pages: [
           { path: '/', status: 'pass', assertions: [], consoleErrors: [], screenshotPath: null },
-          { path: '/about', status: 'pass', assertions: [], consoleErrors: [], screenshotPath: null },
-          { path: '/broken', status: 'fail', assertions: [], consoleErrors: ['TypeError'], screenshotPath: null },
+          {
+            path: '/about',
+            status: 'pass',
+            assertions: [],
+            consoleErrors: [],
+            screenshotPath: null,
+          },
+          {
+            path: '/broken',
+            status: 'fail',
+            assertions: [],
+            consoleErrors: ['TypeError'],
+            screenshotPath: null,
+          },
         ],
       },
       taskReview: null,

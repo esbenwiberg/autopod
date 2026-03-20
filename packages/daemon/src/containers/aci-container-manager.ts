@@ -251,9 +251,9 @@ export class AciContainerManager implements ContainerManager {
 
     // Build environment prefix for the command
     const envPrefix = options?.env
-      ? Object.entries(options.env)
+      ? `${Object.entries(options.env)
           .map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`)
-          .join(' && ') + ' && '
+          .join(' && ')} && `
       : '';
 
     const cwdPrefix = options?.cwd ? `cd ${options.cwd} && ` : '';

@@ -14,7 +14,8 @@ export const PII_PATTERNS: PiiPattern[] = [
   {
     name: 'api-key',
     // Common API key patterns: sk-*, ghp_*, gho_*, ghs_*, ghr_*, xoxb-, xoxp-, JWTs
-    regex: /(?:sk-[a-zA-Z0-9]{20,}|gh[pors]_[a-zA-Z0-9]{36,}|xox[bpoas]-[a-zA-Z0-9-]{10,}|eyJ[a-zA-Z0-9_-]{20,}\.eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,})/g,
+    regex:
+      /(?:sk-[a-zA-Z0-9]{20,}|gh[pors]_[a-zA-Z0-9]{36,}|xox[bpoas]-[a-zA-Z0-9-]{10,}|eyJ[a-zA-Z0-9_-]{20,}\.eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,})/g,
     replacement: '[API_KEY_REDACTED]',
     presets: ['strict', 'standard', 'relaxed'],
   },
@@ -45,7 +46,8 @@ export const PII_PATTERNS: PiiPattern[] = [
   {
     name: 'ipv4',
     // Match IPv4 but exclude common non-PII like 0.0.0.0, 127.0.0.1, 169.254.*
-    regex: /\b(?!0\.0\.0\.0|127\.0\.0\.1|169\.254\.)(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
+    regex:
+      /\b(?!0\.0\.0\.0|127\.0\.0\.1|169\.254\.)(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
     replacement: '[IP_REDACTED]',
     presets: ['strict'],
   },
@@ -89,7 +91,8 @@ export const INJECTION_PATTERNS: InjectionPattern[] = [
   },
   {
     name: 'role-manipulation',
-    regex: /\b(you\s+are\s+(now|actually)|from\s+now\s+on\s+you|new\s+instructions?:|system\s*:\s*you)\b/i,
+    regex:
+      /\b(you\s+are\s+(now|actually)|from\s+now\s+on\s+you|new\s+instructions?:|system\s*:\s*you)\b/i,
     severity: 0.7,
     description: 'Attempt to redefine agent role',
   },
@@ -107,7 +110,8 @@ export const INJECTION_PATTERNS: InjectionPattern[] = [
   },
   {
     name: 'tool-abuse',
-    regex: /\b(call\s+the\s+tool|use\s+the\s+function|execute\s+(the\s+)?command|run\s+(the\s+)?script)\b/i,
+    regex:
+      /\b(call\s+the\s+tool|use\s+the\s+function|execute\s+(the\s+)?command|run\s+(the\s+)?script)\b/i,
     severity: 0.5,
     description: 'Attempt to invoke agent tools',
   },

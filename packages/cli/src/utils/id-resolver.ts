@@ -27,5 +27,5 @@ export async function resolveSessionId(client: AutopodClient, partial: string): 
     throw new Error(`Ambiguous session ID "${partial}" matches: ${ids}`);
   }
 
-  return matches[0]!.id;
+  return matches[0]?.id;
 }

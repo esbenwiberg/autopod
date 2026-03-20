@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import type React from 'react';
+import { useState } from 'react';
 
 interface InlineInputProps {
   prompt: string;
@@ -37,13 +38,10 @@ export function InlineInput({ prompt, onSubmit, onCancel }: InlineInputProps): R
   });
 
   return (
-    <Box
-      borderStyle="round"
-      borderColor="yellow"
-      paddingX={1}
-      flexDirection="column"
-    >
-      <Text bold color="yellow">{prompt}</Text>
+    <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column">
+      <Text bold color="yellow">
+        {prompt}
+      </Text>
       <Box>
         <Text color="green">&gt; </Text>
         <Text>{value}</Text>

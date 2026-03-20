@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { InjectedMcpServer, NetworkPolicy } from '@autopod/shared';
 import pino from 'pino';
-import type { NetworkPolicy, InjectedMcpServer } from '@autopod/shared';
-import { DockerNetworkManager, DEFAULT_ALLOWED_HOSTS } from './docker-network-manager.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_ALLOWED_HOSTS, DockerNetworkManager } from './docker-network-manager.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -65,11 +65,7 @@ describe('DockerNetworkManager', () => {
     });
 
     it('excludes default hosts when replaceDefaults is true', () => {
-      const result = manager.computeAllowlist(
-        makePolicy({ replaceDefaults: true }),
-        [],
-        GATEWAY,
-      );
+      const result = manager.computeAllowlist(makePolicy({ replaceDefaults: true }), [], GATEWAY);
       for (const host of DEFAULT_ALLOWED_HOSTS) {
         expect(result).not.toContain(host);
       }
@@ -97,9 +93,7 @@ describe('DockerNetworkManager', () => {
 
     it('skips malformed MCP server URLs without throwing', () => {
       const servers = [makeMcpServer('not-a-valid-url')];
-      expect(() =>
-        manager.computeAllowlist(makePolicy(), servers, GATEWAY),
-      ).not.toThrow();
+      expect(() => manager.computeAllowlist(makePolicy(), servers, GATEWAY)).not.toThrow();
     });
 
     it('includes daemon gateway IP', () => {
@@ -108,11 +102,7 @@ describe('DockerNetworkManager', () => {
     });
 
     it('always includes host.docker.internal', () => {
-      const result = manager.computeAllowlist(
-        makePolicy({ replaceDefaults: true }),
-        [],
-        GATEWAY,
-      );
+      const result = manager.computeAllowlist(makePolicy({ replaceDefaults: true }), [], GATEWAY);
       expect(result).toContain('host.docker.internal');
     });
 
@@ -207,11 +197,7 @@ describe('DockerNetworkManager', () => {
     });
 
     it('returns null if policy.enabled is false', async () => {
-      const result = await manager.buildNetworkConfig(
-        makePolicy({ enabled: false }),
-        [],
-        GATEWAY,
-      );
+      const result = await manager.buildNetworkConfig(makePolicy({ enabled: false }), [], GATEWAY);
       expect(result).toBeNull();
     });
 
@@ -223,9 +209,9 @@ describe('DockerNetworkManager', () => {
         GATEWAY,
       );
       expect(result).not.toBeNull();
-      expect(result!.networkName).toBe('autopod-net');
-      expect(result!.firewallScript).toContain('#!/bin/sh');
-      expect(result!.firewallScript).toContain('example.com');
+      expect(result?.networkName).toBe('autopod-net');
+      expect(result?.firewallScript).toContain('#!/bin/sh');
+      expect(result?.firewallScript).toContain('example.com');
     });
   });
 });

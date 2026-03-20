@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import pino from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGenericHttpHandler } from './generic-http-handler.js';
 
 function mockResponse(
@@ -44,9 +44,9 @@ describe('createGenericHttpHandler', () => {
       getSecret: () => undefined,
     });
 
-    await expect(
-      handler.execute(makeAction({ endpoint: undefined }), {}),
-    ).rejects.toThrow(/endpoint/i);
+    await expect(handler.execute(makeAction({ endpoint: undefined }), {})).rejects.toThrow(
+      /endpoint/i,
+    );
   });
 
   it('has handlerType "http"', () => {
@@ -78,7 +78,7 @@ describe('createGenericHttpHandler', () => {
     );
 
     const calledOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
-    const authHeader = (calledOpts.headers as Record<string, string>)['Authorization'];
+    const authHeader = (calledOpts.headers as Record<string, string>).Authorization;
     expect(authHeader).toBe('Bearer secret-token-xyz');
   });
 
@@ -107,7 +107,7 @@ describe('createGenericHttpHandler', () => {
     );
 
     const calledOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
-    const authHeader = (calledOpts.headers as Record<string, string>)['Authorization'];
+    const authHeader = (calledOpts.headers as Record<string, string>).Authorization;
     const expected = `Basic ${Buffer.from('admin:hunter2').toString('base64')}`;
     expect(authHeader).toBe(expected);
   });

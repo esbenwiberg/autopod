@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { Profile } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
 import { resolveInheritance, validateInheritanceChain } from './inheritance.js';
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
@@ -40,7 +40,11 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
 
 describe('resolveInheritance', () => {
   it('should let child override parent simple fields', () => {
-    const parent = makeProfile({ name: 'parent', buildCommand: 'parent-build', defaultModel: 'sonnet' });
+    const parent = makeProfile({
+      name: 'parent',
+      buildCommand: 'parent-build',
+      defaultModel: 'sonnet',
+    });
     const child = makeProfile({ name: 'child', buildCommand: 'child-build', extends: 'parent' });
 
     const resolved = resolveInheritance(child, parent);
@@ -68,10 +72,7 @@ describe('resolveInheritance', () => {
     });
 
     const resolved = resolveInheritance(child, parent);
-    expect(resolved.validationPages).toEqual([
-      { path: '/parent-page' },
-      { path: '/child-page' },
-    ]);
+    expect(resolved.validationPages).toEqual([{ path: '/parent-page' }, { path: '/child-page' }]);
   });
 
   it('should deep merge escalation config', () => {
@@ -132,7 +133,11 @@ describe('resolveInheritance', () => {
 
   it('should concatenate customInstructions with separator', () => {
     const parent = makeProfile({ name: 'parent', customInstructions: 'parent rules' });
-    const child = makeProfile({ name: 'child', customInstructions: 'child rules', extends: 'parent' });
+    const child = makeProfile({
+      name: 'child',
+      customInstructions: 'child rules',
+      extends: 'parent',
+    });
 
     const resolved = resolveInheritance(child, parent);
     expect(resolved.customInstructions).toBe('parent rules\n\nchild rules');
@@ -148,7 +153,11 @@ describe('resolveInheritance', () => {
 
   it('should use child customInstructions when parent has none', () => {
     const parent = makeProfile({ name: 'parent', customInstructions: null });
-    const child = makeProfile({ name: 'child', customInstructions: 'child rules', extends: 'parent' });
+    const child = makeProfile({
+      name: 'child',
+      customInstructions: 'child rules',
+      extends: 'parent',
+    });
 
     const resolved = resolveInheritance(child, parent);
     expect(resolved.customInstructions).toBe('child rules');
@@ -190,7 +199,9 @@ describe('validateInheritanceChain', () => {
       a: 'b',
       b: 'a',
     };
-    expect(() => validateInheritanceChain('a', (n) => profiles[n] ?? null)).toThrow('Circular inheritance');
+    expect(() => validateInheritanceChain('a', (n) => profiles[n] ?? null)).toThrow(
+      'Circular inheritance',
+    );
   });
 
   it('should detect circular inheritance (A → B → C → A)', () => {
@@ -199,7 +210,9 @@ describe('validateInheritanceChain', () => {
       b: 'c',
       c: 'a',
     };
-    expect(() => validateInheritanceChain('a', (n) => profiles[n] ?? null)).toThrow('Circular inheritance');
+    expect(() => validateInheritanceChain('a', (n) => profiles[n] ?? null)).toThrow(
+      'Circular inheritance',
+    );
   });
 
   it('should throw on chains deeper than 5 levels', () => {

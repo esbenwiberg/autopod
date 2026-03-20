@@ -1,5 +1,5 @@
-import React from 'react';
 import { render } from 'ink';
+import React from 'react';
 import { App } from './App.js';
 import type { DashboardConfig } from './App.js';
 

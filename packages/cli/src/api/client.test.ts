@@ -1,13 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AutopodClient, DaemonUnreachableError } from './client.js';
 import {
   AuthError,
-  SessionNotFoundError,
-  ProfileNotFoundError,
-  InvalidStateTransitionError,
-  ValidationError,
   AutopodError,
+  InvalidStateTransitionError,
+  ProfileNotFoundError,
+  SessionNotFoundError,
+  ValidationError,
 } from '@autopod/shared';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AutopodClient, DaemonUnreachableError } from './client.js';
 
 // Mock undici's fetch
 const mockFetch = vi.fn();
@@ -205,7 +205,9 @@ describe('AutopodClient', () => {
 
     it('maps 422 to ValidationError', async () => {
       mockFetch.mockResolvedValueOnce(errorResponse(422, { message: 'bad input' }));
-      await expect(client.createSession({ profileName: '', task: '' })).rejects.toThrow(ValidationError);
+      await expect(client.createSession({ profileName: '', task: '' })).rejects.toThrow(
+        ValidationError,
+      );
     });
 
     it('maps 500 to AutopodError', async () => {

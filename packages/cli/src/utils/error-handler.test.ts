@@ -1,13 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { getExitCode } from './error-handler.js';
 import {
-  AutopodError,
   AuthError,
-  SessionNotFoundError,
+  AutopodError,
   ProfileNotFoundError,
+  SessionNotFoundError,
   ValidationError,
 } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
 import { DaemonUnreachableError } from '../api/client.js';
+import { getExitCode } from './error-handler.js';
 
 describe('getExitCode', () => {
   it('returns 2 for AuthError', () => {

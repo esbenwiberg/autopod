@@ -53,11 +53,7 @@ export async function collectScreenshots(
 }
 
 /** Build a GitHub raw content URL for a file on a branch. */
-export function buildGitHubImageUrl(
-  repoUrl: string,
-  branch: string,
-  relativePath: string,
-): string {
+export function buildGitHubImageUrl(repoUrl: string, branch: string, relativePath: string): string {
   // repoUrl: https://github.com/org/repo or https://github.com/org/repo.git
   const clean = repoUrl.replace(/\.git$/, '');
   return `${clean}/blob/${branch}/${relativePath}?raw=true`;

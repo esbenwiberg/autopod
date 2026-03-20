@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import pino from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAdoHandler } from './ado-handler.js';
 
 function mockResponse(
@@ -101,13 +101,11 @@ describe('createAdoHandler', () => {
     );
 
     const calledOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
-    const authHeader = (calledOpts.headers as Record<string, string>)['Authorization'];
+    const authHeader = (calledOpts.headers as Record<string, string>).Authorization;
     const expectedAuth = `Basic ${Buffer.from(':ado-token').toString('base64')}`;
     expect(authHeader).toBe(expectedAuth);
 
-    expect(result).toEqual(
-      expect.objectContaining({ id: 123 }),
-    );
+    expect(result).toEqual(expect.objectContaining({ id: 123 }));
   });
 
   it('search_workitems builds auto-generated WIQL query and picks fields from batch', async () => {
@@ -130,10 +128,11 @@ describe('createAdoHandler', () => {
       getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
     });
 
-    const result: any = await handler.execute(
-      makeAction('search_workitems', ['id']),
-      { org: 'myorg', project: 'myproject', query: 'login bug' },
-    );
+    const result: any = await handler.execute(makeAction('search_workitems', ['id']), {
+      org: 'myorg',
+      project: 'myproject',
+      query: 'login bug',
+    });
 
     // Check WIQL body
     const firstCallOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;

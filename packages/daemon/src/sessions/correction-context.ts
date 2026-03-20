@@ -1,4 +1,4 @@
-import type { Session, ValidationResult, Profile } from '@autopod/shared';
+import type { Profile, Session, ValidationResult } from '@autopod/shared';
 import { MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/index.js';
 import { formatFeedback } from './feedback-formatter.js';
@@ -51,7 +51,9 @@ export async function buildCorrectionContext(
     }
     const failedAssertions = page.assertions.filter((a) => !a.passed);
     for (const a of failedAssertions) {
-      parts.push(`  Assertion failed: ${a.selector} (${a.type}) — expected "${a.expected}", got "${a.actual}"`);
+      parts.push(
+        `  Assertion failed: ${a.selector} (${a.type}) — expected "${a.expected}", got "${a.actual}"`,
+      );
     }
     screenshotDescriptions.push(parts.join('\n'));
   }
@@ -76,14 +78,14 @@ export async function buildCorrectionContext(
 export function determineFailedStep(result: ValidationResult): CorrectionContext['failedStep'] {
   if (result.smoke.build.status === 'fail') return 'build';
   if (result.smoke.health.status === 'fail') return 'health';
-  const hasPageFailure = result.smoke.pages.some(p => p.status === 'fail');
+  const hasPageFailure = result.smoke.pages.some((p) => p.status === 'fail');
   if (hasPageFailure) return 'smoke';
   return 'task_review';
 }
 
 export function truncateDiff(diff: string, maxLength: number): string {
   if (diff.length <= maxLength) return diff;
-  return diff.slice(0, maxLength) + '\n... (truncated)';
+  return `${diff.slice(0, maxLength)}\n... (truncated)`;
 }
 
 export async function buildCorrectionMessage(
@@ -93,7 +95,10 @@ export async function buildCorrectionMessage(
   containerManager: ContainerManager,
 ): Promise<string> {
   const context = await buildCorrectionContext(
-    session, profile, validationResult, containerManager,
+    session,
+    profile,
+    validationResult,
+    containerManager,
   );
 
   const feedback = formatFeedback({

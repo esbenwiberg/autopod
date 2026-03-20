@@ -1,12 +1,12 @@
+import type { AppRole, AuthToken } from '@autopod/shared';
 import {
-  PublicClientApplication,
+  type AccountInfo,
+  type AuthenticationResult,
   type Configuration,
   type DeviceCodeRequest,
-  type AuthenticationResult,
+  PublicClientApplication,
   type SilentFlowRequest,
-  type AccountInfo,
 } from '@azure/msal-node';
-import type { AuthToken, AppRole } from '@autopod/shared';
 import open from 'open';
 
 const SCOPES = ['api://autopod/.default'];
@@ -23,9 +23,7 @@ export class MsalClient {
     this.pca = new PublicClientApplication(config);
   }
 
-  async acquireTokenByDeviceCode(
-    onMessage: (message: string) => void,
-  ): Promise<AuthToken> {
+  async acquireTokenByDeviceCode(onMessage: (message: string) => void): Promise<AuthToken> {
     const request: DeviceCodeRequest = {
       scopes: SCOPES,
       deviceCodeCallback: (response) => {

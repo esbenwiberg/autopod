@@ -1,5 +1,5 @@
-import type { FastifyInstance } from 'fastify';
 import { createSessionRequestSchema, sendMessageSchema } from '@autopod/shared';
+import type { FastifyInstance } from 'fastify';
 import type { SessionManager } from '../../sessions/index.js';
 
 export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManager): void {

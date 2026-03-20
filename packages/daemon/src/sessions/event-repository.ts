@@ -1,5 +1,5 @@
-import type Database from 'better-sqlite3';
 import type { SystemEvent } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 
 export interface StoredEvent {
   id: number;
@@ -20,7 +20,12 @@ function extractSessionId(event: SystemEvent): string | null {
   if ('sessionId' in event && typeof event.sessionId === 'string') {
     return event.sessionId;
   }
-  if ('session' in event && event.session && typeof event.session === 'object' && 'id' in event.session) {
+  if (
+    'session' in event &&
+    event.session &&
+    typeof event.session === 'object' &&
+    'id' in event.session
+  ) {
     return (event.session as { id: string }).id;
   }
   return null;

@@ -1,5 +1,5 @@
-import type Database from 'better-sqlite3';
 import type { ActionAuditEntry } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 
 export interface ActionAuditRepository {
   insert(entry: Omit<ActionAuditEntry, 'id' | 'createdAt'>): void;
@@ -38,7 +38,9 @@ export function createActionAuditRepository(db: Database.Database): ActionAuditR
 
     listBySession(sessionId: string, limit = 50): ActionAuditEntry[] {
       const rows = db
-        .prepare('SELECT * FROM action_audit WHERE session_id = @sessionId ORDER BY created_at DESC LIMIT @limit')
+        .prepare(
+          'SELECT * FROM action_audit WHERE session_id = @sessionId ORDER BY created_at DESC LIMIT @limit',
+        )
         .all({ sessionId, limit }) as Record<string, unknown>[];
       return rows.map(rowToAuditEntry);
     },

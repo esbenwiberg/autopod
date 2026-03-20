@@ -44,9 +44,10 @@ export function quarantine(text: string, config?: Partial<QuarantineConfig>): Qu
 
   // High severity — block
   if (threatScore >= cfg.blockThreshold) {
-    const blocked = cfg.onBlock === 'skip'
-      ? '[CONTENT_BLOCKED: Injection threat detected (score: ' + threatScore.toFixed(2) + '). Content omitted.]'
-      : wrapQuarantine(text, threatScore, true);
+    const blocked =
+      cfg.onBlock === 'skip'
+        ? `[CONTENT_BLOCKED: Injection threat detected (score: ${threatScore.toFixed(2)}). Content omitted.]`
+        : wrapQuarantine(text, threatScore, true);
     return { safe: false, threatScore, threats, sanitized: blocked };
   }
 
@@ -70,9 +71,9 @@ function detectThreats(text: string): ThreatIndicator[] {
   for (const pattern of INJECTION_PATTERNS) {
     // Reset regex state (global flag)
     const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
-    let match: RegExpExecArray | null;
-
-    while ((match = regex.exec(text)) !== null) {
+    for (;;) {
+      const match = regex.exec(text);
+      if (match === null) break;
       threats.push({
         pattern: pattern.name,
         severity: pattern.severity,

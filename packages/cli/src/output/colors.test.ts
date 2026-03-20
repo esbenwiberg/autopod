@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { getStatusStyle, formatStatus, formatDuration, formatDurationFromDates } from './colors.js';
 import type { SessionStatus } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
+import { formatDuration, formatDurationFromDates, formatStatus, getStatusStyle } from './colors.js';
 
 const ALL_STATUSES: SessionStatus[] = [
   'queued',

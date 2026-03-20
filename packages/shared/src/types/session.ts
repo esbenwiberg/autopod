@@ -1,6 +1,6 @@
 import type { EscalationRequest } from './escalation.js';
-import type { RuntimeType } from './runtime.js';
 import type { ExecutionTarget } from './profile.js';
+import type { RuntimeType } from './runtime.js';
 import type { ValidationResult } from './validation.js';
 
 export type SessionStatus =
@@ -46,7 +46,12 @@ export interface Session {
   previewUrl: string | null;
   prUrl: string | null;
   plan: { summary: string; steps: string[] } | null;
-  progress: { phase: string; description: string; currentPhase: number; totalPhases: number } | null;
+  progress: {
+    phase: string;
+    description: string;
+    currentPhase: number;
+    totalPhases: number;
+  } | null;
   claudeSessionId: string | null;
 }
 

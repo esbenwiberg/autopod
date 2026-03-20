@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import type { Session } from '@autopod/shared';
 import { render } from 'ink-testing-library';
+import { describe, expect, it } from 'vitest';
 import { SessionTable } from '../components/SessionTable.js';
 import { calculateColumns } from '../utils/layout.js';
-import type { Session } from '@autopod/shared';
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {

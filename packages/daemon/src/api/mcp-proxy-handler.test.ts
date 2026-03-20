@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { rewriteMcpUrls } from './mcp-proxy-handler.js';
 
 interface InjectedMcpServer {
@@ -12,9 +12,7 @@ const SESSION_ID = 'sess-abc';
 
 describe('rewriteMcpUrls', () => {
   it('rewrites URL correctly with server name and session ID', () => {
-    const servers: InjectedMcpServer[] = [
-      { name: 'github', url: 'https://mcp.github.com/sse' },
-    ];
+    const servers: InjectedMcpServer[] = [{ name: 'github', url: 'https://mcp.github.com/sse' }];
 
     const result = rewriteMcpUrls(servers, SESSION_ID, PROXY_BASE);
 
@@ -25,9 +23,7 @@ describe('rewriteMcpUrls', () => {
   });
 
   it('encodes server names with special characters', () => {
-    const servers: InjectedMcpServer[] = [
-      { name: 'my server/v2', url: 'https://example.com' },
-    ];
+    const servers: InjectedMcpServer[] = [{ name: 'my server/v2', url: 'https://example.com' }];
 
     const result = rewriteMcpUrls(servers, SESSION_ID, PROXY_BASE);
 
@@ -52,9 +48,7 @@ describe('rewriteMcpUrls', () => {
   });
 
   it('preserves server name property', () => {
-    const servers: InjectedMcpServer[] = [
-      { name: 'my-tool', url: 'https://tool.example.com' },
-    ];
+    const servers: InjectedMcpServer[] = [{ name: 'my-tool', url: 'https://tool.example.com' }];
 
     const result = rewriteMcpUrls(servers, SESSION_ID, PROXY_BASE);
 

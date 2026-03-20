@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { generateValidationScript, PlaywrightScriptConfig } from './playwright-script.js';
+import { describe, expect, it } from 'vitest';
+import { type PlaywrightScriptConfig, generateValidationScript } from './playwright-script.js';
 
 function makeConfig(overrides: Partial<PlaywrightScriptConfig> = {}): PlaywrightScriptConfig {
   return {
@@ -33,11 +33,7 @@ describe('generateValidationScript', () => {
 
   it('contains all page paths from config', () => {
     const cfg = makeConfig({
-      pages: [
-        { path: '/dashboard' },
-        { path: '/settings' },
-        { path: '/users/123' },
-      ],
+      pages: [{ path: '/dashboard' }, { path: '/settings' }, { path: '/users/123' }],
     });
     const script = generateValidationScript(cfg);
     // Paths are embedded via the JSON config blob
@@ -50,7 +46,7 @@ describe('generateValidationScript', () => {
     const script = generateValidationScript(makeConfig());
     expect(script).toContain('mkdirSync');
     expect(script).toContain('CONFIG.screenshotDir');
-    expect(script).toContain("recursive: true");
+    expect(script).toContain('recursive: true');
   });
 
   it('has marker strings for JSON output', () => {

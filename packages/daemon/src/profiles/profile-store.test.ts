@@ -1,16 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
-import { describe, expect, it, beforeEach } from 'vitest';
 import { ProfileExistsError, ProfileNotFoundError } from '@autopod/shared';
-import { createProfileStore, type ProfileStore } from './profile-store.js';
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { type ProfileStore, createProfileStore } from './profile-store.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+  const files = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
     db.exec(sql);
@@ -87,7 +90,7 @@ describe('ProfileStore', () => {
       expect(profile.healthPath).toBe('/health');
       expect(profile.healthTimeout).toBe(60);
       expect(profile.validationPages).toHaveLength(1);
-      expect(profile.validationPages[0]!.assertions).toHaveLength(1);
+      expect(profile.validationPages[0]?.assertions).toHaveLength(1);
       expect(profile.maxValidationAttempts).toBe(5);
       expect(profile.defaultModel).toBe('sonnet');
       expect(profile.customInstructions).toBe('Be careful');
@@ -101,7 +104,9 @@ describe('ProfileStore', () => {
     });
 
     it('should throw ProfileNotFoundError if extends references nonexistent parent', () => {
-      expect(() => store.create({ ...validInput, extends: 'nonexistent' })).toThrow(ProfileNotFoundError);
+      expect(() => store.create({ ...validInput, extends: 'nonexistent' })).toThrow(
+        ProfileNotFoundError,
+      );
     });
   });
 
@@ -151,8 +156,8 @@ describe('ProfileStore', () => {
 
       const profiles = store.list();
       expect(profiles).toHaveLength(2);
-      expect(profiles[0]!.name).toBe('app-a');
-      expect(profiles[1]!.name).toBe('app-b');
+      expect(profiles[0]?.name).toBe('app-a');
+      expect(profiles[1]?.name).toBe('app-b');
     });
 
     it('should return profiles with inheritance resolved', () => {
@@ -187,13 +192,17 @@ describe('ProfileStore', () => {
       // Read raw to get the DB-assigned createdAt
       store.getRaw('my-app').updatedAt;
       // Force a different timestamp by manipulating the DB directly
-      db.prepare("UPDATE profiles SET updated_at = '2020-01-01T00:00:00.000Z' WHERE name = 'my-app'").run();
+      db.prepare(
+        "UPDATE profiles SET updated_at = '2020-01-01T00:00:00.000Z' WHERE name = 'my-app'",
+      ).run();
       const updated = store.update('my-app', { buildCommand: 'pnpm build' });
       expect(updated.updatedAt).not.toBe('2020-01-01T00:00:00.000Z');
     });
 
     it('should throw ProfileNotFoundError for nonexistent profile', () => {
-      expect(() => store.update('nonexistent', { buildCommand: 'x' })).toThrow(ProfileNotFoundError);
+      expect(() => store.update('nonexistent', { buildCommand: 'x' })).toThrow(
+        ProfileNotFoundError,
+      );
     });
 
     it('should not touch untouched fields', () => {
@@ -209,7 +218,9 @@ describe('ProfileStore', () => {
 
     it('should verify new parent exists when changing extends', () => {
       store.create(validInput);
-      expect(() => store.update('my-app', { extends: 'nonexistent' })).toThrow(ProfileNotFoundError);
+      expect(() => store.update('my-app', { extends: 'nonexistent' })).toThrow(
+        ProfileNotFoundError,
+      );
     });
 
     it('should return unchanged profile when no changes provided', () => {
@@ -278,7 +289,10 @@ describe('ProfileStore', () => {
     it('should preserve validationPages through create/get', () => {
       const pages = [
         { path: '/', assertions: [{ selector: '#app', type: 'exists' as const }] },
-        { path: '/about', assertions: [{ selector: 'h1', type: 'text_contains' as const, value: 'About' }] },
+        {
+          path: '/about',
+          assertions: [{ selector: 'h1', type: 'text_contains' as const, value: 'About' }],
+        },
       ];
       store.create({ ...validInput, validationPages: pages });
       const profile = store.get('my-app');

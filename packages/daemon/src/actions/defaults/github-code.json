@@ -20,7 +20,11 @@
     "handler": "github",
     "params": {
       "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
-      "query": { "type": "string", "required": true, "description": "Search query (code search syntax)" },
+      "query": {
+        "type": "string",
+        "required": true,
+        "description": "Search query (code search syntax)"
+      },
       "max_results": { "type": "number", "required": false, "default": 10 }
     },
     "response": {

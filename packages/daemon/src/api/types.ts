@@ -9,5 +9,3 @@ declare module 'fastify' {
     auth?: boolean;
   }
 }
-
-export {}; // ensure this is a module

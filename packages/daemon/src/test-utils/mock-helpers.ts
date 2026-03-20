@@ -1,34 +1,34 @@
-import { vi } from 'vitest';
-import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
-import pino from 'pino';
 import type {
-  Runtime,
-  AgentEvent,
   AgentEscalationEvent,
-  ValidationResult,
-  StackTemplate,
-  RuntimeType,
+  AgentEvent,
   EscalationRequest,
+  Runtime,
+  RuntimeType,
+  StackTemplate,
+  ValidationResult,
 } from '@autopod/shared';
+import Database from 'better-sqlite3';
+import pino from 'pino';
+import { vi } from 'vitest';
 import type {
   ContainerManager,
-  WorktreeManager,
   RuntimeRegistry,
   ValidationEngine,
+  WorktreeManager,
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
-import { createSessionRepository } from '../sessions/session-repository.js';
-import { createEventRepository } from '../sessions/event-repository.js';
 import { createEscalationRepository } from '../sessions/escalation-repository.js';
+import type { EscalationRepository } from '../sessions/escalation-repository.js';
 import { createEventBus } from '../sessions/event-bus.js';
+import type { EventBus } from '../sessions/event-bus.js';
+import { createEventRepository } from '../sessions/event-repository.js';
 import { createNudgeRepository } from '../sessions/nudge-repository.js';
 import type { NudgeRepository } from '../sessions/nudge-repository.js';
 import type { SessionManagerDependencies } from '../sessions/session-manager.js';
+import { createSessionRepository } from '../sessions/session-repository.js';
 import type { SessionRepository } from '../sessions/session-repository.js';
-import type { EscalationRepository } from '../sessions/escalation-repository.js';
-import type { EventBus } from '../sessions/event-bus.js';
 
 export const logger = pino({ level: 'silent' });
 
@@ -41,7 +41,10 @@ export function createTestDb(): Database.Database {
   db.pragma('foreign_keys = ON');
 
   const migrationsDir = path.join(__dirname, '..', 'db', 'migrations');
-  const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+  const files = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
     db.exec(sql);
@@ -132,10 +135,7 @@ export function createMockRuntimeRegistry(runtime: Runtime): RuntimeRegistry {
   };
 }
 
-export function createPassingValidationResult(
-  sessionId: string,
-  attempt = 1,
-): ValidationResult {
+export function createPassingValidationResult(sessionId: string, attempt = 1): ValidationResult {
   return {
     sessionId,
     attempt,
@@ -152,10 +152,7 @@ export function createPassingValidationResult(
   };
 }
 
-export function createFailingValidationResult(
-  sessionId: string,
-  attempt = 1,
-): ValidationResult {
+export function createFailingValidationResult(sessionId: string, attempt = 1): ValidationResult {
   return {
     sessionId,
     attempt,
@@ -216,7 +213,9 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         actionPolicy: row.action_policy ? JSON.parse(row.action_policy as string) : null,
         outputMode: (row.output_mode as 'pr' | 'artifact') ?? 'pr',
         modelProvider: (row.model_provider as 'anthropic' | 'max' | 'foundry') ?? 'anthropic',
-        providerCredentials: row.provider_credentials ? JSON.parse(row.provider_credentials as string) : null,
+        providerCredentials: row.provider_credentials
+          ? JSON.parse(row.provider_credentials as string)
+          : null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -241,7 +240,10 @@ export function completeEvent(result = 'Done'): AgentEvent {
   return { type: 'complete', timestamp: new Date().toISOString(), result };
 }
 
-export function escalationEvent(sessionId: string, question = 'What should I do?'): AgentEscalationEvent {
+export function escalationEvent(
+  sessionId: string,
+  question = 'What should I do?',
+): AgentEscalationEvent {
   return {
     type: 'escalation',
     timestamp: new Date().toISOString(),

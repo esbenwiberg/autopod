@@ -1,8 +1,8 @@
-import type { Command } from 'commander';
 import chalk from 'chalk';
-import * as configStore from '../config/config-store.js';
+import type { Command } from 'commander';
 import { AutopodClient } from '../api/client.js';
 import { getToken } from '../auth/token-manager.js';
+import * as configStore from '../config/config-store.js';
 import { withSpinner } from '../output/spinner.js';
 
 export function registerDaemonCommands(program: Command): void {
@@ -23,9 +23,7 @@ export function registerDaemonCommands(program: Command): void {
       // Try to reach it
       const client = new AutopodClient({ baseUrl: url, getToken });
       try {
-        const health = await withSpinner('Connecting to daemon...', () =>
-          client.checkHealth(),
-        );
+        const health = await withSpinner('Connecting to daemon...', () => client.checkHealth());
         console.log(chalk.green(`Connected to daemon v${health.version} at ${url}`));
       } catch {
         console.log(chalk.yellow(`Saved ${url} but daemon is not reachable.`));

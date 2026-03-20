@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
 import type { Profile } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
 import { generateDockerfile, getBaseImage, getInstallCommand } from './dockerfile-generator.js';
 
 function mockProfile(overrides: Partial<Profile> = {}): Profile {
@@ -52,11 +52,15 @@ describe('getBaseImage', () => {
 
 describe('getInstallCommand', () => {
   it('detects pnpm', () => {
-    expect(getInstallCommand(mockProfile({ buildCommand: 'pnpm run build' }))).toContain('pnpm install');
+    expect(getInstallCommand(mockProfile({ buildCommand: 'pnpm run build' }))).toContain(
+      'pnpm install',
+    );
   });
 
   it('detects yarn', () => {
-    expect(getInstallCommand(mockProfile({ buildCommand: 'yarn build' }))).toContain('yarn install');
+    expect(getInstallCommand(mockProfile({ buildCommand: 'yarn build' }))).toContain(
+      'yarn install',
+    );
   });
 
   it('detects dotnet', () => {
@@ -64,7 +68,9 @@ describe('getInstallCommand', () => {
   });
 
   it('detects pip', () => {
-    expect(getInstallCommand(mockProfile({ buildCommand: 'pip install -e .' }))).toBe('pip install -r requirements.txt');
+    expect(getInstallCommand(mockProfile({ buildCommand: 'pip install -e .' }))).toBe(
+      'pip install -r requirements.txt',
+    );
   });
 
   it('defaults to npm ci', () => {

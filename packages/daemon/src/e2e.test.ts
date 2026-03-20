@@ -1,3 +1,4 @@
+import type { AgentEvent, ValidationResult } from '@autopod/shared';
 /**
  * E2E lifecycle tests for the session manager.
  *
@@ -6,17 +7,16 @@
  * is mocked so we can drive the full state-machine without Docker or a real
  * coding agent.
  */
-import { describe, it, expect, vi } from 'vitest';
-import type { AgentEvent, ValidationResult } from '@autopod/shared';
+import { describe, expect, it, vi } from 'vitest';
 import { createSessionManager } from './sessions/session-manager.js';
 import {
-  createTestContext,
-  createMockRuntime,
-  statusEvent,
   completeEvent,
-  escalationEvent,
-  createPassingValidationResult,
   createFailingValidationResult,
+  createMockRuntime,
+  createPassingValidationResult,
+  createTestContext,
+  escalationEvent,
+  statusEvent,
 } from './test-utils/mock-helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -117,7 +117,10 @@ describe('E2E: validation failure with retry', () => {
       }),
     });
 
-    const validationResultFactory = (config: { sessionId: string; attempt: number }): ValidationResult => {
+    const validationResultFactory = (config: {
+      sessionId: string;
+      attempt: number;
+    }): ValidationResult => {
       callCount++;
       if (callCount === 1) {
         return createFailingValidationResult(config.sessionId, config.attempt);
@@ -160,7 +163,10 @@ describe('E2E: validation failure with retry', () => {
       }),
     });
 
-    const validationResultFactory = (config: { sessionId: string; attempt: number }): ValidationResult => {
+    const validationResultFactory = (config: {
+      sessionId: string;
+      attempt: number;
+    }): ValidationResult => {
       callCount++;
       if (callCount === 1) {
         return createFailingValidationResult(config.sessionId, config.attempt);
@@ -179,7 +185,7 @@ describe('E2E: validation failure with retry', () => {
 
     const final = manager.getSession(session.id);
     expect(final.lastValidationResult).not.toBeNull();
-    expect(final.lastValidationResult!.overall).toBe('pass');
+    expect(final.lastValidationResult?.overall).toBe('pass');
   });
 });
 
@@ -218,7 +224,9 @@ describe('E2E: escalation flow', () => {
     // hang. We run processSession in the background, then call sendMessage.
 
     let resolveSpawnBlock!: () => void;
-    const spawnBlock = new Promise<void>((r) => { resolveSpawnBlock = r; });
+    const spawnBlock = new Promise<void>((r) => {
+      resolveSpawnBlock = r;
+    });
 
     // We need a reference to the session id before creating the runtime, but
     // we do not know it yet. We will capture it from the spawn call.
@@ -250,10 +258,13 @@ describe('E2E: escalation flow', () => {
     const processPromise = manager.processSession(session.id);
 
     // Wait a tick for the generator to yield the escalation event
-    await vi.waitFor(() => {
-      const s = manager.getSession(session.id);
-      expect(s.status).toBe('awaiting_input');
-    }, { timeout: 2000 });
+    await vi.waitFor(
+      () => {
+        const s = manager.getSession(session.id);
+        expect(s.status).toBe('awaiting_input');
+      },
+      { timeout: 2000 },
+    );
 
     const awaitingSession = manager.getSession(session.id);
     expect(awaitingSession.status).toBe('awaiting_input');
@@ -273,7 +284,7 @@ describe('E2E: escalation flow', () => {
     const final = manager.getSession(session.id);
     expect(final.status).toBe('validated');
     expect(runtime.resume).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(runtime.resume).mock.calls[0]![1]).toBe('Use CSS variables please');
+    expect(vi.mocked(runtime.resume).mock.calls[0]?.[1]).toBe('Use CSS variables please');
   });
 });
 
@@ -293,7 +304,10 @@ describe('E2E: max retries exhausted', () => {
     });
 
     // Every validation call fails
-    const validationResultFactory = (config: { sessionId: string; attempt: number }): ValidationResult => {
+    const validationResultFactory = (config: {
+      sessionId: string;
+      attempt: number;
+    }): ValidationResult => {
       return createFailingValidationResult(config.sessionId, config.attempt);
     };
 
@@ -368,7 +382,9 @@ describe('E2E: kill mid-run', () => {
   it('kills a running session, transitions through killing to killed', async () => {
     // We make the spawn generator hang so the session stays in "running"
     let resolveHang!: () => void;
-    const hang = new Promise<void>((r) => { resolveHang = r; });
+    const hang = new Promise<void>((r) => {
+      resolveHang = r;
+    });
 
     const runtime = createMockRuntime({
       spawn: vi.fn(async function* (): AsyncIterable<AgentEvent> {
@@ -391,10 +407,13 @@ describe('E2E: kill mid-run', () => {
     const processPromise = manager.processSession(session.id);
 
     // Wait for the session to reach running state
-    await vi.waitFor(() => {
-      const s = manager.getSession(session.id);
-      expect(s.status).toBe('running');
-    }, { timeout: 2000 });
+    await vi.waitFor(
+      () => {
+        const s = manager.getSession(session.id);
+        expect(s.status).toBe('running');
+      },
+      { timeout: 2000 },
+    );
 
     // Kill the session while it is running
     await manager.killSession(session.id);
@@ -455,6 +474,6 @@ describe('E2E: kill mid-run', () => {
 
     const completedEvent = events.find((e) => e.type === 'session.completed');
     expect(completedEvent).toBeDefined();
-    expect(completedEvent!.finalStatus).toBe('killed');
+    expect(completedEvent?.finalStatus).toBe('killed');
   });
 });

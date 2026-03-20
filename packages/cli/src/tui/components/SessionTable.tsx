@@ -1,6 +1,6 @@
-import React from 'react';
-import { Box, Text } from 'ink';
 import type { Session } from '@autopod/shared';
+import { Box, Text } from 'ink';
+import type React from 'react';
 import type { ColumnWidths } from '../utils/layout.js';
 import { SessionRow } from './SessionRow.js';
 
@@ -20,7 +20,9 @@ export function SessionTable({
   if (sessions.length === 0) {
     return (
       <Box paddingX={1} paddingY={1}>
-        <Text dimColor>No sessions. Run `ap run &lt;profile&gt; &quot;task&quot;` to create one.</Text>
+        <Text dimColor>
+          No sessions. Run `ap run &lt;profile&gt; &quot;task&quot;` to create one.
+        </Text>
       </Box>
     );
   }

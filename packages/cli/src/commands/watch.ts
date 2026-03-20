@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
-import * as configStore from '../config/config-store.js';
 import { getToken } from '../auth/token-manager.js';
+import * as configStore from '../config/config-store.js';
 import { renderDashboard } from '../tui/index.js';
 
 export function registerWatchCommand(program: Command): void {

@@ -1,6 +1,6 @@
-import React from 'react';
-import { Box, Text } from 'ink';
 import type { AgentEvent } from '@autopod/shared';
+import { Box, Text } from 'ink';
+import type React from 'react';
 
 interface ActivityFeedProps {
   events: AgentEvent[];
@@ -62,9 +62,10 @@ function getEventText(event: AgentEvent): string {
       return event.result;
     case 'error':
       return event.message;
-    case 'escalation':
+    case 'escalation': {
       const ep = event.payload;
       return `${event.escalationType}: ${'question' in ep ? ep.question : 'description' in ep ? ep.description : ''}`;
+    }
     default:
       return '';
   }
@@ -84,7 +85,9 @@ export function ActivityFeed({ events, maxLines }: ActivityFeedProps): React.Rea
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold dimColor>Activity</Text>
+      <Text bold dimColor>
+        Activity
+      </Text>
       {visibleEvents.map((event, i) => (
         <Box key={`${event.timestamp}-${i}`}>
           <Text color={getEventColor(event)}>{getEventIcon(event)} </Text>

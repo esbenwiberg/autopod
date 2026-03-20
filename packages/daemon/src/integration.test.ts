@@ -1,21 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import type { JwtPayload } from '@autopod/shared';
-import { createProfileStore } from './profiles/index.js';
-import {
-  createSessionRepository,
-  createEventRepository,
-  createEscalationRepository,
-  createEventBus,
-  createSessionQueue,
-  createSessionManager,
-} from './sessions/index.js';
-import { createServer } from './api/server.js';
-import type { AuthModule } from './interfaces/index.js';
+import Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createServer } from './api/server.js';
+import type { AuthModule } from './interfaces/index.js';
+import { createProfileStore } from './profiles/index.js';
+import {
+  createEscalationRepository,
+  createEventBus,
+  createEventRepository,
+  createSessionManager,
+  createSessionQueue,
+  createSessionRepository,
+} from './sessions/index.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
 const MIGRATION_SQL = fs
@@ -47,8 +47,12 @@ function createTestDb(): Database.Database {
 
 function createMockAuthModule(): AuthModule {
   return {
-    async validateToken() { return testUser; },
-    validateTokenSync() { return testUser; },
+    async validateToken() {
+      return testUser;
+    },
+    validateTokenSync() {
+      return testUser;
+    },
   };
 }
 
@@ -86,20 +90,38 @@ describe('Integration', () => {
     const worktreeManager = {
       create: vi.fn().mockResolvedValue('/tmp/worktree/test'),
       cleanup: vi.fn().mockResolvedValue(undefined),
-      getDiffStats: vi.fn().mockResolvedValue({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 }),
+      getDiffStats: vi
+        .fn()
+        .mockResolvedValue({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 }),
       mergeBranch: vi.fn().mockResolvedValue(undefined),
     };
 
     const runtimeRegistry = {
       get: vi.fn().mockReturnValue({
         type: 'claude' as const,
-        spawn: vi.fn().mockReturnValue((async function* () {
-          yield { type: 'status' as const, timestamp: new Date().toISOString(), message: 'Working...' };
-          yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'Done' };
-        })()),
-        resume: vi.fn().mockReturnValue((async function* () {
-          yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'Resumed' };
-        })()),
+        spawn: vi.fn().mockReturnValue(
+          (async function* () {
+            yield {
+              type: 'status' as const,
+              timestamp: new Date().toISOString(),
+              message: 'Working...',
+            };
+            yield {
+              type: 'complete' as const,
+              timestamp: new Date().toISOString(),
+              result: 'Done',
+            };
+          })(),
+        ),
+        resume: vi.fn().mockReturnValue(
+          (async function* () {
+            yield {
+              type: 'complete' as const,
+              timestamp: new Date().toISOString(),
+              result: 'Resumed',
+            };
+          })(),
+        ),
         abort: vi.fn().mockResolvedValue(undefined),
       }),
     };
@@ -112,7 +134,12 @@ describe('Integration', () => {
         smoke: {
           status: 'pass',
           build: { status: 'pass', output: 'ok', duration: 1000 },
-          health: { status: 'pass', url: 'http://localhost:3000/', responseCode: 200, duration: 100 },
+          health: {
+            status: 'pass',
+            url: 'http://localhost:3000/',
+            responseCode: 200,
+            duration: 100,
+          },
           pages: [],
         },
         taskReview: null,
@@ -125,7 +152,9 @@ describe('Integration', () => {
 
     const sessionQueue = createSessionQueue(
       2,
-      async (sessionId) => { await sessionManager.processSession(sessionId); },
+      async (sessionId) => {
+        await sessionManager.processSession(sessionId);
+      },
       logger,
     );
 

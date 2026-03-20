@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { SystemEvent, SessionStatusChangedEvent, SessionCreatedEvent } from '@autopod/shared';
-import type { EventRepository } from './event-repository.js';
-import { createEventBus } from './event-bus.js';
+import type { SessionCreatedEvent, SessionStatusChangedEvent, SystemEvent } from '@autopod/shared';
 import pino from 'pino';
+import { describe, expect, it, vi } from 'vitest';
+import { createEventBus } from './event-bus.js';
+import type { EventRepository } from './event-repository.js';
 
 function createMockEventRepo(): EventRepository {
   let nextId = 1;
@@ -132,7 +132,9 @@ describe('event-bus', () => {
     const bus = createEventBus(repo, logger);
 
     const received: SystemEvent[] = [];
-    bus.subscribe(() => { throw new Error('boom'); });
+    bus.subscribe(() => {
+      throw new Error('boom');
+    });
     bus.subscribe((e) => received.push(e));
 
     bus.emit(makeStatusEvent('s1'));
@@ -144,7 +146,9 @@ describe('event-bus', () => {
     const bus = createEventBus(repo, logger);
 
     const received: SystemEvent[] = [];
-    bus.subscribeToSession('s1', () => { throw new Error('boom'); });
+    bus.subscribeToSession('s1', () => {
+      throw new Error('boom');
+    });
     bus.subscribeToSession('s1', (e) => received.push(e));
 
     bus.emit(makeStatusEvent('s1'));

@@ -1,5 +1,5 @@
-import React from 'react';
 import { Box, Text, useInput } from 'ink';
+import type React from 'react';
 
 interface DiffViewProps {
   diff: string;

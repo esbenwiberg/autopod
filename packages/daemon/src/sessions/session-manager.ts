@@ -463,7 +463,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
       const resumeEnv = await getResumeEnv(session);
       const runtime = runtimeRegistry.get(session.runtime);
-      const events = runtime.resume(sessionId, message, session.containerId!, resumeEnv);
+      if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
+      const events = runtime.resume(sessionId, message, session.containerId, resumeEnv);
       await this.consumeAgentEvents(sessionId, events);
       await this.handleCompletion(sessionId);
     },
@@ -548,7 +549,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // Resume agent with rejection feedback
       const resumeEnv = await getResumeEnv(session);
       const runtime = runtimeRegistry.get(session.runtime);
-      const events = runtime.resume(sessionId, rejectionMessage, session.containerId!, resumeEnv);
+      if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
+      const events = runtime.resume(sessionId, rejectionMessage, session.containerId, resumeEnv);
       await this.consumeAgentEvents(sessionId, events);
       await this.handleCompletion(sessionId);
 
@@ -671,7 +673,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       try {
         const result = await validationEngine.validate({
           sessionId,
-          containerId: session.containerId!,
+          containerId: session.containerId ?? '',
           previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
           buildCommand: profile.buildCommand,
           startCommand: profile.startCommand,
@@ -782,7 +784,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           // Resume the agent with correction feedback
           const resumeEnv = await getResumeEnv(s2);
           const runtime = runtimeRegistry.get(s2.runtime);
-          const events = runtime.resume(sessionId, correctionMessage, s2.containerId!, resumeEnv);
+          if (!s2.containerId) throw new Error(`Session ${sessionId} has no container`);
+          const events = runtime.resume(sessionId, correctionMessage, s2.containerId, resumeEnv);
           await this.consumeAgentEvents(sessionId, events);
           await this.handleCompletion(sessionId);
 

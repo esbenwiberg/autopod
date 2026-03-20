@@ -1,6 +1,6 @@
-import React from 'react';
-import { Box, Text } from 'ink';
 import type { SessionStatus } from '@autopod/shared';
+import { Box, Text } from 'ink';
+import type React from 'react';
 
 interface HotkeyBarProps {
   sessionStatus: SessionStatus | null;
@@ -16,9 +16,7 @@ interface Hotkey {
 }
 
 function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean): Hotkey[] {
-  const base: Hotkey[] = [
-    { key: '↑↓', label: 'navigate' },
-  ];
+  const base: Hotkey[] = [{ key: '↑↓', label: 'navigate' }];
 
   if (!status) return base;
 
@@ -71,9 +69,7 @@ function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean)
 }
 
 function getGlobalHotkeys(hasValidated: boolean, hasFailed: boolean, hasFilter: boolean): Hotkey[] {
-  const hotkeys: Hotkey[] = [
-    { key: 'n', label: 'new' },
-  ];
+  const hotkeys: Hotkey[] = [{ key: 'n', label: 'new' }];
 
   if (hasValidated) hotkeys.push({ key: 'A', label: 'approve-all' });
   if (hasFailed) hotkeys.push({ key: 'X', label: 'kill-failed' });
@@ -90,7 +86,9 @@ function HotkeyRow({ hotkeys }: { hotkeys: Hotkey[] }): React.ReactElement {
     <Box paddingX={1} gap={1}>
       {hotkeys.map((hk) => (
         <Box key={hk.key}>
-          <Text bold color="cyan">[{hk.key}]</Text>
+          <Text bold color="cyan">
+            [{hk.key}]
+          </Text>
           <Text> {hk.label}</Text>
         </Box>
       ))}
@@ -98,7 +96,13 @@ function HotkeyRow({ hotkeys }: { hotkeys: Hotkey[] }): React.ReactElement {
   );
 }
 
-export function HotkeyBar({ sessionStatus, hasPreviewUrl, hasValidated, hasFailed, hasFilter }: HotkeyBarProps): React.ReactElement {
+export function HotkeyBar({
+  sessionStatus,
+  hasPreviewUrl,
+  hasValidated,
+  hasFailed,
+  hasFilter,
+}: HotkeyBarProps): React.ReactElement {
   const sessionHotkeys = getSessionHotkeys(sessionStatus, hasPreviewUrl);
   const globalHotkeys = getGlobalHotkeys(hasValidated, hasFailed, hasFilter);
 

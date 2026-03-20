@@ -1,20 +1,32 @@
-import { describe, it, expect, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import pino from 'pino';
-import type { Runtime, AgentEvent, ValidationResult, StackTemplate, RuntimeType } from '@autopod/shared';
-import { SessionNotFoundError, InvalidStateTransitionError, AutopodError } from '@autopod/shared';
-import type { ContainerManager, WorktreeManager, RuntimeRegistry, ValidationEngine, PrManager } from '../interfaces/index.js';
-import type { ProfileStore } from '../profiles/index.js';
-import { createSessionRepository } from './session-repository.js';
-import { createEventRepository } from './event-repository.js';
-import { createEscalationRepository } from './escalation-repository.js';
-import { createEventBus } from './event-bus.js';
-import { createSessionManager, type SessionManagerDependencies } from './session-manager.js';
-import type { EventBus } from './event-bus.js';
-import type { SessionRepository } from './session-repository.js';
-import type { EscalationRepository } from './escalation-repository.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import type {
+  AgentEvent,
+  Runtime,
+  RuntimeType,
+  StackTemplate,
+  ValidationResult,
+} from '@autopod/shared';
+import { AutopodError, InvalidStateTransitionError, SessionNotFoundError } from '@autopod/shared';
+import Database from 'better-sqlite3';
+import pino from 'pino';
+import { describe, expect, it, vi } from 'vitest';
+import type {
+  ContainerManager,
+  PrManager,
+  RuntimeRegistry,
+  ValidationEngine,
+  WorktreeManager,
+} from '../interfaces/index.js';
+import type { ProfileStore } from '../profiles/index.js';
+import { createEscalationRepository } from './escalation-repository.js';
+import type { EscalationRepository } from './escalation-repository.js';
+import { createEventBus } from './event-bus.js';
+import type { EventBus } from './event-bus.js';
+import { createEventRepository } from './event-repository.js';
+import { type SessionManagerDependencies, createSessionManager } from './session-manager.js';
+import { createSessionRepository } from './session-repository.js';
+import type { SessionRepository } from './session-repository.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -24,7 +36,10 @@ function createTestDb(): Database.Database {
 
   // Run migrations inline
   const migrationsDir = path.join(__dirname, '..', 'db', 'migrations');
-  const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+  const files = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
     db.exec(sql);
@@ -117,7 +132,12 @@ function createMockValidationEngine(result?: Partial<ValidationResult>): Validat
       smoke: {
         status: 'pass' as const,
         build: { status: 'pass' as const, output: '', duration: 100 },
-        health: { status: 'pass' as const, url: 'http://localhost:3000', responseCode: 200, duration: 50 },
+        health: {
+          status: 'pass' as const,
+          url: 'http://localhost:3000',
+          responseCode: 200,
+          duration: 50,
+        },
         pages: [],
       },
       taskReview: null,
@@ -157,7 +177,9 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
   const profileStore: ProfileStore = {
     create: vi.fn(),
     get: vi.fn((name: string) => {
-      const row = db.prepare('SELECT * FROM profiles WHERE name = ?').get(name) as Record<string, unknown> | undefined;
+      const row = db.prepare('SELECT * FROM profiles WHERE name = ?').get(name) as
+        | Record<string, unknown>
+        | undefined;
       if (!row) throw new Error(`Profile "${name}" not found`);
       return {
         name: row.name as string,
@@ -184,7 +206,9 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         actionPolicy: null,
         outputMode: 'pr' as const,
         modelProvider: (row.model_provider as 'anthropic' | 'max' | 'foundry') ?? 'anthropic',
-        providerCredentials: row.provider_credentials ? JSON.parse(row.provider_credentials as string) : null,
+        providerCredentials: row.provider_credentials
+          ? JSON.parse(row.provider_credentials as string)
+          : null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -290,10 +314,7 @@ describe('SessionManager', () => {
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
 
-      manager.createSession(
-        { profileName: 'test-profile', task: 'Do stuff' },
-        'user-1',
-      );
+      manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
 
       const createdEvent = events.find((e: any) => e.type === 'session.created');
       expect(createdEvent).toBeDefined();
@@ -343,7 +364,7 @@ describe('SessionManager', () => {
 
       const sessions = manager.listSessions({ userId: 'user-1' });
       expect(sessions).toHaveLength(1);
-      expect(sessions[0]!.userId).toBe('user-1');
+      expect(sessions[0]?.userId).toBe('user-1');
     });
   });
 
@@ -502,9 +523,7 @@ describe('SessionManager', () => {
 
       await manager.approveSession(session.id, { squash: true });
 
-      expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
-        expect.objectContaining({ squash: true }),
-      );
+      expect(ctx.prManager.mergePr).toHaveBeenCalledWith(expect.objectContaining({ squash: true }));
     });
 
     it('falls back to branch push when no prUrl', async () => {
@@ -537,14 +556,14 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'validated' });
+      ctx.sessionRepo.update(session.id, { status: 'validated', containerId: 'ctr-1' });
 
       await manager.rejectSession(session.id, 'Button color wrong');
 
       // Agent was resumed with the rejection feedback (3rd arg is containerId)
       const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
       expect(resumeCalls.length).toBeGreaterThanOrEqual(1);
-      const resumeMessage = resumeCalls[0]![1] as string;
+      const resumeMessage = resumeCalls[0]?.[1] as string;
       expect(resumeMessage).toContain('Button color wrong');
       expect(resumeMessage).toContain('Rejected by Reviewer');
 
@@ -561,7 +580,11 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'validated', validationAttempts: 2 });
+      ctx.sessionRepo.update(session.id, {
+        status: 'validated',
+        validationAttempts: 2,
+        containerId: 'ctr-1',
+      });
 
       await manager.rejectSession(session.id, 'Needs more work');
 
@@ -579,7 +602,11 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'failed', validationAttempts: 3 });
+      ctx.sessionRepo.update(session.id, {
+        status: 'failed',
+        validationAttempts: 3,
+        containerId: 'ctr-1',
+      });
 
       await manager.rejectSession(session.id, 'Try a different approach');
 
@@ -666,7 +693,9 @@ describe('SessionManager', () => {
 
     it('handles errors by killing the session', async () => {
       const ctx = createTestContext();
-      (ctx.containerManager.spawn as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Docker failed'));
+      (ctx.containerManager.spawn as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Docker failed'),
+      );
 
       const manager = createSessionManager(ctx.deps);
       const session = manager.createSession(
@@ -691,7 +720,11 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Add feature' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'running', containerId: 'ctr-1', worktreePath: '/tmp/wt' });
+      ctx.sessionRepo.update(session.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
 
       await manager.triggerValidation(session.id);
 
@@ -707,7 +740,11 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Add feature' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'running', containerId: 'ctr-1', worktreePath: '/tmp/wt' });
+      ctx.sessionRepo.update(session.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
 
       await manager.triggerValidation(session.id);
 
@@ -734,14 +771,20 @@ describe('SessionManager', () => {
 
     it('still validates even if PR creation fails', async () => {
       const ctx = createTestContext({ overall: 'pass' });
-      (ctx.prManager.createPr as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('gh not found'));
+      (ctx.prManager.createPr as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('gh not found'),
+      );
       const manager = createSessionManager(ctx.deps);
 
       const session = manager.createSession(
         { profileName: 'test-profile', task: 'Add feature' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'running', containerId: 'ctr-1', worktreePath: '/tmp/wt' });
+      ctx.sessionRepo.update(session.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
 
       await manager.triggerValidation(session.id);
 
@@ -791,7 +834,7 @@ describe('SessionManager', () => {
       // Agent was resumed with correction feedback for each retry (attempts 1 and 2)
       const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
       expect(resumeCalls.length).toBe(2);
-      expect(resumeCalls[0]![1]).toContain('Validation Failed');
+      expect(resumeCalls[0]?.[1]).toContain('Validation Failed');
       // 2 retries before exhaustion (attempt 1 → retry, attempt 2 → retry, attempt 3 → failed)
       expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
 

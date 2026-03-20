@@ -1,7 +1,11 @@
 import type { SessionStatus } from '@autopod/shared';
-import { VALID_STATUS_TRANSITIONS, InvalidStateTransitionError } from '@autopod/shared';
+import { InvalidStateTransitionError, VALID_STATUS_TRANSITIONS } from '@autopod/shared';
 
-export function validateTransition(sessionId: string, from: SessionStatus, to: SessionStatus): void {
+export function validateTransition(
+  sessionId: string,
+  from: SessionStatus,
+  to: SessionStatus,
+): void {
   const valid = VALID_STATUS_TRANSITIONS[from];
   if (!valid.includes(to)) {
     throw new InvalidStateTransitionError(sessionId, from, to);

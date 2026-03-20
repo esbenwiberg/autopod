@@ -1,5 +1,5 @@
-import type { Command } from 'commander';
 import chalk from 'chalk';
+import type { Command } from 'commander';
 import open from 'open';
 import type { AutopodClient } from '../api/client.js';
 import { withSpinner } from '../output/spinner.js';
@@ -13,9 +13,7 @@ export function registerValidateCommands(program: Command, getClient: () => Auto
     .action(async (id: string) => {
       const client = getClient();
       const resolvedId = await resolveSessionId(client, id);
-      await withSpinner('Triggering validation...', () =>
-        client.triggerValidation(resolvedId),
-      );
+      await withSpinner('Triggering validation...', () => client.triggerValidation(resolvedId));
       console.log(chalk.green('Validation triggered.'));
       console.log(chalk.dim(`Check results: ap status ${resolvedId.slice(0, 8)}`));
     });

@@ -1,14 +1,14 @@
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import type { Logger } from 'pino';
 import type {
-  WorktreeManager,
-  WorktreeCreateConfig,
-  MergeBranchConfig,
   DiffStats,
+  MergeBranchConfig,
+  WorktreeCreateConfig,
+  WorktreeManager,
 } from '../interfaces/worktree-manager.js';
 
 const execFileAsync = promisify(execFile);
@@ -34,12 +34,14 @@ export class LocalWorktreeManager implements WorktreeManager {
   private repoLocks = new Map<string, Promise<void>>();
 
   constructor(config: LocalWorktreeManagerConfig) {
-    this.cacheDir = config.cacheDir
-      ?? process.env.AUTOPOD_REPO_CACHE
-      ?? path.join(os.homedir(), '.autopod', 'repos');
-    this.worktreeDir = config.worktreeDir
-      ?? process.env.AUTOPOD_WORKTREE_DIR
-      ?? path.join(os.homedir(), '.autopod', 'worktrees');
+    this.cacheDir =
+      config.cacheDir ??
+      process.env.AUTOPOD_REPO_CACHE ??
+      path.join(os.homedir(), '.autopod', 'repos');
+    this.worktreeDir =
+      config.worktreeDir ??
+      process.env.AUTOPOD_WORKTREE_DIR ??
+      path.join(os.homedir(), '.autopod', 'worktrees');
     this.logger = config.logger;
   }
 
@@ -60,10 +62,11 @@ export class LocalWorktreeManager implements WorktreeManager {
       } else {
         this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
         // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share
-        await execFileAsync('git', [
-          'fetch', 'origin',
-          `+refs/heads/${baseBranch}:refs/heads/${baseBranch}`,
-        ], { cwd: bareRepoPath });
+        await execFileAsync(
+          'git',
+          ['fetch', 'origin', `+refs/heads/${baseBranch}:refs/heads/${baseBranch}`],
+          { cwd: bareRepoPath },
+        );
       }
     });
 
@@ -74,10 +77,9 @@ export class LocalWorktreeManager implements WorktreeManager {
     this.logger.info({ worktreePath, branch, baseBranch }, 'Creating worktree');
 
     // -B force-creates branch to handle retry scenarios
-    await execFileAsync('git', [
-      'worktree', 'add', '-B', branch,
-      worktreePath, baseBranch,
-    ], { cwd: bareRepoPath });
+    await execFileAsync('git', ['worktree', 'add', '-B', branch, worktreePath, baseBranch], {
+      cwd: bareRepoPath,
+    });
 
     return worktreePath;
   }
@@ -85,14 +87,14 @@ export class LocalWorktreeManager implements WorktreeManager {
   async cleanup(worktreePath: string): Promise<void> {
     // Find the bare repo that owns this worktree
     try {
-      const { stdout } = await execFileAsync('git', [
-        'rev-parse', '--git-common-dir',
-      ], { cwd: worktreePath });
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+        cwd: worktreePath,
+      });
       const bareRepoPath = path.resolve(worktreePath, stdout.trim());
 
-      await execFileAsync('git', [
-        'worktree', 'remove', '--force', worktreePath,
-      ], { cwd: bareRepoPath }).catch(async () => {
+      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
+        cwd: bareRepoPath,
+      }).catch(async () => {
         // Fallback: rm -rf if git worktree remove fails
         this.logger.warn({ worktreePath }, 'git worktree remove failed, falling back to rm -rf');
         await fs.rm(worktreePath, { recursive: true, force: true });
@@ -111,9 +113,9 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   async getDiffStats(worktreePath: string): Promise<DiffStats> {
     try {
-      const { stdout } = await execFileAsync('git', [
-        'diff', '--stat', 'HEAD',
-      ], { cwd: worktreePath });
+      const { stdout } = await execFileAsync('git', ['diff', '--stat', 'HEAD'], {
+        cwd: worktreePath,
+      });
 
       return this.parseDiffStats(stdout);
     } catch {
@@ -127,15 +129,15 @@ export class LocalWorktreeManager implements WorktreeManager {
     // Commit any uncommitted work
     try {
       await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
-      await execFileAsync('git', [
-        'diff', '--cached', '--quiet',
-      ], { cwd: worktreePath });
+      await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: worktreePath });
       // No staged changes — skip commit
     } catch {
       // There are staged changes — commit them
-      await execFileAsync('git', [
-        'commit', '-m', 'chore: auto-commit uncommitted changes before merge',
-      ], { cwd: worktreePath });
+      await execFileAsync(
+        'git',
+        ['commit', '-m', 'chore: auto-commit uncommitted changes before merge'],
+        { cwd: worktreePath },
+      );
     }
 
     // Push the branch to origin
@@ -196,9 +198,9 @@ export class LocalWorktreeManager implements WorktreeManager {
     const delMatch = summary.match(/(\d+)\s+deletion/);
 
     return {
-      filesChanged: filesMatch?.[1] ? parseInt(filesMatch[1], 10) : 0,
-      linesAdded: addMatch?.[1] ? parseInt(addMatch[1], 10) : 0,
-      linesRemoved: delMatch?.[1] ? parseInt(delMatch[1], 10) : 0,
+      filesChanged: filesMatch?.[1] ? Number.parseInt(filesMatch[1], 10) : 0,
+      linesAdded: addMatch?.[1] ? Number.parseInt(addMatch[1], 10) : 0,
+      linesRemoved: delMatch?.[1] ? Number.parseInt(delMatch[1], 10) : 0,
     };
   }
 

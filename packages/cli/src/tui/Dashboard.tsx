@@ -1,23 +1,23 @@
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
-import { exec } from 'child_process';
+import { exec } from 'node:child_process';
 import type { AgentEvent, Session } from '@autopod/shared';
-import type { UseSessionStateReturn } from './hooks/useSessionState.js';
-import type { UseWebSocketReturn } from './hooks/useWebSocket.js';
-import { useTerminalSize } from './hooks/useTerminalSize.js';
-import { useSelection } from './hooks/useSelection.js';
-import { useKeyboard } from './hooks/useKeyboard.js';
-import { calculateColumns } from './utils/layout.js';
-import { Header } from './components/Header.js';
-import { SessionTable } from './components/SessionTable.js';
+import { Box, Text, useApp, useInput } from 'ink';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useClient } from './App.js';
+import { ConfirmDialog } from './components/ConfirmDialog.js';
+import { CreateSessionWizard } from './components/CreateSessionWizard.js';
 import { DetailPanel } from './components/DetailPanel.js';
+import { DiffView } from './components/DiffView.js';
+import { Header } from './components/Header.js';
 import { HotkeyBar } from './components/HotkeyBar.js';
 import { InlineInput } from './components/InlineInput.js';
-import { ConfirmDialog } from './components/ConfirmDialog.js';
-import { DiffView } from './components/DiffView.js';
-import { CreateSessionWizard } from './components/CreateSessionWizard.js';
+import { SessionTable } from './components/SessionTable.js';
 import { Toast } from './components/Toast.js';
-import { useClient } from './App.js';
+import { useKeyboard } from './hooks/useKeyboard.js';
+import { useSelection } from './hooks/useSelection.js';
+import type { UseSessionStateReturn } from './hooks/useSessionState.js';
+import { useTerminalSize } from './hooks/useTerminalSize.js';
+import type { UseWebSocketReturn } from './hooks/useWebSocket.js';
+import { calculateColumns } from './utils/layout.js';
 
 type UIMode =
   | { type: 'normal' }
@@ -41,7 +41,8 @@ interface DashboardProps {
 }
 
 function openUrl(url: string): void {
-  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  const cmd =
+    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
   exec(`${cmd} ${JSON.stringify(url)}`);
 }
 
@@ -57,11 +58,12 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
   const filteredSessions = useMemo(() => {
     if (!filterText) return sessions;
     const lower = filterText.toLowerCase();
-    return sessions.filter(s =>
-      s.task.toLowerCase().includes(lower) ||
-      s.profileName.toLowerCase().includes(lower) ||
-      s.id.toLowerCase().includes(lower) ||
-      s.status.includes(lower),
+    return sessions.filter(
+      (s) =>
+        s.task.toLowerCase().includes(lower) ||
+        s.profileName.toLowerCase().includes(lower) ||
+        s.id.toLowerCase().includes(lower) ||
+        s.status.includes(lower),
     );
   }, [sessions, filterText]);
 
@@ -76,9 +78,12 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
   }, []);
 
   // Cleanup toast timer on unmount
-  useEffect(() => () => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    },
+    [],
+  );
 
   const selection = useSelection(filteredSessions.length);
   const [mode, setMode] = useState<UIMode>({ type: 'normal' });
@@ -97,15 +102,18 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
   const isOverlayActive = mode.type !== 'normal';
 
   // Action handlers — using AutopodClient instead of bare fetch
-  const handleTell = useCallback(async (message: string) => {
-    if (!currentSessionId) return;
-    try {
-      await client.sendMessage(currentSessionId, message);
-    } catch {
-      showToast('Failed to send message', 'red');
-    }
-    setMode({ type: 'normal' });
-  }, [currentSessionId, client, showToast]);
+  const handleTell = useCallback(
+    async (message: string) => {
+      if (!currentSessionId) return;
+      try {
+        await client.sendMessage(currentSessionId, message);
+      } catch {
+        showToast('Failed to send message', 'red');
+      }
+      setMode({ type: 'normal' });
+    },
+    [currentSessionId, client, showToast],
+  );
 
   const handlePause = useCallback(async () => {
     if (!currentSessionId) return;
@@ -117,16 +125,19 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
     }
   }, [currentSessionId, client, showToast]);
 
-  const handleNudge = useCallback(async (message: string) => {
-    if (!currentSessionId) return;
-    try {
-      await client.nudgeSession(currentSessionId, message);
-      showToast('Nudge sent', 'green');
-    } catch {
-      showToast('Failed to send nudge', 'red');
-    }
-    setMode({ type: 'normal' });
-  }, [currentSessionId, client, showToast]);
+  const handleNudge = useCallback(
+    async (message: string) => {
+      if (!currentSessionId) return;
+      try {
+        await client.nudgeSession(currentSessionId, message);
+        showToast('Nudge sent', 'green');
+      } catch {
+        showToast('Failed to send nudge', 'red');
+      }
+      setMode({ type: 'normal' });
+    },
+    [currentSessionId, client, showToast],
+  );
 
   const handleApprove = useCallback(async () => {
     if (!currentSessionId) return;
@@ -148,21 +159,27 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
     setMode({ type: 'normal' });
   }, [currentSessionId, client, showToast]);
 
-  const handleReject = useCallback(async (reason: string) => {
-    if (!currentSessionId) return;
-    try {
-      await client.rejectSession(currentSessionId, reason);
-    } catch {
-      showToast('Failed to reject session', 'red');
-    }
-    setMode({ type: 'normal' });
-  }, [currentSessionId, client, showToast]);
+  const handleReject = useCallback(
+    async (reason: string) => {
+      if (!currentSessionId) return;
+      try {
+        await client.rejectSession(currentSessionId, reason);
+      } catch {
+        showToast('Failed to reject session', 'red');
+      }
+      setMode({ type: 'normal' });
+    },
+    [currentSessionId, client, showToast],
+  );
 
-  const handleCreateComplete = useCallback((session: Session) => {
-    setMode({ type: 'normal' });
-    showToast(`Session created: ${session.id.slice(0, 8)}`, 'green');
-    void refresh();
-  }, [showToast, refresh]);
+  const handleCreateComplete = useCallback(
+    (session: Session) => {
+      setMode({ type: 'normal' });
+      showToast(`Session created: ${session.id.slice(0, 8)}`, 'green');
+      void refresh();
+    },
+    [showToast, refresh],
+  );
 
   const handleRetry = useCallback(async () => {
     if (mode.type !== 'confirm_retry') return;
@@ -208,7 +225,11 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
       up: () => selection.moveUp(),
       down: () => selection.moveDown(),
       t: () => {
-        if (currentSession?.status === 'running' || currentSession?.status === 'awaiting_input' || currentSession?.status === 'paused') {
+        if (
+          currentSession?.status === 'running' ||
+          currentSession?.status === 'awaiting_input' ||
+          currentSession?.status === 'paused'
+        ) {
           setMode({ type: 'tell_input' });
         }
       },
@@ -267,11 +288,11 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         }
       },
       A: () => {
-        const count = sessions.filter(s => s.status === 'validated').length;
+        const count = sessions.filter((s) => s.status === 'validated').length;
         if (count > 0) setMode({ type: 'confirm_bulk_approve', count });
       },
       X: () => {
-        const count = sessions.filter(s => s.status === 'failed').length;
+        const count = sessions.filter((s) => s.status === 'failed').length;
         if (count > 0) setMode({ type: 'confirm_bulk_kill', count });
       },
       '/': () => {
@@ -287,7 +308,20 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         exit();
       },
     }),
-    [selection, currentSession, currentSessionId, selectedSession, sessions, ws, exit, client, showToast, filterText, handlePause, handleNudge],
+    [
+      selection,
+      currentSession,
+      currentSessionId,
+      selectedSession,
+      sessions,
+      ws,
+      exit,
+      client,
+      showToast,
+      filterText,
+      handlePause,
+      handleNudge,
+    ],
   );
 
   useKeyboard(keyHandlers, !isOverlayActive);
@@ -296,7 +330,9 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
   if (columns < 80 || rows < 24) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color="red" bold>Terminal too small</Text>
+        <Text color="red" bold>
+          Terminal too small
+        </Text>
         <Text>
           Minimum 80x24 required (current: {columns}x{rows})
         </Text>
@@ -336,12 +372,12 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
   const tableMaxRows = Math.max(3, Math.floor((rows - 6) / 2));
   const activityMaxLines = Math.max(3, Math.floor((rows - 6) / 3));
 
-  const sessionEvents = currentSessionId ? agentEvents.get(currentSessionId) ?? [] : [];
+  const sessionEvents = currentSessionId ? (agentEvents.get(currentSessionId) ?? []) : [];
 
   // HotkeyBar props
   const hasPreviewUrl = !!currentSession?.previewUrl;
-  const hasValidated = sessions.some(s => s.status === 'validated');
-  const hasFailed = sessions.some(s => s.status === 'failed');
+  const hasValidated = sessions.some((s) => s.status === 'validated');
+  const hasFailed = sessions.some((s) => s.status === 'failed');
   const hasFilter = filterText.length > 0;
 
   return (
@@ -356,7 +392,10 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         <Box paddingX={1}>
           <Text dimColor>Filter: </Text>
           <Text color="yellow">{filterText}</Text>
-          <Text dimColor> ({filteredSessions.length}/{sessions.length} sessions)</Text>
+          <Text dimColor>
+            {' '}
+            ({filteredSessions.length}/{sessions.length} sessions)
+          </Text>
         </Box>
       )}
 
@@ -407,10 +446,7 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
       )}
 
       {mode.type === 'diff_view' && (
-        <DiffView
-          diff={mode.diff}
-          onClose={() => setMode({ type: 'normal' })}
-        />
+        <DiffView diff={mode.diff} onClose={() => setMode({ type: 'normal' })} />
       )}
 
       {mode.type === 'log_view' && (
@@ -419,10 +455,7 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
             <Text bold>Activity Log — {currentSessionId}</Text>
             <Text dimColor>Esc to close</Text>
           </Box>
-          <ActivityLogOverlay
-            events={sessionEvents}
-            onClose={() => setMode({ type: 'normal' })}
-          />
+          <ActivityLogOverlay events={sessionEvents} onClose={() => setMode({ type: 'normal' })} />
         </Box>
       )}
 
@@ -510,7 +543,8 @@ function ActivityLogOverlay({
     <Box flexDirection="column">
       {events.slice(-20).map((event, i) => (
         <Text key={`log-${i}`} dimColor>
-          [{event.timestamp}] {event.type}: {'message' in event ? (event as { message: string }).message : event.type}
+          [{event.timestamp}] {event.type}:{' '}
+          {'message' in event ? (event as { message: string }).message : event.type}
         </Text>
       ))}
     </Box>

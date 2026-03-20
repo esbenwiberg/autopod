@@ -1,20 +1,23 @@
-import { describe, it, expect } from 'vitest';
 import type { ValidationResult } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
 import { formatFeedback } from './feedback-formatter.js';
 
-function mockValidationResult(overrides: {
-  buildFailed?: boolean;
-  healthFailed?: boolean;
-  pageFailed?: boolean;
-  taskReviewFailed?: boolean;
-  issues?: string[];
-} = {}): ValidationResult {
+function mockValidationResult(
+  overrides: {
+    buildFailed?: boolean;
+    healthFailed?: boolean;
+    pageFailed?: boolean;
+    taskReviewFailed?: boolean;
+    issues?: string[];
+  } = {},
+): ValidationResult {
   return {
     sessionId: 'sess-1',
     attempt: 1,
     timestamp: new Date().toISOString(),
     smoke: {
-      status: overrides.buildFailed || overrides.healthFailed || overrides.pageFailed ? 'fail' : 'pass',
+      status:
+        overrides.buildFailed || overrides.healthFailed || overrides.pageFailed ? 'fail' : 'pass',
       build: {
         status: overrides.buildFailed ? 'fail' : 'pass',
         output: overrides.buildFailed ? 'Error: Cannot find module ./missing' : '',
@@ -27,16 +30,24 @@ function mockValidationResult(overrides: {
         duration: 50,
       },
       pages: overrides.pageFailed
-        ? [{
-            path: '/about',
-            status: 'fail',
-            screenshotPath: '/tmp/screenshots/about.png',
-            consoleErrors: ['TypeError: Cannot read property "x" of undefined'],
-            assertions: [
-              { selector: 'h1', type: 'exists' as const, expected: undefined, actual: undefined, passed: false },
-            ],
-            loadTime: 200,
-          }]
+        ? [
+            {
+              path: '/about',
+              status: 'fail',
+              screenshotPath: '/tmp/screenshots/about.png',
+              consoleErrors: ['TypeError: Cannot read property "x" of undefined'],
+              assertions: [
+                {
+                  selector: 'h1',
+                  type: 'exists' as const,
+                  expected: undefined,
+                  actual: undefined,
+                  passed: false,
+                },
+              ],
+              loadTime: 200,
+            },
+          ]
         : [],
     },
     taskReview: overrides.taskReviewFailed

@@ -1,7 +1,7 @@
-import type { SystemEvent, ProcessContentConfig } from '@autopod/shared';
+import type { ProcessContentConfig, SystemEvent } from '@autopod/shared';
 import { processContentDeep } from '@autopod/shared';
-import type { EventRepository } from './event-repository.js';
 import type { Logger } from 'pino';
+import type { EventRepository } from './event-repository.js';
 
 export type EventSubscriber = (event: SystemEvent) => void;
 
@@ -16,7 +16,11 @@ export interface EventBusOptions {
   contentProcessing?: ProcessContentConfig;
 }
 
-export function createEventBus(eventRepo: EventRepository, logger: Logger, options?: EventBusOptions): EventBus {
+export function createEventBus(
+  eventRepo: EventRepository,
+  logger: Logger,
+  options?: EventBusOptions,
+): EventBus {
   const globalSubscribers = new Set<EventSubscriber>();
   const sessionSubscribers = new Map<string, Set<EventSubscriber>>();
 
@@ -34,12 +38,16 @@ export function createEventBus(eventRepo: EventRepository, logger: Logger, optio
       // Sanitize event payload before broadcasting to subscribers
       // This prevents PII/injection content from leaking via WebSocket broadcasts
       const sanitizedEvent = options?.contentProcessing
-        ? processContentDeep(event, options.contentProcessing).result as SystemEvent
+        ? (processContentDeep(event, options.contentProcessing).result as SystemEvent)
         : event;
 
       // Broadcast to global subscribers
       for (const sub of globalSubscribers) {
-        try { sub(sanitizedEvent); } catch (err) { logger.error({ err }, 'Event subscriber error'); }
+        try {
+          sub(sanitizedEvent);
+        } catch (err) {
+          logger.error({ err }, 'Event subscriber error');
+        }
       }
 
       // Broadcast to session-scoped subscribers
@@ -48,7 +56,11 @@ export function createEventBus(eventRepo: EventRepository, logger: Logger, optio
         const subs = sessionSubscribers.get(sessionId);
         if (subs) {
           for (const sub of subs) {
-            try { sub(sanitizedEvent); } catch (err) { logger.error({ err }, 'Session subscriber error'); }
+            try {
+              sub(sanitizedEvent);
+            } catch (err) {
+              logger.error({ err }, 'Session subscriber error');
+            }
           }
         }
       }
@@ -58,14 +70,16 @@ export function createEventBus(eventRepo: EventRepository, logger: Logger, optio
 
     subscribe(subscriber: EventSubscriber): () => void {
       globalSubscribers.add(subscriber);
-      return () => { globalSubscribers.delete(subscriber); };
+      return () => {
+        globalSubscribers.delete(subscriber);
+      };
     },
 
     subscribeToSession(sessionId: string, subscriber: EventSubscriber): () => void {
       if (!sessionSubscribers.has(sessionId)) {
         sessionSubscribers.set(sessionId, new Set());
       }
-      sessionSubscribers.get(sessionId)!.add(subscriber);
+      sessionSubscribers.get(sessionId)?.add(subscriber);
       return () => {
         const subs = sessionSubscribers.get(sessionId);
         if (subs) {

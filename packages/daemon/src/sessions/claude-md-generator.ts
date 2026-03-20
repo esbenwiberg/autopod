@@ -1,4 +1,4 @@
-import type { Profile, Session, InjectedMcpServer, ActionDefinition } from '@autopod/shared';
+import type { ActionDefinition, InjectedMcpServer, Profile, Session } from '@autopod/shared';
 import type { ResolvedSection } from './section-resolver.js';
 
 export interface ClaudeMdOptions {
@@ -66,7 +66,6 @@ export function generateClaudeMd(
     lines.push('');
   }
 
-
   // Build & Run (adapts for artifact mode)
   if (profile.outputMode === 'artifact') {
     lines.push('## Output');
@@ -106,10 +105,18 @@ export function generateClaudeMd(
 
   lines.push('## Workflow Requirements');
   lines.push('');
-  lines.push('1. **Plan first**: Before writing any code, call `report_plan` with your approach and numbered steps.');
-  lines.push('2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.');
-  lines.push('3. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.');
-  lines.push('4. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:');
+  lines.push(
+    '1. **Plan first**: Before writing any code, call `report_plan` with your approach and numbered steps.',
+  );
+  lines.push(
+    '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',
+  );
+  lines.push(
+    '3. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
+  );
+  lines.push(
+    '4. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
+  );
   lines.push('   - Exploration → Implementation → Testing → Cleanup');
   lines.push('   - Analysis → Design → Build → Verify');
   lines.push('   - Investigation → Fix → Test → Document');
@@ -156,7 +163,9 @@ function generateOperatingEnvironment(
       lines.push(`- Allowed domains: ${profile.networkPolicy.allowedHosts.join(', ')}`);
       lines.push('- Blocked: cloud metadata endpoints, internal services.');
     } else {
-      lines.push('- Direct internet access is BLOCKED. Do not attempt curl/fetch/wget to external URLs.');
+      lines.push(
+        '- Direct internet access is BLOCKED. Do not attempt curl/fetch/wget to external URLs.',
+      );
       lines.push('- All external data access goes through the MCP action tools listed below.');
     }
   } else {
@@ -170,7 +179,7 @@ function generateOperatingEnvironment(
     lines.push('These MCP tools let you access external context. All responses are PII-sanitized.');
     for (const action of availableActions) {
       const paramList = Object.entries(action.params)
-        .map(([name, def]) => def.required ? name : `${name}?`)
+        .map(([name, def]) => (def.required ? name : `${name}?`))
         .join(', ');
       lines.push(`- ${action.name}(${paramList}) — ${action.description}`);
     }

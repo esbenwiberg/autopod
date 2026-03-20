@@ -1,7 +1,7 @@
-import type { FastifyInstance } from 'fastify';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { SessionBridge } from '@autopod/escalation-mcp';
-import { createEscalationMcpServer, type PendingRequests } from '@autopod/escalation-mcp';
+import { type PendingRequests, createEscalationMcpServer } from '@autopod/escalation-mcp';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 
 interface McpSession {
@@ -23,7 +23,11 @@ export function mcpHandler(
 
     // Resolve available actions for this session's profile
     const availableActions = bridge.getAvailableActions(sessionId);
-    const { server, pendingRequests } = createEscalationMcpServer({ sessionId, bridge, availableActions });
+    const { server, pendingRequests } = createEscalationMcpServer({
+      sessionId,
+      bridge,
+      availableActions,
+    });
 
     // Stateless transport — session management is handled by us via sessionId param
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

@@ -1,7 +1,11 @@
-import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { AutopodError } from '@autopod/shared';
+import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 
-export function errorHandler(error: FastifyError, request: FastifyRequest, reply: FastifyReply): void {
+export function errorHandler(
+  error: FastifyError,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): void {
   if (error instanceof AutopodError) {
     reply.status(error.statusCode).send({
       error: error.code,

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { sanitize, sanitizeDeep, getPresetConfig } from './sanitize.js';
+import { describe, expect, it } from 'vitest';
+import { getPresetConfig, sanitize, sanitizeDeep } from './sanitize.js';
 
 describe('getPresetConfig', () => {
   it('returns config for strict preset', () => {

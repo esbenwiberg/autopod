@@ -1,15 +1,15 @@
+import type { ActionDefinition } from '@autopod/shared';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { SessionBridge } from './session-bridge.js';
-import type { ActionDefinition } from '@autopod/shared';
 import { PendingRequests } from './pending-requests.js';
-import { askHuman } from './tools/ask-human.js';
+import type { SessionBridge } from './session-bridge.js';
+import { executeAction } from './tools/actions.js';
 import { askAi } from './tools/ask-ai.js';
+import { askHuman } from './tools/ask-human.js';
+import { checkMessages } from './tools/check-messages.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
-import { checkMessages } from './tools/check-messages.js';
-import { executeAction } from './tools/actions.js';
 
 export interface EscalationMcpDeps {
   sessionId: string;
@@ -118,15 +118,15 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   if (availableActions) {
     for (const action of availableActions) {
       const zodShape = buildZodShape(action);
-      server.tool(
-        action.name,
-        action.description,
-        zodShape,
-        async (input) => {
-          const response = await executeAction(sessionId, action.name, input as Record<string, unknown>, bridge);
-          return { content: [{ type: 'text' as const, text: response }] };
-        },
-      );
+      server.tool(action.name, action.description, zodShape, async (input) => {
+        const response = await executeAction(
+          sessionId,
+          action.name,
+          input as Record<string, unknown>,
+          bridge,
+        );
+        return { content: [{ type: 'text' as const, text: response }] };
+      });
     }
   }
 
@@ -150,7 +150,6 @@ function buildZodShape(action: ActionDefinition): Record<string, z.ZodTypeAny> {
       case 'boolean':
         schema = z.boolean().describe(def.description);
         break;
-      case 'string':
       default:
         if (def.enum) {
           schema = z.enum(def.enum as [string, ...string[]]).describe(def.description);

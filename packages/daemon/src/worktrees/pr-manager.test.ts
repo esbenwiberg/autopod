@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
+import { describe, expect, it, vi } from 'vitest';
 import { GhPrManager } from './pr-manager.js';
 
 vi.mock('node:util', async () => {
