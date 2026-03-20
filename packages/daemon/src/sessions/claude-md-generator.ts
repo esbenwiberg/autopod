@@ -1,4 +1,4 @@
-import type { Profile, Session, InjectedMcpServer } from '@autopod/shared';
+import type { Profile, Session, InjectedMcpServer, ActionDefinition } from '@autopod/shared';
 import type { ResolvedSection } from './section-resolver.js';
 
 export interface ClaudeMdOptions {
@@ -6,6 +6,8 @@ export interface ClaudeMdOptions {
   injectedSections?: ResolvedSection[];
   /** MCP servers beyond the built-in escalation server */
   injectedMcpServers?: InjectedMcpServer[];
+  /** Action definitions available to this session */
+  availableActions?: ActionDefinition[];
 }
 
 export function generateClaudeMd(
@@ -31,6 +33,9 @@ export function generateClaudeMd(
     lines.push(section.content);
     lines.push('');
   }
+
+  // Operating Environment section (adapts to profile config)
+  generateOperatingEnvironment(lines, profile, options?.availableActions ?? []);
 
   // MCP Servers section
   lines.push('## MCP Servers');
@@ -62,12 +67,21 @@ export function generateClaudeMd(
   }
 
 
-  lines.push('## Build & Run');
-  lines.push('');
-  lines.push(`- Build: \`${profile.buildCommand}\``);
-  lines.push(`- Start: \`${profile.startCommand}\``);
-  lines.push(`- Health check: ${profile.healthPath}`);
-  lines.push('');
+  // Build & Run (adapts for artifact mode)
+  if (profile.outputMode === 'artifact') {
+    lines.push('## Output');
+    lines.push('');
+    lines.push('- Write your findings to `research-output.md` in the workspace root.');
+    lines.push('- No build or validation will run — your output IS the deliverable.');
+    lines.push('');
+  } else {
+    lines.push('## Build & Run');
+    lines.push('');
+    lines.push(`- Build: \`${profile.buildCommand}\``);
+    lines.push(`- Start: \`${profile.startCommand}\``);
+    lines.push(`- Health check: ${profile.healthPath}`);
+    lines.push('');
+  }
 
   if (profile.validationPages.length > 0) {
     lines.push('## Validation Pages');
@@ -103,11 +117,82 @@ export function generateClaudeMd(
 
   lines.push('## Guidelines');
   lines.push('');
-  lines.push('- Make small, focused commits');
-  lines.push('- Ensure the build passes before completing');
-  lines.push('- Use the escalation tools when blocked or uncertain');
-  lines.push('- Do NOT modify configuration files unless required by the task');
+  if (profile.outputMode === 'artifact') {
+    lines.push('- Focus on research quality and comprehensiveness');
+    lines.push('- Structure your output clearly with headings and sections');
+    lines.push('- Use the escalation tools when blocked or uncertain');
+    lines.push('- Cite sources where applicable');
+  } else {
+    lines.push('- Make small, focused commits');
+    lines.push('- Ensure the build passes before completing');
+    lines.push('- Use the escalation tools when blocked or uncertain');
+    lines.push('- Do NOT modify configuration files unless required by the task');
+  }
   lines.push('');
 
   return lines.join('\n');
+}
+
+/**
+ * Generate the Operating Environment section.
+ * Adapts based on profile configuration (network policy, actions, output mode).
+ */
+function generateOperatingEnvironment(
+  lines: string[],
+  profile: Profile,
+  availableActions: ActionDefinition[],
+): void {
+  lines.push('## Operating Environment');
+  lines.push('');
+  lines.push('You are running inside an Autopod sandbox container with restricted access.');
+  lines.push('');
+
+  // Network section
+  lines.push('### Network');
+  if (profile.networkPolicy?.enabled) {
+    if (profile.networkPolicy.allowedHosts.length > 0 && profile.networkPolicy.replaceDefaults) {
+      // Research pod style — limited internet
+      lines.push('- You have LIMITED internet access for research purposes.');
+      lines.push(`- Allowed domains: ${profile.networkPolicy.allowedHosts.join(', ')}`);
+      lines.push('- Blocked: cloud metadata endpoints, internal services.');
+    } else {
+      lines.push('- Direct internet access is BLOCKED. Do not attempt curl/fetch/wget to external URLs.');
+      lines.push('- All external data access goes through the MCP action tools listed below.');
+    }
+  } else {
+    lines.push('- Network policy is not enforced. You may have internet access.');
+  }
+  lines.push('');
+
+  // Available Actions section
+  if (availableActions.length > 0) {
+    lines.push('### Available Actions');
+    lines.push('These MCP tools let you access external context. All responses are PII-sanitized.');
+    for (const action of availableActions) {
+      const paramList = Object.entries(action.params)
+        .map(([name, def]) => def.required ? name : `${name}?`)
+        .join(', ');
+      lines.push(`- ${action.name}(${paramList}) — ${action.description}`);
+    }
+    lines.push('');
+  }
+
+  // What You Cannot Do
+  lines.push('### What You Cannot Do');
+  lines.push('- Access APIs directly (no tokens, no credentials)');
+  lines.push('- Read files from repos other than your worktree (use read_file action instead)');
+  lines.push('- See real email addresses or usernames (they are masked for privacy)');
+  lines.push('');
+
+  // Git Operations
+  lines.push('### Git Operations');
+  if (profile.outputMode === 'artifact') {
+    lines.push('- You CAN use git within your worktree for version tracking.');
+    lines.push('- Your primary output is the artifact file, not a PR.');
+  } else {
+    lines.push('- You CAN use git normally within your worktree (commit, branch, etc.)');
+    lines.push('- Push and PR creation are handled by the system after your work completes.');
+    lines.push('- Do NOT attempt to push or create PRs yourself.');
+  }
+  lines.push('');
 }

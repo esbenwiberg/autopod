@@ -21,7 +21,9 @@ export function mcpHandler(
     let mcpSession = mcpSessions.get(sessionId);
     if (mcpSession) return mcpSession;
 
-    const { server, pendingRequests } = createEscalationMcpServer({ sessionId, bridge });
+    // Resolve available actions for this session's profile
+    const availableActions = bridge.getAvailableActions(sessionId);
+    const { server, pendingRequests } = createEscalationMcpServer({ sessionId, bridge, availableActions });
 
     // Stateless transport — session management is handled by us via sessionId param
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

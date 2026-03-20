@@ -1,4 +1,4 @@
-import type { EscalationRequest, EscalationResponse } from '@autopod/shared';
+import type { EscalationRequest, EscalationResponse, ActionDefinition, ActionResponse } from '@autopod/shared';
 
 export interface SessionBridge {
   createEscalation(escalation: EscalationRequest): void;
@@ -13,4 +13,8 @@ export interface SessionBridge {
   reportPlan(sessionId: string, summary: string, steps: string[]): void;
   reportProgress(sessionId: string, phase: string, description: string, currentPhase: number, totalPhases: number): void;
   consumeMessages(sessionId: string): { hasMessage: boolean; message?: string };
+  /** Execute an action via the action control plane */
+  executeAction(sessionId: string, actionName: string, params: Record<string, unknown>): Promise<ActionResponse>;
+  /** Get all action definitions available for a session's profile */
+  getAvailableActions(sessionId: string): ActionDefinition[];
 }

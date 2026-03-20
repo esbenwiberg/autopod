@@ -51,6 +51,7 @@ export interface SessionManagerDependencies {
   validationEngine: ValidationEngine;
   networkManager?: NetworkManager;
   prManager?: PrManager;
+  actionEngine?: { getAvailableActions: (policy: import('@autopod/shared').ActionPolicy) => import('@autopod/shared').ActionDefinition[] };
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
@@ -202,6 +203,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const mergedMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
         const mergedSections = mergeClaudeMdSections(daemonConfig.claudeMdSections, profile.claudeMdSections);
 
+        // Rewrite injected MCP server URLs to route through daemon proxy
+        // Agent sees proxy URLs, daemon handles auth injection + PII stripping
+        const proxiedMcpServers = mergedMcpServers.map(s => ({
+          ...s,
+          url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(s.name)}/${sessionId}`,
+          // Don't expose auth headers to agent — proxy injects them
+          headers: undefined,
+        }));
+
+        // Resolve available actions from profile's action policy
+        const availableActions = profile.actionPolicy
+          ? (deps.actionEngine?.getAvailableActions(profile.actionPolicy) ?? [])
+          : [];
+
         // Resolve dynamic sections (fetches URLs, respects token budgets)
         const resolvedSections = await resolveSections(mergedSections, logger);
 
@@ -209,14 +224,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
         const claudeMd = generateClaudeMd(profile, session, mcpUrl, {
           injectedSections: resolvedSections,
-          injectedMcpServers: mergedMcpServers,
+          injectedMcpServers: proxiedMcpServers,
+          availableActions,
         });
         await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', claudeMd);
 
         // Build MCP server list for runtime
         const mcpServers = [
           { name: 'escalation', url: mcpUrl },
-          ...mergedMcpServers.map(s => ({ name: s.name, url: s.url, headers: s.headers })),
+          ...proxiedMcpServers.map(s => ({ name: s.name, url: s.url, headers: s.headers })),
         ];
 
 

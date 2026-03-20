@@ -1,10 +1,11 @@
 import type { SessionBridge } from '@autopod/escalation-mcp';
-import type { EscalationRequest, EscalationResponse } from '@autopod/shared';
+import type { EscalationRequest, EscalationResponse, ActionResponse, ActionDefinition } from '@autopod/shared';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type { SessionManager } from './session-manager.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { ActionEngine } from '../actions/action-engine.js';
 import type { Logger } from 'pino';
 
 export interface SessionBridgeDependencies {
@@ -12,12 +13,13 @@ export interface SessionBridgeDependencies {
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
+  actionEngine?: ActionEngine;
   pendingRequestsBySession: Map<string, PendingRequests>;
   logger: Logger;
 }
 
 export function createSessionBridge(deps: SessionBridgeDependencies): SessionBridge {
-  const { sessionManager, escalationRepo, nudgeRepo, profileStore, pendingRequestsBySession: _pendingRequestsBySession, logger } = deps;
+  const { sessionManager, escalationRepo, nudgeRepo, profileStore, actionEngine, pendingRequestsBySession: _pendingRequestsBySession, logger } = deps;
 
   return {
     createEscalation(escalation: EscalationRequest): void {
@@ -103,6 +105,32 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
 
     consumeMessages(sessionId: string): { hasMessage: boolean; message?: string } {
       return nudgeRepo.consumeNext(sessionId);
+    },
+
+    async executeAction(sessionId: string, actionName: string, params: Record<string, unknown>): Promise<ActionResponse> {
+      if (!actionEngine) {
+        return { success: false, error: 'Action engine not configured', sanitized: false, quarantined: false };
+      }
+
+      const session = sessionManager.getSession(sessionId);
+      const profile = profileStore.get(session.profileName);
+
+      if (!profile.actionPolicy) {
+        return { success: false, error: 'No action policy configured for this profile', sanitized: false, quarantined: false };
+      }
+
+      logger.info({ sessionId, actionName }, 'Executing action via bridge');
+      return actionEngine.execute({ sessionId, actionName, params }, profile.actionPolicy);
+    },
+
+    getAvailableActions(sessionId: string): ActionDefinition[] {
+      if (!actionEngine) return [];
+
+      const session = sessionManager.getSession(sessionId);
+      const profile = profileStore.get(session.profileName);
+
+      if (!profile.actionPolicy) return [];
+      return actionEngine.getAvailableActions(profile.actionPolicy);
     },
   };
 }
