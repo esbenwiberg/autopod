@@ -1,5 +1,6 @@
 import type { RuntimeType } from './runtime.js';
 import type { InjectedMcpServer, InjectedClaudeMdSection } from './injection.js';
+import type { ActionPolicy, OutputMode } from './actions.js';
 
 export type ExecutionTarget = 'local' | 'aci';
 
@@ -30,6 +31,10 @@ export interface Profile {
   claudeMdSections: InjectedClaudeMdSection[];
   /** Optional network isolation policy for containers */
   networkPolicy: NetworkPolicy | null;
+  /** Action control plane policy — which actions are enabled, PII rules, custom actions */
+  actionPolicy: ActionPolicy | null;
+  /** Output mode — 'pr' for code changes, 'artifact' for research/output collection */
+  outputMode: OutputMode;
   createdAt: string;
   updatedAt: string;
 }
