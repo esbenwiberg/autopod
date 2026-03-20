@@ -1,0 +1,35 @@
+[
+  {
+    "name": "read_workitem",
+    "description": "Read an Azure DevOps work item by ID.",
+    "group": "ado-workitems",
+    "handler": "ado",
+    "params": {
+      "org": { "type": "string", "required": true, "description": "Azure DevOps organization" },
+      "project": { "type": "string", "required": true, "description": "Project name" },
+      "workitem_id": { "type": "number", "required": true, "description": "Work item ID" }
+    },
+    "response": {
+      "fields": ["id", "fields.System.Title", "fields.System.State", "fields.System.Description", "fields.System.WorkItemType", "fields.System.Tags", "fields.System.CreatedDate", "fields.System.ChangedDate"],
+      "redactFields": ["fields.System.CreatedBy", "fields.System.AssignedTo", "fields.System.ChangedBy"]
+    }
+  },
+  {
+    "name": "search_workitems",
+    "description": "Search Azure DevOps work items by query.",
+    "group": "ado-workitems",
+    "handler": "ado",
+    "params": {
+      "org": { "type": "string", "required": true, "description": "Azure DevOps organization" },
+      "project": { "type": "string", "required": true, "description": "Project name" },
+      "query": { "type": "string", "required": true, "description": "Search query or WIQL fragment" },
+      "state": { "type": "string", "required": false, "description": "Filter by state (e.g. Active, Closed)" },
+      "type": { "type": "string", "required": false, "description": "Filter by work item type (e.g. Bug, Task)" },
+      "max_results": { "type": "number", "required": false, "default": 10 }
+    },
+    "response": {
+      "fields": ["id", "fields.System.Title", "fields.System.State", "fields.System.WorkItemType"],
+      "redactFields": ["fields.System.AssignedTo"]
+    }
+  }
+]

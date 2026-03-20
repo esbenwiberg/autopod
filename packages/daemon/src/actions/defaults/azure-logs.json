@@ -1,0 +1,45 @@
+[
+  {
+    "name": "query_logs",
+    "description": "Run a KQL query against Azure Log Analytics workspace.",
+    "group": "azure-logs",
+    "handler": "azure-logs",
+    "params": {
+      "workspace_id": { "type": "string", "required": true, "description": "Log Analytics workspace ID" },
+      "query": { "type": "string", "required": true, "description": "KQL query" },
+      "timespan": { "type": "string", "required": false, "default": "PT1H", "description": "ISO 8601 duration (default: last hour)" }
+    },
+    "response": {
+      "fields": ["tables"]
+    }
+  },
+  {
+    "name": "read_app_insights",
+    "description": "Run a KQL query against Application Insights.",
+    "group": "azure-logs",
+    "handler": "azure-logs",
+    "params": {
+      "app_id": { "type": "string", "required": true, "description": "Application Insights app ID" },
+      "query": { "type": "string", "required": true, "description": "KQL query" },
+      "timespan": { "type": "string", "required": false, "default": "PT1H", "description": "ISO 8601 duration (default: last hour)" }
+    },
+    "response": {
+      "fields": ["tables"]
+    }
+  },
+  {
+    "name": "read_container_logs",
+    "description": "Read logs from an Azure Container App.",
+    "group": "azure-logs",
+    "handler": "azure-logs",
+    "params": {
+      "resource_group": { "type": "string", "required": true, "description": "Azure resource group" },
+      "container_app": { "type": "string", "required": true, "description": "Container app name" },
+      "timespan": { "type": "string", "required": false, "default": "PT1H", "description": "ISO 8601 duration (default: last hour)" },
+      "filter": { "type": "string", "required": false, "description": "Optional KQL filter expression" }
+    },
+    "response": {
+      "fields": ["tables"]
+    }
+  }
+]

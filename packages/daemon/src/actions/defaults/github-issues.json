@@ -1,0 +1,47 @@
+[
+  {
+    "name": "read_issue",
+    "description": "Read a GitHub issue. Returns sanitized content.",
+    "group": "github-issues",
+    "handler": "github",
+    "params": {
+      "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
+      "issue_number": { "type": "number", "required": true, "description": "Issue number" }
+    },
+    "response": {
+      "fields": ["title", "body", "state", "labels", "comments", "created_at", "updated_at"],
+      "redactFields": ["user.login", "user.email", "assignee.login"]
+    }
+  },
+  {
+    "name": "search_issues",
+    "description": "Search GitHub issues by query.",
+    "group": "github-issues",
+    "handler": "github",
+    "params": {
+      "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
+      "query": { "type": "string", "required": true, "description": "Search query" },
+      "state": { "type": "string", "required": false, "enum": ["open", "closed", "all"], "default": "open" },
+      "max_results": { "type": "number", "required": false, "default": 10 }
+    },
+    "response": {
+      "fields": ["number", "title", "state", "labels", "created_at"],
+      "redactFields": ["user.login"]
+    }
+  },
+  {
+    "name": "read_issue_comments",
+    "description": "Read comments on a GitHub issue.",
+    "group": "github-issues",
+    "handler": "github",
+    "params": {
+      "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
+      "issue_number": { "type": "number", "required": true, "description": "Issue number" },
+      "max_results": { "type": "number", "required": false, "default": 20 }
+    },
+    "response": {
+      "fields": ["body", "created_at", "updated_at"],
+      "redactFields": ["user.login", "user.email"]
+    }
+  }
+]
