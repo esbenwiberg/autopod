@@ -42,6 +42,155 @@ Autopod pods currently operate in a sandbox but have no structured way to access
 | `read_app_insights` | app_id, query (KQL), timespan? | Application Insights results |
 | `read_container_logs` | resource_group, container_app, timespan?, filter? | Container Apps console logs |
 
+### Context Enrichment Actions
+| Action | Params | Returns (PII-stripped) |
+|--------|--------|----------------------|
+| `enrich_context` | query, source? | Enriched context from external service (PII stripped) |
+
+---
+
+## MCP Proxy: Solving the Network Isolation Gap
+
+### The Problem
+
+Injected MCP servers (`profile.mcpServers`) currently pass their raw URLs to the agent (line 219 of session-manager.ts). The agent calls these URLs directly. But if `networkPolicy.enabled: true`, the container is firewalled — the agent **cannot reach external MCP servers**.
+
+The escalation MCP works because its URL points to the daemon's own HTTP server (`http://daemon-host:3100/mcp/{sessionId}`), which is reachable from the container's Docker network.
+
+### The Solution: Daemon as MCP Proxy
+
+Route ALL injected MCP server traffic through the daemon:
+
+```
+Agent → http://daemon:3100/mcp-proxy/{serverName}/{sessionId}
+                    ↓
+            Daemon (proxy layer)
+            ├── Auth injection (headers from InjectedMcpServer.headers)
+            ├── PII stripping on responses (sanitizeDeep)
+            ├── Audit logging (which tools called, by which session)
+            ├── Rate limiting
+            └── Timeout enforcement
+                    ↓
+            Actual MCP Server (wherever it lives — internet, internal, etc.)
+```
+
+**How it works:**
+1. At session provisioning, the daemon rewrites `InjectedMcpServer.url` to point to the daemon's proxy endpoint instead of the actual server URL
+2. Agent calls the proxy URL — the daemon forwards to the real server
+3. Daemon injects `InjectedMcpServer.headers` (auth tokens etc.) into the forwarded request
+4. Response is PII-stripped before returning to agent
+5. All calls are audit-logged
+
+**Benefits:**
+- Agent needs ZERO external network access (only reaches daemon on Docker network)
+- PII stripping on MCP responses — same sanitization as action tools
+- Audit trail for all MCP tool calls
+- Centralized auth — MCP server credentials live in the daemon, not the pod
+- Your context enrichment MCP service works automatically through the proxy
+
+**Implementation:**
+- **`packages/daemon/src/api/mcp-proxy-handler.ts`** — New Fastify route handler at `/mcp-proxy/:serverName/:sessionId`
+- **`packages/daemon/src/sessions/session-manager.ts`** — At line 219, rewrite injected MCP server URLs to proxy URLs
+- The proxy uses `StreamableHTTPClientTransport` from `@modelcontextprotocol/sdk` to forward requests
+
+### Context Enrichment Service Integration
+
+Your existing context enrichment service (API or MCP) plugs in two ways:
+
+**As a proxied MCP server (if it's already MCP):**
+```json
+{
+  "mcpServers": [{
+    "name": "context-enrichment",
+    "url": "https://your-enrichment-service.azurewebsites.net/mcp",
+    "headers": { "Authorization": "Bearer ${ENRICHMENT_API_KEY}" },
+    "description": "Enriches task context with domain knowledge",
+    "toolHints": ["Use enrich_context to get additional context about the codebase and domain"]
+  }]
+}
+```
+Agent calls it via the MCP proxy. Daemon handles auth + PII stripping automatically.
+
+**As an action handler (if it's a REST API):**
+Add a `context-enrichment` action group with an `enrich_context` action handler that calls your API. Same pattern as GitHub/ADO handlers.
+
+---
+
+## Research Pods: Web-Crawling Mode
+
+### The Problem
+
+Some pods need to crawl the web for research — fundamentally different from coding pods:
+- They NEED internet access
+- They DON'T produce code (no git, no build, no validation)
+- They produce a REPORT (not a PR)
+
+### The Solution: Profile-Level Mode
+
+Research pods are a profile configuration concern, not a new system. The existing session manager + network policy handles it with two additions:
+
+**1. Relaxed network policy with guardrails:**
+```json
+{
+  "name": "research-pod",
+  "networkPolicy": {
+    "enabled": true,
+    "allowedHosts": [
+      "*.github.com", "*.stackoverflow.com", "arxiv.org",
+      "*.medium.com", "*.dev.to", "*.npmjs.com", "pypi.org"
+    ],
+    "replaceDefaults": true
+  }
+}
+```
+
+Still firewalled (not full open internet), but with a generous domain allowlist for research-relevant sites. Always block:
+- Cloud metadata endpoints (`169.254.169.254`) — prevent SSRF
+- Internal service endpoints
+- Known credential endpoints
+
+**2. New `outputMode` field on Profile:**
+```typescript
+interface Profile {
+  // ... existing fields ...
+  outputMode: 'pr' | 'artifact';  // default: 'pr'
+}
+```
+
+- `pr` (default): Current behavior — collect diff, validate, create PR
+- `artifact`: Agent writes output to a designated file (e.g., `research-output.md`). Session manager collects it as an artifact. No build, no validation, no PR.
+
+**3. Skip validation:**
+Use the existing `skipValidation` session option. Research profiles set this by default.
+
+**4. Safety layers for web access:**
+- **Content size limits** in the egress proxy — cap response bodies (prevent downloading huge files)
+- **Rate limiting** on outbound connections (prevent pod being used as DDoS vector)
+- **PII stripping on output** — the research report goes through `sanitizeDeep()` before being stored/shared
+- **Action tools still available** — research pods can also use `read_issue`, `search_code` etc. for structured data alongside raw web access
+
+**Example research profile:**
+```json
+{
+  "name": "research-pod",
+  "template": "node22",
+  "executionTarget": "local",
+  "networkPolicy": {
+    "enabled": true,
+    "allowedHosts": ["*.github.com", "*.stackoverflow.com", "arxiv.org", "*.medium.com"],
+    "replaceDefaults": true
+  },
+  "actionPolicy": {
+    "enabledGroups": ["github-issues", "github-code"],
+    "sanitization": { "preset": "standard" }
+  },
+  "outputMode": "artifact",
+  "buildCommand": "echo 'no build'",
+  "startCommand": "echo 'no server'",
+  "customInstructions": "Write your research findings to research-output.md in the workspace root."
+}
+```
+
 ---
 
 ## Phase 1: Types, Schemas & Action Framework
@@ -61,7 +210,7 @@ interface ActionPolicy {
 }
 
 type ActionGroup = 'github-issues' | 'github-prs' | 'github-code'
-                 | 'ado-workitems' | 'azure-logs';
+                 | 'ado-workitems' | 'azure-logs' | 'context-enrichment';
 
 interface ActionOverride {
   action: string;           // e.g. 'read_file'
@@ -87,9 +236,10 @@ interface DataSanitizationConfig {
 **`packages/shared/src/types/profile.ts`** — Add to `Profile`:
 ```typescript
 actionPolicy: ActionPolicy | null;
+outputMode: 'pr' | 'artifact'; // default: 'pr'
 ```
 
-**`packages/shared/src/schemas/profile.schema.ts`** — Zod schemas for `actionPolicySchema`, `actionGroupSchema`, `actionOverrideSchema`, `dataSanitizationSchema`. Added to `createProfileSchema` with `.nullable().default(null)`.
+**`packages/shared/src/schemas/profile.schema.ts`** — Zod schemas for `actionPolicySchema`, `actionGroupSchema`, `actionOverrideSchema`, `dataSanitizationSchema`. Added to `createProfileSchema` with `.nullable().default(null)`. Add `outputMode` with `.default('pr')`.
 
 ### Action execution types
 
@@ -123,6 +273,7 @@ interface ActionAuditEntry {
 New `action_audit` table: sessionId, action, params (JSON), outcome, timestamp, durationMs. Append-only for compliance.
 
 Add `action_policy` JSON column to profiles table (nullable, default null).
+Add `output_mode` TEXT column to profiles table (default 'pr').
 
 ---
 
@@ -147,12 +298,7 @@ const SANITIZE_PRESETS: Record<'strict' | 'standard' | 'relaxed', DataSanitizati
 - Presets: `strict` (all patterns), `standard` (emails + api keys + author fields), `relaxed` (api keys only)
 - Fail-open: if a regex throws, pass through + log warning
 
-**`packages/shared/src/sanitize/sanitize.test.ts`** — Tests:
-- Email masking (various formats, unicode)
-- False positive resistance (emails in code, version numbers vs IPs)
-- `allowedDomains` bypass
-- `sanitizeDeep` on nested objects with author fields
-- Preset behavior differences
+**`packages/shared/src/sanitize/sanitize.test.ts`** — Tests covering email masking, false positive resistance, allowedDomains bypass, sanitizeDeep on nested objects, preset behavior.
 
 ---
 
@@ -193,69 +339,31 @@ interface ActionContext {
 
 ### GitHub handlers
 
-**`packages/daemon/src/actions/github/client.ts`** — Shared GitHub API client:
-- Uses Octokit with the daemon's `github-pat` from Key Vault (or GitHub App token in future)
-- Single client instance, reused across handlers
-- Rate limit awareness (respect `x-ratelimit-remaining`)
+**`packages/daemon/src/actions/github/client.ts`** — Shared Octokit client using daemon's `github-pat` from Key Vault.
 
-**`packages/daemon/src/actions/github/read-issue.ts`** — Fetches issue, maps to clean response object, returns for sanitization.
-
-**`packages/daemon/src/actions/github/search-issues.ts`** — Uses GitHub search API, returns summaries.
-
-**`packages/daemon/src/actions/github/read-issue-comments.ts`** — Paginated comment fetch, truncated to `max_results`.
-
-**`packages/daemon/src/actions/github/read-pr.ts`** — PR metadata + files changed list.
-
-**`packages/daemon/src/actions/github/read-pr-comments.ts`** — Review comments + inline comments.
-
-**`packages/daemon/src/actions/github/read-pr-diff.ts`** — Raw diff, optionally filtered to specific file.
-
-**`packages/daemon/src/actions/github/read-file.ts`** — File contents from a repo (via Contents API), with ref support for branches/tags.
-
-**`packages/daemon/src/actions/github/search-code.ts`** — Code search API, returns matching snippets with context.
+- `read-issue.ts`, `search-issues.ts`, `read-issue-comments.ts`
+- `read-pr.ts`, `read-pr-comments.ts`, `read-pr-diff.ts`
+- `read-file.ts`, `search-code.ts`
 
 ### Azure DevOps handlers
 
-**`packages/daemon/src/actions/ado/client.ts`** — ADO REST client using PAT or Entra ID token.
+**`packages/daemon/src/actions/ado/client.ts`** — ADO REST client using PAT or Entra token.
 
-**`packages/daemon/src/actions/ado/read-workitem.ts`** — Work item fetch via `GET /{org}/{project}/_apis/wit/workitems/{id}`.
-
-**`packages/daemon/src/actions/ado/search-workitems.ts`** — WIQL query execution.
+- `read-workitem.ts`, `search-workitems.ts`
 
 ### Azure Observability handlers
 
-**`packages/daemon/src/actions/azure-logs/client.ts`** — Azure Monitor client using `@azure/monitor-query` SDK. Authenticates via Managed Identity or Workload Identity.
+**`packages/daemon/src/actions/azure-logs/client.ts`** — Azure Monitor client via `@azure/monitor-query`.
 
-**`packages/daemon/src/actions/azure-logs/query-logs.ts`** — Log Analytics KQL query execution.
-
-**`packages/daemon/src/actions/azure-logs/read-app-insights.ts`** — Application Insights query.
-
-**`packages/daemon/src/actions/azure-logs/read-container-logs.ts`** — Container Apps log stream fetch.
+- `query-logs.ts`, `read-app-insights.ts`, `read-container-logs.ts`
 
 ---
 
-## Phase 4: MCP Tools + Agent Awareness
+## Phase 4: MCP Tools, MCP Proxy & Agent Awareness
 
-### MCP tool registration
+### Action MCP tools
 
-**`packages/escalation-mcp/src/tools/actions.ts`** — New file. Registers one MCP tool per action:
-
-```typescript
-// Example: read_issue
-server.tool('read_issue',
-  'Read a GitHub issue. Returns sanitized content (PII stripped). Use this to understand task context.',
-  {
-    repo: z.string().describe('Repository in owner/name format'),
-    issue_number: z.number().int().describe('Issue number'),
-  },
-  async (input) => {
-    const result = await bridge.executeAction(sessionId, 'read_issue', input);
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-  }
-);
-```
-
-Each action gets its own tool with descriptive name, description, and typed params. This gives the agent clear affordances — it sees exactly what operations are available.
+**`packages/escalation-mcp/src/tools/actions.ts`** — Registers one MCP tool per action. Only actions enabled in the profile's `actionPolicy` get registered — agent can't see tools it doesn't have.
 
 **`packages/escalation-mcp/src/session-bridge.ts`** — Add:
 ```typescript
@@ -263,11 +371,36 @@ executeAction(sessionId: string, action: string, params: Record<string, unknown>
 getAvailableActions(sessionId: string): string[];
 ```
 
-**`packages/escalation-mcp/src/server.ts`** — Dynamically register action tools based on `bridge.getAvailableActions(sessionId)`. Only actions enabled in the profile's `actionPolicy` get registered as MCP tools — the agent literally cannot see tools it doesn't have permission for.
+**`packages/escalation-mcp/src/server.ts`** — Dynamic tool registration based on `bridge.getAvailableActions(sessionId)`.
+
+### MCP Proxy
+
+**`packages/daemon/src/api/mcp-proxy-handler.ts`** — New Fastify route at `/mcp-proxy/:serverName/:sessionId`:
+- Looks up the real MCP server URL from session's merged MCP servers
+- Forwards MCP requests to the actual server, injecting `headers` (auth tokens etc.)
+- PII-strips responses via `sanitizeDeep()` using session's sanitization config
+- Audit logs all tool calls
+- Enforces timeout (30s default)
+
+**`packages/daemon/src/sessions/session-manager.ts`** — At line 219, rewrite injected MCP server URLs:
+```typescript
+// Before: { name: 'my-service', url: 'https://external-mcp.com/mcp' }
+// After:  { name: 'my-service', url: 'http://daemon:3100/mcp-proxy/my-service/{sessionId}' }
+const mcpServers = [
+  { name: 'escalation', url: mcpUrl },
+  ...mergedMcpServers.map(s => ({
+    name: s.name,
+    url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(s.name)}/${sessionId}`,
+    // headers NOT passed to agent — daemon handles auth
+  })),
+];
+```
+
+Agent never sees the real MCP server URL or its auth headers.
 
 ### Agent awareness in CLAUDE.md
 
-**`packages/daemon/src/sessions/claude-md-generator.ts`** — Add new "Operating Environment" section generated from profile config:
+**`packages/daemon/src/sessions/claude-md-generator.ts`** — New "Operating Environment" section:
 
 ```markdown
 ## Operating Environment
@@ -282,10 +415,11 @@ You are running inside an Autopod sandbox container with restricted access.
 These MCP tools let you access external context. All responses are PII-sanitized.
 - read_issue(repo, issue_number) — read a GitHub issue
 - search_issues(repo, query) — search GitHub issues
-- read_pr(repo, pr_number) — read a GitHub pull request
-- read_workitem(org, project, workitem_id) — read an Azure DevOps work item
-- query_logs(workspace_id, query) — query Azure Log Analytics
 [... only lists actions enabled for this profile ...]
+
+### Additional MCP Servers
+[... only if proxied MCP servers are configured ...]
+- context-enrichment: Enriches task context with domain knowledge
 
 ### What You Cannot Do
 - Access APIs directly (no tokens, no credentials)
@@ -298,29 +432,28 @@ These MCP tools let you access external context. All responses are PII-sanitized
 - Do NOT attempt to push or create PRs yourself.
 ```
 
-New helper function:
-```typescript
-function generateOperatingEnvironment(
-  profile: Profile,
-  availableActions: string[]
-): string
+For **research pods** (web access enabled), the section adapts:
+```markdown
+### Network
+- You have LIMITED internet access for research purposes.
+- Allowed domains: *.github.com, *.stackoverflow.com, arxiv.org, ...
+- Blocked: cloud metadata endpoints, internal services.
+- Use action tools for structured data (issues, PRs, logs) when possible.
+
+### Output
+- Write your findings to `research-output.md` in the workspace root.
+- No build or validation will run — your output IS the deliverable.
 ```
 
-This section is **generated from the profile's `actionPolicy`**, so it's always accurate. If a profile has `enabledGroups: ['github-issues']`, only those actions appear.
+Generated dynamically from profile config — always accurate.
 
 ---
 
 ## Phase 5: Event Bus + Notification Sanitization
 
-Apply PII stripping to outbound data (events, notifications) — not just action responses.
+**`packages/daemon/src/sessions/event-bus.ts`** — Sanitizing decorator wrapper.
 
-**`packages/daemon/src/sessions/event-bus.ts`** — Wrap with sanitizing decorator:
-- `createSanitizingEventBus(innerBus, configLookup)` — composition pattern
-- Looks up session's profile sanitization config
-- Applies `sanitizeDeep()` to event payloads before broadcasting
-- Short-circuits (zero cost) when profile has no `actionPolicy`
-
-**`packages/daemon/src/notifications/notification-service.ts`** — Sanitize Teams notification payloads before card building.
+**`packages/daemon/src/notifications/notification-service.ts`** — Sanitize Teams notification payloads.
 
 **`packages/daemon/src/sessions/section-resolver.ts`** — Sanitize dynamically fetched CLAUDE.md sections.
 
@@ -331,7 +464,7 @@ Apply PII stripping to outbound data (events, notifications) — not just action
 ```
 Phase 1 (types/schemas) ─┬─→ Phase 2 (PII sanitizer)
                           └─→ Phase 3 (action engine + handlers)
-                                └─→ Phase 4 (MCP tools + agent awareness)
+                                └─→ Phase 4 (MCP tools + proxy + agent awareness)
                                       └─→ Phase 5 (event bus sanitization)
 ```
 
@@ -339,8 +472,9 @@ Phases 2 and 3 are independent — can be parallelized.
 
 ---
 
-## Configuration Example
+## Configuration Examples
 
+### Standard coding pod with context access
 ```json
 {
   "name": "my-frontend-app",
@@ -348,20 +482,40 @@ Phases 2 and 3 are independent — can be parallelized.
   "actionPolicy": {
     "enabledGroups": ["github-issues", "github-prs", "azure-logs"],
     "actionOverrides": [
-      {
-        "action": "read_file",
-        "allowedResources": ["myorg/shared-components", "myorg/design-system"]
-      },
-      {
-        "action": "query_logs",
-        "requiresApproval": true
-      }
+      { "action": "read_file", "allowedResources": ["myorg/shared-components"] },
+      { "action": "query_logs", "requiresApproval": true }
     ],
-    "sanitization": {
-      "preset": "standard",
-      "allowedDomains": ["example.com"]
-    }
-  }
+    "sanitization": { "preset": "standard", "allowedDomains": ["example.com"] }
+  },
+  "mcpServers": [{
+    "name": "context-enrichment",
+    "url": "https://your-enrichment-service.azurewebsites.net/mcp",
+    "headers": { "Authorization": "Bearer ${ENRICHMENT_API_KEY}" },
+    "description": "Enriches task context with domain knowledge"
+  }],
+  "outputMode": "pr"
+}
+```
+
+### Research pod with web access
+```json
+{
+  "name": "research-pod",
+  "repoUrl": "https://github.com/myorg/research-outputs",
+  "template": "node22",
+  "networkPolicy": {
+    "enabled": true,
+    "allowedHosts": ["*.github.com", "*.stackoverflow.com", "arxiv.org", "*.medium.com"],
+    "replaceDefaults": true
+  },
+  "actionPolicy": {
+    "enabledGroups": ["github-issues", "github-code"],
+    "sanitization": { "preset": "standard" }
+  },
+  "outputMode": "artifact",
+  "buildCommand": "echo 'no build'",
+  "startCommand": "echo 'no server'",
+  "customInstructions": "Write your research findings to research-output.md."
 }
 ```
 
@@ -369,35 +523,39 @@ Phases 2 and 3 are independent — can be parallelized.
 
 ## Credentials the Daemon Needs
 
-The daemon (not the pod) holds credentials for the action backends:
-
 | Backend | Credential | Source |
 |---------|-----------|--------|
 | GitHub | PAT or GitHub App (future) | Key Vault `github-pat` (already exists) |
 | Azure DevOps | PAT or Entra token | Key Vault (new secret `ado-pat`) |
 | Azure Monitor | Managed Identity | Already available on Container Apps infra |
 | App Insights | Managed Identity | Already available |
+| Context Enrichment | API key | Key Vault or profile MCP server headers |
 
-No new credential infrastructure needed for MVP — the daemon already authenticates to Key Vault via Managed Identity.
+No new credential infrastructure needed for MVP.
 
 ---
 
-## Future: Token Vending as Escape Hatch
+## Future Enhancements
 
-If we hit a case where actions can't cover the need (e.g., agent needs to interact with a niche API we haven't built a handler for), we can add a `request_token` tool as a controlled fallback. But actions-first is the default posture.
+- **Token Vending escape hatch** — for cases actions can't cover (niche APIs)
+- **GitHub App backend** — replace PAT with scoped 1hr installation tokens
+- **Vault integration** — dynamic secrets for databases, cloud providers
+- **OPA/Cedar policies** — replace the simple `actionOverrides` with a real policy engine
+- **Egress proxy for research pods** — squid/mitmproxy sidecar for full URL audit trail
 
 ---
 
 ## Verification
 
 1. **Types/schemas**: `npx pnpm build` passes. Profile creation with `actionPolicy` validates.
-2. **Sanitizer**: Unit tests for `sanitize()` and `sanitizeDeep()` — email masking, author field redaction, allowedDomains bypass, preset differences.
-3. **Action engine**: Unit tests for authorization (enabled groups, overrides, denied actions, approval-required).
-4. **GitHub actions**: Integration test — create session with `github-issues` enabled, call `read_issue`, verify response is sanitized (author emails masked).
-5. **Agent awareness**: Inspect generated CLAUDE.md — verify "Operating Environment" section lists only enabled actions.
-6. **Dynamic tool registration**: Session with `enabledGroups: ['github-issues']` should only see `read_issue`, `search_issues`, `read_issue_comments` as MCP tools — not PR or code tools.
-7. **Audit trail**: After action execution, verify `action_audit` table has entry with correct params and outcome.
-8. **Approval flow**: Profile with `actionOverrides: [{ action: 'query_logs', requiresApproval: true }]`. Agent calls `query_logs`, verify it creates an escalation.
+2. **Sanitizer**: Unit tests for `sanitize()` and `sanitizeDeep()`.
+3. **Action engine**: Unit tests for authorization (enabled groups, overrides, denied, approval-required).
+4. **GitHub actions**: Integration test — `read_issue` returns sanitized response.
+5. **MCP proxy**: Injected MCP server URL is rewritten to proxy. Agent call reaches actual server. Response is PII-stripped.
+6. **Agent awareness**: Generated CLAUDE.md contains "Operating Environment" with correct actions/constraints.
+7. **Dynamic tool registration**: Only enabled actions appear as MCP tools.
+8. **Research pod**: Session with `outputMode: 'artifact'` skips validation, collects output file.
+9. **Audit trail**: `action_audit` table has entries for all action executions.
 
 ---
 
@@ -406,7 +564,7 @@ If we hit a case where actions can't cover the need (e.g., agent needs to intera
 | File | Action |
 |------|--------|
 | `packages/shared/src/types/actions.ts` | Create — ActionPolicy, ActionRequest/Response, audit types |
-| `packages/shared/src/types/profile.ts` | Modify — add `actionPolicy` field |
+| `packages/shared/src/types/profile.ts` | Modify — add `actionPolicy`, `outputMode` |
 | `packages/shared/src/schemas/profile.schema.ts` | Modify — add Zod schemas |
 | `packages/shared/src/sanitize/sanitize.ts` | Create — core sanitizer |
 | `packages/shared/src/sanitize/patterns.ts` | Create — regex patterns |
@@ -423,5 +581,7 @@ If we hit a case where actions can't cover the need (e.g., agent needs to intera
 | `packages/escalation-mcp/src/tools/actions.ts` | Create — MCP tool registrations |
 | `packages/escalation-mcp/src/session-bridge.ts` | Modify — add executeAction, getAvailableActions |
 | `packages/escalation-mcp/src/server.ts` | Modify — dynamic tool registration |
+| `packages/daemon/src/api/mcp-proxy-handler.ts` | Create — MCP proxy for injected servers |
+| `packages/daemon/src/sessions/session-manager.ts` | Modify — rewrite MCP URLs to proxy, artifact output mode |
 | `packages/daemon/src/sessions/claude-md-generator.ts` | Modify — Operating Environment section |
 | `packages/daemon/src/sessions/event-bus.ts` | Modify — sanitizing decorator |
