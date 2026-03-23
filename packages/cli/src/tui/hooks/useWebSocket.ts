@@ -15,6 +15,8 @@ export interface UseWebSocketReturn {
   reconnecting: boolean;
   reconnectAttempt: number;
   disconnect: () => void;
+  /** Last event ID seen — used for replay on reconnect */
+  lastEventIdRef: React.MutableRefObject<number>;
 }
 
 const MAX_BACKOFF = 30_000;
@@ -41,6 +43,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const intentionalCloseRef = useRef(false);
+  const lastEventIdRef = useRef(0);
 
   // Use refs for callbacks to avoid re-triggering the effect
   const onEventRef = useRef(onEvent);
@@ -83,16 +86,29 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         setConnected(true);
         setReconnecting(false);
         setReconnectAttempt(0);
+
+        // Subscribe to all events so the server actually pushes them to us
+        ws.send(JSON.stringify({ type: 'subscribe_all' }));
+
+        // Replay missed events on reconnect (lastEventIdRef > 0 means we've seen events before)
+        if (lastEventIdRef.current > 0) {
+          ws.send(JSON.stringify({ type: 'replay', lastEventId: lastEventIdRef.current }));
+        }
+
         onConnectRef.current();
       });
 
       ws.on('message', (data: WebSocket.RawData) => {
         if (!mountedRef.current) return;
         try {
-          const event = JSON.parse(data.toString()) as SystemEvent;
+          const event = JSON.parse(data.toString()) as SystemEvent & { _eventId?: number };
+          // Track the highest event ID for replay on reconnect
+          if (event._eventId && event._eventId > lastEventIdRef.current) {
+            lastEventIdRef.current = event._eventId;
+          }
           onEventRef.current(event);
         } catch {
-          // Silently ignore malformed messages
+          // Silently ignore malformed messages (e.g. subscription acks)
         }
       });
 
@@ -137,5 +153,5 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     setReconnecting(false);
   }, [cleanup]);
 
-  return { connected, reconnecting, reconnectAttempt, disconnect };
+  return { connected, reconnecting, reconnectAttempt, disconnect, lastEventIdRef };
 }

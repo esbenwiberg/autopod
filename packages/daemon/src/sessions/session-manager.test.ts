@@ -105,6 +105,7 @@ function createMockWorktreeManager(): WorktreeManager {
     create: vi.fn(async () => '/tmp/worktree/abc'),
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
+    getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),
     commitFiles: vi.fn(async () => {}),
   };

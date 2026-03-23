@@ -111,8 +111,27 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
-  async getDiffStats(worktreePath: string): Promise<DiffStats> {
+  async getDiffStats(worktreePath: string, baseBranch?: string): Promise<DiffStats> {
     try {
+      // Compare committed changes against the base branch (the branch we forked from).
+      // Plain `git diff --stat HEAD` only shows *uncommitted* changes, which is empty
+      // when the agent commits as it goes (Claude Code does this).
+      if (baseBranch) {
+        // Find the merge-base so we only count commits on this branch
+        const { stdout: mergeBase } = await execFileAsync(
+          'git',
+          ['merge-base', 'HEAD', baseBranch],
+          { cwd: worktreePath },
+        );
+        const { stdout } = await execFileAsync(
+          'git',
+          ['diff', '--stat', mergeBase.trim(), 'HEAD'],
+          { cwd: worktreePath },
+        );
+        return this.parseDiffStats(stdout);
+      }
+
+      // Fallback: uncommitted changes only (legacy behaviour)
       const { stdout } = await execFileAsync('git', ['diff', '--stat', 'HEAD'], {
         cwd: worktreePath,
       });
@@ -120,6 +139,21 @@ export class LocalWorktreeManager implements WorktreeManager {
       return this.parseDiffStats(stdout);
     } catch {
       return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
+    }
+  }
+
+  async getDiff(worktreePath: string, baseBranch: string, maxLength = 50_000): Promise<string> {
+    try {
+      const { stdout: mergeBase } = await execFileAsync('git', ['merge-base', 'HEAD', baseBranch], {
+        cwd: worktreePath,
+      });
+      const { stdout } = await execFileAsync('git', ['diff', mergeBase.trim(), 'HEAD'], {
+        cwd: worktreePath,
+        maxBuffer: 2 * 1024 * 1024,
+      });
+      return stdout.slice(0, maxLength);
+    } catch {
+      return '';
     }
   }
 
