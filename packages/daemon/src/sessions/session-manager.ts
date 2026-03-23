@@ -421,12 +421,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     async handleCompletion(sessionId: string): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
-      if (isTerminalState(session.status)) return;
+      // Bail out if session is already past the running stage (could happen when
+      // processSession's spawn unblocks after sendMessage already drove completion)
+      if (
+        isTerminalState(session.status) ||
+        session.status === 'validating' ||
+        session.status === 'validated' ||
+        session.status === 'failed'
+      ) {
+        return;
+      }
 
-      // Get diff stats
+      // Get diff stats (compare branch against base to catch committed changes)
       if (session.worktreePath) {
         try {
-          const stats = await worktreeManager.getDiffStats(session.worktreePath);
+          const profile = profileStore.get(session.profileName);
+          const stats = await worktreeManager.getDiffStats(
+            session.worktreePath,
+            profile.defaultBranch,
+          );
           sessionRepo.update(sessionId, {
             filesChanged: stats.filesChanged,
             linesAdded: stats.linesAdded,
@@ -671,9 +684,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       });
 
       try {
+        if (!session.containerId) {
+          throw new Error(`Session ${sessionId} has no container — cannot validate`);
+        }
+
+        // Get the actual diff for AI task review
+        const diff = session.worktreePath
+          ? await worktreeManager.getDiff(session.worktreePath, profile.defaultBranch)
+          : '';
+
         const result = await validationEngine.validate({
           sessionId,
-          containerId: session.containerId ?? '',
+          containerId: session.containerId,
           previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
           buildCommand: profile.buildCommand,
           startCommand: profile.startCommand,
@@ -682,7 +704,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           validationPages: profile.validationPages,
           attempt,
           task: session.task,
-          diff: '', // would come from worktreeManager
+          diff,
         });
 
         // Collect screenshots from the host worktree (volume-mounted from container)
@@ -715,6 +737,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         });
 
         const s2 = sessionRepo.getOrThrow(sessionId);
+
+        // Session may have been killed while validation was running — bail out
+        if (isTerminalState(s2.status) || s2.status === 'killing') {
+          logger.info(
+            { sessionId, status: s2.status },
+            'Session killed during validation, skipping post-validation',
+          );
+          return;
+        }
+
         if (result.overall === 'pass') {
           // Push branch and create PR before transitioning to validated
           let prUrl: string | null = null;

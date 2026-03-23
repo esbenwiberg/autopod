@@ -41,6 +41,9 @@ export function createEventBus(
         ? (processContentDeep(event, options.contentProcessing).result as SystemEvent)
         : event;
 
+      // Tag with persisted event ID so WebSocket clients can track for replay
+      (sanitizedEvent as SystemEvent & { _eventId?: number })._eventId = id;
+
       // Broadcast to global subscribers
       for (const sub of globalSubscribers) {
         try {
