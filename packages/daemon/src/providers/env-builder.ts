@@ -82,9 +82,9 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
     2,
   );
 
-  // Write to a temp home dir inside the container.
-  // We use /tmp/claude-home so we don't clobber the container's real HOME.
-  const homeDir = '/tmp/claude-home';
+  // Write credentials to the node user's actual home directory.
+  // /home/node is the container's real HOME — no HOME override needed.
+  const homeDir = '/home/node';
   const credPath = `${homeDir}/.claude/.credentials.json`;
 
   // Also write a minimal config to skip onboarding prompts
@@ -99,11 +99,7 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
   const configPath = `${homeDir}/.claude/config.json`;
 
   return {
-    env: {
-      HOME: homeDir,
-      // Explicitly unset API key so Claude Code uses OAuth
-      // (empty string is treated as "not set" by Claude Code)
-    },
+    env: {},
     containerFiles: [
       { path: credPath, content: credentialsFile },
       { path: configPath, content: configFile },
