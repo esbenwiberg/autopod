@@ -809,6 +809,21 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               logger.warn({ err, sessionId }, 'Failed to push branch for PR');
             }
 
+            // Re-compute diff stats now that auto-commit has run
+            try {
+              const stats = await worktreeManager.getDiffStats(
+                s2.worktreePath,
+                profile.defaultBranch,
+              );
+              sessionRepo.update(sessionId, {
+                filesChanged: stats.filesChanged,
+                linesAdded: stats.linesAdded,
+                linesRemoved: stats.linesRemoved,
+              });
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to recompute diff stats after merge');
+            }
+
             // Build screenshot URLs for the PR body
             const screenshotRefs = result.smoke.pages
               .filter((p) => p.screenshotPath)
@@ -822,6 +837,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               }));
 
             try {
+              const s3 = sessionRepo.getOrThrow(sessionId);
               prUrl = await prManager.createPr({
                 worktreePath: s2.worktreePath,
                 branch: s2.branch,
@@ -830,9 +846,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 task: s2.task,
                 profileName: s2.profileName,
                 validationResult: result,
-                filesChanged: s2.filesChanged,
-                linesAdded: s2.linesAdded,
-                linesRemoved: s2.linesRemoved,
+                filesChanged: s3.filesChanged,
+                linesAdded: s3.linesAdded,
+                linesRemoved: s3.linesRemoved,
                 previewUrl: s2.previewUrl,
                 screenshots: screenshotRefs,
               });

@@ -64,6 +64,12 @@ export function DetailPanel({
           <Text dimColor>{'Branch:   '}</Text>
           <Text>{session.branch || '-'}</Text>
         </Box>
+        {session.prUrl && (
+          <Box>
+            <Text dimColor>{'PR:       '}</Text>
+            <Text color="blue">{session.prUrl}</Text>
+          </Box>
+        )}
         <Box>
           <Text dimColor>{'Duration: '}</Text>
           <Text>{formatDuration(session.startedAt, session.completedAt)}</Text>

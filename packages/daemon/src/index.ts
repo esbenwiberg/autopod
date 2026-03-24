@@ -32,6 +32,7 @@ import {
 import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
+import { GhPrManager } from './worktrees/pr-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -208,6 +209,8 @@ const containerManagerFactory = {
   },
 };
 
+const prManager = new GhPrManager({ logger });
+
 sessionManager = createSessionManager({
   sessionRepo,
   escalationRepo,
@@ -219,6 +222,7 @@ sessionManager = createSessionManager({
   runtimeRegistry,
   validationEngine,
   networkManager,
+  prManager,
   enqueueSession: (id) => sessionQueue.enqueue(id),
   mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? (HOST === '0.0.0.0' ? 'host.docker.internal' : HOST)}:${PORT}`,
   daemonConfig: {
