@@ -1,6 +1,6 @@
 import type { ActionDefinition, ActionPolicy } from '@autopod/shared';
 import pino from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ActionEngine, createActionEngine } from './action-engine.js';
 import type { ActionRegistry } from './action-registry.js';
 import type { ActionAuditRepository } from './audit-repository.js';
@@ -50,7 +50,15 @@ describe('ActionEngine', () => {
   let registry: ReturnType<typeof createMockRegistry>;
   let auditRepo: ReturnType<typeof createMockAuditRepo>;
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('network disabled in tests')),
+    );
     registry = createMockRegistry();
     auditRepo = createMockAuditRepo();
     engine = createActionEngine({

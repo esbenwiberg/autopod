@@ -1,112 +1,75 @@
-# Autopod Development Guide
+# Autopod Session
 
-## Quick Reference
+Session ID: lPHn0U8K
+Profile: autopod-test
+Task: You should change that thing you know, to that value.
 
-```bash
-# Install (always use npx — pnpm is not globally installed)
-npx pnpm install
+## Operating Environment
 
-# Full validation pipeline (install → lint → build → test)
-./scripts/validate.sh
+You are running inside an Autopod sandbox container with restricted access.
 
-# Individual steps
-npx pnpm lint              # Biome check
-npx pnpm lint:fix          # Biome auto-fix
-npx pnpm build             # Turborepo build (all packages)
-npx pnpm test              # Vitest (all packages)
+### Network
+- Direct internet access is BLOCKED. Do not attempt curl/fetch/wget to external URLs.
+- All external data access goes through the MCP action tools listed below.
 
-# Single package
-npx pnpm --filter @autopod/daemon test
-npx pnpm --filter @autopod/cli test
-npx pnpm --filter @autopod/shared test
+### What You Cannot Do
+- Access APIs directly (no tokens, no credentials)
+- Read files from repos other than your worktree (use read_file action instead)
+- See real email addresses or usernames (they are masked for privacy)
 
-# Docker (when available)
-./scripts/docker-validate.sh   # Build image → compose up → health check → tear down
-```
+### Git Operations
+- You CAN use git normally within your worktree (commit, branch, etc.)
+- Push and PR creation are handled by the system after your work completes.
+- Do NOT attempt to push or create PRs yourself.
 
-## Architecture
+## MCP Servers
 
-Monorepo with pnpm workspaces. Dependency graph:
+### Escalation & Monitoring
+- URL: http://host.docker.internal:3100/mcp/lPHn0U8K
+- Tools:
+  - ask_human — ask the human for input
+  - ask_ai — consult another AI
+  - report_blocker — report a blocking issue
+  - report_plan — declare your implementation plan (fire-and-forget)
+  - report_progress — report phase transitions (fire-and-forget)
+  - check_messages — poll for human nudge messages (non-blocking)
 
-```
-shared ← daemon, cli, validator, escalation-mcp
-daemon ← validator, escalation-mcp
-```
+## Build & Run
 
-| Package | Purpose |
-|---------|---------|
-| `shared` | Types, errors, constants, sanitization. Zero heavy deps. |
-| `daemon` | Fastify server, session orchestration, SQLite, Docker/ACI container management |
-| `cli` | Commander CLI + Ink TUI dashboard |
-| `validator` | Playwright smoke tests + AI task review (types only — execution lives in daemon) |
-| `escalation-mcp` | MCP server injected into agent containers for human escalation |
+- Build: `pnpm install && pnpm build`
+- Start: ``
+- Health check: /
 
-## Build System
+## Custom Instructions
 
-- **Turborepo** orchestrates tasks with `^build` dependency chains
-- **tsup** (esbuild) compiles each package to ESM with sourcemaps
-- **Biome** handles lint + format (not ESLint/Prettier)
-- **Vitest** for all testing with in-memory SQLite for daemon tests
+This is the autopod monorepo (pnpm + turbo). Packages: daemon (Fastify API), cli (Commander + Ink TUI), shared (types/schemas), validator, escalation-mcp. Focus on code quality and keeping things simple.
 
-## Session Lifecycle (the core flow)
+Validation runs `pnpm test` — do NOT try to start a web server or health endpoint. The repo has no runtime web server for validation.
 
-```
-queued → provisioning → running → validating → validated → approved → merging → complete
-                                     ↓                        ↓
-                                   failed ←──── retry ────── rejected
+## When to call ask_human
 
-Any non-terminal state can → killing → killed
-```
+Call `ask_human` and **wait for a response** before proceeding whenever any of these apply:
+- The task is ambiguous or underspecified and assumptions could lead you in the wrong direction
+- You face a meaningful decision with multiple reasonable paths (architecture, approach, scope)
+- You discover something unexpected that changes the nature or scope of the task
+- You are blocked and cannot make progress without more information
+- The task explicitly asks you to check in before acting
 
-Key code paths:
-- `session-manager.ts:processSession()` — the main orchestration loop
-- `docker-container-manager.ts` — actual Docker operations (spawn, kill, exec, file I/O)
-- `docker-network-manager.ts` — network isolation + iptables firewall
-- `state-machine.ts` — transition validation
+**Important**: Human responses come through the MCP tool — do NOT write questions as text output. The human cannot see your output stream; they only see what you send via `ask_human`.
 
-## Testing Patterns
+## Workflow Requirements
 
-### Unit tests
-Each module has co-located `.test.ts` files. Use `createTestContext()` from
-`packages/daemon/src/test-utils/mock-helpers.ts` for session manager tests —
-it wires up real SQLite + real repos with mocked infrastructure.
+1. **Plan first**: Before writing any code, call `report_plan` with your approach and numbered steps.
+2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.
+3. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.
+4. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:
+   - Exploration → Implementation → Testing → Cleanup
+   - Analysis → Design → Build → Verify
+   - Investigation → Fix → Test → Document
 
-### Docker container tests
-`docker-container-manager.test.ts` tests Dockerode interactions with mock objects.
-When Docker is available, `scripts/docker-validate.sh` runs real container smoke tests.
+## Guidelines
 
-### Integration tests
-`integration.test.ts` — Fastify HTTP endpoint tests with `app.inject()`.
-`session-lifecycle.e2e.test.ts` — full state machine traversal with mocked infra.
-
-## Environment Gotchas
-
-- **`npx pnpm`** — pnpm is NOT globally installed. Always prefix with npx.
-- **No Playwright/Chromium** — use the validate MCP tool instead of running Playwright directly.
-- **NODE_ENV=development** — required when dev dependencies are needed.
-- **Docker may not be available** — the daemon requires Docker but the sandbox may not have it.
-  Unit tests mock Dockerode so they work without Docker.
-- **Azure File Share** — use explicit fetch refspec: `git fetch origin +refs/heads/main:refs/remotes/origin/main`
-  Wildcard fetches fail on Azure SMB mounts. Ignore `chmod on config.lock` warnings on push.
-
-## Daemon Startup Requirements
-
-The daemon (`packages/daemon/src/index.ts`) needs:
-- Docker socket accessible (pings Docker on start, exits if unreachable)
-- `ENTRA_CLIENT_ID` + `ENTRA_TENANT_ID` env vars (placeholders OK in dev)
-- SQLite (auto-created at `DB_PATH`, defaults to `./autopod.db`)
-
-In dev mode (`NODE_ENV !== 'production'`), auth is stubbed to accept all tokens.
-
-## Code Style
-
-- Biome: 2-space indent, 100-char lines, single quotes, trailing commas, always semicolons
-- Strict TypeScript: no any, no unused vars
-- Test files co-located with source: `foo.ts` → `foo.test.ts`
-- Mocks in `test-utils/mock-helpers.ts`, not scattered across test files
-
-## PR Workflow
-
-- Always use `gh pr create --head <branch>` — worktrees don't track remotes
-- Push before creating PRs: `git push -u origin <branch>`
-- Commit and push as you go — don't batch up work
+- Make small, focused commits
+- Ensure the build passes before completing
+- Use ask_human when uncertain rather than guessing
+- Do NOT modify configuration files unless required by the task
