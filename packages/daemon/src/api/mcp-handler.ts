@@ -1,11 +1,12 @@
 import type { SessionBridge } from '@autopod/escalation-mcp';
 import { type PendingRequests, createEscalationMcpServer } from '@autopod/escalation-mcp';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 
 interface McpSession {
-  transport: StreamableHTTPServerTransport;
+  server: McpServer;
   pendingRequests: PendingRequests;
 }
 
@@ -29,14 +30,7 @@ export function mcpHandler(
       availableActions,
     });
 
-    // Stateless transport — session management is handled by us via sessionId param
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-
-    server.connect(transport).catch((err) => {
-      logger.error({ err, sessionId }, 'Failed to connect MCP transport');
-    });
-
-    mcpSession = { transport, pendingRequests };
+    mcpSession = { server, pendingRequests };
     mcpSessions.set(sessionId, mcpSession);
     pendingRequestsBySession.set(sessionId, pendingRequests);
 
@@ -44,20 +38,32 @@ export function mcpHandler(
   }
 
   // Handle all MCP requests at /mcp/:sessionId
-  // The MCP SDK handles GET (SSE) and POST (JSON-RPC) internally
+  // The MCP SDK's StreamableHTTPServerTransport is stateless — each HTTP request
+  // needs a fresh transport instance. We reuse the server (to preserve pendingRequests
+  // state) by closing the previous transport after each request, which resets the
+  // server's internal transport reference and allows reconnection.
   app.all('/mcp/:sessionId', { config: { auth: false } }, async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
-    const mcpSession = getOrCreateMcpSession(sessionId);
+    const { server } = getOrCreateMcpSession(sessionId);
 
-    // Delegate to the MCP transport — it writes directly to the response
-    await mcpSession.transport.handleRequest(request.raw, reply.raw, request.body);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+
+    try {
+      await transport.handleRequest(request.raw, reply.raw, request.body);
+    } finally {
+      // Close transport so the server resets its _transport reference,
+      // allowing it to accept a new connection on the next request.
+      await transport.close().catch((err) => {
+        logger.debug({ err, sessionId }, 'MCP transport close error (non-fatal)');
+      });
+    }
   });
 
   // Cleanup on server close
   app.addHook('onClose', async () => {
     for (const [, mcpSession] of mcpSessions) {
       mcpSession.pendingRequests.cancelAll();
-      await mcpSession.transport.close();
     }
     mcpSessions.clear();
   });
