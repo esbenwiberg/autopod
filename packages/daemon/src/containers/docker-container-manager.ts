@@ -133,7 +133,9 @@ export class DockerContainerManager implements ContainerManager {
     const pack = tar.pack();
     // Use the full path relative to root so putArchive (extracting at /) places it correctly
     const normalizedPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
-    pack.entry({ name: normalizedPath, type: 'file' }, content);
+    // uid/gid 1000 = node user in the container — without this Docker extracts as root
+    // and the node process can't write to its own config/credentials files
+    pack.entry({ name: normalizedPath, type: 'file', uid: 1000, gid: 1000, mode: 0o644 }, content);
     pack.finalize();
 
     // Collect tar into a Buffer — dockerode putArchive expects a stream or buffer
