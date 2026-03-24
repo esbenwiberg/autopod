@@ -741,6 +741,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           attempt,
           task: session.task,
           diff,
+          testCommand: profile.testCommand,
         });
 
         // Collect screenshots from the host worktree (volume-mounted from container)

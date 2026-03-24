@@ -13,6 +13,7 @@ export interface ValidationEngineConfig {
   task: string;
   diff: string;
   reviewerModel?: string;
+  testCommand?: string | null;
 }
 
 export interface ValidationEngine {

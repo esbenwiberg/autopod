@@ -40,6 +40,8 @@ export interface Profile {
   modelProvider: ModelProvider;
   /** Provider-specific credentials (OAuth tokens for MAX, endpoint config for Foundry, etc.) */
   providerCredentials: ProviderCredentials | null;
+  /** Optional test command to run after build (e.g. 'pnpm test') */
+  testCommand?: string | null;
   createdAt: string;
   updatedAt: string;
 }

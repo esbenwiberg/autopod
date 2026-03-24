@@ -70,6 +70,7 @@ export function rowToProfile(
     outputMode: (row.output_mode as Profile['outputMode']) ?? 'pr',
     modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
     providerCredentials: decryptCreds(row.provider_credentials),
+    testCommand: (row.test_command as string) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -155,14 +156,14 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, mcp_servers, claude_md_sections, network_policy, action_policy, output_mode,
-          model_provider, provider_credentials,
+          model_provider, provider_credentials, test_command,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @mcpServers, @claudeMdSections, @networkPolicy, @actionPolicy, @outputMode,
-          @modelProvider, @providerCredentials,
+          @modelProvider, @providerCredentials, @testCommand,
           @createdAt, @updatedAt
         )
       `).run({
@@ -189,6 +190,7 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
         outputMode: parsed.outputMode,
         modelProvider: parsed.modelProvider,
         providerCredentials: encryptCreds(parsed.providerCredentials),
+        testCommand: parsed.testCommand ?? null,
         createdAt: now,
         updatedAt: now,
       });
@@ -327,6 +329,10 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
       if (parsed.providerCredentials !== undefined) {
         setClauses.push('provider_credentials = @providerCredentials');
         fieldMap.providerCredentials = encryptCreds(parsed.providerCredentials);
+      }
+      if (parsed.testCommand !== undefined) {
+        setClauses.push('test_command = @testCommand');
+        fieldMap.testCommand = parsed.testCommand ?? null;
       }
 
       if (setClauses.length === 0) {

@@ -29,7 +29,13 @@ export function createLocalValidationEngine(
       // ── Phase 1: Build ──────────────────────────────────────────────
       const buildResult = await runBuild(containerManager, config, log);
 
-      // ── Phase 2: Health check ───────────────────────────────────────
+      // ── Phase 2: Test ───────────────────────────────────────────────
+      const testResult =
+        buildResult.status === 'pass'
+          ? await runTests(containerManager, config, log)
+          : { status: 'skip' as const, duration: 0 };
+
+      // ── Phase 3: Health check ───────────────────────────────────────
       const healthResult =
         buildResult.status === 'pass'
           ? await runHealthCheck(containerManager, config, log)
@@ -40,24 +46,27 @@ export function createLocalValidationEngine(
               duration: 0,
             };
 
-      // ── Phase 3: Page validation ─────────────────────────────────────
+      // ── Phase 4: Page validation ─────────────────────────────────────
       const pages: PageResult[] =
         healthResult.status === 'pass' && config.validationPages.length > 0
           ? await runPageValidation(containerManager, config, log)
           : [];
 
-      // ── Phase 4: AI Task Review ─────────────────────────────────────
+      // ── Phase 5: AI Task Review ─────────────────────────────────────
       const taskReview = await runTaskReview(config, log);
 
-      // ── Phase 5: Overall result ─────────────────────────────────────
+      // ── Phase 6: Overall result ─────────────────────────────────────
       const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
       const smokeStatus =
         buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass
           ? ('pass' as const)
           : ('fail' as const);
 
+      const testFailed = testResult.status === 'fail';
       const overall =
-        smokeStatus === 'pass' && (taskReview === null || taskReview.status !== 'fail')
+        smokeStatus === 'pass' &&
+        !testFailed &&
+        (taskReview === null || taskReview.status !== 'fail')
           ? ('pass' as const)
           : ('fail' as const);
 
@@ -73,6 +82,7 @@ export function createLocalValidationEngine(
           health: healthResult,
           pages,
         },
+        test: testResult,
         taskReview,
         overall,
         duration,
@@ -116,6 +126,44 @@ async function runBuild(
     status,
     output: output.slice(0, 10_000), // Cap output size
     duration,
+  };
+}
+
+// ── Test phase ───────────────────────────────────────────────────────────────
+
+async function runTests(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+) {
+  if (!config.testCommand) {
+    log?.info('no test command configured, skipping tests');
+    return { status: 'skip' as const, duration: 0 };
+  }
+
+  const testStart = Date.now();
+  log?.info({ testCommand: config.testCommand }, 'running tests');
+
+  const result = await containerManager.execInContainer(
+    config.containerId,
+    ['sh', '-c', config.testCommand],
+    { cwd: '/workspace', timeout: 300_000 },
+  );
+
+  const duration = Date.now() - testStart;
+  const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
+
+  if (status === 'fail') {
+    log?.warn({ exitCode: result.exitCode, duration }, 'tests failed');
+  } else {
+    log?.info({ duration }, 'tests passed');
+  }
+
+  return {
+    status,
+    duration,
+    stdout: result.stdout.slice(0, 10_000),
+    stderr: result.stderr.slice(0, 10_000),
   };
 }
 

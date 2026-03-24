@@ -5,6 +5,7 @@ export interface ValidationResult {
   attempt: number;
   timestamp: string;
   smoke: SmokeResult;
+  test?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
   taskReview: TaskReviewResult | null;
   overall: 'pass' | 'fail';
   duration: number;

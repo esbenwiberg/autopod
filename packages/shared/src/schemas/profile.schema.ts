@@ -95,6 +95,7 @@ export const createProfileSchema = z.object({
   outputMode: outputModeSchema.default('pr'),
   modelProvider: modelProviderSchema.default('anthropic'),
   providerCredentials: providerCredentialsSchema.nullable().default(null),
+  testCommand: z.string().nullable().optional().default(null),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });
