@@ -129,12 +129,17 @@ export class DockerContainerManager implements ContainerManager {
   async writeFile(containerId: string, filePath: string, content: string): Promise<void> {
     const container = this.docker.getContainer(containerId);
 
-    // Build a tar archive with the single file
+    // Build a tar archive with the single file, including parent directory entries.
+    // uid/gid 1000 = node user — without this Docker extracts as root and the node
+    // process can't create new files in those directories (config updates, session state).
     const pack = tar.pack();
-    // Use the full path relative to root so putArchive (extracting at /) places it correctly
     const normalizedPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
-    // uid/gid 1000 = node user in the container — without this Docker extracts as root
-    // and the node process can't write to its own config/credentials files
+    const parts = normalizedPath.split('/');
+    // Add each intermediate directory as an explicit entry so they're owned by node
+    for (let i = 1; i < parts.length; i++) {
+      const dirPath = parts.slice(0, i).join('/');
+      pack.entry({ name: dirPath, type: 'directory', uid: 1000, gid: 1000, mode: 0o755 });
+    }
     pack.entry({ name: normalizedPath, type: 'file', uid: 1000, gid: 1000, mode: 0o644 }, content);
     pack.finalize();
 
