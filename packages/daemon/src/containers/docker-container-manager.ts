@@ -63,6 +63,9 @@ export class DockerContainerManager implements ContainerManager {
       hostConfig.NetworkMode = config.networkName;
       // NET_ADMIN required for iptables firewall rules inside the container
       hostConfig.CapAdd = ['NET_ADMIN'];
+      // On Linux, host.docker.internal is not auto-added for custom bridge networks.
+      // Inject it so containers can always reach the daemon's MCP endpoint.
+      hostConfig.ExtraHosts = ['host.docker.internal:host-gateway'];
     }
 
     const container = await this.docker.createContainer({
