@@ -44,11 +44,18 @@ export class ClaudeStreamParser {
       try {
         event = JSON.parse(trimmed);
       } catch {
-        logger.warn({
+        // Non-JSON line — emit as a visible status event so it shows up in the TUI
+        logger.info({
           component: 'claude-stream-parser',
           sessionId,
-          msg: `Failed to parse NDJSON line: ${trimmed.slice(0, 200)}`,
+          raw: trimmed.slice(0, 500),
+          msg: 'Non-JSON stdout line from claude',
         });
+        yield {
+          type: 'status',
+          timestamp: new Date().toISOString(),
+          message: `[stdout] ${trimmed.slice(0, 500)}`,
+        };
         continue;
       }
 

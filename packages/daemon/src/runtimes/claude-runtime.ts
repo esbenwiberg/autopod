@@ -43,9 +43,21 @@ export class ClaudeRuntime implements Runtime {
 
     this.handles.set(config.sessionId, handle);
 
-    let stderrBuffer = '';
+    // Emit stderr lines in real-time as error events so they appear in the TUI immediately
+    const stderrEvents: AgentEvent[] = [];
     handle.stderr.on('data', (chunk: Buffer) => {
-      stderrBuffer += chunk.toString('utf-8');
+      const text = chunk.toString('utf-8').trim();
+      if (!text) return;
+      this.logger.warn(
+        { component: 'claude-runtime', sessionId: config.sessionId, stderr: text.slice(0, 500) },
+        'claude stderr',
+      );
+      stderrEvents.push({
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: `[stderr] ${text.slice(0, 500)}`,
+        fatal: false,
+      });
     });
 
     try {
@@ -54,6 +66,9 @@ export class ClaudeRuntime implements Runtime {
         config.sessionId,
         this.logger,
       )) {
+        // Flush any stderr events that arrived before the next stdout event
+        for (const e of stderrEvents.splice(0)) yield e;
+
         // Capture Claude's session ID from init events for resume support
         if (event.type === 'status' && event.message.includes('Claude session initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
@@ -63,18 +78,14 @@ export class ClaudeRuntime implements Runtime {
         }
         yield event;
       }
+      // Flush any remaining stderr events after stdout closes
+      for (const e of stderrEvents.splice(0)) yield e;
     } finally {
       this.handles.delete(config.sessionId);
     }
 
     // Check exit code after stream is consumed
     const exitCode = await handle.exitCode;
-    if (stderrBuffer.trim()) {
-      this.logger.warn(
-        { component: 'claude-runtime', sessionId: config.sessionId, stderr: stderrBuffer.slice(0, 2000) },
-        'claude stderr',
-      );
-    }
     if (exitCode !== 0) {
       yield {
         type: 'error',
@@ -109,13 +120,25 @@ export class ClaudeRuntime implements Runtime {
 
     this.handles.set(sessionId, handle);
 
-    let stderrBuffer = '';
+    const stderrEvents: AgentEvent[] = [];
     handle.stderr.on('data', (chunk: Buffer) => {
-      stderrBuffer += chunk.toString('utf-8');
+      const text = chunk.toString('utf-8').trim();
+      if (!text) return;
+      this.logger.warn(
+        { component: 'claude-runtime', sessionId, stderr: text.slice(0, 500) },
+        'claude stderr',
+      );
+      stderrEvents.push({
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: `[stderr] ${text.slice(0, 500)}`,
+        fatal: false,
+      });
     });
 
     try {
       for await (const event of ClaudeStreamParser.parse(handle.stdout, sessionId, this.logger)) {
+        for (const e of stderrEvents.splice(0)) yield e;
         // Update Claude session ID on resume too
         if (event.type === 'status' && event.message.includes('Claude session initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
@@ -125,15 +148,9 @@ export class ClaudeRuntime implements Runtime {
         }
         yield event;
       }
+      for (const e of stderrEvents.splice(0)) yield e;
     } finally {
       this.handles.delete(sessionId);
-    }
-
-    if (stderrBuffer.trim()) {
-      this.logger.warn(
-        { component: 'claude-runtime', sessionId, stderr: stderrBuffer.slice(0, 2000) },
-        'claude stderr',
-      );
     }
   }
 
