@@ -241,6 +241,7 @@ export class ClaudeRuntime implements Runtime {
       '--output-format',
       'stream-json',
       '--verbose',
+      '--debug',
       '--permission-mode',
       'bypassPermissions',
     ];
