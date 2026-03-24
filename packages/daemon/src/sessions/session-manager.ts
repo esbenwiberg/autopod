@@ -340,6 +340,22 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Write provider credential files to container (e.g., OAuth .credentials.json for MAX)
         for (const file of providerResult.containerFiles) {
           await containerManager.writeFile(containerId, file.path, file.content);
+          logger.info(
+            { sessionId, path: file.path, bytes: file.content.length },
+            'Wrote provider credential file to container',
+          );
+        }
+
+        // Verify credential files are readable by the container user
+        if (providerResult.containerFiles.length > 0) {
+          const verifyResult = await containerManager.execInContainer(
+            containerId,
+            ['sh', '-c', providerResult.containerFiles.map((f) => `ls -la ${f.path}`).join(' && ')],
+          );
+          logger.info(
+            { sessionId, stdout: verifyResult.stdout.trim(), stderr: verifyResult.stderr.trim() },
+            'Credential file verification',
+          );
         }
 
         // Start the agent inside the container
