@@ -18,6 +18,10 @@ const maxCredentialsSchema = z.object({
   refreshToken: z.string().min(1),
   expiresAt: z.string().min(1),
   clientId: z.string().optional(),
+  // Required by claude 2.1.80+ — must be preserved through storage
+  scopes: z.array(z.string()).optional(),
+  subscriptionType: z.string().optional(),
+  rateLimitTier: z.string().optional(),
 });
 
 const foundryCredentialsSchema = z.object({
