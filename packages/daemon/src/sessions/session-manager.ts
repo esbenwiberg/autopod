@@ -729,20 +729,40 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           ? await worktreeManager.getDiff(session.worktreePath, profile.defaultBranch)
           : '';
 
-        const result = await validationEngine.validate({
-          sessionId,
-          containerId: session.containerId,
-          previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
-          buildCommand: profile.buildCommand,
-          startCommand: profile.startCommand,
-          healthPath: profile.healthPath,
-          healthTimeout: profile.healthTimeout,
-          validationPages: profile.validationPages,
-          attempt,
-          task: session.task,
-          diff,
-          testCommand: profile.testCommand,
-        });
+        let result: Awaited<ReturnType<typeof validationEngine.validate>>;
+        try {
+          result = await validationEngine.validate({
+            sessionId,
+            containerId: session.containerId,
+            previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
+            buildCommand: profile.buildCommand,
+            startCommand: profile.startCommand,
+            healthPath: profile.healthPath,
+            healthTimeout: profile.healthTimeout,
+            validationPages: profile.validationPages,
+            attempt,
+            task: session.task,
+            diff,
+            testCommand: profile.testCommand,
+          });
+        } catch (validateErr) {
+          // Treat unexpected validation errors as a failed result so retry logic still applies
+          logger.error({ err: validateErr, sessionId, attempt }, 'Validation engine threw unexpectedly');
+          result = {
+            sessionId,
+            attempt,
+            timestamp: new Date().toISOString(),
+            overall: 'fail',
+            smoke: {
+              status: 'fail',
+              build: { status: 'fail', output: String(validateErr), duration: 0 },
+              health: { status: 'fail', url: '', responseCode: null, duration: 0 },
+              pages: [],
+            },
+            taskReview: null,
+            duration: 0,
+          };
+        }
 
         // Collect screenshots from the host worktree (volume-mounted from container)
         if (session.worktreePath && result.smoke.pages.length > 0) {

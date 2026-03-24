@@ -103,6 +103,23 @@ export function generateClaudeMd(
     lines.push('');
   }
 
+  lines.push('## When to call ask_human');
+  lines.push('');
+  lines.push(
+    'Call `ask_human` and **wait for a response** before proceeding whenever any of these apply:',
+  );
+  lines.push('- The task is ambiguous or underspecified and assumptions could lead you in the wrong direction');
+  lines.push('- You face a meaningful decision with multiple reasonable paths (architecture, approach, scope)');
+  lines.push('- You discover something unexpected that changes the nature or scope of the task');
+  lines.push('- You are blocked and cannot make progress without more information');
+  lines.push('- The task explicitly asks you to check in before acting');
+  lines.push('');
+  lines.push(
+    '**Important**: Human responses come through the MCP tool — do NOT write questions as text output. ' +
+    'The human cannot see your output stream; they only see what you send via `ask_human`.',
+  );
+  lines.push('');
+
   lines.push('## Workflow Requirements');
   lines.push('');
   lines.push(
@@ -127,12 +144,12 @@ export function generateClaudeMd(
   if (profile.outputMode === 'artifact') {
     lines.push('- Focus on research quality and comprehensiveness');
     lines.push('- Structure your output clearly with headings and sections');
-    lines.push('- Use the escalation tools when blocked or uncertain');
+    lines.push('- Use ask_human when uncertain about scope or direction');
     lines.push('- Cite sources where applicable');
   } else {
     lines.push('- Make small, focused commits');
     lines.push('- Ensure the build passes before completing');
-    lines.push('- Use the escalation tools when blocked or uncertain');
+    lines.push('- Use ask_human when uncertain rather than guessing');
     lines.push('- Do NOT modify configuration files unless required by the task');
   }
   lines.push('');
