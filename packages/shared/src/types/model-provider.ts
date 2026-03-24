@@ -18,6 +18,10 @@ export interface AnthropicCredentials {
  *
  * Claude Code reads these from `~/.claude/.credentials.json` when no API key is set.
  * The daemon handles token refresh pre-flight and persists rotated tokens post-exec.
+ *
+ * All fields from the `claudeAiOauth` object must be preserved — claude 2.1.80+
+ * requires `scopes` and `subscriptionType` to be present or it treats the user as
+ * logged out even with a valid, non-expired access token.
  */
 export interface MaxCredentials {
   provider: 'max';
@@ -29,6 +33,12 @@ export interface MaxCredentials {
   expiresAt: string;
   /** OAuth client ID — defaults to Claude Code's well-known client ID. */
   clientId?: string;
+  /** OAuth scopes granted to this token. Required by claude 2.1.80+. */
+  scopes?: string[];
+  /** Subscription tier (e.g. "max", "pro"). Required by claude 2.1.80+. */
+  subscriptionType?: string;
+  /** Rate limit tier. Preserved for completeness. */
+  rateLimitTier?: string;
 }
 
 /**

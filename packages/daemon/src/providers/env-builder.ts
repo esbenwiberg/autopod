@@ -69,13 +69,18 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
   // Pre-flight token refresh
   const refreshed = await refreshOAuthToken(creds, logger);
 
-  // Build the credentials file that Claude Code expects at ~/.claude/.credentials.json
+  // Build the credentials file that Claude Code expects at ~/.claude/.credentials.json.
+  // All fields must be preserved — claude 2.1.80+ requires scopes/subscriptionType
+  // to be present or it treats the user as logged out locally (no API call made).
   const credentialsFile = JSON.stringify(
     {
       claudeAiOauth: {
         accessToken: refreshed.accessToken,
         refreshToken: refreshed.refreshToken,
         expiresAt: new Date(refreshed.expiresAt).getTime(),
+        ...(refreshed.scopes && { scopes: refreshed.scopes }),
+        ...(refreshed.subscriptionType && { subscriptionType: refreshed.subscriptionType }),
+        ...(refreshed.rateLimitTier && { rateLimitTier: refreshed.rateLimitTier }),
       },
     },
     null,

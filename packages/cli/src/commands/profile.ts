@@ -278,7 +278,16 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         process.exit(1);
       }
 
-      let creds: { claudeAiOauth?: { accessToken?: string; refreshToken?: string; expiresAt?: number } };
+      let creds: {
+        claudeAiOauth?: {
+          accessToken?: string;
+          refreshToken?: string;
+          expiresAt?: number;
+          scopes?: string[];
+          subscriptionType?: string;
+          rateLimitTier?: string;
+        };
+      };
       try {
         creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
       } catch {
@@ -304,6 +313,10 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
             accessToken: oauth.accessToken,
             refreshToken: oauth.refreshToken,
             expiresAt,
+            // Preserve all fields — claude 2.1.80+ requires scopes/subscriptionType
+            ...(oauth.scopes && { scopes: oauth.scopes }),
+            ...(oauth.subscriptionType && { subscriptionType: oauth.subscriptionType }),
+            ...(oauth.rateLimitTier && { rateLimitTier: oauth.rateLimitTier }),
           },
         }),
       );

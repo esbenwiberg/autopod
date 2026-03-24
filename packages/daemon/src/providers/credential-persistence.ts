@@ -36,7 +36,14 @@ export async function persistRefreshedCredentials(
 
   // Parse the Claude credentials format
   let parsed: {
-    claudeAiOauth?: { accessToken?: string; refreshToken?: string; expiresAt?: number };
+    claudeAiOauth?: {
+      accessToken?: string;
+      refreshToken?: string;
+      expiresAt?: number;
+      scopes?: string[];
+      subscriptionType?: string;
+      rateLimitTier?: string;
+    };
   };
   try {
     parsed = JSON.parse(rawContent);
@@ -68,14 +75,17 @@ export async function persistRefreshedCredentials(
     }
   }
 
-  // Build updated credentials
+  // Build updated credentials — preserve all fields from the file
   const updated: MaxCredentials = {
     provider: 'max',
     accessToken: oauth.accessToken,
     refreshToken: oauth.refreshToken,
     expiresAt: new Date(oauth.expiresAt).toISOString(),
-    // Preserve the original clientId
+    // Preserve fields from stored credentials that aren't in the rotated token response
     clientId: currentCreds?.provider === 'max' ? currentCreds.clientId : undefined,
+    scopes: currentCreds?.provider === 'max' ? currentCreds.scopes : undefined,
+    subscriptionType: currentCreds?.provider === 'max' ? currentCreds.subscriptionType : undefined,
+    rateLimitTier: currentCreds?.provider === 'max' ? currentCreds.rateLimitTier : undefined,
   };
 
   profileStore.update(profileName, { providerCredentials: updated });
