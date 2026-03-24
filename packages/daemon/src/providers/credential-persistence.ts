@@ -4,7 +4,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 
 /** Path where MAX credentials are written inside the container. */
-const CREDENTIALS_PATH = '/tmp/claude-home/.claude/.credentials.json';
+const CREDENTIALS_PATH = '/home/node/.claude/.credentials.json';
 
 /**
  * Read back OAuth credentials from the container after agent execution.

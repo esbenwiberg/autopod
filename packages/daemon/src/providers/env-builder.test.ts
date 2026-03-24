@@ -104,8 +104,8 @@ describe('buildProviderEnv', () => {
 
       // Should NOT have ANTHROPIC_API_KEY (forces OAuth path)
       expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
-      // Should set HOME to temp dir
-      expect(result.env.HOME).toBe('/tmp/claude-home');
+      // Should NOT override HOME — credentials go to /home/node directly
+      expect(result.env.HOME).toBeUndefined();
       // Should write credentials file
       expect(result.containerFiles).toHaveLength(2); // .credentials.json + config.json
       expect(result.requiresPostExecPersistence).toBe(true);
