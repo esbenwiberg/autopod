@@ -209,6 +209,7 @@ export class ClaudeRuntime implements Runtime {
       config.model,
       '--output-format',
       'stream-json',
+      '--verbose',
       '--permission-mode',
       'bypassPermissions',
     ];
@@ -238,6 +239,7 @@ export class ClaudeRuntime implements Runtime {
       message,
       '--output-format',
       'stream-json',
+      '--verbose',
       '--permission-mode',
       'bypassPermissions',
     ];
