@@ -44,13 +44,31 @@ export function mcpHandler(
   // server's internal transport reference and allows reconnection.
   app.all('/mcp/:sessionId', { config: { auth: false } }, async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
-    const { server } = getOrCreateMcpSession(sessionId);
 
+    let mcpSession: McpSession;
+    try {
+      mcpSession = getOrCreateMcpSession(sessionId);
+    } catch (err) {
+      logger.error({ err, sessionId }, 'Failed to create MCP session');
+      reply.status(500).send({ error: 'MCP_SESSION_ERROR', message: String(err) });
+      return;
+    }
+
+    const { server } = mcpSession;
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    await server.connect(transport);
+
+    try {
+      await server.connect(transport);
+    } catch (err) {
+      logger.error({ err, sessionId }, 'Failed to connect MCP transport (server may already be connected)');
+      reply.status(500).send({ error: 'MCP_CONNECT_ERROR', message: String(err) });
+      return;
+    }
 
     try {
       await transport.handleRequest(request.raw, reply.raw, request.body);
+    } catch (err) {
+      logger.error({ err, sessionId }, 'MCP handleRequest error');
     } finally {
       // Close transport so the server resets its _transport reference,
       // allowing it to accept a new connection on the next request.

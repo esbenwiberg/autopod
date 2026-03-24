@@ -34,6 +34,14 @@ export async function askHuman(
   bridge.createEscalation(escalation);
   bridge.incrementEscalationCount(sessionId);
 
-  const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);
-  return response;
+  try {
+    const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);
+    return response;
+  } catch (err) {
+    // Timeout or cancellation — return a message rather than throwing INTERNAL_ERROR
+    const isTimeout = err instanceof Error && err.message.includes('timed out');
+    return isTimeout
+      ? `[No response received within the timeout period. Please check in with the human separately and continue with your best judgement.]`
+      : `[Escalation cancelled: ${err instanceof Error ? err.message : String(err)}]`;
+  }
 }
