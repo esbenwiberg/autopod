@@ -239,7 +239,7 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
     worktreeManager,
     runtimeRegistry,
     validationEngine,
-    prManager,
+    prManagerFactory: () => prManager,
     enqueueSession: (id) => enqueuedSessions.push(id),
     mcpBaseUrl: 'http://localhost:8080',
     daemonConfig: { mcpServers: [], claudeMdSections: [] },

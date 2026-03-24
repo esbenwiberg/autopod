@@ -53,16 +53,27 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
   // POST /sessions/:sessionId/approve — approve session
   app.post('/sessions/:sessionId/approve', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
-    await sessionManager.approveSession(sessionId);
+    const body = (request.body ?? {}) as { squash?: boolean };
+    await sessionManager.approveSession(sessionId, { squash: body.squash });
     return { ok: true };
   });
 
   // POST /sessions/:sessionId/reject — reject session
   app.post('/sessions/:sessionId/reject', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
-    const body = (request.body ?? {}) as { reason?: string };
-    await sessionManager.rejectSession(sessionId, body.reason);
+    const body = (request.body ?? {}) as { feedback?: string };
+    await sessionManager.rejectSession(sessionId, body.feedback);
     return { ok: true };
+  });
+
+  // POST /sessions/approve-all — approve all validated sessions
+  app.post('/sessions/approve-all', async () => {
+    return sessionManager.approveAllValidated();
+  });
+
+  // POST /sessions/kill-failed — kill all failed sessions
+  app.post('/sessions/kill-failed', async () => {
+    return sessionManager.killAllFailed();
   });
 
   // POST /sessions/:sessionId/pause — pause a running session

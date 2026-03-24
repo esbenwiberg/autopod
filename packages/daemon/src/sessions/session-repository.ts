@@ -263,8 +263,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
     },
 
     getStats(filters?: { profileName?: string }): SessionStats {
-      const where =
-        filters?.profileName !== undefined ? 'WHERE profile_name = @profileName' : '';
+      const where = filters?.profileName !== undefined ? 'WHERE profile_name = @profileName' : '';
       const params = filters?.profileName !== undefined ? { profileName: filters.profileName } : {};
 
       const rows = db
@@ -272,12 +271,24 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         .all(params) as { status: SessionStatus; count: number }[];
 
       const allStatuses: SessionStatus[] = [
-        'queued', 'provisioning', 'running', 'awaiting_input', 'validating',
-        'validated', 'failed', 'approved', 'merging', 'complete', 'paused', 'killing', 'killed',
+        'queued',
+        'provisioning',
+        'running',
+        'awaiting_input',
+        'validating',
+        'validated',
+        'failed',
+        'approved',
+        'merging',
+        'complete',
+        'paused',
+        'killing',
+        'killed',
       ];
-      const byStatus = Object.fromEntries(
-        allStatuses.map((s) => [s, 0]),
-      ) as Record<SessionStatus, number>;
+      const byStatus = Object.fromEntries(allStatuses.map((s) => [s, 0])) as Record<
+        SessionStatus,
+        number
+      >;
 
       let total = 0;
       for (const row of rows) {

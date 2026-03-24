@@ -103,9 +103,7 @@ describe('DockerContainerManager', () => {
       await manager.spawn(baseConfig);
 
       const createCall = docker.createContainer.mock.calls[0]![0];
-      expect(createCall.Env).toEqual(
-        expect.arrayContaining(['SESSION_ID=sess-abc', 'PORT=3000']),
-      );
+      expect(createCall.Env).toEqual(expect.arrayContaining(['SESSION_ID=sess-abc', 'PORT=3000']));
     });
 
     it('configures port bindings when ports provided', async () => {
@@ -516,9 +514,7 @@ describe('DockerContainerManager', () => {
       });
 
       // Volume binds
-      expect(createCall.HostConfig.Binds).toEqual([
-        '/tmp/worktrees/sess-xyz:/workspace',
-      ]);
+      expect(createCall.HostConfig.Binds).toEqual(['/tmp/worktrees/sess-xyz:/workspace']);
 
       // Network isolation
       expect(createCall.HostConfig.NetworkMode).toBe('autopod-net');

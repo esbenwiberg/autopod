@@ -16,6 +16,8 @@ export interface EscalationMcpDeps {
   bridge: SessionBridge;
   /** Actions available for this session (pre-resolved from profile) */
   availableActions?: ActionDefinition[];
+  /** Reuse an existing PendingRequests instance (e.g. when creating a fresh server per HTTP request) */
+  pendingRequests?: PendingRequests;
 }
 
 export function createEscalationMcpServer(deps: EscalationMcpDeps): {
@@ -23,7 +25,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   pendingRequests: PendingRequests;
 } {
   const { sessionId, bridge, availableActions } = deps;
-  const pendingRequests = new PendingRequests();
+  const pendingRequests = deps.pendingRequests ?? new PendingRequests();
 
   const server = new McpServer({
     name: 'autopod-escalation',

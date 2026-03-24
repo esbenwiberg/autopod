@@ -37,6 +37,7 @@ export function rowToProfile(
   row: Record<string, unknown>,
   decryptCreds: (raw: unknown) => ProviderCredentials | null = (raw) =>
     raw ? (JSON.parse(raw as string) as ProviderCredentials) : null,
+  decryptPat: (raw: unknown) => string | null = (raw) => (raw ? (raw as string) : null),
 ): Profile {
   return {
     name: row.name as string,
@@ -71,12 +72,17 @@ export function rowToProfile(
     modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
     providerCredentials: decryptCreds(row.provider_credentials),
     testCommand: (row.test_command as string) ?? null,
+    prProvider: (row.pr_provider as Profile['prProvider']) ?? 'github',
+    adoPat: decryptPat(row.ado_pat),
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
 }
 
-export function createProfileStore(db: Database.Database, cipher?: CredentialsCipher): ProfileStore {
+export function createProfileStore(
+  db: Database.Database,
+  cipher?: CredentialsCipher,
+): ProfileStore {
   function encryptCreds(creds: ProviderCredentials | null | undefined): string | null {
     if (!creds) return null;
     const json = JSON.stringify(creds);
@@ -98,13 +104,29 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
       }
     }
   }
+
+  function encryptPat(pat: string | null | undefined): string | null {
+    if (!pat) return null;
+    return cipher ? cipher.encrypt(pat) : pat;
+  }
+
+  function decryptPat(raw: unknown): string | null {
+    if (!raw) return null;
+    const str = raw as string;
+    try {
+      return cipher ? cipher.decrypt(str) : str;
+    } catch {
+      return str; // Fallback: treat as plain text
+    }
+  }
+
   /** Fetch a raw profile row from DB, throw if not found. */
   function fetchRaw(name: string): Profile {
     const row = db.prepare('SELECT * FROM profiles WHERE name = ?').get(name) as
       | Record<string, unknown>
       | undefined;
     if (!row) throw new ProfileNotFoundError(name);
-    return rowToProfile(row, decryptCreds);
+    return rowToProfile(row, decryptCreds, decryptPat);
   }
 
   /** Recursively resolve inheritance for a profile. */
@@ -156,14 +178,14 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, mcp_servers, claude_md_sections, network_policy, action_policy, output_mode,
-          model_provider, provider_credentials, test_command,
+          model_provider, provider_credentials, test_command, pr_provider, ado_pat,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @mcpServers, @claudeMdSections, @networkPolicy, @actionPolicy, @outputMode,
-          @modelProvider, @providerCredentials, @testCommand,
+          @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat,
           @createdAt, @updatedAt
         )
       `).run({
@@ -191,6 +213,8 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
         modelProvider: parsed.modelProvider,
         providerCredentials: encryptCreds(parsed.providerCredentials),
         testCommand: parsed.testCommand ?? null,
+        prProvider: parsed.prProvider,
+        adoPat: encryptPat(parsed.adoPat),
         createdAt: now,
         updatedAt: now,
       });
@@ -219,7 +243,7 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
         unknown
       >[];
       return rows.map((row) => {
-        const profile = rowToProfile(row, decryptCreds);
+        const profile = rowToProfile(row, decryptCreds, decryptPat);
         return profile.extends ? resolve(profile) : profile;
       });
     },
@@ -333,6 +357,14 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
       if (parsed.testCommand !== undefined) {
         setClauses.push('test_command = @testCommand');
         fieldMap.testCommand = parsed.testCommand ?? null;
+      }
+      if (parsed.prProvider !== undefined) {
+        setClauses.push('pr_provider = @prProvider');
+        fieldMap.prProvider = parsed.prProvider;
+      }
+      if (parsed.adoPat !== undefined) {
+        setClauses.push('ado_pat = @adoPat');
+        fieldMap.adoPat = encryptPat(parsed.adoPat);
       }
 
       if (setClauses.length === 0) {

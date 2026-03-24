@@ -143,22 +143,103 @@ export function DetailPanel({
               {validation.smoke.status}
             </Text>
           </Box>
-          {validation.taskReview && (
-            <Box>
-              <Text dimColor>{'Review:   '}</Text>
-              <Text
-                color={
-                  validation.taskReview.status === 'pass'
-                    ? 'green'
-                    : validation.taskReview.status === 'fail'
-                      ? 'red'
-                      : 'yellow'
-                }
-              >
-                {validation.taskReview.status}
-              </Text>
+          {/* Smoke failure details */}
+          {validation.smoke.status === 'fail' && (
+            <Box flexDirection="column" marginLeft={2}>
+              {validation.smoke.build.status === 'fail' && (
+                <Box flexDirection="column">
+                  <Text color="red">Build failed:</Text>
+                  {validation.smoke.build.output
+                    .trim()
+                    .split('\n')
+                    .slice(-8)
+                    .map((line, i) => (
+                      <Text key={i} dimColor wrap="truncate">
+                        {line}
+                      </Text>
+                    ))}
+                </Box>
+              )}
+              {validation.smoke.health.status === 'fail' && (
+                <Text color="red">
+                  Health check failed: {validation.smoke.health.url} → HTTP{' '}
+                  {validation.smoke.health.responseCode ?? 'no response'}
+                </Text>
+              )}
+              {validation.smoke.pages
+                .filter((p) => p.status === 'fail')
+                .map((page, i) => (
+                  <Box key={i} flexDirection="column">
+                    <Text color="red">Page {page.path} failed:</Text>
+                    {page.assertions
+                      .filter((a) => !a.passed)
+                      .map((a, j) => (
+                        <Text key={j} dimColor wrap="truncate">
+                          {`  ${a.type} ${a.selector}: expected "${a.expected}" got "${a.actual}"`}
+                        </Text>
+                      ))}
+                    {page.consoleErrors.map((e, j) => (
+                      <Text key={j} dimColor wrap="truncate">
+                        {`  console: ${e}`}
+                      </Text>
+                    ))}
+                  </Box>
+                ))}
             </Box>
           )}
+          {validation.taskReview && (
+            <Box flexDirection="column">
+              <Box>
+                <Text dimColor>{'Review:   '}</Text>
+                <Text
+                  color={
+                    validation.taskReview.status === 'pass'
+                      ? 'green'
+                      : validation.taskReview.status === 'fail'
+                        ? 'red'
+                        : 'yellow'
+                  }
+                >
+                  {validation.taskReview.status}
+                </Text>
+              </Box>
+              {validation.taskReview.status !== 'pass' && (
+                <Box flexDirection="column" marginLeft={2}>
+                  {validation.taskReview.reasoning && (
+                    <Text dimColor wrap="wrap">
+                      {validation.taskReview.reasoning}
+                    </Text>
+                  )}
+                  {validation.taskReview.issues.map((issue, i) => (
+                    <Text key={i} color="red" wrap="truncate">
+                      {`• ${issue}`}
+                    </Text>
+                  ))}
+                </Box>
+              )}
+            </Box>
+          )}
+        </Box>
+      )}
+
+      {/* Pending escalation question */}
+      {session.pendingEscalation?.type === 'ask_human' && (
+        <Box flexDirection="column" marginTop={1} borderStyle="single" borderColor="yellow">
+          <Text bold color="yellow">
+            Agent is asking:
+          </Text>
+          <Text wrap="wrap">
+            {'question' in session.pendingEscalation.payload
+              ? session.pendingEscalation.payload.question
+              : ''}
+          </Text>
+          {'context' in session.pendingEscalation.payload &&
+            session.pendingEscalation.payload.context && (
+              <Text dimColor wrap="wrap">
+                {session.pendingEscalation.payload.context}
+              </Text>
+            )}
+          <Text dimColor>Press [t] to respond</Text>
         </Box>
       )}
 

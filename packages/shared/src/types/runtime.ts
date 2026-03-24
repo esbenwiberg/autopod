@@ -1,4 +1,4 @@
-export type RuntimeType = 'claude' | 'codex';
+export type RuntimeType = 'claude' | 'codex' | 'copilot';
 
 export interface Runtime {
   type: RuntimeType;

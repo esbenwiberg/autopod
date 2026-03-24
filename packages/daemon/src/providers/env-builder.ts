@@ -26,6 +26,9 @@ export async function buildProviderEnv(
     case 'foundry':
       return buildFoundryEnv(profile);
 
+    case 'copilot':
+      return buildCopilotEnv(profile);
+
     default:
       // Exhaustiveness check
       throw new Error(`Unknown model provider: ${provider as string}`);
@@ -110,6 +113,25 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
       { path: configPath, content: configFile },
     ],
     requiresPostExecPersistence: true,
+  };
+}
+
+/**
+ * GitHub Copilot CLI provider — injects COPILOT_GITHUB_TOKEN env var.
+ */
+function buildCopilotEnv(profile: Profile): ProviderEnvResult {
+  const creds = profile.providerCredentials;
+
+  if (!creds || creds.provider !== 'copilot') {
+    throw new Error(
+      `Profile "${profile.name}" has modelProvider=copilot but missing or mismatched providerCredentials`,
+    );
+  }
+
+  return {
+    env: { COPILOT_GITHUB_TOKEN: creds.token },
+    containerFiles: [],
+    requiresPostExecPersistence: false,
   };
 }
 

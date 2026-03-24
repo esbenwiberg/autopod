@@ -41,6 +41,10 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         { escalationId: escalation.id, sessionId: escalation.sessionId, type: escalation.type },
         'Escalation created',
       );
+      // Transition session to awaiting_input so the TUI shows the pending question
+      if (escalation.type === 'ask_human' || escalation.type === 'report_blocker') {
+        sessionManager.notifyEscalation(escalation.sessionId, escalation);
+      }
     },
 
     resolveEscalation(escalationId: string, response: EscalationResponse): void {

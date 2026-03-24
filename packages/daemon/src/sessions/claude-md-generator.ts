@@ -108,15 +108,19 @@ export function generateClaudeMd(
   lines.push(
     'Call `ask_human` and **wait for a response** before proceeding whenever any of these apply:',
   );
-  lines.push('- The task is ambiguous or underspecified and assumptions could lead you in the wrong direction');
-  lines.push('- You face a meaningful decision with multiple reasonable paths (architecture, approach, scope)');
+  lines.push(
+    '- The task is ambiguous or underspecified and assumptions could lead you in the wrong direction',
+  );
+  lines.push(
+    '- You face a meaningful decision with multiple reasonable paths (architecture, approach, scope)',
+  );
   lines.push('- You discover something unexpected that changes the nature or scope of the task');
   lines.push('- You are blocked and cannot make progress without more information');
   lines.push('- The task explicitly asks you to check in before acting');
   lines.push('');
   lines.push(
     '**Important**: Human responses come through the MCP tool — do NOT write questions as text output. ' +
-    'The human cannot see your output stream; they only see what you send via `ask_human`.',
+      'The human cannot see your output stream; they only see what you send via `ask_human`.',
   );
   lines.push('');
 

@@ -69,7 +69,7 @@ describe('Session Lifecycle E2E', () => {
     it('walks through the entire lifecycle', async () => {
       const ctx = createTestContext();
       const prManager = createMockPrManager();
-      ctx.deps.prManager = prManager;
+      ctx.deps.prManagerFactory = () => prManager;
       const manager = createSessionManager(ctx.deps);
       const events = collectEvents(ctx);
 
@@ -137,7 +137,7 @@ describe('Session Lifecycle E2E', () => {
         },
       });
       const prManager = createMockPrManager();
-      ctx.deps.prManager = prManager;
+      ctx.deps.prManagerFactory = () => prManager;
       const manager = createSessionManager(ctx.deps);
 
       const session = manager.createSession(
@@ -288,7 +288,7 @@ describe('Session Lifecycle E2E', () => {
     it('rejection resumes agent and re-runs validation', async () => {
       const ctx = createTestContext();
       const prManager = createMockPrManager();
-      ctx.deps.prManager = prManager;
+      ctx.deps.prManagerFactory = () => prManager;
       const manager = createSessionManager(ctx.deps);
 
       const session = manager.createSession(
@@ -673,7 +673,7 @@ describe('Session Lifecycle E2E', () => {
     it('emits events in correct order for full lifecycle', async () => {
       const ctx = createTestContext();
       const prManager = createMockPrManager();
-      ctx.deps.prManager = prManager;
+      ctx.deps.prManagerFactory = () => prManager;
       const manager = createSessionManager(ctx.deps);
       const events = collectEvents(ctx);
 

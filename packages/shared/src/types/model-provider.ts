@@ -5,8 +5,9 @@
  * - `anthropic`: API key from daemon env (default, backwards-compatible)
  * - `max`: Claude consumer subscription (MAX/PRO) via OAuth credentials file
  * - `foundry`: Azure Foundry deployment with endpoint + project config
+ * - `copilot`: GitHub Copilot CLI via OAuth token (`COPILOT_GITHUB_TOKEN`)
  */
-export type ModelProvider = 'anthropic' | 'max' | 'foundry';
+export type ModelProvider = 'anthropic' | 'max' | 'foundry' | 'copilot';
 
 /** Anthropic API key provider — uses daemon env `ANTHROPIC_API_KEY`. No per-profile creds. */
 export interface AnthropicCredentials {
@@ -56,4 +57,21 @@ export interface FoundryCredentials {
   apiKey?: string;
 }
 
-export type ProviderCredentials = AnthropicCredentials | MaxCredentials | FoundryCredentials;
+/**
+ * GitHub Copilot CLI credentials.
+ *
+ * Token is injected as `COPILOT_GITHUB_TOKEN` env var when spawning the runtime.
+ * Supported token types: OAuth (`gho_`), fine-grained PAT (`github_pat_`), GitHub App (`ghu_`).
+ * Classic PATs (`ghp_`) are not supported by Copilot CLI.
+ */
+export interface CopilotCredentials {
+  provider: 'copilot';
+  /** GitHub OAuth or PAT token. Does not expire unless revoked. */
+  token: string;
+}
+
+export type ProviderCredentials =
+  | AnthropicCredentials
+  | MaxCredentials
+  | FoundryCredentials
+  | CopilotCredentials;

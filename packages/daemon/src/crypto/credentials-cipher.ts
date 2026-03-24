@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32; // 256 bits
-const IV_LENGTH = 12;  // 96 bits — recommended for GCM
+const IV_LENGTH = 12; // 96 bits — recommended for GCM
 const TAG_LENGTH = 16;
 
 export interface CredentialsCipher {

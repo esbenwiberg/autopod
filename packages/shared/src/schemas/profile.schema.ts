@@ -6,7 +6,7 @@ import { injectedClaudeMdSectionSchema, injectedMcpServerSchema } from './inject
 // Model provider credentials schemas
 // ---------------------------------------------------------------------------
 
-export const modelProviderSchema = z.enum(['anthropic', 'max', 'foundry']);
+export const modelProviderSchema = z.enum(['anthropic', 'max', 'foundry', 'copilot']);
 
 const anthropicCredentialsSchema = z.object({
   provider: z.literal('anthropic'),
@@ -31,10 +31,16 @@ const foundryCredentialsSchema = z.object({
   apiKey: z.string().optional(),
 });
 
+const copilotCredentialsSchema = z.object({
+  provider: z.literal('copilot'),
+  token: z.string().min(1),
+});
+
 export const providerCredentialsSchema = z.discriminatedUnion('provider', [
   anthropicCredentialsSchema,
   maxCredentialsSchema,
   foundryCredentialsSchema,
+  copilotCredentialsSchema,
 ]);
 
 const pageAssertionSchema = z.object({
@@ -83,7 +89,7 @@ export const createProfileSchema = z.object({
   validationPages: z.array(validationPageSchema).default([]),
   maxValidationAttempts: z.number().int().min(1).max(10).default(3),
   defaultModel: z.string().default('opus'),
-  defaultRuntime: z.enum(['claude', 'codex']).default('claude'),
+  defaultRuntime: z.enum(['claude', 'codex', 'copilot']).default('claude'),
   executionTarget: z.enum(['local', 'aci']).default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),
   escalation: escalationConfigSchema.default({}),
@@ -96,6 +102,8 @@ export const createProfileSchema = z.object({
   modelProvider: modelProviderSchema.default('anthropic'),
   providerCredentials: providerCredentialsSchema.nullable().default(null),
   testCommand: z.string().nullable().optional().default(null),
+  prProvider: z.enum(['github', 'ado']).default('github'),
+  adoPat: z.string().min(1).nullable().default(null),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });

@@ -66,7 +66,7 @@ export function createLocalValidationEngine(
       const overall =
         smokeStatus === 'pass' &&
         !testFailed &&
-        (taskReview === null || taskReview.status !== 'fail')
+        (taskReview === null || taskReview.status === 'pass')
           ? ('pass' as const)
           : ('fail' as const);
 
@@ -335,6 +335,11 @@ Review the changes and respond with a JSON object:
   "reasoning": "brief explanation",
   "issues": ["list of specific issues found, if any"]
 }
+
+Rules:
+- Use "pass" only if you can clearly verify the diff fulfills the task.
+- Use "fail" if the task is too vague or ambiguous to verify, if the diff clearly does not match the task, or if there are obvious correctness issues.
+- Use "uncertain" only if the task is clear but the diff is inconclusive (e.g. the change is plausible but you cannot confirm without runtime context).
 
 Respond ONLY with the JSON object, no markdown fences or extra text.`;
 

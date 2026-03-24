@@ -7,6 +7,7 @@ import pino from 'pino';
 import { createServer } from './api/server.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
+import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrate.js';
 import type { AuthModule } from './interfaces/index.js';
@@ -17,9 +18,13 @@ import {
   createTeamsAdapter,
 } from './notifications/index.js';
 import type { NotificationConfig } from './notifications/index.js';
-import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createProfileStore } from './profiles/index.js';
-import { ClaudeRuntime, CodexRuntime, createRuntimeRegistry } from './runtimes/index.js';
+import {
+  ClaudeRuntime,
+  CodexRuntime,
+  CopilotRuntime,
+  createRuntimeRegistry,
+} from './runtimes/index.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -32,6 +37,7 @@ import {
 import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
+import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { GhPrManager } from './worktrees/pr-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,9 +70,7 @@ const migrationsDir =
 runMigrations(db, migrationsDir, logger);
 
 // Credentials encryption key (generated on first run, persisted at ~/.autopod/secrets.key)
-const credentialsCipher = loadOrCreateKey(
-  path.join(os.homedir(), '.autopod', 'secrets.key'),
-);
+const credentialsCipher = loadOrCreateKey(path.join(os.homedir(), '.autopod', 'secrets.key'));
 
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
@@ -144,6 +148,7 @@ if (ACR_REGISTRY_URL) {
 const runtimeRegistry = createRuntimeRegistry([
   new ClaudeRuntime(logger, containerManager),
   new CodexRuntime(logger, containerManager),
+  new CopilotRuntime(logger, containerManager),
 ]);
 const validationEngine = createLocalValidationEngine(containerManager, logger);
 
@@ -209,7 +214,27 @@ const containerManagerFactory = {
   },
 };
 
-const prManager = new GhPrManager({ logger });
+const ghPrManager = new GhPrManager({ logger });
+
+function prManagerFactory(profile: import('@autopod/shared').Profile): import('./interfaces/pr-manager.js').PrManager | null {
+  if (profile.prProvider === 'ado') {
+    if (!profile.adoPat) {
+      logger.warn({ profileName: profile.name }, 'ADO pr provider configured but adoPat is missing — skipping PR creation');
+      return null;
+    }
+    try {
+      const { orgUrl, project, repoName } = parseAdoRepoUrl(profile.repoUrl);
+      return new AdoPrManager({ orgUrl, project, repoName, pat: profile.adoPat, logger });
+    } catch (err) {
+      logger.warn({ err, profileName: profile.name }, 'Failed to parse ADO repo URL — skipping PR creation');
+      return null;
+    }
+  }
+  return ghPrManager;
+}
+
+// Pending MCP ask_human requests — created before sessionManager so both can share the map
+const pendingRequestsBySession = new Map<string, PendingRequests>();
 
 sessionManager = createSessionManager({
   sessionRepo,
@@ -222,18 +247,18 @@ sessionManager = createSessionManager({
   runtimeRegistry,
   validationEngine,
   networkManager,
-  prManager,
+  prManagerFactory,
   enqueueSession: (id) => sessionQueue.enqueue(id),
   mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? (HOST === '0.0.0.0' ? 'host.docker.internal' : HOST)}:${PORT}`,
   daemonConfig: {
     mcpServers: JSON.parse(process.env.DAEMON_MCP_SERVERS ?? '[]'),
     claudeMdSections: JSON.parse(process.env.DAEMON_CLAUDE_MD_SECTIONS ?? '[]'),
   },
+  pendingRequestsBySession,
   logger,
 });
 
 // Session bridge for MCP escalation
-const pendingRequestsBySession = new Map<string, PendingRequests>();
 const sessionBridge = createSessionBridge({
   sessionManager,
   escalationRepo,
@@ -312,12 +337,23 @@ if (aciContainerManager) {
 // On restart, local Docker sessions lose their stream handles and become orphaned.
 // Kill any that are still in a non-terminal state so they don't appear stuck.
 {
-  const orphanStatuses = ['running', 'provisioning', 'queued', 'awaiting_input', 'validating', 'paused', 'killing'] as const;
+  const orphanStatuses = [
+    'running',
+    'provisioning',
+    'queued',
+    'awaiting_input',
+    'validating',
+    'paused',
+    'killing',
+  ] as const;
   for (const status of orphanStatuses) {
     const sessions = sessionRepo.list({ status });
     const localSessions = sessions.filter((s) => s.executionTarget === 'local');
     for (const session of localSessions) {
-      logger.warn({ sessionId: session.id, status }, 'Orphaned local session on restart — marking killed');
+      logger.warn(
+        { sessionId: session.id, status },
+        'Orphaned local session on restart — marking killed',
+      );
       try {
         await sessionManager.killSession(session.id);
       } catch (err) {

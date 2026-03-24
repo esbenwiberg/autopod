@@ -1,10 +1,13 @@
+import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   AgentEvent,
   CreateSessionRequest,
   DaemonConfig,
+  EscalationRequest,
   ExecutionTarget,
   InjectedMcpServer,
   NetworkPolicy,
+  Profile,
   Session,
   SessionStatus,
 } from '@autopod/shared';
@@ -71,7 +74,8 @@ export interface SessionManagerDependencies {
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
   networkManager?: NetworkManager;
-  prManager?: PrManager;
+  /** Factory returning the appropriate PrManager for a given profile. Return null to skip PR creation. */
+  prManagerFactory?: (profile: Profile) => PrManager | null;
   actionEngine?: {
     getAvailableActions: (
       policy: import('@autopod/shared').ActionPolicy,
@@ -80,6 +84,8 @@ export interface SessionManagerDependencies {
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
+  /** Pending MCP ask_human requests keyed by sessionId — used to resolve escalations */
+  pendingRequestsBySession?: Map<string, PendingRequests>;
   logger: Logger;
 }
 
@@ -89,8 +95,11 @@ export interface SessionManager {
   consumeAgentEvents(sessionId: string, events: AsyncIterable<AgentEvent>): Promise<void>;
   handleCompletion(sessionId: string): Promise<void>;
   sendMessage(sessionId: string, message: string): Promise<void>;
+  notifyEscalation(sessionId: string, escalation: EscalationRequest): void;
   approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void>;
   rejectSession(sessionId: string, reason?: string): Promise<void>;
+  approveAllValidated(): Promise<{ approved: string[] }>;
+  killAllFailed(): Promise<{ killed: string[] }>;
   pauseSession(sessionId: string): Promise<void>;
   nudgeSession(sessionId: string, message: string): void;
   killSession(sessionId: string): Promise<void>;
@@ -117,7 +126,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     runtimeRegistry,
     validationEngine,
     networkManager,
-    prManager,
+    prManagerFactory,
     enqueueSession,
     mcpBaseUrl,
     daemonConfig,
@@ -142,6 +151,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
     }
     return { SESSION_ID: session.id, ...result.env };
+  }
+
+  function emitActivityStatus(sessionId: string, message: string): void {
+    eventBus.emit({
+      type: 'session.agent_activity',
+      timestamp: new Date().toISOString(),
+      sessionId,
+      event: { type: 'status', timestamp: new Date().toISOString(), message },
+    });
   }
 
   function transition(
@@ -215,12 +233,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const profile = profileStore.get(session.profileName);
 
       function emitStatus(message: string): void {
-        eventBus.emit({
-          type: 'session.agent_activity',
-          timestamp: new Date().toISOString(),
-          sessionId,
-          event: { type: 'status', timestamp: new Date().toISOString(), message },
-        });
+        emitActivityStatus(sessionId, message);
       }
 
       try {
@@ -348,10 +361,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Verify credential files are readable by the container user
         if (providerResult.containerFiles.length > 0) {
-          const verifyResult = await containerManager.execInContainer(
-            containerId,
-            ['sh', '-c', providerResult.containerFiles.map((f) => `ls -la ${f.path}`).join(' && ')],
-          );
+          const verifyResult = await containerManager.execInContainer(containerId, [
+            'sh',
+            '-c',
+            providerResult.containerFiles.map((f) => `ls -la ${f.path}`).join(' && '),
+          ]);
           logger.info(
             { sessionId, stdout: verifyResult.stdout.trim(), stderr: verifyResult.stderr.trim() },
             'Credential file verification',
@@ -486,9 +500,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
       }
 
-      // Skip validation if requested
-      if (session.skipValidation) {
-        transition(session, 'validating');
+      // Skip validation if requested or if agent made no changes
+      const refreshed = sessionRepo.getOrThrow(sessionId);
+      const noChanges = Boolean(session.worktreePath) && refreshed.filesChanged === 0;
+      if (refreshed.skipValidation || noChanges) {
+        if (noChanges) {
+          logger.info({ sessionId }, 'Skipping validation — no files changed');
+          emitActivityStatus(sessionId, 'No files changed — skipping validation');
+        }
+        transition(refreshed, 'validating');
         const s2 = sessionRepo.getOrThrow(sessionId);
         transition(s2, 'validated');
         return;
@@ -510,6 +530,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
       transition(session, 'running', { pendingEscalation: null });
 
+      // If the session was blocked on an ask_human MCP call, resolve the pending request.
+      // The container's agent event stream is still active — no need to call runtime.resume().
+      const pendingForSession = deps.pendingRequestsBySession?.get(sessionId);
+      if (pendingForSession && session.pendingEscalation?.id) {
+        const resolved = pendingForSession.resolve(session.pendingEscalation.id, message);
+        if (resolved) {
+          // The MCP ask_human call has been unblocked — processSession's consumeAgentEvents
+          // loop will continue picking up events from the still-running container.
+          return;
+        }
+      }
+
       const resumeEnv = await getResumeEnv(session);
       const runtime = runtimeRegistry.get(session.runtime);
       if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
@@ -524,6 +556,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const s2 = transition(s1, 'merging');
 
       // Merge the PR if one was created, otherwise fall back to branch push
+      const approveProfile = profileStore.get(session.profileName);
+      const prManager = prManagerFactory ? prManagerFactory(approveProfile) : null;
       if (session.prUrl && prManager && session.worktreePath) {
         try {
           await prManager.mergePr({
@@ -719,6 +753,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         attempt,
       });
 
+      emitActivityStatus(sessionId, `Starting validation (attempt ${attempt})…`);
+
       try {
         if (!session.containerId) {
           throw new Error(`Session ${sessionId} has no container — cannot validate`);
@@ -748,7 +784,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           });
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies
-          logger.error({ err: validateErr, sessionId, attempt }, 'Validation engine threw unexpectedly');
+          logger.error(
+            { err: validateErr, sessionId, attempt },
+            'Validation engine threw unexpectedly',
+          );
           result = {
             sessionId,
             attempt,
@@ -806,8 +845,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         if (result.overall === 'pass') {
+          emitActivityStatus(sessionId, `Validation passed (attempt ${attempt})`);
           // Push branch and create PR before transitioning to validated
           let prUrl: string | null = null;
+          const prManager = prManagerFactory ? prManagerFactory(profile) : null;
           if (prManager && s2.worktreePath) {
             // Commit screenshots to the branch so they're visible in the PR
             try {
@@ -880,6 +921,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
           transition(s2, 'validated', { prUrl });
         } else if (attempt < profile.maxValidationAttempts) {
+          emitActivityStatus(
+            sessionId,
+            `Validation failed (attempt ${attempt}/${profile.maxValidationAttempts}) — retrying`,
+          );
           // Build correction message with structured feedback for the agent
           const cm = containerManagerFactory.get(s2.executionTarget);
           const correctionMessage = await buildCorrectionMessage(s2, profile, result, cm);
@@ -904,12 +949,26 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             'Retrying after validation failure',
           );
         } else {
+          emitActivityStatus(
+            sessionId,
+            `Validation failed — max attempts (${profile.maxValidationAttempts}) exhausted`,
+          );
           transition(s2, 'failed');
         }
       } catch (err) {
         logger.error({ err, sessionId }, 'Validation error');
         const s2 = sessionRepo.getOrThrow(sessionId);
         transition(s2, 'failed');
+      }
+    },
+
+    notifyEscalation(sessionId: string, escalation: EscalationRequest): void {
+      const session = sessionRepo.getOrThrow(sessionId);
+      if (session.status === 'running') {
+        transition(session, 'awaiting_input', {
+          pendingEscalation: escalation,
+          escalationCount: session.escalationCount + 1,
+        });
       }
     },
 
@@ -957,6 +1016,34 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     getSessionStats(filters?) {
       return sessionRepo.getStats(filters);
+    },
+
+    async approveAllValidated(): Promise<{ approved: string[] }> {
+      const validated = sessionRepo.list({ status: 'validated' });
+      const approved: string[] = [];
+      for (const session of validated) {
+        try {
+          await this.approveSession(session.id);
+          approved.push(session.id);
+        } catch (err) {
+          logger.warn({ err, sessionId: session.id }, 'Failed to approve session in bulk');
+        }
+      }
+      return { approved };
+    },
+
+    async killAllFailed(): Promise<{ killed: string[] }> {
+      const failed = sessionRepo.list({ status: 'failed' });
+      const killed: string[] = [];
+      for (const session of failed) {
+        try {
+          await this.killSession(session.id);
+          killed.push(session.id);
+        } catch (err) {
+          logger.warn({ err, sessionId: session.id }, 'Failed to kill session in bulk');
+        }
+      }
+      return { killed };
     },
   };
 }

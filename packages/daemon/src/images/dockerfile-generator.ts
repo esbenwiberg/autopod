@@ -42,7 +42,7 @@ export function generateDockerfile(options: DockerfileOptions): string {
   lines.push(
     '',
     '# Install agent CLIs into the image',
-    'RUN npm install -g @anthropic-ai/claude-code @openai/codex 2>/dev/null || true',
+    'RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot 2>/dev/null || true',
   );
 
   // Pre-warm build caches

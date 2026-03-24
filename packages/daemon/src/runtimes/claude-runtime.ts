@@ -220,7 +220,10 @@ export class ClaudeRuntime implements Runtime {
 
     // MCP server configuration
     if (config.mcpServers && config.mcpServers.length > 0) {
-      const servers: Record<string, { type: string; url: string; headers?: Record<string, string> }> = {};
+      const servers: Record<
+        string,
+        { type: string; url: string; headers?: Record<string, string> }
+      > = {};
       for (const server of config.mcpServers) {
         servers[server.name] = {
           type: 'http',

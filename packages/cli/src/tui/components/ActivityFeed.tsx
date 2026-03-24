@@ -72,8 +72,11 @@ function getEventText(event: AgentEvent): string {
 }
 
 export function ActivityFeed({ events, maxLines }: ActivityFeedProps): React.ReactElement {
-  // Show most recent events (reverse chronological — latest at top)
-  const visibleEvents = events.slice(-maxLines).reverse();
+  // Show most recent high-level events — filter out tool_use (too verbose; visible in log view)
+  const visibleEvents = events
+    .filter((e) => e.type !== 'tool_use')
+    .slice(-maxLines)
+    .reverse();
 
   if (visibleEvents.length === 0) {
     return (

@@ -269,7 +269,7 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         }
       },
       r: () => {
-        if (currentSession?.status === 'validated') {
+        if (currentSession?.status === 'validated' || currentSession?.status === 'failed') {
           setMode({ type: 'reject_input' });
         }
       },
@@ -569,12 +569,37 @@ function ActivityLogOverlay({
 
   return (
     <Box flexDirection="column">
-      {events.slice(-20).map((event, i) => (
-        <Text key={`log-${i}`} dimColor>
-          [{event.timestamp}] {event.type}:{' '}
-          {'message' in event ? (event as { message: string }).message : event.type}
-        </Text>
-      ))}
+      {events.slice(-40).map((event, i) => {
+        const ts = new Date(event.timestamp).toLocaleTimeString();
+        let detail: string;
+        switch (event.type) {
+          case 'status':
+            detail = event.message;
+            break;
+          case 'tool_use':
+            detail = `${event.tool}(${Object.keys(event.input).join(', ')})`;
+            break;
+          case 'file_change':
+            detail = `${event.action} ${event.path}`;
+            break;
+          case 'complete':
+            detail = event.result;
+            break;
+          case 'error':
+            detail = event.message;
+            break;
+          case 'escalation':
+            detail = `${event.escalationType}: ${'question' in event.payload ? event.payload.question : ''}`;
+            break;
+          default:
+            detail = event.type;
+        }
+        return (
+          <Text key={`log-${i}`} dimColor wrap="truncate">
+            {ts} [{event.type}] {detail}
+          </Text>
+        );
+      })}
     </Box>
   );
 }

@@ -42,6 +42,10 @@ export interface Profile {
   providerCredentials: ProviderCredentials | null;
   /** Optional test command to run after build (e.g. 'pnpm test') */
   testCommand?: string | null;
+  /** PR provider — determines which service creates/merges pull requests */
+  prProvider: 'github' | 'ado';
+  /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */
+  adoPat: string | null;
   createdAt: string;
   updatedAt: string;
 }

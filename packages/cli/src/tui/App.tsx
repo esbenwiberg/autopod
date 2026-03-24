@@ -65,8 +65,6 @@ export function App({ config }: AppProps): React.ReactElement {
         return next;
       });
     }
-
-
   }, []);
 
   const handleConnect = useCallback(() => {
