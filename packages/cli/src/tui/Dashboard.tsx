@@ -25,6 +25,7 @@ type UIMode =
   | { type: 'reject_input' }
   | { type: 'confirm_approve' }
   | { type: 'confirm_kill' }
+  | { type: 'confirm_delete' }
   | { type: 'diff_view'; diff: string }
   | { type: 'log_view' }
   | { type: 'create_session' }
@@ -149,10 +150,23 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
     setMode({ type: 'normal' });
   }, [currentSessionId, client, showToast]);
 
+  const handleDelete = useCallback(async () => {
+    if (!currentSessionId) return;
+    try {
+      await client.deleteSession(currentSessionId);
+      showToast('Session deleted', 'green');
+      void refresh();
+    } catch {
+      showToast('Failed to delete session', 'red');
+    }
+    setMode({ type: 'normal' });
+  }, [currentSessionId, client, showToast, refresh]);
+
   const handleKill = useCallback(async () => {
     if (!currentSessionId) return;
     try {
       await client.killSession(currentSessionId);
+      showToast('Session killed', 'yellow');
     } catch {
       showToast('Failed to kill session', 'red');
     }
@@ -282,6 +296,11 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
           setMode({ type: 'confirm_retry', session: currentSession });
         }
       },
+      D: () => {
+        if (currentSession && ['killed', 'complete', 'failed'].includes(currentSession.status)) {
+          setMode({ type: 'confirm_delete' });
+        }
+      },
       o: () => {
         if (currentSession?.previewUrl) {
           openUrl(currentSession.previewUrl);
@@ -321,6 +340,7 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
       filterText,
       handlePause,
       handleNudge,
+      handleDelete,
     ],
   );
 
@@ -441,6 +461,14 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         <ConfirmDialog
           message={`Kill session ${currentSessionId ?? ''}?`}
           onConfirm={() => void handleKill()}
+          onCancel={() => setMode({ type: 'normal' })}
+        />
+      )}
+
+      {mode.type === 'confirm_delete' && (
+        <ConfirmDialog
+          message={`Delete session ${currentSessionId ?? ''}? This cannot be undone.`}
+          onConfirm={() => void handleDelete()}
           onCancel={() => setMode({ type: 'normal' })}
         />
       )}

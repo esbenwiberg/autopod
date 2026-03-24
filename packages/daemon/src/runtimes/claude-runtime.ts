@@ -43,6 +43,11 @@ export class ClaudeRuntime implements Runtime {
 
     this.handles.set(config.sessionId, handle);
 
+    let stderrBuffer = '';
+    handle.stderr.on('data', (chunk: Buffer) => {
+      stderrBuffer += chunk.toString('utf-8');
+    });
+
     try {
       for await (const event of ClaudeStreamParser.parse(
         handle.stdout,
@@ -64,6 +69,12 @@ export class ClaudeRuntime implements Runtime {
 
     // Check exit code after stream is consumed
     const exitCode = await handle.exitCode;
+    if (stderrBuffer.trim()) {
+      this.logger.warn(
+        { component: 'claude-runtime', sessionId: config.sessionId, stderr: stderrBuffer.slice(0, 2000) },
+        'claude stderr',
+      );
+    }
     if (exitCode !== 0) {
       yield {
         type: 'error',
@@ -98,6 +109,11 @@ export class ClaudeRuntime implements Runtime {
 
     this.handles.set(sessionId, handle);
 
+    let stderrBuffer = '';
+    handle.stderr.on('data', (chunk: Buffer) => {
+      stderrBuffer += chunk.toString('utf-8');
+    });
+
     try {
       for await (const event of ClaudeStreamParser.parse(handle.stdout, sessionId, this.logger)) {
         // Update Claude session ID on resume too
@@ -111,6 +127,13 @@ export class ClaudeRuntime implements Runtime {
       }
     } finally {
       this.handles.delete(sessionId);
+    }
+
+    if (stderrBuffer.trim()) {
+      this.logger.warn(
+        { component: 'claude-runtime', sessionId, stderr: stderrBuffer.slice(0, 2000) },
+        'claude stderr',
+      );
     }
   }
 

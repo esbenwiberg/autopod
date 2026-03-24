@@ -30,6 +30,7 @@ export interface ServerDependencies {
   imageBuilder?: ImageBuilder;
   logLevel?: string;
   prettyLog?: boolean;
+  onShutdown?: () => void;
 }
 
 export async function createServer(deps: ServerDependencies): Promise<FastifyInstance> {
@@ -55,7 +56,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   await app.register(websocket);
 
   // Routes
-  healthRoutes(app);
+  healthRoutes(app, deps.onShutdown);
   sessionRoutes(app, deps.sessionManager);
   profileRoutes(app, deps.profileStore, deps.imageBuilder);
 

@@ -55,10 +55,16 @@ function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean)
       contextual.push({ key: 'l', label: 'logs' });
       contextual.push({ key: 'v', label: 'validate' });
       contextual.push({ key: 'R', label: 'retry' });
+      contextual.push({ key: 'D', label: 'delete' });
       break;
     case 'killed':
       contextual.push({ key: 'l', label: 'logs' });
       contextual.push({ key: 'R', label: 'retry' });
+      contextual.push({ key: 'D', label: 'delete' });
+      break;
+    case 'complete':
+      contextual.push({ key: 'l', label: 'logs' });
+      contextual.push({ key: 'D', label: 'delete' });
       break;
     default:
       contextual.push({ key: 'l', label: 'logs' });

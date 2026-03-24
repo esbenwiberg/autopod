@@ -75,6 +75,10 @@ export class AutopodClient {
     await this.request<void>('POST', `/sessions/${id}/kill`);
   }
 
+  async deleteSession(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/sessions/${id}`);
+  }
+
   async getSessionLogs(id: string, buildLogs?: boolean): Promise<string> {
     const params = buildLogs ? '?build=true' : '';
     return this.request<string>('GET', `/sessions/${id}/logs${params}`);
@@ -105,6 +109,13 @@ export class AutopodClient {
     await this.request<void>('POST', `/profiles/${name}/warm`, { rebuild });
   }
 
+  async setProfileCredentials(
+    name: string,
+    credentials: { modelProvider: string; providerCredentials: unknown },
+  ): Promise<Profile> {
+    return this.request<Profile>('PATCH', `/profiles/${name}`, credentials);
+  }
+
   // Bulk
   async approveAllValidated(): Promise<{ approved: string[] }> {
     return this.request<{ approved: string[] }>('POST', '/sessions/approve-all');
@@ -112,6 +123,10 @@ export class AutopodClient {
 
   async killAllFailed(): Promise<{ killed: string[] }> {
     return this.request<{ killed: string[] }>('POST', '/sessions/kill-failed');
+  }
+
+  async stopDaemon(): Promise<void> {
+    await this.request<void>('POST', '/shutdown');
   }
 
   // Health
@@ -144,7 +159,7 @@ export class AutopodClient {
       response = await fetch(url, {
         method,
         headers: {
-          'Content-Type': 'application/json',
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
           Authorization: `Bearer ${token}`,
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -160,7 +175,7 @@ export class AutopodClient {
         response = await fetch(url, {
           method,
           headers: {
-            'Content-Type': 'application/json',
+            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
             Authorization: `Bearer ${token}`,
           },
           body: body !== undefined ? JSON.stringify(body) : undefined,

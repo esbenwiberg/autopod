@@ -17,6 +17,7 @@ import {
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import pino from 'pino';
+import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
 import { resolveInheritance, validateInheritanceChain } from './inheritance.js';
 
 const logger = pino({ name: 'autopod' }).child({ component: 'profiles' });
@@ -31,8 +32,12 @@ export interface ProfileStore {
   exists(name: string): boolean;
 }
 
-/** Map a SQLite row (snake_case) to a Profile (camelCase). */
-function rowToProfile(row: Record<string, unknown>): Profile {
+/** Map a SQLite row (snake_case) to a Profile (camelCase). Defined outside factory for test-utils. */
+export function rowToProfile(
+  row: Record<string, unknown>,
+  decryptCreds: (raw: unknown) => ProviderCredentials | null = (raw) =>
+    raw ? (JSON.parse(raw as string) as ProviderCredentials) : null,
+): Profile {
   return {
     name: row.name as string,
     repoUrl: row.repo_url as string,
@@ -64,22 +69,41 @@ function rowToProfile(row: Record<string, unknown>): Profile {
       : null,
     outputMode: (row.output_mode as Profile['outputMode']) ?? 'pr',
     modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
-    providerCredentials: row.provider_credentials
-      ? (JSON.parse(row.provider_credentials as string) as ProviderCredentials)
-      : null,
+    providerCredentials: decryptCreds(row.provider_credentials),
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
 }
 
-export function createProfileStore(db: Database.Database): ProfileStore {
+export function createProfileStore(db: Database.Database, cipher?: CredentialsCipher): ProfileStore {
+  function encryptCreds(creds: ProviderCredentials | null | undefined): string | null {
+    if (!creds) return null;
+    const json = JSON.stringify(creds);
+    return cipher ? cipher.encrypt(json) : json;
+  }
+
+  function decryptCreds(raw: unknown): ProviderCredentials | null {
+    if (!raw) return null;
+    const str = raw as string;
+    try {
+      const json = cipher ? cipher.decrypt(str) : str;
+      return JSON.parse(json) as ProviderCredentials;
+    } catch {
+      // Fallback: try plain JSON (e.g. rows written before encryption was enabled)
+      try {
+        return JSON.parse(str) as ProviderCredentials;
+      } catch {
+        return null;
+      }
+    }
+  }
   /** Fetch a raw profile row from DB, throw if not found. */
   function fetchRaw(name: string): Profile {
     const row = db.prepare('SELECT * FROM profiles WHERE name = ?').get(name) as
       | Record<string, unknown>
       | undefined;
     if (!row) throw new ProfileNotFoundError(name);
-    return rowToProfile(row);
+    return rowToProfile(row, decryptCreds);
   }
 
   /** Recursively resolve inheritance for a profile. */
@@ -164,9 +188,7 @@ export function createProfileStore(db: Database.Database): ProfileStore {
         actionPolicy: parsed.actionPolicy ? JSON.stringify(parsed.actionPolicy) : null,
         outputMode: parsed.outputMode,
         modelProvider: parsed.modelProvider,
-        providerCredentials: parsed.providerCredentials
-          ? JSON.stringify(parsed.providerCredentials)
-          : null,
+        providerCredentials: encryptCreds(parsed.providerCredentials),
         createdAt: now,
         updatedAt: now,
       });
@@ -304,9 +326,7 @@ export function createProfileStore(db: Database.Database): ProfileStore {
       }
       if (parsed.providerCredentials !== undefined) {
         setClauses.push('provider_credentials = @providerCredentials');
-        fieldMap.providerCredentials = parsed.providerCredentials
-          ? JSON.stringify(parsed.providerCredentials)
-          : null;
+        fieldMap.providerCredentials = encryptCreds(parsed.providerCredentials);
       }
 
       if (setClauses.length === 0) {

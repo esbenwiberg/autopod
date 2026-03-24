@@ -51,6 +51,7 @@ export interface SessionRepository {
   insert(session: NewSession): void;
   getOrThrow(id: string): Session;
   update(id: string, changes: SessionUpdates): void;
+  delete(id: string): void;
   list(filters?: SessionFilters): Session[];
   countByStatusAndProfile(status: SessionStatus, profileName: string): number;
 }
@@ -239,6 +240,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         .all(params) as Record<string, unknown>[];
 
       return rows.map(rowToSession);
+    },
+
+    delete(id: string): void {
+      const result = db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+      if (result.changes === 0) throw new SessionNotFoundError(id);
     },
 
     countByStatusAndProfile(status: SessionStatus, profileName: string): number {

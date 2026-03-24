@@ -38,4 +38,24 @@ export function registerDaemonCommands(program: Command): void {
       configStore.set('daemon', undefined);
       console.log(chalk.dim('Disconnected.'));
     });
+
+  program
+    .command('stop')
+    .description('Gracefully stop the daemon')
+    .action(async () => {
+      const daemonUrl = configStore.get('daemon');
+      if (!daemonUrl) {
+        console.error(chalk.red('No daemon configured. Run: ap connect <url>'));
+        process.exit(1);
+      }
+
+      const client = new AutopodClient({ baseUrl: daemonUrl, getToken });
+      try {
+        await withSpinner('Stopping daemon...', () => client.stopDaemon());
+        console.log(chalk.green('Daemon is shutting down.'));
+      } catch {
+        console.error(chalk.red('Failed to reach daemon — it may already be stopped.'));
+        process.exit(1);
+      }
+    });
 }

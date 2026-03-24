@@ -78,4 +78,11 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
     await sessionManager.killSession(sessionId);
     return { ok: true };
   });
+
+  // DELETE /sessions/:sessionId — delete a terminal session
+  app.delete('/sessions/:sessionId', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    await sessionManager.deleteSession(sessionId);
+    reply.status(204);
+  });
 }

@@ -66,15 +66,7 @@ export function App({ config }: AppProps): React.ReactElement {
       });
     }
 
-    // Clean up agent events for completed sessions
-    if (event.type === 'session.completed') {
-      setAgentEvents((prev) => {
-        if (!prev.has(event.sessionId)) return prev;
-        const next = new Map(prev);
-        next.delete(event.sessionId);
-        return next;
-      });
-    }
+
   }, []);
 
   const handleConnect = useCallback(() => {
@@ -85,7 +77,7 @@ export function App({ config }: AppProps): React.ReactElement {
     // State is preserved; we just show the connection status change
   }, []);
 
-  const wsUrl = `${config.daemonUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/ws`;
+  const wsUrl = `${config.daemonUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/events`;
 
   const ws = useWebSocket({
     url: wsUrl,

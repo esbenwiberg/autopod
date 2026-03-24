@@ -95,6 +95,7 @@ export interface SessionManager {
   nudgeSession(sessionId: string, message: string): void;
   killSession(sessionId: string): Promise<void>;
   triggerValidation(sessionId: string): Promise<void>;
+  deleteSession(sessionId: string): Promise<void>;
   getSession(sessionId: string): Session;
   listSessions(filters?: {
     profileName?: string;
@@ -425,6 +426,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // processSession's spawn unblocks after sendMessage already drove completion)
       if (
         isTerminalState(session.status) ||
+        session.status === 'killing' ||
         session.status === 'validating' ||
         session.status === 'validated' ||
         session.status === 'failed'
@@ -837,6 +839,40 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const s2 = sessionRepo.getOrThrow(sessionId);
         transition(s2, 'failed');
       }
+    },
+
+    async deleteSession(sessionId: string): Promise<void> {
+      const session = sessionRepo.getOrThrow(sessionId);
+      const deletable = isTerminalState(session.status) || session.status === 'failed';
+      if (!deletable) {
+        throw new AutopodError(
+          `Cannot delete session ${sessionId} in status ${session.status} — kill it first`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      // Clean up container if still present
+      if (session.containerId) {
+        try {
+          const cm = containerManagerFactory.get(session.executionTarget);
+          await cm.kill(session.containerId);
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Failed to kill container during delete');
+        }
+      }
+
+      // Clean up worktree if still present
+      if (session.worktreePath) {
+        try {
+          await worktreeManager.cleanup(session.worktreePath);
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Failed to cleanup worktree during delete');
+        }
+      }
+
+      sessionRepo.delete(sessionId);
+      logger.info({ sessionId }, 'Session deleted');
     },
 
     getSession(sessionId: string): Session {

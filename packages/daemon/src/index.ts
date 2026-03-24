@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PendingRequests } from '@autopod/escalation-mcp';
@@ -16,6 +17,7 @@ import {
   createTeamsAdapter,
 } from './notifications/index.js';
 import type { NotificationConfig } from './notifications/index.js';
+import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createProfileStore } from './profiles/index.js';
 import { ClaudeRuntime, CodexRuntime, createRuntimeRegistry } from './runtimes/index.js';
 import {
@@ -60,8 +62,13 @@ const migrationsDir =
 
 runMigrations(db, migrationsDir, logger);
 
+// Credentials encryption key (generated on first run, persisted at ~/.autopod/secrets.key)
+const credentialsCipher = loadOrCreateKey(
+  path.join(os.homedir(), '.autopod', 'secrets.key'),
+);
+
 // Repositories
-const profileStore = createProfileStore(db);
+const profileStore = createProfileStore(db, credentialsCipher);
 const sessionRepo = createSessionRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
@@ -269,6 +276,7 @@ const app = await createServer({
   imageBuilder,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
+  onShutdown: () => void shutdown('API'),
 });
 
 // Start listening

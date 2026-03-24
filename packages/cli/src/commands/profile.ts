@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawn } from 'node-pty';
 import type { Profile } from '@autopod/shared';
 import { createProfileSchema, updateProfileSchema } from '@autopod/shared';
 import chalk from 'chalk';
@@ -179,6 +180,139 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
 
       await withSpinner('Deleting profile...', () => client.deleteProfile(name));
       console.log(chalk.green(`Profile "${name}" deleted.`));
+    });
+
+  profile
+    .command('auth <name>')
+    .description('Authenticate a profile with Claude MAX/PRO via interactive login')
+    .action(async (name: string) => {
+      const client = getClient();
+
+      // Verify profile exists
+      try {
+        await client.getProfile(name);
+      } catch {
+        console.error(chalk.red(`Profile "${name}" not found.`));
+        process.exit(1);
+      }
+
+      // Isolated home so credentials land in a known place
+      const token = Math.random().toString(36).slice(2, 10);
+      const home = path.join(os.tmpdir(), `autopod-auth-${token}`);
+      const claudeDir = path.join(home, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+
+      // Suppress first-run prompts
+      fs.writeFileSync(
+        path.join(claudeDir, '.config.json'),
+        JSON.stringify({ hasCompletedOnboarding: true, theme: 'dark' }),
+      );
+
+      // Working dir (claude needs a git repo context)
+      const cwd = path.join(os.tmpdir(), `autopod-auth-cwd-${token}`);
+      fs.mkdirSync(cwd, { recursive: true });
+      try { execSync('git init', { cwd, stdio: 'ignore' }); } catch { /* best-effort */ }
+
+      // Build env: strip API key so Claude uses OAuth
+      const spawnEnv: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined && k !== 'ANTHROPIC_API_KEY') spawnEnv[k] = v;
+      }
+      spawnEnv['HOME'] = home;
+
+      console.log(chalk.cyan(`\nStarting Claude login for profile "${name}"...`));
+      console.log(chalk.dim('Claude will open a browser URL. Complete the OAuth flow, then the credentials will be saved automatically.\n'));
+
+      const pty = spawn('claude', [], {
+        name: 'xterm-256color',
+        cols: 500,
+        rows: 50,
+        cwd,
+        env: spawnEnv,
+      });
+
+      process.stdin.setRawMode?.(true);
+      process.stdin.on('data', (d) => pty.write(d.toString()));
+
+      // Auto-send /login after REPL is ready, handling the auth-method selector
+      let loginSent = false;
+      let authSelectHandled = false;
+      let outputSoFar = '';
+
+      pty.onData((data) => {
+        process.stdout.write(data);
+        outputSoFar += data;
+        if (loginSent) return;
+
+        // Strip ANSI for text matching
+        const text = outputSoFar.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
+
+        if (!authSelectHandled && (text.includes('Select login method') || text.includes('select login method'))) {
+          authSelectHandled = true;
+          loginSent = true;
+          setTimeout(() => pty.write('\r'), 300);
+          setTimeout(() => pty.write('/login\r'), 2000);
+          return;
+        }
+      });
+
+      // Fallback: send /login after 1.5s of first output
+      setTimeout(() => {
+        if (!loginSent) {
+          loginSent = true;
+          pty.write('/login\r');
+        }
+      }, 1500);
+
+      await new Promise<void>((resolve) => {
+        pty.onExit(() => resolve());
+      });
+
+      process.stdin.setRawMode?.(false);
+      process.stdin.removeAllListeners('data');
+
+      // Read credentials from isolated home
+      const credsPath = path.join(home, '.claude', '.credentials.json');
+      if (!fs.existsSync(credsPath)) {
+        console.error(chalk.red('\nNo credentials file found — login may not have completed.'));
+        process.exit(1);
+      }
+
+      let creds: { claudeAiOauth?: { accessToken?: string; refreshToken?: string; expiresAt?: number } };
+      try {
+        creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+      } catch {
+        console.error(chalk.red('\nFailed to parse credentials file.'));
+        process.exit(1);
+      }
+
+      const oauth = creds.claudeAiOauth;
+      if (!oauth?.accessToken || !oauth?.refreshToken) {
+        console.error(chalk.red('\nCredentials file missing OAuth tokens.'));
+        process.exit(1);
+      }
+
+      const expiresAt = oauth.expiresAt
+        ? new Date(oauth.expiresAt).toISOString()
+        : new Date(Date.now() + 3600_000).toISOString();
+
+      await withSpinner(`Saving credentials for "${name}"...`, () =>
+        client.setProfileCredentials(name, {
+          modelProvider: 'max',
+          providerCredentials: {
+            provider: 'max',
+            accessToken: oauth.accessToken,
+            refreshToken: oauth.refreshToken,
+            expiresAt,
+          },
+        }),
+      );
+
+      // Cleanup temp dirs
+      try { fs.rmSync(home, { recursive: true, force: true }); } catch { /* best-effort */ }
+      try { fs.rmSync(cwd, { recursive: true, force: true }); } catch { /* best-effort */ }
+
+      console.log(chalk.green(`\nProfile "${name}" is now authenticated with Claude MAX/PRO.`));
     });
 
   profile
