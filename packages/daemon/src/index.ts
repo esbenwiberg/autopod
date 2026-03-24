@@ -305,6 +305,25 @@ if (aciContainerManager) {
   });
 }
 
+// On restart, local Docker sessions lose their stream handles and become orphaned.
+// Kill any that are still in a non-terminal state so they don't appear stuck.
+{
+  const orphanStatuses = ['running', 'provisioning', 'queued', 'awaiting_input', 'validating', 'paused', 'killing'] as const;
+  for (const status of orphanStatuses) {
+    const sessions = sessionRepo.list({ status });
+    const localSessions = sessions.filter((s) => s.executionTarget === 'local');
+    for (const session of localSessions) {
+      logger.warn({ sessionId: session.id, status }, 'Orphaned local session on restart — marking killed');
+      try {
+        await sessionManager.killSession(session.id);
+      } catch (err) {
+        // Best effort — may already be in a terminal state
+        logger.debug({ err, sessionId: session.id }, 'Could not kill orphaned session');
+      }
+    }
+  }
+}
+
 // Graceful shutdown
 async function shutdown(signal: string) {
   logger.info({ signal }, 'Shutting down...');
