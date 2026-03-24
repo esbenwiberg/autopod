@@ -21,6 +21,14 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
     });
   });
 
+  // GET /sessions/stats — session counts grouped by status
+  app.get('/sessions/stats', async (request) => {
+    const query = request.query as { profile?: string };
+    return sessionManager.getSessionStats({
+      profileName: query.profile,
+    });
+  });
+
   // GET /sessions/:sessionId — get session
   app.get('/sessions/:sessionId', async (request) => {
     const { sessionId } = request.params as { sessionId: string };

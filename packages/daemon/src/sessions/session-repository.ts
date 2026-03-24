@@ -47,6 +47,11 @@ export interface SessionUpdates {
   claudeSessionId?: string | null;
 }
 
+export interface SessionStats {
+  total: number;
+  byStatus: Record<SessionStatus, number>;
+}
+
 export interface SessionRepository {
   insert(session: NewSession): void;
   getOrThrow(id: string): Session;
@@ -54,6 +59,7 @@ export interface SessionRepository {
   delete(id: string): void;
   list(filters?: SessionFilters): Session[];
   countByStatusAndProfile(status: SessionStatus, profileName: string): number;
+  getStats(filters?: { profileName?: string }): SessionStats;
 }
 
 /** Map a SQLite row (snake_case) to a Session (camelCase). */
@@ -254,6 +260,32 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         )
         .get({ status, profileName }) as { count: number };
       return row.count;
+    },
+
+    getStats(filters?: { profileName?: string }): SessionStats {
+      const where =
+        filters?.profileName !== undefined ? 'WHERE profile_name = @profileName' : '';
+      const params = filters?.profileName !== undefined ? { profileName: filters.profileName } : {};
+
+      const rows = db
+        .prepare(`SELECT status, COUNT(*) as count FROM sessions ${where} GROUP BY status`)
+        .all(params) as { status: SessionStatus; count: number }[];
+
+      const allStatuses: SessionStatus[] = [
+        'queued', 'provisioning', 'running', 'awaiting_input', 'validating',
+        'validated', 'failed', 'approved', 'merging', 'complete', 'paused', 'killing', 'killed',
+      ];
+      const byStatus = Object.fromEntries(
+        allStatuses.map((s) => [s, 0]),
+      ) as Record<SessionStatus, number>;
+
+      let total = 0;
+      for (const row of rows) {
+        byStatus[row.status] = row.count;
+        total += row.count;
+      }
+
+      return { total, byStatus };
     },
   };
 }

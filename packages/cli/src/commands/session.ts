@@ -61,6 +61,31 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
       },
     );
 
+  // ap stats
+  program
+    .command('stats')
+    .description('Show session counts grouped by status')
+    .option('-p, --profile <profile>', 'Filter by profile')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { profile?: string; json?: boolean }) => {
+      const client = getClient();
+      const stats = await withSpinner('Fetching stats...', () =>
+        client.getSessionStats({ profile: opts.profile }),
+      );
+
+      withJsonOutput(opts, stats, (data) => {
+        console.log(chalk.bold(`Total: ${data.total}`));
+        const entries = Object.entries(data.byStatus).filter(([, count]) => count > 0);
+        if (entries.length === 0) {
+          console.log(chalk.dim('No sessions.'));
+          return;
+        }
+        for (const [status, count] of entries) {
+          console.log(`  ${formatStatus(status as any)}  ${count}`);
+        }
+      });
+    });
+
   // ap ls
   program
     .command('ls')

@@ -8,6 +8,7 @@ export { createSessionQueue, type SessionQueue } from './session-queue.js';
 export {
   createSessionRepository,
   type SessionRepository,
+  type SessionStats,
   type NewSession,
   type SessionUpdates,
   type SessionFilters,

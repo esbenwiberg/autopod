@@ -71,6 +71,7 @@ export class DockerContainerManager implements ContainerManager {
       Env: env,
       Cmd: ['sleep', 'infinity'],
       WorkingDir: '/workspace',
+      User: 'node',
       ExposedPorts: exposedPorts,
       HostConfig: hostConfig,
     });

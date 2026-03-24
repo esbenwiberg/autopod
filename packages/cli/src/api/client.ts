@@ -43,6 +43,15 @@ export class AutopodClient {
     return this.request<Session[]>('GET', `/sessions${qs ? `?${qs}` : ''}`);
   }
 
+  async getSessionStats(filters?: {
+    profile?: string;
+  }): Promise<{ total: number; byStatus: Record<string, number> }> {
+    const params = new URLSearchParams();
+    if (filters?.profile) params.set('profile', filters.profile);
+    const qs = params.toString();
+    return this.request('GET', `/sessions/stats${qs ? `?${qs}` : ''}`);
+  }
+
   async getSession(id: string): Promise<Session> {
     return this.request<Session>('GET', `/sessions/${id}`);
   }

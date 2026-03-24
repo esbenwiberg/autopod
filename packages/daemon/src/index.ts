@@ -220,7 +220,7 @@ sessionManager = createSessionManager({
   validationEngine,
   networkManager,
   enqueueSession: (id) => sessionQueue.enqueue(id),
-  mcpBaseUrl: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`,
+  mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? (HOST === '0.0.0.0' ? 'host.docker.internal' : HOST)}:${PORT}`,
   daemonConfig: {
     mcpServers: JSON.parse(process.env.DAEMON_MCP_SERVERS ?? '[]'),
     claudeMdSections: JSON.parse(process.env.DAEMON_CLAUDE_MD_SECTIONS ?? '[]'),

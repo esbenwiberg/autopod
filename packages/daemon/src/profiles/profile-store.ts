@@ -217,7 +217,7 @@ export function createProfileStore(db: Database.Database, cipher?: CredentialsCi
         unknown
       >[];
       return rows.map((row) => {
-        const profile = rowToProfile(row);
+        const profile = rowToProfile(row, decryptCreds);
         return profile.extends ? resolve(profile) : profile;
       });
     },

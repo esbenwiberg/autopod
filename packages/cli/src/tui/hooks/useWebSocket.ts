@@ -90,10 +90,8 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         // Subscribe to all events so the server actually pushes them to us
         ws.send(JSON.stringify({ type: 'subscribe_all' }));
 
-        // Replay missed events on reconnect (lastEventIdRef > 0 means we've seen events before)
-        if (lastEventIdRef.current > 0) {
-          ws.send(JSON.stringify({ type: 'replay', lastEventId: lastEventIdRef.current }));
-        }
+        // Replay events since last seen — on first connect lastEventId is 0 so we get all history
+        ws.send(JSON.stringify({ type: 'replay', lastEventId: lastEventIdRef.current }));
 
         onConnectRef.current();
       });

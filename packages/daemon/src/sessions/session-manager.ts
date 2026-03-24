@@ -29,7 +29,7 @@ import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { resolveSections } from './section-resolver.js';
-import type { SessionRepository, SessionUpdates } from './session-repository.js';
+import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
 import {
   canKill,
   canNudge,
@@ -102,6 +102,7 @@ export interface SessionManager {
     status?: SessionStatus;
     userId?: string;
   }): Session[];
+  getSessionStats(filters?: { profileName?: string }): SessionStats;
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
@@ -213,11 +214,21 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       let session = sessionRepo.getOrThrow(sessionId);
       const profile = profileStore.get(session.profileName);
 
+      function emitStatus(message: string): void {
+        eventBus.emit({
+          type: 'session.agent_activity',
+          timestamp: new Date().toISOString(),
+          sessionId,
+          event: { type: 'status', timestamp: new Date().toISOString(), message },
+        });
+      }
+
       try {
         // Transition to provisioning
         session = transition(session, 'provisioning', { startedAt: new Date().toISOString() });
 
         // Create worktree
+        emitStatus('Creating worktree…');
         const worktreePath = await worktreeManager.create({
           repoUrl: profile.repoUrl,
           branch: session.branch,
@@ -252,6 +263,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const hostPort = allocateHostPort();
 
         // Spawn container with port mapping so daemon + user can reach the app
+        emitStatus(`Spawning container (${profile.template})…`);
         const containerId = await containerManager.spawn({
           image: profile.template,
           sessionId,
@@ -291,9 +303,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           : [];
 
         // Resolve dynamic sections (fetches URLs, respects token budgets)
+        if (mergedSections.some((s) => s.fetch)) {
+          emitStatus('Fetching dynamic CLAUDE.md sections…');
+        }
         const resolvedSections = await resolveSections(mergedSections, logger);
 
         // Generate CLAUDE.md and write to container
+        emitStatus('Writing CLAUDE.md to container…');
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
         const claudeMd = generateClaudeMd(profile, session, mcpUrl, {
           injectedSections: resolvedSections,
@@ -309,6 +325,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         ];
 
         // Build provider-aware env (API keys, OAuth creds, Foundry config)
+        emitStatus('Building provider credentials…');
         const providerResult = await buildProviderEnv(profile, sessionId, logger);
         const secretEnv: Record<string, string> = {
           SESSION_ID: sessionId,
@@ -326,6 +343,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         // Start the agent inside the container
+        emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(session.runtime);
         const events = runtime.spawn({
           sessionId,
@@ -881,6 +899,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     listSessions(filters?) {
       return sessionRepo.list(filters);
+    },
+
+    getSessionStats(filters?) {
+      return sessionRepo.getStats(filters);
     },
   };
 }
