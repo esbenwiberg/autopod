@@ -51,6 +51,12 @@ describe('ActionEngine', () => {
   let auditRepo: ReturnType<typeof createMockAuditRepo>;
 
   beforeEach(() => {
+    // Mock fetch so tests that hit real HTTP handlers fail fast instead of hanging
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('Network disabled in tests')),
+    );
+
     registry = createMockRegistry();
     auditRepo = createMockAuditRepo();
     engine = createActionEngine({

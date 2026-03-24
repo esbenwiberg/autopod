@@ -27,7 +27,7 @@ export async function buildCorrectionContext(
       const result = await containerManager.execInContainer(
         session.containerId,
         ['git', 'diff', 'HEAD~1'],
-        { cwd: '/workspace' },
+        { cwd: session.worktreePath },
       );
       previousDiff = result.stdout;
     } catch {
