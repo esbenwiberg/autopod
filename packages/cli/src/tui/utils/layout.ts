@@ -14,14 +14,15 @@ const FIXED_STATUS = 14;
 const GAPS = 2 + 4 * 2;
 const FIXED_TOTAL = FIXED_ID + FIXED_PROFILE + FIXED_MODEL + FIXED_STATUS + GAPS;
 const MIN_TASK = 15;
+const MAX_TASK = 60;
 
 /**
  * Calculate column widths for the session table based on terminal width.
- * Task column gets the remainder after fixed columns are allocated.
+ * Task column gets the remainder after fixed columns are allocated, capped at MAX_TASK.
  */
 export function calculateColumns(terminalWidth: number): ColumnWidths {
   const remainder = terminalWidth - FIXED_TOTAL;
-  const taskWidth = Math.max(MIN_TASK, remainder);
+  const taskWidth = Math.min(MAX_TASK, Math.max(MIN_TASK, remainder));
 
   return {
     id: FIXED_ID,

@@ -9,8 +9,8 @@ describe('calculateColumns', () => {
     expect(cols.model).toBe(7);
     expect(cols.status).toBe(14);
     // Fixed total: 5+12+7+14 + 2(prefix) + 4*2(gaps) = 48
-    // Task = 120 - 48 = 72
-    expect(cols.task).toBe(72);
+    // Task = min(60, 120 - 48) = 60
+    expect(cols.task).toBe(60);
   });
 
   it('calculates columns for a standard 80-wide terminal', () => {
@@ -36,8 +36,8 @@ describe('calculateColumns', () => {
     }
   });
 
-  it('handles very large terminal widths', () => {
+  it('caps task width at 60 for very large terminal widths', () => {
     const cols = calculateColumns(300);
-    expect(cols.task).toBe(300 - 48);
+    expect(cols.task).toBe(60);
   });
 });
