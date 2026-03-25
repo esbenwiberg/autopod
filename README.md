@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="assets/banner.png" alt="autopod — Spec in. Validated software out." width="700">
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/Node-22-green?logo=node.js&logoColor=white" alt="Node 22">
   <img src="https://img.shields.io/badge/Fastify-5-black?logo=fastify&logoColor=white" alt="Fastify">
@@ -6,11 +10,17 @@
   <img src="https://img.shields.io/badge/Azure-Container%20Apps-0078D4?logo=microsoft-azure&logoColor=white" alt="Azure">
 </p>
 
-# autopod
+<p align="center">
+  <b>Autonomous AI agent orchestration. Containerized. Validated. Human-approved.</b>
+</p>
 
-**Spec in, validated software out.**
+<p align="center">
+  <a href="#getting-started">Getting Started</a> · <a href="#how-it-works">How It Works</a> · <a href="#cli-reference">CLI Reference</a> · <a href="#profile-deep-dive">Profile Config</a> · <a href="#deployment-azure">Deploy</a>
+</p>
 
-autopod is an orchestration platform for AI coding agents. You describe a task, autopod spins up an isolated container, lets the agent work, validates the output in a real browser, and only bothers you when there's something worth reviewing. Run dozens of agents in parallel across repos, models, and runtimes — without babysitting a single one.
+---
+
+You describe a task. autopod spins up an isolated container, lets an AI agent work, validates the output in a real browser, and only bothers you when there's something worth reviewing. Run dozens of agents in parallel — across repos, models, and runtimes — without babysitting a single one.
 
 ```
 $ ap run my-app "Add a dark mode toggle to the settings page" --model opus
@@ -28,9 +38,9 @@ $ ap run my-app "Add a dark mode toggle to the settings page" --model opus
 
 AI coding agents are powerful, but running them is still a pain. You set up the environment, watch the agent work, manually check the output, restart when it goes sideways, and pray it didn't break something unrelated.
 
-autopod flips the model: **agents are untrusted by default.** They run in locked-down containers. When they say they're done, autopod doesn't take their word for it — it builds the project, starts it up, opens a real browser, takes screenshots, and asks a separate AI reviewer: *"Does this actually look right?"*
+autopod flips the model: **agents are untrusted by default.** They run in locked-down containers with network isolation and firewall rules. When they say they're done, autopod doesn't take their word for it — it builds the project, runs your test suite, starts it up, opens a real browser, takes screenshots, and asks a separate AI reviewer: *"Does this actually look right?"*
 
-If it doesn't pass, the agent gets feedback and tries again. If it does pass, you get a notification with screenshots and a diff. One command to approve, and it's merged.
+If it doesn't pass, the agent gets structured feedback and tries again. If it does, you get a notification with screenshots and a diff. One command to approve, and it's merged.
 
 **The human stays in the loop. The human just doesn't have to do the boring part.**
 
@@ -39,39 +49,38 @@ If it doesn't pass, the agent gets feedback and tries again. If it does pass, yo
 ## How It Works
 
 ```
-                    +-----------+
-                    |  ap run   |  You describe the task
-                    +-----+-----+
-                          |
-                    +-----v-----+
-                    |  Daemon    |  Orchestrates everything
-                    +-----+-----+
-                          |
-              +-----------+-----------+
-              |                       |
-        +-----v-----+          +-----v-----+
-        | Container  |          | Container  |  Isolated pods per task
-        | (Agent)    |          | (Agent)    |
-        +-----+-----+          +-----+-----+
-              |                       |
-        +-----v-----+          +-----v-----+
-        | Validate   |          | Validate   |  Build, run, screenshot
-        | (Playwright)|         | (Playwright)|
-        +-----+-----+          +-----+-----+
-              |                       |
-        +-----v-----+          +-----v-----+
-        | AI Review  |          | AI Review  |  "Does this match the task?"
-        +-----+-----+          +-----+-----+
-              |                       |
-              +-----------+-----------+
-                          |
-                    +-----v-----+
-                    | Notify    |  Screenshots + diff in Teams/CLI
-                    +-----+-----+
-                          |
-                    +-----v-----+
-                    | ap approve|  One command to merge
-                    +-----------+
+                    ┌───────────┐
+                    │  ap run   │  You describe the task
+                    └─────┬─────┘
+                          │
+                    ┌─────▼─────┐
+                    │  Daemon   │  Orchestrates everything
+                    └─────┬─────┘
+                          │
+              ┌───────────┼───────────┐
+              │           │           │
+        ┌─────▼─────┐ ┌──▼──┐ ┌─────▼─────┐
+        │ Container  │ │ ... │ │ Container  │  Isolated pods per task
+        │ (Agent)    │ │     │ │ (Agent)    │
+        └─────┬─────┘ └──┬──┘ └─────┬─────┘
+              │           │           │
+        ┌─────▼─────┐    │     ┌─────▼─────┐
+        │ Validate  │    │     │ Validate  │  Build → Test → Run → Screenshot
+        └─────┬─────┘    │     └─────┬─────┘
+              │           │           │
+        ┌─────▼─────┐    │     ┌─────▼─────┐
+        │ AI Review │    │     │ AI Review │  "Does this match the task?"
+        └─────┬─────┘    │     └─────┬─────┘
+              │           │           │
+              └───────────┼───────────┘
+                          │
+                    ┌─────▼─────┐
+                    │  Notify   │  Screenshots + diff → Teams / CLI
+                    └─────┬─────┘
+                          │
+                    ┌─────▼─────┐
+                    │ ap approve│  One command to merge
+                    └───────────┘
 ```
 
 ### Session Lifecycle
@@ -79,43 +88,53 @@ If it doesn't pass, the agent gets feedback and tries again. If it does pass, yo
 Every task follows a state machine:
 
 ```
-queued --> provisioning --> running --> validating --> validated --> approved --> merging --> complete
-                              |            |
-                              |            +--> failed (retry with feedback, up to N attempts)
-                              |
-                              +--> paused (operator paused via ap pause / p key)
-                              |       |
-                              |       +--> running (resumed via ap tell / nudge)
-                              |
-                              +--> awaiting_input (agent escalated — needs help)
+queued → provisioning → running → validating → validated → approved → merging → complete
+                           │            │
+                           │            └─→ failed (retry with feedback, up to N attempts)
+                           │
+                           ├─→ paused (operator paused via ap pause / p key)
+                           │      │
+                           │      └─→ running (resumed via ap tell / nudge)
+                           │
+                           └─→ awaiting_input (agent escalated — needs help)
 ```
 
-- **Escalation** — Agents can ask a human, ask a cheaper AI model for a second opinion, or declare a blocker. The session pauses until someone responds via `ap tell`.
-- **Pause / Nudge** — Operators can pause a running agent (`ap pause`) and send nudge messages (`ap nudge`) without killing the session. The agent picks up nudges on its next `check_messages` call.
-- **Plan & Progress** — Agents report their implementation plan and phase progress in real time via MCP tools (`report_plan`, `report_progress`). Visible in the TUI dashboard.
-- **Correction loops** — If validation fails, the agent gets structured feedback (console errors, screenshot diffs, reviewer notes) and retries automatically. Up to 3 attempts by default, configurable per profile.
-- **Self-validation** — Two-phase lifecycle inside the container: (1) agent works, (2) Playwright builds + runs + screenshots, then an AI reviewer judges the result against the original task.
+### Validation Pipeline
+
+Validation is a 5-phase pipeline — each phase must pass before the next runs:
+
+| Phase | What happens | Configurable via |
+|-------|-------------|------------------|
+| **1. Build** | Runs your build command inside the container | `profile.build` |
+| **2. Test** | Runs your test suite (skipped if not configured) | `profile.testCommand` |
+| **3. Health check** | Starts the app and waits for HTTP 200 | `profile.start`, `profile.health` |
+| **4. Page screenshots** | Playwright visits configured pages, checks assertions | `profile.validationPages` |
+| **5. AI task review** | A separate model reviews the diff against the original task | `profile.escalation.askAi.model` |
+
+If any phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, reviewer notes) and retries automatically.
 
 ---
 
 ## Features
 
-- **Multi-agent parallelism** — Run 10, 20, 50 sessions across repos simultaneously
-- **Self-validation** — Playwright smoke tests + AI task review before any human sees it
-- **Multi-provider model auth** — Anthropic API keys, Claude MAX/PRO (OAuth), or Azure Foundry — per profile
-- **Model-agnostic** — Claude, Codex, or any runtime that speaks the protocol
-- **Escalation via MCP** — Agents can pause and ask for help (human or AI)
-- **Pause & nudge** — Pause a running agent, send mid-flight instructions, resume without losing state
-- **Agent plan & progress** — Agents report their implementation plan and phase progress in real time
-- **Action control plane** — Let agents read GitHub issues, Azure DevOps work items, and app logs — with PII stripping, prompt-injection quarantine, and field whitelisting
-- **Profile system** — Pre-configured templates per repo with inheritance
-- **Image warming** — Pre-bake dependencies into Docker images for fast spin-up
-- **Real-time TUI dashboard** — `ap watch` with progress bars, plan panel, metrics, and keyboard-driven control
-- **Teams notifications** — Rich Adaptive Cards with inline screenshots
-- **Git-native** — Every session gets its own branch, PR created on approve
-- **Correction loops** — Reject with feedback, agent retries from where it left off
-- **On-demand previews** — `ap open <id>` spins up a live preview of any session's work
-- **Session injection** — Plug in external MCP servers and CLAUDE.md content at daemon or profile level (e.g., Prism codebase context)
+<table>
+<tr><td>🔀</td><td><b>Multi-agent parallelism</b></td><td>Run 10, 20, 50 sessions across repos simultaneously</td></tr>
+<tr><td>✅</td><td><b>5-phase validation</b></td><td>Build → Test → Health check → Screenshots → AI review</td></tr>
+<tr><td>🤖</td><td><b>Multi-runtime</b></td><td>Claude, Codex, or GitHub Copilot — swap with a flag</td></tr>
+<tr><td>🔑</td><td><b>Multi-provider auth</b></td><td>Anthropic API, Claude MAX/PRO (OAuth), Azure Foundry, or Copilot tokens</td></tr>
+<tr><td>🆘</td><td><b>Escalation via MCP</b></td><td>Agents can pause and ask for help (human or AI)</td></tr>
+<tr><td>⏸️</td><td><b>Pause & nudge</b></td><td>Pause a running agent, send mid-flight instructions, resume without losing state</td></tr>
+<tr><td>📋</td><td><b>Agent plan & progress</b></td><td>Agents report their implementation plan and phase progress in real time</td></tr>
+<tr><td>🛡️</td><td><b>Action control plane</b></td><td>Read GitHub issues, ADO work items, and app logs — with PII stripping and prompt-injection quarantine</td></tr>
+<tr><td>📦</td><td><b>Profile system</b></td><td>Pre-configured templates per repo with inheritance</td></tr>
+<tr><td>🐳</td><td><b>Image warming</b></td><td>Pre-bake dependencies into Docker images for fast spin-up</td></tr>
+<tr><td>📊</td><td><b>Real-time TUI</b></td><td><code>ap watch</code> — progress bars, plan panel, metrics, keyboard-driven control</td></tr>
+<tr><td>💬</td><td><b>Teams notifications</b></td><td>Rich Adaptive Cards with inline screenshots</td></tr>
+<tr><td>🔄</td><td><b>Correction loops</b></td><td>Reject with feedback, agent retries from where it left off</td></tr>
+<tr><td>🌐</td><td><b>On-demand previews</b></td><td><code>ap open &lt;id&gt;</code> spins up a live preview of any session's work</td></tr>
+<tr><td>🔌</td><td><b>Session injection</b></td><td>Plug in external MCP servers and CLAUDE.md content at daemon or profile level</td></tr>
+<tr><td>🏗️</td><td><b>Git-native PRs</b></td><td>GitHub and Azure DevOps — every session gets its own branch</td></tr>
+</table>
 
 ---
 
@@ -202,10 +221,20 @@ ap profile create my-app \
   --build "npm ci && npm run build" \
   --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
   --health "/" \
+  --test "npm test" \
   --model opus
 ```
 
-Available templates: `node22`, `node22-pw` (with Playwright/Chromium), `dotnet9`, `python312`, `custom`.
+Available templates:
+
+| Template | Stack | Includes |
+|----------|-------|----------|
+| `node22` | Node.js 22 | npm/pnpm/yarn |
+| `node22-pw` | Node.js 22 + Playwright | Chromium for browser validation |
+| `dotnet9` | .NET 9 SDK | dotnet CLI |
+| `dotnet10` | .NET 10 + Node.js 22 | Mixed stacks (dotnet + npm/pnpm/yarn) |
+| `python312` | Python 3.12 | pip/poetry |
+| `custom` | Bring your own | Custom Dockerfile |
 
 ### 7. Run your first session
 
@@ -265,6 +294,7 @@ ap profile show <name>       # Show profile details
 ap profile edit <name>       # Open in $EDITOR
 ap profile delete <name>     # Delete a profile
 ap profile warm <name>       # Pre-bake deps into Docker image (faster spin-up)
+ap profile auth-copilot <n>  # Interactive Copilot OAuth setup
 ```
 
 ### Sessions
@@ -274,6 +304,7 @@ ap profile warm <name>       # Pre-bake deps into Docker image (faster spin-up)
 ap run <profile> "<task>"                   # Start a session
 ap run <profile> "<task>" --model opus      # Override model
 ap run <profile> "<task>" --runtime codex   # Use Codex runtime
+ap run <profile> "<task>" --runtime copilot # Use Copilot runtime
 ap run <profile> "<task>" --branch feat/x   # Custom branch name
 ap run <profile> "<task>" --no-validate     # Skip auto-validation
 
@@ -286,7 +317,7 @@ ap logs <id>                                # Stream agent activity
 ap logs <id> --build                        # Build/validation logs
 
 # Interact
-ap tell <id> "<message>"                    # Send message to agent (also resumes paused)
+ap tell <id> "<message>"                    # Send message (also resumes paused sessions)
 ap tell <id> --file instructions.md         # Message from file
 ap tell <id> --stdin                        # Pipe from stdin
 ap pause <id>                               # Pause a running session
@@ -316,13 +347,11 @@ ap kill --all-failed                        # Clean up all failures
 ap watch                     # Launch TUI dashboard
 ```
 
-Real-time session overview via WebSocket. The dashboard includes a **progress bar** (phase-aware coloring), **plan panel** (agent's declared implementation steps), and **metrics bar** (tool calls, file edits, lines changed, elapsed time).
-
-Keyboard shortcuts:
+Real-time session overview via WebSocket. Progress bars with phase-aware coloring, plan panel showing the agent's declared implementation steps, and a metrics bar tracking tool calls, file edits, lines changed, and elapsed time.
 
 | Key | Action |
 |-----|--------|
-| `Up/Down` | Navigate sessions |
+| `↑` `↓` | Navigate sessions |
 | `t` | Tell / resume (send message to agent) |
 | `p` | Pause running session |
 | `u` | Nudge (send async message) |
@@ -350,14 +379,33 @@ ap profile create my-app \
   --template node22-pw \
   --build "npm ci && npm run build" \
   --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
+  --test "npm test" \
   --health "/" \
   --health-timeout 30000 \
   --model opus \
   --runtime claude \
+  --pr-provider github \
   --max-validation-attempts 3 \
   --instructions "Use TypeScript. Prefer Tailwind CSS. Keep it accessible." \
   --extends frontend-base
 ```
+
+### PR providers
+
+autopod supports creating pull requests on both GitHub and Azure DevOps:
+
+```yaml
+# GitHub (default)
+prProvider: github
+
+# Azure DevOps
+prProvider: ado
+adoPat: <your-ado-personal-access-token>  # encrypted at rest
+```
+
+ADO supports both URL formats:
+- `https://dev.azure.com/{org}/{project}/_git/{repo}`
+- `https://{org}.visualstudio.com/{project}/_git/{repo}`
 
 ### Validation pages
 
@@ -380,6 +428,16 @@ validationPages:
 
 Assertion types: `exists`, `visible`, `text_contains`, `count`.
 
+### Test command
+
+Add automated test execution to the validation pipeline:
+
+```yaml
+testCommand: "npm test"
+```
+
+Tests run after the build phase and before the health check. If tests fail, the agent gets the stdout/stderr output as feedback and retries.
+
 ### Escalation settings
 
 Control how and when agents can ask for help:
@@ -389,11 +447,38 @@ escalation:
   askHuman: true                  # Allow agent to pause and ask human
   askAi:
     enabled: true                 # Allow agent to ask cheaper model
-    model: sonnet                 # Which model to consult
+    model: sonnet                 # Also used as the AI reviewer model in validation
     maxCalls: 5                   # Max AI-to-AI escalations per session
   autoPauseAfter: 3              # Auto-escalate after N consecutive failures
   humanResponseTimeout: 3600000  # 1 hour before auto-killing stalled session
 ```
+
+> **Note:** `escalation.askAi.model` does double duty — it's both the model agents consult during work *and* the model that reviews their output in the AI task review validation phase.
+
+### Multi-Provider Model Auth
+
+Profiles can authenticate with different AI providers:
+
+| Provider | Auth method | Use case |
+|----------|-------------|----------|
+| `anthropic` | API key (`ANTHROPIC_API_KEY`) | Default — direct Anthropic API |
+| `max` | OAuth (access + refresh tokens) | Claude MAX/PRO consumer subscriptions |
+| `foundry` | Managed identity + project config | Azure-hosted Foundry deployments |
+| `copilot` | GitHub token (OAuth / fine-grained PAT) | GitHub Copilot runtime |
+
+```yaml
+# Set on profile
+modelProvider: max          # anthropic | max | foundry | copilot
+
+# Foundry-specific
+foundryConfig:
+  baseUrl: "https://your-foundry.azure.com"
+  project: "my-project"
+```
+
+For **MAX/PRO**, the daemon handles OAuth token lifecycle automatically — pre-flight refresh before session start, post-session persistence of rotated tokens.
+
+For **Copilot**, use `ap profile auth-copilot <name>` for interactive OAuth setup. Supported token types: OAuth (`gho_`), fine-grained PAT (`github_pat_`), and GitHub App (`ghu_`). Classic PATs (`ghp_`) are not supported.
 
 ### Session Injection (MCP Servers & CLAUDE.md)
 
@@ -413,24 +498,19 @@ Profile entries override daemon entries with the same key (`name` for MCP server
 
 #### MCP servers
 
-Add external MCP servers that agents can call at runtime:
-
 ```yaml
 mcpServers:
   - name: prism
     url: "https://prism.internal/mcp"
     headers:
       Authorization: "Bearer ${PRISM_API_KEY}"
-    description: "Codebase context powered by Prism. Use these tools to understand the codebase before making changes."
+    description: "Codebase context powered by Prism."
     toolHints:
       - "Call get_file_context before modifying any file"
       - "Call get_related_files to find blast radius of your changes"
-      - "Call get_architecture_overview for system-level orientation"
 ```
 
 #### CLAUDE.md sections
-
-Inject content into the generated CLAUDE.md — either static or dynamically fetched at provisioning time:
 
 ```yaml
 claudeMdSections:
@@ -451,7 +531,7 @@ claudeMdSections:
 ```
 
 - **Priority** controls document order (lower = higher in CLAUDE.md, default: 50)
-- **Dynamic sections** are fetched via POST at provisioning time; if the fetch fails, the section falls back to static `content` (if set) or is silently skipped
+- **Dynamic sections** are fetched via POST at provisioning time; if the fetch fails, the section falls back to static `content` or is silently skipped
 - **maxTokens** limits dynamic content length (~4 chars/token heuristic)
 
 #### Daemon-level defaults
@@ -465,9 +545,7 @@ DAEMON_CLAUDE_MD_SECTIONS='[{"heading":"Company Rules","content":"...","priority
 
 ### Action Control Plane
 
-Agents often need context from external systems — GitHub issues, Azure DevOps work items, application logs. The action control plane lets agents call these APIs in a controlled, sandboxed way. The daemon validates, executes, and sanitizes responses before returning them.
-
-#### How it works
+Agents often need context from external systems — GitHub issues, Azure DevOps work items, application logs. The action control plane lets agents call these APIs in a controlled, sandboxed way.
 
 ```
 Agent calls MCP tool (e.g. read_issue)
@@ -492,8 +570,6 @@ Agent calls MCP tool (e.g. read_issue)
 
 #### Configuration
 
-Enable action groups and tune sanitization per profile:
-
 ```yaml
 actionPolicy:
   enabledGroups:
@@ -504,7 +580,7 @@ actionPolicy:
     preset: standard          # standard | strict | relaxed
   quarantine:
     enabled: true
-    threshold: 0.5            # injection score: ≥0.8 block, ≥0.5 warn, <0.5 pass
+    threshold: 0.5            # ≥0.8 block, ≥0.5 warn, <0.5 pass
   actionOverrides:
     - action: read_issue
       requiresApproval: false
@@ -513,47 +589,7 @@ actionPolicy:
         - "owner/repo2"
 ```
 
-#### MCP proxy
-
 Injected MCP servers are automatically proxied through the daemon. Auth headers are injected server-side, and responses pass through the same PII sanitization pipeline. Agents never see raw credentials or unsanitized data.
-
-### Multi-Provider Model Auth
-
-Profiles can authenticate with different AI providers — no more one-size-fits-all API key.
-
-| Provider | Auth method | Use case |
-|----------|-------------|----------|
-| `anthropic` | API key (`ANTHROPIC_API_KEY`) | Default — direct Anthropic API |
-| `max` | OAuth (access + refresh tokens) | Claude MAX/PRO consumer subscriptions |
-| `foundry` | Managed identity + project config | Azure-hosted Foundry deployments |
-
-#### Configuration
-
-Set the provider on your profile:
-
-```bash
-ap profile create my-app \
-  --repo owner/my-app \
-  --model-provider max \
-  # ... other options
-```
-
-Or in the profile YAML:
-
-```yaml
-modelProvider: max          # anthropic | max | foundry
-```
-
-For **MAX/PRO**, the daemon handles OAuth token lifecycle automatically — pre-flight refresh before session start, post-session persistence of rotated tokens.
-
-For **Foundry**, set the endpoint and project:
-
-```yaml
-modelProvider: foundry
-foundryConfig:
-  baseUrl: "https://your-foundry.azure.com"
-  project: "my-project"
-```
 
 ---
 
@@ -620,6 +656,9 @@ autopod/
     daemon/            # Fastify server, session orchestration, SQLite state
       src/actions/     #   Action control plane (handlers, registry, audit)
       src/providers/   #   Multi-provider model auth (env builder, credential refresh)
+      src/runtimes/    #   Runtime adapters (Claude, Codex, Copilot)
+      src/validation/  #   5-phase validation pipeline
+      src/worktrees/   #   Git worktree + PR management (GitHub, ADO)
     cli/               # Commander CLI + Ink TUI dashboard
     escalation-mcp/    # MCP server injected into agent containers (escalation + actions)
     validator/         # Playwright smoke tests + AI task review
@@ -643,8 +682,9 @@ npx pnpm run lint:fix         # Auto-fix
 ### Run tests for a single package
 
 ```bash
-npx pnpm --filter @autopod/cli exec npx vitest run
-npx pnpm --filter @autopod/daemon exec npx vitest run
+npx pnpm --filter @autopod/daemon test
+npx pnpm --filter @autopod/cli test
+npx pnpm --filter @autopod/shared test
 ```
 
 ### Tech stack
@@ -669,29 +709,59 @@ npx pnpm --filter @autopod/daemon exec npx vitest run
 
 ## FAQ
 
-**Can I use models other than Claude?**
-Yes. autopod supports multiple runtimes — set `--runtime codex` for OpenAI Codex, or implement a custom runtime adapter. The runtime interface is pluggable.
+<details>
+<summary><b>Can I use models other than Claude?</b></summary>
 
-**Do I need Azure?**
+Yes. autopod supports multiple runtimes — set `--runtime codex` for OpenAI Codex, `--runtime copilot` for GitHub Copilot, or implement a custom runtime adapter. The runtime interface is pluggable.
+</details>
+
+<details>
+<summary><b>Do I need Azure?</b></summary>
+
 For production, yes — autopod is built around Azure Container Apps, ACR, and Key Vault. For local development, Docker Compose is all you need.
+</details>
 
-**How much does it cost to run?**
+<details>
+<summary><b>How much does it cost to run?</b></summary>
+
 Agent pods are ephemeral — they spin up, do work, and die. You only pay for compute while agents are active. The daemon itself is lightweight (single container, SQLite). The main cost driver is AI API usage, not infrastructure.
+</details>
 
-**What happens if the agent gets stuck?**
-It can escalate via MCP tools: `ask_human` pauses and notifies you, `ask_ai` gets a second opinion from a cheaper model, `report_blocker` declares a hard stop. You can also proactively pause a session (`ap pause`) and nudge the agent with new instructions (`ap nudge`) without killing its work. If the agent exceeds configured limits without completing, the session fails and you're notified.
+<details>
+<summary><b>What happens if the agent gets stuck?</b></summary>
 
-**Can agents access external data (issues, logs, etc.)?**
-Yes — the action control plane gives agents read access to GitHub issues/PRs, Azure DevOps work items, and Azure application logs. All responses are PII-stripped and scanned for prompt injection before reaching the agent. Configure which action groups are enabled per profile via `actionPolicy`.
+It can escalate via MCP tools: `ask_human` pauses and notifies you, `ask_ai` gets a second opinion from a cheaper model, `report_blocker` declares a hard stop. You can also proactively pause a session (`ap pause`) and nudge the agent with new instructions (`ap nudge`) without killing its work.
+</details>
 
-**Do I need an Anthropic API key?**
-Not necessarily. autopod supports three model providers: direct Anthropic API key (`anthropic`), Claude MAX/PRO OAuth subscriptions (`max`), and Azure Foundry deployments (`foundry`). Set `modelProvider` on your profile.
+<details>
+<summary><b>Can agents access external data (issues, logs, etc.)?</b></summary>
 
-**Can I review before anything gets merged?**
+Yes — the action control plane gives agents read access to GitHub issues/PRs, Azure DevOps work items, and Azure application logs. All responses are PII-stripped and scanned for prompt injection before reaching the agent.
+</details>
+
+<details>
+<summary><b>Do I need an Anthropic API key?</b></summary>
+
+Not necessarily. autopod supports four model providers: Anthropic API key, Claude MAX/PRO OAuth, Azure Foundry, and GitHub Copilot tokens. Set `modelProvider` on your profile.
+</details>
+
+<details>
+<summary><b>Can I review before anything gets merged?</b></summary>
+
 Always. Nothing merges without an explicit `ap approve`. The `validated` state means "autopod thinks it's good" — but you always have the final say.
+</details>
 
-**Can I use this for non-web projects?**
-The validation layer (Playwright screenshots + AI review) is geared towards web apps. For non-web projects, use `--no-validate` to skip auto-validation and review diffs manually, or implement a custom validation engine.
+<details>
+<summary><b>Can I use this for non-web projects?</b></summary>
+
+The validation layer (Playwright screenshots + AI review) is geared towards web apps. For non-web projects, use `--no-validate` to skip auto-validation and review diffs manually, or configure `testCommand` to run your test suite as the primary validation.
+</details>
+
+<details>
+<summary><b>Can I use Azure DevOps instead of GitHub for PRs?</b></summary>
+
+Yes. Set `prProvider: ado` on your profile and provide an ADO personal access token. autopod supports both `dev.azure.com` and `visualstudio.com` URL formats.
+</details>
 
 ---
 
