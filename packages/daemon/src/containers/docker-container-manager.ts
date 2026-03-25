@@ -74,7 +74,7 @@ export class DockerContainerManager implements ContainerManager {
       Env: env,
       Cmd: ['sleep', 'infinity'],
       WorkingDir: '/workspace',
-      User: 'node',
+      User: 'autopod',
       ExposedPorts: exposedPorts,
       HostConfig: hostConfig,
     });
@@ -257,9 +257,13 @@ export class DockerContainerManager implements ContainerManager {
       stderrStream.destroy(err);
     });
 
-    // Resolve exit code once the stream closes and we can inspect the exec
+    // Resolve exit code once the stream closes and we can inspect the exec.
+    // Listen to 'end', 'error', and 'close' — destroy() only emits 'close'.
     const exitCode = new Promise<number>((resolve) => {
+      let resolved = false;
       const checkExit = async () => {
+        if (resolved) return;
+        resolved = true;
         try {
           const inspection = await exec.inspect();
           resolve(inspection.ExitCode ?? 1);
@@ -268,9 +272,11 @@ export class DockerContainerManager implements ContainerManager {
         }
       };
 
-      (muxStream as NodeJS.ReadableStream & { on: Function }).on('end', checkExit);
-      // If stream errors, also try to get exit code
-      (muxStream as NodeJS.ReadableStream & { on: Function }).on('error', checkExit);
+      const mux = muxStream as NodeJS.ReadableStream & { on: Function };
+      mux.on('end', checkExit);
+      mux.on('error', checkExit);
+      // destroy() emits 'close' but not 'end' — must handle this too
+      mux.on('close', checkExit);
     });
 
     const kill = async () => {

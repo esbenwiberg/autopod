@@ -5,7 +5,7 @@ import type { ContainerManager, StreamingExecResult } from '../interfaces/contai
 import { CopilotStreamParser } from './copilot-stream-parser.js';
 
 /** Directory inside the container where Copilot stores its config. */
-const COPILOT_HOME = '/root/.copilot';
+const COPILOT_HOME = '/home/node/.copilot';
 
 /**
  * GitHub Copilot CLI runtime adapter.
@@ -56,8 +56,9 @@ export class CopilotRuntime implements Runtime {
 
     this.handles.set(config.sessionId, handle);
 
-    // Emit stderr lines as non-fatal error events
+    // Emit stderr lines as non-fatal error events; also accumulate for exit error context
     const stderrEvents: AgentEvent[] = [];
+    const stderrChunks: string[] = [];
     handle.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8').trim();
       if (!text) return;
@@ -65,6 +66,7 @@ export class CopilotRuntime implements Runtime {
         { component: 'copilot-runtime', sessionId: config.sessionId, stderr: text.slice(0, 500) },
         'copilot stderr',
       );
+      stderrChunks.push(text);
       stderrEvents.push({
         type: 'error',
         timestamp: new Date().toISOString(),
@@ -89,10 +91,13 @@ export class CopilotRuntime implements Runtime {
 
     const exitCode = await handle.exitCode;
     if (exitCode !== 0) {
+      const stderrSummary = stderrChunks.length > 0
+        ? `: ${stderrChunks.join('\n').slice(-500)}`
+        : '';
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: `Copilot process exited with code ${exitCode}`,
+        message: `Copilot process exited with code ${exitCode}${stderrSummary}`,
         fatal: true,
       };
     }
@@ -153,7 +158,10 @@ export class CopilotRuntime implements Runtime {
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
-    return ['-p', config.task, '--model', config.model, '--allow-all', '--no-ask-user', '-s'];
+    const args = ['-p', config.task, '--allow-all', '--no-ask-user', '-s'];
+    const copilotModel = config.env['COPILOT_MODEL'];
+    if (copilotModel) args.push('--model', copilotModel);
+    return args;
   }
 
   private buildEnv(config: SpawnConfig): Record<string, string> {

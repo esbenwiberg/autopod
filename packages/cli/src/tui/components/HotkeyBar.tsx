@@ -45,6 +45,7 @@ function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean)
       contextual.push({ key: 'r', label: 'reject' });
       contextual.push({ key: 'd', label: 'diff' });
       if (hasPreviewUrl) contextual.push({ key: 'o', label: 'open' });
+      contextual.push({ key: 'x', label: 'kill' });
       break;
     case 'validating':
       contextual.push({ key: 'l', label: 'logs' });
@@ -64,6 +65,9 @@ function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean)
       break;
     case 'complete':
       contextual.push({ key: 'l', label: 'logs' });
+      contextual.push({ key: 'D', label: 'delete' });
+      break;
+    case 'killing':
       contextual.push({ key: 'D', label: 'delete' });
       break;
     default:

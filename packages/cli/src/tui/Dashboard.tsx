@@ -108,6 +108,7 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
       if (!currentSessionId) return;
       try {
         await client.sendMessage(currentSessionId, message);
+        showToast('Message sent', 'green');
       } catch {
         showToast('Failed to send message', 'red');
       }
@@ -297,7 +298,10 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         }
       },
       D: () => {
-        if (currentSession && ['killed', 'complete', 'failed'].includes(currentSession.status)) {
+        if (
+          currentSession &&
+          ['killed', 'complete', 'failed', 'killing'].includes(currentSession.status)
+        ) {
           setMode({ type: 'confirm_delete' });
         }
       },

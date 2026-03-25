@@ -43,6 +43,7 @@ describe('getBaseImage', () => {
     ['node22', 'autopod-node22:latest'],
     ['node22-pw', 'autopod-node22-pw:latest'],
     ['dotnet9', 'autopod-dotnet9:latest'],
+    ['dotnet10', 'autopod-dotnet10:latest'],
     ['python312', 'autopod-python312:latest'],
     ['custom', 'autopod-node22:latest'],
   ] as const)('maps %s → %s', (template, expected) => {
@@ -64,7 +65,25 @@ describe('getInstallCommand', () => {
   });
 
   it('detects dotnet', () => {
-    expect(getInstallCommand(mockProfile({ buildCommand: 'dotnet build' }))).toBe('dotnet restore');
+    expect(
+      getInstallCommand(mockProfile({ template: 'dotnet10', buildCommand: 'dotnet build' })),
+    ).toBe('dotnet restore');
+  });
+
+  it('detects mixed dotnet+npm', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({ template: 'dotnet10', buildCommand: 'dotnet build && npm run build' }),
+      ),
+    ).toBe('dotnet restore && npm ci');
+  });
+
+  it('detects mixed dotnet+pnpm', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({ template: 'dotnet10', buildCommand: 'dotnet build && pnpm run build' }),
+      ),
+    ).toContain('dotnet restore');
   });
 
   it('detects pip', () => {
@@ -99,13 +118,34 @@ describe('generateDockerfile', () => {
     expect(df).toContain('pnpm install --frozen-lockfile');
   });
 
-  it('generates Dockerfile for dotnet project', () => {
+  it('generates Dockerfile for dotnet9 project', () => {
     const df = generateDockerfile({
       profile: mockProfile({ template: 'dotnet9', buildCommand: 'dotnet build' }),
       gitCredentials: 'none',
     });
     expect(df).toContain('FROM autopod-dotnet9:latest');
     expect(df).toContain('dotnet restore');
+  });
+
+  it('generates Dockerfile for dotnet10 project', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({ template: 'dotnet10', buildCommand: 'dotnet build' }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('FROM autopod-dotnet10:latest');
+    expect(df).toContain('dotnet restore');
+  });
+
+  it('generates Dockerfile for dotnet10+npm project', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        template: 'dotnet10',
+        buildCommand: 'dotnet build && npm run build',
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('FROM autopod-dotnet10:latest');
+    expect(df).toContain('dotnet restore && npm ci');
   });
 
   it('generates Dockerfile for python project', () => {

@@ -5,7 +5,7 @@ import type { RuntimeType } from './runtime.js';
 
 export type ExecutionTarget = 'local' | 'aci';
 
-export type StackTemplate = 'node22' | 'node22-pw' | 'dotnet9' | 'python312' | 'custom';
+export type StackTemplate = 'node22' | 'node22-pw' | 'dotnet9' | 'dotnet10' | 'python312' | 'custom';
 
 export interface Profile {
   name: string;

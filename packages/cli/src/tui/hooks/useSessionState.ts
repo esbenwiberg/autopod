@@ -119,8 +119,10 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
   const handleEvent = useCallback((event: SystemEvent) => {
     switch (event.type) {
       case 'session.created': {
-        setSessions((prev) =>
-          sortSessions([
+        setSessions((prev) => {
+          // Deduplicate: refresh() may have already added this session via REST
+          if (prev.some((s) => s.id === event.session.id)) return prev;
+          return sortSessions([
             ...prev,
             {
               id: event.session.id,
@@ -153,8 +155,8 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
               progress: null,
               claudeSessionId: null,
             },
-          ]),
-        );
+          ]);
+        });
         break;
       }
       case 'session.status_changed': {

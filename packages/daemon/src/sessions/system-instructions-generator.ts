@@ -1,7 +1,7 @@
 import type { ActionDefinition, InjectedMcpServer, Profile, Session } from '@autopod/shared';
 import type { ResolvedSection } from './section-resolver.js';
 
-export interface ClaudeMdOptions {
+export interface SystemInstructionsOptions {
   /** Resolved (already fetched) content sections to inject */
   injectedSections?: ResolvedSection[];
   /** MCP servers beyond the built-in escalation server */
@@ -10,11 +10,11 @@ export interface ClaudeMdOptions {
   availableActions?: ActionDefinition[];
 }
 
-export function generateClaudeMd(
+export function generateSystemInstructions(
   profile: Profile,
   session: Session,
   mcpServerUrl: string,
-  options?: ClaudeMdOptions,
+  options?: SystemInstructionsOptions,
 ): string {
   const lines: string[] = [];
 

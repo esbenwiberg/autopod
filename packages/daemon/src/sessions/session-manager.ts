@@ -24,7 +24,7 @@ import type { ProfileStore } from '../profiles/index.js';
 import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
 import type { ProviderEnvResult } from '../providers/index.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
-import { generateClaudeMd } from './claude-md-generator.js';
+import { generateSystemInstructions } from './system-instructions-generator.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -42,9 +42,10 @@ import {
   validateTransition,
 } from './state-machine.js';
 
-/** Allocate a random host port in range 10000–59999 for container port mapping. */
+/** Allocate a random host port in range 10000–48999 for container port mapping.
+ * Capped at 48999 to avoid the Windows/Hyper-V dynamic port reservation range (49152+). */
 function allocateHostPort(): number {
-  return 10_000 + Math.floor(Math.random() * 50_000);
+  return 10_000 + Math.floor(Math.random() * 39_000);
 }
 
 /** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
@@ -321,15 +322,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
         const resolvedSections = await resolveSections(mergedSections, logger);
 
-        // Generate CLAUDE.md and write to container
-        emitStatus('Writing CLAUDE.md to container…');
+        // Generate system instructions and deliver based on runtime
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
-        const claudeMd = generateClaudeMd(profile, session, mcpUrl, {
+        const systemInstructions = generateSystemInstructions(profile, session, mcpUrl, {
           injectedSections: resolvedSections,
           injectedMcpServers: proxiedMcpServers,
           availableActions,
         });
-        await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', claudeMd);
+
+        // Claude reads CLAUDE.md from the workspace; Copilot reads copilot-instructions.md
+        // (passed via customInstructions in SpawnConfig — written by the runtime)
+        if (session.runtime === 'claude') {
+          emitStatus('Writing CLAUDE.md to container…');
+          await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', systemInstructions);
+        }
 
         // Build MCP server list for runtime
         const mcpServers = [
@@ -381,7 +387,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           model: session.model,
           workDir: '/workspace',
           containerId,
-          customInstructions: profile.customInstructions ?? undefined,
+          customInstructions: session.runtime === 'copilot' ? systemInstructions : undefined,
           env: secretEnv,
           mcpServers,
         });
@@ -437,6 +443,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         if (event.type === 'escalation') {
           const session = sessionRepo.getOrThrow(sessionId);
           if (session.status === 'running') {
+            const escalationPayload = event.payload.payload;
+            const escalationSummary =
+              'question' in escalationPayload
+                ? escalationPayload.question
+                : 'description' in escalationPayload
+                  ? escalationPayload.description
+                  : 'Agent requested input';
+            emitActivityStatus(
+              sessionId,
+              `Waiting for human input [${event.escalationType}]: ${escalationSummary}`,
+            );
             transition(session, 'awaiting_input', {
               pendingEscalation: event.payload,
               escalationCount: session.escalationCount + 1,
@@ -528,6 +545,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
 
+      emitActivityStatus(sessionId, 'Human replied — resuming agent…');
       transition(session, 'running', { pendingEscalation: null });
 
       // If the session was blocked on an ask_human MCP call, resolve the pending request.
@@ -542,6 +560,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
       }
 
+      emitActivityStatus(sessionId, 'Resuming agent with message…');
       const resumeEnv = await getResumeEnv(session);
       const runtime = runtimeRegistry.get(session.runtime);
       if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
@@ -552,6 +571,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     async approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
+      emitActivityStatus(sessionId, 'Approved — merging changes…');
       const s1 = transition(session, 'approved');
       const s2 = transition(s1, 'merging');
 
@@ -559,30 +579,37 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const approveProfile = profileStore.get(session.profileName);
       const prManager = prManagerFactory ? prManagerFactory(approveProfile) : null;
       if (session.prUrl && prManager && session.worktreePath) {
+        emitActivityStatus(sessionId, `Merging PR: ${session.prUrl}`);
         try {
           await prManager.mergePr({
             worktreePath: session.worktreePath,
             prUrl: session.prUrl,
             squash: options?.squash,
           });
+          emitActivityStatus(sessionId, 'PR merged successfully');
         } catch (err) {
           logger.error({ err, sessionId, prUrl: session.prUrl }, 'Failed to merge PR');
+          emitActivityStatus(sessionId, 'PR merge failed — session still completing');
           // Don't block completion — merge is best-effort
         }
       } else if (session.worktreePath) {
         // Fallback: push branch directly (no PR was created)
+        emitActivityStatus(sessionId, 'Pushing branch…');
         try {
           const profile = profileStore.get(session.profileName);
           await worktreeManager.mergeBranch({
             worktreePath: session.worktreePath,
             targetBranch: profile.defaultBranch,
           });
+          emitActivityStatus(sessionId, 'Branch pushed successfully');
         } catch (err) {
           logger.error({ err, sessionId }, 'Failed to push branch during approval');
+          emitActivityStatus(sessionId, 'Branch push failed — session still completing');
           // Don't block completion — branch push is best-effort
         }
       }
 
+      emitActivityStatus(sessionId, 'Session complete');
       transition(s2, 'complete', { completedAt: new Date().toISOString() });
 
       eventBus.emit({
@@ -609,6 +636,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     async rejectSession(sessionId: string, reason?: string): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
       const previousStatus = session.status as 'validated' | 'failed';
+
+      emitActivityStatus(
+        sessionId,
+        reason ? `Rejected by human: ${reason}` : 'Rejected by human — resuming agent…',
+      );
 
       // Reset validation attempts — human is giving a fresh chance
       sessionRepo.update(sessionId, {
@@ -653,11 +685,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
 
+      emitActivityStatus(sessionId, 'Pausing session…');
       // Suspend the runtime (kills stream but preserves session ID)
       const runtime = runtimeRegistry.get(session.runtime);
       await runtime.suspend(sessionId);
 
       transition(session, 'paused');
+      emitActivityStatus(sessionId, 'Session paused — use [t] tell or [u] nudge to resume');
       logger.info({ sessionId }, 'Session paused');
     },
 
@@ -672,6 +706,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       nudgeRepo.queue(sessionId, message);
+      emitActivityStatus(sessionId, `Nudge queued: ${message}`);
       logger.info({ sessionId }, 'Nudge message queued');
     },
 
@@ -685,34 +720,50 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
 
+      emitActivityStatus(sessionId, 'Killing session…');
       transition(session, 'killing');
 
-      // Kill container
-      if (session.containerId) {
-        try {
-          const cm = containerManagerFactory.get(session.executionTarget);
-          await cm.kill(session.containerId);
-        } catch (err) {
-          logger.warn({ err, sessionId }, 'Failed to kill container');
+      // Run cleanup with a timeout so a hung Docker stop or git cleanup
+      // can never leave the session stuck in 'killing' forever.
+      const KILL_TIMEOUT_MS = 30_000;
+      const cleanup = async () => {
+        // Kill container
+        if (session.containerId) {
+          try {
+            const cm = containerManagerFactory.get(session.executionTarget);
+            await cm.kill(session.containerId);
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to kill container');
+          }
         }
-      }
 
-      // Abort runtime
-      try {
-        const runtime = runtimeRegistry.get(session.runtime);
-        await runtime.abort(sessionId);
-      } catch (err) {
-        logger.warn({ err, sessionId }, 'Failed to abort runtime');
-      }
-
-      // Cleanup worktree
-      if (session.worktreePath) {
+        // Abort runtime
         try {
-          await worktreeManager.cleanup(session.worktreePath);
+          const runtime = runtimeRegistry.get(session.runtime);
+          await runtime.abort(sessionId);
         } catch (err) {
-          logger.warn({ err, sessionId }, 'Failed to cleanup worktree');
+          logger.warn({ err, sessionId }, 'Failed to abort runtime');
         }
-      }
+
+        // Cleanup worktree
+        if (session.worktreePath) {
+          try {
+            await worktreeManager.cleanup(session.worktreePath);
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to cleanup worktree');
+          }
+        }
+      };
+
+      await Promise.race([
+        cleanup(),
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            logger.warn({ sessionId }, 'Kill cleanup timed out — forcing killed');
+            resolve();
+          }, KILL_TIMEOUT_MS),
+        ),
+      ]);
 
       const killingSession = sessionRepo.getOrThrow(sessionId);
       transition(killingSession, 'killed', { completedAt: new Date().toISOString() });
@@ -844,6 +895,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           return;
         }
 
+        // Emit detailed validation result
+        const buildStatus = result.smoke.build.status;
+        const healthStatus = result.smoke.health.status;
+        const reviewStatus = result.taskReview?.status ?? 'skip';
+        emitActivityStatus(
+          sessionId,
+          `Validation ${result.overall} — build: ${buildStatus}, health: ${healthStatus}, review: ${reviewStatus}`,
+        );
+
         if (result.overall === 'pass') {
           emitActivityStatus(sessionId, `Validation passed (attempt ${attempt})`);
           // Push branch and create PR before transitioning to validated
@@ -899,6 +959,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               }));
 
             try {
+              emitActivityStatus(sessionId, 'Creating PR…');
               const s3 = sessionRepo.getOrThrow(sessionId);
               prUrl = await prManager.createPr({
                 worktreePath: s2.worktreePath,
@@ -914,8 +975,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 previewUrl: s2.previewUrl,
                 screenshots: screenshotRefs,
               });
+              if (prUrl) {
+                emitActivityStatus(sessionId, `PR created: ${prUrl}`);
+              }
             } catch (err) {
               logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');
+              emitActivityStatus(sessionId, 'PR creation failed — session still validated');
             }
           }
 
@@ -974,7 +1039,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     async deleteSession(sessionId: string): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
-      const deletable = isTerminalState(session.status) || session.status === 'failed';
+      const deletable =
+        isTerminalState(session.status) ||
+        session.status === 'failed' ||
+        session.status === 'killing';
       if (!deletable) {
         throw new AutopodError(
           `Cannot delete session ${sessionId} in status ${session.status} — kill it first`,

@@ -14,6 +14,10 @@ export const DEFAULT_ALLOWED_HOSTS = [
   'raw.githubusercontent.com',
   // Required for MAX/PRO OAuth token refresh (Claude Code refreshes internally)
   'platform.claude.com',
+  // Required for GitHub Copilot CLI
+  'api.enterprise.githubcopilot.com',
+  'copilot-proxy.githubusercontent.com',
+  'githubcopilot.com',
 ];
 
 interface DockerNetworkManagerOptions {

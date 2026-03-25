@@ -1,0 +1,31 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    iptables \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 (for npm frontend builds)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd --gid 1000 autopod && \
+    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod
+
+# Pre-warm NuGet cache with common restore patterns
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_NOLOGO=1
+
+# Working directory
+WORKDIR /workspace
+RUN chown autopod:autopod /workspace
+
+USER autopod
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-3000}/health || exit 1

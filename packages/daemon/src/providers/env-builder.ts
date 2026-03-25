@@ -128,8 +128,11 @@ function buildCopilotEnv(profile: Profile): ProviderEnvResult {
     );
   }
 
+  const env: Record<string, string> = { COPILOT_GITHUB_TOKEN: creds.token };
+  if (creds.model) env.COPILOT_MODEL = creds.model;
+
   return {
-    env: { COPILOT_GITHUB_TOKEN: creds.token },
+    env,
     containerFiles: [],
     requiresPostExecPersistence: false,
   };

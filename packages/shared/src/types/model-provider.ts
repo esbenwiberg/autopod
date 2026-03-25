@@ -68,6 +68,8 @@ export interface CopilotCredentials {
   provider: 'copilot';
   /** GitHub OAuth or PAT token. Does not expire unless revoked. */
   token: string;
+  /** Copilot model ID (e.g. "claude-3.5-sonnet", "gpt-4o"). Omits --model flag if not set. */
+  model?: string;
 }
 
 export type ProviderCredentials =

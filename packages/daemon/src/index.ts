@@ -355,7 +355,15 @@ if (aciContainerManager) {
         'Orphaned local session on restart — marking killed',
       );
       try {
-        await sessionManager.killSession(session.id);
+        if (status === 'killing') {
+          // Already mid-kill — no live container/stream to clean up, just finish the transition
+          sessionRepo.update(session.id, {
+            status: 'killed',
+            completedAt: new Date().toISOString(),
+          });
+        } else {
+          await sessionManager.killSession(session.id);
+        }
       } catch (err) {
         // Best effort — may already be in a terminal state
         logger.debug({ err, sessionId: session.id }, 'Could not kill orphaned session');

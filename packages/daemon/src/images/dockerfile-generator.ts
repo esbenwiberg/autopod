@@ -9,6 +9,7 @@ const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
   node22: 'autopod-node22:latest',
   'node22-pw': 'autopod-node22-pw:latest',
   dotnet9: 'autopod-dotnet9:latest',
+  dotnet10: 'autopod-dotnet10:latest',
   python312: 'autopod-python312:latest',
   custom: 'autopod-node22:latest',
 };
@@ -73,16 +74,29 @@ export function getBaseImage(template: StackTemplate): string {
 }
 
 export function getInstallCommand(profile: Profile): string {
-  if (profile.buildCommand.includes('pnpm')) {
-    return 'corepack enable pnpm && pnpm install --frozen-lockfile';
-  }
-  if (profile.buildCommand.includes('yarn')) {
-    return 'corepack enable yarn && yarn install --frozen-lockfile';
-  }
-  if (profile.buildCommand.includes('dotnet')) {
+  const cmd = profile.buildCommand;
+  const isDotnet = profile.template === 'dotnet9' || profile.template === 'dotnet10';
+
+  if (isDotnet) {
+    // Mixed dotnet+npm: run both restores if the build command also invokes npm/pnpm/yarn
+    if (cmd.includes('pnpm')) {
+      return 'dotnet restore && corepack enable pnpm && pnpm install --frozen-lockfile';
+    }
+    if (cmd.includes('yarn')) {
+      return 'dotnet restore && corepack enable yarn && yarn install --frozen-lockfile';
+    }
+    if (cmd.includes('npm')) {
+      return 'dotnet restore && npm ci';
+    }
     return 'dotnet restore';
   }
-  if (profile.buildCommand.includes('pip')) {
+  if (cmd.includes('pnpm')) {
+    return 'corepack enable pnpm && pnpm install --frozen-lockfile';
+  }
+  if (cmd.includes('yarn')) {
+    return 'corepack enable yarn && yarn install --frozen-lockfile';
+  }
+  if (cmd.includes('pip')) {
     return 'pip install -r requirements.txt';
   }
   return 'npm ci';

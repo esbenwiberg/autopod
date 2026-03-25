@@ -1,6 +1,6 @@
 import type { Profile, Session } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { generateClaudeMd } from './claude-md-generator.js';
+import { generateSystemInstructions } from './system-instructions-generator.js';
 
 function makeProfile(overrides?: Partial<Profile>): Profile {
   return {
@@ -69,9 +69,9 @@ function makeSession(overrides?: Partial<Session>): Session {
   };
 }
 
-describe('generateClaudeMd', () => {
+describe('generateSystemInstructions', () => {
   it('includes session id, profile, and task', () => {
-    const md = generateClaudeMd(makeProfile(), makeSession(), 'http://localhost:8080/mcp/abc12345');
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/abc12345');
 
     expect(md).toContain('Session ID: abc12345');
     expect(md).toContain('Profile: test-profile');
@@ -79,7 +79,7 @@ describe('generateClaudeMd', () => {
   });
 
   it('includes MCP server URL', () => {
-    const md = generateClaudeMd(makeProfile(), makeSession(), 'http://localhost:8080/mcp/abc12345');
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/abc12345');
 
     expect(md).toContain('http://localhost:8080/mcp/abc12345');
     expect(md).toContain('ask_human');
@@ -88,7 +88,7 @@ describe('generateClaudeMd', () => {
   });
 
   it('includes build and run commands', () => {
-    const md = generateClaudeMd(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
 
     expect(md).toContain('`npm run build`');
     expect(md).toContain('`npm start`');
@@ -109,7 +109,7 @@ describe('generateClaudeMd', () => {
       ],
     });
 
-    const md = generateClaudeMd(profile, makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(profile, makeSession(), 'http://localhost:8080/mcp/x');
 
     expect(md).toContain('## Validation Pages');
     expect(md).toContain('- /dashboard');
@@ -119,7 +119,7 @@ describe('generateClaudeMd', () => {
   });
 
   it('omits validation pages section when empty', () => {
-    const md = generateClaudeMd(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
     expect(md).not.toContain('## Validation Pages');
   });
 
@@ -128,19 +128,19 @@ describe('generateClaudeMd', () => {
       customInstructions: 'Always use TypeScript strict mode.',
     });
 
-    const md = generateClaudeMd(profile, makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(profile, makeSession(), 'http://localhost:8080/mcp/x');
 
     expect(md).toContain('## Custom Instructions');
     expect(md).toContain('Always use TypeScript strict mode.');
   });
 
   it('omits custom instructions section when null', () => {
-    const md = generateClaudeMd(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
     expect(md).not.toContain('## Custom Instructions');
   });
 
   it('includes guidelines', () => {
-    const md = generateClaudeMd(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
 
     expect(md).toContain('## Guidelines');
     expect(md).toContain('Make small, focused commits');
