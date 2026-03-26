@@ -287,3 +287,20 @@ These are things that drifted from the original spec or emerged during briefs 01
 #### Debt to clean up in brief 06
 
 - **5 pre-existing test failures** — `copilot-runtime.test.ts` (4 failures: path expectations use `/root/` but container now uses `/home/node/`, and worktree cwd uses `/tmp/worktree/` but code uses `/workspace/`). `correction-context.test.ts` (1 failure: same `/workspace/` vs `/tmp/worktree/` cwd mismatch). These have been carried since brief 01. Fix the test expectations, not the production code.
+
+### Notes from Brief 06
+
+- **All 6 briefs complete** — The validation redesign spec is fully implemented.
+- **5 pre-existing test failures fixed** — `copilot-runtime.test.ts` (4): updated `/root/.copilot` → `/home/node/.copilot` and removed stale `--model` expectation (code conditionally adds it from `COPILOT_MODEL` env). `correction-context.test.ts` (1): updated cwd `/tmp/worktree/sess-1` → `/workspace`.
+- **`ValidationPage` alias removed** — Deprecated alias from brief 01 cleaned up. No consumers remained.
+- **648 tests pass, 0 failures** across all packages.
+
+#### What was built in the TUI
+
+- **`[w]` hotkey** — Opens `{daemonUrl}/sessions/{id}/report` in default browser. Visible on HotkeyBar when session has validation results (validated, failed, killed, complete states).
+- **Attempt navigation** — `[<]` `[>]` cycle through validation history fetched from `GET /sessions/:id/validations`. Header shows "Attempt 2/3 [<] [>] to navigate". Defaults to latest; resets when session selection changes.
+- **AC validation section** — Between smoke status and task review in DetailPanel. Shows "AC Check: pass/fail (X/Y passed)" with failed criteria listed with reasoning. Only shown when `acValidation` exists and status is not `skip`.
+- **Preview status** — DetailPanel shows "Preview: stopped (press [o] to launch)" when container exists but no previewUrl. Shows active URL when running.
+- **Context-aware `[o]`** — Launches preview via `POST /sessions/:id/preview` when container stopped, opens previewUrl when active, falls back to prUrl.
+- **Client API additions** — `getValidations(id)`, `startPreview(id)`, `stopPreview(id)` on `AutopodClient`.
+- **`daemonUrl` prop plumbed** — From App → Dashboard for constructing report URLs.
