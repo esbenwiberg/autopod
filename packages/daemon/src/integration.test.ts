@@ -419,6 +419,47 @@ describe('Integration', () => {
     });
   });
 
+  describe('Validation report', () => {
+    beforeEach(async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+    });
+
+    it('GET /sessions/:sessionId/report returns HTML', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'Build a widget' },
+      });
+      const sessionId = createRes.json().id;
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/sessions/${sessionId}/report`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/html');
+      expect(res.body).toContain('<!DOCTYPE html>');
+      expect(res.body).toContain('Build a widget');
+      expect(res.body).toContain(sessionId);
+    });
+
+    it('GET /sessions/:sessionId/report returns 404 for nonexistent session', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/sessions/nonexistent/report',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
   describe('Error handling', () => {
     it('returns 404 for nonexistent profile', async () => {
       const res = await app.inject({

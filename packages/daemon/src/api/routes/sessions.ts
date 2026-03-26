@@ -1,6 +1,7 @@
 import { createSessionRequestSchema, sendMessageSchema } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { SessionManager } from '../../sessions/index.js';
+import { generateValidationReport } from '../../validation/report-generator.js';
 
 export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManager): void {
   // POST /sessions — create a new session
@@ -47,6 +48,15 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
   app.get('/sessions/:sessionId/validations', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
     return sessionManager.getValidationHistory(sessionId);
+  });
+
+  // GET /sessions/:sessionId/report — HTML validation report
+  app.get('/sessions/:sessionId/report', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const session = sessionManager.getSession(sessionId);
+    const validations = sessionManager.getValidationHistory(sessionId);
+    const html = generateValidationReport(session, validations);
+    reply.type('text/html').send(html);
   });
 
   // POST /sessions/:sessionId/validate — trigger validation
