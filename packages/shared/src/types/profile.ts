@@ -54,6 +54,10 @@ export interface Profile {
   prProvider: 'github' | 'ado';
   /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */
   adoPat: string | null;
+  /** Private package registries (npm/NuGet) for Azure DevOps feeds */
+  privateRegistries: PrivateRegistry[];
+  /** PAT for authenticating against private registries (encrypted at rest) */
+  registryPat: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +79,17 @@ export interface NetworkPolicy {
   allowedHosts: string[];
   /** If true, replace the default allowlist entirely (advanced) */
   replaceDefaults?: boolean;
+}
+
+export type RegistryType = 'npm' | 'nuget';
+
+export interface PrivateRegistry {
+  /** Registry type — determines which config file is generated (.npmrc vs NuGet.config) */
+  type: RegistryType;
+  /** Full feed URL (e.g. https://pkgs.dev.azure.com/{org}/_packaging/{feed}/npm/registry/) */
+  url: string;
+  /** npm scope (e.g. '@myorg') — only used for npm registries. Omit to override the default registry. */
+  scope?: string;
 }
 
 export interface EscalationConfig {

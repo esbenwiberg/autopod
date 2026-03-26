@@ -65,6 +65,14 @@ const networkPolicySchema = z.object({
   replaceDefaults: z.boolean().optional(),
 });
 
+const registryTypeSchema = z.enum(['npm', 'nuget']);
+
+const privateRegistrySchema = z.object({
+  type: registryTypeSchema,
+  url: z.string().url(),
+  scope: z.string().startsWith('@').optional(),
+});
+
 const escalationConfigSchema = z.object({
   askHuman: z.boolean().default(true),
   askAi: z
@@ -112,6 +120,8 @@ export const createProfileSchema = z.object({
   testCommand: z.string().nullable().optional().default(null),
   prProvider: z.enum(['github', 'ado']).default('github'),
   adoPat: z.string().min(1).nullable().default(null),
+  privateRegistries: z.array(privateRegistrySchema).default([]),
+  registryPat: z.string().min(1).nullable().default(null),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });
