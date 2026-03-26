@@ -6,6 +6,7 @@ export interface ValidationResult {
   timestamp: string;
   smoke: SmokeResult;
   test?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
+  acValidation?: AcValidationResult | null;
   taskReview: TaskReviewResult | null;
   overall: 'pass' | 'fail';
   duration: number;
@@ -48,6 +49,24 @@ export interface AssertionResult {
   expected: string | undefined;
   actual: string | undefined;
   passed: boolean;
+}
+
+export interface AcCheckResult {
+  /** The original acceptance criterion text */
+  criterion: string;
+  /** Whether the check passed */
+  passed: boolean;
+  /** Base64-encoded PNG screenshot of the relevant page state */
+  screenshot?: string;
+  /** Reviewer/executor reasoning about why it passed or failed */
+  reasoning: string;
+}
+
+export interface AcValidationResult {
+  status: 'pass' | 'fail' | 'skip';
+  results: AcCheckResult[];
+  /** The model used to generate and execute checks */
+  model: string;
 }
 
 export interface TaskReviewResult {

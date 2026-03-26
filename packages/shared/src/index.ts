@@ -71,6 +71,8 @@ export type {
   PageResult,
   AssertionResult,
   TaskReviewResult,
+  AcValidationResult,
+  AcCheckResult,
 } from './types/validation.js';
 
 export type {

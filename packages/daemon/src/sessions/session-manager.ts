@@ -247,6 +247,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         userId,
         maxValidationAttempts: profile.maxValidationAttempts,
         skipValidation,
+        acceptanceCriteria: request.acceptanceCriteria ?? null,
       });
 
       const session = sessionRepo.getOrThrow(id);
