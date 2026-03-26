@@ -251,3 +251,19 @@ Things the implementing agent for subsequent briefs should know:
 - **Brief 06 — `Session` type now has `acceptanceCriteria: string[] | null`.** Any `Session` mock in TUI tests needs this field. It's non-optional on the type (always present, nullable). `ValidationResult.acValidation` is optional though (`AcValidationResult | null | undefined`), so existing TUI code reading `lastValidationResult` won't break — it just won't show AC data until the UI is added.
 - **Brief 06 — AC failures are mixed into `screenshotDescriptions` in correction context.** This works fine for the correction message (it's just "what went wrong" text), but if the TUI wants to display AC failures separately, read from `validationResult.acValidation.results` directly — don't parse `screenshotDescriptions`.
 - **No backwards-incompatible changes.** `acValidation` is optional on `ValidationResult`, `acceptanceCriteria` is nullable on `Session`. All pre-existing code keeps working without changes.
+
+### Notes from Brief 05
+
+- **`validate_in_browser` registered on escalation MCP server** — Tool in `packages/escalation-mcp/src/tools/validate-in-browser.ts`. Takes `{ url: string, checks: string[] }`, validates localhost, generates Playwright script via LLM, executes in container, returns `{ passed: boolean, results: BrowserCheckResult[] }` as JSON string.
+- **SessionBridge extended with container operations** — `writeFileInContainer(sessionId, path, content)` and `execInContainer(sessionId, command, options?)` added to the bridge interface. Daemon implementation in `session-bridge-impl.ts` resolves containerId from session and delegates to `ContainerManagerFactory`.
+- **Uses different stdout markers than AC validation** — `__AUTOPOD_BROWSER_RESULTS_START__`/`__AUTOPOD_BROWSER_RESULTS_END__` (not `__AUTOPOD_AC_RESULTS__`). Has its own `parseResults()` and `stripMarkdownFences()` in the tool file — deliberately decoupled from the daemon's functions to keep escalation-mcp self-contained.
+- **Results are NOT stored** — returned directly to the agent as a tool response. Not persisted to DB, not passed to the reviewer. This is by design per the spec ("agent can't grade its own homework").
+- **System instructions updated** — `validate_in_browser` listed in MCP tools section. New "### Self-Validation" sub-section under "## Acceptance Criteria" explains usage with example. Only shown when session has acceptance criteria.
+- **5 pre-existing test failures unchanged** — Same 5 as briefs 01-04. Still earmarked for brief 06.
+
+#### Handover: what brief 06 should know
+
+- **Tool is always available** — `validate_in_browser` is registered unconditionally on every escalation MCP server instance. It doesn't check for Playwright availability — that's the container's responsibility (only `node22-pw` templates have it). If the agent calls the tool in a container without Playwright, the script execution will fail with a clear error ("Cannot find module 'playwright'").
+- **Bridge container ops need a running container** — `writeFileInContainer` and `execInContainer` throw if `session.containerId` is null. The TUI shouldn't expose browser validation for sessions without a container.
+- **Types exported from escalation-mcp** — `ValidateInBrowserInput`, `ValidateInBrowserResult`, `BrowserCheckResult` are all exported from `@autopod/escalation-mcp` index if the TUI needs them for display purposes.
+- **No new shared types** — Brief 05 is fully self-contained in escalation-mcp + daemon bridge wiring. No changes to `@autopod/shared` types.
