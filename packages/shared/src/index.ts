@@ -11,7 +11,6 @@ export type {
   StackTemplate,
   ExecutionTarget,
   SmokePage,
-  ValidationPage,
   PageAssertion,
   EscalationConfig,
   NetworkPolicy,

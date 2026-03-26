@@ -61,9 +61,6 @@ export interface SmokePage {
   assertions?: PageAssertion[];
 }
 
-/** @deprecated Use SmokePage instead */
-export type ValidationPage = SmokePage;
-
 export interface PageAssertion {
   selector: string;
   type: 'exists' | 'text_contains' | 'visible' | 'count';
