@@ -14,7 +14,7 @@ const NEVER_INHERITED: ReadonlySet<keyof Profile> = new Set([
 
 /** Fields that have special merge logic instead of simple override. */
 const SPECIAL_MERGE_FIELDS: ReadonlySet<keyof Profile> = new Set([
-  'validationPages',
+  'smokePages',
   'escalation',
   'customInstructions',
   'mcpServers',
@@ -41,8 +41,8 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
     }
   }
 
-  // validationPages: parent pages first, then child pages appended
-  resolved.validationPages = [...parent.validationPages, ...child.validationPages];
+  // smokePages: parent pages first, then child pages appended
+  resolved.smokePages = [...parent.smokePages, ...child.smokePages];
 
   // escalation: deep merge — child overrides individual keys
   resolved.escalation = {

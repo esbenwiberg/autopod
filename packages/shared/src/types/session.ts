@@ -52,6 +52,7 @@ export interface Session {
     currentPhase: number;
     totalPhases: number;
   } | null;
+  acceptanceCriteria: string[] | null;
   claudeSessionId: string | null;
 }
 
@@ -63,6 +64,7 @@ export interface CreateSessionRequest {
   executionTarget?: ExecutionTarget;
   branch?: string;
   skipValidation?: boolean;
+  acceptanceCriteria?: string[];
 }
 
 export interface SessionSummary {

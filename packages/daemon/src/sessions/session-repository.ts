@@ -14,6 +14,7 @@ export interface NewSession {
   userId: string;
   maxValidationAttempts: number;
   skipValidation: boolean;
+  acceptanceCriteria?: string[] | null;
 }
 
 export interface SessionFilters {
@@ -95,6 +96,9 @@ function rowToSession(row: Record<string, unknown>): Session {
     prUrl: (row.pr_url as string) ?? null,
     plan: row.plan ? JSON.parse(row.plan as string) : null,
     progress: row.progress ? JSON.parse(row.progress as string) : null,
+    acceptanceCriteria: row.acceptance_criteria
+      ? JSON.parse(row.acceptance_criteria as string)
+      : null,
     claudeSessionId: (row.claude_session_id as string) ?? null,
   };
 }
@@ -105,10 +109,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       db.prepare(`
         INSERT INTO sessions (
           id, profile_name, task, status, model, runtime, execution_target, branch,
-          user_id, max_validation_attempts, skip_validation
+          user_id, max_validation_attempts, skip_validation, acceptance_criteria
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
-          @userId, @maxValidationAttempts, @skipValidation
+          @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria
         )
       `).run({
         id: session.id,
@@ -122,6 +126,9 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         userId: session.userId,
         maxValidationAttempts: session.maxValidationAttempts,
         skipValidation: session.skipValidation ? 1 : 0,
+        acceptanceCriteria: session.acceptanceCriteria
+          ? JSON.stringify(session.acceptanceCriteria)
+          : null,
       });
     },
 

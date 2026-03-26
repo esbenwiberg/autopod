@@ -11,7 +11,7 @@ import type { ActionEngine } from '../actions/action-engine.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
-import type { SessionManager } from './session-manager.js';
+import type { ContainerManagerFactory, SessionManager } from './session-manager.js';
 
 export interface SessionBridgeDependencies {
   sessionManager: SessionManager;
@@ -19,6 +19,7 @@ export interface SessionBridgeDependencies {
   nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
   actionEngine?: ActionEngine;
+  containerManagerFactory: ContainerManagerFactory;
   pendingRequestsBySession: Map<string, PendingRequests>;
   logger: Logger;
 }
@@ -30,6 +31,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     nudgeRepo,
     profileStore,
     actionEngine,
+    containerManagerFactory,
     pendingRequestsBySession: _pendingRequestsBySession,
     logger,
   } = deps;
@@ -178,6 +180,28 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
 
       if (!profile.actionPolicy) return [];
       return actionEngine.getAvailableActions(profile.actionPolicy);
+    },
+
+    async writeFileInContainer(sessionId: string, path: string, content: string): Promise<void> {
+      const session = sessionManager.getSession(sessionId);
+      if (!session.containerId) {
+        throw new Error(`Session ${sessionId} has no container`);
+      }
+      const cm = containerManagerFactory.get(session.executionTarget);
+      await cm.writeFile(session.containerId, path, content);
+    },
+
+    async execInContainer(
+      sessionId: string,
+      command: string[],
+      options?: { cwd?: string; timeout?: number },
+    ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+      const session = sessionManager.getSession(sessionId);
+      if (!session.containerId) {
+        throw new Error(`Session ${sessionId} has no container`);
+      }
+      const cm = containerManagerFactory.get(session.executionTarget);
+      return cm.execInContainer(session.containerId, command, options);
     },
   };
 }

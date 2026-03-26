@@ -1,5 +1,5 @@
 import { exec } from 'node:child_process';
-import type { AgentEvent, Session } from '@autopod/shared';
+import type { AgentEvent, Session, ValidationResult } from '@autopod/shared';
 import { Box, Text, useApp, useInput } from 'ink';
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useClient } from './App.js';
@@ -39,6 +39,7 @@ interface DashboardProps {
   sessionState: UseSessionStateReturn;
   ws: UseWebSocketReturn;
   agentEvents: Map<string, AgentEvent[]>;
+  daemonUrl: string;
 }
 
 function openUrl(url: string): void {
@@ -47,7 +48,12 @@ function openUrl(url: string): void {
   exec(`${cmd} ${JSON.stringify(url)}`);
 }
 
-export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): React.ReactElement {
+export function Dashboard({
+  sessionState,
+  ws,
+  agentEvents,
+  daemonUrl,
+}: DashboardProps): React.ReactElement {
   const { columns, rows } = useTerminalSize();
   const { exit } = useApp();
   const client = useClient();
@@ -97,6 +103,36 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
   React.useEffect(() => {
     sessionState.setSelectedSessionId(currentSessionId);
   }, [currentSessionId, sessionState]);
+
+  // Validation attempt navigation state
+  const [validationAttempts, setValidationAttempts] = useState<ValidationResult[]>([]);
+  const [attemptIndex, setAttemptIndex] = useState(-1); // -1 = show latest (lastValidationResult)
+
+  // Fetch validation history when selected session changes
+  useEffect(() => {
+    if (!currentSessionId || !selectedSession?.lastValidationResult) {
+      setValidationAttempts([]);
+      setAttemptIndex(-1);
+      return;
+    }
+    void client
+      .getValidations(currentSessionId)
+      .then((stored) => {
+        setValidationAttempts(stored.map((s) => s.result));
+        setAttemptIndex(-1); // reset to latest
+      })
+      .catch(() => {
+        setValidationAttempts([]);
+        setAttemptIndex(-1);
+      });
+  }, [currentSessionId, selectedSession?.lastValidationResult, client]);
+
+  const displayedValidation = useMemo((): ValidationResult | null => {
+    if (attemptIndex >= 0 && attemptIndex < validationAttempts.length) {
+      return validationAttempts[attemptIndex] ?? null;
+    }
+    return selectedSession?.lastValidationResult ?? null;
+  }, [attemptIndex, validationAttempts, selectedSession]);
 
   const columnWidths = useMemo(() => calculateColumns(columns), [columns]);
 
@@ -308,6 +344,46 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
       o: () => {
         if (currentSession?.previewUrl) {
           openUrl(currentSession.previewUrl);
+        } else if (
+          currentSession &&
+          currentSession.containerId &&
+          ['validated', 'failed'].includes(currentSession.status)
+        ) {
+          // Container is stopped — launch preview
+          void client
+            .startPreview(currentSession.id)
+            .then((res) => {
+              showToast(`Preview started: ${res.previewUrl}`, 'green');
+              void refresh();
+            })
+            .catch(() => {
+              showToast('Failed to start preview', 'red');
+            });
+        } else if (currentSession?.prUrl) {
+          openUrl(currentSession.prUrl);
+        }
+      },
+      w: () => {
+        if (selectedSession?.lastValidationResult) {
+          const reportUrl = `${daemonUrl.replace(/\/$/, '')}/sessions/${selectedSession.id}/report`;
+          openUrl(reportUrl);
+        }
+      },
+      '<': () => {
+        if (validationAttempts.length > 1) {
+          setAttemptIndex((prev) => {
+            const current = prev === -1 ? validationAttempts.length - 1 : prev;
+            return Math.max(0, current - 1);
+          });
+        }
+      },
+      '>': () => {
+        if (validationAttempts.length > 1) {
+          setAttemptIndex((prev) => {
+            if (prev === -1) return -1; // already at latest
+            const next = prev + 1;
+            return next >= validationAttempts.length ? -1 : next;
+          });
         }
       },
       A: () => {
@@ -345,6 +421,9 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
       handlePause,
       handleNudge,
       handleDelete,
+      daemonUrl,
+      refresh,
+      validationAttempts,
     ],
   );
 
@@ -403,6 +482,9 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
   const hasValidated = sessions.some((s) => s.status === 'validated');
   const hasFailed = sessions.some((s) => s.status === 'failed');
   const hasFilter = filterText.length > 0;
+  const hasValidationResult = !!selectedSession?.lastValidationResult;
+  const hasContainerId = !!currentSession?.containerId;
+  const hasPrUrl = !!currentSession?.prUrl;
 
   return (
     <Box flexDirection="column" height={rows}>
@@ -434,6 +516,8 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         session={selectedSession}
         events={sessionEvents}
         maxActivityLines={activityMaxLines}
+        displayedValidation={displayedValidation}
+        totalAttempts={validationAttempts.length || undefined}
       />
 
       {/* Overlays */}
@@ -550,6 +634,9 @@ export function Dashboard({ sessionState, ws, agentEvents }: DashboardProps): Re
         hasValidated={hasValidated}
         hasFailed={hasFailed}
         hasFilter={hasFilter}
+        hasValidationResult={hasValidationResult}
+        hasContainerId={hasContainerId}
+        hasPrUrl={hasPrUrl}
       />
     </Box>
   );

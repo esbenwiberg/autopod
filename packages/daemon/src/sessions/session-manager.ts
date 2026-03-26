@@ -24,7 +24,6 @@ import type { ProfileStore } from '../profiles/index.js';
 import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
 import type { ProviderEnvResult } from '../providers/index.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
-import { generateSystemInstructions } from './system-instructions-generator.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -42,6 +41,8 @@ import {
   isTerminalState,
   validateTransition,
 } from './state-machine.js';
+import { generateSystemInstructions } from './system-instructions-generator.js';
+import type { ValidationRepository } from './validation-repository.js';
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
  * Capped at 48999 to avoid the Windows/Hyper-V dynamic port reservation range (49152+). */
@@ -51,6 +52,9 @@ function allocateHostPort(): number {
 
 /** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
 const CONTAINER_APP_PORT = 3000;
+
+/** Auto-stop preview containers after this duration (default 10 minutes). */
+const PREVIEW_AUTO_STOP_MS = 10 * 60 * 1000;
 
 export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
@@ -69,6 +73,7 @@ export interface SessionManagerDependencies {
   sessionRepo: SessionRepository;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
+  validationRepo?: ValidationRepository;
   profileStore: ProfileStore;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
@@ -107,6 +112,8 @@ export interface SessionManager {
   killSession(sessionId: string): Promise<void>;
   triggerValidation(sessionId: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
+  startPreview(sessionId: string): Promise<{ previewUrl: string }>;
+  stopPreview(sessionId: string): Promise<void>;
   getSession(sessionId: string): Session;
   listSessions(filters?: {
     profileName?: string;
@@ -114,6 +121,7 @@ export interface SessionManager {
     userId?: string;
   }): Session[];
   getSessionStats(filters?: { profileName?: string }): SessionStats;
+  getValidationHistory(sessionId: string): import('./validation-repository.js').StoredValidation[];
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
@@ -133,7 +141,42 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     mcpBaseUrl,
     daemonConfig,
     logger,
+    validationRepo,
   } = deps;
+
+  /** Active auto-stop timers for preview containers, keyed by sessionId. */
+  const previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** Cancel and remove an auto-stop timer for a session if one exists. */
+  function clearPreviewTimer(sessionId: string): void {
+    const timer = previewTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      previewTimers.delete(sessionId);
+    }
+  }
+
+  /** Schedule an auto-stop timer that will stop the container after PREVIEW_AUTO_STOP_MS. */
+  function schedulePreviewAutoStop(
+    sessionId: string,
+    containerId: string,
+    target: import('@autopod/shared').ExecutionTarget,
+  ): void {
+    clearPreviewTimer(sessionId);
+    const timer = setTimeout(async () => {
+      previewTimers.delete(sessionId);
+      try {
+        const cm = containerManagerFactory.get(target);
+        await cm.stop(containerId);
+        logger.info({ sessionId, containerId }, 'Preview auto-stopped after timeout');
+      } catch (err) {
+        logger.warn({ err, sessionId }, 'Failed to auto-stop preview container');
+      }
+    }, PREVIEW_AUTO_STOP_MS);
+    // Unref so the timer doesn't prevent process exit
+    timer.unref();
+    previewTimers.set(sessionId, timer);
+  }
 
   /**
    * Build provider env for resume calls.
@@ -205,6 +248,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         userId,
         maxValidationAttempts: profile.maxValidationAttempts,
         skipValidation,
+        acceptanceCriteria: request.acceptanceCriteria ?? null,
       });
 
       const session = sessionRepo.getOrThrow(id);
@@ -740,6 +784,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     },
 
     async killSession(sessionId: string): Promise<void> {
+      clearPreviewTimer(sessionId);
       const session = sessionRepo.getOrThrow(sessionId);
       if (!canKill(session.status)) {
         throw new AutopodError(
@@ -855,12 +900,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             startCommand: profile.startCommand,
             healthPath: profile.healthPath,
             healthTimeout: profile.healthTimeout,
-            validationPages: profile.validationPages,
+            smokePages: profile.smokePages,
             attempt,
             task: session.task,
             diff,
             testCommand: profile.testCommand,
             reviewerModel: profile.escalation.askAi.model,
+            acceptanceCriteria: session.acceptanceCriteria ?? undefined,
           });
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies
@@ -905,6 +951,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         sessionRepo.update(sessionId, { lastValidationResult: result });
+
+        // Persist every attempt to validation history
+        validationRepo?.insert(sessionId, attempt, result);
 
         eventBus.emit({
           type: 'session.validation_completed',
@@ -1014,6 +1063,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
 
           transition(s2, 'validated', { prUrl });
+
+          // Stop the container (not remove) so it can be restarted for preview
+          if (s2.containerId) {
+            try {
+              const cm = containerManagerFactory.get(s2.executionTarget);
+              await cm.stop(s2.containerId);
+              logger.info({ sessionId }, 'Container stopped post-validation');
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to stop container post-validation');
+            }
+          }
         } else if (attempt < profile.maxValidationAttempts) {
           emitActivityStatus(
             sessionId,
@@ -1048,11 +1108,32 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             `Validation failed — max attempts (${profile.maxValidationAttempts}) exhausted`,
           );
           transition(s2, 'failed');
+
+          // Stop the container (not remove) so it can be restarted for preview
+          if (s2.containerId) {
+            try {
+              const cm = containerManagerFactory.get(s2.executionTarget);
+              await cm.stop(s2.containerId);
+              logger.info({ sessionId }, 'Container stopped after max validation attempts');
+            } catch (stopErr) {
+              logger.warn({ err: stopErr, sessionId }, 'Failed to stop container post-validation');
+            }
+          }
         }
       } catch (err) {
         logger.error({ err, sessionId }, 'Validation error');
         const s2 = sessionRepo.getOrThrow(sessionId);
         transition(s2, 'failed');
+
+        // Stop the container (not remove) so it can be restarted for preview
+        if (s2.containerId) {
+          try {
+            const cm = containerManagerFactory.get(s2.executionTarget);
+            await cm.stop(s2.containerId);
+          } catch (stopErr) {
+            logger.warn({ err: stopErr, sessionId }, 'Failed to stop container post-validation');
+          }
+        }
       }
     },
 
@@ -1067,6 +1148,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     },
 
     async deleteSession(sessionId: string): Promise<void> {
+      clearPreviewTimer(sessionId);
       const session = sessionRepo.getOrThrow(sessionId);
       const deletable =
         isTerminalState(session.status) ||
@@ -1103,6 +1185,100 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       logger.info({ sessionId }, 'Session deleted');
     },
 
+    async startPreview(sessionId: string): Promise<{ previewUrl: string }> {
+      const session = sessionRepo.getOrThrow(sessionId);
+
+      if (!session.containerId) {
+        throw new AutopodError(
+          `Session ${sessionId} has no container — cannot start preview`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      if (!session.previewUrl) {
+        throw new AutopodError(`Session ${sessionId} has no preview URL`, 'INVALID_STATE', 409);
+      }
+
+      const cm = containerManagerFactory.get(session.executionTarget);
+      const status = await cm.getStatus(session.containerId);
+
+      if (status === 'running') {
+        // Already running — idempotent, just reset the auto-stop timer
+        schedulePreviewAutoStop(sessionId, session.containerId, session.executionTarget);
+        return { previewUrl: session.previewUrl };
+      }
+
+      if (status === 'unknown') {
+        throw new AutopodError(
+          `Container for session ${sessionId} has been removed — cannot start preview`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      // Container is stopped — start it
+      await cm.start(session.containerId);
+
+      // Re-run the start command and wait for health check
+      const profile = profileStore.get(session.profileName);
+      if (profile.startCommand) {
+        cm.execInContainer(session.containerId, ['sh', '-c', `${profile.startCommand} &`], {
+          cwd: '/workspace',
+        }).catch((err) => {
+          logger.warn(
+            { err, sessionId },
+            'Preview start command errored (may be expected for long-running processes)',
+          );
+        });
+
+        // Poll for health
+        const healthUrl = session.previewUrl + profile.healthPath;
+        const timeoutMs = (profile.healthTimeout ?? 30) * 1_000;
+        const pollIntervalMs = 2_000;
+        const start = Date.now();
+
+        while (Date.now() - start < timeoutMs) {
+          try {
+            const response = await fetch(healthUrl, {
+              signal: AbortSignal.timeout(5_000),
+            });
+            if (response.status === 200) {
+              logger.info({ sessionId, healthUrl }, 'Preview health check passed');
+              break;
+            }
+          } catch {
+            // Health check not ready yet
+          }
+          const remaining = timeoutMs - (Date.now() - start);
+          if (remaining > 0) {
+            await new Promise<void>((r) => setTimeout(r, Math.min(pollIntervalMs, remaining)));
+          }
+        }
+      }
+
+      schedulePreviewAutoStop(sessionId, session.containerId, session.executionTarget);
+      logger.info({ sessionId, previewUrl: session.previewUrl }, 'Preview started');
+      return { previewUrl: session.previewUrl };
+    },
+
+    async stopPreview(sessionId: string): Promise<void> {
+      clearPreviewTimer(sessionId);
+      const session = sessionRepo.getOrThrow(sessionId);
+
+      if (!session.containerId) {
+        throw new AutopodError(
+          `Session ${sessionId} has no container — cannot stop preview`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      const cm = containerManagerFactory.get(session.executionTarget);
+      await cm.stop(session.containerId);
+      logger.info({ sessionId }, 'Preview stopped');
+    },
+
     getSession(sessionId: string): Session {
       return sessionRepo.getOrThrow(sessionId);
     },
@@ -1113,6 +1289,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     getSessionStats(filters?) {
       return sessionRepo.getStats(filters);
+    },
+
+    getValidationHistory(sessionId: string) {
+      // Verify session exists
+      sessionRepo.getOrThrow(sessionId);
+      return validationRepo?.getForSession(sessionId) ?? [];
     },
 
     async approveAllValidated(): Promise<{ approved: string[] }> {

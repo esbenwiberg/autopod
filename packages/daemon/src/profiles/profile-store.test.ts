@@ -57,7 +57,7 @@ describe('ProfileStore', () => {
       expect(profile.defaultRuntime).toBe('claude');
       expect(profile.customInstructions).toBeNull();
       expect(profile.extends).toBeNull();
-      expect(profile.validationPages).toEqual([]);
+      expect(profile.smokePages).toEqual([]);
       expect(profile.escalation).toEqual({
         askHuman: true,
         askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
@@ -73,7 +73,7 @@ describe('ProfileStore', () => {
         template: 'node22-pw',
         healthPath: '/health',
         healthTimeout: 60,
-        validationPages: [{ path: '/', assertions: [{ selector: 'h1', type: 'exists' }] }],
+        smokePages: [{ path: '/', assertions: [{ selector: 'h1', type: 'exists' }] }],
         maxValidationAttempts: 5,
         defaultModel: 'sonnet',
         defaultRuntime: 'claude',
@@ -89,8 +89,8 @@ describe('ProfileStore', () => {
       expect(profile.template).toBe('node22-pw');
       expect(profile.healthPath).toBe('/health');
       expect(profile.healthTimeout).toBe(60);
-      expect(profile.validationPages).toHaveLength(1);
-      expect(profile.validationPages[0]?.assertions).toHaveLength(1);
+      expect(profile.smokePages).toHaveLength(1);
+      expect(profile.smokePages[0]?.assertions).toHaveLength(1);
       expect(profile.maxValidationAttempts).toBe(5);
       expect(profile.defaultModel).toBe('sonnet');
       expect(profile.customInstructions).toBe('Be careful');
@@ -134,17 +134,17 @@ describe('ProfileStore', () => {
       store.create({
         ...validInput,
         name: 'parent',
-        validationPages: [{ path: '/parent' }],
+        smokePages: [{ path: '/parent' }],
       });
       store.create({
         ...validInput,
         name: 'child',
         extends: 'parent',
-        validationPages: [{ path: '/child' }],
+        smokePages: [{ path: '/child' }],
       });
 
       const raw = store.getRaw('child');
-      expect(raw.validationPages).toEqual([{ path: '/child' }]);
+      expect(raw.smokePages).toEqual([{ path: '/child' }]);
       expect(raw.extends).toBe('parent');
     });
   });
@@ -286,7 +286,7 @@ describe('ProfileStore', () => {
   });
 
   describe('JSON roundtrip', () => {
-    it('should preserve validationPages through create/get', () => {
+    it('should preserve smokePages through create/get', () => {
       const pages = [
         { path: '/', assertions: [{ selector: '#app', type: 'exists' as const }] },
         {
@@ -294,9 +294,9 @@ describe('ProfileStore', () => {
           assertions: [{ selector: 'h1', type: 'text_contains' as const, value: 'About' }],
         },
       ];
-      store.create({ ...validInput, validationPages: pages });
+      store.create({ ...validInput, smokePages: pages });
       const profile = store.get('my-app');
-      expect(profile.validationPages).toEqual(pages);
+      expect(profile.smokePages).toEqual(pages);
     });
 
     it('should preserve escalation config through create/get', () => {
@@ -318,26 +318,26 @@ describe('ProfileStore', () => {
         ...validInput,
         name: 'grandparent',
         customInstructions: 'gp rules',
-        validationPages: [{ path: '/gp' }],
+        smokePages: [{ path: '/gp' }],
       });
       store.create({
         ...validInput,
         name: 'parent',
         extends: 'grandparent',
         customInstructions: 'parent rules',
-        validationPages: [{ path: '/parent' }],
+        smokePages: [{ path: '/parent' }],
       });
       store.create({
         ...validInput,
         name: 'child',
         extends: 'parent',
         customInstructions: 'child rules',
-        validationPages: [{ path: '/child' }],
+        smokePages: [{ path: '/child' }],
       });
 
       const resolved = store.get('child');
       expect(resolved.customInstructions).toBe('gp rules\n\nparent rules\n\nchild rules');
-      expect(resolved.validationPages).toEqual([
+      expect(resolved.smokePages).toEqual([
         { path: '/gp' },
         { path: '/parent' },
         { path: '/child' },

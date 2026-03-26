@@ -92,9 +92,8 @@ export class CopilotRuntime implements Runtime {
 
     const exitCode = await handle.exitCode;
     if (exitCode !== 0) {
-      const stderrSummary = stderrChunks.length > 0
-        ? `: ${stderrChunks.join('\n').slice(-500)}`
-        : '';
+      const stderrSummary =
+        stderrChunks.length > 0 ? `: ${stderrChunks.join('\n').slice(-500)}` : '';
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),

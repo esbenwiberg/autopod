@@ -81,7 +81,10 @@ describe('Integration', () => {
     const containerManager = {
       spawn: vi.fn().mockResolvedValue('container-123'),
       kill: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      start: vi.fn().mockResolvedValue(undefined),
       writeFile: vi.fn().mockResolvedValue(undefined),
+      readFile: vi.fn().mockResolvedValue(''),
       getStatus: vi.fn().mockResolvedValue('running' as const),
       execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
       execStreaming: vi.fn(),
@@ -416,6 +419,103 @@ describe('Integration', () => {
         // Session already transitioned to a non-killable state (validated, approved, etc.)
         expect([200, 409]).toContain(killRes.statusCode);
       }
+    });
+  });
+
+  describe('Validation report', () => {
+    beforeEach(async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+    });
+
+    it('GET /sessions/:sessionId/report returns HTML', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'Build a widget' },
+      });
+      const sessionId = createRes.json().id;
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/sessions/${sessionId}/report`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/html');
+      expect(res.body).toContain('<!DOCTYPE html>');
+      expect(res.body).toContain('Build a widget');
+      expect(res.body).toContain(sessionId);
+    });
+
+    it('GET /sessions/:sessionId/report returns 404 for nonexistent session', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/sessions/nonexistent/report',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('Preview', () => {
+    beforeEach(async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+    });
+
+    it('POST /sessions/:sessionId/preview returns 409 when session has no container', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'Preview test' },
+      });
+      const sessionId = createRes.json().id;
+
+      // Freshly created session has no containerId yet
+      const res = await app.inject({
+        method: 'POST',
+        url: `/sessions/${sessionId}/preview`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+      // May be 409 (no container) or 200 (if session was already processed fast enough)
+      expect([200, 409]).toContain(res.statusCode);
+    });
+
+    it('DELETE /sessions/:sessionId/preview returns 409 when session has no container', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'Preview stop test' },
+      });
+      const sessionId = createRes.json().id;
+
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/sessions/${sessionId}/preview`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect([200, 409]).toContain(res.statusCode);
+    });
+
+    it('POST /sessions/:sessionId/preview returns 404 for nonexistent session', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/sessions/nonexistent/preview',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(404);
     });
   });
 

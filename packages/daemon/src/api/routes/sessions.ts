@@ -1,6 +1,7 @@
 import { createSessionRequestSchema, sendMessageSchema } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { SessionManager } from '../../sessions/index.js';
+import { generateValidationReport } from '../../validation/report-generator.js';
 
 export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManager): void {
   // POST /sessions — create a new session
@@ -41,6 +42,21 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
     const { message } = sendMessageSchema.parse(request.body);
     await sessionManager.sendMessage(sessionId, message);
     return { ok: true };
+  });
+
+  // GET /sessions/:sessionId/validations — validation history
+  app.get('/sessions/:sessionId/validations', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    return sessionManager.getValidationHistory(sessionId);
+  });
+
+  // GET /sessions/:sessionId/report — HTML validation report
+  app.get('/sessions/:sessionId/report', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const session = sessionManager.getSession(sessionId);
+    const validations = sessionManager.getValidationHistory(sessionId);
+    const html = generateValidationReport(session, validations);
+    reply.type('text/html').send(html);
   });
 
   // POST /sessions/:sessionId/validate — trigger validation
@@ -95,6 +111,19 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
   app.post('/sessions/:sessionId/kill', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
     await sessionManager.killSession(sessionId);
+    return { ok: true };
+  });
+
+  // POST /sessions/:sessionId/preview — start preview (restart stopped container)
+  app.post('/sessions/:sessionId/preview', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    return sessionManager.startPreview(sessionId);
+  });
+
+  // DELETE /sessions/:sessionId/preview — stop preview (stop running container)
+  app.delete('/sessions/:sessionId/preview', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    await sessionManager.stopPreview(sessionId);
     return { ok: true };
   });
 

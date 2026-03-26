@@ -66,9 +66,9 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         if (data.extends) {
           console.log(`${chalk.bold('Extends:')}    ${data.extends}`);
         }
-        if (data.validationPages.length > 0) {
+        if (data.smokePages.length > 0) {
           console.log(
-            `${chalk.bold('Pages:')}      ${data.validationPages.map((p) => p.path).join(', ')}`,
+            `${chalk.bold('Pages:')}      ${data.smokePages.map((p) => p.path).join(', ')}`,
           );
         }
         if (data.mcpServers && data.mcpServers.length > 0) {
@@ -108,7 +108,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         startCommand: 'npm start',
         healthPath: '/',
         healthTimeout: 120,
-        validationPages: [{ path: '/' }],
+        smokePages: [{ path: '/' }],
         maxValidationAttempts: 3,
         defaultModel: 'opus',
         defaultRuntime: 'claude',

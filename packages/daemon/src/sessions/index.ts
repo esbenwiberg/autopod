@@ -29,6 +29,11 @@ export {
   type NudgeMessage,
 } from './nudge-repository.js';
 export {
+  createValidationRepository,
+  type ValidationRepository,
+  type StoredValidation,
+} from './validation-repository.js';
+export {
   validateTransition,
   isTerminalState,
   canReceiveMessage,
@@ -36,6 +41,9 @@ export {
   canPause,
   canNudge,
 } from './state-machine.js';
-export { generateSystemInstructions, type SystemInstructionsOptions } from './system-instructions-generator.js';
+export {
+  generateSystemInstructions,
+  type SystemInstructionsOptions,
+} from './system-instructions-generator.js';
 export { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
 export { resolveSections, type ResolvedSection } from './section-resolver.js';

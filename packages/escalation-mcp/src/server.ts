@@ -10,6 +10,7 @@ import { checkMessages } from './tools/check-messages.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
+import { validateInBrowser } from './tools/validate-in-browser.js';
 
 export interface EscalationMcpDeps {
   sessionId: string;
@@ -111,6 +112,28 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     {},
     async () => {
       const response = await checkMessages(sessionId, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'validate_in_browser',
+    'Open a browser in your container to verify your work. URL must be localhost. Use this to check your changes against acceptance criteria before committing.',
+    {
+      url: z
+        .string()
+        .describe(
+          'The localhost URL to validate (e.g., http://localhost:3000/settings). Must be localhost or 127.0.0.1.',
+        ),
+      checks: z
+        .array(z.string())
+        .min(1)
+        .describe(
+          'Natural language checks to perform (e.g., "Verify there is a dark mode toggle that is visible and clickable")',
+        ),
+    },
+    async (input) => {
+      const response = await validateInBrowser(sessionId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );

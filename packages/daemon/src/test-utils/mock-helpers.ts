@@ -111,6 +111,8 @@ export function createMockContainerManager(): ContainerManager {
   return {
     spawn: vi.fn(async () => 'container-123'),
     kill: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+    start: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
     readFile: vi.fn(async () => ''),
     getStatus: vi.fn(async () => 'running' as const),
@@ -198,7 +200,7 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         startCommand: row.start_command as string,
         healthPath: row.health_path as string,
         healthTimeout: row.health_timeout as number,
-        validationPages: JSON.parse(row.validation_pages as string),
+        smokePages: JSON.parse(row.validation_pages as string),
         maxValidationAttempts: row.max_validation_attempts as number,
         defaultModel: row.default_model as string,
         defaultRuntime: row.default_runtime as RuntimeType,

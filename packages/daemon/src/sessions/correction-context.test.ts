@@ -35,6 +35,11 @@ function mockSession(overrides: Partial<Session> = {}): Session {
     linesAdded: 50,
     linesRemoved: 10,
     previewUrl: 'http://localhost:3000',
+    prUrl: null,
+    plan: null,
+    progress: null,
+    acceptanceCriteria: null,
+    claudeSessionId: null,
     ...overrides,
   };
 }
@@ -49,7 +54,7 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     startCommand: 'npm start',
     healthPath: '/health',
     healthTimeout: 120,
-    validationPages: [],
+    smokePages: [],
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',
@@ -134,7 +139,10 @@ function mockContainerManager(diff = '+added line\n-removed line'): ContainerMan
   return {
     spawn: vi.fn(),
     kill: vi.fn(),
+    stop: vi.fn(),
+    start: vi.fn(),
     writeFile: vi.fn(),
+    readFile: vi.fn().mockResolvedValue(''),
     getStatus: vi.fn(),
     execInContainer: vi.fn().mockResolvedValue({ stdout: diff, stderr: '', exitCode: 0 }),
     execStreaming: vi.fn(),
@@ -158,6 +166,26 @@ describe('determineFailedStep', () => {
     expect(determineFailedStep(mockValidationResult({ taskReviewFailed: true }))).toBe(
       'task_review',
     );
+  });
+
+  it('returns ac_validation when AC validation fails (smoke passes)', () => {
+    const result = mockValidationResult({});
+    result.acValidation = {
+      status: 'fail',
+      results: [{ criterion: 'Has toggle', passed: false, reasoning: 'Not found' }],
+      model: 'opus',
+    };
+    expect(determineFailedStep(result)).toBe('ac_validation');
+  });
+
+  it('prioritizes smoke over ac_validation', () => {
+    const result = mockValidationResult({ pageFailed: true });
+    result.acValidation = {
+      status: 'fail',
+      results: [{ criterion: 'Has toggle', passed: false, reasoning: 'Not found' }],
+      model: 'opus',
+    };
+    expect(determineFailedStep(result)).toBe('smoke');
   });
 
   it('prioritizes build over health', () => {
@@ -196,7 +224,7 @@ describe('buildCorrectionContext', () => {
     );
     expect(context.previousDiff).toContain('+added line');
     expect(cm.execInContainer).toHaveBeenCalledWith('ctr-abc', ['git', 'diff', 'HEAD~1'], {
-      cwd: '/tmp/worktree/sess-1',
+      cwd: '/workspace',
     });
   });
 
@@ -232,6 +260,28 @@ describe('buildCorrectionContext', () => {
       cm,
     );
     expect(context.screenshotDescriptions).toEqual([]);
+  });
+
+  it('includes AC validation failures in screenshot descriptions', async () => {
+    const cm = mockContainerManager();
+    const result = mockValidationResult({});
+    result.acValidation = {
+      status: 'fail',
+      results: [
+        { criterion: 'Has toggle', passed: true, reasoning: 'Found it' },
+        { criterion: 'Toggle works', passed: false, reasoning: 'Click had no effect' },
+      ],
+      model: 'opus',
+    };
+    const context = await buildCorrectionContext(mockSession(), mockProfile(), result, cm);
+    expect(context.screenshotDescriptions).toContainEqual(expect.stringContaining('Toggle works'));
+    expect(context.screenshotDescriptions).toContainEqual(
+      expect.stringContaining('Click had no effect'),
+    );
+    // Passing ACs should not appear
+    expect(context.screenshotDescriptions).not.toContainEqual(
+      expect.stringContaining('Has toggle'),
+    );
   });
 
   it('handles exec error gracefully', async () => {
