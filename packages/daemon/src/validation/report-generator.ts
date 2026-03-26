@@ -26,6 +26,7 @@ export function generateValidationReport(
 <body class="bg-gray-50 text-gray-900 min-h-screen">
   <div class="max-w-5xl mx-auto px-4 py-8">
     ${renderHeader(session)}
+    ${renderPreviewSection(session)}
     ${renderAttemptTimeline(validations)}
     ${validations.length === 0 ? renderNoValidations() : validations.map((v, i) => renderAttempt(v, i, validations.length)).join('\n')}
   </div>
@@ -40,6 +41,47 @@ export function generateValidationReport(
     }
     // Show the latest attempt by default
     ${validations.length > 0 ? `showTab(${validations[validations.length - 1].attempt});` : ''}
+
+    // ── Preview controls ──
+    async function startPreview() {
+      const btn = document.getElementById('preview-start-btn');
+      const status = document.getElementById('preview-status');
+      if (btn) btn.disabled = true;
+      if (btn) btn.textContent = 'Starting…';
+      try {
+        const res = await fetch(window.location.origin + '/sessions/${escapeHtml(session.id)}/preview', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed to start preview');
+        if (status) status.innerHTML = 'Preview running at <a href="' + data.previewUrl + '" target="_blank" class="text-blue-600 underline">' + data.previewUrl + '</a>';
+        if (btn) btn.textContent = 'Restart Preview';
+        if (btn) btn.disabled = false;
+        const stopBtn = document.getElementById('preview-stop-btn');
+        if (stopBtn) stopBtn.classList.remove('hidden');
+      } catch (err) {
+        if (status) status.textContent = 'Error: ' + err.message;
+        if (btn) btn.textContent = 'Launch Preview';
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function stopPreview() {
+      const btn = document.getElementById('preview-stop-btn');
+      const status = document.getElementById('preview-status');
+      if (btn) btn.disabled = true;
+      if (btn) btn.textContent = 'Stopping…';
+      try {
+        const res = await fetch(window.location.origin + '/sessions/${escapeHtml(session.id)}/preview', { method: 'DELETE' });
+        if (!res.ok) { const data = await res.json(); throw new Error(data.message || 'Failed to stop preview'); }
+        if (status) status.textContent = 'Preview stopped';
+        if (btn) btn.textContent = 'Stop Preview';
+        if (btn) btn.disabled = false;
+        if (btn) btn.classList.add('hidden');
+      } catch (err) {
+        if (status) status.textContent = 'Error: ' + err.message;
+        if (btn) btn.textContent = 'Stop Preview';
+        if (btn) btn.disabled = false;
+      }
+    }
   </script>
 </body>
 </html>`;
@@ -107,6 +149,35 @@ function renderHeader(session: Session): string {
         </div>
       </div>
     </header>`;
+}
+
+function renderPreviewSection(session: Session): string {
+  // Only show preview controls for sessions that have a container and are post-validation
+  if (!session.containerId || !session.previewUrl) return '';
+  const postValidationStatuses = ['validated', 'failed', 'approved', 'complete', 'killed'];
+  if (!postValidationStatuses.includes(session.status)) return '';
+
+  return `
+    <section class="mb-6">
+      <div class="bg-white rounded-lg shadow p-4 flex items-center gap-4">
+        <div class="flex-1">
+          <h2 class="text-sm font-semibold text-gray-700 mb-1">Preview Environment</h2>
+          <p id="preview-status" class="text-sm text-gray-500">Preview stopped — click Launch to start the app</p>
+        </div>
+        <button
+          id="preview-start-btn"
+          onclick="startPreview()"
+          class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded hover:bg-green-700 transition-colors">
+          Launch Preview
+        </button>
+        <button
+          id="preview-stop-btn"
+          onclick="stopPreview()"
+          class="hidden px-4 py-2 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 transition-colors">
+          Stop Preview
+        </button>
+      </div>
+    </section>`;
 }
 
 function renderAttemptTimeline(validations: StoredValidation[]): string {

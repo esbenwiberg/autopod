@@ -33,6 +33,10 @@ export interface StreamingExecResult {
 export interface ContainerManager {
   spawn(config: ContainerSpawnConfig): Promise<string>; // returns containerId
   kill(containerId: string): Promise<void>;
+  /** Stop a container without removing it. Idempotent — swallows "already stopped". */
+  stop(containerId: string): Promise<void>;
+  /** Start a previously stopped container. Idempotent — swallows "already running". */
+  start(containerId: string): Promise<void>;
   writeFile(containerId: string, path: string, content: string): Promise<void>;
   readFile(containerId: string, path: string): Promise<string>;
   getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'>;

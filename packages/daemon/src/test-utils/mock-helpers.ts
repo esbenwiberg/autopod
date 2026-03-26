@@ -111,6 +111,8 @@ export function createMockContainerManager(): ContainerManager {
   return {
     spawn: vi.fn(async () => 'container-123'),
     kill: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+    start: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
     readFile: vi.fn(async () => ''),
     getStatus: vi.fn(async () => 'running' as const),
