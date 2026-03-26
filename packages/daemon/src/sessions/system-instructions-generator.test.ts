@@ -199,6 +199,38 @@ describe('generateSystemInstructions', () => {
     expect(md).not.toContain('## Acceptance Criteria');
   });
 
+  it('includes validate_in_browser tool in MCP tools list', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('validate_in_browser');
+  });
+
+  it('includes self-validation section when session has acceptance criteria', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        acceptanceCriteria: ['Page loads without errors'],
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('### Self-Validation');
+    expect(md).toContain('validate_in_browser');
+    expect(md).toContain('localhost URL');
+    expect(md).toContain('NOT shared with the independent reviewer');
+  });
+
+  it('omits self-validation section when no acceptance criteria', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ acceptanceCriteria: null }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('### Self-Validation');
+  });
+
   it('includes guidelines', () => {
     const md = generateSystemInstructions(
       makeProfile(),

@@ -275,6 +275,7 @@ const sessionBridge = createSessionBridge({
   escalationRepo,
   nudgeRepo,
   profileStore,
+  containerManagerFactory,
   pendingRequestsBySession,
   logger,
 });
