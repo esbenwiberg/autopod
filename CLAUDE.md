@@ -39,7 +39,7 @@ daemon ← validator, escalation-mcp
 | `daemon` | Fastify server, session orchestration, SQLite, Docker/ACI container management |
 | `cli` | Commander CLI + Ink TUI dashboard |
 | `validator` | Playwright smoke tests + AI task review (types only — execution lives in daemon) |
-| `escalation-mcp` | MCP server injected into agent containers for human escalation |
+| `escalation-mcp` | MCP server injected into agent containers for escalation, actions, and browser self-validation |
 
 ## Build System
 

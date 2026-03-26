@@ -65,7 +65,7 @@ If it doesn't pass, the agent gets structured feedback and tries again. If it do
         └─────┬─────┘ └──┬──┘ └─────┬─────┘
               │           │           │
         ┌─────▼─────┐    │     ┌─────▼─────┐
-        │ Validate  │    │     │ Validate  │  Build → Test → Run → Screenshot
+        │ Validate  │    │     │ Validate  │  Build → Test → Smoke → ACs → Review
         └─────┬─────┘    │     └─────┬─────┘
               │           │           │
         ┌─────▼─────┐    │     ┌─────▼─────┐
@@ -101,17 +101,26 @@ queued → provisioning → running → validating → validated → approved �
 
 ### Validation Pipeline
 
-Validation is a 5-phase pipeline — each phase must pass before the next runs:
+Validation is a multi-phase pipeline with two loops — each phase must pass before the next runs:
+
+**Inner loop (agent self-validates):** While developing, the agent can use the `validate_in_browser` MCP tool to open a real browser in its container and verify work against acceptance criteria. This catches issues early, before the independent review.
+
+**Outer loop (independent reviewer):**
 
 | Phase | What happens | Configurable via |
 |-------|-------------|------------------|
 | **1. Build** | Runs your build command inside the container | `profile.build` |
 | **2. Test** | Runs your test suite (skipped if not configured) | `profile.testCommand` |
 | **3. Health check** | Starts the app and waits for HTTP 200 | `profile.start`, `profile.health` |
-| **4. Page screenshots** | Playwright visits configured pages, checks assertions | `profile.validationPages` |
-| **5. AI task review** | A separate model reviews the diff against the original task | `profile.escalation.askAi.model` |
+| **4. Smoke pages** | Playwright visits configured pages, checks assertions | `profile.smokePages` |
+| **5. AC validation** | Reviewer generates browser checks from acceptance criteria, executed via Playwright | `session.acceptanceCriteria` |
+| **6. AI task review** | A separate model reviews the diff against the original task | `profile.escalation.askAi.model` |
 
-If any phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, reviewer notes) and retries automatically.
+If any phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, AC failures, reviewer notes) and retries automatically.
+
+Every validation attempt is stored with full results and screenshots. View the **validation report** (`GET /sessions/:id/report`) for a visual timeline of all attempts, or browse it from the TUI with `[w]`.
+
+After validation, the container is **stopped** (not removed). Launch an on-demand **preview** to interact with the agent's work in a real browser before approving.
 
 ---
 
@@ -119,7 +128,7 @@ If any phase fails, the agent gets structured feedback (console errors, build ou
 
 <table>
 <tr><td>🔀</td><td><b>Multi-agent parallelism</b></td><td>Run 10, 20, 50 sessions across repos simultaneously</td></tr>
-<tr><td>✅</td><td><b>5-phase validation</b></td><td>Build → Test → Health check → Screenshots → AI review</td></tr>
+<tr><td>✅</td><td><b>Multi-phase validation</b></td><td>Build → Test → Health → Smoke pages → AC validation → AI review</td></tr>
 <tr><td>🤖</td><td><b>Multi-runtime</b></td><td>Claude, Codex, or GitHub Copilot — swap with a flag</td></tr>
 <tr><td>🔑</td><td><b>Multi-provider auth</b></td><td>Anthropic API, Claude MAX/PRO (OAuth), Azure Foundry, or Copilot tokens</td></tr>
 <tr><td>🆘</td><td><b>Escalation via MCP</b></td><td>Agents can pause and ask for help (human or AI)</td></tr>
@@ -307,6 +316,7 @@ ap run <profile> "<task>" --runtime codex   # Use Codex runtime
 ap run <profile> "<task>" --runtime copilot # Use Copilot runtime
 ap run <profile> "<task>" --branch feat/x   # Custom branch name
 ap run <profile> "<task>" --no-validate     # Skip auto-validation
+ap run <profile> "<task>" --ac "criterion"  # Add acceptance criteria (repeatable)
 
 # Monitor
 ap ls                                       # List sessions
@@ -325,7 +335,8 @@ ap nudge <id> "<message>"                   # Send nudge (agent picks up async)
 
 # Validate & Preview
 ap validate <id>                            # Trigger validation manually
-ap open <id>                                # Spin up live preview
+ap open <id>                                # Spin up live preview (restarts stopped container)
+ap report <id>                              # Open validation report in browser
 ap screenshots <id>                         # Show screenshot URLs
 ap diff <id>                                # Show git diff
 ap diff <id> --stat                         # Diff summary only
@@ -359,9 +370,13 @@ Real-time session overview via WebSocket. Progress bars with phase-aware colorin
 | `r` | Reject with feedback |
 | `d` | View diff |
 | `l` | View logs |
-| `o` | Open live preview |
+| `w` | Open validation report in browser |
+| `o` | Launch preview / open preview URL / open PR (context-aware) |
+| `<` `>` | Navigate validation attempts |
 | `x` | Kill session |
 | `v` | Trigger validation |
+| `n` | Create new session |
+| `/` | Filter sessions |
 | `q` | Quit |
 
 ---
@@ -407,12 +422,12 @@ ADO supports both URL formats:
 - `https://dev.azure.com/{org}/{project}/_git/{repo}`
 - `https://{org}.visualstudio.com/{project}/_git/{repo}`
 
-### Validation pages
+### Smoke pages
 
-Configure which pages to validate and what to assert:
+Configure baseline pages to check on every validation run (infrastructure-level sanity):
 
 ```yaml
-validationPages:
+smokePages:
   - path: "/"
     assertions:
       - selector: ".dark-mode-toggle"
@@ -427,6 +442,19 @@ validationPages:
 ```
 
 Assertion types: `exists`, `visible`, `text_contains`, `count`.
+
+### Acceptance criteria
+
+For task-specific validation, pass acceptance criteria when creating a session:
+
+```bash
+ap run my-app "Add dark mode" \
+  --ac "Settings page has a dark mode toggle" \
+  --ac "Toggle persists after page refresh" \
+  --ac "Dark mode applies to all pages"
+```
+
+The validation engine independently verifies each criterion in a browser using a separate reviewer model. The agent also has access to a `validate_in_browser` MCP tool for self-checking during development.
 
 ### Test command
 
@@ -657,10 +685,10 @@ autopod/
       src/actions/     #   Action control plane (handlers, registry, audit)
       src/providers/   #   Multi-provider model auth (env builder, credential refresh)
       src/runtimes/    #   Runtime adapters (Claude, Codex, Copilot)
-      src/validation/  #   5-phase validation pipeline
+      src/validation/  #   Multi-phase validation pipeline (smoke, AC, AI review, reports)
       src/worktrees/   #   Git worktree + PR management (GitHub, ADO)
     cli/               # Commander CLI + Ink TUI dashboard
-    escalation-mcp/    # MCP server injected into agent containers (escalation + actions)
+    escalation-mcp/    # MCP server injected into agent containers (escalation, actions, browser validation)
     validator/         # Playwright smoke tests + AI task review
   e2e/                 # End-to-end tests
   infra/               # Azure Bicep IaC
