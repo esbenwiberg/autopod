@@ -96,6 +96,19 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
+  if (session.acceptanceCriteria && session.acceptanceCriteria.length > 0) {
+    lines.push('## Acceptance Criteria');
+    lines.push('');
+    lines.push(
+      'Your changes must satisfy these criteria. The system will independently verify each one in a browser after you commit:',
+    );
+    lines.push('');
+    for (const ac of session.acceptanceCriteria) {
+      lines.push(`- ${ac}`);
+    }
+    lines.push('');
+  }
+
   if (profile.customInstructions) {
     lines.push('## Custom Instructions');
     lines.push('');

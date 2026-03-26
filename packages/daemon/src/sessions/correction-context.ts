@@ -6,7 +6,7 @@ import { formatFeedback } from './feedback-formatter.js';
 export interface CorrectionContext {
   task: string;
   customInstructions: string | null;
-  failedStep: 'build' | 'health' | 'smoke' | 'task_review';
+  failedStep: 'build' | 'health' | 'smoke' | 'ac_validation' | 'task_review';
   validationResult: ValidationResult;
   previousDiff: string;
   screenshotDescriptions: string[];
@@ -58,6 +58,17 @@ export async function buildCorrectionContext(
     screenshotDescriptions.push(parts.join('\n'));
   }
 
+  // AC validation failures
+  if (validationResult.acValidation?.status === 'fail') {
+    for (const check of validationResult.acValidation.results) {
+      if (!check.passed) {
+        screenshotDescriptions.push(
+          `AC failed: "${check.criterion}" — ${check.reasoning}`,
+        );
+      }
+    }
+  }
+
   // Task review issues
   if (validationResult.taskReview?.status === 'fail') {
     screenshotDescriptions.push(...validationResult.taskReview.issues);
@@ -80,6 +91,7 @@ export function determineFailedStep(result: ValidationResult): CorrectionContext
   if (result.smoke.health.status === 'fail') return 'health';
   const hasPageFailure = result.smoke.pages.some((p) => p.status === 'fail');
   if (hasPageFailure) return 'smoke';
+  if (result.acValidation?.status === 'fail') return 'ac_validation';
   return 'task_review';
 }
 

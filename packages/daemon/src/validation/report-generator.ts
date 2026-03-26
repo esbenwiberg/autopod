@@ -226,6 +226,7 @@ function renderAttempt(v: StoredValidation, _index: number, _total: number): str
       ${r.test ? renderTestPhase(r.test) : ''}
       ${renderHealthPhase(r.smoke.health)}
       ${renderSmokePages(r.smoke.pages)}
+      ${r.acValidation ? renderAcValidation(r.acValidation) : ''}
       ${r.taskReview ? renderTaskReview(r.taskReview) : ''}
     </div>`;
 }
@@ -356,6 +357,42 @@ function renderSmokePages(
     .join('\n');
 
   return renderPhaseCard(`Smoke Pages (${pages.length})`, allPass ? 'pass' : 'fail', content);
+}
+
+function renderAcValidation(acValidation: {
+  status: string;
+  results: Array<{
+    criterion: string;
+    passed: boolean;
+    screenshot?: string;
+    reasoning: string;
+  }>;
+  model: string;
+}): string {
+  if (acValidation.status === 'skip' || acValidation.results.length === 0) return '';
+
+  const passCount = acValidation.results.filter((r) => r.passed).length;
+  const content = `
+    <p class="text-xs text-gray-500 mb-3">Model: ${escapeHtml(acValidation.model)} — ${passCount}/${acValidation.results.length} passed</p>
+    ${acValidation.results
+      .map(
+        (check) => `
+      <div class="border rounded p-3 space-y-2 ${check.passed ? 'border-gray-200' : 'border-red-200 bg-red-50'}">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium">${escapeHtml(check.criterion)}</span>
+          ${renderBadge(check.passed ? 'pass' : 'fail')}
+        </div>
+        <p class="text-sm text-gray-600">${escapeHtml(check.reasoning)}</p>
+        ${check.screenshot ? `<img src="data:image/png;base64,${check.screenshot}" alt="Screenshot for: ${escapeHtml(check.criterion)}" class="rounded border max-w-full" />` : ''}
+      </div>`,
+      )
+      .join('\n')}`;
+
+  return renderPhaseCard(
+    `AC Validation (${acValidation.results.length})`,
+    acValidation.status,
+    content,
+  );
 }
 
 function renderTaskReview(review: {

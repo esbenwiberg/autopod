@@ -87,6 +87,19 @@ function formatValidationFailure(input: ValidationFeedback): string {
     }
   }
 
+  // AC validation failures
+  if (result.acValidation && result.acValidation.status === 'fail') {
+    const failed = result.acValidation.results.filter((r) => !r.passed);
+    if (failed.length > 0) {
+      lines.push('### Acceptance Criteria Failures');
+      for (const check of failed) {
+        lines.push(`**${check.criterion}**:`);
+        lines.push(`- ${check.reasoning}`);
+      }
+      lines.push('');
+    }
+  }
+
   // Task review issues
   if (result.taskReview && result.taskReview.status !== 'pass') {
     lines.push('### Task Review Issues');
