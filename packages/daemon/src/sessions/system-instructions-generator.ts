@@ -1,4 +1,10 @@
-import type { ActionDefinition, InjectedMcpServer, Profile, Session } from '@autopod/shared';
+import type {
+  ActionDefinition,
+  InjectedMcpServer,
+  InjectedSkill,
+  Profile,
+  Session,
+} from '@autopod/shared';
 import type { ResolvedSection } from './section-resolver.js';
 
 export interface SystemInstructionsOptions {
@@ -8,6 +14,8 @@ export interface SystemInstructionsOptions {
   injectedMcpServers?: InjectedMcpServer[];
   /** Action definitions available to this session */
   availableActions?: ActionDefinition[];
+  /** Skills (slash commands) injected into this session */
+  injectedSkills?: InjectedSkill[];
 }
 
 export function generateSystemInstructions(
@@ -62,6 +70,20 @@ export function generateSystemInstructions(
       for (const hint of server.toolHints) {
         lines.push(`- ${hint}`);
       }
+    }
+    lines.push('');
+  }
+
+  // Injected Skills (slash commands)
+  const injectedSkills = options?.injectedSkills ?? [];
+  if (injectedSkills.length > 0) {
+    lines.push('## Available Skills');
+    lines.push('');
+    lines.push('The following custom slash commands are available in this session:');
+    lines.push('');
+    for (const skill of injectedSkills) {
+      const desc = skill.description ? ` — ${skill.description}` : '';
+      lines.push(`- \`/${skill.name}\`${desc}`);
     }
     lines.push('');
   }

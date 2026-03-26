@@ -29,6 +29,7 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
     warmImageBuiltAt: null,
     mcpServers: [],
     claudeMdSections: [],
+    skills: [],
     networkPolicy: null,
     actionPolicy: null,
     outputMode: 'pr' as const,
@@ -145,5 +146,25 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('## Guidelines');
     expect(md).toContain('Make small, focused commits');
     expect(md).toContain('Do NOT modify configuration files');
+  });
+
+  it('includes injected skills section with descriptions', () => {
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x', {
+      injectedSkills: [
+        { name: 'review', source: { type: 'local', path: '/s/r.md' }, description: 'Review PR changes' },
+        { name: 'deploy', source: { type: 'github', repo: 'org/skills' } },
+      ],
+    });
+
+    expect(md).toContain('## Available Skills');
+    expect(md).toContain('`/review` — Review PR changes');
+    expect(md).toContain('`/deploy`');
+    // deploy has no description so no dash after it
+    expect(md).not.toContain('`/deploy` —');
+  });
+
+  it('omits skills section when no skills injected', () => {
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    expect(md).not.toContain('## Available Skills');
   });
 });

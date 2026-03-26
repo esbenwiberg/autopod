@@ -325,24 +325,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Generate system instructions and deliver based on runtime
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
-        const systemInstructions = generateSystemInstructions(profile, session, mcpUrl, {
-          injectedSections: resolvedSections,
-          injectedMcpServers: proxiedMcpServers,
-          availableActions,
-        });
-
-        // Claude reads CLAUDE.md from the workspace; Copilot reads copilot-instructions.md
-        // (passed via customInstructions in SpawnConfig — written by the runtime)
-        if (session.runtime === 'claude') {
-          emitStatus('Writing CLAUDE.md to container…');
-          await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', systemInstructions);
-        }
-
-        // Merge and resolve skills (slash commands)
+        // Merge and resolve skills (slash commands) — must happen before system instructions
+        // so we can document available skills in CLAUDE.md
         const mergedSkills = mergeSkills(
           daemonConfig.skills ?? [],
           profile.skills ?? [],
         );
+        let resolvedSkillNames: string[] = [];
         if (mergedSkills.length > 0) {
           emitStatus('Resolving skills…');
           const resolvedSkills = await resolveSkills(mergedSkills, logger);
@@ -354,12 +343,27 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               skill.content,
             );
           }
+          resolvedSkillNames = resolvedSkills.map((s) => s.name);
           if (resolvedSkills.length > 0) {
             logger.info(
-              { sessionId, count: resolvedSkills.length, names: resolvedSkills.map((s) => s.name) },
+              { sessionId, count: resolvedSkills.length, names: resolvedSkillNames },
               'Skills written to container',
             );
           }
+        }
+
+        const systemInstructions = generateSystemInstructions(profile, session, mcpUrl, {
+          injectedSections: resolvedSections,
+          injectedMcpServers: proxiedMcpServers,
+          availableActions,
+          injectedSkills: mergedSkills.filter((s) => resolvedSkillNames.includes(s.name)),
+        });
+
+        // Claude reads CLAUDE.md from the workspace; Copilot reads copilot-instructions.md
+        // (passed via customInstructions in SpawnConfig — written by the runtime)
+        if (session.runtime === 'claude') {
+          emitStatus('Writing CLAUDE.md to container…');
+          await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', systemInstructions);
         }
 
         // Build MCP server list for runtime
