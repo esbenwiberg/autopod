@@ -877,6 +877,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             diff,
             testCommand: profile.testCommand,
             reviewerModel: profile.escalation.askAi.model,
+            acceptanceCriteria: session.acceptanceCriteria ?? undefined,
           });
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies

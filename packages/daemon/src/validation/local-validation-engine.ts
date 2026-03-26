@@ -1,7 +1,13 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import type { PageResult, TaskReviewResult, ValidationResult } from '@autopod/shared';
+import type {
+  AcCheckResult,
+  AcValidationResult,
+  PageResult,
+  TaskReviewResult,
+  ValidationResult,
+} from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
 
@@ -52,10 +58,16 @@ export function createLocalValidationEngine(
           ? await runPageValidation(containerManager, config, log)
           : [];
 
-      // ── Phase 5: AI Task Review ─────────────────────────────────────
+      // ── Phase 5: AC Validation ────────────────────────────────────────
+      const acValidation =
+        healthResult.status === 'pass'
+          ? await runAcValidation(containerManager, config, log)
+          : null;
+
+      // ── Phase 6: AI Task Review ─────────────────────────────────────
       const taskReview = await runTaskReview(config, log);
 
-      // ── Phase 6: Overall result ─────────────────────────────────────
+      // ── Phase 7: Overall result ─────────────────────────────────────
       const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
       const smokeStatus =
         buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass
@@ -63,9 +75,11 @@ export function createLocalValidationEngine(
           : ('fail' as const);
 
       const testFailed = testResult.status === 'fail';
+      const acFailed = acValidation !== null && acValidation.status === 'fail';
       const overall =
         smokeStatus === 'pass' &&
         !testFailed &&
+        !acFailed &&
         (taskReview === null || taskReview.status === 'pass')
           ? ('pass' as const)
           : ('fail' as const);
@@ -83,6 +97,7 @@ export function createLocalValidationEngine(
           pages,
         },
         test: testResult,
+        acValidation,
         taskReview,
         overall,
         duration,
@@ -307,6 +322,299 @@ function makeSyntheticFailure(path: string, error: string): PageResult {
     assertions: [],
     loadTime: 0,
   };
+}
+
+// ── AC Validation phase ─────────────────────────────────────────────────────
+
+async function runAcValidation(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<AcValidationResult | null> {
+  if (!config.acceptanceCriteria || config.acceptanceCriteria.length === 0) {
+    log?.info('no acceptance criteria provided, skipping AC validation');
+    return null;
+  }
+
+  if (!config.reviewerModel) {
+    log?.info('no reviewer model configured, skipping AC validation');
+    return null;
+  }
+
+  log?.info(
+    { acCount: config.acceptanceCriteria.length, model: config.reviewerModel },
+    'running AC validation',
+  );
+
+  // Step 1: Reviewer generates validation instructions from ACs
+  const instructions = await generateAcInstructions(config, log);
+  if (!instructions || instructions.length === 0) {
+    log?.warn('reviewer generated no validation instructions, skipping AC validation');
+    return { status: 'skip', results: [], model: config.reviewerModel };
+  }
+
+  // Step 2: Executor translates instructions to Playwright script and executes
+  const results = await executeAcChecks(containerManager, config, instructions, log);
+
+  const allPassed = results.every((r) => r.passed);
+
+  log?.info(
+    {
+      acCount: results.length,
+      passCount: results.filter((r) => r.passed).length,
+      failCount: results.filter((r) => !r.passed).length,
+    },
+    'AC validation complete',
+  );
+
+  return {
+    status: allPassed ? 'pass' : 'fail',
+    results,
+    model: config.reviewerModel,
+  };
+}
+
+/** Reviewer LLM generates natural language validation instructions from ACs. */
+async function generateAcInstructions(
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<Array<{ criterion: string; instruction: string }> | null> {
+  const acList = config
+    .acceptanceCriteria!.map((ac, i) => `${i + 1}. ${ac}`)
+    .join('\n');
+
+  const prompt = `You are a QA reviewer for a web application. Your job is to generate browser-based validation instructions for each acceptance criterion.
+
+Task: ${config.task}
+
+Acceptance Criteria:
+${acList}
+
+Diff of changes made:
+${config.diff || '(no diff available)'}
+
+The application is running at: ${config.previewUrl}
+
+For each acceptance criterion, generate a specific validation instruction that can be carried out in a browser. The instruction should describe:
+- Which URL to navigate to
+- What to look for on the page
+- What constitutes a pass vs fail
+
+Respond with a JSON array. Each element must have:
+- "criterion": the original acceptance criterion text (copy exactly)
+- "instruction": a natural language instruction for a browser automation tool
+
+Example:
+[
+  {
+    "criterion": "Settings page has a dark mode toggle",
+    "instruction": "Navigate to /settings. Look for a toggle, switch, or checkbox element related to 'dark mode' or 'theme'. Verify it is visible and interactive. Take a screenshot."
+  }
+]
+
+Respond ONLY with the JSON array, no markdown fences or extra text.`;
+
+  try {
+    const { stdout } = await execFileAsync(
+      'claude',
+      ['-p', prompt, '--model', config.reviewerModel!, '--output-format', 'text'],
+      { timeout: 120_000, maxBuffer: 1024 * 1024 },
+    );
+
+    return parseAcInstructionsJson(stdout.trim());
+  } catch (err) {
+    log?.warn({ err }, 'failed to generate AC validation instructions');
+    return null;
+  }
+}
+
+/** Executor LLM generates and runs a Playwright script from instructions. */
+async function executeAcChecks(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  instructions: Array<{ criterion: string; instruction: string }>,
+  log?: Logger,
+): Promise<AcCheckResult[]> {
+  const instructionList = instructions
+    .map(
+      (inst, i) =>
+        `Check ${i + 1}: "${inst.criterion}"\nInstruction: ${inst.instruction}`,
+    )
+    .join('\n\n');
+
+  const prompt = `You are a browser automation expert. Generate a Playwright script (ESM, using @playwright/test's chromium) that executes the following validation checks against a running web application.
+
+Base URL: ${config.previewUrl}
+Screenshot directory: /tmp/autopod-ac-screenshots
+
+Checks to perform:
+${instructionList}
+
+Requirements:
+- Use \`import { chromium } from 'playwright';\`
+- Launch chromium with \`{ headless: true, args: ['--no-sandbox'] }\`
+- For each check: navigate to the appropriate URL, perform the validation, take a screenshot
+- Save screenshots as /tmp/autopod-ac-screenshots/check-{index}.png (0-indexed)
+- After all checks, output a JSON result between markers:
+  __AUTOPOD_AC_RESULTS_START__
+  [
+    { "criterion": "...", "passed": true/false, "reasoning": "what you found" }
+  ]
+  __AUTOPOD_AC_RESULTS_END__
+- Exit code 0 regardless of pass/fail (failures are data, not errors)
+- Wrap each check in try/catch — if one fails, continue to the next
+- Use a 15 second timeout for each navigation
+
+Respond ONLY with the script code. No markdown fences, no explanation.`;
+
+  try {
+    const { stdout: scriptCode } = await execFileAsync(
+      'claude',
+      ['-p', prompt, '--model', config.reviewerModel!, '--output-format', 'text'],
+      { timeout: 120_000, maxBuffer: 1024 * 1024 },
+    );
+
+    // Strip any markdown fences the LLM might add
+    const cleanScript = stripMarkdownFences(scriptCode.trim());
+
+    // Write script to container
+    const scriptPath = '/tmp/autopod-ac-validation.mjs';
+    await containerManager.writeFile(config.containerId, scriptPath, cleanScript);
+
+    // Ensure screenshot directory exists
+    await containerManager.execInContainer(
+      config.containerId,
+      ['mkdir', '-p', '/tmp/autopod-ac-screenshots'],
+      { cwd: '/workspace' },
+    );
+
+    // Execute the script
+    const result = await containerManager.execInContainer(
+      config.containerId,
+      ['node', scriptPath],
+      { cwd: '/workspace', timeout: instructions.length * 45_000 + 30_000 },
+    );
+
+    // Parse results from stdout markers
+    const parsed = parseAcResults(result.stdout, instructions);
+
+    // Collect screenshots from container (binary files — use base64 exec)
+    for (let i = 0; i < parsed.length; i++) {
+      try {
+        const b64Result = await containerManager.execInContainer(
+          config.containerId,
+          ['sh', '-c', `base64 -w0 /tmp/autopod-ac-screenshots/check-${i}.png 2>/dev/null`],
+          { timeout: 10_000 },
+        );
+        if (b64Result.exitCode === 0 && b64Result.stdout.trim()) {
+          parsed[i].screenshot = b64Result.stdout.trim();
+        }
+      } catch {
+        // Screenshot might not exist if the check crashed
+      }
+    }
+
+    return parsed;
+  } catch (err) {
+    log?.warn({ err }, 'AC check execution failed');
+    // Return failures for all checks
+    return instructions.map((inst) => ({
+      criterion: inst.criterion,
+      passed: false,
+      reasoning: `Execution failed: ${err}`,
+    }));
+  }
+}
+
+/** Parse the reviewer's JSON array of AC instructions. */
+function parseAcInstructionsJson(
+  raw: string,
+): Array<{ criterion: string; instruction: string }> | null {
+  const cleaned = stripMarkdownFences(raw);
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) return null;
+
+    return parsed
+      .filter(
+        (item: unknown): item is { criterion: string; instruction: string } =>
+          typeof item === 'object' &&
+          item !== null &&
+          typeof (item as Record<string, unknown>).criterion === 'string' &&
+          typeof (item as Record<string, unknown>).instruction === 'string',
+      )
+      .map((item) => ({ criterion: item.criterion, instruction: item.instruction }));
+  } catch {
+    return null;
+  }
+}
+
+/** Parse AC results from the Playwright script's stdout markers. */
+function parseAcResults(
+  stdout: string,
+  instructions: Array<{ criterion: string; instruction: string }>,
+): AcCheckResult[] {
+  const startMarker = '__AUTOPOD_AC_RESULTS_START__';
+  const endMarker = '__AUTOPOD_AC_RESULTS_END__';
+
+  const startIdx = stdout.indexOf(startMarker);
+  const endIdx = stdout.indexOf(endMarker);
+
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+    // Script didn't output proper markers — treat all as failed
+    return instructions.map((inst) => ({
+      criterion: inst.criterion,
+      passed: false,
+      reasoning: 'Script did not produce parseable results',
+    }));
+  }
+
+  const jsonStr = stdout.slice(startIdx + startMarker.length, endIdx).trim();
+
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (!Array.isArray(parsed)) {
+      return instructions.map((inst) => ({
+        criterion: inst.criterion,
+        passed: false,
+        reasoning: 'Script output was not a JSON array',
+      }));
+    }
+
+    // Map results back to instructions, preserving order
+    return instructions.map((inst, i) => {
+      const result = parsed[i];
+      if (!result || typeof result !== 'object') {
+        return {
+          criterion: inst.criterion,
+          passed: false,
+          reasoning: 'No result returned for this check',
+        };
+      }
+      return {
+        criterion: inst.criterion,
+        passed: Boolean(result.passed),
+        reasoning: typeof result.reasoning === 'string' ? result.reasoning : 'No reasoning provided',
+      };
+    });
+  } catch {
+    return instructions.map((inst) => ({
+      criterion: inst.criterion,
+      passed: false,
+      reasoning: 'Failed to parse script output as JSON',
+    }));
+  }
+}
+
+/** Strip markdown code fences from LLM output. */
+function stripMarkdownFences(text: string): string {
+  return text
+    .replace(/^```(?:\w+)?\s*\n?/m, '')
+    .replace(/\n?\s*```\s*$/m, '')
+    .trim();
 }
 
 // ── AI Task Review phase ────────────────────────────────────────────────────

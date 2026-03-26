@@ -14,6 +14,7 @@ export interface ValidationEngineConfig {
   diff: string;
   reviewerModel?: string;
   testCommand?: string | null;
+  acceptanceCriteria?: string[];
 }
 
 export interface ValidationEngine {
