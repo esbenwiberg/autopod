@@ -1,3 +1,4 @@
+import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { MaxCredentials, Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { refreshOAuthToken } from './credential-refresh.js';
@@ -90,10 +91,8 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
     2,
   );
 
-  // Write credentials to the node user's actual home directory.
-  // /home/node is the container's real HOME — no HOME override needed.
-  const homeDir = '/home/node';
-  const credPath = `${homeDir}/.claude/.credentials.json`;
+  // Write credentials to the autopod user's home directory.
+  const credPath = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
 
   // Also write a minimal config to skip onboarding prompts
   const configFile = JSON.stringify(
@@ -104,7 +103,7 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
     null,
     2,
   );
-  const configPath = `${homeDir}/.claude/config.json`;
+  const configPath = `${CONTAINER_HOME_DIR}/.claude/config.json`;
 
   return {
     env: {},

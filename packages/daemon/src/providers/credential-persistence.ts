@@ -1,10 +1,11 @@
+import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { MaxCredentials } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 
 /** Path where MAX credentials are written inside the container. */
-const CREDENTIALS_PATH = '/home/node/.claude/.credentials.json';
+const CREDENTIALS_PATH = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
 
 /**
  * Read back OAuth credentials from the container after agent execution.

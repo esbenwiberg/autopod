@@ -1,11 +1,12 @@
 import * as path from 'node:path';
+import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { CopilotStreamParser } from './copilot-stream-parser.js';
 
 /** Directory inside the container where Copilot stores its config. */
-const COPILOT_HOME = '/home/node/.copilot';
+const COPILOT_HOME = `${CONTAINER_HOME_DIR}/.copilot`;
 
 /**
  * GitHub Copilot CLI runtime adapter.

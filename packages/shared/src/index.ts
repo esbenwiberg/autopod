@@ -137,6 +137,8 @@ export {
   SCREENSHOT_QUALITY,
   EVENT_LOG_RETENTION_DAYS,
   VALID_STATUS_TRANSITIONS,
+  CONTAINER_USER,
+  CONTAINER_HOME_DIR,
 } from './constants.js';
 
 // Schemas (runtime values — Zod objects)

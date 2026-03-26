@@ -133,7 +133,7 @@ describe('CopilotRuntime', () => {
         'container-123',
         expect.any(Array),
         expect.objectContaining({
-          env: expect.objectContaining({ COPILOT_HOME: '/root/.copilot' }),
+          env: expect.objectContaining({ COPILOT_HOME: '/home/autopod/.copilot' }),
         }),
       );
     });
@@ -161,7 +161,7 @@ describe('CopilotRuntime', () => {
 
       expect(cm.writeFile).toHaveBeenCalledWith(
         'container-123',
-        '/root/.copilot/mcp-config.json',
+        '/home/autopod/.copilot/mcp-config.json',
         expect.stringContaining('escalation'),
       );
     });
@@ -189,7 +189,7 @@ describe('CopilotRuntime', () => {
 
       expect(cm.writeFile).toHaveBeenCalledWith(
         'container-123',
-        '/root/.copilot/copilot-instructions.md',
+        '/home/autopod/.copilot/copilot-instructions.md',
         'Always write tests.',
       );
     });

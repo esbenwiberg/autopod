@@ -133,12 +133,12 @@ export class DockerContainerManager implements ContainerManager {
     const container = this.docker.getContainer(containerId);
 
     // Build a tar archive with the single file, including parent directory entries.
-    // uid/gid 1000 = node user — without this Docker extracts as root and the node
+    // uid/gid 1000 = autopod user — without this Docker extracts as root and the
     // process can't create new files in those directories (config updates, session state).
     const pack = tar.pack();
     const normalizedPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
     const parts = normalizedPath.split('/');
-    // Add each intermediate directory as an explicit entry so they're owned by node
+    // Add each intermediate directory as an explicit entry so they're owned by autopod
     for (let i = 1; i < parts.length; i++) {
       const dirPath = parts.slice(0, i).join('/');
       pack.entry({ name: dirPath, type: 'directory', uid: 1000, gid: 1000, mode: 0o755 });
