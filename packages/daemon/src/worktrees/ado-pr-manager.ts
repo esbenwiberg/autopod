@@ -138,7 +138,10 @@ export class AdoPrManager implements PrManager {
       pr._links?.web?.href ??
       `${this.orgUrl}/${encodeURIComponent(this.project)}/_git/${encodeURIComponent(this.repoName)}/pullrequest/${pr.pullRequestId}`;
 
-    this.logger.info({ sessionId: config.sessionId, prUrl, prId: pr.pullRequestId }, 'ADO pull request created');
+    this.logger.info(
+      { sessionId: config.sessionId, prUrl, prId: pr.pullRequestId },
+      'ADO pull request created',
+    );
     return prUrl;
   }
 
@@ -149,7 +152,10 @@ export class AdoPrManager implements PrManager {
       throw new Error(`Cannot extract PR ID from URL: ${config.prUrl}`);
     }
 
-    this.logger.info({ prUrl: config.prUrl, prId, squash: config.squash ?? false }, 'Completing ADO pull request');
+    this.logger.info(
+      { prUrl: config.prUrl, prId, squash: config.squash ?? false },
+      'Completing ADO pull request',
+    );
 
     // Fetch current PR to get lastMergeSourceCommit
     const pr = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {

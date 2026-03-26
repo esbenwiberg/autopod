@@ -71,7 +71,11 @@ function makeSession(overrides?: Partial<Session>): Session {
 
 describe('generateSystemInstructions', () => {
   it('includes session id, profile, and task', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/abc12345');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/abc12345',
+    );
 
     expect(md).toContain('Session ID: abc12345');
     expect(md).toContain('Profile: test-profile');
@@ -79,7 +83,11 @@ describe('generateSystemInstructions', () => {
   });
 
   it('includes MCP server URL', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/abc12345');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/abc12345',
+    );
 
     expect(md).toContain('http://localhost:8080/mcp/abc12345');
     expect(md).toContain('ask_human');
@@ -88,7 +96,11 @@ describe('generateSystemInstructions', () => {
   });
 
   it('includes build and run commands', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
 
     expect(md).toContain('`npm run build`');
     expect(md).toContain('`npm start`');
@@ -119,7 +131,11 @@ describe('generateSystemInstructions', () => {
   });
 
   it('omits validation pages section when empty', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
     expect(md).not.toContain('## Smoke Pages');
   });
 
@@ -135,12 +151,20 @@ describe('generateSystemInstructions', () => {
   });
 
   it('omits custom instructions section when null', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
     expect(md).not.toContain('## Custom Instructions');
   });
 
   it('includes guidelines', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
 
     expect(md).toContain('## Guidelines');
     expect(md).toContain('Make small, focused commits');

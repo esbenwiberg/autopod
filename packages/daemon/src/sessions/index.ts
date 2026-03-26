@@ -41,6 +41,9 @@ export {
   canPause,
   canNudge,
 } from './state-machine.js';
-export { generateSystemInstructions, type SystemInstructionsOptions } from './system-instructions-generator.js';
+export {
+  generateSystemInstructions,
+  type SystemInstructionsOptions,
+} from './system-instructions-generator.js';
 export { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
 export { resolveSections, type ResolvedSection } from './section-resolver.js';

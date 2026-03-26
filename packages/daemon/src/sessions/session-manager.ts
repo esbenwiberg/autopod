@@ -24,10 +24,8 @@ import type { ProfileStore } from '../profiles/index.js';
 import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
 import type { ProviderEnvResult } from '../providers/index.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
-import { generateSystemInstructions } from './system-instructions-generator.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
-import type { ValidationRepository } from './validation-repository.js';
 import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
@@ -42,6 +40,8 @@ import {
   isTerminalState,
   validateTransition,
 } from './state-machine.js';
+import { generateSystemInstructions } from './system-instructions-generator.js';
+import type { ValidationRepository } from './validation-repository.js';
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
  * Capped at 48999 to avoid the Windows/Hyper-V dynamic port reservation range (49152+). */

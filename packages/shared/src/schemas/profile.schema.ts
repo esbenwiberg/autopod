@@ -82,7 +82,9 @@ export const createProfileSchema = z.object({
     .regex(/^[a-z0-9\-]+$/, 'Profile name must be lowercase alphanumeric with hyphens'),
   repoUrl: z.string().url(),
   defaultBranch: z.string().default('main'),
-  template: z.enum(['node22', 'node22-pw', 'dotnet9', 'dotnet10', 'python312', 'custom']).default('node22'),
+  template: z
+    .enum(['node22', 'node22-pw', 'dotnet9', 'dotnet10', 'python312', 'custom'])
+    .default('node22'),
   buildCommand: z.string().min(1),
   startCommand: z.string().min(1),
   healthPath: z.string().default('/'),
