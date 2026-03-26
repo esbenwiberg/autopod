@@ -23,6 +23,7 @@ import type {
 import type { ProfileStore } from '../profiles/index.js';
 import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
 import type { ProviderEnvResult } from '../providers/index.js';
+import { getBaseImage } from '../images/dockerfile-generator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -324,7 +325,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Spawn container with port mapping so daemon + user can reach the app
         emitStatus(`Spawning container (${profile.template})…`);
         const containerId = await containerManager.spawn({
-          image: profile.template,
+          image: getBaseImage(profile.template),
           sessionId,
           env: { SESSION_ID: sessionId, PORT: String(CONTAINER_APP_PORT) },
           ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],

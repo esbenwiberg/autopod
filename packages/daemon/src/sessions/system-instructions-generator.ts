@@ -193,10 +193,14 @@ export function generateSystemInstructions(
     '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',
   );
   lines.push(
-    '3. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
+    '3. **Commit and push regularly**: After each phase (or sooner for significant changes), run ' +
+      '`git add -A && git commit -m "..." && git push origin HEAD`. Do not save all commits for the end.',
   );
   lines.push(
-    '4. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
+    '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
+  );
+  lines.push(
+    '5. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
   );
   lines.push('   - Exploration → Implementation → Testing → Cleanup');
   lines.push('   - Analysis → Design → Build → Verify');
@@ -211,7 +215,7 @@ export function generateSystemInstructions(
     lines.push('- Use ask_human when uncertain about scope or direction');
     lines.push('- Cite sources where applicable');
   } else {
-    lines.push('- Make small, focused commits');
+    lines.push('- Commit and push after every meaningful unit of work — do not batch everything at the end');
     lines.push('- Ensure the build passes before completing');
     lines.push('- Use ask_human when uncertain rather than guessing');
     lines.push('- Do NOT modify configuration files unless required by the task');
@@ -281,8 +285,11 @@ function generateOperatingEnvironment(
     lines.push('- Your primary output is the artifact file, not a PR.');
   } else {
     lines.push('- You CAN use git normally within your worktree (commit, branch, etc.)');
-    lines.push('- Push and PR creation are handled by the system after your work completes.');
-    lines.push('- Do NOT attempt to push or create PRs yourself.');
+    lines.push('- **Commit and push frequently** — after each meaningful unit of work (e.g. a passing');
+    lines.push('  test, a completed function, a working feature slice). This preserves your progress');
+    lines.push('  in case of interruptions.');
+    lines.push('- Push to the current branch with `git push origin HEAD`. Do NOT create PRs — the');
+    lines.push('  system handles that after your work is validated.');
   }
   lines.push('');
 }

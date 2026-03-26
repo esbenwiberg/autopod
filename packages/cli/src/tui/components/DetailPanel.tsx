@@ -1,6 +1,7 @@
 import type { AgentEvent, Session, ValidationResult } from '@autopod/shared';
 import { Box, Text } from 'ink';
 import type React from 'react';
+import { truncate } from '../utils/truncate.js';
 import { ActivityFeed } from './ActivityFeed.js';
 import { MetricsBar } from './MetricsBar.js';
 import { PlanPanel } from './PlanPanel.js';
@@ -56,7 +57,7 @@ export function DetailPanel({
       <Box flexDirection="column" marginTop={1}>
         <Box>
           <Text dimColor>{'Task:     '}</Text>
-          <Text>{session.task}</Text>
+          <Text wrap="truncate">{session.task.split('\n')[0]}</Text>
         </Box>
         <Box>
           <Text dimColor>{'Model:    '}</Text>
