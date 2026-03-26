@@ -224,7 +224,7 @@ describe('buildCorrectionContext', () => {
     );
     expect(context.previousDiff).toContain('+added line');
     expect(cm.execInContainer).toHaveBeenCalledWith('ctr-abc', ['git', 'diff', 'HEAD~1'], {
-      cwd: '/tmp/worktree/sess-1',
+      cwd: '/workspace',
     });
   });
 

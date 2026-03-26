@@ -1,4 +1,4 @@
-import type { AgentEvent, Session } from '@autopod/shared';
+import type { AgentEvent, Session, ValidationResult } from '@autopod/shared';
 import { Box, Text } from 'ink';
 import type React from 'react';
 import { ActivityFeed } from './ActivityFeed.js';
@@ -11,6 +11,10 @@ interface DetailPanelProps {
   session: Session | null;
   events: AgentEvent[];
   maxActivityLines: number;
+  /** Override the displayed validation (for attempt navigation). Falls back to session.lastValidationResult. */
+  displayedValidation?: ValidationResult | null;
+  /** Total number of validation attempts (for "Attempt X/Y" display). */
+  totalAttempts?: number;
 }
 
 function formatDuration(startedAt: string | null, completedAt: string | null): string {
@@ -27,6 +31,8 @@ export function DetailPanel({
   session,
   events,
   maxActivityLines,
+  displayedValidation,
+  totalAttempts,
 }: DetailPanelProps): React.ReactElement {
   if (!session) {
     return (
@@ -36,7 +42,7 @@ export function DetailPanel({
     );
   }
 
-  const validation = session.lastValidationResult;
+  const validation = displayedValidation ?? session.lastValidationResult;
 
   return (
     <Box flexDirection="column" paddingX={1} borderStyle="single" borderColor="gray">
@@ -80,11 +86,20 @@ export function DetailPanel({
             {session.filesChanged} changed, +{session.linesAdded} -{session.linesRemoved}
           </Text>
         </Box>
-        {session.previewUrl && (
+        {session.previewUrl ? (
           <Box>
             <Text dimColor>{'Preview:  '}</Text>
             <Text color="blue">{session.previewUrl}</Text>
           </Box>
+        ) : (
+          session.containerId &&
+          ['validated', 'failed'].includes(session.status) && (
+            <Box>
+              <Text dimColor>{'Preview:  '}</Text>
+              <Text color="yellow">stopped</Text>
+              <Text dimColor> (press [o] to launch)</Text>
+            </Box>
+          )
         )}
       </Box>
 
@@ -128,9 +143,18 @@ export function DetailPanel({
       {/* Validation summary */}
       {validation && (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold dimColor>
-            Validation (attempt {validation.attempt})
-          </Text>
+          <Box>
+            <Text bold dimColor>
+              Validation (attempt {validation.attempt}
+              {totalAttempts && totalAttempts > 1 ? `/${totalAttempts}` : ''})
+            </Text>
+            {totalAttempts && totalAttempts > 1 && (
+              <Text dimColor>
+                {' '}
+                [{'<'}] [{'>'} ] to navigate
+              </Text>
+            )}
+          </Box>
           <Box>
             <Text dimColor>{'Result:   '}</Text>
             <Text color={validation.overall === 'pass' ? 'green' : 'red'}>
@@ -183,6 +207,37 @@ export function DetailPanel({
                         {`  console: ${e}`}
                       </Text>
                     ))}
+                  </Box>
+                ))}
+            </Box>
+          )}
+          {/* AC validation results */}
+          {validation.acValidation && validation.acValidation.status !== 'skip' && (
+            <Box flexDirection="column">
+              <Box>
+                <Text dimColor>{'AC Check: '}</Text>
+                <Text color={validation.acValidation.status === 'pass' ? 'green' : 'red'}>
+                  {validation.acValidation.status}
+                </Text>
+                <Text dimColor>
+                  {' '}
+                  ({validation.acValidation.results.filter((r) => r.passed).length}/
+                  {validation.acValidation.results.length} passed)
+                </Text>
+              </Box>
+              {validation.acValidation.results
+                .filter((r) => !r.passed)
+                .map((r, i) => (
+                  <Box key={i} flexDirection="column" marginLeft={2}>
+                    <Text color="red" wrap="truncate">
+                      ✗ {r.criterion}
+                    </Text>
+                    {r.reasoning && (
+                      <Text dimColor wrap="truncate">
+                        {'  '}
+                        {r.reasoning}
+                      </Text>
+                    )}
                   </Box>
                 ))}
             </Box>

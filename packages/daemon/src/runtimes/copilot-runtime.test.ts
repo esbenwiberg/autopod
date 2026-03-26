@@ -62,15 +62,7 @@ describe('CopilotRuntime', () => {
         containerId: 'container-123',
         env: {},
       });
-      expect(args).toEqual([
-        '-p',
-        'Fix the bug',
-        '--model',
-        'claude-sonnet-4-5',
-        '--allow-all',
-        '--no-ask-user',
-        '-s',
-      ]);
+      expect(args).toEqual(['-p', 'Fix the bug', '--allow-all', '--no-ask-user', '-s']);
     });
   });
 
@@ -133,7 +125,7 @@ describe('CopilotRuntime', () => {
         'container-123',
         expect.any(Array),
         expect.objectContaining({
-          env: expect.objectContaining({ COPILOT_HOME: '/root/.copilot' }),
+          env: expect.objectContaining({ COPILOT_HOME: '/home/node/.copilot' }),
         }),
       );
     });
@@ -161,7 +153,7 @@ describe('CopilotRuntime', () => {
 
       expect(cm.writeFile).toHaveBeenCalledWith(
         'container-123',
-        '/root/.copilot/mcp-config.json',
+        '/home/node/.copilot/mcp-config.json',
         expect.stringContaining('escalation'),
       );
     });
@@ -189,7 +181,7 @@ describe('CopilotRuntime', () => {
 
       expect(cm.writeFile).toHaveBeenCalledWith(
         'container-123',
-        '/root/.copilot/copilot-instructions.md',
+        '/home/node/.copilot/copilot-instructions.md',
         'Always write tests.',
       );
     });

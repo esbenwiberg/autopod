@@ -89,7 +89,12 @@ export function App({ config }: AppProps): React.ReactElement {
     <ClientContext.Provider value={client}>
       <SessionStateContext.Provider value={sessionState}>
         <ErrorBoundary>
-          <Dashboard sessionState={sessionState} ws={ws} agentEvents={agentEvents} />
+          <Dashboard
+            sessionState={sessionState}
+            ws={ws}
+            agentEvents={agentEvents}
+            daemonUrl={config.daemonUrl}
+          />
         </ErrorBoundary>
       </SessionStateContext.Provider>
     </ClientContext.Provider>
