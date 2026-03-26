@@ -267,3 +267,23 @@ Things the implementing agent for subsequent briefs should know:
 - **Bridge container ops need a running container** — `writeFileInContainer` and `execInContainer` throw if `session.containerId` is null. The TUI shouldn't expose browser validation for sessions without a container.
 - **Types exported from escalation-mcp** — `ValidateInBrowserInput`, `ValidateInBrowserResult`, `BrowserCheckResult` are all exported from `@autopod/escalation-mcp` index if the TUI needs them for display purposes.
 - **No new shared types** — Brief 05 is fully self-contained in escalation-mcp + daemon bridge wiring. No changes to `@autopod/shared` types.
+
+### Handover to Brief 06: drifts, gotchas, and debt
+
+These are things that drifted from the original spec or emerged during briefs 01-05 that brief 06 should account for.
+
+#### Drifts from spec
+
+- **`validate_in_browser` registered unconditionally** — Spec said "tool available in all templates that have Playwright installed (`node22-pw`)". We register it on every MCP server instance regardless of template. Simpler, but means agents in non-pw containers get a runtime error ("Cannot find module 'playwright'"), not a "tool unavailable" signal. If the TUI wants to show tool availability per session, it would need to check the profile template — but this is cosmetic, not blocking.
+- **SessionBridge grew beyond spec scope** — `writeFileInContainer` and `execInContainer` were added to `SessionBridge` to give the MCP tool container access. No brief anticipated this. Any new tests that fully mock `SessionBridge` need these two methods. Existing tests still pass because nothing calls them through old mocks, but new bridge mocks in brief 06 should include them.
+- **LLM calls route through `callReviewerModel`** — The tool uses the profile's escalation reviewer model (configured via `profile.escalation.askAi.model`), not a dedicated model param. This means the model used for self-validation is whatever the profile picked for `ask_ai`. Fine for now, but worth knowing if someone asks "why is self-validation using sonnet when I expected opus."
+
+#### Gotchas for TUI work
+
+- **No rate limiting on `validate_in_browser`** — Unlike `ask_ai` which has `getAiEscalationCount` / `maxCalls`, the browser tool has no usage cap. Each call = 1 LLM call + 1 container exec. If the TUI ever shows escalation counts or cost indicators, browser validation calls won't be reflected.
+- **`previewTimers` not exposed** — Noted in brief 03 handover but worth repeating: the auto-stop timer is module-scoped inside `createSessionManager()`. If the TUI wants to show "auto-stop in X minutes", there's no API for it. Would need a `getPreviewStatus()` method on SessionManager.
+- **`ValidationPage` alias still exported** — From brief 01: `packages/shared/src/types/profile.ts` has `export type ValidationPage = SmokePage`. Brief 06 is the right place to remove it if nothing external depends on it.
+
+#### Debt to clean up in brief 06
+
+- **5 pre-existing test failures** — `copilot-runtime.test.ts` (4 failures: path expectations use `/root/` but container now uses `/home/node/`, and worktree cwd uses `/tmp/worktree/` but code uses `/workspace/`). `correction-context.test.ts` (1 failure: same `/workspace/` vs `/tmp/worktree/` cwd mismatch). These have been carried since brief 01. Fix the test expectations, not the production code.
