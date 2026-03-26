@@ -16,6 +16,38 @@ export interface InjectedMcpServer {
 }
 
 /**
+ * A custom slash command (skill) to inject into agent sessions.
+ * Skills are markdown files placed in the container's `.claude/commands/` directory.
+ * The skill name becomes the slash command name (e.g., name "review" → `/review`).
+ */
+export interface InjectedSkill {
+  /** Unique name — used as the slash command name and merge key */
+  name: string;
+  /** Where to source the skill content from */
+  source: LocalSkillSource | GithubSkillSource;
+  /** Human-readable description (shown in CLAUDE.md) */
+  description?: string;
+}
+
+export interface LocalSkillSource {
+  type: 'local';
+  /** Absolute path on daemon host to the skill .md file */
+  path: string;
+}
+
+export interface GithubSkillSource {
+  type: 'github';
+  /** GitHub repository in owner/repo format */
+  repo: string;
+  /** Path within the repo to the skill .md file (default: skill name + .md) */
+  path?: string;
+  /** Git ref — branch, tag, or commit SHA (default: main) */
+  ref?: string;
+  /** Optional GitHub token for private repos */
+  token?: string;
+}
+
+/**
  * A content section to inject into the generated CLAUDE.md.
  * Content is either inline (static) or fetched from a URL at provisioning time (dynamic).
  */

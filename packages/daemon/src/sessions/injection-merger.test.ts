@@ -1,6 +1,6 @@
-import type { InjectedClaudeMdSection, InjectedMcpServer } from '@autopod/shared';
+import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
+import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 
 describe('mergeMcpServers', () => {
   it('returns empty array when both inputs are empty', () => {
@@ -79,5 +79,50 @@ describe('mergeClaudeMdSections', () => {
     const result = mergeClaudeMdSections(daemon, profile);
     expect(result[0]?.heading).toBe('First');
     expect(result[1]?.heading).toBe('Middle');
+  });
+});
+
+describe('mergeSkills', () => {
+  it('returns empty array when both inputs are empty', () => {
+    expect(mergeSkills([], [])).toEqual([]);
+  });
+
+  it('returns daemon skills when profile is empty', () => {
+    const daemon: InjectedSkill[] = [
+      { name: 'review', source: { type: 'local', path: '/skills/review.md' } },
+    ];
+    expect(mergeSkills(daemon, [])).toEqual(daemon);
+  });
+
+  it('returns profile skills when daemon is empty', () => {
+    const profile: InjectedSkill[] = [
+      { name: 'deploy', source: { type: 'github', repo: 'org/skills' } },
+    ];
+    expect(mergeSkills([], profile)).toEqual(profile);
+  });
+
+  it('combines skills with different names', () => {
+    const daemon: InjectedSkill[] = [
+      { name: 'review', source: { type: 'local', path: '/skills/review.md' } },
+    ];
+    const profile: InjectedSkill[] = [
+      { name: 'deploy', source: { type: 'github', repo: 'org/skills' } },
+    ];
+    const result = mergeSkills(daemon, profile);
+    expect(result).toHaveLength(2);
+    expect(result.map((s) => s.name)).toEqual(['review', 'deploy']);
+  });
+
+  it('profile overrides daemon skill with same name', () => {
+    const daemon: InjectedSkill[] = [
+      { name: 'review', source: { type: 'local', path: '/old/review.md' }, description: 'old' },
+    ];
+    const profile: InjectedSkill[] = [
+      { name: 'review', source: { type: 'github', repo: 'org/skills' }, description: 'new' },
+    ];
+    const result = mergeSkills(daemon, profile);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.source.type).toBe('github');
+    expect(result[0]?.description).toBe('new');
   });
 });

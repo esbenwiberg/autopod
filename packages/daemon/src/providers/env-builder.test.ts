@@ -33,6 +33,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     warmImageBuiltAt: null,
     mcpServers: [],
     claudeMdSections: [],
+    skills: [],
     networkPolicy: null,
     actionPolicy: null,
     outputMode: 'pr',
@@ -104,7 +105,7 @@ describe('buildProviderEnv', () => {
 
       // Should NOT have ANTHROPIC_API_KEY (forces OAuth path)
       expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
-      // Should NOT override HOME — credentials go to /home/node directly
+      // Should NOT override HOME — credentials go to /home/autopod directly
       expect(result.env.HOME).toBeUndefined();
       // Should write credentials file
       expect(result.containerFiles).toHaveLength(2); // .credentials.json + config.json

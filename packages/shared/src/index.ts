@@ -36,6 +36,9 @@ export type {
 export type {
   InjectedMcpServer,
   InjectedClaudeMdSection,
+  InjectedSkill,
+  LocalSkillSource,
+  GithubSkillSource,
 } from './types/injection.js';
 
 export type {
@@ -139,6 +142,8 @@ export {
   SCREENSHOT_QUALITY,
   EVENT_LOG_RETENTION_DAYS,
   VALID_STATUS_TRANSITIONS,
+  CONTAINER_USER,
+  CONTAINER_HOME_DIR,
 } from './constants.js';
 
 // Schemas (runtime values — Zod objects)
@@ -170,6 +175,7 @@ export {
 } from './schemas/action-definition.schema.js';
 
 export {
+  injectedSkillSchema,
   injectedMcpServerSchema,
   injectedClaudeMdSectionSchema,
 } from './schemas/injection.schema.js';

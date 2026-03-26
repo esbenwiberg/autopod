@@ -11,6 +11,13 @@ export const MAX_DIFF_LENGTH = 50_000;
 export const SCREENSHOT_QUALITY = 80;
 export const EVENT_LOG_RETENTION_DAYS = 30;
 
+/**
+ * Container user identity — all agent containers run as this non-root user.
+ * Dockerfiles create this user at uid/gid 1000.
+ */
+export const CONTAINER_USER = 'autopod';
+export const CONTAINER_HOME_DIR = '/home/autopod';
+
 export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
   queued: ['provisioning', 'killing'],
   provisioning: ['running', 'killing'],

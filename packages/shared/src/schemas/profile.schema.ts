@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { actionPolicySchema, outputModeSchema } from './action-definition.schema.js';
-import { injectedClaudeMdSectionSchema, injectedMcpServerSchema } from './injection.schema.js';
+import {
+  injectedClaudeMdSectionSchema,
+  injectedMcpServerSchema,
+  injectedSkillSchema,
+} from './injection.schema.js';
 
 // ---------------------------------------------------------------------------
 // Model provider credentials schemas
@@ -99,6 +103,7 @@ export const createProfileSchema = z.object({
   extends: z.string().nullable().default(null),
   mcpServers: z.array(injectedMcpServerSchema).default([]),
   claudeMdSections: z.array(injectedClaudeMdSectionSchema).default([]),
+  skills: z.array(injectedSkillSchema).default([]),
   networkPolicy: networkPolicySchema.nullable().default(null),
   actionPolicy: actionPolicySchema.nullable().default(null),
   outputMode: outputModeSchema.default('pr'),

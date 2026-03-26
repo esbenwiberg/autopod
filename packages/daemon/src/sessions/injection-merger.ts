@@ -1,4 +1,4 @@
-import type { InjectedClaudeMdSection, InjectedMcpServer } from '@autopod/shared';
+import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from '@autopod/shared';
 
 /**
  * Merge daemon-level and profile-level MCP server injections.
@@ -27,4 +27,18 @@ export function mergeClaudeMdSections(
   for (const s of daemon) merged.set(s.heading, s);
   for (const s of profile) merged.set(s.heading, s); // profile wins
   return [...merged.values()].sort((a, b) => (a.priority ?? 50) - (b.priority ?? 50));
+}
+
+/**
+ * Merge daemon-level and profile-level skill injections.
+ * Profile entries override daemon entries with the same name.
+ */
+export function mergeSkills(
+  daemon: InjectedSkill[],
+  profile: InjectedSkill[],
+): InjectedSkill[] {
+  const merged = new Map<string, InjectedSkill>();
+  for (const s of daemon) merged.set(s.name, s);
+  for (const s of profile) merged.set(s.name, s); // profile wins
+  return [...merged.values()];
 }

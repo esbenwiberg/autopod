@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { injectedClaudeMdSectionSchema, injectedMcpServerSchema } from './injection.schema.js';
+import {
+  injectedClaudeMdSectionSchema,
+  injectedMcpServerSchema,
+  injectedSkillSchema,
+} from './injection.schema.js';
 
 export const daemonConfigSchema = z.object({
   port: z.number().int().min(1).max(65535).default(3100),
@@ -24,6 +28,8 @@ export const daemonConfigSchema = z.object({
   mcpServers: z.array(injectedMcpServerSchema).default([]),
   /** CLAUDE.md sections injected into every session (unless overridden by profile) */
   claudeMdSections: z.array(injectedClaudeMdSectionSchema).default([]),
+  /** Skills (slash commands) injected into every session (unless overridden by profile) */
+  skills: z.array(injectedSkillSchema).default([]),
 });
 
 export type DaemonConfig = z.infer<typeof daemonConfigSchema>;

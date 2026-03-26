@@ -11,7 +11,7 @@ import type {
   Session,
   SessionStatus,
 } from '@autopod/shared';
-import { AutopodError, generateId } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type {
   ContainerManager,
@@ -28,7 +28,8 @@ import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
-import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
+import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
+import { resolveSkills } from './skill-resolver.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { resolveSections } from './section-resolver.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
@@ -368,10 +369,38 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Generate system instructions and deliver based on runtime
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
+        // Merge and resolve skills (slash commands) — must happen before system instructions
+        // so we can document available skills in CLAUDE.md
+        const mergedSkills = mergeSkills(
+          daemonConfig.skills ?? [],
+          profile.skills ?? [],
+        );
+        let resolvedSkillNames: string[] = [];
+        if (mergedSkills.length > 0) {
+          emitStatus('Resolving skills…');
+          const resolvedSkills = await resolveSkills(mergedSkills, logger);
+          const skillsDir = `${CONTAINER_HOME_DIR}/.claude/commands`;
+          for (const skill of resolvedSkills) {
+            await containerManager.writeFile(
+              containerId,
+              `${skillsDir}/${skill.name}.md`,
+              skill.content,
+            );
+          }
+          resolvedSkillNames = resolvedSkills.map((s) => s.name);
+          if (resolvedSkills.length > 0) {
+            logger.info(
+              { sessionId, count: resolvedSkills.length, names: resolvedSkillNames },
+              'Skills written to container',
+            );
+          }
+        }
+
         const systemInstructions = generateSystemInstructions(profile, session, mcpUrl, {
           injectedSections: resolvedSections,
           injectedMcpServers: proxiedMcpServers,
           availableActions,
+          injectedSkills: mergedSkills.filter((s) => resolvedSkillNames.includes(s.name)),
         });
 
         // Claude reads CLAUDE.md from the workspace; Copilot reads copilot-instructions.md

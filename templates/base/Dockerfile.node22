@@ -8,8 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd --gid 1000 autopod && \
+# Create non-root user — remove the default node user (uid 1000) first
+RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
+    groupadd --gid 1000 autopod && \
     useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod
 
 # Global tools
