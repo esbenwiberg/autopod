@@ -10,7 +10,8 @@ type WizardStep =
   | { step: 'loading_profiles' }
   | { step: 'pick_profile'; profiles: Profile[] }
   | { step: 'enter_task'; profile: Profile }
-  | { step: 'creating'; profile: Profile; task: string }
+  | { step: 'enter_ac'; profile: Profile; task: string; criteria: string[] }
+  | { step: 'creating'; profile: Profile; task: string; criteria: string[] }
   | { step: 'error'; message: string };
 
 interface CreateSessionWizardProps {
@@ -84,15 +85,36 @@ export function CreateSessionWizard({
       <InlineInput
         prompt={`Task for "${wizardState.profile.name}":`}
         onSubmit={(task) => {
-          const { profile } = wizardState;
-          setWizardState({ step: 'creating', profile, task });
-          void client.createSession({ profileName: profile.name, task }).then(
-            (session) => onComplete(session),
-            (err: unknown) => {
-              const message = err instanceof Error ? err.message : 'Failed to create session';
-              setWizardState({ step: 'error', message });
-            },
-          );
+          setWizardState({ step: 'enter_ac', profile: wizardState.profile, task, criteria: [] });
+        }}
+        onCancel={onCancel}
+      />
+    );
+  }
+
+  if (wizardState.step === 'enter_ac') {
+    const { profile, task, criteria } = wizardState;
+    return (
+      <AcInput
+        criteria={criteria}
+        onAdd={(criterion) =>
+          setWizardState({ step: 'enter_ac', profile, task, criteria: [...criteria, criterion] })
+        }
+        onDone={(finalCriteria) => {
+          setWizardState({ step: 'creating', profile, task, criteria: finalCriteria });
+          void client
+            .createSession({
+              profileName: profile.name,
+              task,
+              ...(finalCriteria.length > 0 ? { acceptanceCriteria: finalCriteria } : {}),
+            })
+            .then(
+              (session) => onComplete(session),
+              (err: unknown) => {
+                const message = err instanceof Error ? err.message : 'Failed to create session';
+                setWizardState({ step: 'error', message });
+              },
+            );
         }}
         onCancel={onCancel}
       />
@@ -100,11 +122,16 @@ export function CreateSessionWizard({
   }
 
   if (wizardState.step === 'creating') {
+    const { profile, task, criteria } = wizardState;
     return (
       <WizardMessage
         color="cyan"
         title="Creating session..."
-        lines={[`Profile: ${wizardState.profile.name}`, `Task: ${wizardState.task}`]}
+        lines={[
+          `Profile: ${profile.name}`,
+          `Task: ${task}`,
+          ...(criteria.length > 0 ? [`AC: ${criteria.length} criteria`] : []),
+        ]}
       />
     );
   }
@@ -117,6 +144,63 @@ export function CreateSessionWizard({
       lines={[wizardState.message, 'Esc to dismiss']}
       onEsc={onCancel}
     />
+  );
+}
+
+function AcInput({
+  criteria,
+  onAdd,
+  onDone,
+  onCancel,
+}: {
+  criteria: string[];
+  onAdd: (criterion: string) => void;
+  onDone: (criteria: string[]) => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  const [value, setValue] = useState('');
+
+  useInput((input, key) => {
+    if (key.escape) {
+      onCancel();
+      return;
+    }
+    if (key.return) {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        onDone(criteria);
+      } else {
+        onAdd(trimmed);
+        setValue('');
+      }
+      return;
+    }
+    if (key.backspace || key.delete) {
+      setValue((prev) => prev.slice(0, -1));
+      return;
+    }
+    if (key.ctrl || key.meta) return;
+    if (input) setValue((prev) => prev + input);
+  });
+
+  return (
+    <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column">
+      <Text bold color="yellow">
+        Acceptance Criteria (optional)
+      </Text>
+      {criteria.map((c, i) => (
+        <Text key={i} color="green">
+          {'  ✓ '}
+          {c}
+        </Text>
+      ))}
+      <Box>
+        <Text color="green">&gt; </Text>
+        <Text>{value}</Text>
+        <Text color="gray">_</Text>
+      </Box>
+      <Text dimColor>Enter to add criterion · empty Enter to finish · Esc to cancel</Text>
+    </Box>
   );
 }
 

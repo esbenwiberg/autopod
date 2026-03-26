@@ -59,6 +59,11 @@ export function DetailPanel({
           <Text dimColor>{'Task:     '}</Text>
           <Text wrap="truncate">{session.task.split('\n')[0]}</Text>
         </Box>
+        {session.acceptanceCriteria && session.acceptanceCriteria.length > 0 && (
+          <Box flexDirection="column">
+            <Text dimColor>{'AC:       '}{session.acceptanceCriteria.length} criteria</Text>
+          </Box>
+        )}
         <Box>
           <Text dimColor>{'Model:    '}</Text>
           <Text>{session.model}</Text>
