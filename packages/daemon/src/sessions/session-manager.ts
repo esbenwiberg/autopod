@@ -13,6 +13,7 @@ import type {
 } from '@autopod/shared';
 import { AutopodError, CONTAINER_HOME_DIR, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { getBaseImage } from '../images/dockerfile-generator.js';
 import type {
   ContainerManager,
   PrManager,
@@ -23,18 +24,17 @@ import type {
 import type { ProfileStore } from '../profiles/index.js';
 import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
 import type { ProviderEnvResult } from '../providers/index.js';
-import { getBaseImage } from '../images/dockerfile-generator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
-import { buildRegistryFiles } from './registry-injector.js';
-import { resolveSkills } from './skill-resolver.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import { buildRegistryFiles } from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
+import { resolveSkills } from './skill-resolver.js';
 import {
   canKill,
   canNudge,
@@ -373,10 +373,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
         // Merge and resolve skills (slash commands) — must happen before system instructions
         // so we can document available skills in CLAUDE.md
-        const mergedSkills = mergeSkills(
-          daemonConfig.skills ?? [],
-          profile.skills ?? [],
-        );
+        const mergedSkills = mergeSkills(daemonConfig.skills ?? [], profile.skills ?? []);
         let resolvedSkillNames: string[] = [];
         if (mergedSkills.length > 0) {
           emitStatus('Resolving skills…');
@@ -454,10 +451,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         // Write private registry config files (.npmrc / NuGet.config)
-        const registryFiles = buildRegistryFiles(
-          profile.privateRegistries,
-          profile.registryPat,
-        );
+        const registryFiles = buildRegistryFiles(profile.privateRegistries, profile.registryPat);
         for (const file of registryFiles) {
           await containerManager.writeFile(containerId, file.path, file.content);
           logger.info(

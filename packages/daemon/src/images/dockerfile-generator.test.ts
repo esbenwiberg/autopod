@@ -32,6 +32,14 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     networkPolicy: null,
     actionPolicy: null,
     outputMode: 'pr' as const,
+    modelProvider: 'anthropic' as const,
+    providerCredentials: null,
+    testCommand: null,
+    prProvider: 'github' as const,
+    adoPat: null,
+    skills: [],
+    privateRegistries: [],
+    registryPat: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -202,5 +210,86 @@ describe('generateDockerfile', () => {
     });
     const lines = df.split('\n');
     expect(lines[lines.length - 1]).toBe('USER autopod');
+  });
+
+  it('injects npm registry config with REGISTRY_PAT build arg', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        privateRegistries: [
+          {
+            type: 'npm',
+            url: 'https://pkgs.dev.azure.com/myorg/_packaging/shared/npm/registry/',
+            scope: '@myorg',
+          },
+        ],
+        registryPat: 'secret',
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('ARG REGISTRY_PAT');
+    expect(df).toContain(
+      '@myorg:registry=https://pkgs.dev.azure.com/myorg/_packaging/shared/npm/registry/',
+    );
+    expect(df).toContain(':_authToken=$REGISTRY_PAT');
+    expect(df).toContain(':always-auth=true');
+    // Credentials should be cleaned up
+    expect(df).toContain('rm -f /workspace/.npmrc');
+  });
+
+  it('injects NuGet registry config with REGISTRY_PAT build arg', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        template: 'dotnet10',
+        buildCommand: 'dotnet build',
+        privateRegistries: [
+          {
+            type: 'nuget',
+            url: 'https://pkgs.dev.azure.com/myorg/_packaging/shared/nuget/v3/index.json',
+          },
+        ],
+        registryPat: 'secret',
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('ARG REGISTRY_PAT');
+    expect(df).toContain('packageSources');
+    expect(df).toContain('myorg-shared');
+    expect(df).toContain('ClearTextPassword');
+    expect(df).toContain('$REGISTRY_PAT');
+    expect(df).toContain('rm -f /workspace/.npmrc /workspace/NuGet.config');
+  });
+
+  it('injects both npm and NuGet registries', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        template: 'dotnet10',
+        buildCommand: 'dotnet build && npm run build',
+        privateRegistries: [
+          {
+            type: 'npm',
+            url: 'https://pkgs.dev.azure.com/myorg/_packaging/shared/npm/registry/',
+            scope: '@myorg',
+          },
+          {
+            type: 'nuget',
+            url: 'https://pkgs.dev.azure.com/myorg/_packaging/shared/nuget/v3/index.json',
+          },
+        ],
+        registryPat: 'secret',
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('.npmrc');
+    expect(df).toContain('NuGet.config');
+  });
+
+  it('does not inject registry config when no registries', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({ privateRegistries: [] }),
+      gitCredentials: 'none',
+    });
+    expect(df).not.toContain('REGISTRY_PAT');
+    expect(df).not.toContain('.npmrc');
+    expect(df).not.toContain('NuGet.config');
   });
 });

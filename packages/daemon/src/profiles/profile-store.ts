@@ -75,9 +75,7 @@ export function rowToProfile(
     testCommand: (row.test_command as string) ?? null,
     prProvider: (row.pr_provider as Profile['prProvider']) ?? 'github',
     adoPat: decryptPat(row.ado_pat),
-    privateRegistries: JSON.parse(
-      (row.private_registries as string) ?? '[]',
-    ) as PrivateRegistry[],
+    privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
     registryPat: decryptPat(row.registry_pat),
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
