@@ -30,6 +30,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
+import { buildRegistryFiles } from './registry-injector.js';
 import { resolveSkills } from './skill-resolver.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { resolveSections } from './section-resolver.js';
@@ -449,6 +450,19 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           logger.info(
             { sessionId, stdout: verifyResult.stdout.trim(), stderr: verifyResult.stderr.trim() },
             'Credential file verification',
+          );
+        }
+
+        // Write private registry config files (.npmrc / NuGet.config)
+        const registryFiles = buildRegistryFiles(
+          profile.privateRegistries,
+          profile.registryPat,
+        );
+        for (const file of registryFiles) {
+          await containerManager.writeFile(containerId, file.path, file.content);
+          logger.info(
+            { sessionId, path: file.path, bytes: file.content.length },
+            'Wrote registry config file to container',
           );
         }
 
