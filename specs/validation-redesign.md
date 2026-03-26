@@ -222,3 +222,11 @@ Things the implementing agent for subsequent briefs should know:
 - **`createMockContainerManager()` updated** — `mock-helpers.ts` now includes `stop` and `start` mocks. Integration test containerManager mock also updated.
 - **No shared types or DB schema changes** — `Session.previewUrl` already existed from brief 01. No new types needed.
 - **5 pre-existing test failures unchanged** — Same 5 as briefs 01-02. Still earmarked for brief 06.
+
+#### Handover: what downstream briefs should know
+
+- **Report generator signature unchanged** — Still `generateValidationReport(session, validations)`. Preview JS uses `window.location.origin` so no `daemonBaseUrl` param was needed. Brief 04 can add its AC validation section to `renderAttempt()` without touching the signature.
+- **Container stopped in 3 code paths** — after `validated`, after `failed` (max attempts), and in the `catch` block of `triggerValidation()`. Brief 04 shouldn't need to touch these — the stop happens after state transitions.
+- **`startPreview()` reads profile fields** — Uses `profile.startCommand`, `profile.healthPath`, and `profile.healthTimeout` from `profileStore.get()`. If brief 04 changes how profiles are fetched or how validation uses these fields, preview could be affected.
+- **`previewTimers` is not exposed on the SessionManager interface** — It's module-scoped inside `createSessionManager()`. If brief 06 TUI wants to show "auto-stop in X minutes", there's no API for that yet — would need a `getPreviewStatus()` method.
+- **Mock helpers are current** — `createMockContainerManager()` in `mock-helpers.ts` includes `stop` and `start`. Integration test mock also updated. Briefs 04/05 get these for free via `createTestContext()`.
