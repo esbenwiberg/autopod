@@ -826,7 +826,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             startCommand: profile.startCommand,
             healthPath: profile.healthPath,
             healthTimeout: profile.healthTimeout,
-            validationPages: profile.validationPages,
+            smokePages: profile.smokePages,
             attempt,
             task: session.task,
             diff,

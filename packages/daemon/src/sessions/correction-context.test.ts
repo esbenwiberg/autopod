@@ -49,7 +49,7 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     startCommand: 'npm start',
     healthPath: '/health',
     healthTimeout: 120,
-    validationPages: [],
+    smokePages: [],
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',

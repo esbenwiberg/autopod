@@ -50,7 +50,7 @@ const pageAssertionSchema = z.object({
   value: z.string().optional(),
 });
 
-const validationPageSchema = z.object({
+const smokePageSchema = z.object({
   path: z.string().min(1).startsWith('/'),
   assertions: z.array(pageAssertionSchema).optional(),
 });
@@ -87,7 +87,7 @@ export const createProfileSchema = z.object({
   startCommand: z.string().min(1),
   healthPath: z.string().default('/'),
   healthTimeout: z.number().int().min(10).max(600).default(120),
-  validationPages: z.array(validationPageSchema).default([]),
+  smokePages: z.array(smokePageSchema).default([]),
   maxValidationAttempts: z.number().int().min(1).max(10).default(3),
   defaultModel: z.string().default('opus'),
   defaultRuntime: z.enum(['claude', 'codex', 'copilot']).default('claude'),

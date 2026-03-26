@@ -8,7 +8,7 @@ export interface ValidationEngineConfig {
   startCommand: string;
   healthPath: string;
   healthTimeout: number;
-  validationPages: import('@autopod/shared').ValidationPage[];
+  smokePages: import('@autopod/shared').SmokePage[];
   attempt: number;
   task: string;
   diff: string;

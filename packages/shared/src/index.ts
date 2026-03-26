@@ -10,6 +10,7 @@ export type {
   Profile,
   StackTemplate,
   ExecutionTarget,
+  SmokePage,
   ValidationPage,
   PageAssertion,
   EscalationConfig,

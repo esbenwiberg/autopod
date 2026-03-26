@@ -82,10 +82,10 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
-  if (profile.validationPages.length > 0) {
-    lines.push('## Validation Pages');
+  if (profile.smokePages.length > 0) {
+    lines.push('## Smoke Pages');
     lines.push('');
-    for (const page of profile.validationPages) {
+    for (const page of profile.smokePages) {
       lines.push(`- ${page.path}`);
       if (page.assertions) {
         for (const a of page.assertions) {

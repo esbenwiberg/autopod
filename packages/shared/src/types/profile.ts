@@ -16,7 +16,7 @@ export interface Profile {
   startCommand: string;
   healthPath: string;
   healthTimeout: number;
-  validationPages: ValidationPage[];
+  smokePages: SmokePage[];
   maxValidationAttempts: number;
   defaultModel: string;
   defaultRuntime: RuntimeType;
@@ -50,10 +50,13 @@ export interface Profile {
   updatedAt: string;
 }
 
-export interface ValidationPage {
+export interface SmokePage {
   path: string;
   assertions?: PageAssertion[];
 }
+
+/** @deprecated Use SmokePage instead */
+export type ValidationPage = SmokePage;
 
 export interface PageAssertion {
   selector: string;

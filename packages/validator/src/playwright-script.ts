@@ -1,8 +1,8 @@
-import type { ValidationPage } from '@autopod/shared';
+import type { SmokePage } from '@autopod/shared';
 
 export interface PlaywrightScriptConfig {
   baseUrl: string;
-  pages: ValidationPage[];
+  pages: SmokePage[];
   screenshotDir: string;
   navigationTimeout: number;
   maxConsoleErrors: number;

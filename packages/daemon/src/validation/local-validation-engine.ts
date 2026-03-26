@@ -48,7 +48,7 @@ export function createLocalValidationEngine(
 
       // ── Phase 4: Page validation ─────────────────────────────────────
       const pages: PageResult[] =
-        healthResult.status === 'pass' && config.validationPages.length > 0
+        healthResult.status === 'pass' && config.smokePages.length > 0
           ? await runPageValidation(containerManager, config, log)
           : [];
 
@@ -245,11 +245,11 @@ async function runPageValidation(
   config: ValidationEngineConfig,
   log?: Logger,
 ): Promise<PageResult[]> {
-  log?.info({ pageCount: config.validationPages.length }, 'running page validation');
+  log?.info({ pageCount: config.smokePages.length }, 'running page validation');
 
   const script = generateValidationScript({
     baseUrl: config.previewUrl,
-    pages: config.validationPages,
+    pages: config.smokePages,
     screenshotDir: '/workspace/.autopod/screenshots',
     navigationTimeout: 30_000,
     maxConsoleErrors: 50,
@@ -269,7 +269,7 @@ async function runPageValidation(
     const result = await containerManager.execInContainer(
       config.containerId,
       ['node', scriptPath],
-      { cwd: '/workspace', timeout: config.validationPages.length * 45_000 },
+      { cwd: '/workspace', timeout: config.smokePages.length * 45_000 },
     );
 
     const pages = parsePageResults(result.stdout);

@@ -12,7 +12,7 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
     startCommand: 'npm start',
     healthPath: '/health',
     healthTimeout: 120,
-    validationPages: [],
+    smokePages: [],
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',
@@ -97,7 +97,7 @@ describe('generateSystemInstructions', () => {
 
   it('includes validation pages when present', () => {
     const profile = makeProfile({
-      validationPages: [
+      smokePages: [
         {
           path: '/dashboard',
           assertions: [
@@ -111,7 +111,7 @@ describe('generateSystemInstructions', () => {
 
     const md = generateSystemInstructions(profile, makeSession(), 'http://localhost:8080/mcp/x');
 
-    expect(md).toContain('## Validation Pages');
+    expect(md).toContain('## Smoke Pages');
     expect(md).toContain('- /dashboard');
     expect(md).toContain('  - exists: .header');
     expect(md).toContain('  - text_contains: .title = "Dashboard"');
@@ -120,7 +120,7 @@ describe('generateSystemInstructions', () => {
 
   it('omits validation pages section when empty', () => {
     const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
-    expect(md).not.toContain('## Validation Pages');
+    expect(md).not.toContain('## Smoke Pages');
   });
 
   it('includes custom instructions when present', () => {
