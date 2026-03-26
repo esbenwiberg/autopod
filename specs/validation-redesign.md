@@ -211,3 +211,14 @@ Things the implementing agent for subsequent briefs should know:
 - **No shared types or DB schema changes** — Brief 02 only touched daemon-internal code. `ValidationResult`, `StoredValidation`, and the DB schema are untouched from brief 01.
 - **`createTestContext()` still doesn't include `validationRepo`** — The integration test for the report endpoint works because it goes through the full server setup (which wires `validationRepo` via `index.ts`). Unit tests using `createTestContext()` from `mock-helpers.ts` still won't have it. Add it there if future briefs need to assert on validation history in session manager unit tests.
 - **5 pre-existing test failures unchanged** — Same 5 as brief 01. Still earmarked for brief 06.
+
+### Notes from Brief 03
+
+- **`ContainerManager` now has `stop()` and `start()`** — Interface at `packages/daemon/src/interfaces/container-manager.ts`. Docker implementation is idempotent (swallows 304). ACI implementation throws 501 `NOT_SUPPORTED`.
+- **Post-validation containers are stopped, not left running** — After `transition(s2, 'validated')` and `transition(s2, 'failed')` (max attempts), the container is stopped via `cm.stop()`. This means preview requires an explicit `startPreview()` call.
+- **Auto-stop timer** — `previewTimers` Map inside session manager tracks `setTimeout` handles per session. Default 10 min (`PREVIEW_AUTO_STOP_MS`). Timers are `.unref()`'d so they don't block process exit. Cleared on kill, delete, manual stop, or timer reset on new preview start.
+- **Preview API** — `POST /sessions/:id/preview` starts container + re-runs start command + polls health check. Returns `{ previewUrl }`. `DELETE /sessions/:id/preview` stops container. Both return 409 if no container.
+- **Report preview section** — `renderPreviewSection()` in report-generator.ts. Uses `window.location.origin` for same-origin `fetch()` calls — no daemon URL plumbing needed. Only shown for post-validation sessions with a container.
+- **`createMockContainerManager()` updated** — `mock-helpers.ts` now includes `stop` and `start` mocks. Integration test containerManager mock also updated.
+- **No shared types or DB schema changes** — `Session.previewUrl` already existed from brief 01. No new types needed.
+- **5 pre-existing test failures unchanged** — Same 5 as briefs 01-02. Still earmarked for brief 06.
