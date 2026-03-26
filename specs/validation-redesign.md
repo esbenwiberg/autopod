@@ -230,3 +230,16 @@ Things the implementing agent for subsequent briefs should know:
 - **`startPreview()` reads profile fields** — Uses `profile.startCommand`, `profile.healthPath`, and `profile.healthTimeout` from `profileStore.get()`. If brief 04 changes how profiles are fetched or how validation uses these fields, preview could be affected.
 - **`previewTimers` is not exposed on the SessionManager interface** — It's module-scoped inside `createSessionManager()`. If brief 06 TUI wants to show "auto-stop in X minutes", there's no API for that yet — would need a `getPreviewStatus()` method.
 - **Mock helpers are current** — `createMockContainerManager()` in `mock-helpers.ts` includes `stop` and `start`. Integration test mock also updated. Briefs 04/05 get these for free via `createTestContext()`.
+
+### Notes from Brief 04
+
+- **`acceptanceCriteria: string[] | null`** on `Session` type, `acceptance_criteria TEXT` column in sessions table, stored as JSON. `CreateSessionRequest` has optional `acceptanceCriteria?: string[]` with Zod schema max 50 items, 2000 chars each.
+- **AC validation is phase 5** — runs between smoke pages (phase 4) and AI task review (phase 6) in `local-validation-engine.ts`. Only runs when `healthResult.status === 'pass'` AND `config.acceptanceCriteria` has entries AND `config.reviewerModel` is set.
+- **Two-step LLM flow** — `generateAcInstructions()` calls reviewer LLM to produce natural language browser checks from ACs + diff + task. `executeAcChecks()` calls executor LLM to translate instructions into a Playwright script, writes to container, executes, parses results from `__AUTOPOD_AC_RESULTS_START__`/`__AUTOPOD_AC_RESULTS_END__` markers.
+- **Brief 05 should reuse patterns** — The LLM→Playwright flow (`generateAcInstructions` + `executeAcChecks`) is the same pattern the agent browser MCP tool needs. Key functions to study: `executeAcChecks()` for script generation prompt structure, `parseAcResults()` for stdout marker parsing, screenshot collection via `base64 -w0` exec.
+- **`AcValidationResult` and `AcCheckResult`** exported from `@autopod/shared`. `ValidationResult.acValidation` is optional (`AcValidationResult | null | undefined`).
+- **Report generator unchanged signature** — Still `generateValidationReport(session, validations)`. Added `renderAcValidation()` between smoke pages and task review in `renderAttempt()`.
+- **Correction context updated** — `failedStep` union now includes `'ac_validation'`. AC failures included in `screenshotDescriptions`. Feedback formatter has new "Acceptance Criteria Failures" section.
+- **System instructions** — Adds `## Acceptance Criteria` section when `session.acceptanceCriteria` has entries, before custom instructions. Tells agent the system will independently verify each criterion.
+- **Parser functions exported** — `parseAcInstructionsJson`, `parseAcResults`, `stripMarkdownFences` exported from `local-validation-engine.ts` for testing. Brief 05 can import these if needed.
+- **5 pre-existing test failures unchanged** — Same 5 as briefs 01-03. Still earmarked for brief 06.
