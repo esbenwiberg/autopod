@@ -193,3 +193,12 @@ This spec is too large for a single agent session. Decompose into 6 briefs with 
 ```
 
 Briefs 02 and 04 can run in parallel after 01 completes. Brief 06 should run last as it integrates all prior work into the TUI.
+
+### Notes from Brief 01
+
+Things the implementing agent for subsequent briefs should know:
+
+- **`ValidationPage` alias still exported** — `packages/shared/src/types/profile.ts` has `export type ValidationPage = SmokePage` as a deprecated alias, re-exported from the shared index. Safe to remove in brief 06 cleanup if nothing external depends on it.
+- **DB column name diverges from TS field** — The SQLite column is still `validation_pages` while the TypeScript field is `smokePages`. `profile-store.ts` handles the mapping. Anyone writing raw SQL against the profiles table needs to use `validation_pages`, not `smokePages`. Same pattern as `escalation_config` → `escalation`.
+- **`validationRepo` is optional on `SessionManagerDependencies`** — Declared as `validationRepo?: ValidationRepository` so existing tests don't break. The daemon's `index.ts` wires it. The shared `createTestContext()` in `mock-helpers.ts` does NOT include it yet — brief 02 should add it if tests need to assert on validation history.
+- **5 pre-existing test failures** — `copilot-runtime.test.ts` (4) and `correction-context.test.ts` (1). Path expectation mismatches from a container user/cwd change (`/root/` → `/home/node/`, worktree cwd → `/workspace/`). Not caused by brief 01. Brief 06 is a good place to clean them up.
