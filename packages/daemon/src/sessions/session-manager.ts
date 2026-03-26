@@ -11,7 +11,7 @@ import type {
   Session,
   SessionStatus,
 } from '@autopod/shared';
-import { AutopodError, generateId } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type {
   ContainerManager,
@@ -29,7 +29,8 @@ import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
-import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
+import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
+import { resolveSkills } from './skill-resolver.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { resolveSections } from './section-resolver.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
@@ -335,6 +336,30 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         if (session.runtime === 'claude') {
           emitStatus('Writing CLAUDE.md to container…');
           await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', systemInstructions);
+        }
+
+        // Merge and resolve skills (slash commands)
+        const mergedSkills = mergeSkills(
+          daemonConfig.skills ?? [],
+          profile.skills ?? [],
+        );
+        if (mergedSkills.length > 0) {
+          emitStatus('Resolving skills…');
+          const resolvedSkills = await resolveSkills(mergedSkills, logger);
+          const skillsDir = `${CONTAINER_HOME_DIR}/.claude/commands`;
+          for (const skill of resolvedSkills) {
+            await containerManager.writeFile(
+              containerId,
+              `${skillsDir}/${skill.name}.md`,
+              skill.content,
+            );
+          }
+          if (resolvedSkills.length > 0) {
+            logger.info(
+              { sessionId, count: resolvedSkills.length, names: resolvedSkills.map((s) => s.name) },
+              'Skills written to container',
+            );
+          }
         }
 
         // Build MCP server list for runtime

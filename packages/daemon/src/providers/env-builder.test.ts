@@ -33,6 +33,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     warmImageBuiltAt: null,
     mcpServers: [],
     claudeMdSections: [],
+    skills: [],
     networkPolicy: null,
     actionPolicy: null,
     outputMode: 'pr',

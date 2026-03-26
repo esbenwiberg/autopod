@@ -36,6 +36,9 @@ export type {
 export type {
   InjectedMcpServer,
   InjectedClaudeMdSection,
+  InjectedSkill,
+  LocalSkillSource,
+  GithubSkillSource,
 } from './types/injection.js';
 
 export type {
@@ -170,6 +173,7 @@ export {
 } from './schemas/action-definition.schema.js';
 
 export {
+  injectedSkillSchema,
   injectedMcpServerSchema,
   injectedClaudeMdSectionSchema,
 } from './schemas/injection.schema.js';

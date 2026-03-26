@@ -1,5 +1,5 @@
 import type { ActionPolicy, OutputMode } from './actions.js';
-import type { InjectedClaudeMdSection, InjectedMcpServer } from './injection.js';
+import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from './injection.js';
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
 import type { RuntimeType } from './runtime.js';
 
@@ -30,6 +30,8 @@ export interface Profile {
   mcpServers: InjectedMcpServer[];
   /** Additional CLAUDE.md sections for sessions using this profile */
   claudeMdSections: InjectedClaudeMdSection[];
+  /** Skills (slash commands) injected into agent sessions */
+  skills: InjectedSkill[];
   /** Optional network isolation policy for containers */
   networkPolicy: NetworkPolicy | null;
   /** Action control plane policy — which actions are enabled, PII rules, custom actions */
