@@ -29,6 +29,11 @@ export {
   type NudgeMessage,
 } from './nudge-repository.js';
 export {
+  createValidationRepository,
+  type ValidationRepository,
+  type StoredValidation,
+} from './validation-repository.js';
+export {
   validateTransition,
   isTerminalState,
   canReceiveMessage,

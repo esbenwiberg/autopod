@@ -43,6 +43,12 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
     return { ok: true };
   });
 
+  // GET /sessions/:sessionId/validations — validation history
+  app.get('/sessions/:sessionId/validations', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    return sessionManager.getValidationHistory(sessionId);
+  });
+
   // POST /sessions/:sessionId/validate — trigger validation
   app.post('/sessions/:sessionId/validate', async (request) => {
     const { sessionId } = request.params as { sessionId: string };

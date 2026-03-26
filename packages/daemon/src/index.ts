@@ -33,6 +33,7 @@ import {
   createSessionManager,
   createSessionQueue,
   createSessionRepository,
+  createValidationRepository,
 } from './sessions/index.js';
 import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
@@ -78,6 +79,7 @@ const sessionRepo = createSessionRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
 const nudgeRepo = createNudgeRepository(db);
+const validationRepo = createValidationRepository(db);
 
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);
@@ -240,6 +242,7 @@ sessionManager = createSessionManager({
   sessionRepo,
   escalationRepo,
   nudgeRepo,
+  validationRepo,
   profileStore,
   eventBus,
   containerManagerFactory,

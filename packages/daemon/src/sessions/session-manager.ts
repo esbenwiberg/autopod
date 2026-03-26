@@ -27,6 +27,7 @@ import { buildGitHubImageUrl, collectScreenshots } from '../validation/screensho
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
+import type { ValidationRepository } from './validation-repository.js';
 import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
@@ -68,6 +69,7 @@ export interface SessionManagerDependencies {
   sessionRepo: SessionRepository;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
+  validationRepo?: ValidationRepository;
   profileStore: ProfileStore;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
@@ -113,6 +115,7 @@ export interface SessionManager {
     userId?: string;
   }): Session[];
   getSessionStats(filters?: { profileName?: string }): SessionStats;
+  getValidationHistory(sessionId: string): import('./validation-repository.js').StoredValidation[];
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
@@ -132,6 +135,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     mcpBaseUrl,
     daemonConfig,
     logger,
+    validationRepo,
   } = deps;
 
   /**
@@ -877,6 +881,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         sessionRepo.update(sessionId, { lastValidationResult: result });
 
+        // Persist every attempt to validation history
+        validationRepo?.insert(sessionId, attempt, result);
+
         eventBus.emit({
           type: 'session.validation_completed',
           timestamp: new Date().toISOString(),
@@ -1084,6 +1091,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     getSessionStats(filters?) {
       return sessionRepo.getStats(filters);
+    },
+
+    getValidationHistory(sessionId: string) {
+      // Verify session exists
+      sessionRepo.getOrThrow(sessionId);
+      return validationRepo?.getForSession(sessionId) ?? [];
     },
 
     async approveAllValidated(): Promise<{ approved: string[] }> {
