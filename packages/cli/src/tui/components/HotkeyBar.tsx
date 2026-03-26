@@ -8,6 +8,9 @@ interface HotkeyBarProps {
   hasValidated: boolean;
   hasFailed: boolean;
   hasFilter: boolean;
+  hasValidationResult: boolean;
+  hasContainerId: boolean;
+  hasPrUrl: boolean;
 }
 
 interface Hotkey {
@@ -15,12 +18,27 @@ interface Hotkey {
   label: string;
 }
 
-function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean): Hotkey[] {
+interface SessionHotkeyContext {
+  hasPreviewUrl: boolean;
+  hasValidationResult: boolean;
+  hasContainerId: boolean;
+  hasPrUrl: boolean;
+}
+
+function getOpenLabel(ctx: SessionHotkeyContext): string {
+  if (ctx.hasPreviewUrl) return 'open';
+  if (ctx.hasContainerId) return 'preview';
+  if (ctx.hasPrUrl) return 'open PR';
+  return 'open';
+}
+
+function getSessionHotkeys(status: SessionStatus | null, ctx: SessionHotkeyContext): Hotkey[] {
   const base: Hotkey[] = [{ key: '↑↓', label: 'navigate' }];
 
   if (!status) return base;
 
   const contextual: Hotkey[] = [];
+  const canOpen = ctx.hasPreviewUrl || ctx.hasContainerId || ctx.hasPrUrl;
 
   switch (status) {
     case 'running':
@@ -44,7 +62,8 @@ function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean)
       contextual.push({ key: 'a', label: 'approve' });
       contextual.push({ key: 'r', label: 'reject' });
       contextual.push({ key: 'd', label: 'diff' });
-      if (hasPreviewUrl) contextual.push({ key: 'o', label: 'open' });
+      if (canOpen) contextual.push({ key: 'o', label: getOpenLabel(ctx) });
+      if (ctx.hasValidationResult) contextual.push({ key: 'w', label: 'report' });
       contextual.push({ key: 'x', label: 'kill' });
       break;
     case 'validating':
@@ -54,17 +73,21 @@ function getSessionHotkeys(status: SessionStatus | null, hasPreviewUrl: boolean)
     case 'failed':
       contextual.push({ key: 'd', label: 'diff' });
       contextual.push({ key: 'l', label: 'logs' });
+      if (canOpen) contextual.push({ key: 'o', label: getOpenLabel(ctx) });
+      if (ctx.hasValidationResult) contextual.push({ key: 'w', label: 'report' });
       contextual.push({ key: 'v', label: 'validate' });
       contextual.push({ key: 'R', label: 'retry' });
       contextual.push({ key: 'D', label: 'delete' });
       break;
     case 'killed':
       contextual.push({ key: 'l', label: 'logs' });
+      if (ctx.hasValidationResult) contextual.push({ key: 'w', label: 'report' });
       contextual.push({ key: 'R', label: 'retry' });
       contextual.push({ key: 'D', label: 'delete' });
       break;
     case 'complete':
       contextual.push({ key: 'l', label: 'logs' });
+      if (ctx.hasValidationResult) contextual.push({ key: 'w', label: 'report' });
       contextual.push({ key: 'D', label: 'delete' });
       break;
     case 'killing':
@@ -112,8 +135,16 @@ export function HotkeyBar({
   hasValidated,
   hasFailed,
   hasFilter,
+  hasValidationResult,
+  hasContainerId,
+  hasPrUrl,
 }: HotkeyBarProps): React.ReactElement {
-  const sessionHotkeys = getSessionHotkeys(sessionStatus, hasPreviewUrl);
+  const sessionHotkeys = getSessionHotkeys(sessionStatus, {
+    hasPreviewUrl,
+    hasValidationResult,
+    hasContainerId,
+    hasPrUrl,
+  });
   const globalHotkeys = getGlobalHotkeys(hasValidated, hasFailed, hasFilter);
 
   return (

@@ -12,7 +12,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     startCommand: 'node server.js --port $PORT',
     healthPath: '/',
     healthTimeout: 120,
-    validationPages: [],
+    smokePages: [],
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',
@@ -60,19 +60,19 @@ describe('resolveInheritance', () => {
     expect(resolved.warmImageTag).toBe('my-image:latest');
   });
 
-  it('should append validationPages (parent first, child second)', () => {
+  it('should append smokePages (parent first, child second)', () => {
     const parent = makeProfile({
       name: 'parent',
-      validationPages: [{ path: '/parent-page' }],
+      smokePages: [{ path: '/parent-page' }],
     });
     const child = makeProfile({
       name: 'child',
-      validationPages: [{ path: '/child-page' }],
+      smokePages: [{ path: '/child-page' }],
       extends: 'parent',
     });
 
     const resolved = resolveInheritance(child, parent);
-    expect(resolved.validationPages).toEqual([{ path: '/parent-page' }, { path: '/child-page' }]);
+    expect(resolved.smokePages).toEqual([{ path: '/parent-page' }, { path: '/child-page' }]);
   });
 
   it('should deep merge escalation config', () => {

@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream';
+import { AutopodError } from '@autopod/shared';
 import {
   type ContainerGroup,
   ContainerInstanceManagementClient,
@@ -136,6 +137,14 @@ export class AciContainerManager implements ContainerManager {
     );
 
     return containerId;
+  }
+
+  async stop(_containerId: string): Promise<void> {
+    throw new AutopodError('Preview not supported for ACI containers', 'NOT_SUPPORTED', 501);
+  }
+
+  async start(_containerId: string): Promise<void> {
+    throw new AutopodError('Preview not supported for ACI containers', 'NOT_SUPPORTED', 501);
   }
 
   async kill(containerId: string): Promise<void> {

@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   files_changed   INTEGER NOT NULL DEFAULT 0,
   lines_added     INTEGER NOT NULL DEFAULT 0,
   lines_removed   INTEGER NOT NULL DEFAULT 0,
-  preview_url     TEXT
+  preview_url     TEXT,
+  acceptance_criteria TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);

@@ -229,6 +229,55 @@ describe('DockerContainerManager', () => {
     });
   });
 
+  // ─── stop() ─────────────────────────────────────────────
+
+  describe('stop()', () => {
+    it('stops the container without removing it', async () => {
+      await manager.stop('abc123');
+
+      expect(container.stop).toHaveBeenCalledWith({ t: 10 });
+      expect(container.remove).not.toHaveBeenCalled();
+    });
+
+    it('swallows 304 (already stopped)', async () => {
+      container.stop.mockRejectedValue({ statusCode: 304 });
+
+      await expect(manager.stop('abc123')).resolves.toBeUndefined();
+    });
+
+    it('throws unexpected errors', async () => {
+      container.stop.mockRejectedValue({ statusCode: 500, message: 'internal error' });
+
+      await expect(manager.stop('abc123')).rejects.toEqual(
+        expect.objectContaining({ statusCode: 500 }),
+      );
+    });
+  });
+
+  // ─── start() ────────────────────────────────────────────
+
+  describe('start()', () => {
+    it('starts a stopped container', async () => {
+      await manager.start('abc123');
+
+      expect(container.start).toHaveBeenCalled();
+    });
+
+    it('swallows 304 (already running)', async () => {
+      container.start.mockRejectedValue({ statusCode: 304 });
+
+      await expect(manager.start('abc123')).resolves.toBeUndefined();
+    });
+
+    it('throws unexpected errors', async () => {
+      container.start.mockRejectedValue({ statusCode: 500, message: 'internal error' });
+
+      await expect(manager.start('abc123')).rejects.toEqual(
+        expect.objectContaining({ statusCode: 500 }),
+      );
+    });
+  });
+
   // ─── kill() ─────────────────────────────────────────────
 
   describe('kill()', () => {

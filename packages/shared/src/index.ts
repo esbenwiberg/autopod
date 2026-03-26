@@ -10,7 +10,7 @@ export type {
   Profile,
   StackTemplate,
   ExecutionTarget,
-  ValidationPage,
+  SmokePage,
   PageAssertion,
   EscalationConfig,
   NetworkPolicy,
@@ -70,6 +70,8 @@ export type {
   PageResult,
   AssertionResult,
   TaskReviewResult,
+  AcValidationResult,
+  AcCheckResult,
 } from './types/validation.js';
 
 export type {

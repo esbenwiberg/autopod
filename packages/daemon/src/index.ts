@@ -33,11 +33,12 @@ import {
   createSessionManager,
   createSessionQueue,
   createSessionRepository,
+  createValidationRepository,
 } from './sessions/index.js';
 import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
-import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
+import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { GhPrManager } from './worktrees/pr-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -78,6 +79,7 @@ const sessionRepo = createSessionRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
 const nudgeRepo = createNudgeRepository(db);
+const validationRepo = createValidationRepository(db);
 
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);
@@ -216,17 +218,25 @@ const containerManagerFactory = {
 
 const ghPrManager = new GhPrManager({ logger });
 
-function prManagerFactory(profile: import('@autopod/shared').Profile): import('./interfaces/pr-manager.js').PrManager | null {
+function prManagerFactory(
+  profile: import('@autopod/shared').Profile,
+): import('./interfaces/pr-manager.js').PrManager | null {
   if (profile.prProvider === 'ado') {
     if (!profile.adoPat) {
-      logger.warn({ profileName: profile.name }, 'ADO pr provider configured but adoPat is missing — skipping PR creation');
+      logger.warn(
+        { profileName: profile.name },
+        'ADO pr provider configured but adoPat is missing — skipping PR creation',
+      );
       return null;
     }
     try {
       const { orgUrl, project, repoName } = parseAdoRepoUrl(profile.repoUrl);
       return new AdoPrManager({ orgUrl, project, repoName, pat: profile.adoPat, logger });
     } catch (err) {
-      logger.warn({ err, profileName: profile.name }, 'Failed to parse ADO repo URL — skipping PR creation');
+      logger.warn(
+        { err, profileName: profile.name },
+        'Failed to parse ADO repo URL — skipping PR creation',
+      );
       return null;
     }
   }
@@ -240,6 +250,7 @@ sessionManager = createSessionManager({
   sessionRepo,
   escalationRepo,
   nudgeRepo,
+  validationRepo,
   profileStore,
   eventBus,
   containerManagerFactory,
@@ -264,6 +275,7 @@ const sessionBridge = createSessionBridge({
   escalationRepo,
   nudgeRepo,
   profileStore,
+  containerManagerFactory,
   pendingRequestsBySession,
   logger,
 });

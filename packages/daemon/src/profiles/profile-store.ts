@@ -6,7 +6,7 @@ import type {
   NetworkPolicy,
   Profile,
   ProviderCredentials,
-  ValidationPage,
+  SmokePage,
 } from '@autopod/shared';
 import {
   AutopodError,
@@ -48,7 +48,7 @@ export function rowToProfile(
     startCommand: row.start_command as string,
     healthPath: row.health_path as string,
     healthTimeout: row.health_timeout as number,
-    validationPages: JSON.parse(row.validation_pages as string) as ValidationPage[],
+    smokePages: JSON.parse(row.validation_pages as string) as SmokePage[],
     maxValidationAttempts: row.max_validation_attempts as number,
     defaultModel: row.default_model as string,
     defaultRuntime: row.default_runtime as Profile['defaultRuntime'],
@@ -197,7 +197,7 @@ export function createProfileStore(
         startCommand: parsed.startCommand,
         healthPath: parsed.healthPath,
         healthTimeout: parsed.healthTimeout,
-        validationPages: JSON.stringify(parsed.validationPages),
+        validationPages: JSON.stringify(parsed.smokePages),
         maxValidationAttempts: parsed.maxValidationAttempts,
         defaultModel: parsed.defaultModel,
         defaultRuntime: parsed.defaultRuntime,
@@ -294,9 +294,9 @@ export function createProfileStore(
         setClauses.push('health_timeout = @healthTimeout');
         fieldMap.healthTimeout = parsed.healthTimeout;
       }
-      if (parsed.validationPages !== undefined) {
+      if (parsed.smokePages !== undefined) {
         setClauses.push('validation_pages = @validationPages');
-        fieldMap.validationPages = JSON.stringify(parsed.validationPages);
+        fieldMap.validationPages = JSON.stringify(parsed.smokePages);
       }
       if (parsed.maxValidationAttempts !== undefined) {
         setClauses.push('max_validation_attempts = @maxValidationAttempts');

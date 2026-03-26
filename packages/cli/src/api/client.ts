@@ -6,7 +6,13 @@ import {
   SessionNotFoundError,
   ValidationError,
 } from '@autopod/shared';
-import type { CreateSessionRequest, Profile, Session, SessionStatus } from '@autopod/shared';
+import type {
+  CreateSessionRequest,
+  Profile,
+  Session,
+  SessionStatus,
+  ValidationResult,
+} from '@autopod/shared';
 import { fetch } from 'undici';
 
 export class DaemonUnreachableError extends AutopodError {
@@ -60,6 +66,12 @@ export class AutopodClient {
     await this.request<void>('POST', `/sessions/${id}/message`, { message });
   }
 
+  async getValidations(
+    id: string,
+  ): Promise<Array<{ id: string; attempt: number; result: ValidationResult; createdAt: string }>> {
+    return this.request('GET', `/sessions/${id}/validations`);
+  }
+
   async triggerValidation(id: string): Promise<void> {
     await this.request<void>('POST', `/sessions/${id}/validate`);
   }
@@ -91,6 +103,14 @@ export class AutopodClient {
   async getSessionLogs(id: string, buildLogs?: boolean): Promise<string> {
     const params = buildLogs ? '?build=true' : '';
     return this.request<string>('GET', `/sessions/${id}/logs${params}`);
+  }
+
+  async startPreview(id: string): Promise<{ previewUrl: string }> {
+    return this.request<{ previewUrl: string }>('POST', `/sessions/${id}/preview`);
+  }
+
+  async stopPreview(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/sessions/${id}/preview`);
   }
 
   // Profiles

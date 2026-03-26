@@ -12,7 +12,7 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
     startCommand: 'npm start',
     healthPath: '/health',
     healthTimeout: 120,
-    validationPages: [],
+    smokePages: [],
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',
@@ -65,13 +65,22 @@ function makeSession(overrides?: Partial<Session>): Session {
     linesAdded: 0,
     linesRemoved: 0,
     previewUrl: null,
+    prUrl: null,
+    plan: null,
+    progress: null,
+    acceptanceCriteria: null,
+    claudeSessionId: null,
     ...overrides,
   };
 }
 
 describe('generateSystemInstructions', () => {
   it('includes session id, profile, and task', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/abc12345');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/abc12345',
+    );
 
     expect(md).toContain('Session ID: abc12345');
     expect(md).toContain('Profile: test-profile');
@@ -79,7 +88,11 @@ describe('generateSystemInstructions', () => {
   });
 
   it('includes MCP server URL', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/abc12345');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/abc12345',
+    );
 
     expect(md).toContain('http://localhost:8080/mcp/abc12345');
     expect(md).toContain('ask_human');
@@ -88,7 +101,11 @@ describe('generateSystemInstructions', () => {
   });
 
   it('includes build and run commands', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
 
     expect(md).toContain('`npm run build`');
     expect(md).toContain('`npm start`');
@@ -97,7 +114,7 @@ describe('generateSystemInstructions', () => {
 
   it('includes validation pages when present', () => {
     const profile = makeProfile({
-      validationPages: [
+      smokePages: [
         {
           path: '/dashboard',
           assertions: [
@@ -111,7 +128,7 @@ describe('generateSystemInstructions', () => {
 
     const md = generateSystemInstructions(profile, makeSession(), 'http://localhost:8080/mcp/x');
 
-    expect(md).toContain('## Validation Pages');
+    expect(md).toContain('## Smoke Pages');
     expect(md).toContain('- /dashboard');
     expect(md).toContain('  - exists: .header');
     expect(md).toContain('  - text_contains: .title = "Dashboard"');
@@ -119,8 +136,12 @@ describe('generateSystemInstructions', () => {
   });
 
   it('omits validation pages section when empty', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
-    expect(md).not.toContain('## Validation Pages');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## Smoke Pages');
   });
 
   it('includes custom instructions when present', () => {
@@ -135,12 +156,87 @@ describe('generateSystemInstructions', () => {
   });
 
   it('omits custom instructions section when null', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
     expect(md).not.toContain('## Custom Instructions');
   });
 
+  it('includes acceptance criteria when session has ACs', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        acceptanceCriteria: [
+          'Settings page has a dark mode toggle',
+          'Toggle persists after refresh',
+        ],
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('## Acceptance Criteria');
+    expect(md).toContain('- Settings page has a dark mode toggle');
+    expect(md).toContain('- Toggle persists after refresh');
+    expect(md).toContain('independently verify');
+  });
+
+  it('omits acceptance criteria section when null', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ acceptanceCriteria: null }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## Acceptance Criteria');
+  });
+
+  it('omits acceptance criteria section when empty array', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ acceptanceCriteria: [] }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## Acceptance Criteria');
+  });
+
+  it('includes validate_in_browser tool in MCP tools list', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('validate_in_browser');
+  });
+
+  it('includes self-validation section when session has acceptance criteria', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        acceptanceCriteria: ['Page loads without errors'],
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('### Self-Validation');
+    expect(md).toContain('validate_in_browser');
+    expect(md).toContain('localhost URL');
+    expect(md).toContain('NOT shared with the independent reviewer');
+  });
+
+  it('omits self-validation section when no acceptance criteria', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ acceptanceCriteria: null }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('### Self-Validation');
+  });
+
   it('includes guidelines', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
 
     expect(md).toContain('## Guidelines');
     expect(md).toContain('Make small, focused commits');

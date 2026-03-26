@@ -99,6 +99,36 @@ export class DockerContainerManager implements ContainerManager {
     return container.id;
   }
 
+  async stop(containerId: string): Promise<void> {
+    try {
+      const container = this.docker.getContainer(containerId);
+      await container.stop({ t: 10 });
+      this.logger.info({ containerId }, 'Docker container stopped');
+    } catch (err: unknown) {
+      if (isExpectedError(err, [304])) {
+        this.logger.debug({ containerId }, 'Container already stopped');
+        return;
+      }
+      this.logger.error({ containerId, err }, 'Failed to stop Docker container');
+      throw err;
+    }
+  }
+
+  async start(containerId: string): Promise<void> {
+    try {
+      const container = this.docker.getContainer(containerId);
+      await container.start();
+      this.logger.info({ containerId }, 'Docker container started');
+    } catch (err: unknown) {
+      if (isExpectedError(err, [304])) {
+        this.logger.debug({ containerId }, 'Container already running');
+        return;
+      }
+      this.logger.error({ containerId, err }, 'Failed to start Docker container');
+      throw err;
+    }
+  }
+
   async kill(containerId: string): Promise<void> {
     try {
       const container = this.docker.getContainer(containerId);

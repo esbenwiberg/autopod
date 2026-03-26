@@ -49,6 +49,7 @@ export function generateSystemInstructions(
   lines.push('  - report_plan — declare your implementation plan (fire-and-forget)');
   lines.push('  - report_progress — report phase transitions (fire-and-forget)');
   lines.push('  - check_messages — poll for human nudge messages (non-blocking)');
+  lines.push('  - validate_in_browser — open a browser to verify your work (localhost URLs only)');
   lines.push('');
 
   const injectedMcpServers = options?.injectedMcpServers ?? [];
@@ -82,10 +83,10 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
-  if (profile.validationPages.length > 0) {
-    lines.push('## Validation Pages');
+  if (profile.smokePages.length > 0) {
+    lines.push('## Smoke Pages');
     lines.push('');
-    for (const page of profile.validationPages) {
+    for (const page of profile.smokePages) {
       lines.push(`- ${page.path}`);
       if (page.assertions) {
         for (const a of page.assertions) {
@@ -93,6 +94,43 @@ export function generateSystemInstructions(
         }
       }
     }
+    lines.push('');
+  }
+
+  if (session.acceptanceCriteria && session.acceptanceCriteria.length > 0) {
+    lines.push('## Acceptance Criteria');
+    lines.push('');
+    lines.push(
+      'Your changes must satisfy these criteria. The system will independently verify each one in a browser after you commit:',
+    );
+    lines.push('');
+    for (const ac of session.acceptanceCriteria) {
+      lines.push(`- ${ac}`);
+    }
+    lines.push('');
+
+    lines.push('### Self-Validation');
+    lines.push('');
+    lines.push(
+      'Before committing, use the `validate_in_browser` tool to verify your work against the acceptance criteria above. ' +
+        'This opens a real browser in your container. Pass the localhost URL of your running app and natural language checks describing what to verify.',
+    );
+    lines.push('');
+    lines.push('Example:');
+    lines.push('```');
+    lines.push('validate_in_browser({');
+    lines.push('  url: "http://localhost:3000/settings",');
+    lines.push('  checks: [');
+    lines.push('    "Verify there is a dark mode toggle that is visible and clickable",');
+    lines.push('    "Verify the page title contains Settings"');
+    lines.push('  ]');
+    lines.push('})');
+    lines.push('```');
+    lines.push('');
+    lines.push(
+      'Your self-validation results are NOT shared with the independent reviewer — ' +
+        'they exist to help you catch issues early, like a developer testing before pushing.',
+    );
     lines.push('');
   }
 
