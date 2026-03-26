@@ -65,6 +65,11 @@ function makeSession(overrides?: Partial<Session>): Session {
     linesAdded: 0,
     linesRemoved: 0,
     previewUrl: null,
+    prUrl: null,
+    plan: null,
+    progress: null,
+    acceptanceCriteria: null,
+    claudeSessionId: null,
     ...overrides,
   };
 }
@@ -157,6 +162,41 @@ describe('generateSystemInstructions', () => {
       'http://localhost:8080/mcp/x',
     );
     expect(md).not.toContain('## Custom Instructions');
+  });
+
+  it('includes acceptance criteria when session has ACs', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        acceptanceCriteria: [
+          'Settings page has a dark mode toggle',
+          'Toggle persists after refresh',
+        ],
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('## Acceptance Criteria');
+    expect(md).toContain('- Settings page has a dark mode toggle');
+    expect(md).toContain('- Toggle persists after refresh');
+    expect(md).toContain('independently verify');
+  });
+
+  it('omits acceptance criteria section when null', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ acceptanceCriteria: null }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## Acceptance Criteria');
+  });
+
+  it('omits acceptance criteria section when empty array', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ acceptanceCriteria: [] }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## Acceptance Criteria');
   });
 
   it('includes guidelines', () => {

@@ -122,6 +122,55 @@ describe('formatFeedback', () => {
       expect(result).toContain('Wrong font');
     });
 
+    it('includes AC validation failures when present', () => {
+      const result = mockValidationResult({});
+      result.acValidation = {
+        status: 'fail',
+        results: [
+          {
+            criterion: 'Settings page has dark mode toggle',
+            passed: true,
+            reasoning: 'Found toggle',
+          },
+          {
+            criterion: 'Dark mode changes background to black',
+            passed: false,
+            reasoning: 'Background remained white after toggling',
+          },
+        ],
+        model: 'opus',
+      };
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result,
+        task: 'Add dark mode',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(output).toContain('Acceptance Criteria Failures');
+      expect(output).toContain('Dark mode changes background to black');
+      expect(output).toContain('Background remained white');
+      // Passed ACs should NOT be in the failure section
+      expect(output).not.toContain('Settings page has dark mode toggle');
+    });
+
+    it('omits AC section when all ACs pass', () => {
+      const result = mockValidationResult({ taskReviewFailed: true });
+      result.acValidation = {
+        status: 'pass',
+        results: [{ criterion: 'Page loads', passed: true, reasoning: 'Loaded fine' }],
+        model: 'opus',
+      };
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result,
+        task: 'Fix stuff',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(output).not.toContain('Acceptance Criteria Failures');
+    });
+
     it('always includes the original task', () => {
       const result = formatFeedback({
         type: 'validation_failure',

@@ -62,9 +62,7 @@ export async function buildCorrectionContext(
   if (validationResult.acValidation?.status === 'fail') {
     for (const check of validationResult.acValidation.results) {
       if (!check.passed) {
-        screenshotDescriptions.push(
-          `AC failed: "${check.criterion}" — ${check.reasoning}`,
-        );
+        screenshotDescriptions.push(`AC failed: "${check.criterion}" — ${check.reasoning}`);
       }
     }
   }

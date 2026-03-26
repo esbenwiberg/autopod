@@ -33,6 +33,7 @@ function createTestSession(overrides: Partial<Session> = {}): Session {
     prUrl: 'https://github.com/org/repo/pull/42',
     plan: null,
     progress: null,
+    acceptanceCriteria: null,
     claudeSessionId: null,
     ...overrides,
   };
@@ -263,6 +264,53 @@ describe('generateValidationReport', () => {
   it('includes Tailwind CDN', () => {
     const html = generateValidationReport(createTestSession(), []);
     expect(html).toContain('cdn.tailwindcss.com');
+  });
+
+  it('renders AC validation section when present', () => {
+    const result = createPassingResult(1);
+    result.acValidation = {
+      status: 'fail',
+      results: [
+        {
+          criterion: 'Settings page has dark mode toggle',
+          passed: true,
+          reasoning: 'Toggle found',
+        },
+        {
+          criterion: 'Dark mode changes background',
+          passed: false,
+          reasoning: 'Background stayed white',
+        },
+      ],
+      model: 'sonnet',
+    };
+    const stored = toStoredValidation(result);
+    const html = generateValidationReport(createTestSession(), [stored]);
+
+    expect(html).toContain('AC Validation (2)');
+    expect(html).toContain('Settings page has dark mode toggle');
+    expect(html).toContain('Toggle found');
+    expect(html).toContain('Dark mode changes background');
+    expect(html).toContain('Background stayed white');
+    expect(html).toContain('Model: sonnet');
+    expect(html).toContain('1/2 passed');
+  });
+
+  it('omits AC section when no AC validation', () => {
+    const result = createPassingResult(1);
+    const stored = toStoredValidation(result);
+    const html = generateValidationReport(createTestSession(), [stored]);
+
+    expect(html).not.toContain('AC Validation');
+  });
+
+  it('omits AC section when AC validation was skipped', () => {
+    const result = createPassingResult(1);
+    result.acValidation = { status: 'skip', results: [], model: 'sonnet' };
+    const stored = toStoredValidation(result);
+    const html = generateValidationReport(createTestSession(), [stored]);
+
+    expect(html).not.toContain('AC Validation');
   });
 
   it('renders diff in task review', () => {

@@ -379,9 +379,8 @@ async function generateAcInstructions(
   config: ValidationEngineConfig,
   log?: Logger,
 ): Promise<Array<{ criterion: string; instruction: string }> | null> {
-  const acList = config
-    .acceptanceCriteria!.map((ac, i) => `${i + 1}. ${ac}`)
-    .join('\n');
+  const acs = config.acceptanceCriteria ?? [];
+  const acList = acs.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
 
   const prompt = `You are a QA reviewer for a web application. Your job is to generate browser-based validation instructions for each acceptance criterion.
 
@@ -417,7 +416,7 @@ Respond ONLY with the JSON array, no markdown fences or extra text.`;
   try {
     const { stdout } = await execFileAsync(
       'claude',
-      ['-p', prompt, '--model', config.reviewerModel!, '--output-format', 'text'],
+      ['-p', prompt, '--model', config.reviewerModel ?? 'sonnet', '--output-format', 'text'],
       { timeout: 120_000, maxBuffer: 1024 * 1024 },
     );
 
@@ -436,10 +435,7 @@ async function executeAcChecks(
   log?: Logger,
 ): Promise<AcCheckResult[]> {
   const instructionList = instructions
-    .map(
-      (inst, i) =>
-        `Check ${i + 1}: "${inst.criterion}"\nInstruction: ${inst.instruction}`,
-    )
+    .map((inst, i) => `Check ${i + 1}: "${inst.criterion}"\nInstruction: ${inst.instruction}`)
     .join('\n\n');
 
   const prompt = `You are a browser automation expert. Generate a Playwright script (ESM, using @playwright/test's chromium) that executes the following validation checks against a running web application.
@@ -470,7 +466,7 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
   try {
     const { stdout: scriptCode } = await execFileAsync(
       'claude',
-      ['-p', prompt, '--model', config.reviewerModel!, '--output-format', 'text'],
+      ['-p', prompt, '--model', config.reviewerModel ?? 'sonnet', '--output-format', 'text'],
       { timeout: 120_000, maxBuffer: 1024 * 1024 },
     );
 
@@ -526,8 +522,8 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
   }
 }
 
-/** Parse the reviewer's JSON array of AC instructions. */
-function parseAcInstructionsJson(
+/** @internal Exported for testing. Parse the reviewer's JSON array of AC instructions. */
+export function parseAcInstructionsJson(
   raw: string,
 ): Array<{ criterion: string; instruction: string }> | null {
   const cleaned = stripMarkdownFences(raw);
@@ -552,8 +548,8 @@ function parseAcInstructionsJson(
   }
 }
 
-/** Parse AC results from the Playwright script's stdout markers. */
-function parseAcResults(
+/** @internal Exported for testing. Parse AC results from the Playwright script's stdout markers. */
+export function parseAcResults(
   stdout: string,
   instructions: Array<{ criterion: string; instruction: string }>,
 ): AcCheckResult[] {
@@ -597,7 +593,8 @@ function parseAcResults(
       return {
         criterion: inst.criterion,
         passed: Boolean(result.passed),
-        reasoning: typeof result.reasoning === 'string' ? result.reasoning : 'No reasoning provided',
+        reasoning:
+          typeof result.reasoning === 'string' ? result.reasoning : 'No reasoning provided',
       };
     });
   } catch {
@@ -609,8 +606,8 @@ function parseAcResults(
   }
 }
 
-/** Strip markdown code fences from LLM output. */
-function stripMarkdownFences(text: string): string {
+/** @internal Exported for testing. Strip markdown code fences from LLM output. */
+export function stripMarkdownFences(text: string): string {
   return text
     .replace(/^```(?:\w+)?\s*\n?/m, '')
     .replace(/\n?\s*```\s*$/m, '')
