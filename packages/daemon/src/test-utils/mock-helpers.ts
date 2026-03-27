@@ -134,7 +134,7 @@ export function createMockContainerManager(): ContainerManager {
 
 export function createMockWorktreeManager(): WorktreeManager {
   return {
-    create: vi.fn(async () => '/tmp/worktree/abc'),
+    create: vi.fn(async () => ({ worktreePath: '/tmp/worktree/abc', bareRepoPath: '/tmp/bare/abc.git' })),
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),

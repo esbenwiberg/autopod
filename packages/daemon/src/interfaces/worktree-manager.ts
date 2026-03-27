@@ -15,8 +15,13 @@ export interface DiffStats {
   linesRemoved: number;
 }
 
+export interface WorktreeResult {
+  worktreePath: string;
+  bareRepoPath: string;
+}
+
 export interface WorktreeManager {
-  create(config: WorktreeCreateConfig): Promise<string>; // returns worktreePath
+  create(config: WorktreeCreateConfig): Promise<WorktreeResult>;
   cleanup(worktreePath: string): Promise<void>;
   getDiffStats(worktreePath: string, baseBranch?: string): Promise<DiffStats>;
   mergeBranch(config: MergeBranchConfig): Promise<void>;

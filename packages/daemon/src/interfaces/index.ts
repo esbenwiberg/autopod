@@ -9,6 +9,7 @@ export type {
 export type {
   WorktreeManager,
   WorktreeCreateConfig,
+  WorktreeResult,
   MergeBranchConfig,
   DiffStats,
 } from './worktree-manager.js';

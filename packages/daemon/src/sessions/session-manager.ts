@@ -295,7 +295,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Create worktree
         emitStatus('Creating worktree…');
-        const worktreePath = await worktreeManager.create({
+        const { worktreePath, bareRepoPath } = await worktreeManager.create({
           repoUrl: profile.repoUrl,
           branch: session.branch,
           baseBranch: session.baseBranch ?? profile.defaultBranch,
@@ -343,7 +343,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           sessionId,
           env: { SESSION_ID: sessionId, PORT: String(CONTAINER_APP_PORT) },
           ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
-          volumes: [{ host: worktreePath, container: '/workspace' }],
+          volumes: [
+            { host: worktreePath, container: '/workspace' },
+            { host: bareRepoPath, container: bareRepoPath },
+          ],
           networkName,
           firewallScript,
         });

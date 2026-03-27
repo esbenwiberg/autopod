@@ -9,6 +9,7 @@ import type {
   MergeBranchConfig,
   WorktreeCreateConfig,
   WorktreeManager,
+  WorktreeResult,
 } from '../interfaces/worktree-manager.js';
 
 const execFileAsync = promisify(execFile);
@@ -45,7 +46,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     this.logger = config.logger;
   }
 
-  async create(config: WorktreeCreateConfig): Promise<string> {
+  async create(config: WorktreeCreateConfig): Promise<WorktreeResult> {
     const { repoUrl, branch, baseBranch } = config;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
@@ -86,7 +87,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       { cwd: bareRepoPath },
     );
 
-    return worktreePath;
+    return { worktreePath, bareRepoPath };
   }
 
   async cleanup(worktreePath: string): Promise<void> {
