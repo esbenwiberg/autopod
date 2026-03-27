@@ -21,7 +21,7 @@ export const CONTAINER_HOME_DIR = '/home/autopod';
 export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
   queued: ['provisioning', 'killing'],
   provisioning: ['running', 'killing'],
-  running: ['awaiting_input', 'validating', 'paused', 'killing'],
+  running: ['awaiting_input', 'validating', 'paused', 'killing', 'complete'],
   awaiting_input: ['running', 'killing'],
   paused: ['running', 'killing'],
   validating: ['validated', 'running', 'failed', 'killing'],

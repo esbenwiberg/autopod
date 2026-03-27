@@ -47,7 +47,18 @@ export function createTestDb(): Database.Database {
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    db.exec(sql);
+    // Split multi-statement migrations and tolerate "duplicate column" errors
+    // that arise from 001_initial.sql already having columns that later
+    // ALTER TABLE migrations re-add.
+    const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
+    for (const stmt of statements) {
+      try {
+        db.exec(`${stmt};`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (!msg.includes('duplicate column name')) throw err;
+      }
+    }
   }
   return db;
 }
@@ -215,7 +226,7 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         skills: JSON.parse((row.skills as string) ?? '[]'),
         networkPolicy: row.network_policy ? JSON.parse(row.network_policy as string) : null,
         actionPolicy: row.action_policy ? JSON.parse(row.action_policy as string) : null,
-        outputMode: (row.output_mode as 'pr' | 'artifact') ?? 'pr',
+        outputMode: (row.output_mode as 'pr' | 'artifact' | 'workspace') ?? 'pr',
         modelProvider: (row.model_provider as 'anthropic' | 'max' | 'foundry') ?? 'anthropic',
         providerCredentials: row.provider_credentials
           ? JSON.parse(row.provider_credentials as string)

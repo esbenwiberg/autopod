@@ -42,7 +42,15 @@ function createTestDb(): Database.Database {
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    db.exec(sql);
+    const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
+    for (const stmt of statements) {
+      try {
+        db.exec(`${stmt};`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (!msg.includes('duplicate column name')) throw err;
+      }
+    }
   }
   return db;
 }

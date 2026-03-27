@@ -30,7 +30,16 @@ function createTestDb(): Database.Database {
     .filter((f) => f.endsWith('.sql'))
     .sort();
   for (const file of files) {
-    db.exec(fs.readFileSync(path.join(migrationsDir, file), 'utf-8'));
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
+    for (const stmt of statements) {
+      try {
+        db.exec(`${stmt};`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (!msg.includes('duplicate column name')) throw err;
+      }
+    }
   }
 
   // Insert a test session (needed for FK constraint on action_audit)

@@ -1,4 +1,4 @@
-import type { ExecutionTarget, Session, SessionStatus } from '@autopod/shared';
+import type { ExecutionTarget, OutputMode, Session, SessionStatus } from '@autopod/shared';
 import { SessionNotFoundError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
@@ -15,6 +15,8 @@ export interface NewSession {
   maxValidationAttempts: number;
   skipValidation: boolean;
   acceptanceCriteria?: string[] | null;
+  outputMode: OutputMode;
+  baseBranch?: string | null;
 }
 
 export interface SessionFilters {
@@ -100,6 +102,8 @@ function rowToSession(row: Record<string, unknown>): Session {
       ? JSON.parse(row.acceptance_criteria as string)
       : null,
     claudeSessionId: (row.claude_session_id as string) ?? null,
+    outputMode: (row.output_mode as OutputMode) ?? 'pr',
+    baseBranch: (row.base_branch as string) ?? null,
   };
 }
 
@@ -109,10 +113,12 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       db.prepare(`
         INSERT INTO sessions (
           id, profile_name, task, status, model, runtime, execution_target, branch,
-          user_id, max_validation_attempts, skip_validation, acceptance_criteria
+          user_id, max_validation_attempts, skip_validation, acceptance_criteria,
+          output_mode, base_branch
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
-          @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria
+          @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
+          @outputMode, @baseBranch
         )
       `).run({
         id: session.id,
@@ -129,6 +135,8 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         acceptanceCriteria: session.acceptanceCriteria
           ? JSON.stringify(session.acceptanceCriteria)
           : null,
+        outputMode: session.outputMode,
+        baseBranch: session.baseBranch ?? null,
       });
     },
 

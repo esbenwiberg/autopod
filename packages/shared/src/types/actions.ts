@@ -90,7 +90,7 @@ export interface ActionPolicy {
 }
 
 // ─── Output Mode ────────────────────────────────────────────────
-export type OutputMode = 'pr' | 'artifact';
+export type OutputMode = 'pr' | 'artifact' | 'workspace';
 
 // ─── Runtime types (action engine request/response) ─────────────
 export interface ActionRequest {

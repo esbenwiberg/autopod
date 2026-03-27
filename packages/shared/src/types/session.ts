@@ -1,3 +1,4 @@
+import type { OutputMode } from './actions.js';
 import type { EscalationRequest } from './escalation.js';
 import type { ExecutionTarget } from './profile.js';
 import type { RuntimeType } from './runtime.js';
@@ -54,6 +55,8 @@ export interface Session {
   } | null;
   acceptanceCriteria: string[] | null;
   claudeSessionId: string | null;
+  outputMode: OutputMode;
+  baseBranch: string | null;
 }
 
 export interface CreateSessionRequest {
@@ -65,6 +68,9 @@ export interface CreateSessionRequest {
   branch?: string;
   skipValidation?: boolean;
   acceptanceCriteria?: string[];
+  outputMode?: OutputMode;
+  baseBranch?: string;
+  acFrom?: string;
 }
 
 export interface SessionSummary {
