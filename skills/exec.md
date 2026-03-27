@@ -20,15 +20,21 @@ the big picture.
 The user provides: **$ARGUMENTS**
 
 This can be:
-- A path to a `specs/` directory (execute the full spec suite)
+- A path to a `specs/<spec-name>/` directory (execute the full spec suite)
 - A path to a single brief (execute just that one brief)
+- A spec name (resolve to `specs/<spec-name>/`)
 - Empty (auto-detect specs in the project)
 
-If $ARGUMENTS is empty, look for a `specs/` directory in the current project:
-- If `specs/briefs/` exists — show the execution plan and ask to proceed.
-- If `specs/brief.md` exists (medium task) — treat as single-brief execution.
+If $ARGUMENTS is empty, look for spec directories under `specs/`:
+- If exactly one `specs/<name>/` exists — use it automatically.
+- If multiple `specs/<name>/` directories exist — list them and ask the user
+  which one to execute.
 - If no specs exist — tell the user: "No specs found. Run `/prep` first." and
   stop.
+
+Once a spec directory is resolved:
+- If `specs/<name>/briefs/` exists — show the execution plan and ask to proceed.
+- If `specs/<name>/brief.md` exists (medium task) — treat as single-brief execution.
 
 ---
 
@@ -36,16 +42,17 @@ If $ARGUMENTS is empty, look for a `specs/` directory in the current project:
 
 ### Step 1: Read the Spec Suite
 
-Read and internalize the full spec context:
-- **`specs/plan.md`** — overall architecture, goals, dependency graph
-- **`specs/contracts.md`** — shared interfaces between briefs
-- **`specs/validation.md`** — end-to-end verification plan
-- **`specs/decisions/`** — architectural decisions (if they exist)
-- **All briefs** in `specs/briefs/` — scan for dependencies and ordering
+Read and internalize the full spec context (all paths relative to the resolved
+`specs/<spec-name>/` directory):
+- **`plan.md`** — overall architecture, goals, dependency graph
+- **`contracts.md`** — shared interfaces between briefs
+- **`validation.md`** — end-to-end verification plan
+- **`decisions/`** — architectural decisions (if they exist)
+- **All briefs** in `briefs/` — scan for dependencies and ordering
 
 ### Step 2: Check for Existing Progress
 
-Look at `specs/handovers/` for already-completed briefs. This handles resume
+Look at `handovers/` within the spec directory for already-completed briefs. This handles resume
 scenarios — if the user ran `/exec` before and it was interrupted, or if they
 ran a single brief manually.
 
@@ -120,7 +127,7 @@ files.
 #### C. Collect the Handover
 
 After each subagent completes:
-1. Read the handover file it wrote to `specs/handovers/`
+1. Read the handover file it wrote to `specs/<spec-name>/handovers/`
 2. Check for **major downstream impacts** — if the handover flags something
    that breaks assumptions in a not-yet-executed brief, **pause and surface
    to the user** before continuing
@@ -162,13 +169,13 @@ Verify the implementation hangs together:
 2. **Check for integration gaps** — do the pieces actually connect? Read the
    key integration points where briefs meet (API boundaries, shared types,
    event handlers).
-3. **Run the validation plan** — execute the scenarios from `specs/validation.md`
+3. **Run the validation plan** — execute the scenarios from `validation.md`
    where possible. For scenarios that require manual testing or browser
    interaction, list them for the user.
 
 ### Step 3: Contract Audit
 
-Compare `contracts.md` against the actual codebase:
+Compare the spec's `contracts.md` against the actual codebase:
 - Are all defined interfaces implemented?
 - Do implementations match the contracts?
 - Are there interfaces in the code that aren't in the contracts?
@@ -249,7 +256,7 @@ criteria that could not be met and why.
 
 ### Phase D: Write Handover
 
-Create specs/handovers/[brief-number]-[brief-name].md:
+Create handovers/[brief-number]-[brief-name].md (within the spec directory):
 
 # Handover: [brief-number]-[brief-name]
 
@@ -297,10 +304,11 @@ Commit and push your work + handover together. Do not accumulate unpushed work.
 
 ## Single Brief Mode
 
-If the user passes a path to a single brief (not a `specs/` directory), skip
-the orchestration and dispatch it directly as a subagent. Still:
-1. Load shared context (contracts, plan)
-2. Load existing handovers
+If the user passes a path to a single brief (not a spec directory), skip the
+orchestration and dispatch it directly as a subagent. Resolve the parent spec
+directory from the brief's path. Still:
+1. Load shared context (contracts, plan) from the spec directory
+2. Load existing handovers from the spec directory
 3. Dispatch the brief as a subagent
 4. Read the handover when done
 5. Run a lighter validation (just the brief's acceptance criteria + tests)
