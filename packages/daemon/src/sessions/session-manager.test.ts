@@ -11,6 +11,15 @@ import { AutopodError, InvalidStateTransitionError, SessionNotFoundError } from 
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
+
+// Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
+vi.mock('node:child_process', () => ({
+  execFile: vi.fn(),
+}));
+
+import { execFile } from 'node:child_process';
+
+const mockedExecFile = vi.mocked(execFile);
 import type {
   ContainerManager,
   PrManager,
@@ -42,7 +51,10 @@ function createTestDb(): Database.Database {
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
+    const statements = sql
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
     for (const stmt of statements) {
       try {
         db.exec(`${stmt};`);
@@ -124,7 +136,10 @@ function createMockContainerManager(): ContainerManager {
 
 function createMockWorktreeManager(): WorktreeManager {
   return {
-    create: vi.fn(async () => ({ worktreePath: '/tmp/worktree/abc', bareRepoPath: '/tmp/bare/abc.git' })),
+    create: vi.fn(async () => ({
+      worktreePath: '/tmp/worktree/abc',
+      bareRepoPath: '/tmp/bare/abc.git',
+    })),
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
@@ -852,6 +867,214 @@ describe('SessionManager', () => {
         ([, path]) => path === '/workspace/.npmrc' || path === '/workspace/NuGet.config',
       );
       expect(registryFiles).toHaveLength(0);
+    });
+
+    describe('recovery mode', () => {
+      /**
+       * Configure execFile mock to handle:
+       * - deriveBareRepoPath: git rev-parse --git-common-dir
+       * - recovery-context getGitLog: git log --oneline
+       * - recovery-context getUncommittedDiff: git diff HEAD --stat
+       */
+      function setupExecFileMock(opts?: {
+        bareRepoPath?: string;
+        gitLog?: string;
+        diffStat?: string;
+      }) {
+        const bareRepo = opts?.bareRepoPath ?? '/tmp/bare/repo.git';
+        const gitLog = opts?.gitLog ?? 'abc1234 Previous work';
+        const diffStat = opts?.diffStat ?? '';
+
+        mockedExecFile.mockImplementation((...args: unknown[]) => {
+          const gitArgs = args[1] as string[];
+          const callback = args[args.length - 1] as (
+            err: Error | null,
+            result: { stdout: string; stderr: string },
+          ) => void;
+
+          if (gitArgs[0] === 'rev-parse' && gitArgs[1] === '--git-common-dir') {
+            callback(null, { stdout: bareRepo, stderr: '' });
+          } else if (gitArgs[0] === 'log') {
+            callback(null, { stdout: gitLog, stderr: '' });
+          } else if (gitArgs[0] === 'diff') {
+            callback(null, { stdout: diffStat, stderr: '' });
+          } else {
+            callback(null, { stdout: '', stderr: '' });
+          }
+          return undefined as never;
+        });
+      }
+
+      it('skips worktree creation and reuses existing path in recovery mode', async () => {
+        const ctx = createTestContext();
+        setupExecFileMock({ bareRepoPath: '/tmp/bare/recovered.git' });
+
+        const manager = createSessionManager(ctx.deps);
+        const session = manager.createSession(
+          { profileName: 'test-profile', task: 'Continue feature', skipValidation: true },
+          'user-1',
+        );
+
+        // Set recovery state: worktree already exists from previous run
+        ctx.sessionRepo.update(session.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+        });
+
+        await manager.processSession(session.id);
+
+        // Worktree manager should NOT have been called
+        expect(ctx.worktreeManager.create).not.toHaveBeenCalled();
+
+        // Container should have been spawned with the recovery worktree path
+        const spawnCalls = vi.mocked(ctx.containerManager.spawn).mock.calls;
+        expect(spawnCalls).toHaveLength(1);
+        const volumes = spawnCalls[0]?.[0]?.volumes;
+        expect(volumes).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ host: '/tmp/worktree/existing', container: '/workspace' }),
+          ]),
+        );
+
+        // Session should have worktreePath set correctly
+        const updated = manager.getSession(session.id);
+        expect(updated.worktreePath).toBe('/tmp/worktree/existing');
+      });
+
+      it('clears recoveryWorktreePath after recovery starts', async () => {
+        const ctx = createTestContext();
+        setupExecFileMock();
+
+        const manager = createSessionManager(ctx.deps);
+        const session = manager.createSession(
+          { profileName: 'test-profile', task: 'Continue feature', skipValidation: true },
+          'user-1',
+        );
+
+        ctx.sessionRepo.update(session.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+        });
+
+        await manager.processSession(session.id);
+
+        const updated = manager.getSession(session.id);
+        expect(updated.recoveryWorktreePath).toBeNull();
+      });
+
+      it('uses runtime.resume for Claude with claudeSessionId', async () => {
+        const runtime = createMockRuntime();
+        // Add setClaudeSessionId to make it duck-type as ClaudeRuntime
+        (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+
+        const ctx = createTestContext(undefined, {});
+        // Replace the runtime registry to use our custom runtime
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+
+        setupExecFileMock();
+
+        const manager = createSessionManager(ctx.deps);
+        const session = manager.createSession(
+          { profileName: 'test-profile', task: 'Continue feature', skipValidation: true },
+          'user-1',
+        );
+
+        ctx.sessionRepo.update(session.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          claudeSessionId: 'claude-ses-abc',
+        });
+
+        await manager.processSession(session.id);
+
+        // setClaudeSessionId should have been called to rehydrate
+        expect((runtime as Record<string, unknown>).setClaudeSessionId).toHaveBeenCalledWith(
+          session.id,
+          'claude-ses-abc',
+        );
+
+        // resume should have been called (not spawn)
+        expect(runtime.resume).toHaveBeenCalled();
+        const resumeCall = vi.mocked(runtime.resume).mock.calls[0];
+        expect(resumeCall?.[0]).toBe(session.id);
+        // The continuation prompt should mention session interruption
+        expect(resumeCall?.[1]).toContain('interrupted');
+      });
+
+      it('uses runtime.spawn with recovery task for non-Claude runtime', async () => {
+        const runtime = createMockRuntime();
+        runtime.type = 'copilot';
+
+        const ctx = createTestContext();
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+
+        setupExecFileMock({ gitLog: 'def5678 Half-done work' });
+
+        const manager = createSessionManager(ctx.deps);
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Build the widget',
+            runtime: 'copilot',
+            skipValidation: true,
+          },
+          'user-1',
+        );
+
+        ctx.sessionRepo.update(session.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+        });
+
+        await manager.processSession(session.id);
+
+        // Should use spawn (not resume) for non-Claude runtime
+        expect(runtime.spawn).toHaveBeenCalled();
+        expect(runtime.resume).not.toHaveBeenCalled();
+
+        // Task should include recovery context
+        const spawnCall = vi.mocked(runtime.spawn).mock.calls[0];
+        const task = spawnCall?.[0]?.task;
+        expect(task).toContain('Build the widget');
+        expect(task).toContain('RECOVERY CONTEXT');
+        expect(task).toContain('def5678 Half-done work');
+      });
+
+      it('falls back to fresh spawn when Claude resume throws', async () => {
+        const runtime = createMockRuntime();
+        (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+
+        // Make resume throw
+        runtime.resume = vi.fn(() => {
+          throw new Error('Resume failed: session expired');
+        });
+
+        const ctx = createTestContext();
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+
+        setupExecFileMock();
+
+        const manager = createSessionManager(ctx.deps);
+        const session = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
+          'user-1',
+        );
+
+        ctx.sessionRepo.update(session.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          claudeSessionId: 'claude-ses-expired',
+        });
+
+        await manager.processSession(session.id);
+
+        // Resume was attempted
+        expect(runtime.resume).toHaveBeenCalled();
+
+        // Fallback to spawn should have been called
+        expect(runtime.spawn).toHaveBeenCalled();
+        const spawnCall = vi.mocked(runtime.spawn).mock.calls[0];
+        expect(spawnCall?.[0]?.task).toContain('RECOVERY CONTEXT');
+
+        // Session should still complete (not crash)
+        const updated = manager.getSession(session.id);
+        expect(updated.status).toBe('validated');
+      });
     });
 
     it('does not write registry files when registryPat is null', async () => {
