@@ -105,7 +105,10 @@ describe('Integration', () => {
       getDiffStats: vi
         .fn()
         .mockResolvedValue({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 }),
+      getDiff: vi.fn().mockResolvedValue('diff --git a/file.ts b/file.ts\n+added line'),
       mergeBranch: vi.fn().mockResolvedValue(undefined),
+      commitFiles: vi.fn().mockResolvedValue(undefined),
+      pushBranch: vi.fn().mockResolvedValue(undefined),
     };
 
     const runtimeRegistry = {
@@ -564,6 +567,181 @@ describe('Integration', () => {
         payload: validProfileInput,
       });
       expect(res.statusCode).toBe(409);
+    });
+  });
+
+  describe('Workspace Sessions', () => {
+    it('POST /sessions creates a workspace session', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'Workspace session',
+          outputMode: 'workspace',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const session = res.json();
+      expect(session.outputMode).toBe('workspace');
+      expect(session.status).toBe('queued');
+    });
+
+    it('POST /sessions rejects workspace + ACI execution target', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'Workspace session',
+          outputMode: 'workspace',
+          executionTarget: 'aci',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toContain('local');
+    });
+
+    it('POST /sessions/:id/complete rejects non-workspace sessions', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'Normal PR session',
+        },
+      });
+      const session = createRes.json();
+
+      // Force to running state for the test
+      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('running', session.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/sessions/${session.id}/complete`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('POST /sessions/:id/complete transitions workspace session to complete', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'Workspace session',
+          outputMode: 'workspace',
+        },
+      });
+      const session = createRes.json();
+
+      // Force to running state with worktree path
+      db.prepare('UPDATE sessions SET status = ?, worktree_path = ? WHERE id = ?').run(
+        'running',
+        '/tmp/worktree/test',
+        session.id,
+      );
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/sessions/${session.id}/complete`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().ok).toBe(true);
+
+      // Verify session is now complete
+      const getRes = await app.inject({
+        method: 'GET',
+        url: `/sessions/${session.id}`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(getRes.json().status).toBe('complete');
+    });
+
+    it('POST /sessions accepts baseBranch and acFrom parameters', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'Execute the plan',
+          baseBranch: 'feat/plan-auth',
+          acFrom: 'specs/auth/acceptance-criteria.md',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const session = res.json();
+      expect(session.baseBranch).toBe('feat/plan-auth');
+      expect(session.acFrom).toBe('specs/auth/acceptance-criteria.md');
+    });
+
+    it('POST /sessions rejects acFrom with path traversal', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'Evil session',
+          acFrom: '../../etc/passwd',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
     });
   });
 });

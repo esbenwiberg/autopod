@@ -1,5 +1,6 @@
 import { AutopodError } from '@autopod/shared';
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
+import { ZodError } from 'zod';
 
 export function errorHandler(
   error: FastifyError,
@@ -10,6 +11,15 @@ export function errorHandler(
     reply.status(error.statusCode).send({
       error: error.code,
       message: error.message,
+    });
+    return;
+  }
+
+  // Zod schema validation errors (from manual schema.parse() calls)
+  if (error instanceof ZodError) {
+    reply.status(400).send({
+      error: 'VALIDATION_ERROR',
+      message: error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
     });
     return;
   }
