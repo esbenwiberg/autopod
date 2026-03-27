@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   AgentEvent,
@@ -24,13 +27,16 @@ import type {
 import type { ProfileStore } from '../profiles/index.js';
 import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
 import type { ProviderEnvResult } from '../providers/index.js';
+import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
+import { readAcFile } from './ac-file-parser.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import { buildContinuationPrompt, buildRecoveryTask } from './recovery-context.js';
 import { buildRegistryFiles } from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
@@ -45,7 +51,6 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
-import { readAcFile } from './ac-file-parser.js';
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
  * Capped at 48999 to avoid the Windows/Hyper-V dynamic port reservation range (49152+). */
@@ -58,6 +63,16 @@ const CONTAINER_APP_PORT = 3000;
 
 /** Auto-stop preview containers after this duration (default 10 minutes). */
 const PREVIEW_AUTO_STOP_MS = 10 * 60 * 1000;
+
+const execFileAsync = promisify(execFile);
+
+/** Derive the bare repo path from an existing worktree via `git rev-parse --git-common-dir`. */
+async function deriveBareRepoPath(worktreePath: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+    cwd: worktreePath,
+  });
+  return path.resolve(worktreePath, stdout.trim());
+}
 
 export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
@@ -290,23 +305,44 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       try {
+        // Detect recovery mode before any provisioning work
+        const isRecovery = !!session.recoveryWorktreePath;
+
         // Transition to provisioning
         session = transition(session, 'provisioning', { startedAt: new Date().toISOString() });
 
-        // Create worktree
-        emitStatus('Creating worktree…');
-        const { worktreePath, bareRepoPath } = await worktreeManager.create({
-          repoUrl: profile.repoUrl,
-          branch: session.branch,
-          baseBranch: session.baseBranch ?? profile.defaultBranch,
-        });
+        // Recovery mode: reuse existing worktree instead of creating new one
+        let worktreePath: string;
+        let bareRepoPath: string;
+
+        if (isRecovery && session.recoveryWorktreePath) {
+          worktreePath = session.recoveryWorktreePath;
+          bareRepoPath = await deriveBareRepoPath(worktreePath);
+          // Clear recovery flag now that we've captured the path
+          sessionRepo.update(sessionId, { recoveryWorktreePath: null });
+          emitStatus('Recovering session — reusing existing worktree…');
+          logger.info({ sessionId, worktreePath }, 'Recovery mode: reusing worktree');
+        } else {
+          // Normal path: create worktree
+          emitStatus('Creating worktree…');
+          const result = await worktreeManager.create({
+            repoUrl: profile.repoUrl,
+            branch: session.branch,
+            baseBranch: session.baseBranch ?? profile.defaultBranch,
+          });
+          worktreePath = result.worktreePath;
+          bareRepoPath = result.bareRepoPath;
+        }
 
         // If acFrom is set, read acceptance criteria from the worktree
         if (session.acFrom) {
           const criteria = await readAcFile(worktreePath, session.acFrom);
           sessionRepo.update(sessionId, { acceptanceCriteria: criteria });
           session = sessionRepo.getOrThrow(sessionId);
-          logger.info({ sessionId, acFrom: session.acFrom, count: criteria.length }, 'Loaded acceptance criteria from file');
+          logger.info(
+            { sessionId, acFrom: session.acFrom, count: criteria.length },
+            'Loaded acceptance criteria from file',
+          );
         }
 
         // Select container manager based on execution target
@@ -482,19 +518,64 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           );
         }
 
-        // Start the agent inside the container
+        // Start the agent — recovery mode uses resume for Claude, fresh spawn for others
         emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(session.runtime);
-        const events = runtime.spawn({
-          sessionId,
-          task: session.task,
-          model: session.model,
-          workDir: '/workspace',
-          containerId,
-          customInstructions: session.runtime === 'copilot' ? systemInstructions : undefined,
-          env: secretEnv,
-          mcpServers,
-        });
+        let events: AsyncIterable<AgentEvent>;
+
+        if (isRecovery && session.runtime === 'claude' && session.claudeSessionId) {
+          // Attempt Claude --resume with persisted session ID
+          emitStatus('Resuming Claude session…');
+
+          // Rehydrate the in-memory session ID map so resume() can find it
+          if ('setClaudeSessionId' in runtime) {
+            (runtime as ClaudeRuntime).setClaudeSessionId(sessionId, session.claudeSessionId);
+          }
+
+          const continuationPrompt = await buildContinuationPrompt(session, worktreePath);
+
+          try {
+            events = runtime.resume(sessionId, continuationPrompt, containerId, secretEnv);
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Claude --resume failed, falling back to fresh spawn');
+            const recoveryTask = await buildRecoveryTask(session, worktreePath);
+            events = runtime.spawn({
+              sessionId,
+              task: recoveryTask,
+              model: session.model,
+              workDir: '/workspace',
+              containerId,
+              customInstructions: session.runtime === 'copilot' ? systemInstructions : undefined,
+              env: secretEnv,
+              mcpServers,
+            });
+          }
+        } else if (isRecovery) {
+          // Non-Claude runtime or no claudeSessionId — fresh spawn with recovery context
+          const recoveryTask = await buildRecoveryTask(session, worktreePath);
+          events = runtime.spawn({
+            sessionId,
+            task: recoveryTask,
+            model: session.model,
+            workDir: '/workspace',
+            containerId,
+            customInstructions: session.runtime === 'copilot' ? systemInstructions : undefined,
+            env: secretEnv,
+            mcpServers,
+          });
+        } else {
+          // Normal path
+          events = runtime.spawn({
+            sessionId,
+            task: session.task,
+            model: session.model,
+            workDir: '/workspace',
+            containerId,
+            customInstructions: session.runtime === 'copilot' ? systemInstructions : undefined,
+            env: secretEnv,
+            mcpServers,
+          });
+        }
 
         await this.consumeAgentEvents(sessionId, events);
 
@@ -933,7 +1014,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         } catch (err) {
           pushError = err instanceof Error ? err.message : String(err);
-          logger.warn({ err, sessionId }, 'Failed to push workspace branch — completing anyway, worktree preserved');
+          logger.warn(
+            { err, sessionId },
+            'Failed to push workspace branch — completing anyway, worktree preserved',
+          );
         }
       }
 
@@ -952,9 +1036,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           status: 'complete',
           model: session.model,
           runtime: session.runtime,
-          duration: session.startedAt
-            ? Date.now() - new Date(session.startedAt).getTime()
-            : null,
+          duration: session.startedAt ? Date.now() - new Date(session.startedAt).getTime() : null,
           filesChanged: session.filesChanged,
           createdAt: session.createdAt,
         },

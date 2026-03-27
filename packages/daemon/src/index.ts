@@ -346,42 +346,27 @@ if (aciContainerManager) {
   });
 }
 
-// On restart, local Docker sessions lose their stream handles and become orphaned.
-// Kill any that are still in a non-terminal state so they don't appear stuck.
+// Reconcile local sessions (non-blocking — errors logged, not fatal)
 {
-  const orphanStatuses = [
-    'running',
-    'provisioning',
-    'queued',
-    'awaiting_input',
-    'validating',
-    'paused',
-    'killing',
-  ] as const;
-  for (const status of orphanStatuses) {
-    const sessions = sessionRepo.list({ status });
-    const localSessions = sessions.filter((s) => s.executionTarget === 'local');
-    for (const session of localSessions) {
-      logger.warn(
-        { sessionId: session.id, status },
-        'Orphaned local session on restart — marking killed',
-      );
-      try {
-        if (status === 'killing') {
-          // Already mid-kill — no live container/stream to clean up, just finish the transition
-          sessionRepo.update(session.id, {
-            status: 'killed',
-            completedAt: new Date().toISOString(),
-          });
-        } else {
-          await sessionManager.killSession(session.id);
-        }
-      } catch (err) {
-        // Best effort — may already be in a terminal state
-        logger.debug({ err, sessionId: session.id }, 'Could not kill orphaned session');
+  const { reconcileLocalSessions } = await import('./sessions/local-reconciler.js');
+  reconcileLocalSessions({
+    sessionRepo,
+    eventBus,
+    containerManager,
+    enqueueSession: (id) => sessionQueue.enqueue(id),
+    logger,
+  })
+    .then((result) => {
+      if (result.recovered.length > 0) {
+        logger.info({ recovered: result.recovered }, 'Local sessions recovered');
       }
-    }
-  }
+      if (result.killed.length > 0) {
+        logger.warn({ killed: result.killed }, 'Unrecoverable local sessions killed');
+      }
+    })
+    .catch((err) => {
+      logger.error({ err }, 'Local session reconciliation failed');
+    });
 }
 
 // Graceful shutdown
