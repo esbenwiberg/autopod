@@ -4,6 +4,7 @@ import type {
   InjectedClaudeMdSection,
   InjectedMcpServer,
   NetworkPolicy,
+  PrivateRegistry,
   Profile,
   ProviderCredentials,
   SmokePage,
@@ -74,6 +75,8 @@ export function rowToProfile(
     testCommand: (row.test_command as string) ?? null,
     prProvider: (row.pr_provider as Profile['prProvider']) ?? 'github',
     adoPat: decryptPat(row.ado_pat),
+    privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
+    registryPat: decryptPat(row.registry_pat),
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -179,6 +182,7 @@ export function createProfileStore(
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, mcp_servers, claude_md_sections, network_policy, action_policy, output_mode,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat,
+          private_registries, registry_pat,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
@@ -186,6 +190,7 @@ export function createProfileStore(
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @mcpServers, @claudeMdSections, @networkPolicy, @actionPolicy, @outputMode,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat,
+          @privateRegistries, @registryPat,
           @createdAt, @updatedAt
         )
       `).run({
@@ -215,6 +220,8 @@ export function createProfileStore(
         testCommand: parsed.testCommand ?? null,
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
+        privateRegistries: JSON.stringify(parsed.privateRegistries),
+        registryPat: encryptPat(parsed.registryPat),
         createdAt: now,
         updatedAt: now,
       });
@@ -365,6 +372,14 @@ export function createProfileStore(
       if (parsed.adoPat !== undefined) {
         setClauses.push('ado_pat = @adoPat');
         fieldMap.adoPat = encryptPat(parsed.adoPat);
+      }
+      if (parsed.privateRegistries !== undefined) {
+        setClauses.push('private_registries = @privateRegistries');
+        fieldMap.privateRegistries = JSON.stringify(parsed.privateRegistries);
+      }
+      if (parsed.registryPat !== undefined) {
+        setClauses.push('registry_pat = @registryPat');
+        fieldMap.registryPat = encryptPat(parsed.registryPat);
       }
 
       if (setClauses.length === 0) {

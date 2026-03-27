@@ -32,6 +32,14 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     networkPolicy: null,
     actionPolicy: null,
     outputMode: 'pr' as const,
+    modelProvider: 'anthropic' as const,
+    providerCredentials: null,
+    testCommand: null,
+    prProvider: 'github' as const,
+    adoPat: null,
+    skills: [],
+    privateRegistries: [],
+    registryPat: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -161,6 +169,66 @@ describe('resolveInheritance', () => {
 
     const resolved = resolveInheritance(child, parent);
     expect(resolved.customInstructions).toBe('child rules');
+  });
+
+  it('should merge privateRegistries (parent first, child appended)', () => {
+    const parent = makeProfile({
+      name: 'parent',
+      privateRegistries: [
+        {
+          type: 'nuget',
+          url: 'https://pkgs.dev.azure.com/org/_packaging/shared/nuget/v3/index.json',
+        },
+      ],
+    });
+    const child = makeProfile({
+      name: 'child',
+      privateRegistries: [
+        {
+          type: 'npm',
+          url: 'https://pkgs.dev.azure.com/org/_packaging/shared/npm/registry/',
+          scope: '@org',
+        },
+      ],
+      extends: 'parent',
+    });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.privateRegistries).toHaveLength(2);
+    expect(resolved.privateRegistries[0].type).toBe('nuget');
+    expect(resolved.privateRegistries[1].type).toBe('npm');
+  });
+
+  it('should deduplicate privateRegistries by URL', () => {
+    const feedUrl = 'https://pkgs.dev.azure.com/org/_packaging/shared/npm/registry/';
+    const parent = makeProfile({
+      name: 'parent',
+      privateRegistries: [{ type: 'npm', url: feedUrl, scope: '@org' }],
+    });
+    const child = makeProfile({
+      name: 'child',
+      privateRegistries: [{ type: 'npm', url: feedUrl, scope: '@org' }],
+      extends: 'parent',
+    });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.privateRegistries).toHaveLength(1);
+  });
+
+  it('should inherit registryPat from parent when child has null', () => {
+    const parent = makeProfile({ name: 'parent', registryPat: 'parent-pat' });
+    const child = makeProfile({ name: 'child', registryPat: null, extends: 'parent' });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.registryPat).toBe('parent-pat');
+  });
+
+  it('should let child override registryPat', () => {
+    const parent = makeProfile({ name: 'parent', registryPat: 'parent-pat' });
+    const child = makeProfile({ name: 'child', registryPat: 'child-pat', extends: 'parent' });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.registryPat).toBe('child-pat');
   });
 
   it('should never inherit name, extends, createdAt, updatedAt', () => {

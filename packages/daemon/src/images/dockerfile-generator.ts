@@ -1,4 +1,4 @@
-import type { Profile, StackTemplate } from '@autopod/shared';
+import type { PrivateRegistry, Profile, StackTemplate } from '@autopod/shared';
 
 export interface DockerfileOptions {
   profile: Profile;
@@ -36,6 +36,20 @@ export function generateDockerfile(options: DockerfileOptions): string {
     lines.push(`RUN git clone --depth 1 ${profile.repoUrl} .`);
   }
 
+  // Inject private registry config for install step (uses build arg, cleaned up below)
+  const hasRegistries = profile.privateRegistries.length > 0;
+  if (hasRegistries) {
+    lines.push('', 'ARG REGISTRY_PAT');
+    const npmRegs = profile.privateRegistries.filter((r) => r.type === 'npm');
+    const nugetRegs = profile.privateRegistries.filter((r) => r.type === 'nuget');
+    if (npmRegs.length > 0) {
+      lines.push(...generateNpmrcDockerLines(npmRegs));
+    }
+    if (nugetRegs.length > 0) {
+      lines.push(...generateNuGetDockerLines(nugetRegs));
+    }
+  }
+
   // Install dependencies
   lines.push('', '# Install dependencies', `RUN ${installCommand}`);
 
@@ -60,6 +74,15 @@ export function generateDockerfile(options: DockerfileOptions): string {
       '',
       '# Remove git credentials from image',
       'RUN git remote set-url origin https://github.com/placeholder/repo.git',
+    );
+  }
+
+  // Clean up registry credentials (session provisioning re-injects them at runtime)
+  if (hasRegistries) {
+    lines.push(
+      '',
+      '# Remove registry credentials from image (re-injected at session start)',
+      'RUN rm -f /workspace/.npmrc /workspace/NuGet.config',
     );
   }
 
@@ -104,4 +127,73 @@ export function getInstallCommand(profile: Profile): string {
 
 function stripProtocol(url: string): string {
   return url.replace(/^https?:\/\//, '');
+}
+
+/**
+ * Generate Dockerfile RUN lines that write .npmrc with $REGISTRY_PAT expansion.
+ * Uses echo + append so the build arg is expanded by the shell at build time.
+ */
+function generateNpmrcDockerLines(registries: PrivateRegistry[]): string[] {
+  const echos: string[] = [];
+  for (const reg of registries) {
+    const url = reg.url.endsWith('/') ? reg.url : `${reg.url}/`;
+    const urlPath = url.replace(/^https?:\/\//, '');
+    const prefix = reg.scope ? `${reg.scope}:` : '';
+    echos.push(`echo "${prefix}registry=${url}"`);
+    echos.push(`echo "//${urlPath}:_authToken=$REGISTRY_PAT"`);
+    echos.push(`echo "//${urlPath}:always-auth=true"`);
+  }
+  // First echo uses >, rest use >> to append
+  const cmds = echos.map((e, i) => `${e} ${i === 0 ? '>' : '>>'} /workspace/.npmrc`);
+  return [`RUN ${cmds.join(' && \\\n    ')}`];
+}
+
+/**
+ * Generate Dockerfile RUN lines that write NuGet.config with $REGISTRY_PAT expansion.
+ */
+function generateNuGetDockerLines(registries: PrivateRegistry[]): string[] {
+  const parts: string[] = [];
+  parts.push('echo "<?xml version=\\"1.0\\" encoding=\\"utf-8\\"?>" > /workspace/NuGet.config');
+  parts.push('echo "<configuration>" >> /workspace/NuGet.config');
+  parts.push('echo "  <packageSources>" >> /workspace/NuGet.config');
+  parts.push('echo "    <clear />" >> /workspace/NuGet.config');
+  parts.push(
+    'echo "    <add key=\\"nuget.org\\" value=\\"https://api.nuget.org/v3/index.json\\" />" >> /workspace/NuGet.config',
+  );
+  for (const reg of registries) {
+    const name = deriveNuGetFeedName(reg.url);
+    parts.push(
+      `echo "    <add key=\\"${name}\\" value=\\"${reg.url}\\" />" >> /workspace/NuGet.config`,
+    );
+  }
+  parts.push('echo "  </packageSources>" >> /workspace/NuGet.config');
+  parts.push('echo "  <packageSourceCredentials>" >> /workspace/NuGet.config');
+  for (const reg of registries) {
+    const name = deriveNuGetFeedName(reg.url);
+    parts.push(`echo "    <${name}>" >> /workspace/NuGet.config`);
+    parts.push(
+      'echo "      <add key=\\"Username\\" value=\\"autopod\\" />" >> /workspace/NuGet.config',
+    );
+    parts.push(
+      `echo "      <add key=\\"ClearTextPassword\\" value=\\"$REGISTRY_PAT\\" />" >> /workspace/NuGet.config`,
+    );
+    parts.push(`echo "    </${name}>" >> /workspace/NuGet.config`);
+  }
+  parts.push('echo "  </packageSourceCredentials>" >> /workspace/NuGet.config');
+  parts.push('echo "</configuration>" >> /workspace/NuGet.config');
+
+  return [`RUN ${parts.join(' && \\\n    ')}`];
+}
+
+/** Derive an XML-safe feed name from an Azure DevOps feed URL */
+function deriveNuGetFeedName(url: string): string {
+  const match = url.match(/pkgs\.dev\.azure\.com\/([^/]+)(?:\/[^/]+)?\/_packaging\/([^/]+)/);
+  if (match) return `${match[1]}-${match[2]}`;
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    return `${parsed.hostname}-${segments.at(-1) ?? 'feed'}`.replace(/[^a-zA-Z0-9-]/g, '-');
+  } catch {
+    return 'private-feed';
+  }
 }

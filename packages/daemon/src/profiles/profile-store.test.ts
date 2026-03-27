@@ -310,6 +310,57 @@ describe('ProfileStore', () => {
       const profile = store.get('my-app');
       expect(profile.escalation).toEqual(escalation);
     });
+
+    it('should preserve privateRegistries through create/get', () => {
+      const registries = [
+        {
+          type: 'npm' as const,
+          url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/npm/registry/',
+          scope: '@myorg',
+        },
+        {
+          type: 'nuget' as const,
+          url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/nuget/v3/index.json',
+        },
+      ];
+      store.create({ ...validInput, privateRegistries: registries });
+      const profile = store.get('my-app');
+      expect(profile.privateRegistries).toEqual(registries);
+    });
+
+    it('should preserve registryPat through create/get', () => {
+      store.create({ ...validInput, registryPat: 'my-secret-pat' });
+      const profile = store.get('my-app');
+      expect(profile.registryPat).toBe('my-secret-pat');
+    });
+
+    it('should default privateRegistries to empty array', () => {
+      store.create(validInput);
+      const profile = store.get('my-app');
+      expect(profile.privateRegistries).toEqual([]);
+    });
+
+    it('should default registryPat to null', () => {
+      store.create(validInput);
+      const profile = store.get('my-app');
+      expect(profile.registryPat).toBeNull();
+    });
+
+    it('should update privateRegistries and registryPat', () => {
+      store.create(validInput);
+      const registries = [
+        {
+          type: 'npm' as const,
+          url: 'https://pkgs.dev.azure.com/org/_packaging/feed/npm/registry/',
+        },
+      ];
+      const updated = store.update('my-app', {
+        privateRegistries: registries,
+        registryPat: 'updated-pat',
+      });
+      expect(updated.privateRegistries).toEqual(registries);
+      expect(updated.registryPat).toBe('updated-pat');
+    });
   });
 
   describe('multi-level inheritance', () => {

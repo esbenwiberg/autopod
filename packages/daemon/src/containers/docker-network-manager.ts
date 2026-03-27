@@ -12,6 +12,8 @@ export const DEFAULT_ALLOWED_HOSTS = [
   'github.com',
   'objects.githubusercontent.com',
   'raw.githubusercontent.com',
+  // Azure DevOps package feeds (npm / NuGet)
+  'pkgs.dev.azure.com',
   // Required for MAX/PRO OAuth token refresh (Claude Code refreshes internally)
   'platform.claude.com',
   // Required for GitHub Copilot CLI
