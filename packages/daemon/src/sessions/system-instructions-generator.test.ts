@@ -33,6 +33,13 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
     networkPolicy: null,
     actionPolicy: null,
     outputMode: 'pr' as const,
+    modelProvider: 'anthropic' as const,
+    providerCredentials: null,
+    testCommand: null,
+    prProvider: 'github' as const,
+    adoPat: null,
+    privateRegistries: [],
+    registryPat: null,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -245,12 +252,21 @@ describe('generateSystemInstructions', () => {
   });
 
   it('includes injected skills section with descriptions', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x', {
-      injectedSkills: [
-        { name: 'review', source: { type: 'local', path: '/s/r.md' }, description: 'Review PR changes' },
-        { name: 'deploy', source: { type: 'github', repo: 'org/skills' } },
-      ],
-    });
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+      {
+        injectedSkills: [
+          {
+            name: 'review',
+            source: { type: 'local', path: '/s/r.md' },
+            description: 'Review PR changes',
+          },
+          { name: 'deploy', source: { type: 'github', repo: 'org/skills' } },
+        ],
+      },
+    );
 
     expect(md).toContain('## Available Skills');
     expect(md).toContain('`/review` — Review PR changes');
@@ -260,7 +276,11 @@ describe('generateSystemInstructions', () => {
   });
 
   it('omits skills section when no skills injected', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
     expect(md).not.toContain('## Available Skills');
   });
 });

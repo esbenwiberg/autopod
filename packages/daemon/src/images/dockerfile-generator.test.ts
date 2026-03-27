@@ -292,4 +292,50 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('.npmrc');
     expect(df).not.toContain('NuGet.config');
   });
+
+  it('snapshot: full Dockerfile with npm + nuget registries and PAT git', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        template: 'dotnet10',
+        repoUrl: 'https://github.com/org/full-stack',
+        buildCommand: 'dotnet build && npm run build',
+        privateRegistries: [
+          {
+            type: 'npm',
+            url: 'https://pkgs.dev.azure.com/contoso/_packaging/libs/npm/registry/',
+            scope: '@contoso',
+          },
+          {
+            type: 'nuget',
+            url: 'https://pkgs.dev.azure.com/contoso/_packaging/libs/nuget/v3/index.json',
+          },
+        ],
+        registryPat: 'secret',
+      }),
+      gitCredentials: 'pat',
+    });
+
+    // Verify ordering: git clone → registry config → install → build → cleanup → USER
+    const lines = df.split('\n');
+    const gitCloneIdx = lines.findIndex((l) => l.includes('git clone'));
+    const registryArgIdx = lines.findIndex((l) => l.includes('ARG REGISTRY_PAT'));
+    const npmrcIdx = lines.findIndex((l) => l.includes('.npmrc'));
+    const nugetIdx = lines.findIndex((l) => l.includes('NuGet.config'));
+    const installIdx = lines.findIndex((l) => l.includes('Install dependencies'));
+    const cleanupIdx = lines.findIndex((l) => l.includes('Remove registry credentials'));
+    const userIdx = lines.findIndex((l) => l === 'USER autopod');
+
+    expect(gitCloneIdx).toBeLessThan(registryArgIdx);
+    expect(registryArgIdx).toBeLessThan(npmrcIdx);
+    expect(npmrcIdx).toBeLessThan(nugetIdx);
+    expect(nugetIdx).toBeLessThan(installIdx);
+    expect(installIdx).toBeLessThan(cleanupIdx);
+    expect(cleanupIdx).toBeLessThan(userIdx);
+
+    // Registry credentials are cleaned up
+    expect(df).toContain('rm -f /workspace/.npmrc /workspace/NuGet.config');
+
+    // Git credentials are also cleaned up
+    expect(df).toContain('git remote set-url origin');
+  });
 });

@@ -19,6 +19,7 @@ const SPECIAL_MERGE_FIELDS: ReadonlySet<keyof Profile> = new Set([
   'customInstructions',
   'mcpServers',
   'claudeMdSections',
+  'privateRegistries',
 ]);
 
 /**
@@ -69,6 +70,17 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
     parent.claudeMdSections,
     child.claudeMdSections,
   );
+
+  // privateRegistries: concatenate (parent first, child appended — same feed URL deduped)
+  const seenUrls = new Set<string>();
+  const mergedRegistries = [];
+  for (const reg of [...parent.privateRegistries, ...child.privateRegistries]) {
+    if (!seenUrls.has(reg.url)) {
+      seenUrls.add(reg.url);
+      mergedRegistries.push(reg);
+    }
+  }
+  resolved.privateRegistries = mergedRegistries;
 
   return resolved;
 }

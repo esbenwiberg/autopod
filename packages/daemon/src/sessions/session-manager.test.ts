@@ -47,16 +47,28 @@ function createTestDb(): Database.Database {
   return db;
 }
 
-function insertTestProfile(db: Database.Database, name = 'test-profile') {
+interface TestProfileOverrides {
+  name?: string;
+  privateRegistries?: string;
+  registryPat?: string;
+}
+
+function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
+  // Backwards compat: accept plain string as name
+  const opts = typeof overrides === 'string' ? { name: overrides } : overrides;
+  const name = opts.name ?? 'test-profile';
+
   db.prepare(`
     INSERT INTO profiles (
       name, repo_url, default_branch, template, build_command, start_command,
       health_path, health_timeout, validation_pages, max_validation_attempts,
-      default_model, default_runtime, escalation_config
+      default_model, default_runtime, escalation_config,
+      private_registries, registry_pat
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
-      @defaultModel, @defaultRuntime, @escalationConfig
+      @defaultModel, @defaultRuntime, @escalationConfig,
+      @privateRegistries, @registryPat
     )
   `).run({
     name,
@@ -77,6 +89,8 @@ function insertTestProfile(db: Database.Database, name = 'test-profile') {
       autoPauseAfter: 3,
       humanResponseTimeout: 3600,
     }),
+    privateRegistries: opts.privateRegistries ?? '[]',
+    registryPat: opts.registryPat ?? null,
   });
 }
 
@@ -165,9 +179,12 @@ interface TestContext {
   deps: SessionManagerDependencies;
 }
 
-function createTestContext(validationResult?: Partial<ValidationResult>): TestContext {
+function createTestContext(
+  validationResult?: Partial<ValidationResult>,
+  profileOverrides?: TestProfileOverrides,
+): TestContext {
   const db = createTestDb();
-  insertTestProfile(db);
+  insertTestProfile(db, profileOverrides ?? {});
 
   const sessionRepo = createSessionRepository(db);
   const eventRepo = createEventRepository(db);
@@ -210,6 +227,12 @@ function createTestContext(validationResult?: Partial<ValidationResult>): TestCo
         providerCredentials: row.provider_credentials
           ? JSON.parse(row.provider_credentials as string)
           : null,
+        testCommand: (row.test_command as string) ?? null,
+        prProvider: (row.pr_provider as 'github' | 'ado') ?? 'github',
+        adoPat: (row.ado_pat as string) ?? null,
+        skills: JSON.parse((row.skills as string) ?? '[]'),
+        privateRegistries: JSON.parse((row.private_registries as string) ?? '[]'),
+        registryPat: (row.registry_pat as string) ?? null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -709,6 +732,142 @@ describe('SessionManager', () => {
       // Should have been killed due to error during provisioning
       const result = manager.getSession(session.id);
       expect(result.status).toBe('killed');
+    });
+
+    it('writes .npmrc to container when profile has npm registry', async () => {
+      const registries = [
+        {
+          type: 'npm',
+          url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/npm/registry/',
+          scope: '@myorg',
+        },
+      ];
+      const ctx = createTestContext(undefined, {
+        privateRegistries: JSON.stringify(registries),
+        registryPat: 'test-pat-123',
+      });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Install deps', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processSession(session.id);
+
+      const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
+      const npmrcCall = writeCalls.find(([, path]) => path === '/workspace/.npmrc');
+      expect(npmrcCall).toBeDefined();
+      const content = npmrcCall![2] as string;
+      expect(content).toContain(
+        '@myorg:registry=https://pkgs.dev.azure.com/myorg/_packaging/feed/npm/registry/',
+      );
+      expect(content).toContain(':_authToken=test-pat-123');
+      expect(content).toContain(':always-auth=true');
+    });
+
+    it('writes NuGet.config to container when profile has nuget registry', async () => {
+      const registries = [
+        {
+          type: 'nuget',
+          url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/nuget/v3/index.json',
+        },
+      ];
+      const ctx = createTestContext(undefined, {
+        privateRegistries: JSON.stringify(registries),
+        registryPat: 'nuget-pat',
+      });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Build project', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processSession(session.id);
+
+      const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
+      const nugetCall = writeCalls.find(([, path]) => path === '/workspace/NuGet.config');
+      expect(nugetCall).toBeDefined();
+      const content = nugetCall![2] as string;
+      expect(content).toContain('<packageSources>');
+      expect(content).toContain('myorg-feed');
+      expect(content).toContain('ClearTextPassword');
+      expect(content).toContain('nuget-pat');
+    });
+
+    it('writes both .npmrc and NuGet.config when profile has both registry types', async () => {
+      const registries = [
+        {
+          type: 'npm',
+          url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/npm/registry/',
+          scope: '@myorg',
+        },
+        {
+          type: 'nuget',
+          url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/nuget/v3/index.json',
+        },
+      ];
+      const ctx = createTestContext(undefined, {
+        privateRegistries: JSON.stringify(registries),
+        registryPat: 'dual-pat',
+      });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Full stack build', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processSession(session.id);
+
+      const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
+      const writtenPaths = writeCalls.map(([, path]) => path);
+      expect(writtenPaths).toContain('/workspace/.npmrc');
+      expect(writtenPaths).toContain('/workspace/NuGet.config');
+    });
+
+    it('does not write registry files when profile has no registries', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Normal task', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processSession(session.id);
+
+      const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
+      const registryFiles = writeCalls.filter(
+        ([, path]) => path === '/workspace/.npmrc' || path === '/workspace/NuGet.config',
+      );
+      expect(registryFiles).toHaveLength(0);
+    });
+
+    it('does not write registry files when registryPat is null', async () => {
+      const registries = [
+        {
+          type: 'npm',
+          url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/npm/registry/',
+        },
+      ];
+      const ctx = createTestContext(undefined, {
+        privateRegistries: JSON.stringify(registries),
+        registryPat: null as unknown as string,
+      });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'No pat', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processSession(session.id);
+
+      const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
+      const npmrcCalls = writeCalls.filter(([, path]) => path === '/workspace/.npmrc');
+      expect(npmrcCalls).toHaveLength(0);
     });
   });
 
