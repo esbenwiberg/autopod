@@ -96,6 +96,10 @@ export class AutopodClient {
     await this.request<void>('POST', `/sessions/${id}/kill`);
   }
 
+  async completeSession(id: string): Promise<{ ok: boolean; pushError?: string }> {
+    return this.request<{ ok: boolean; pushError?: string }>('POST', `/sessions/${id}/complete`);
+  }
+
   async deleteSession(id: string): Promise<void> {
     await this.request<void>('DELETE', `/sessions/${id}`);
   }

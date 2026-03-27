@@ -14,6 +14,21 @@ export const createSessionRequestSchema = z.object({
     .optional(),
   skipValidation: z.boolean().optional(),
   acceptanceCriteria: z.array(z.string().min(1).max(2_000)).max(50).optional(),
+  outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),
+  baseBranch: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch name contains invalid characters')
+    .optional(),
+  acFrom: z
+    .string()
+    .min(1)
+    .max(500)
+    .refine((p) => !p.startsWith('/') && !p.includes('..'), {
+      message: 'acFrom must be a relative path without ".." segments',
+    })
+    .optional(),
 });
 
 export const sessionStatusSchema = z.enum([

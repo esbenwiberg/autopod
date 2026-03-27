@@ -4,6 +4,8 @@
 
 Add a `workspace` output mode that provisions an isolated Docker container (same image, network policy, and credential injection as regular pods) and keeps it running for interactive use — no agent, no validation, no PR. The CLI gains `ap workspace` to create one and `ap attach` to drop into it via `docker exec`. On session complete, the branch is auto-pushed so a subsequent worker pod can branch from it — enabling a `/prep` → `/exec` handoff pattern.
 
+Additionally, `ap run` gains `--ac-from <path>` to load acceptance criteria from a file on the base branch. This bridges planning tools (like `/prep`) and autopod's validation system without coupling them — any tool that writes a plain-text AC file (one criterion per line) becomes autopod-compatible.
+
 ---
 
 ## Non-Goals
@@ -13,24 +15,29 @@ Add a `workspace` output mode that provisions an isolated Docker container (same
 - No automated PR or merge at the end of the session
 - No validation phase
 - No changes to the existing `pr` or `artifact` output modes
+- No coupling to specific planning tools — `--ac-from` reads any plain-text file, autopod doesn't know or care who wrote it
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] `ap workspace <profile> [description]` creates a session with `outputMode: 'workspace'`; daemon returns 400 if `executionTarget !== 'local'`
-- [ ] Workspace session provisions a container (same image/network/credentials path as agent sessions) and transitions `queued → provisioning → running`, then `processSession` returns — container stays alive
-- [ ] `ap attach <id>` (short IDs supported) resolves the session, calls `docker exec -it autopod-<sessionId> bash` (falling back to `sh`), inherits stdin/stdout/stderr
-- [ ] When `docker exec` exits (user types `exit`), `ap attach` calls `POST /sessions/:id/complete` and prints confirmation
-- [ ] `ap ls` shows workspace sessions with status `running` while attached, `complete` after exit, `killed` if force-killed
-- [ ] `ap kill <id>` works on workspace sessions (existing path: `running → killing → killed`)
-- [ ] New `running → complete` transition allowed in `VALID_STATUS_TRANSITIONS` for workspace sessions (guarded in the API: only allowed when `outputMode === 'workspace'`)
-- [ ] DB migration adds `output_mode` column to `sessions` table (defaults to `'pr'`)
-- [ ] DB migration adds `base_branch` column to `sessions` table (defaults to `null`, meaning use `profile.defaultBranch`)
-- [ ] `CreateSessionRequest` accepts optional `baseBranch` — worker pod can be created with `--base-branch feat/plan-auth` to branch from workspace pod's output
-- [ ] On workspace session complete, daemon pushes the branch to origin (`git push origin HEAD`) before transitioning to `complete`
-- [ ] `ap workspace` accepts `--branch <name>` to set an explicit branch name (for handoff to worker)
-- [ ] `ap run` accepts `--base-branch <name>` to start a worker from a workspace pod's pushed branch
+- [x] `ap workspace <profile> [description]` creates a session with `outputMode: 'workspace'`; daemon returns 400 if `executionTarget !== 'local'`
+- [x] Workspace session provisions a container (same image/network/credentials path as agent sessions) and transitions `queued → provisioning → running`, then `processSession` returns — container stays alive
+- [x] `ap attach <id>` (short IDs supported) resolves the session, calls `docker exec -it autopod-<sessionId> bash` (falling back to `sh`), inherits stdin/stdout/stderr
+- [x] When `docker exec` exits (user types `exit`), `ap attach` calls `POST /sessions/:id/complete` and prints confirmation
+- [x] `ap ls` shows workspace sessions with status `running` while attached, `complete` after exit, `killed` if force-killed
+- [x] `ap kill <id>` works on workspace sessions (existing path: `running → killing → killed`)
+- [x] New `running → complete` transition allowed in `VALID_STATUS_TRANSITIONS` for workspace sessions (guarded in the API: only allowed when `outputMode === 'workspace'`)
+- [x] DB migration adds `output_mode` column to `sessions` table (defaults to `'pr'`)
+- [x] DB migration adds `base_branch` column to `sessions` table (defaults to `null`, meaning use `profile.defaultBranch`)
+- [x] `CreateSessionRequest` accepts optional `baseBranch` — worker pod can be created with `--base-branch feat/plan-auth` to branch from workspace pod's output
+- [x] On workspace session complete, daemon pushes the branch to origin (`git push origin HEAD`) before transitioning to `complete`
+- [x] `ap workspace` accepts `--branch <name>` to set an explicit branch name (for handoff to worker)
+- [x] `ap run` accepts `--base-branch <name>` to start a worker from a workspace pod's pushed branch
+- [x] `ap run` accepts `--ac-from <path>` to load acceptance criteria from a file on the base branch (one criterion per line, blank lines and leading `- ` stripped)
+- [x] When `--ac-from` is provided, daemon reads the file from the worktree after checkout, parses it, and populates `acceptanceCriteria` on the session — overrides any ACs passed via `--ac` flags or wizard
+- [x] If `--ac-from` file doesn't exist or is empty, session creation fails with a clear error (no silent fallback)
+- [x] `CreateSessionRequest` accepts optional `acFrom: string` (relative path within repo)
 
 ---
 
@@ -57,20 +64,42 @@ ap attach <id>
              → daemon: git push origin HEAD (worktree push)
              → transition running → complete
 
-ap run <profile> "execute the plan" --base-branch feat/plan-auth
-  → POST /sessions  { baseBranch: 'feat/plan-auth' }
+ap run <profile> "execute the plan" --base-branch feat/plan-auth \
+     --ac-from specs/auth-redesign/acceptance-criteria.md
+  → POST /sessions  { baseBranch: 'feat/plan-auth', acFrom: 'specs/auth-redesign/acceptance-criteria.md' }
   → worktreeManager.create({ baseBranch: 'feat/plan-auth' })
      → bare repo fetches feat/plan-auth from origin
      → worker branch cut from feat/plan-auth tip
-  → worker sees plan files, produces PR
+  → daemon reads acFrom file from worktree:
+     → split lines, trim, strip leading "- ", drop blanks
+     → populate session.acceptanceCriteria
+     → if file missing or empty → 400 error
+  → worker sees plan files + ACs flow into validation, produces PR
 ```
+
+### AC file format
+
+Plain text, one criterion per line. Optional `- ` prefix for markdown list compatibility.
+
+```
+specs/auth-redesign/acceptance-criteria.md
+```
+```
+Login form validates email format before submission
+POST /users returns 201 with valid payload
+Registration form shows inline validation errors
+Settings page loads without console errors
+```
+
+The file lives alongside other `/prep` output — autopod doesn't care about the surrounding folder structure, it just reads the path you give it.
 
 ### Handoff pattern
 
 ```
 main
   └── feat/plan-auth        ← workspace pod: /prep runs here, auto-pushed on complete
-        └── autopod/abc123  ← worker pod: branches from feat/plan-auth, runs /exec → PR
+        │                      produces specs/*/acceptance-criteria.md
+        └── autopod/abc123  ← worker pod: --ac-from reads ACs into session → validator uses them
 ```
 
 ### State machine additions (`constants.ts`)
@@ -87,7 +116,7 @@ The `complete` API endpoint guards this: rejects if `outputMode !== 'workspace'`
 packages/shared/src/
   types/actions.ts           OutputMode: add 'workspace'
   types/session.ts           Session: add outputMode, baseBranch fields
-                             CreateSessionRequest: add outputMode?, baseBranch?
+                             CreateSessionRequest: add outputMode?, baseBranch?, acFrom?
   constants.ts               VALID_STATUS_TRANSITIONS: running → complete
 
 packages/daemon/src/
@@ -95,16 +124,20 @@ packages/daemon/src/
                                         ALTER TABLE sessions ADD COLUMN base_branch TEXT
   sessions/session-repository.ts        NewSession: add outputMode, baseBranch; rowToSession: map both
   sessions/session-manager.ts           createSession: store outputMode/baseBranch from request
+                                                       if acFrom: read file from worktree, parse ACs, populate acceptanceCriteria
                                         processSession: pass baseBranch override to worktreeManager.create()
                                                         early-return branch for 'workspace'
                                         completeSession(id): push branch, transition running→complete
+  sessions/ac-file-parser.ts           NEW: readAcFile(worktreePath, acFrom) → string[]
+                                        split lines, trim, strip leading "- ", drop blanks
+                                        throw if file missing or result empty
   api/routes/sessions.ts               POST /sessions/:id/complete  (new endpoint)
                                         POST /sessions: validate workspace + local constraint
 
 packages/cli/src/
   commands/workspace.ts                 new file: ap workspace + ap attach commands
-  commands/session.ts                   ap run: add --base-branch option
-  api/client.ts                         add completeSession(), pass baseBranch in createSession
+  commands/session.ts                   ap run: add --base-branch and --ac-from options
+  api/client.ts                         add completeSession(), pass baseBranch + acFrom in createSession
   index.ts                              register workspace commands
 ```
 
@@ -118,7 +151,7 @@ packages/cli/src/
 
 **Files touched:**
 - `packages/shared/src/types/actions.ts` — add `'workspace'` to `OutputMode`
-- `packages/shared/src/types/session.ts` — add `outputMode: OutputMode` and `baseBranch: string | null` to `Session`; add both as optional to `CreateSessionRequest`
+- `packages/shared/src/types/session.ts` — add `outputMode: OutputMode` and `baseBranch: string | null` to `Session`; add `outputMode?`, `baseBranch?`, `acFrom?` to `CreateSessionRequest`
 - `packages/shared/src/constants.ts` — add `'complete'` to `running`'s valid transitions
 - `packages/daemon/src/db/migrations/012_output_mode.sql` — two `ALTER TABLE` statements: `output_mode TEXT NOT NULL DEFAULT 'pr'` and `base_branch TEXT`
 - `packages/daemon/src/sessions/session-repository.ts` — `NewSession.outputMode` + `NewSession.baseBranch`; `rowToSession` maps both columns
@@ -139,12 +172,19 @@ npx pnpm --filter @autopod/daemon test
 **Files touched:**
 - `packages/daemon/src/sessions/session-manager.ts`
   - `createSession`: store `outputMode` (`request.outputMode ?? profile.outputMode ?? 'pr'`) and `baseBranch` (`request.baseBranch ?? null`)
-  - `processSession`: pass `baseBranch ?? profile.defaultBranch` to `worktreeManager.create()`; after `transition(session, 'running', ...)`, if `outputMode === 'workspace'` → `return` immediately
+  - `createSession`: if `request.acFrom` is set, defer AC file reading until after worktree checkout (processSession calls back)
+  - `processSession`: pass `baseBranch ?? profile.defaultBranch` to `worktreeManager.create()`; after checkout, if `acFrom` → call `readAcFile(worktreePath, acFrom)` and update session's `acceptanceCriteria`; after `transition(session, 'running', ...)`, if `outputMode === 'workspace'` → `return` immediately
   - Add `completeSession(id)`: validates `outputMode === 'workspace'`; calls `worktreeManager` push equivalent (`git push origin HEAD` on the worktree path); transitions `running → complete` with `completedAt`
   - Expose `completeSession` on the `SessionManager` interface
+- `packages/daemon/src/sessions/ac-file-parser.ts` (new file)
+  - `readAcFile(worktreePath: string, relativePath: string): string[]`
+  - Reads file via `fs.readFile`, splits on `\n`, trims each line, strips leading `- ` or `* `, drops blank lines
+  - Throws `AutopodError('AC_FILE_NOT_FOUND')` if file doesn't exist
+  - Throws `AutopodError('AC_FILE_EMPTY')` if no criteria parsed
 - `packages/daemon/src/api/routes/sessions.ts`
   - `POST /sessions/:id/complete` — calls `sessionManager.completeSession(id)`, returns 204
   - `POST /sessions` — if `outputMode === 'workspace'` and resolved `executionTarget !== 'local'`, return 400
+  - `POST /sessions` — validate `acFrom` is a relative path (no `..`, no absolute), max 500 chars
 
 **Verification:**
 ```bash
@@ -176,8 +216,8 @@ npx pnpm --filter @autopod/daemon test
     → client.completeSession(id)   ← daemon pushes branch here
     → print "Session complete. Branch pushed to origin."
   ```
-- `packages/cli/src/commands/session.ts` — add `--base-branch <branch>` option to `ap run`; pass through to `createSession`
-- `packages/cli/src/api/client.ts` — add `completeSession(id: string): Promise<void>`; pass `baseBranch` in `createSession`
+- `packages/cli/src/commands/session.ts` — add `--base-branch <branch>` and `--ac-from <path>` options to `ap run`; pass through to `createSession`
+- `packages/cli/src/api/client.ts` — add `completeSession(id: string): Promise<void>`; pass `baseBranch` + `acFrom` in `createSession`
 - `packages/cli/src/index.ts` — import + register workspace commands
 
 **Verification:**
@@ -191,8 +231,10 @@ ap attach <id>
 exit
 # ap ls shows 'complete', branch pushed to origin
 
-ap run <profile> "execute the plan in .plan/" --base-branch feat/plan-auth
-# worker branches from feat/plan-auth, sees plan files, produces PR
+ap run <profile> "execute the plan" --base-branch feat/plan-auth \
+  --ac-from specs/auth-redesign/acceptance-criteria.md
+# worker branches from feat/plan-auth, sees plan files
+# ACs loaded from file → validator verifies them → produces PR
 ```
 
 ---
@@ -209,6 +251,10 @@ ap run <profile> "execute the plan in .plan/" --base-branch feat/plan-auth
 | `spawnSync` vs `spawn` for `docker exec` | `spawnSync` with `stdio: 'inherit'` — blocking is correct for an interactive terminal |
 | `git push` fails if remote branch diverged or no upstream | Use `git push origin HEAD` (not `--force`); if it fails, surface the error but still transition to `complete` — user can push manually |
 | bare repo only fetches `profile.defaultBranch` — worker won't find `feat/plan-auth` unless we also fetch it | `worktreeManager.create` already uses `baseBranch` as the refspec to fetch: `+refs/heads/${baseBranch}:refs/heads/${baseBranch}`. Passing `feat/plan-auth` as `baseBranch` will fetch it. Confirmed in `local-worktree-manager.ts:65-69` |
+| `--ac-from` path traversal — `../../etc/passwd` | Validate: no `..` segments, no absolute paths, must be relative. Reject at API level before any file I/O |
+| `--ac-from` without `--base-branch` | Valid — reads from the default branch worktree. No special handling needed |
+| AC file has markdown headers, comments, or other noise | Parser is line-based: strip `- ` / `* ` prefix, trim whitespace, drop blank lines. Headers (`#`) and other markdown would become ACs — document that the file should be plain criteria only |
+| `--ac-from` conflicts with `--ac` flags or wizard input | `--ac-from` wins — overrides any other AC source. Document this precedence clearly |
 
 ---
 

@@ -45,6 +45,7 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
+import { readAcFile } from './ac-file-parser.js';
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
  * Capped at 48999 to avoid the Windows/Hyper-V dynamic port reservation range (49152+). */
@@ -112,6 +113,7 @@ export interface SessionManager {
   pauseSession(sessionId: string): Promise<void>;
   nudgeSession(sessionId: string, message: string): void;
   killSession(sessionId: string): Promise<void>;
+  completeSession(sessionId: string): Promise<{ pushError?: string }>;
   triggerValidation(sessionId: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
   startPreview(sessionId: string): Promise<{ previewUrl: string }>;
@@ -251,6 +253,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         maxValidationAttempts: profile.maxValidationAttempts,
         skipValidation,
         acceptanceCriteria: request.acceptanceCriteria ?? null,
+        outputMode: request.outputMode ?? profile.outputMode ?? 'pr',
+        baseBranch: request.baseBranch ?? null,
+        acFrom: request.acFrom ?? null,
       });
 
       const session = sessionRepo.getOrThrow(id);
@@ -293,8 +298,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const worktreePath = await worktreeManager.create({
           repoUrl: profile.repoUrl,
           branch: session.branch,
-          baseBranch: profile.defaultBranch,
+          baseBranch: session.baseBranch ?? profile.defaultBranch,
         });
+
+        // If acFrom is set, read acceptance criteria from the worktree
+        if (session.acFrom) {
+          const criteria = await readAcFile(worktreePath, session.acFrom);
+          sessionRepo.update(sessionId, { acceptanceCriteria: criteria });
+          session = sessionRepo.getOrThrow(sessionId);
+          logger.info({ sessionId, acFrom: session.acFrom, count: criteria.length }, 'Loaded acceptance criteria from file');
+        }
 
         // Select container manager based on execution target
         const containerManager = containerManagerFactory.get(session.executionTarget);
@@ -341,6 +354,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           worktreePath,
           previewUrl,
         });
+
+        // Workspace sessions: container stays alive, no agent/validation/PR
+        if (session.outputMode === 'workspace') {
+          logger.info({ sessionId }, 'Workspace session running — awaiting manual attach');
+          return;
+        }
 
         // Merge daemon + profile injections
         const mergedMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
@@ -870,6 +889,64 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       });
 
       logger.info({ sessionId }, 'Session killed');
+    },
+
+    async completeSession(sessionId: string): Promise<{ pushError?: string }> {
+      const session = sessionRepo.getOrThrow(sessionId);
+
+      if (session.outputMode !== 'workspace') {
+        throw new AutopodError(
+          'Only workspace sessions can be completed via this endpoint',
+          'INVALID_OUTPUT_MODE',
+          400,
+        );
+      }
+
+      if (session.status !== 'running') {
+        throw new AutopodError(
+          `Cannot complete session in status '${session.status}' — must be 'running'`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      // Push the branch to origin before completing
+      let pushError: string | undefined;
+      if (session.worktreePath) {
+        try {
+          await worktreeManager.pushBranch(session.worktreePath);
+          logger.info({ sessionId, branch: session.branch }, 'Workspace branch pushed to origin');
+        } catch (err) {
+          pushError = err instanceof Error ? err.message : String(err);
+          logger.warn({ err, sessionId }, 'Failed to push workspace branch — completing anyway');
+        }
+      }
+
+      emitActivityStatus(sessionId, 'Session complete');
+      transition(session, 'complete', { completedAt: new Date().toISOString() });
+
+      eventBus.emit({
+        type: 'session.completed',
+        timestamp: new Date().toISOString(),
+        sessionId,
+        finalStatus: 'complete',
+        summary: {
+          id: sessionId,
+          profileName: session.profileName,
+          task: session.task,
+          status: 'complete',
+          model: session.model,
+          runtime: session.runtime,
+          duration: session.startedAt
+            ? Date.now() - new Date(session.startedAt).getTime()
+            : null,
+          filesChanged: session.filesChanged,
+          createdAt: session.createdAt,
+        },
+      });
+
+      logger.info({ sessionId, pushError }, 'Workspace session completed');
+      return { pushError };
     },
 
     async triggerValidation(sessionId: string): Promise<void> {

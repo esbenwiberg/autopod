@@ -34,12 +34,21 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .option('-m, --model <model>', 'AI model to use')
     .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
     .option('-b, --branch <branch>', 'Target branch name')
+    .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
+    .option('--ac-from <path>', 'Load acceptance criteria from a file in the repo')
     .option('--skip-validation', 'Skip validation phase')
     .action(
       async (
         profile: string,
         task: string,
-        opts: { model?: string; runtime?: string; branch?: string; skipValidation?: boolean },
+        opts: {
+          model?: string;
+          runtime?: string;
+          branch?: string;
+          baseBranch?: string;
+          acFrom?: string;
+          skipValidation?: boolean;
+        },
       ) => {
         const client = getClient();
         const session = await withSpinner('Starting session...', () =>
@@ -49,6 +58,8 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
             model: opts.model,
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
             branch: opts.branch,
+            baseBranch: opts.baseBranch,
+            acFrom: opts.acFrom,
             skipValidation: opts.skipValidation,
           }),
         );

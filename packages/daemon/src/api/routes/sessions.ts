@@ -7,6 +7,16 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
   // POST /sessions — create a new session
   app.post('/sessions', async (request, reply) => {
     const body = createSessionRequestSchema.parse(request.body);
+
+    // Workspace sessions are local-only — reject if execution target is not 'local'
+    if (body.outputMode === 'workspace') {
+      const resolvedTarget = body.executionTarget ?? 'local';
+      if (resolvedTarget !== 'local') {
+        reply.status(400);
+        return { error: 'Workspace sessions only support local execution target' };
+      }
+    }
+
     const session = sessionManager.createSession(body, request.user.oid);
     reply.status(201);
     return session;
@@ -105,6 +115,13 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
     const { message } = sendMessageSchema.parse(request.body);
     sessionManager.nudgeSession(sessionId, message);
     return { ok: true };
+  });
+
+  // POST /sessions/:sessionId/complete — complete a workspace session (push branch + transition)
+  app.post('/sessions/:sessionId/complete', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const result = await sessionManager.completeSession(sessionId);
+    return { ok: true, ...result };
   });
 
   // POST /sessions/:sessionId/kill — kill session

@@ -10,17 +10,26 @@ import {
 } from './session-repository.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
-const MIGRATION_SQL = fs
+const MIGRATION_FILES = fs
   .readdirSync(migrationsDir)
   .filter((f) => f.endsWith('.sql'))
   .sort()
-  .map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf-8'))
-  .join('\n');
+  .map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf-8'));
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  db.exec(MIGRATION_SQL);
+  for (const sql of MIGRATION_FILES) {
+    const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
+    for (const stmt of statements) {
+      try {
+        db.exec(`${stmt};`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (!msg.includes('duplicate column name')) throw err;
+      }
+    }
+  }
   return db;
 }
 
@@ -43,6 +52,7 @@ const validSession: NewSession = {
   userId: 'user-1',
   maxValidationAttempts: 3,
   skipValidation: false,
+  outputMode: 'pr',
 };
 
 describe('SessionRepository', () => {

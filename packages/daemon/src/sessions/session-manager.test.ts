@@ -42,7 +42,15 @@ function createTestDb(): Database.Database {
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    db.exec(sql);
+    const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
+    for (const stmt of statements) {
+      try {
+        db.exec(`${stmt};`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (!msg.includes('duplicate column name')) throw err;
+      }
+    }
   }
   return db;
 }
@@ -122,6 +130,7 @@ function createMockWorktreeManager(): WorktreeManager {
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),
     commitFiles: vi.fn(async () => {}),
+    pushBranch: vi.fn(async () => {}),
   };
 }
 
@@ -1036,6 +1045,263 @@ describe('SessionManager', () => {
       );
 
       await expect(manager.sendMessage(session.id, 'hello')).rejects.toThrow(AutopodError);
+    });
+  });
+
+  describe('workspace sessions', () => {
+    describe('createSession', () => {
+      it('stores outputMode and baseBranch', () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Plan auth redesign',
+            outputMode: 'workspace',
+            baseBranch: 'feat/plan-auth',
+          },
+          'user-1',
+        );
+
+        expect(session.outputMode).toBe('workspace');
+        expect(session.baseBranch).toBe('feat/plan-auth');
+      });
+
+      it('defaults outputMode to pr when not specified', () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          { profileName: 'test-profile', task: 'Do stuff' },
+          'user-1',
+        );
+
+        expect(session.outputMode).toBe('pr');
+        expect(session.baseBranch).toBeNull();
+      });
+
+      it('stores acFrom on the session', () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Execute plan',
+            acFrom: 'specs/auth/acceptance-criteria.md',
+          },
+          'user-1',
+        );
+
+        expect(session.acFrom).toBe('specs/auth/acceptance-criteria.md');
+      });
+    });
+
+    describe('processSession', () => {
+      it('passes baseBranch to worktreeManager.create', async () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Plan auth',
+            outputMode: 'workspace',
+            baseBranch: 'feat/plan-auth',
+          },
+          'user-1',
+        );
+
+        await manager.processSession(session.id);
+
+        expect(ctx.worktreeManager.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            baseBranch: 'feat/plan-auth',
+          }),
+        );
+      });
+
+      it('returns early for workspace sessions — no agent spawn', async () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace session',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        await manager.processSession(session.id);
+
+        const updated = manager.getSession(session.id);
+        expect(updated.status).toBe('running');
+        expect(updated.containerId).toBe('container-123');
+        expect(updated.worktreePath).toBe('/tmp/worktree/abc');
+
+        // Agent should NOT have been spawned
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      });
+
+      it('reads acFrom file and populates acceptanceCriteria', async () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        // Create a temp file for the AC
+        const fs = await import('node:fs/promises');
+        const tmpPath = '/tmp/worktree/abc';
+        await fs.mkdir(`${tmpPath}/specs`, { recursive: true });
+        await fs.writeFile(`${tmpPath}/specs/ac.md`, '- Login works\n- Logout works\n');
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Execute plan',
+            outputMode: 'workspace',
+            acFrom: 'specs/ac.md',
+          },
+          'user-1',
+        );
+
+        await manager.processSession(session.id);
+
+        const updated = manager.getSession(session.id);
+        expect(updated.acceptanceCriteria).toEqual(['Login works', 'Logout works']);
+
+        // Cleanup
+        await fs.rm(`${tmpPath}/specs`, { recursive: true, force: true });
+      });
+    });
+
+    describe('completeSession', () => {
+      it('pushes branch and transitions running → complete', async () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace session',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        // Simulate processSession having run: set status to running with worktreePath
+        ctx.sessionRepo.update(session.id, {
+          status: 'running',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+
+        const result = await manager.completeSession(session.id);
+
+        expect(result.pushError).toBeUndefined();
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith('/tmp/worktree/abc');
+
+        const completed = manager.getSession(session.id);
+        expect(completed.status).toBe('complete');
+        expect(completed.completedAt).not.toBeNull();
+      });
+
+      it('emits session.completed event', async () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace session',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        ctx.sessionRepo.update(session.id, {
+          status: 'running',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+
+        const events: unknown[] = [];
+        ctx.eventBus.subscribe((e) => events.push(e));
+
+        await manager.completeSession(session.id);
+
+        const completedEvent = events.find((e: any) => e.type === 'session.completed') as any;
+        expect(completedEvent).toBeDefined();
+        expect(completedEvent.finalStatus).toBe('complete');
+      });
+
+      it('rejects non-workspace sessions', async () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          { profileName: 'test-profile', task: 'Normal session' },
+          'user-1',
+        );
+
+        ctx.sessionRepo.update(session.id, { status: 'running' });
+
+        await expect(manager.completeSession(session.id)).rejects.toThrow(AutopodError);
+        await expect(manager.completeSession(session.id)).rejects.toMatchObject({
+          code: 'INVALID_OUTPUT_MODE',
+        });
+      });
+
+      it('rejects sessions not in running status', async () => {
+        const ctx = createTestContext();
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace session',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        // Session is in queued status — not running
+        await expect(manager.completeSession(session.id)).rejects.toThrow(AutopodError);
+        await expect(manager.completeSession(session.id)).rejects.toMatchObject({
+          code: 'INVALID_STATE',
+        });
+      });
+
+      it('surfaces push errors without blocking completion', async () => {
+        const ctx = createTestContext();
+        (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValue(
+          new Error('remote: Permission denied'),
+        );
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace session',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        ctx.sessionRepo.update(session.id, {
+          status: 'running',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+
+        const result = await manager.completeSession(session.id);
+
+        expect(result.pushError).toBe('remote: Permission denied');
+        // Session still transitions to complete
+        const completed = manager.getSession(session.id);
+        expect(completed.status).toBe('complete');
+      });
     });
   });
 });

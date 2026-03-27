@@ -7,6 +7,7 @@ import { registerProfileCommands } from './commands/profile.js';
 import { registerSessionCommands } from './commands/session.js';
 import { registerValidateCommands } from './commands/validate.js';
 import { registerWatchCommand } from './commands/watch.js';
+import { registerWorkspaceCommands } from './commands/workspace.js';
 import * as configStore from './config/config-store.js';
 import { handleError } from './utils/error-handler.js';
 
@@ -39,6 +40,7 @@ registerAuthCommands(program);
 registerDaemonCommands(program);
 registerProfileCommands(program, getClient);
 registerSessionCommands(program, getClient);
+registerWorkspaceCommands(program, getClient);
 registerValidateCommands(program, getClient);
 registerWatchCommand(program);
 

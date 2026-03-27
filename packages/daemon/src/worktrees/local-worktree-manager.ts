@@ -202,6 +202,11 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
+  async pushBranch(worktreePath: string): Promise<void> {
+    this.logger.info({ worktreePath }, 'Pushing branch to origin');
+    await execFileAsync('git', ['push', 'origin', 'HEAD'], { cwd: worktreePath });
+  }
+
   // --- Private helpers ---
 
   private sanitizeRepoUrl(url: string): string {

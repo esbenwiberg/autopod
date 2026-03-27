@@ -24,4 +24,6 @@ export interface WorktreeManager {
   getDiff(worktreePath: string, baseBranch: string, maxLength?: number): Promise<string>;
   /** Stage and commit specific paths (e.g. screenshot artifacts). No-op if nothing to commit. */
   commitFiles(worktreePath: string, paths: string[], message: string): Promise<void>;
+  /** Push the current branch to origin. */
+  pushBranch(worktreePath: string): Promise<void>;
 }
