@@ -143,6 +143,9 @@ After validation, the container is **stopped** (not removed). Launch an on-deman
 <tr><td>🌐</td><td><b>On-demand previews</b></td><td><code>ap open &lt;id&gt;</code> spins up a live preview of any session's work</td></tr>
 <tr><td>🔌</td><td><b>Session injection</b></td><td>Plug in external MCP servers and CLAUDE.md content at daemon or profile level</td></tr>
 <tr><td>🏗️</td><td><b>Git-native PRs</b></td><td>GitHub and Azure DevOps — every session gets its own branch</td></tr>
+<tr><td>🧪</td><td><b>Workspace pods</b></td><td>Interactive containers for manual prep, then hand off to automated agents</td></tr>
+<tr><td>🔐</td><td><b>Private registries</b></td><td>npm and NuGet feeds from Azure DevOps — credentials injected automatically</td></tr>
+<tr><td>⚡</td><td><b>Skills injection</b></td><td>Custom slash commands from local files or GitHub repos, injected into agent containers</td></tr>
 </table>
 
 ---
@@ -317,6 +320,8 @@ ap run <profile> "<task>" --runtime copilot # Use Copilot runtime
 ap run <profile> "<task>" --branch feat/x   # Custom branch name
 ap run <profile> "<task>" --no-validate     # Skip auto-validation
 ap run <profile> "<task>" --ac "criterion"  # Add acceptance criteria (repeatable)
+ap run <profile> "<task>" --base-branch feat/plan  # Branch from a specific base (e.g. workspace output)
+ap run <profile> "<task>" --ac-from specs/ac.md    # Load acceptance criteria from a file in the repo
 
 # Monitor
 ap ls                                       # List sessions
@@ -350,6 +355,14 @@ ap kill <id>                                # Kill session, discard work
 # Bulk operations
 ap approve --all-validated                  # Approve everything that passed
 ap kill --all-failed                        # Clean up all failures
+```
+
+### Workspace Pods
+
+```bash
+ap workspace <profile> [description]        # Spin up an interactive container (no agent)
+ap workspace <profile> -b feat/plan-auth    # With explicit branch name
+ap attach <id>                              # Shell into a workspace pod (auto-pushes on exit)
 ```
 
 ### Dashboard
@@ -466,6 +479,27 @@ testCommand: "npm test"
 
 Tests run after the build phase and before the health check. If tests fail, the agent gets the stdout/stderr output as feedback and retries.
 
+### Private Registries
+
+If your project pulls packages from private Azure DevOps feeds, autopod can inject the right auth config into containers automatically.
+
+```yaml
+privateRegistries:
+  # npm feed (scoped or unscoped)
+  - type: npm
+    url: "https://pkgs.dev.azure.com/{org}/_packaging/{feed}/npm/registry/"
+    scope: "@myorg"          # optional — for scoped packages
+
+  # NuGet feed
+  - type: nuget
+    url: "https://pkgs.dev.azure.com/{org}/_packaging/{feed}/nuget/v3/index.json"
+
+# PAT for authenticating (encrypted at rest)
+registryPat: "<your-ado-pat>"
+```
+
+At session startup, autopod generates `.npmrc` and/or `NuGet.config` files in the container workspace with embedded auth tokens. Child profiles inherit and merge registries from parent profiles (deduped by URL).
+
 ### Escalation settings
 
 Control how and when agents can ask for help:
@@ -569,6 +603,68 @@ Set MCP servers and sections that apply to all sessions via environment variable
 ```bash
 DAEMON_MCP_SERVERS='[{"name":"prism","url":"https://prism.internal/mcp"}]'
 DAEMON_CLAUDE_MD_SECTIONS='[{"heading":"Company Rules","content":"...","priority":5}]'
+```
+
+### Skills Injection
+
+Inject custom slash commands into agent containers from local files or GitHub repos. Skills are markdown files that become available as `/commands` inside the agent's Claude session.
+
+```yaml
+skills:
+  # Local skill — read from daemon host filesystem
+  - name: review
+    description: "Run a structured code review"
+    source:
+      type: local
+      path: /opt/skills/review.md
+
+  # GitHub skill — fetched from a repo at provisioning time
+  - name: security-check
+    description: "OWASP-aware security review"
+    source:
+      type: github
+      repo: myorg/claude-skills
+      path: security-check.md       # defaults to {name}.md
+      ref: main                      # branch, tag, or SHA (default: main)
+      token: "${GITHUB_TOKEN}"       # optional, for private repos
+```
+
+Skills merge the same way as MCP servers and CLAUDE.md sections: daemon-level defaults + profile-level overrides (matched by `name`). Failed skill resolutions (missing file, GitHub 404) are logged but don't block provisioning.
+
+### Workspace Pods (Prep → Exec Handoff)
+
+Workspace pods are interactive containers with no agent — same image, network, and credentials as agent pods, but you drive. Use them to explore, prototype, or write specs manually, then hand off to an automated agent that branches from your work.
+
+```
+main
+  └── feat/plan-auth           ← workspace pod: you edit here, pushes on exit
+        └── autopod/abc123     ← worker pod: --base-branch feat/plan-auth
+                                              --ac-from specs/acceptance-criteria.md
+```
+
+**Workflow:**
+
+```bash
+# 1. Spin up a workspace
+ap workspace my-app "Plan auth rewrite" -b feat/plan-auth
+
+# 2. Shell in and do your thing
+ap attach <id>
+# ... edit files, write specs, prototype ...
+# Exit the shell — branch auto-pushes to origin
+
+# 3. Hand off to an agent, branching from your work
+ap run my-app "Implement auth rewrite per spec" \
+  --base-branch feat/plan-auth \
+  --ac-from specs/acceptance-criteria.md
+```
+
+**AC file format** (`--ac-from`): one criterion per line, optional `- ` prefix, blank lines ignored.
+
+```
+- Login page renders email and password fields
+- Invalid credentials show an error banner
+- Successful login redirects to /dashboard
 ```
 
 ### Action Control Plane
@@ -789,6 +885,18 @@ The validation layer (Playwright screenshots + AI review) is geared towards web 
 <summary><b>Can I use Azure DevOps instead of GitHub for PRs?</b></summary>
 
 Yes. Set `prProvider: ado` on your profile and provide an ADO personal access token. autopod supports both `dev.azure.com` and `visualstudio.com` URL formats.
+</details>
+
+<details>
+<summary><b>What are workspace pods for?</b></summary>
+
+Workspace pods give you an interactive container (same image and setup as agent pods) without an AI agent. Use them to explore, prototype, or write acceptance criteria manually, then hand off to an automated agent with `--base-branch` and `--ac-from`. Think of it as the "prep" step before "exec".
+</details>
+
+<details>
+<summary><b>Can agents use private npm/NuGet feeds?</b></summary>
+
+Yes. Add `privateRegistries` to your profile with your Azure DevOps feed URLs and a `registryPat`. autopod generates `.npmrc` and `NuGet.config` files in the container at startup. The PAT is encrypted at rest.
 </details>
 
 ---

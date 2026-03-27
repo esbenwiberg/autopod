@@ -58,11 +58,19 @@ queued → provisioning → running → validating → validated → approved �
 Any non-terminal state can → killing → killed
 ```
 
+Workspace pods follow a simplified flow:
+```
+queued → provisioning → running (interactive — no agent) → complete (auto-pushes branch on exit)
+```
+
 Key code paths:
 - `session-manager.ts:processSession()` — the main orchestration loop
 - `docker-container-manager.ts` — actual Docker operations (spawn, kill, exec, file I/O)
 - `docker-network-manager.ts` — network isolation + iptables firewall
 - `state-machine.ts` — transition validation
+- `registry-injector.ts` — generates `.npmrc` / `NuGet.config` for private ADO feeds
+- `skill-resolver.ts` — resolves skill content from local files or GitHub repos
+- `system-instructions-generator.ts` — builds CLAUDE.md with injected sections + skill docs
 
 ## Testing Patterns
 
