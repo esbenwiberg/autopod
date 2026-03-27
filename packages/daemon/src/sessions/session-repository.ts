@@ -50,6 +50,7 @@ export interface SessionUpdates {
   } | null;
   claudeSessionId?: string | null;
   acceptanceCriteria?: string[] | null;
+  recoveryWorktreePath?: string | null;
 }
 
 export interface SessionStats {
@@ -107,6 +108,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     outputMode: (row.output_mode as OutputMode) ?? 'pr',
     baseBranch: (row.base_branch as string) ?? null,
     acFrom: (row.ac_from as string) ?? null,
+    recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
   };
 }
 
@@ -234,6 +236,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
           changes.acceptanceCriteria !== null
             ? JSON.stringify(changes.acceptanceCriteria)
             : null;
+      }
+      if (changes.recoveryWorktreePath !== undefined) {
+        setClauses.push('recovery_worktree_path = @recoveryWorktreePath');
+        params.recoveryWorktreePath = changes.recoveryWorktreePath;
       }
 
       if (setClauses.length === 0) return;

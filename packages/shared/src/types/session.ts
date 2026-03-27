@@ -58,6 +58,7 @@ export interface Session {
   outputMode: OutputMode;
   baseBranch: string | null;
   acFrom: string | null;
+  recoveryWorktreePath: string | null;
 }
 
 export interface CreateSessionRequest {
