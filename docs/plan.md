@@ -21,23 +21,23 @@ Additionally, `ap run` gains `--ac-from <path>` to load acceptance criteria from
 
 ## Acceptance Criteria
 
-- [ ] `ap workspace <profile> [description]` creates a session with `outputMode: 'workspace'`; daemon returns 400 if `executionTarget !== 'local'`
-- [ ] Workspace session provisions a container (same image/network/credentials path as agent sessions) and transitions `queued → provisioning → running`, then `processSession` returns — container stays alive
-- [ ] `ap attach <id>` (short IDs supported) resolves the session, calls `docker exec -it autopod-<sessionId> bash` (falling back to `sh`), inherits stdin/stdout/stderr
-- [ ] When `docker exec` exits (user types `exit`), `ap attach` calls `POST /sessions/:id/complete` and prints confirmation
-- [ ] `ap ls` shows workspace sessions with status `running` while attached, `complete` after exit, `killed` if force-killed
-- [ ] `ap kill <id>` works on workspace sessions (existing path: `running → killing → killed`)
-- [ ] New `running → complete` transition allowed in `VALID_STATUS_TRANSITIONS` for workspace sessions (guarded in the API: only allowed when `outputMode === 'workspace'`)
-- [ ] DB migration adds `output_mode` column to `sessions` table (defaults to `'pr'`)
-- [ ] DB migration adds `base_branch` column to `sessions` table (defaults to `null`, meaning use `profile.defaultBranch`)
-- [ ] `CreateSessionRequest` accepts optional `baseBranch` — worker pod can be created with `--base-branch feat/plan-auth` to branch from workspace pod's output
-- [ ] On workspace session complete, daemon pushes the branch to origin (`git push origin HEAD`) before transitioning to `complete`
-- [ ] `ap workspace` accepts `--branch <name>` to set an explicit branch name (for handoff to worker)
-- [ ] `ap run` accepts `--base-branch <name>` to start a worker from a workspace pod's pushed branch
-- [ ] `ap run` accepts `--ac-from <path>` to load acceptance criteria from a file on the base branch (one criterion per line, blank lines and leading `- ` stripped)
-- [ ] When `--ac-from` is provided, daemon reads the file from the worktree after checkout, parses it, and populates `acceptanceCriteria` on the session — overrides any ACs passed via `--ac` flags or wizard
-- [ ] If `--ac-from` file doesn't exist or is empty, session creation fails with a clear error (no silent fallback)
-- [ ] `CreateSessionRequest` accepts optional `acFrom: string` (relative path within repo)
+- [x] `ap workspace <profile> [description]` creates a session with `outputMode: 'workspace'`; daemon returns 400 if `executionTarget !== 'local'`
+- [x] Workspace session provisions a container (same image/network/credentials path as agent sessions) and transitions `queued → provisioning → running`, then `processSession` returns — container stays alive
+- [x] `ap attach <id>` (short IDs supported) resolves the session, calls `docker exec -it autopod-<sessionId> bash` (falling back to `sh`), inherits stdin/stdout/stderr
+- [x] When `docker exec` exits (user types `exit`), `ap attach` calls `POST /sessions/:id/complete` and prints confirmation
+- [x] `ap ls` shows workspace sessions with status `running` while attached, `complete` after exit, `killed` if force-killed
+- [x] `ap kill <id>` works on workspace sessions (existing path: `running → killing → killed`)
+- [x] New `running → complete` transition allowed in `VALID_STATUS_TRANSITIONS` for workspace sessions (guarded in the API: only allowed when `outputMode === 'workspace'`)
+- [x] DB migration adds `output_mode` column to `sessions` table (defaults to `'pr'`)
+- [x] DB migration adds `base_branch` column to `sessions` table (defaults to `null`, meaning use `profile.defaultBranch`)
+- [x] `CreateSessionRequest` accepts optional `baseBranch` — worker pod can be created with `--base-branch feat/plan-auth` to branch from workspace pod's output
+- [x] On workspace session complete, daemon pushes the branch to origin (`git push origin HEAD`) before transitioning to `complete`
+- [x] `ap workspace` accepts `--branch <name>` to set an explicit branch name (for handoff to worker)
+- [x] `ap run` accepts `--base-branch <name>` to start a worker from a workspace pod's pushed branch
+- [x] `ap run` accepts `--ac-from <path>` to load acceptance criteria from a file on the base branch (one criterion per line, blank lines and leading `- ` stripped)
+- [x] When `--ac-from` is provided, daemon reads the file from the worktree after checkout, parses it, and populates `acceptanceCriteria` on the session — overrides any ACs passed via `--ac` flags or wizard
+- [x] If `--ac-from` file doesn't exist or is empty, session creation fails with a clear error (no silent fallback)
+- [x] `CreateSessionRequest` accepts optional `acFrom: string` (relative path within repo)
 
 ---
 
