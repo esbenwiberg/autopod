@@ -17,6 +17,7 @@ export interface NewSession {
   acceptanceCriteria?: string[] | null;
   outputMode: OutputMode;
   baseBranch?: string | null;
+  acFrom?: string | null;
 }
 
 export interface SessionFilters {
@@ -48,6 +49,7 @@ export interface SessionUpdates {
     totalPhases: number;
   } | null;
   claudeSessionId?: string | null;
+  acceptanceCriteria?: string[] | null;
 }
 
 export interface SessionStats {
@@ -104,6 +106,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     claudeSessionId: (row.claude_session_id as string) ?? null,
     outputMode: (row.output_mode as OutputMode) ?? 'pr',
     baseBranch: (row.base_branch as string) ?? null,
+    acFrom: (row.ac_from as string) ?? null,
   };
 }
 
@@ -114,11 +117,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         INSERT INTO sessions (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
-          output_mode, base_branch
+          output_mode, base_branch, ac_from
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
-          @outputMode, @baseBranch
+          @outputMode, @baseBranch, @acFrom
         )
       `).run({
         id: session.id,
@@ -137,6 +140,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
           : null,
         outputMode: session.outputMode,
         baseBranch: session.baseBranch ?? null,
+        acFrom: session.acFrom ?? null,
       });
     },
 
@@ -223,6 +227,13 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.claudeSessionId !== undefined) {
         setClauses.push('claude_session_id = @claudeSessionId');
         params.claudeSessionId = changes.claudeSessionId;
+      }
+      if (changes.acceptanceCriteria !== undefined) {
+        setClauses.push('acceptance_criteria = @acceptanceCriteria');
+        params.acceptanceCriteria =
+          changes.acceptanceCriteria !== null
+            ? JSON.stringify(changes.acceptanceCriteria)
+            : null;
       }
 
       if (setClauses.length === 0) return;

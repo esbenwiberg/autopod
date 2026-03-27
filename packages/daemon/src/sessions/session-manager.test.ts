@@ -116,6 +116,7 @@ function createMockWorktreeManager(): WorktreeManager {
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),
     commitFiles: vi.fn(async () => {}),
+    pushBranch: vi.fn(async () => {}),
   };
 }
 

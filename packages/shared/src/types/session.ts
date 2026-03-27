@@ -57,6 +57,7 @@ export interface Session {
   claudeSessionId: string | null;
   outputMode: OutputMode;
   baseBranch: string | null;
+  acFrom: string | null;
 }
 
 export interface CreateSessionRequest {
