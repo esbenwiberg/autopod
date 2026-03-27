@@ -355,6 +355,29 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           previewUrl,
         });
 
+        // Resolve and write skills for all session types (including workspace)
+        const mergedSkills = mergeSkills(daemonConfig.skills ?? [], profile.skills ?? []);
+        let resolvedSkillNames: string[] = [];
+        if (mergedSkills.length > 0) {
+          emitStatus('Resolving skills…');
+          const resolvedSkills = await resolveSkills(mergedSkills, logger);
+          const skillsDir = `${CONTAINER_HOME_DIR}/.claude/commands`;
+          for (const skill of resolvedSkills) {
+            await containerManager.writeFile(
+              containerId,
+              `${skillsDir}/${skill.name}.md`,
+              skill.content,
+            );
+          }
+          resolvedSkillNames = resolvedSkills.map((s) => s.name);
+          if (resolvedSkills.length > 0) {
+            logger.info(
+              { sessionId, count: resolvedSkills.length, names: resolvedSkillNames },
+              'Skills written to container',
+            );
+          }
+        }
+
         // Workspace sessions: container stays alive, no agent/validation/PR
         if (session.outputMode === 'workspace') {
           logger.info({ sessionId }, 'Workspace session running — awaiting manual attach');
@@ -390,29 +413,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Generate system instructions and deliver based on runtime
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
-        // Merge and resolve skills (slash commands) — must happen before system instructions
-        // so we can document available skills in CLAUDE.md
-        const mergedSkills = mergeSkills(daemonConfig.skills ?? [], profile.skills ?? []);
-        let resolvedSkillNames: string[] = [];
-        if (mergedSkills.length > 0) {
-          emitStatus('Resolving skills…');
-          const resolvedSkills = await resolveSkills(mergedSkills, logger);
-          const skillsDir = `${CONTAINER_HOME_DIR}/.claude/commands`;
-          for (const skill of resolvedSkills) {
-            await containerManager.writeFile(
-              containerId,
-              `${skillsDir}/${skill.name}.md`,
-              skill.content,
-            );
-          }
-          resolvedSkillNames = resolvedSkills.map((s) => s.name);
-          if (resolvedSkills.length > 0) {
-            logger.info(
-              { sessionId, count: resolvedSkills.length, names: resolvedSkillNames },
-              'Skills written to container',
-            );
-          }
-        }
 
         const systemInstructions = generateSystemInstructions(profile, session, mcpUrl, {
           injectedSections: resolvedSections,
@@ -910,15 +910,27 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
 
-      // Push the branch to origin before completing
+      // Push the branch to origin before completing, then clean up the worktree.
+      // Only remove the worktree if push succeeds — don't lose uncommitted work.
       let pushError: string | undefined;
       if (session.worktreePath) {
         try {
-          await worktreeManager.pushBranch(session.worktreePath);
+          // mergeBranch auto-commits any uncommitted changes before pushing
+          await worktreeManager.mergeBranch({
+            worktreePath: session.worktreePath,
+            targetBranch: session.branch ?? 'HEAD',
+          });
           logger.info({ sessionId, branch: session.branch }, 'Workspace branch pushed to origin');
+          // Safe to clean up — work is in origin
+          try {
+            await worktreeManager.cleanup(session.worktreePath);
+            logger.info({ sessionId }, 'Workspace worktree cleaned up');
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to cleanup workspace worktree');
+          }
         } catch (err) {
           pushError = err instanceof Error ? err.message : String(err);
-          logger.warn({ err, sessionId }, 'Failed to push workspace branch — completing anyway');
+          logger.warn({ err, sessionId }, 'Failed to push workspace branch — completing anyway, worktree preserved');
         }
       }
 

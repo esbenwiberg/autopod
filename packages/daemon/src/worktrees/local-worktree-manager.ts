@@ -61,10 +61,12 @@ export class LocalWorktreeManager implements WorktreeManager {
         await execFileAsync('git', ['clone', '--bare', repoUrl, bareRepoPath]);
       } else {
         this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
-        // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share
+        // Fetch to remote tracking ref — avoids "refusing to fetch into branch checked out
+        // at worktree" errors when baseBranch is an autopod/* branch from a prior session.
+        // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
         await execFileAsync(
           'git',
-          ['fetch', 'origin', `+refs/heads/${baseBranch}:refs/heads/${baseBranch}`],
+          ['fetch', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
           { cwd: bareRepoPath },
         );
       }
@@ -77,9 +79,12 @@ export class LocalWorktreeManager implements WorktreeManager {
     this.logger.info({ worktreePath, branch, baseBranch }, 'Creating worktree');
 
     // -B force-creates branch to handle retry scenarios
-    await execFileAsync('git', ['worktree', 'add', '-B', branch, worktreePath, baseBranch], {
-      cwd: bareRepoPath,
-    });
+    // Use refs/remotes/origin/baseBranch as start point (matches the fetch above)
+    await execFileAsync(
+      'git',
+      ['worktree', 'add', '-B', branch, worktreePath, `refs/remotes/origin/${baseBranch}`],
+      { cwd: bareRepoPath },
+    );
 
     return worktreePath;
   }

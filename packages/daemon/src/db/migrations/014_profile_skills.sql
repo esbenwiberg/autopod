@@ -1,0 +1,1 @@
+ALTER TABLE profiles ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';

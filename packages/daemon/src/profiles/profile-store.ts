@@ -3,6 +3,7 @@ import type {
   EscalationConfig,
   InjectedClaudeMdSection,
   InjectedMcpServer,
+  InjectedSkill,
   NetworkPolicy,
   PrivateRegistry,
   Profile,
@@ -63,6 +64,7 @@ export function rowToProfile(
     claudeMdSections: JSON.parse(
       (row.claude_md_sections as string) ?? '[]',
     ) as InjectedClaudeMdSection[],
+    skills: JSON.parse((row.skills as string) ?? '[]') as InjectedSkill[],
     networkPolicy: row.network_policy
       ? (JSON.parse(row.network_policy as string) as NetworkPolicy)
       : null,
@@ -180,7 +182,7 @@ export function createProfileStore(
           name, repo_url, default_branch, template, build_command, start_command,
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
-          extends, mcp_servers, claude_md_sections, network_policy, action_policy, output_mode,
+          extends, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat,
           private_registries, registry_pat,
           created_at, updated_at
@@ -188,7 +190,7 @@ export function createProfileStore(
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
-          @extends, @mcpServers, @claudeMdSections, @networkPolicy, @actionPolicy, @outputMode,
+          @extends, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat,
           @privateRegistries, @registryPat,
           @createdAt, @updatedAt
@@ -212,6 +214,7 @@ export function createProfileStore(
         extends: parsed.extends,
         mcpServers: JSON.stringify(parsed.mcpServers),
         claudeMdSections: JSON.stringify(parsed.claudeMdSections),
+        skills: JSON.stringify(parsed.skills),
         networkPolicy: parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null,
         actionPolicy: parsed.actionPolicy ? JSON.stringify(parsed.actionPolicy) : null,
         outputMode: parsed.outputMode,
@@ -340,6 +343,10 @@ export function createProfileStore(
       if (parsed.claudeMdSections !== undefined) {
         setClauses.push('claude_md_sections = @claudeMdSections');
         fieldMap.claudeMdSections = JSON.stringify(parsed.claudeMdSections);
+      }
+      if (parsed.skills !== undefined) {
+        setClauses.push('skills = @skills');
+        fieldMap.skills = JSON.stringify(parsed.skills);
       }
       if (parsed.networkPolicy !== undefined) {
         setClauses.push('network_policy = @networkPolicy');

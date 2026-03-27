@@ -1,6 +1,6 @@
 import type { EscalationConfig, Profile } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
-import { mergeClaudeMdSections, mergeMcpServers } from '../sessions/injection-merger.js';
+import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from '../sessions/injection-merger.js';
 
 const MAX_INHERITANCE_DEPTH = 5;
 
@@ -19,6 +19,7 @@ const SPECIAL_MERGE_FIELDS: ReadonlySet<keyof Profile> = new Set([
   'customInstructions',
   'mcpServers',
   'claudeMdSections',
+  'skills',
   'privateRegistries',
 ]);
 
@@ -70,6 +71,9 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
     parent.claudeMdSections,
     child.claudeMdSections,
   );
+
+  // skills: merge by name (parent first, child overrides)
+  resolved.skills = mergeSkills(parent.skills, child.skills);
 
   // privateRegistries: concatenate (parent first, child appended — same feed URL deduped)
   const seenUrls = new Set<string>();
