@@ -33,10 +33,7 @@ export function mergeClaudeMdSections(
  * Merge daemon-level and profile-level skill injections.
  * Profile entries override daemon entries with the same name.
  */
-export function mergeSkills(
-  daemon: InjectedSkill[],
-  profile: InjectedSkill[],
-): InjectedSkill[] {
+export function mergeSkills(daemon: InjectedSkill[], profile: InjectedSkill[]): InjectedSkill[] {
   const merged = new Map<string, InjectedSkill>();
   for (const s of daemon) merged.set(s.name, s);
   for (const s of profile) merged.set(s.name, s); // profile wins

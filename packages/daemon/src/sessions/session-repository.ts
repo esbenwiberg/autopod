@@ -51,6 +51,7 @@ export interface SessionUpdates {
   claudeSessionId?: string | null;
   acceptanceCriteria?: string[] | null;
   recoveryWorktreePath?: string | null;
+  lastHeartbeatAt?: string | null;
 }
 
 export interface SessionStats {
@@ -109,6 +110,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     baseBranch: (row.base_branch as string) ?? null,
     acFrom: (row.ac_from as string) ?? null,
     recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
+    lastHeartbeatAt: (row.last_heartbeat_at as string) ?? null,
   };
 }
 
@@ -233,9 +235,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.acceptanceCriteria !== undefined) {
         setClauses.push('acceptance_criteria = @acceptanceCriteria');
         params.acceptanceCriteria =
-          changes.acceptanceCriteria !== null
-            ? JSON.stringify(changes.acceptanceCriteria)
-            : null;
+          changes.acceptanceCriteria !== null ? JSON.stringify(changes.acceptanceCriteria) : null;
+      }
+      if (changes.lastHeartbeatAt !== undefined) {
+        setClauses.push('last_heartbeat_at = @lastHeartbeatAt');
+        params.lastHeartbeatAt = changes.lastHeartbeatAt;
       }
       if (changes.recoveryWorktreePath !== undefined) {
         setClauses.push('recovery_worktree_path = @recoveryWorktreePath');

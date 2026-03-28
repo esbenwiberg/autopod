@@ -59,6 +59,7 @@ export interface Session {
   baseBranch: string | null;
   acFrom: string | null;
   recoveryWorktreePath: string | null;
+  lastHeartbeatAt: string | null;
 }
 
 export interface CreateSessionRequest {

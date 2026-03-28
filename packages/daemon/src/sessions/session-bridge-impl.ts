@@ -38,6 +38,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
 
   return {
     createEscalation(escalation: EscalationRequest): void {
+      sessionManager.touchHeartbeat(escalation.sessionId);
       escalationRepo.insert(escalation);
       logger.info(
         { escalationId: escalation.id, sessionId: escalation.sessionId, type: escalation.type },
@@ -121,6 +122,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     },
 
     reportPlan(sessionId: string, summary: string, steps: string[]): void {
+      sessionManager.touchHeartbeat(sessionId);
       logger.info({ sessionId, summary, stepCount: steps.length }, 'Agent reported plan');
       // Plan is persisted via the AgentPlanEvent flowing through consumeAgentEvents
       // but we also emit it as an agent activity event from the MCP bridge
@@ -134,11 +136,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       currentPhase: number,
       totalPhases: number,
     ): void {
+      sessionManager.touchHeartbeat(sessionId);
       logger.info({ sessionId, phase, currentPhase, totalPhases }, 'Agent reported progress');
       // Progress is persisted via the AgentProgressEvent flowing through consumeAgentEvents
     },
 
     consumeMessages(sessionId: string): { hasMessage: boolean; message?: string } {
+      sessionManager.touchHeartbeat(sessionId);
       return nudgeRepo.consumeNext(sessionId);
     },
 
@@ -169,6 +173,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       }
 
       logger.info({ sessionId, actionName }, 'Executing action via bridge');
+      sessionManager.touchHeartbeat(sessionId);
       return actionEngine.execute({ sessionId, actionName, params }, profile.actionPolicy);
     },
 
@@ -183,6 +188,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     },
 
     async writeFileInContainer(sessionId: string, path: string, content: string): Promise<void> {
+      sessionManager.touchHeartbeat(sessionId);
       const session = sessionManager.getSession(sessionId);
       if (!session.containerId) {
         throw new Error(`Session ${sessionId} has no container`);
@@ -196,6 +202,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       command: string[],
       options?: { cwd?: string; timeout?: number },
     ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+      sessionManager.touchHeartbeat(sessionId);
       const session = sessionManager.getSession(sessionId);
       if (!session.containerId) {
         throw new Error(`Session ${sessionId} has no container`);

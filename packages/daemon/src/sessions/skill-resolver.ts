@@ -17,9 +17,7 @@ export async function resolveSkills(
   skills: InjectedSkill[],
   logger: Logger,
 ): Promise<ResolvedSkill[]> {
-  const results = await Promise.allSettled(
-    skills.map((s) => resolveOne(s, logger)),
-  );
+  const results = await Promise.allSettled(skills.map((s) => resolveOne(s, logger)));
 
   return results
     .filter((r): r is PromiseFulfilledResult<ResolvedSkill | null> => r.status === 'fulfilled')
@@ -27,10 +25,7 @@ export async function resolveSkills(
     .filter((s): s is ResolvedSkill => s !== null);
 }
 
-async function resolveOne(
-  skill: InjectedSkill,
-  logger: Logger,
-): Promise<ResolvedSkill | null> {
+async function resolveOne(skill: InjectedSkill, logger: Logger): Promise<ResolvedSkill | null> {
   const { source } = skill;
 
   try {

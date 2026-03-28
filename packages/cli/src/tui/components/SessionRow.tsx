@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import type React from 'react';
 import type { ColumnWidths } from '../utils/layout.js';
 import { truncate } from '../utils/truncate.js';
+import { HeartbeatDot } from './HeartbeatDot.js';
 import { StatusBadge } from './StatusBadge.js';
 
 interface SessionRowProps {
@@ -27,6 +28,7 @@ export function SessionRow({ session, selected, columns }: SessionRowProps): Rea
         <Text>{truncate(session.model, columns.model).padEnd(columns.model)}</Text>
         {'  '}
       </Text>
+      <HeartbeatDot status={session.status} lastHeartbeatAt={session.lastHeartbeatAt} />
       <StatusBadge status={session.status} />
     </Box>
   );

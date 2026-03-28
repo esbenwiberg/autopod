@@ -125,11 +125,10 @@ export class CopilotRuntime implements Runtime {
 
     const execEnv = env ? { ...env, COPILOT_HOME } : { COPILOT_HOME };
 
-    const handle = await this.containerManager.execStreaming(
-      containerId,
-      ['copilot', ...args],
-      { cwd: '/workspace', env: execEnv },
-    );
+    const handle = await this.containerManager.execStreaming(containerId, ['copilot', ...args], {
+      cwd: '/workspace',
+      env: execEnv,
+    });
 
     this.handles.set(sessionId, handle);
 
@@ -163,7 +162,8 @@ export class CopilotRuntime implements Runtime {
 
     const exitCode = await handle.exitCode;
     if (exitCode !== 0) {
-      const stderrSummary = stderrChunks.length > 0 ? `: ${stderrChunks.join('\n').slice(-500)}` : '';
+      const stderrSummary =
+        stderrChunks.length > 0 ? `: ${stderrChunks.join('\n').slice(-500)}` : '';
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),

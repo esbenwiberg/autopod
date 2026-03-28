@@ -50,7 +50,10 @@ export function createTestDb(): Database.Database {
     // Split multi-statement migrations and tolerate "duplicate column" errors
     // that arise from 001_initial.sql already having columns that later
     // ALTER TABLE migrations re-add.
-    const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
+    const statements = sql
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
     for (const stmt of statements) {
       try {
         db.exec(`${stmt};`);
@@ -134,7 +137,10 @@ export function createMockContainerManager(): ContainerManager {
 
 export function createMockWorktreeManager(): WorktreeManager {
   return {
-    create: vi.fn(async () => ({ worktreePath: '/tmp/worktree/abc', bareRepoPath: '/tmp/bare/abc.git' })),
+    create: vi.fn(async () => ({
+      worktreePath: '/tmp/worktree/abc',
+      bareRepoPath: '/tmp/bare/abc.git',
+    })),
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),

@@ -121,6 +121,7 @@ export interface SessionManager {
   handleCompletion(sessionId: string): Promise<void>;
   sendMessage(sessionId: string, message: string): Promise<void>;
   notifyEscalation(sessionId: string, escalation: EscalationRequest): void;
+  touchHeartbeat(sessionId: string): void;
   approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void>;
   rejectSession(sessionId: string, reason?: string): Promise<void>;
   approveAllValidated(): Promise<{ approved: string[] }>;
@@ -1327,6 +1328,14 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           pendingEscalation: escalation,
           escalationCount: session.escalationCount + 1,
         });
+      }
+    },
+
+    touchHeartbeat(sessionId: string): void {
+      try {
+        sessionRepo.update(sessionId, { lastHeartbeatAt: new Date().toISOString() });
+      } catch {
+        // Best-effort — don't crash on heartbeat failures
       }
     },
 

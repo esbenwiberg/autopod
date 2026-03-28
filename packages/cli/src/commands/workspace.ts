@@ -6,10 +6,7 @@ import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
 import { resolveSessionId } from '../utils/id-resolver.js';
 
-export function registerWorkspaceCommands(
-  program: Command,
-  getClient: () => AutopodClient,
-): void {
+export function registerWorkspaceCommands(program: Command, getClient: () => AutopodClient): void {
   // ap workspace <profile> [description]
   program
     .command('workspace <profile> [description]')
@@ -33,9 +30,7 @@ export function registerWorkspaceCommands(
       console.log();
       console.log(chalk.dim(`Enter the container:  ap attach ${session.id.slice(0, 8)}`));
       console.log(
-        chalk.dim(
-          `Hand off to worker:   ap run ${profile} <task> --base-branch ${session.branch}`,
-        ),
+        chalk.dim(`Hand off to worker:   ap run ${profile} <task> --base-branch ${session.branch}`),
       );
     });
 
@@ -91,9 +86,7 @@ export function registerWorkspaceCommands(
 
       if (completion.pushError) {
         console.log(
-          chalk.yellow(
-            `Session complete, but branch push failed: ${completion.pushError}`,
-          ),
+          chalk.yellow(`Session complete, but branch push failed: ${completion.pushError}`),
         );
         console.log(chalk.dim('You can push manually from the worktree.'));
       } else {

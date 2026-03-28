@@ -30,6 +30,15 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     linesAdded: 45,
     linesRemoved: 12,
     previewUrl: null,
+    prUrl: null,
+    plan: null,
+    progress: null,
+    acceptanceCriteria: null,
+    claudeSessionId: null,
+    outputMode: 'pr' as const,
+    baseBranch: null,
+    acFrom: null,
+    lastHeartbeatAt: null,
     ...overrides,
   };
 }

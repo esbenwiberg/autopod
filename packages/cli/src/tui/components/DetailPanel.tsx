@@ -61,7 +61,10 @@ export function DetailPanel({
         </Box>
         {session.acceptanceCriteria && session.acceptanceCriteria.length > 0 && (
           <Box flexDirection="column">
-            <Text dimColor>{'AC:       '}{session.acceptanceCriteria.length} criteria</Text>
+            <Text dimColor>
+              {'AC:       '}
+              {session.acceptanceCriteria.length} criteria
+            </Text>
           </Box>
         )}
         <Box>
