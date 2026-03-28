@@ -295,9 +295,10 @@ If none: "No new constraints discovered."
 - [x] Criteria that passed
 - [ ] Criteria that couldn't be met (with explanation)
 
-### Phase E: Push
+### Phase E: Commit
 
-Commit and push your work + handover together. Do not accumulate unpushed work.
+Commit your work and handover together with a single commit. Do not accumulate
+uncommitted work — commit after each phase so progress is preserved.
 ```
 
 ---
@@ -329,8 +330,8 @@ directory from the brief's path. Still:
 - **You own integration.** Subagents own their brief. You own the fact that
   the briefs work together as a feature. Test failures after all briefs
   complete are YOUR problem to diagnose and fix.
-- **Push early.** Ensure subagents commit and push. If a session dies, the
-  handover chain lets you resume where you left off.
+- **Commit early.** Ensure subagents commit after each phase. If a session dies,
+  the handover chain lets you resume where you left off.
 - **Parallel when possible.** If the DAG says two briefs are independent and
   their file ownership doesn't overlap, run them concurrently. Don't
   artificially serialize independent work.
