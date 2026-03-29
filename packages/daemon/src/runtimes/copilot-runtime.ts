@@ -108,69 +108,20 @@ export class CopilotRuntime implements Runtime {
 
   async *resume(
     sessionId: string,
-    message: string,
-    containerId: string,
-    env?: Record<string, string>,
+    _message: string,
+    _containerId: string,
+    _env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
-    // Copilot has no native session ID targeting, but the container is still alive
-    // with MCP config and instructions already written. Re-spawn with the message as prompt.
-    this.logger.info(
-      { component: 'copilot-runtime', sessionId, containerId },
-      'Resuming copilot via re-spawn in existing container',
+    this.logger.warn(
+      { component: 'copilot-runtime', sessionId },
+      'Resume not supported for copilot runtime',
     );
-
-    const args = ['-p', message, '--allow-all', '--no-ask-user', '-s'];
-    const lastModel = this.lastModels.get(sessionId);
-    if (lastModel) args.push('--model', lastModel);
-
-    const execEnv = env ? { ...env, COPILOT_HOME } : { COPILOT_HOME };
-
-    const handle = await this.containerManager.execStreaming(containerId, ['copilot', ...args], {
-      cwd: '/workspace',
-      env: execEnv,
-    });
-
-    this.handles.set(sessionId, handle);
-
-    const stderrEvents: AgentEvent[] = [];
-    const stderrChunks: string[] = [];
-    handle.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8').trim();
-      if (!text) return;
-      this.logger.warn(
-        { component: 'copilot-runtime', sessionId, stderr: text.slice(0, 500) },
-        'copilot stderr (resume)',
-      );
-      stderrChunks.push(text);
-      stderrEvents.push({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        message: `[stderr] ${text.slice(0, 500)}`,
-        fatal: false,
-      });
-    });
-
-    try {
-      for await (const event of CopilotStreamParser.parse(handle.stdout, sessionId, this.logger)) {
-        for (const e of stderrEvents.splice(0)) yield e;
-        yield event;
-      }
-      for (const e of stderrEvents.splice(0)) yield e;
-    } finally {
-      this.handles.delete(sessionId);
-    }
-
-    const exitCode = await handle.exitCode;
-    if (exitCode !== 0) {
-      const stderrSummary =
-        stderrChunks.length > 0 ? `: ${stderrChunks.join('\n').slice(-500)}` : '';
-      yield {
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        message: `Copilot process exited with code ${exitCode}${stderrSummary}`,
-        fatal: true,
-      };
-    }
+    yield {
+      type: 'error',
+      timestamp: new Date().toISOString(),
+      message: 'Resume not supported for copilot runtime',
+      fatal: true,
+    };
   }
 
   async abort(sessionId: string): Promise<void> {
@@ -211,9 +162,10 @@ export class CopilotRuntime implements Runtime {
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
-    const args = ['-p', config.task, '--allow-all', '--no-ask-user', '-s'];
-    const copilotModel = config.env['COPILOT_MODEL'];
+    const args: string[] = ['-p', config.task];
+    const copilotModel = config.env['COPILOT_MODEL'] ?? config.model;
     if (copilotModel) args.push('--model', copilotModel);
+    args.push('--allow-all', '--no-ask-user', '-s');
     return args;
   }
 

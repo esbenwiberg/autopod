@@ -3,6 +3,8 @@ import type { ValidationResult } from '@autopod/shared';
 export interface CreatePrConfig {
   /** Worktree path to run `gh` from (inherits git remote context) */
   worktreePath: string;
+  /** GitHub repository URL (e.g. https://github.com/owner/repo.git) — required for API-based PR creation */
+  repoUrl?: string;
   /** Branch the PR is for (--head) */
   branch: string;
   /** Target branch to merge into (--base) */

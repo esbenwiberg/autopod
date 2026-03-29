@@ -69,7 +69,7 @@ describe('buildProviderEnv', () => {
       const result = await buildProviderEnv(profile, 'session-1', logger);
 
       expect(result.env.ANTHROPIC_API_KEY).toBe('sk-ant-test123');
-      expect(result.containerFiles).toHaveLength(0);
+      expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
       expect(result.requiresPostExecPersistence).toBe(false);
     });
 
@@ -80,7 +80,7 @@ describe('buildProviderEnv', () => {
       const result = await buildProviderEnv(profile, 'session-1', logger);
 
       expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(result.containerFiles).toHaveLength(0);
+      expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
     });
 
     it('handles explicit anthropic modelProvider', async () => {
@@ -112,8 +112,8 @@ describe('buildProviderEnv', () => {
       expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
       // Should NOT override HOME — credentials go to /home/autopod directly
       expect(result.env.HOME).toBeUndefined();
-      // Should write credentials file
-      expect(result.containerFiles).toHaveLength(2); // .credentials.json + config.json
+      // Should write credentials + .claude.json + settings.json
+      expect(result.containerFiles).toHaveLength(3); // .credentials.json + .claude.json + settings.json
       expect(result.requiresPostExecPersistence).toBe(true);
 
       const credsFile = result.containerFiles.find((f) => f.path.includes('.credentials.json'));
@@ -121,6 +121,19 @@ describe('buildProviderEnv', () => {
       const parsed = JSON.parse(credsFile?.content ?? '{}');
       expect(parsed.claudeAiOauth.accessToken).toBe('access-123');
       expect(parsed.claudeAiOauth.refreshToken).toBe('refresh-456');
+
+      // .claude.json should skip onboarding + pre-accept workspace trust
+      const claudeJson = result.containerFiles.find((f) => f.path.endsWith('.claude.json'));
+      expect(claudeJson).toBeDefined();
+      const claudeParsed = JSON.parse(claudeJson?.content ?? '{}');
+      expect(claudeParsed.hasCompletedOnboarding).toBe(true);
+      expect(claudeParsed.hasAcknowledgedDisclaimer).toBe(true);
+      expect(claudeParsed.projects['/workspace'].hasTrustDialogAccepted).toBe(true);
+
+      // settings.json should set dark theme
+      const settingsJson = result.containerFiles.find((f) => f.path.endsWith('settings.json'));
+      expect(settingsJson).toBeDefined();
+      expect(JSON.parse(settingsJson?.content ?? '{}')).toEqual({ theme: 'dark' });
     });
 
     it('throws when modelProvider is max but credentials are missing', async () => {
@@ -168,7 +181,7 @@ describe('buildProviderEnv', () => {
       expect(result.env.ANTHROPIC_BASE_URL).toBe('https://foundry.azure.com/v1');
       expect(result.env.CLAUDE_FOUNDRY_PROJECT).toBe('my-project');
       expect(result.env.ANTHROPIC_API_KEY).toBe('foundry-key-123');
-      expect(result.containerFiles).toHaveLength(0);
+      expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
       expect(result.requiresPostExecPersistence).toBe(false);
     });
 

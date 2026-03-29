@@ -39,7 +39,12 @@ import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
-import { GhPrManager } from './worktrees/pr-manager.js';
+import {
+  createActionEngine,
+  createActionRegistry,
+  createActionAuditRepository,
+} from './actions/index.js';
+import { GhPrManager, GitHubApiPrManager } from './worktrees/pr-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +74,9 @@ const migrationsDir =
   ].find((dir) => fs.existsSync(dir)) ?? path.join(__dirname, '..', 'src', 'db', 'migrations');
 
 runMigrations(db, migrationsDir, logger);
+
+const actionAuditRepo = createActionAuditRepository(db);
+const actionRegistry = createActionRegistry(logger);
 
 // Credentials encryption key (generated on first run, persisted at ~/.autopod/secrets.key)
 const credentialsCipher = loadOrCreateKey(path.join(os.homedir(), '.autopod', 'secrets.key'));
@@ -240,6 +248,9 @@ function prManagerFactory(
       return null;
     }
   }
+  if (profile.githubPat) {
+    return new GitHubApiPrManager({ pat: profile.githubPat, logger });
+  }
   return ghPrManager;
 }
 
@@ -269,6 +280,21 @@ sessionManager = createSessionManager({
   logger,
 });
 
+function makeActionEngine(profile: import('@autopod/shared').Profile) {
+  return createActionEngine({
+    registry: actionRegistry,
+    auditRepo: actionAuditRepo,
+    logger,
+    getSecret: (ref: string) => {
+      const envVal = process.env[ref];
+      if (envVal) return envVal;
+      if (ref === 'github-pat' || ref === 'GITHUB_TOKEN') return profile.githubPat ?? undefined;
+      if (ref === 'ado-pat' || ref === 'ADO_PAT') return profile.adoPat ?? undefined;
+      return undefined;
+    },
+  });
+}
+
 // Session bridge for MCP escalation
 const sessionBridge = createSessionBridge({
   sessionManager,
@@ -276,6 +302,7 @@ const sessionBridge = createSessionBridge({
   nudgeRepo,
   profileStore,
   containerManagerFactory,
+  makeActionEngine,
   pendingRequestsBySession,
   logger,
 });

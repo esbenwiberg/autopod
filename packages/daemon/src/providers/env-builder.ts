@@ -4,6 +4,41 @@ import type { Logger } from 'pino';
 import { refreshOAuthToken } from './credential-refresh.js';
 import type { ProviderEnvResult } from './types.js';
 
+type ContainerFile = ProviderEnvResult['containerFiles'][number];
+
+const CONTAINER_WORK_DIR = '/workspace';
+
+/**
+ * Returns the Claude Code config files to inject into every container:
+ *
+ *  ~/.claude.json       — skips onboarding, disclaimer, and pre-accepts folder trust
+ *  ~/.claude/settings.json — sets theme to dark
+ */
+function buildClaudeConfigFiles(): ContainerFile[] {
+  const claudeJson = JSON.stringify(
+    {
+      hasCompletedOnboarding: true,
+      hasAcknowledgedDisclaimer: true,
+      projects: {
+        [CONTAINER_WORK_DIR]: {
+          hasTrustDialogAccepted: true,
+          hasCompletedProjectOnboarding: true,
+          projectOnboardingSeenCount: 1,
+        },
+      },
+    },
+    null,
+    2,
+  );
+
+  const settingsJson = JSON.stringify({ theme: 'dark' }, null, 2);
+
+  return [
+    { path: `${CONTAINER_HOME_DIR}/.claude.json`, content: claudeJson },
+    { path: `${CONTAINER_HOME_DIR}/.claude/settings.json`, content: settingsJson },
+  ];
+}
+
 /**
  * Build provider-specific environment variables and credential files for a session.
  *
@@ -48,7 +83,7 @@ function buildAnthropicEnv(): ProviderEnvResult {
 
   return {
     env,
-    containerFiles: [],
+    containerFiles: buildClaudeConfigFiles(),
     requiresPostExecPersistence: false,
   };
 }
@@ -94,23 +129,9 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
   // Write credentials to the autopod user's home directory.
   const credPath = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
 
-  // Also write a minimal config to skip onboarding prompts
-  const configFile = JSON.stringify(
-    {
-      hasCompletedOnboarding: true,
-      hasAcknowledgedDisclaimer: true,
-    },
-    null,
-    2,
-  );
-  const configPath = `${CONTAINER_HOME_DIR}/.claude/config.json`;
-
   return {
     env: {},
-    containerFiles: [
-      { path: credPath, content: credentialsFile },
-      { path: configPath, content: configFile },
-    ],
+    containerFiles: [{ path: credPath, content: credentialsFile }, ...buildClaudeConfigFiles()],
     requiresPostExecPersistence: true,
   };
 }
@@ -132,7 +153,7 @@ function buildCopilotEnv(profile: Profile): ProviderEnvResult {
 
   return {
     env,
-    containerFiles: [],
+    containerFiles: buildClaudeConfigFiles(),
     requiresPostExecPersistence: false,
   };
 }
@@ -161,7 +182,7 @@ function buildFoundryEnv(profile: Profile): ProviderEnvResult {
 
   return {
     env,
-    containerFiles: [],
+    containerFiles: buildClaudeConfigFiles(),
     requiresPostExecPersistence: false,
   };
 }

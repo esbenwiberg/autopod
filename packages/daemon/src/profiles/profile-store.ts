@@ -77,6 +77,7 @@ export function rowToProfile(
     testCommand: (row.test_command as string) ?? null,
     prProvider: (row.pr_provider as Profile['prProvider']) ?? 'github',
     adoPat: decryptPat(row.ado_pat),
+    githubPat: decryptPat(row.github_pat),
     privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
     registryPat: decryptPat(row.registry_pat),
     createdAt: row.created_at as string,
@@ -183,7 +184,7 @@ export function createProfileStore(
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
-          model_provider, provider_credentials, test_command, pr_provider, ado_pat,
+          model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
           private_registries, registry_pat,
           created_at, updated_at
         ) VALUES (
@@ -191,7 +192,7 @@ export function createProfileStore(
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
-          @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat,
+          @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
           @privateRegistries, @registryPat,
           @createdAt, @updatedAt
         )
@@ -223,6 +224,7 @@ export function createProfileStore(
         testCommand: parsed.testCommand ?? null,
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
+        githubPat: encryptPat(parsed.githubPat),
         privateRegistries: JSON.stringify(parsed.privateRegistries),
         registryPat: encryptPat(parsed.registryPat),
         createdAt: now,
@@ -379,6 +381,10 @@ export function createProfileStore(
       if (parsed.adoPat !== undefined) {
         setClauses.push('ado_pat = @adoPat');
         fieldMap.adoPat = encryptPat(parsed.adoPat);
+      }
+      if (parsed.githubPat !== undefined) {
+        setClauses.push('github_pat = @githubPat');
+        fieldMap.githubPat = encryptPat(parsed.githubPat);
       }
       if (parsed.privateRegistries !== undefined) {
         setClauses.push('private_registries = @privateRegistries');

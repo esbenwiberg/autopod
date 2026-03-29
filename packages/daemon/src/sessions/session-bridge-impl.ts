@@ -5,6 +5,7 @@ import type {
   ActionResponse,
   EscalationRequest,
   EscalationResponse,
+  Profile,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
@@ -18,7 +19,7 @@ export interface SessionBridgeDependencies {
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
-  actionEngine?: ActionEngine;
+  makeActionEngine?: (profile: Profile) => ActionEngine;
   containerManagerFactory: ContainerManagerFactory;
   pendingRequestsBySession: Map<string, PendingRequests>;
   logger: Logger;
@@ -30,7 +31,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     escalationRepo,
     nudgeRepo,
     profileStore,
-    actionEngine,
+    makeActionEngine,
     containerManagerFactory,
     pendingRequestsBySession: _pendingRequestsBySession,
     logger,
@@ -151,7 +152,10 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       actionName: string,
       params: Record<string, unknown>,
     ): Promise<ActionResponse> {
-      if (!actionEngine) {
+      const session = sessionManager.getSession(sessionId);
+      const profile = profileStore.get(session.profileName);
+
+      if (!makeActionEngine) {
         return {
           success: false,
           error: 'Action engine not configured',
@@ -159,9 +163,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
           quarantined: false,
         };
       }
-
-      const session = sessionManager.getSession(sessionId);
-      const profile = profileStore.get(session.profileName);
 
       if (!profile.actionPolicy) {
         return {
@@ -172,19 +173,20 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         };
       }
 
+      const actionEngine = makeActionEngine(profile);
       logger.info({ sessionId, actionName }, 'Executing action via bridge');
       sessionManager.touchHeartbeat(sessionId);
       return actionEngine.execute({ sessionId, actionName, params }, profile.actionPolicy);
     },
 
     getAvailableActions(sessionId: string): ActionDefinition[] {
-      if (!actionEngine) return [];
+      if (!makeActionEngine) return [];
 
       const session = sessionManager.getSession(sessionId);
       const profile = profileStore.get(session.profileName);
 
       if (!profile.actionPolicy) return [];
-      return actionEngine.getAvailableActions(profile.actionPolicy);
+      return makeActionEngine(profile).getAvailableActions(profile.actionPolicy);
     },
 
     async writeFileInContainer(sessionId: string, path: string, content: string): Promise<void> {
