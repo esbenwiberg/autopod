@@ -1,4 +1,4 @@
-import type { InjectedMcpServer, NetworkPolicy } from '@autopod/shared';
+import type { InjectedMcpServer, NetworkPolicy, NetworkPolicyMode } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 
@@ -66,6 +66,11 @@ export class DockerNetworkManager {
   /**
    * Compute the effective allowlist for a session, merging defaults,
    * profile policy, daemon gateway, and MCP server hosts.
+   *
+   * Wildcard entries (e.g. `*.example.com`) are resolved by stripping the
+   * `*.` prefix and resolving the parent domain. This is best-effort: it works
+   * when all subdomains share the same IP block, but won't cover CDN-dispersed
+   * hostnames where subdomains resolve to different PoPs.
    */
   computeAllowlist(
     policy: NetworkPolicy,
@@ -81,9 +86,10 @@ export class DockerNetworkManager {
       }
     }
 
-    // Add profile-specified hosts
+    // Add profile-specified hosts, normalising wildcard entries
     for (const h of policy.allowedHosts) {
-      hosts.add(h);
+      // *.example.com → resolve example.com (best-effort wildcard support)
+      hosts.add(h.startsWith('*.') ? h.slice(2) : h);
     }
 
     // Add daemon gateway so the container can reach the daemon's MCP endpoint
@@ -105,39 +111,20 @@ export class DockerNetworkManager {
   }
 
   /**
-   * Generate an iptables firewall script that:
-   * 1. Resolves all allowed hostnames to IPs
-   * 2. Allows DNS (port 53) for resolution
-   * 3. Allows established connections
-   * 4. Allows traffic to resolved IPs
-   * 5. Drops everything else outbound
+   * Generate an iptables firewall script. Behaviour depends on mode:
    *
-   * The script is designed to be idempotent and to fail gracefully.
+   * - 'allow-all'  — flush rules, allow loopback + established; no DROP (open egress)
+   * - 'deny-all'   — flush rules, allow loopback + established + DNS, DROP everything else
+   * - 'restricted' — (default) resolve allowed hosts to IPs, allow them, DROP the rest
+   *
+   * The script is idempotent: it always flushes OUTPUT before re-applying rules,
+   * making it safe to re-exec on a running container for live policy updates.
+   * Note: there is a brief window (~ms) between flush and new rules where all
+   * traffic is allowed — acceptable for this use case.
    */
-  generateFirewallScript(allowedHosts: string[]): string {
-    const lines = [
-      '#!/bin/sh',
-      'set -e',
-      '',
-      '# Resolve allowed hosts to IPs at container start',
-      'ALLOWED_IPS=""',
-    ];
+  generateFirewallScript(allowedHosts: string[], mode: NetworkPolicyMode = 'restricted'): string {
+    const lines = ['#!/bin/sh', 'set -e', ''];
 
-    for (const host of allowedHosts) {
-      // If it looks like an IP already, use it directly
-      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-        lines.push(`ALLOWED_IPS="$ALLOWED_IPS ${host}"`);
-      } else {
-        // Resolve hostname — use getent for reliability, fall back to nslookup
-        lines.push(
-          `for ip in $(getent ahosts "${host}" 2>/dev/null | awk '{print $1}' | sort -u); do`,
-        );
-        lines.push(`  ALLOWED_IPS="$ALLOWED_IPS $ip"`);
-        lines.push('done');
-      }
-    }
-
-    lines.push('');
     lines.push('# Flush existing OUTPUT rules');
     lines.push('iptables -F OUTPUT 2>/dev/null || true');
     lines.push('');
@@ -146,10 +133,45 @@ export class DockerNetworkManager {
     lines.push('');
     lines.push('# Allow established/related connections');
     lines.push('iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
+
+    if (mode === 'allow-all') {
+      lines.push('');
+      lines.push('echo "Firewall: allow-all mode — no outbound restrictions"');
+      return lines.join('\n');
+    }
+
     lines.push('');
     lines.push('# Allow DNS (UDP + TCP port 53)');
     lines.push('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
     lines.push('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
+
+    if (mode === 'deny-all') {
+      lines.push('');
+      lines.push('# Drop everything else outbound');
+      lines.push('iptables -A OUTPUT -j DROP');
+      lines.push('');
+      lines.push('echo "Firewall: deny-all mode — all outbound blocked"');
+      return lines.join('\n');
+    }
+
+    // restricted — resolve hosts to IPs and allow them
+    lines.push('');
+    lines.push('# Resolve allowed hosts to IPs');
+    lines.push('ALLOWED_IPS=""');
+
+    for (const host of allowedHosts) {
+      // If it looks like an IP already, use it directly
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+        lines.push(`ALLOWED_IPS="$ALLOWED_IPS ${host}"`);
+      } else {
+        lines.push(
+          `for ip in $(getent ahosts "${host}" 2>/dev/null | awk '{print $1}' | sort -u); do`,
+        );
+        lines.push(`  ALLOWED_IPS="$ALLOWED_IPS $ip"`);
+        lines.push('done');
+      }
+    }
+
     lines.push('');
     lines.push('# Allow traffic to each resolved IP');
     lines.push('for ip in $ALLOWED_IPS; do');
@@ -178,7 +200,7 @@ export class DockerNetworkManager {
     await this.ensureNetwork();
 
     const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp);
-    const firewallScript = this.generateFirewallScript(allowlist);
+    const firewallScript = this.generateFirewallScript(allowlist, policy.mode);
 
     return {
       networkName: NETWORK_NAME,

@@ -162,6 +162,12 @@ export interface SessionManager {
   }): Session[];
   getSessionStats(filters?: { profileName?: string }): SessionStats;
   getValidationHistory(sessionId: string): import('./validation-repository.js').StoredValidation[];
+  /**
+   * Re-apply network policy to all running local containers using the given profile.
+   * Called after a profile's networkPolicy is updated via the API.
+   * Fire-and-forget safe — errors are logged but do not propagate.
+   */
+  refreshNetworkPolicy(profileName: string): Promise<void>;
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
@@ -1563,6 +1569,51 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
       }
       return { killed };
+    },
+
+    async refreshNetworkPolicy(profileName: string): Promise<void> {
+      if (!networkManager) return;
+
+      const profile = profileStore.get(profileName);
+      if (!profile.networkPolicy?.enabled) return;
+
+      const runningSessions = sessionRepo
+        .list({ status: 'running' })
+        .filter(
+          (s) =>
+            s.profileName === profileName &&
+            s.executionTarget === 'local' &&
+            s.containerId != null,
+        );
+
+      if (runningSessions.length === 0) return;
+
+      const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
+      const gatewayIp = await networkManager.getGatewayIp();
+      const netConfig = await networkManager.buildNetworkConfig(
+        profile.networkPolicy,
+        mergedServers,
+        gatewayIp,
+      );
+      if (!netConfig) return;
+
+      const cm = containerManagerFactory.get('local');
+      await Promise.all(
+        runningSessions.map(async (session) => {
+          try {
+            await cm.refreshFirewall(session.containerId!, netConfig.firewallScript);
+            logger.info(
+              { sessionId: session.id, profileName },
+              'Network policy refreshed on running container',
+            );
+          } catch (err) {
+            logger.warn(
+              { err, sessionId: session.id, profileName },
+              'Failed to refresh network policy on running container',
+            );
+          }
+        }),
+      );
     },
   };
 }

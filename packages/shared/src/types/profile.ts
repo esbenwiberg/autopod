@@ -54,6 +54,8 @@ export interface Profile {
   prProvider: 'github' | 'ado';
   /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */
   adoPat: string | null;
+  /** GitHub Personal Access Token (encrypted at rest). Used for PR creation and action read access. */
+  githubPat: string | null;
   /** Private package registries (npm/NuGet) for Azure DevOps feeds */
   privateRegistries: PrivateRegistry[];
   /** PAT for authenticating against private registries (encrypted at rest) */
@@ -73,8 +75,17 @@ export interface PageAssertion {
   value?: string;
 }
 
+export type NetworkPolicyMode = 'allow-all' | 'deny-all' | 'restricted';
+
 export interface NetworkPolicy {
   enabled: boolean;
+  /**
+   * Firewall mode:
+   * - 'allow-all'  — no DROP rule; all outbound traffic is permitted
+   * - 'deny-all'   — DROP all outbound (loopback + established still allowed)
+   * - 'restricted' — default; only allowedHosts (+ defaults) are permitted
+   */
+  mode?: NetworkPolicyMode;
   /** Additional hosts beyond defaults (api.anthropic.com, registry.npmjs.org, etc.) */
   allowedHosts: string[];
   /** If true, replace the default allowlist entirely (advanced) */

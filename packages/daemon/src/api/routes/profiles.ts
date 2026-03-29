@@ -6,6 +6,7 @@ import type { ProfileStore } from '../../profiles/index.js';
 export function profileRoutes(
   app: FastifyInstance,
   profileStore: ProfileStore,
+  refreshNetworkPolicy: (profileName: string) => Promise<void>,
   imageBuilder?: ImageBuilder,
 ): void {
   // POST /profiles — create profile
@@ -29,7 +30,12 @@ export function profileRoutes(
   // PUT/PATCH /profiles/:name — update profile
   const updateHandler = async (request: import('fastify').FastifyRequest) => {
     const { name } = request.params as { name: string };
-    return profileStore.update(name, request.body as Record<string, unknown>);
+    const updated = profileStore.update(name, request.body as Record<string, unknown>);
+    // Fire-and-forget: re-apply network policy to running containers using this profile
+    refreshNetworkPolicy(name).catch(() => {
+      // Errors are logged inside refreshNetworkPolicy — don't surface to caller
+    });
+    return updated;
   };
   app.put('/profiles/:name', updateHandler);
   app.patch('/profiles/:name', updateHandler);

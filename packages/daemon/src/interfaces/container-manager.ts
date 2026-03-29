@@ -33,6 +33,8 @@ export interface StreamingExecResult {
 export interface ContainerManager {
   spawn(config: ContainerSpawnConfig): Promise<string>; // returns containerId
   kill(containerId: string): Promise<void>;
+  /** Re-apply firewall rules to a running container (live policy update). Idempotent — flushes and re-applies. */
+  refreshFirewall(containerId: string, script: string): Promise<void>;
   /** Stop a container without removing it. Idempotent — swallows "already stopped". */
   stop(containerId: string): Promise<void>;
   /** Start a previously stopped container. Idempotent — swallows "already running". */

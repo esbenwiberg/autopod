@@ -500,6 +500,39 @@ registryPat: "<your-ado-pat>"
 
 At session startup, autopod generates `.npmrc` and/or `NuGet.config` files in the container workspace with embedded auth tokens. Child profiles inherit and merge registries from parent profiles (deduped by URL).
 
+### Network Policy
+
+Control egress traffic from agent containers with iptables firewall rules. Disabled by default.
+
+```yaml
+networkPolicy:
+  enabled: true
+
+  # Mode controls the firewall behaviour:
+  #   restricted  — (default) only allowedHosts are reachable
+  #   deny-all    — block everything except loopback and DNS
+  #   allow-all   — no outbound restrictions (useful for debug)
+  mode: restricted
+
+  # Hosts to allow. Wildcards strip the prefix and resolve the parent domain —
+  # best-effort: works when all subdomains share the same IP block.
+  allowedHosts:
+    - "api.stripe.com"
+    - "*.my-company.com"      # resolves my-company.com
+
+  # Replace the built-in defaults (Anthropic, npm, GitHub, etc.) entirely.
+  # Use this when you need a strict allowlist with no implicit hosts.
+  replaceDefaults: false
+```
+
+**Built-in default hosts** (always allowed unless `replaceDefaults: true`):
+
+`api.anthropic.com`, `api.openai.com`, `registry.npmjs.org`, `pypi.org`, `github.com`, `*.githubusercontent.com`, `pkgs.dev.azure.com`, `platform.claude.com`, GitHub Copilot endpoints.
+
+**Live updates** — patching a profile's `networkPolicy` via the API immediately re-applies firewall rules to all running containers using that profile. No restart needed.
+
+**MCP server hosts** are always allowed regardless of mode — the daemon injects them automatically.
+
 ### Escalation settings
 
 Control how and when agents can ask for help:

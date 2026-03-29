@@ -58,7 +58,12 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   // Routes
   healthRoutes(app, deps.onShutdown);
   sessionRoutes(app, deps.sessionManager);
-  profileRoutes(app, deps.profileStore, deps.imageBuilder);
+  profileRoutes(
+    app,
+    deps.profileStore,
+    (profileName) => deps.sessionManager.refreshNetworkPolicy(profileName),
+    deps.imageBuilder,
+  );
 
   // WebSocket handler
   websocketHandler(app, deps.authModule, deps.eventBus, deps.eventRepo);

@@ -86,7 +86,7 @@ export class DockerContainerManager implements ContainerManager {
     // Apply firewall rules if provided
     if (config.firewallScript) {
       try {
-        await this.applyFirewall(container.id, config.firewallScript);
+        await this.refreshFirewall(container.id, config.firewallScript);
       } catch (err) {
         // Graceful degradation — log warning but don't fail the spawn
         this.logger.warn(
@@ -323,7 +323,7 @@ export class DockerContainerManager implements ContainerManager {
     return { stdout: stdoutStream, stderr: stderrStream, exitCode, kill };
   }
 
-  private async applyFirewall(containerId: string, script: string): Promise<void> {
+  async refreshFirewall(containerId: string, script: string): Promise<void> {
     // Write script to container
     await this.writeFile(containerId, '/tmp/firewall.sh', script);
 

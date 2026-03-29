@@ -148,7 +148,12 @@ describe('DockerNetworkManager', () => {
       expect(script).toContain('-p tcp --dport 53');
     });
 
-    it('has a final DROP rule', () => {
+    it('has a final DROP rule in restricted mode', () => {
+      const script = manager.generateFirewallScript([], 'restricted');
+      expect(script).toContain('iptables -A OUTPUT -j DROP');
+    });
+
+    it('has a final DROP rule when mode is omitted (defaults to restricted)', () => {
       const script = manager.generateFirewallScript([]);
       expect(script).toContain('iptables -A OUTPUT -j DROP');
     });
@@ -161,6 +166,79 @@ describe('DockerNetworkManager', () => {
     it('has ESTABLISHED,RELATED allow', () => {
       const script = manager.generateFirewallScript([]);
       expect(script).toContain('--state ESTABLISHED,RELATED -j ACCEPT');
+    });
+
+    describe('allow-all mode', () => {
+      it('has no DROP rule', () => {
+        const script = manager.generateFirewallScript([], 'allow-all');
+        expect(script).not.toContain('iptables -A OUTPUT -j DROP');
+      });
+
+      it('still allows loopback and established', () => {
+        const script = manager.generateFirewallScript([], 'allow-all');
+        expect(script).toContain('-o lo -j ACCEPT');
+        expect(script).toContain('--state ESTABLISHED,RELATED -j ACCEPT');
+      });
+
+      it('does not include host resolution or IP allowances', () => {
+        const script = manager.generateFirewallScript(['example.com'], 'allow-all');
+        expect(script).not.toContain('getent ahosts');
+        expect(script).not.toContain('ALLOWED_IPS');
+      });
+    });
+
+    describe('deny-all mode', () => {
+      it('has a DROP rule', () => {
+        const script = manager.generateFirewallScript([], 'deny-all');
+        expect(script).toContain('iptables -A OUTPUT -j DROP');
+      });
+
+      it('allows DNS', () => {
+        const script = manager.generateFirewallScript([], 'deny-all');
+        expect(script).toContain('--dport 53 -j ACCEPT');
+      });
+
+      it('does not include host resolution or IP allowances', () => {
+        const script = manager.generateFirewallScript(['example.com'], 'deny-all');
+        expect(script).not.toContain('getent ahosts');
+        expect(script).not.toContain('ALLOWED_IPS');
+      });
+    });
+  });
+
+  describe('wildcard hosts', () => {
+    const GATEWAY = '172.17.0.1';
+
+    it('strips wildcard prefix and resolves parent domain', () => {
+      const result = manager.computeAllowlist(
+        makePolicy({ allowedHosts: ['*.example.com'] }),
+        [],
+        GATEWAY,
+      );
+      expect(result).toContain('example.com');
+      expect(result).not.toContain('*.example.com');
+    });
+
+    it('wildcard parent domain appears in generated firewall script', () => {
+      const hosts = manager.computeAllowlist(
+        makePolicy({ allowedHosts: ['*.my-company.com'], replaceDefaults: true }),
+        [],
+        GATEWAY,
+      );
+      const script = manager.generateFirewallScript(hosts);
+      expect(script).toContain('getent ahosts "my-company.com"');
+      expect(script).not.toContain('*.my-company.com');
+    });
+
+    it('leaves non-wildcard hosts unchanged', () => {
+      const result = manager.computeAllowlist(
+        makePolicy({ allowedHosts: ['api.example.com', '*.foo.com', '10.0.0.1'] }),
+        [],
+        GATEWAY,
+      );
+      expect(result).toContain('api.example.com');
+      expect(result).toContain('foo.com');
+      expect(result).toContain('10.0.0.1');
     });
   });
 

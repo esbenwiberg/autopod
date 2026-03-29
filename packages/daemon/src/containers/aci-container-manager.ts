@@ -147,6 +147,12 @@ export class AciContainerManager implements ContainerManager {
     throw new AutopodError('Preview not supported for ACI containers', 'NOT_SUPPORTED', 501);
   }
 
+  async refreshFirewall(_containerId: string, _script: string): Promise<void> {
+    // ACI does not support exec-based firewall updates — network policy changes
+    // require a container restart. This is a no-op; log at debug level.
+    this.logger.debug('refreshFirewall is not supported on ACI containers — skipping');
+  }
+
   async kill(containerId: string): Promise<void> {
     // Stop any active log polling
     const poll = this.activePolls.get(containerId);

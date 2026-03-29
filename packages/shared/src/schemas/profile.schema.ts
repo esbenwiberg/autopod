@@ -61,6 +61,7 @@ const smokePageSchema = z.object({
 
 const networkPolicySchema = z.object({
   enabled: z.boolean(),
+  mode: z.enum(['allow-all', 'deny-all', 'restricted']).optional(),
   allowedHosts: z.array(z.string().min(1)).default([]),
   replaceDefaults: z.boolean().optional(),
 });
@@ -120,6 +121,7 @@ export const createProfileSchema = z.object({
   testCommand: z.string().nullable().optional().default(null),
   prProvider: z.enum(['github', 'ado']).default('github'),
   adoPat: z.string().min(1).nullable().default(null),
+  githubPat: z.string().min(1).nullable().default(null),
   privateRegistries: z.array(privateRegistrySchema).default([]),
   registryPat: z.string().min(1).nullable().default(null),
 });
