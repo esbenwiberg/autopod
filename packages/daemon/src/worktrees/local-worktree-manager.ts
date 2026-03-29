@@ -34,6 +34,14 @@ export class LocalWorktreeManager implements WorktreeManager {
   /** Per-repo mutex to avoid git lock contention during concurrent fetches. */
   private repoLocks = new Map<string, Promise<void>>();
 
+  /**
+   * In-memory PAT cache keyed by bare repo path.
+   * PATs are never written to the git remote URL — remote stays clean so containers
+   * that mount the bare repo cannot read the credential. Host-side git operations
+   * (fetch, push) use the auth URL constructed from this cache at call time only.
+   */
+  private patCache = new Map<string, string>();
+
   constructor(config: LocalWorktreeManagerConfig) {
     this.cacheDir =
       config.cacheDir ??
@@ -55,6 +63,11 @@ export class LocalWorktreeManager implements WorktreeManager {
     await fs.mkdir(this.cacheDir, { recursive: true });
     await fs.mkdir(this.worktreeDir, { recursive: true });
 
+    // Update in-memory PAT cache (PAT is never written to the remote URL).
+    if (pat) {
+      this.patCache.set(bareRepoPath, pat);
+    }
+
     // Ensure bare repo exists and is up-to-date (with per-repo locking)
     await this.withRepoLock(cacheKey, async () => {
       const valid = await this.isBareRepoValid(bareRepoPath);
@@ -62,27 +75,23 @@ export class LocalWorktreeManager implements WorktreeManager {
         // Remove any incomplete/stale directory before cloning
         await fs.rm(bareRepoPath, { recursive: true, force: true });
         this.logger.info({ repoUrl, bareRepoPath }, 'Cloning bare repo');
+        // Clone with auth URL so the initial fetch authenticates, then immediately
+        // reset origin to the clean URL — containers mount the bare repo and must
+        // not be able to read the PAT from git config.
         await execFileAsync('git', ['clone', '--bare', authUrl, bareRepoPath]);
-        // Store auth URL in remote so subsequent fetch/push from worktrees authenticate
-        if (pat) {
-          await execFileAsync('git', ['remote', 'set-url', 'origin', authUrl], {
-            cwd: bareRepoPath,
-          });
-        }
-      } else if (pat) {
-        // Update remote URL with PAT if provided (e.g. PAT rotated or first time with PAT)
-        await execFileAsync('git', ['remote', 'set-url', 'origin', authUrl], {
+        await execFileAsync('git', ['remote', 'set-url', 'origin', repoUrl], {
           cwd: bareRepoPath,
         });
       }
 
       // Always fetch to populate refs/remotes/origin/* — git clone --bare only creates
       // refs/heads/*, so worktree add would fail without this fetch on a fresh clone.
+      // Use auth URL directly so the credential is never persisted in git config.
       this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
       // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
       await execFileAsync(
         'git',
-        ['fetch', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
+        ['fetch', authUrl, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
         { cwd: bareRepoPath },
       );
     });
@@ -111,6 +120,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         cwd: worktreePath,
       });
       const bareRepoPath = path.resolve(worktreePath, stdout.trim());
+      this.patCache.delete(bareRepoPath);
 
       await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
         cwd: bareRepoPath,
@@ -194,9 +204,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       );
     }
 
-    // Push the branch to origin
+    // Push using auth URL so the PAT is never stored in git config.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
-    await execFileAsync('git', ['push', 'origin', 'HEAD'], { cwd: worktreePath });
+    const authUrl = await this.getAuthUrl(worktreePath);
+    await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath });
   }
 
   async commitFiles(worktreePath: string, paths: string[], message: string): Promise<void> {
@@ -224,7 +235,8 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   async pushBranch(worktreePath: string): Promise<void> {
     this.logger.info({ worktreePath }, 'Pushing branch to origin');
-    await execFileAsync('git', ['push', 'origin', 'HEAD'], { cwd: worktreePath });
+    const authUrl = await this.getAuthUrl(worktreePath);
+    await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath });
   }
 
   async getCommitLog(
@@ -245,6 +257,29 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   // --- Private helpers ---
+
+  /**
+   * Resolve the authenticated push/fetch URL for a worktree.
+   * Looks up the clean origin URL from the bare repo config and combines it with
+   * the cached PAT. If no PAT is cached (e.g. public repo), returns the clean URL.
+   * The credential is never stored in git config — only used per-command.
+   */
+  private async getAuthUrl(worktreePath: string): Promise<string> {
+    const { stdout: commonDir } = await execFileAsync(
+      'git',
+      ['rev-parse', '--git-common-dir'],
+      { cwd: worktreePath },
+    );
+    const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
+    const { stdout: remoteUrl } = await execFileAsync(
+      'git',
+      ['remote', 'get-url', 'origin'],
+      { cwd: bareRepoPath },
+    );
+    const cleanUrl = remoteUrl.trim();
+    const pat = this.patCache.get(bareRepoPath);
+    return pat ? this.injectPat(cleanUrl, pat) : cleanUrl;
+  }
 
   /** Inject a PAT into an https remote URL: https://host/... → https://:PAT@host/... */
   private injectPat(url: string, pat: string): string {

@@ -193,8 +193,8 @@ export function generateSystemInstructions(
     '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',
   );
   lines.push(
-    '3. **Commit and push regularly**: After each phase (or sooner for significant changes), run ' +
-      '`git add -A && git commit -m "..." && git push origin HEAD`. Do not save all commits for the end.',
+    '3. **Commit regularly**: After each phase (or sooner for significant changes), run ' +
+      '`git add -A && git commit -m "..."`. Do not save all commits for the end.',
   );
   lines.push(
     '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
@@ -216,7 +216,7 @@ export function generateSystemInstructions(
     lines.push('- Cite sources where applicable');
   } else {
     lines.push(
-      '- Commit and push after every meaningful unit of work — do not batch everything at the end',
+      '- Commit after every meaningful unit of work — do not batch everything at the end',
     );
     lines.push('- Ensure the build passes before completing');
     lines.push('- Use ask_human when uncertain rather than guessing');
@@ -288,14 +288,13 @@ function generateOperatingEnvironment(
   } else {
     lines.push('- You CAN use git normally within your worktree (commit, branch, etc.)');
     lines.push(
-      '- **Commit and push frequently** — after each meaningful unit of work (e.g. a passing',
+      '- **Commit frequently** — after each meaningful unit of work (e.g. a passing',
     );
     lines.push(
       '  test, a completed function, a working feature slice). This preserves your progress',
     );
     lines.push('  in case of interruptions.');
-    lines.push('- Push to the current branch with `git push origin HEAD`. Do NOT create PRs — the');
-    lines.push('  system handles that after your work is validated.');
+    lines.push('- Do NOT run `git push` — the system pushes and creates PRs on your behalf');
   }
   lines.push('');
 }

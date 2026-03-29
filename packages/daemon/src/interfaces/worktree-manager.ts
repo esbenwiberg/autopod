@@ -2,7 +2,7 @@ export interface WorktreeCreateConfig {
   repoUrl: string;
   branch: string;
   baseBranch: string;
-  /** PAT injected into the https remote URL for authenticated clone/fetch/push. */
+  /** PAT used for authenticated clone/fetch/push on the daemon host. Never written to git remote config. */
   pat?: string;
 }
 
