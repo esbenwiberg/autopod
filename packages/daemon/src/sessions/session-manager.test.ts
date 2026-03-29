@@ -146,6 +146,7 @@ function createMockWorktreeManager(): WorktreeManager {
     mergeBranch: vi.fn(async () => {}),
     commitFiles: vi.fn(async () => {}),
     pushBranch: vi.fn(async () => {}),
+    getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
   };
 }
 
@@ -1423,7 +1424,10 @@ describe('SessionManager', () => {
         const result = await manager.completeSession(session.id);
 
         expect(result.pushError).toBeUndefined();
-        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith('/tmp/worktree/abc');
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
+          worktreePath: '/tmp/worktree/abc',
+          targetBranch: expect.any(String),
+        });
 
         const completed = manager.getSession(session.id);
         expect(completed.status).toBe('complete');
@@ -1498,7 +1502,7 @@ describe('SessionManager', () => {
 
       it('surfaces push errors without blocking completion', async () => {
         const ctx = createTestContext();
-        (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValue(
+        (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValue(
           new Error('remote: Permission denied'),
         );
         const manager = createSessionManager(ctx.deps);

@@ -70,6 +70,20 @@ export function buildPrBody(config: PrBodyConfig): string {
       if (v.taskReview.reasoning) {
         lines.push(`\n> ${v.taskReview.reasoning}`);
       }
+      if (v.taskReview.requirementsCheck && v.taskReview.requirementsCheck.length > 0) {
+        lines.push('');
+        for (const req of v.taskReview.requirementsCheck) {
+          const reqIcon = req.met ? '✅' : '❌';
+          const note = req.note ? ` — ${req.note}` : '';
+          lines.push(`> ${reqIcon} ${req.criterion}${note}`);
+        }
+      }
+      if (v.taskReview.issues && v.taskReview.issues.length > 0) {
+        lines.push('');
+        for (const issue of v.taskReview.issues) {
+          lines.push(`> ⚠️ ${issue}`);
+        }
+      }
     }
 
     lines.push(

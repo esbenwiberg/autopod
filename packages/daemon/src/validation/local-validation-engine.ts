@@ -627,26 +627,98 @@ async function runTaskReview(
 
   log?.info({ model: config.reviewerModel }, 'running AI task review');
 
-  const prompt = `You are reviewing code changes for correctness.
+  const acList =
+    config.acceptanceCriteria && config.acceptanceCriteria.length > 0
+      ? config.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n')
+      : null;
 
-Task: ${config.task}
+  const repoRulesSection = config.codeReviewSkill
+    ? `\n## REPO-SPECIFIC REVIEW RULES (these take precedence over standard rules)\n\n${config.codeReviewSkill}\n`
+    : '';
 
-Diff:
+  const acSection = acList
+    ? `\n## ACCEPTANCE CRITERIA\n\n${acList}\n`
+    : '';
+
+  const commitLogSection = config.commitLog
+    ? `\n## COMMIT HISTORY\n\nCommits on this branch (most recent first — use to understand progression and intent):\n\n${config.commitLog}\n`
+    : '';
+
+  const prompt = `You are an expert software engineer performing an independent code review of changes made by an AI agent.
+
+Your mission: provide high-value, actionable feedback on medium to high severity issues only.
+
+Core principles:
+- Be helpful, not noisy. Only raise fair, actionable concerns that genuinely improve code.
+- Focus exclusively on what changed in this diff. Never comment on pre-existing code.
+- Don't flag style preferences. Only flag significant inconsistencies with existing patterns.
+- Treat generated code fairly — if it's appropriate and contextually correct, it passes.
+- When uncertain, skip rather than create noise.
+${repoRulesSection}
+## TASK
+
+${config.task}
+${acSection}
+${commitLogSection}## DIFF
+
 ${config.diff}
 
-Review the changes and respond with a JSON object:
+## INSTRUCTIONS
+
+${acList ? `### Step 1: Requirements check
+
+For each acceptance criterion above, determine whether the diff addresses it:
+- Mark met=true only if the diff clearly and fully implements the criterion
+- Mark met=false if the criterion is unaddressed or only partially implemented
+- Add a brief note if the criterion is partially met or needs context
+
+` : ''}### ${acList ? 'Step 2' : 'Step 1'}: Code review
+
+Review ONLY the changed code across these dimensions. Only raise medium or high severity issues:
+
+**Correctness & Quality**: error handling completeness, resource management, type/null safety, edge case handling
+
+**Security**: input validation and sanitization, access control, hardcoded secrets, dependency vulnerabilities
+
+**Performance & Reliability**: memory leaks, concurrency correctness, N+1 queries, retry logic and timeout handling, data consistency
+
+**Architecture & Maintainability**: component boundaries, interface design, inappropriate coupling, documentation for public APIs
+
+**Consistency**: does new code follow same patterns as existing similar code? Same error handling, naming, logging approaches? Only flag if the inconsistency is significant enough to cause confusion — not style preferences.
+
+**Generated Code**: if code appears generated (repetitive, boilerplate, generic) — verify it's adapted to the specific use case and follows project patterns. Flag if it's illogical or manipulated. Don't penalize if it's correct and contextually appropriate.
+
+**Testing** (treat as critical):
+- Coverage: are new functions/methods/branches tested? Edge cases and error scenarios covered? Missing tests for significant functionality? Coverage notably low?
+- Quality: do tests verify intended behavior (not just "no crash")? Meaningful assertions? Tests isolated and independent?
+- Common issues: over-mocking (testing mock behavior instead of real logic), type "any" abuse bypassing type checking, mocking core business logic instead of testing it, testing implementation details instead of behavior, missing negative/error tests, arbitrary sleeps instead of proper synchronization, tests inconsistent with existing patterns
+- Severity: High = missing tests for critical paths, "any" type abuse, mocking core logic / Medium = low coverage, tests not verifying behavior, excessive mocking
+
+### Self-reflection gate
+
+Before including any issue, ask yourself:
+- Is this actually in the diff (not pre-existing code)?
+- Could this be intentional per the task description or acceptance criteria?
+- Does the existing codebase use similar patterns?
+- Is this medium/high severity, not just a nit?
+- Would I want this feedback if I were the author?
+
+Drop any issue that fails these checks.
+
+## RESPONSE FORMAT
+
+Respond ONLY with a JSON object — no markdown fences, no extra text:
+
 {
   "status": "pass" | "fail" | "uncertain",
-  "reasoning": "brief explanation",
-  "issues": ["list of specific issues found, if any"]
+  "reasoning": "one or two sentence summary of the overall assessment",
+  ${acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}"issues": ["specific medium/high severity issues only"]
 }
 
-Rules:
-- Use "pass" only if you can clearly verify the diff fulfills the task.
-- Use "fail" if the task is too vague or ambiguous to verify, if the diff clearly does not match the task, or if there are obvious correctness issues.
-- Use "uncertain" only if the task is clear but the diff is inconclusive (e.g. the change is plausible but you cannot confirm without runtime context).
-
-Respond ONLY with the JSON object, no markdown fences or extra text.`;
+Status rules:
+- "pass": requirements met (if any) and no significant issues found
+- "fail": one or more requirements unmet, OR critical/high severity issues found
+- "uncertain": task is clear but diff is inconclusive without runtime context (use sparingly)`;
 
   try {
     const { stdout } = await execFileAsync(
@@ -664,15 +736,23 @@ Respond ONLY with the JSON object, no markdown fences or extra text.`;
       return null;
     }
 
-    log?.info({ status: parsed.status, issueCount: parsed.issues.length }, 'task review complete');
+    log?.info(
+      {
+        status: parsed.status,
+        issueCount: parsed.issues.length,
+        requirementsChecked: parsed.requirementsCheck?.length ?? 0,
+      },
+      'task review complete',
+    );
 
     return {
       status: parsed.status,
       reasoning: parsed.reasoning,
       issues: parsed.issues,
       model: config.reviewerModel,
-      screenshots: [], // No browser screenshots available
+      screenshots: [],
       diff: config.diff,
+      requirementsCheck: parsed.requirementsCheck,
     };
   } catch (err) {
     log?.warn({ err }, 'task review failed, continuing without review');
@@ -684,9 +764,12 @@ Respond ONLY with the JSON object, no markdown fences or extra text.`;
  * Attempts to parse the reviewer's JSON response, tolerating markdown fences
  * and other common LLM output quirks.
  */
-function parseReviewJson(
-  raw: string,
-): { status: 'pass' | 'fail' | 'uncertain'; reasoning: string; issues: string[] } | null {
+function parseReviewJson(raw: string): {
+  status: 'pass' | 'fail' | 'uncertain';
+  reasoning: string;
+  issues: string[];
+  requirementsCheck?: Array<{ criterion: string; met: boolean; note?: string }>;
+} | null {
   // Strip markdown code fences if present
   let cleaned = raw
     .replace(/^```(?:json)?\s*/m, '')
@@ -708,10 +791,27 @@ function parseReviewJson(
     if (typeof parsed.reasoning !== 'string') return null;
     if (!Array.isArray(parsed.issues)) return null;
 
+    const requirementsCheck = Array.isArray(parsed.requirementsCheck)
+      ? parsed.requirementsCheck
+          .filter(
+            (item: unknown): item is Record<string, unknown> =>
+              typeof item === 'object' &&
+              item !== null &&
+              typeof (item as Record<string, unknown>).criterion === 'string' &&
+              typeof (item as Record<string, unknown>).met === 'boolean',
+          )
+          .map((item) => ({
+            criterion: item.criterion as string,
+            met: item.met as boolean,
+            note: typeof item.note === 'string' ? item.note : undefined,
+          }))
+      : undefined;
+
     return {
       status: parsed.status,
       reasoning: parsed.reasoning,
       issues: parsed.issues.map(String),
+      requirementsCheck,
     };
   } catch {
     return null;

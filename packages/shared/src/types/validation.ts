@@ -69,6 +69,12 @@ export interface AcValidationResult {
   model: string;
 }
 
+export interface RequirementsCheckItem {
+  criterion: string;
+  met: boolean;
+  note?: string;
+}
+
 export interface TaskReviewResult {
   status: 'pass' | 'fail' | 'uncertain';
   reasoning: string;
@@ -76,4 +82,6 @@ export interface TaskReviewResult {
   model: string;
   screenshots: string[];
   diff: string;
+  /** Per-AC requirements coverage check */
+  requirementsCheck?: RequirementsCheckItem[];
 }

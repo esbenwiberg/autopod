@@ -15,6 +15,10 @@ export interface ValidationEngineConfig {
   reviewerModel?: string;
   testCommand?: string | null;
   acceptanceCriteria?: string[];
+  /** Repo-specific review rules loaded from e.g. skills/code-review.md in the worktree */
+  codeReviewSkill?: string;
+  /** Git commit log between base branch and HEAD (one-line format) */
+  commitLog?: string;
 }
 
 export interface ValidationEngine {

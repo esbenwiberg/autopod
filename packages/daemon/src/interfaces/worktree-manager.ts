@@ -2,6 +2,8 @@ export interface WorktreeCreateConfig {
   repoUrl: string;
   branch: string;
   baseBranch: string;
+  /** PAT injected into the https remote URL for authenticated clone/fetch/push. */
+  pat?: string;
 }
 
 export interface MergeBranchConfig {
@@ -31,4 +33,6 @@ export interface WorktreeManager {
   commitFiles(worktreePath: string, paths: string[], message: string): Promise<void>;
   /** Push the current branch to origin. */
   pushBranch(worktreePath: string): Promise<void>;
+  /** Get commit log between current HEAD and a base branch (one-line format). */
+  getCommitLog(worktreePath: string, baseBranch: string, maxCommits?: number): Promise<string>;
 }

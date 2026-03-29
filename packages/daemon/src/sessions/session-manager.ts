@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
@@ -14,7 +15,7 @@ import type {
   Session,
   SessionStatus,
 } from '@autopod/shared';
-import { AutopodError, CONTAINER_HOME_DIR, generateId } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, generateSessionId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { getBaseImage } from '../images/dockerfile-generator.js';
 import type {
@@ -65,6 +66,25 @@ const CONTAINER_APP_PORT = 3000;
 const PREVIEW_AUTO_STOP_MS = 10 * 60 * 1000;
 
 const execFileAsync = promisify(execFile);
+
+/** Load a repo-specific code-review skill from standard locations in the worktree. */
+async function loadCodeReviewSkill(
+  worktreePath: string,
+  log?: Logger,
+): Promise<string | undefined> {
+  const candidates = ['skills/code-review.md', '.claude/skills/code-review.md'];
+  for (const relative of candidates) {
+    const fullPath = path.join(worktreePath, relative);
+    try {
+      const content = await readFile(fullPath, 'utf-8');
+      log?.info({ path: fullPath }, 'loaded repo-specific code-review skill');
+      return content;
+    } catch {
+      // not found — try next
+    }
+  }
+  return undefined;
+}
 
 /** Derive the bare repo path from an existing worktree via `git rev-parse --git-common-dir`. */
 async function deriveBareRepoPath(worktreePath: string): Promise<string> {
@@ -249,30 +269,46 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   return {
     createSession(request: CreateSessionRequest, userId: string): Session {
       const profile = profileStore.get(request.profileName);
-      const id = generateId();
-      const branch = request.branch ?? `autopod/${id}`;
       const model = request.model ?? profile.defaultModel;
       const runtime = request.runtime ?? profile.defaultRuntime;
       const executionTarget = request.executionTarget ?? profile.executionTarget;
       const skipValidation = request.skipValidation ?? false;
 
-      sessionRepo.insert({
-        id,
-        profileName: request.profileName,
-        task: request.task,
-        status: 'queued',
-        model,
-        runtime,
-        executionTarget,
-        branch,
-        userId,
-        maxValidationAttempts: profile.maxValidationAttempts,
-        skipValidation,
-        acceptanceCriteria: request.acceptanceCriteria ?? null,
-        outputMode: request.outputMode ?? profile.outputMode ?? 'pr',
-        baseBranch: request.baseBranch ?? null,
-        acFrom: request.acFrom ?? null,
-      });
+      let id: string;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        id = generateSessionId();
+        const branch = request.branch ?? `autopod/${id}`;
+        try {
+          sessionRepo.insert({
+            id,
+            profileName: request.profileName,
+            task: request.task,
+            status: 'queued',
+            model,
+            runtime,
+            executionTarget,
+            branch,
+            userId,
+            maxValidationAttempts: profile.maxValidationAttempts,
+            skipValidation,
+            acceptanceCriteria: request.acceptanceCriteria ?? null,
+            outputMode: request.outputMode ?? profile.outputMode ?? 'pr',
+            baseBranch: request.baseBranch ?? null,
+            acFrom: request.acFrom ?? null,
+          });
+          break;
+        } catch (err: unknown) {
+          if (
+            err instanceof Error &&
+            err.message.includes('UNIQUE constraint failed') &&
+            attempt < 9
+          ) {
+            continue;
+          }
+          throw err;
+        }
+      }
+      id = id!;
 
       const session = sessionRepo.getOrThrow(id);
 
@@ -330,6 +366,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             repoUrl: profile.repoUrl,
             branch: session.branch,
             baseBranch: session.baseBranch ?? profile.defaultBranch,
+            pat: profile.adoPat ?? profile.githubPat ?? undefined,
           });
           worktreePath = result.worktreePath;
           bareRepoPath = result.bareRepoPath;
@@ -1069,10 +1106,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           throw new Error(`Session ${sessionId} has no container — cannot validate`);
         }
 
-        // Get the actual diff for AI task review
-        const diff = session.worktreePath
-          ? await worktreeManager.getDiff(session.worktreePath, profile.defaultBranch)
-          : '';
+        // Get the actual diff and commit log for AI task review
+        const [diff, commitLog] = session.worktreePath
+          ? await Promise.all([
+              worktreeManager.getDiff(session.worktreePath, profile.defaultBranch),
+              worktreeManager.getCommitLog(session.worktreePath, profile.defaultBranch),
+            ])
+          : ['', ''];
+
+        // Try to load a repo-specific code-review skill from the worktree
+        const codeReviewSkill = session.worktreePath
+          ? await loadCodeReviewSkill(session.worktreePath, logger)
+          : undefined;
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         try {
@@ -1091,6 +1136,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             testCommand: profile.testCommand,
             reviewerModel: profile.escalation.askAi.model,
             acceptanceCriteria: session.acceptanceCriteria ?? undefined,
+            codeReviewSkill,
+            commitLog: commitLog || undefined,
           });
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies
@@ -1225,6 +1272,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               const s3 = sessionRepo.getOrThrow(sessionId);
               prUrl = await prManager.createPr({
                 worktreePath: s2.worktreePath,
+                repoUrl: profile.repoUrl,
                 branch: s2.branch,
                 baseBranch: profile.defaultBranch,
                 sessionId,

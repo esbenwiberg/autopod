@@ -75,6 +75,7 @@ export type {
   PageResult,
   AssertionResult,
   TaskReviewResult,
+  RequirementsCheckItem,
   AcValidationResult,
   AcCheckResult,
 } from './types/validation.js';
@@ -210,4 +211,4 @@ export type {
 } from './sanitize/index.js';
 
 // ID generation utility
-export { generateId } from './id.js';
+export { generateId, generateSessionId } from './id.js';

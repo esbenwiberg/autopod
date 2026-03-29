@@ -47,30 +47,44 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   async create(config: WorktreeCreateConfig): Promise<WorktreeResult> {
-    const { repoUrl, branch, baseBranch } = config;
+    const { repoUrl, branch, baseBranch, pat } = config;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
+    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
 
     await fs.mkdir(this.cacheDir, { recursive: true });
     await fs.mkdir(this.worktreeDir, { recursive: true });
 
     // Ensure bare repo exists and is up-to-date (with per-repo locking)
     await this.withRepoLock(cacheKey, async () => {
-      const exists = await this.pathExists(bareRepoPath);
-      if (!exists) {
+      const valid = await this.isBareRepoValid(bareRepoPath);
+      if (!valid) {
+        // Remove any incomplete/stale directory before cloning
+        await fs.rm(bareRepoPath, { recursive: true, force: true });
         this.logger.info({ repoUrl, bareRepoPath }, 'Cloning bare repo');
-        await execFileAsync('git', ['clone', '--bare', repoUrl, bareRepoPath]);
-      } else {
-        this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
-        // Fetch to remote tracking ref — avoids "refusing to fetch into branch checked out
-        // at worktree" errors when baseBranch is an autopod/* branch from a prior session.
-        // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
-        await execFileAsync(
-          'git',
-          ['fetch', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
-          { cwd: bareRepoPath },
-        );
+        await execFileAsync('git', ['clone', '--bare', authUrl, bareRepoPath]);
+        // Store auth URL in remote so subsequent fetch/push from worktrees authenticate
+        if (pat) {
+          await execFileAsync('git', ['remote', 'set-url', 'origin', authUrl], {
+            cwd: bareRepoPath,
+          });
+        }
+      } else if (pat) {
+        // Update remote URL with PAT if provided (e.g. PAT rotated or first time with PAT)
+        await execFileAsync('git', ['remote', 'set-url', 'origin', authUrl], {
+          cwd: bareRepoPath,
+        });
       }
+
+      // Always fetch to populate refs/remotes/origin/* — git clone --bare only creates
+      // refs/heads/*, so worktree add would fail without this fetch on a fresh clone.
+      this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
+      // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
+      await execFileAsync(
+        'git',
+        ['fetch', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
+        { cwd: bareRepoPath },
+      );
     });
 
     // Create worktree — use session-derived path
@@ -213,7 +227,39 @@ export class LocalWorktreeManager implements WorktreeManager {
     await execFileAsync('git', ['push', 'origin', 'HEAD'], { cwd: worktreePath });
   }
 
+  async getCommitLog(
+    worktreePath: string,
+    baseBranch: string,
+    maxCommits = 20,
+  ): Promise<string> {
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['log', `origin/${baseBranch}..HEAD`, `--max-count=${maxCommits}`, '--format=%h %s%n%b'],
+        { cwd: worktreePath },
+      );
+      return stdout.trim();
+    } catch {
+      return '';
+    }
+  }
+
   // --- Private helpers ---
+
+  /** Inject a PAT into an https remote URL: https://host/... → https://:PAT@host/... */
+  private injectPat(url: string, pat: string): string {
+    return url.replace(/^https:\/\//, `https://:${pat}@`);
+  }
+
+  /** A bare repo is valid if it has been cloned (packed-refs or non-empty refs/). */
+  private async isBareRepoValid(bareRepoPath: string): Promise<boolean> {
+    try {
+      await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: bareRepoPath });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   private sanitizeRepoUrl(url: string): string {
     // "https://github.com/org/repo.git" → "github.com_org_repo"
