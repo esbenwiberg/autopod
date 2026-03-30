@@ -239,11 +239,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath });
   }
 
-  async getCommitLog(
-    worktreePath: string,
-    baseBranch: string,
-    maxCommits = 20,
-  ): Promise<string> {
+  async getCommitLog(worktreePath: string, baseBranch: string, maxCommits = 20): Promise<string> {
     try {
       const { stdout } = await execFileAsync(
         'git',
@@ -265,17 +261,13 @@ export class LocalWorktreeManager implements WorktreeManager {
    * The credential is never stored in git config — only used per-command.
    */
   private async getAuthUrl(worktreePath: string): Promise<string> {
-    const { stdout: commonDir } = await execFileAsync(
-      'git',
-      ['rev-parse', '--git-common-dir'],
-      { cwd: worktreePath },
-    );
+    const { stdout: commonDir } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: worktreePath,
+    });
     const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
-    const { stdout: remoteUrl } = await execFileAsync(
-      'git',
-      ['remote', 'get-url', 'origin'],
-      { cwd: bareRepoPath },
-    );
+    const { stdout: remoteUrl } = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
+      cwd: bareRepoPath,
+    });
     const cleanUrl = remoteUrl.trim();
     const pat = this.patCache.get(bareRepoPath);
     return pat ? this.injectPat(cleanUrl, pat) : cleanUrl;

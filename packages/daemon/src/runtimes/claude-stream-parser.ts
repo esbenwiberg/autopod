@@ -160,9 +160,7 @@ export class ClaudeStreamParser {
         const toolResultBlock = userContent.find((b) => b.type === 'tool_result');
         if (!toolResultBlock) return null;
 
-        const output =
-          event.tool_use_result?.stdout ??
-          toolResultBlock.content?.slice(0, 2000);
+        const output = event.tool_use_result?.stdout ?? toolResultBlock.content?.slice(0, 2000);
 
         return {
           type: 'tool_use',
@@ -175,8 +173,7 @@ export class ClaudeStreamParser {
 
       case 'result': {
         const resultText =
-          (typeof event.result === 'string' ? event.result : null) ??
-          'Claude agent completed';
+          (typeof event.result === 'string' ? event.result : null) ?? 'Claude agent completed';
         return {
           type: 'complete',
           timestamp: ts,
