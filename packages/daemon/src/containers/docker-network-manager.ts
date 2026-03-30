@@ -17,6 +17,7 @@ export const DEFAULT_ALLOWED_HOSTS = [
   // Required for MAX/PRO OAuth token refresh (Claude Code refreshes internally)
   'platform.claude.com',
   // Required for GitHub Copilot CLI
+  'api.github.com',
   'api.enterprise.githubcopilot.com',
   'copilot-proxy.githubusercontent.com',
   'githubcopilot.com',

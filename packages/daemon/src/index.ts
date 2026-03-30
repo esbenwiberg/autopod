@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { config as loadDotenv } from 'dotenv';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import pino from 'pino';
 import { createServer } from './api/server.js';
@@ -47,6 +48,8 @@ import {
 import { GhPrManager, GitHubApiPrManager } from './worktrees/pr-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+loadDotenv(); // load .env if present (no-op if missing)
 
 const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 const IS_DEV = process.env.NODE_ENV !== 'production';

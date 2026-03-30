@@ -57,6 +57,9 @@ export class DockerContainerManager implements ContainerManager {
       Binds: binds.length > 0 ? binds : undefined,
       PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
       AutoRemove: false,
+      // Hard memory cap — prevents OOM kills from taking down the whole Docker VM.
+      // Docker requires Memory to be a multiple of the system's page size (4096 bytes).
+      Memory: config.memoryBytes ? Math.ceil(config.memoryBytes / 4096) * 4096 : undefined,
     };
 
     if (config.networkName) {

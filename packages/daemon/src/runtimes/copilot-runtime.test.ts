@@ -27,6 +27,7 @@ function createMockHandle(options?: { exitCode?: number }): StreamingExecResult 
 
   (handle as { finish?: (code?: number) => void }).finish = (code?: number) => {
     stdout.push(null);
+    stderr.push(null); // end stderr so stderrPromise resolves
     resolveExitCode?.(code ?? options?.exitCode ?? 0);
   };
 
@@ -62,15 +63,7 @@ describe('CopilotRuntime', () => {
         containerId: 'container-123',
         env: {},
       });
-      expect(args).toEqual([
-        '-p',
-        'Fix the bug',
-        '--model',
-        'claude-sonnet-4-5',
-        '--allow-all',
-        '--no-ask-user',
-        '-s',
-      ]);
+      expect(args).toEqual(['-p', 'Fix the bug', '--allow-all', '--no-ask-user', '--no-auto-update', '-s']);
     });
   });
 
@@ -248,7 +241,7 @@ describe('CopilotRuntime', () => {
   });
 
   describe('resume', () => {
-    it('yields a fatal error event — resume not supported', async () => {
+    it('yields a fatal error when called with no prior spawn config', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new CopilotRuntime(logger, cm);
@@ -260,6 +253,49 @@ describe('CopilotRuntime', () => {
 
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({ type: 'error', fatal: true });
+    });
+
+    it('respawns copilot with correction message after a prior spawn', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CopilotRuntime(logger, cm);
+
+      // Seed the stored config by calling spawn first
+      setTimeout(() => {
+        (handle as { finish?: (code?: number) => void }).finish?.(0);
+        (handle.stderr as PassThrough).push(null);
+      }, 10);
+
+      for await (const _ of runtime.spawn({
+        sessionId: 'sess-resume',
+        task: 'Original task',
+        model: 'sonnet',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: { COPILOT_GITHUB_TOKEN: 'gho_test' },
+      })) { /* consume */ }
+
+      // Now set up a fresh handle for the respawn
+      const handle2 = createMockHandle();
+      (cm.execStreaming as ReturnType<typeof vi.fn>).mockResolvedValueOnce(handle2);
+      setTimeout(() => {
+        (handle2 as { finish?: (code?: number) => void }).finish?.(0);
+        (handle2.stderr as PassThrough).push(null);
+      }, 10);
+
+      const events = [];
+      for await (const event of runtime.resume('sess-resume', 'Fix the build', 'container-123')) {
+        events.push(event);
+      }
+
+      // Should have spawned copilot with the correction message
+      expect(cm.execStreaming).toHaveBeenLastCalledWith(
+        'container-123',
+        expect.arrayContaining(['-p', 'Fix the build']),
+        expect.any(Object),
+      );
+      const completeEvent = events.find((e) => e.type === 'complete');
+      expect(completeEvent).toBeDefined();
     });
   });
 

@@ -6,18 +6,41 @@ import type { Logger } from 'pino';
 /**
  * Claude CLI `--output-format stream-json` event shape.
  * Each line is an NDJSON object with a `type` field.
+ *
+ * NOTE: `assistant` and `user` events nest their content under `event.message.content`,
+ * NOT at the top-level `event.content`.
  */
+interface ClaudeStreamContentBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  id?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  content?: string;
+  is_error?: boolean;
+  thinking?: string;
+}
+
+interface ClaudeStreamMessage {
+  role?: string;
+  content?: ClaudeStreamContentBlock[];
+}
+
+interface ClaudeToolUseResult {
+  stdout?: string;
+  stderr?: string;
+  interrupted?: boolean;
+}
+
 interface ClaudeStreamEvent {
   type: string;
   subtype?: string;
   session_id?: string;
-  content?: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }>;
-  tool_use_id?: string;
-  content_type?: string;
-  output?: string;
+  message?: ClaudeStreamMessage;
+  tool_use_result?: ClaudeToolUseResult;
   result?: string;
   error?: { message: string };
-  message?: string;
   [key: string]: unknown;
 }
 
@@ -91,11 +114,12 @@ export class ClaudeStreamParser {
       }
 
       case 'assistant': {
-        // Content blocks can be text or tool_use
-        if (!event.content || !Array.isArray(event.content)) return null;
+        // Content is nested under event.message.content (not top-level event.content)
+        const content = event.message?.content;
+        if (!content || !Array.isArray(content)) return null;
 
-        // Process the first meaningful content block
-        for (const block of event.content) {
+        // Process the first meaningful content block (skip 'thinking' blocks)
+        for (const block of content) {
           if (block.type === 'text' && block.text) {
             return {
               type: 'status',
@@ -127,25 +151,31 @@ export class ClaudeStreamParser {
         return null;
       }
 
-      case 'tool_result': {
+      case 'user': {
+        // Tool results arrive as user messages with tool_result content blocks.
+        // The tool output is also available at event.tool_use_result.stdout for convenience.
+        const userContent = event.message?.content;
+        if (!userContent || !Array.isArray(userContent)) return null;
+
+        const toolResultBlock = userContent.find((b) => b.type === 'tool_result');
+        if (!toolResultBlock) return null;
+
+        const output =
+          event.tool_use_result?.stdout ??
+          toolResultBlock.content?.slice(0, 2000);
+
         return {
           type: 'tool_use',
           timestamp: ts,
           tool: 'tool_result',
-          input: { tool_use_id: event.tool_use_id },
-          output: (event.output ?? event.content?.toString())?.slice(0, 2000),
+          input: { tool_use_id: toolResultBlock.tool_use_id },
+          output: output?.slice(0, 2000),
         };
       }
 
       case 'result': {
         const resultText =
-          event.result ??
-          (event.content && Array.isArray(event.content)
-            ? event.content
-                .map((b) => b.text)
-                .filter(Boolean)
-                .join('\n')
-            : undefined) ??
+          (typeof event.result === 'string' ? event.result : null) ??
           'Claude agent completed';
         return {
           type: 'complete',
@@ -158,7 +188,7 @@ export class ClaudeStreamParser {
         return {
           type: 'error',
           timestamp: ts,
-          message: event.error?.message ?? event.message ?? 'Unknown Claude error',
+          message: event.error?.message ?? 'Unknown Claude error',
           fatal: true,
         };
       }

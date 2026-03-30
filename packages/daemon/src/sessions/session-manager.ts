@@ -418,10 +418,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Spawn container with port mapping so daemon + user can reach the app
         emitStatus(`Spawning container (${profile.template})…`);
+
+        // For .NET templates, cap MSBuild node count to half the available CPUs
+        // (min 2, max 4) to prevent dozens of MSBuild workers from exhausting memory.
+        const isDotnet = profile.template.startsWith('dotnet');
+        const containerEnv: Record<string, string> = {
+          SESSION_ID: sessionId,
+          PORT: String(CONTAINER_APP_PORT),
+          ...(isDotnet ? { MSBUILDNODECOUNT: '4' } : {}),
+        };
+
         const containerId = await containerManager.spawn({
           image: getBaseImage(profile.template),
           sessionId,
-          env: { SESSION_ID: sessionId, PORT: String(CONTAINER_APP_PORT) },
+          env: containerEnv,
           ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
           volumes: [
             { host: worktreePath, container: '/workspace' },
@@ -429,6 +439,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           ],
           networkName,
           firewallScript,
+          memoryBytes: profile.containerMemoryGb
+            ? profile.containerMemoryGb * 1024 * 1024 * 1024
+            : undefined,
         });
 
         const previewUrl = `http://localhost:${hostPort}`;
@@ -710,6 +723,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           if (match?.[1]) {
             sessionRepo.update(sessionId, { claudeSessionId: match[1] });
           }
+        } else if (event.type === 'error' && event.fatal) {
+          const session = sessionRepo.getOrThrow(sessionId);
+          if (session.status === 'running') {
+            emitActivityStatus(sessionId, `Agent failed: ${event.message}`);
+            transition(session, 'failed', { completedAt: new Date().toISOString() });
+          }
+          break;
         }
       }
     },

@@ -12,7 +12,7 @@ A premium native macOS app for orchestrating and monitoring Autopod sessions. Th
 | **Terminal** | SwiftTerm | Native Swift terminal emulator, CoreText rendering, SwiftUI wrapper included |
 | **Networking** | URLSession + async/await | Native HTTP client, `URLSessionWebSocketTask` for events + terminal |
 | **State** | `@Observable` (Observation framework) | Modern SwiftUI state management, replaces Combine for most cases |
-| **Persistence** | SwiftData or UserDefaults | Connection profiles, preferences, window state |
+| **Persistence** | UserDefaults | Connection profiles (URL + token per daemon) and preferences stored as Codable JSON. No ORM needed. |
 | **Build** | Xcode + SPM | Standard macOS app target with Swift Package Manager dependencies |
 | **Min Target** | macOS 14 (Sonoma) | Required for `@Observable`, modern SwiftUI features |
 
@@ -34,6 +34,16 @@ A premium native macOS app for orchestrating and monitoring Autopod sessions. Th
 │  Fastify REST API · /events WS · /terminal WS    │
 └─────────────────────────────────────────────────┘
 ```
+
+### Existing Daemon Endpoints
+
+The `/events` WebSocket is already implemented in `packages/daemon/src/api/websocket.ts`:
+- Auth via `?token=` query param
+- `subscribe_all` for global event feed, `subscribe` per session
+- `replay` with `lastEventId` for reconnect after disconnect
+- 30s heartbeat ping
+
+No daemon changes needed for event streaming.
 
 ### New Daemon Endpoint Required
 
@@ -160,12 +170,12 @@ An alternative top-level view toggled via toolbar segmented control: `[List] [Ca
 | `provisioning` | Spinner, "Setting up container..." |
 | `running` | Progress bar (phase X/Y), current phase description, latest activity line |
 | `awaiting_input` | Escalation question prominently displayed, suggested options, [Reply] button |
-| `paused` | "Paused" label, last activity, [Resume] button |
 | `validating` | Spinner with "Validating...", attempt X/Y |
 | `validated` | Validation checklist (smoke/tests/review), diff stats, [Approve] [Reject] |
 | `failed` | Error summary, attempt count, [Logs] [Retry] [Kill] |
 | `approved` / `merging` | "Creating PR..." spinner |
 | `complete` | PR link, merged timestamp, diff stats |
+| `killing` | "Stopping..." spinner + reason if triggered by user |
 | `killed` | "Killed" label, reason if available |
 
 ### 3. Detail Panel Tabs
@@ -242,9 +252,11 @@ Presented as a `.sheet` modal:
 
 Spotlight-style overlay for power users:
 
+All icons use SF Symbols (`Image(systemName:)`) — no emoji in system chrome.
+
 ```
 ┌─────────────────────────────────────┐
-│  🔍 Type a command or search...     │
+│  ⌕  Type a command or search...     │
 ├─────────────────────────────────────┤
 │  Sessions                           │
 │    feat/oauth — my-app (awaiting)   │
@@ -258,6 +270,29 @@ Spotlight-style overlay for power users:
 │    Open Settings            ⌘,      │
 └─────────────────────────────────────┘
 ```
+
+---
+
+## Connection Management
+
+The app connects to one or more Autopod daemons (local Docker or remote ACI). Each connection profile stores:
+
+```swift
+struct DaemonConnection: Codable {
+  var id: UUID
+  var name: String       // e.g. "Local", "Production ACI"
+  var url: URL           // e.g. http://localhost:3000
+  var token: String      // Bearer token from daemon
+}
+```
+
+Stored in UserDefaults as JSON-encoded array. Active connection is tracked separately.
+
+**First-launch flow:** "Add Daemon" sheet prompts for URL + token. Basic connectivity check (GET /health) before saving.
+
+**Reconnect:** The `/events` WebSocket supports `replay` with `lastEventId` — on reconnect, the app sends its last known event ID to catch up without polling. The EventSocket must implement exponential backoff reconnect from Phase 1, not Phase 7.
+
+**Daemon restart / laptop wake:** Running containers (especially ACI) continue while the daemon is down. On reconnect, the app replays missed events and the session list refreshes from REST. No `paused` state needed — the daemon reconciles container state on startup.
 
 ---
 
@@ -334,7 +369,6 @@ Follows macOS system colors with semantic status mapping:
 | `provisioning` | `.blue` | Pulsing dot |
 | `running` | `.green` | Solid dot |
 | `awaiting_input` | `.orange` | Solid dot + glow |
-| `paused` | `.yellow` | Solid dot |
 | `validating` | `.blue` | Spinning arc |
 | `validated` | `.green` | Checkmark badge |
 | `failed` | `.red` | X badge |
@@ -476,13 +510,27 @@ GET /sessions/:sessionId/events?type=status,file_change&since=<timestamp>
 
 ## Implementation Phases
 
+### Phase 0 — Daemon: Terminal WebSocket (unblocks Phase 4)
+This is a daemon-side prerequisite. Do it before or in parallel with Phase 1 so Phase 4 isn't blocked.
+- New endpoint: `WS /sessions/:sessionId/terminal`
+- Docker exec with `Tty: true`, `AttachStdin: true`
+- Bidirectional binary frames for stdin/stdout
+- JSON control frame for resize: `{ type: "resize", cols, rows }`
+- Closes with exit code in close reason when exec exits or client disconnects
+
 ### Phase 1 — Foundation
-- Xcode project setup with SPM
-- AutopodClient (REST API client)
-- EventSocket (WebSocket event stream)
+- Xcode project setup with SPM (SwiftTerm dependency)
+- `DaemonConnection` model + UserDefaults store
+- First-launch "Add Daemon" sheet (URL + token + health check)
+- `AutopodClient` — REST API client (async/await)
+- `EventSocket` — `/events` WebSocket consumer with:
+  - Token auth via query param
+  - `subscribe_all` on connect
+  - `replay` with `lastEventId` on reconnect
+  - Exponential backoff reconnect (this is architecture, not polish)
 - Session/Profile models
-- SessionStore + ProfileStore
-- Basic NavigationSplitView with sidebar + list
+- `SessionStore` + `ProfileStore`
+- Basic `NavigationSplitView` with sidebar + list
 
 ### Phase 2 — Core Views
 - Session list with status dots, filtering, keyboard nav
@@ -498,11 +546,11 @@ GET /sessions/:sessionId/events?type=status,file_change&since=<timestamp>
 - Inline action buttons on cards
 - Toggle between List and Cards view
 
-### Phase 4 — Terminal
-- Daemon: WebSocket terminal endpoint
-- TerminalSocket adapter (SwiftTerm <-> WebSocket)
+### Phase 4 — Terminal (requires Phase 0)
+- `TerminalSocket` — adapts SwiftTerm ↔ daemon WS terminal
 - Terminal tab in detail panel
-- Resize handling, disconnect/reconnect
+- Auto-connect when tab selected for running sessions
+- Resize handling on window resize
 
 ### Phase 5 — Diff & Validation
 - Diff viewer with syntax highlighting
@@ -513,14 +561,13 @@ GET /sessions/:sessionId/events?type=status,file_change&since=<timestamp>
 
 ### Phase 6 — System Integration
 - Menubar tray with fleet status
-- Native notifications (actionable)
-- Command palette (Cmd+K)
+- Native notifications (actionable: Approve, Reply, View)
+- Command palette (Cmd+K) — all icons via SF Symbols
 - Keyboard shortcuts
 - Dark/light mode polish
 
 ### Phase 7 — Polish
 - Animations and transitions
 - Performance optimization (lazy loading, virtualized lists)
-- Error handling and offline state
-- Connection management (auto-reconnect, multi-daemon)
+- Multi-daemon support (connection switcher in sidebar)
 - App icon and branding

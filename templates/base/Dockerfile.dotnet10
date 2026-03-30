@@ -20,9 +20,21 @@ RUN groupadd --gid 1000 autopod 2>/dev/null || groupmod -n autopod "$(getent gro
 # Agent CLIs
 RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
-# Pre-warm NuGet cache with common restore patterns
+# .NET env
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
+# Shared NuGet cache accessible by both root (image build) and autopod (runtime)
+ENV NUGET_PACKAGES=/usr/local/share/nuget/packages
+
+# Pre-warm Microsoft.VisualStudio.JavaScript.Sdk for .esproj support.
+# This is a NuGet-distributed MSBuild SDK (not a workload) — installing it into
+# the shared package cache makes it resolvable at build time without VS.
+RUN mkdir /tmp/sdk-warmup \
+    && dotnet new classlib -o /tmp/sdk-warmup --no-restore \
+    && dotnet add /tmp/sdk-warmup package Microsoft.VisualStudio.JavaScript.Sdk \
+    && dotnet restore /tmp/sdk-warmup \
+    && rm -rf /tmp/sdk-warmup \
+    && chown -R autopod:autopod "$NUGET_PACKAGES"
 
 # Working directory
 WORKDIR /workspace

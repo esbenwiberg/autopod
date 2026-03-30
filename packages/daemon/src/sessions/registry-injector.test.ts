@@ -165,6 +165,19 @@ describe('generateNuGetConfig', () => {
     expect(content).toContain('org-feed-b');
   });
 
+  it('prefixes feed name with underscore when org name starts with a digit', () => {
+    const regs: PrivateRegistry[] = [
+      {
+        type: 'nuget',
+        url: 'https://pkgs.dev.azure.com/365projectum/_packaging/shared-libs/nuget/v3/index.json',
+      },
+    ];
+    const content = generateNuGetConfig(regs, 'pat');
+    // XML element names cannot start with a digit — must be prefixed
+    expect(content).toContain('_365projectum-shared-libs');
+    expect(content).not.toMatch(/<365/);
+  });
+
   it('escapes XML special characters in PAT', () => {
     const regs: PrivateRegistry[] = [
       {

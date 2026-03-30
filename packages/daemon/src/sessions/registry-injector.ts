@@ -132,18 +132,22 @@ function extractUrlPath(url: string): string {
 function deriveFeedName(url: string): string {
   // Try to extract org and feed from Azure DevOps URL pattern
   const match = url.match(/pkgs\.dev\.azure\.com\/([^/]+)(?:\/[^/]+)?\/_packaging\/([^/]+)/);
+  let name: string;
   if (match) {
-    return `${match[1]}-${match[2]}`;
+    name = `${match[1]}-${match[2]}`;
+  } else {
+    // Fallback: use hostname + last path segment
+    try {
+      const parsed = new URL(url);
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      const last = segments.at(-1) ?? 'feed';
+      name = `${parsed.hostname}-${last}`.replace(/[^a-zA-Z0-9-]/g, '-');
+    } catch {
+      return 'private-feed';
+    }
   }
-  // Fallback: use hostname + last path segment
-  try {
-    const parsed = new URL(url);
-    const segments = parsed.pathname.split('/').filter(Boolean);
-    const last = segments.at(-1) ?? 'feed';
-    return `${parsed.hostname}-${last}`.replace(/[^a-zA-Z0-9-]/g, '-');
-  } catch {
-    return 'private-feed';
-  }
+  // XML element names cannot start with a digit — prefix with underscore if needed
+  return /^\d/.test(name) ? `_${name}` : name;
 }
 
 function escapeXml(str: string): string {

@@ -20,13 +20,16 @@ const COPILOT_HOME = `${CONTAINER_HOME_DIR}/.copilot`;
  *
  * Auth is via `COPILOT_GITHUB_TOKEN` env var injected from profile credentials.
  *
- * Resume is not supported — Copilot CLI has no session ID targeting mechanism.
+ * Resume re-spawns copilot with the correction/continuation message as the new task,
+ * reusing the stored spawn config (MCP servers, instructions) from the initial spawn.
+ * Config files are already in the container so re-writing them is idempotent.
  */
 export class CopilotRuntime implements Runtime {
   readonly type = 'copilot' as const;
 
   private handles = new Map<string, StreamingExecResult>();
   private lastModels = new Map<string, string>();
+  private lastSpawnConfigs = new Map<string, SpawnConfig>();
   private logger: Logger;
   private containerManager: ContainerManager;
 
@@ -36,12 +39,15 @@ export class CopilotRuntime implements Runtime {
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    // Persist config so resume() can replay a fresh spawn with correction message
+    this.lastSpawnConfigs.set(config.sessionId, config);
+
     // Write config files before spawning
     await this.writeConfigFiles(config);
 
     const args = this.buildSpawnArgs(config);
     const env = this.buildEnv(config);
-    const copilotModel = config.env['COPILOT_MODEL'];
+    const copilotModel = config.env['COPILOT_MODEL'] ?? null;
     if (copilotModel) this.lastModels.set(config.sessionId, copilotModel);
 
     this.logger.info({
@@ -60,23 +66,12 @@ export class CopilotRuntime implements Runtime {
 
     this.handles.set(config.sessionId, handle);
 
-    // Emit stderr lines as non-fatal error events; also accumulate for exit error context
-    const stderrEvents: AgentEvent[] = [];
-    const stderrChunks: string[] = [];
-    handle.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8').trim();
-      if (!text) return;
-      this.logger.warn(
-        { component: 'copilot-runtime', sessionId: config.sessionId, stderr: text.slice(0, 500) },
-        'copilot stderr',
-      );
-      stderrChunks.push(text);
-      stderrEvents.push({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        message: `[stderr] ${text.slice(0, 500)}`,
-        fatal: false,
-      });
+    // Accumulate stderr into a promise so we catch it even if it arrives after stdout ends
+    const stderrPromise = new Promise<string>((resolve) => {
+      const chunks: string[] = [];
+      handle.stderr.on('data', (chunk: Buffer) => chunks.push(chunk.toString('utf-8')));
+      handle.stderr.on('end', () => resolve(chunks.join('')));
+      handle.stderr.on('error', () => resolve(chunks.join('')));
     });
 
     try {
@@ -85,18 +80,23 @@ export class CopilotRuntime implements Runtime {
         config.sessionId,
         this.logger,
       )) {
-        for (const e of stderrEvents.splice(0)) yield e;
         yield event;
       }
-      for (const e of stderrEvents.splice(0)) yield e;
     } finally {
       this.handles.delete(config.sessionId);
     }
 
-    const exitCode = await handle.exitCode;
+    const [exitCode, stderrText] = await Promise.all([handle.exitCode, stderrPromise]);
+
+    if (stderrText.trim()) {
+      this.logger.warn(
+        { component: 'copilot-runtime', sessionId: config.sessionId, stderr: stderrText.slice(0, 1000) },
+        'copilot stderr',
+      );
+    }
+
     if (exitCode !== 0) {
-      const stderrSummary =
-        stderrChunks.length > 0 ? `: ${stderrChunks.join('\n').slice(-500)}` : '';
+      const stderrSummary = stderrText.trim() ? `: ${stderrText.trim().slice(-500)}` : '';
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
@@ -108,20 +108,40 @@ export class CopilotRuntime implements Runtime {
 
   async *resume(
     sessionId: string,
-    _message: string,
-    _containerId: string,
-    _env?: Record<string, string>,
+    message: string,
+    containerId: string,
+    env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
-    this.logger.warn(
+    const lastConfig = this.lastSpawnConfigs.get(sessionId);
+
+    if (!lastConfig) {
+      this.logger.warn(
+        { component: 'copilot-runtime', sessionId },
+        'Resume called with no prior spawn config — cannot respawn',
+      );
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Copilot resume failed: no prior spawn config found for session',
+        fatal: true,
+      };
+      return;
+    }
+
+    this.logger.info(
       { component: 'copilot-runtime', sessionId },
-      'Resume not supported for copilot runtime',
+      'Resume: respawning copilot with correction message (no session continuity)',
     );
-    yield {
-      type: 'error',
-      timestamp: new Date().toISOString(),
-      message: 'Resume not supported for copilot runtime',
-      fatal: true,
-    };
+
+    // Copilot has no session ID mechanism — respawn with the correction/continuation
+    // message as the new task. Reuse stored MCP servers and instructions (already written
+    // to container); pass fresh env if provided (token rotation).
+    yield* this.spawn({
+      ...lastConfig,
+      containerId,
+      task: message,
+      env: env ?? lastConfig.env,
+    });
   }
 
   async abort(sessionId: string): Promise<void> {
@@ -138,6 +158,7 @@ export class CopilotRuntime implements Runtime {
     await handle.kill();
     this.handles.delete(sessionId);
     this.lastModels.delete(sessionId);
+    this.lastSpawnConfigs.delete(sessionId);
   }
 
   async suspend(sessionId: string): Promise<void> {
@@ -154,18 +175,19 @@ export class CopilotRuntime implements Runtime {
     this.logger.info({
       component: 'copilot-runtime',
       sessionId,
-      msg: 'Suspending copilot session (resume not supported — session state will be lost)',
+      msg: 'Suspending copilot session (no session continuity — will respawn on resume)',
     });
 
     await handle.kill();
     this.handles.delete(sessionId);
+    // Keep lastSpawnConfigs entry so resume() can respawn after suspension
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
     const args: string[] = ['-p', config.task];
-    const copilotModel = config.env['COPILOT_MODEL'] ?? config.model;
+    const copilotModel = config.env['COPILOT_MODEL'];
     if (copilotModel) args.push('--model', copilotModel);
-    args.push('--allow-all', '--no-ask-user', '-s');
+    args.push('--allow-all', '--no-ask-user', '--no-auto-update', '-s');
     return args;
   }
 

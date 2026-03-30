@@ -68,7 +68,12 @@ export class LocalWorktreeManager implements WorktreeManager {
       this.patCache.set(bareRepoPath, pat);
     }
 
-    // Ensure bare repo exists and is up-to-date (with per-repo locking)
+    // Create worktree — use session-derived path
+    const sessionDir = branch.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const worktreePath = path.join(this.worktreeDir, sessionDir);
+
+    // Ensure bare repo exists, fetch latest, and create worktree — all inside the
+    // per-repo lock so the ref cannot change between fetch and worktree add.
     await this.withRepoLock(cacheKey, async () => {
       const valid = await this.isBareRepoValid(bareRepoPath);
       if (!valid) {
@@ -94,21 +99,16 @@ export class LocalWorktreeManager implements WorktreeManager {
         ['fetch', authUrl, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
         { cwd: bareRepoPath },
       );
+
+      // -B force-creates branch to handle retry scenarios
+      // Use refs/remotes/origin/baseBranch as start point (matches the fetch above)
+      this.logger.info({ worktreePath, branch, baseBranch }, 'Creating worktree');
+      await execFileAsync(
+        'git',
+        ['worktree', 'add', '-B', branch, worktreePath, `refs/remotes/origin/${baseBranch}`],
+        { cwd: bareRepoPath },
+      );
     });
-
-    // Create worktree — use session-derived path
-    const sessionDir = branch.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const worktreePath = path.join(this.worktreeDir, sessionDir);
-
-    this.logger.info({ worktreePath, branch, baseBranch }, 'Creating worktree');
-
-    // -B force-creates branch to handle retry scenarios
-    // Use refs/remotes/origin/baseBranch as start point (matches the fetch above)
-    await execFileAsync(
-      'git',
-      ['worktree', 'add', '-B', branch, worktreePath, `refs/remotes/origin/${baseBranch}`],
-      { cwd: bareRepoPath },
-    );
 
     return { worktreePath, bareRepoPath };
   }
@@ -281,9 +281,10 @@ export class LocalWorktreeManager implements WorktreeManager {
     return pat ? this.injectPat(cleanUrl, pat) : cleanUrl;
   }
 
-  /** Inject a PAT into an https remote URL: https://host/... → https://:PAT@host/... */
+  /** Inject a PAT into an https remote URL: https://host/... → https://:PAT@host/...
+   * Strips any existing userinfo first so stale credentials in the stored URL don't double-inject. */
   private injectPat(url: string, pat: string): string {
-    return url.replace(/^https:\/\//, `https://:${pat}@`);
+    return url.replace(/^https:\/\/([^@]*@)?/, `https://:${pat}@`);
   }
 
   /** A bare repo is valid if it has been cloned (packed-refs or non-empty refs/). */

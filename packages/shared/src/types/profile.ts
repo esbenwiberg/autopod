@@ -60,6 +60,8 @@ export interface Profile {
   privateRegistries: PrivateRegistry[];
   /** PAT for authenticating against private registries (encrypted at rest) */
   registryPat: string | null;
+  /** Container memory limit in GB. null = no limit (Docker default). */
+  containerMemoryGb: number | null;
   createdAt: string;
   updatedAt: string;
 }

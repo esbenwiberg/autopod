@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execSync, spawn as cpSpawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -6,7 +6,6 @@ import type { Profile } from '@autopod/shared';
 import { createProfileSchema, updateProfileSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import { spawn } from 'node-pty';
 import { parse, stringify } from 'yaml';
 import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
@@ -196,19 +195,10 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         process.exit(1);
       }
 
-      // Isolated Copilot home so credentials land in a known place
+      // Isolated config dir so credentials land in a known place
       const token = Math.random().toString(36).slice(2, 10);
-      const copilotHome = path.join(os.tmpdir(), `autopod-copilot-auth-${token}`);
-      fs.mkdirSync(copilotHome, { recursive: true });
-
-      // Working dir (copilot needs a directory context)
-      const cwd = path.join(os.tmpdir(), `autopod-copilot-cwd-${token}`);
-      fs.mkdirSync(cwd, { recursive: true });
-      try {
-        execSync('git init', { cwd, stdio: 'ignore' });
-      } catch {
-        /* best-effort */
-      }
+      const configDir = path.join(os.tmpdir(), `autopod-copilot-auth-${token}`);
+      fs.mkdirSync(configDir, { recursive: true });
 
       // Build env: strip existing GitHub tokens so Copilot prompts a fresh login
       const spawnEnv: Record<string, string> = {};
@@ -222,78 +212,51 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           spawnEnv[k] = v;
         }
       }
-      spawnEnv.COPILOT_HOME = copilotHome;
 
       console.log(chalk.cyan(`\nStarting Copilot login for profile "${name}"...`));
       console.log(
         chalk.dim(
-          'Copilot will open a browser URL. Complete the OAuth flow, then credentials will be saved automatically.\n',
+          'Follow the browser OAuth flow. Credentials will be saved automatically once complete.\n',
         ),
       );
 
-      const pty = spawn('copilot', [], {
-        name: 'xterm-256color',
-        cols: 500,
-        rows: 50,
-        cwd,
-        env: spawnEnv,
+      await new Promise<void>((resolve, reject) => {
+        const proc = cpSpawn('copilot', ['login', '--config-dir', configDir], {
+          stdio: 'inherit',
+          env: spawnEnv,
+        });
+        proc.on('error', reject);
+        proc.on('close', () => resolve());
       });
 
-      process.stdin.setRawMode?.(true);
-      process.stdin.on('data', (d) => pty.write(d.toString()));
+      // @github/copilot stores tokens as <config-dir>/github.com.tokens.json (file fallback)
+      // or in the system keychain (macOS/Windows credential store) — try both
+      let authToken: string | undefined;
 
-      // Send /login after the REPL is ready
-      let loginSent = false;
-      let outputSoFar = '';
-
-      pty.onData((data) => {
-        process.stdout.write(data);
-        outputSoFar += data;
-        if (loginSent) return;
-
-        // Strip ANSI escape sequences for text matching (avoid control char literals)
-        const text = stripAnsi(outputSoFar);
-        if (text.includes('>') || text.includes('$') || text.includes('Welcome')) {
-          loginSent = true;
-          setTimeout(() => pty.write('/login\r'), 500);
+      const credsPath = path.join(configDir, 'github.com.tokens.json');
+      if (fs.existsSync(credsPath)) {
+        try {
+          const credsJson = JSON.parse(fs.readFileSync(credsPath, 'utf-8')) as Record<string, unknown>;
+          authToken = typeof credsJson['token'] === 'string' ? credsJson['token'] : undefined;
+        } catch {
+          /* fall through to keychain */
         }
-      });
-
-      // Fallback: send /login after 2s
-      setTimeout(() => {
-        if (!loginSent) {
-          loginSent = true;
-          pty.write('/login\r');
-        }
-      }, 2000);
-
-      await new Promise<void>((resolve) => {
-        pty.onExit(() => resolve());
-      });
-
-      process.stdin.setRawMode?.(false);
-      process.stdin.removeAllListeners('data');
-
-      // Read credentials from isolated Copilot home
-      const credsPath = path.join(copilotHome, 'config.json');
-      if (!fs.existsSync(credsPath)) {
-        console.error(chalk.red('\nNo credentials file found — login may not have completed.'));
-        process.exit(1);
       }
 
-      let credsJson: Record<string, unknown>;
-      try {
-        credsJson = JSON.parse(fs.readFileSync(credsPath, 'utf-8')) as Record<string, unknown>;
-      } catch {
-        console.error(chalk.red('\nFailed to parse credentials file.'));
-        process.exit(1);
+      // macOS keychain fallback — security CLI will prompt for access if needed
+      if (!authToken && process.platform === 'darwin') {
+        try {
+          authToken = execSync('security find-generic-password -s "copilot-cli" -w', {
+            encoding: 'utf-8',
+            stdio: ['inherit', 'pipe', 'inherit'],
+          }).trim() || undefined;
+        } catch {
+          /* keychain read failed */
+        }
       }
 
-      // Defensively find the token — look for any string value that looks like a GitHub token
-      const githubTokenPrefixes = ['gho_', 'github_pat_', 'ghu_'];
-      const authToken = findToken(credsJson, githubTokenPrefixes);
       if (!authToken) {
-        console.error(chalk.red('\nNo GitHub token found in credentials file.'));
+        console.error(chalk.red('\nNo token found — login may not have completed.'));
         process.exit(1);
       }
 
@@ -307,14 +270,9 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         }),
       );
 
-      // Cleanup temp dirs
+      // Cleanup temp dir
       try {
-        fs.rmSync(copilotHome, { recursive: true, force: true });
-      } catch {
-        /* best-effort */
-      }
-      try {
-        fs.rmSync(cwd, { recursive: true, force: true });
+        fs.rmSync(configDir, { recursive: true, force: true });
       } catch {
         /* best-effort */
       }
@@ -371,56 +329,17 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         ),
       );
 
-      const pty = spawn('claude', [], {
-        name: 'xterm-256color',
-        cols: 500,
-        rows: 50,
-        cwd,
-        env: spawnEnv,
+      console.log(chalk.yellow('When the Claude REPL opens, type /login and complete the OAuth flow, then exit with /exit.\n'));
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = cpSpawn('claude', [], {
+          stdio: 'inherit',
+          env: spawnEnv,
+          cwd,
+        });
+        proc.on('error', reject);
+        proc.on('close', () => resolve());
       });
-
-      process.stdin.setRawMode?.(true);
-      process.stdin.on('data', (d) => pty.write(d.toString()));
-
-      // Auto-send /login after REPL is ready, handling the auth-method selector
-      let loginSent = false;
-      let authSelectHandled = false;
-      let outputSoFar = '';
-
-      pty.onData((data) => {
-        process.stdout.write(data);
-        outputSoFar += data;
-        if (loginSent) return;
-
-        // Strip ANSI for text matching
-        const text = stripAnsi(outputSoFar);
-
-        if (
-          !authSelectHandled &&
-          (text.includes('Select login method') || text.includes('select login method'))
-        ) {
-          authSelectHandled = true;
-          loginSent = true;
-          setTimeout(() => pty.write('\r'), 300);
-          setTimeout(() => pty.write('/login\r'), 2000);
-          return;
-        }
-      });
-
-      // Fallback: send /login after 1.5s of first output
-      setTimeout(() => {
-        if (!loginSent) {
-          loginSent = true;
-          pty.write('/login\r');
-        }
-      }, 1500);
-
-      await new Promise<void>((resolve) => {
-        pty.onExit(() => resolve());
-      });
-
-      process.stdin.setRawMode?.(false);
-      process.stdin.removeAllListeners('data');
 
       // Read credentials from isolated home
       const credsPath = path.join(home, '.claude', '.credentials.json');
@@ -523,42 +442,6 @@ async function openInEditor(data: unknown): Promise<unknown> {
   }
 }
 
-/**
- * Strip ANSI escape sequences from a string.
- * Uses dynamic RegExp construction to avoid Biome's noControlCharactersInRegex rule.
- */
-function stripAnsi(str: string): string {
-  const esc = String.fromCharCode(27);
-  const bel = String.fromCharCode(7);
-  return str
-    .replace(new RegExp(`${esc}\\[[0-9;]*[a-zA-Z]`, 'g'), '')
-    .replace(new RegExp(`${esc}\\][^${bel}]*${bel}`, 'g'), '');
-}
-
-/**
- * Recursively search a JSON object for a string value that starts with one of the given prefixes.
- * Used to defensively extract a GitHub token from Copilot's config.json regardless of exact key name.
- */
-function findToken(obj: unknown, prefixes: string[]): string | null {
-  if (typeof obj === 'string') {
-    if (prefixes.some((p) => obj.startsWith(p))) return obj;
-    return null;
-  }
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findToken(item, prefixes);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (obj && typeof obj === 'object') {
-    for (const value of Object.values(obj as Record<string, unknown>)) {
-      const found = findToken(value, prefixes);
-      if (found) return found;
-    }
-  }
-  return null;
-}
 
 function confirm(question: string): Promise<boolean> {
   const readline = require('node:readline') as typeof import('node:readline');

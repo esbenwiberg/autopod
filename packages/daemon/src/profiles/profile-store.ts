@@ -80,6 +80,7 @@ export function rowToProfile(
     githubPat: decryptPat(row.github_pat),
     privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
     registryPat: decryptPat(row.registry_pat),
+    containerMemoryGb: (row.container_memory_gb as number | null) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -185,7 +186,7 @@ export function createProfileStore(
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
-          private_registries, registry_pat,
+          private_registries, registry_pat, container_memory_gb,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
@@ -193,7 +194,7 @@ export function createProfileStore(
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
-          @privateRegistries, @registryPat,
+          @privateRegistries, @registryPat, @containerMemoryGb,
           @createdAt, @updatedAt
         )
       `).run({
@@ -227,6 +228,7 @@ export function createProfileStore(
         githubPat: encryptPat(parsed.githubPat),
         privateRegistries: JSON.stringify(parsed.privateRegistries),
         registryPat: encryptPat(parsed.registryPat),
+        containerMemoryGb: parsed.containerMemoryGb ?? null,
         createdAt: now,
         updatedAt: now,
       });
@@ -393,6 +395,10 @@ export function createProfileStore(
       if (parsed.registryPat !== undefined) {
         setClauses.push('registry_pat = @registryPat');
         fieldMap.registryPat = encryptPat(parsed.registryPat);
+      }
+      if (parsed.containerMemoryGb !== undefined) {
+        setClauses.push('container_memory_gb = @containerMemoryGb');
+        fieldMap.containerMemoryGb = parsed.containerMemoryGb ?? null;
       }
 
       if (setClauses.length === 0) {

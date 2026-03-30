@@ -10,6 +10,8 @@ export interface ContainerSpawnConfig {
   networkName?: string;
   /** Firewall script to execute after container start (iptables rules) */
   firewallScript?: string;
+  /** Hard memory limit in bytes. Omit for no limit. */
+  memoryBytes?: number;
 }
 
 export interface ExecResult {
