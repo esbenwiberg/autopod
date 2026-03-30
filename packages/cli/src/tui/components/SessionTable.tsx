@@ -52,6 +52,8 @@ export function SessionTable({
           {'  '}
           {'MODEL'.padEnd(columns.model)}
           {'  '}
+          {'TGT'.padEnd(columns.target)}
+          {'  '}
           {'STATUS'.padEnd(columns.status)}
         </Text>
       </Box>

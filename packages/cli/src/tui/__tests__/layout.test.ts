@@ -7,21 +7,22 @@ describe('calculateColumns', () => {
     expect(cols.id).toBe(5);
     expect(cols.profile).toBe(12);
     expect(cols.model).toBe(7);
+    expect(cols.target).toBe(5);
     expect(cols.status).toBe(14);
-    // Fixed total: 5+12+7+14 + 2(prefix) + 4*2(gaps) = 48
-    // Task = min(60, 120 - 48) = 60
+    // Fixed total: 5+12+7+5+14 + 2(prefix) + 5*2(gaps) = 55
+    // Task = min(60, 120 - 55) = 60
     expect(cols.task).toBe(60);
   });
 
   it('calculates columns for a standard 80-wide terminal', () => {
     const cols = calculateColumns(80);
-    // Task = 80 - 48 = 32
-    expect(cols.task).toBe(32);
+    // Task = max(15, 80 - 55) = 25
+    expect(cols.task).toBe(25);
   });
 
   it('enforces minimum task width of 15', () => {
     // Need terminal width where remainder < 15
-    // 48 + 15 = 63, so width 50 => remainder = 2, clamped to 15
+    // 55 + 15 = 70, so width 50 => remainder = -5, clamped to 15
     const cols = calculateColumns(50);
     expect(cols.task).toBe(15);
   });
@@ -32,6 +33,7 @@ describe('calculateColumns', () => {
       expect(cols.id).toBe(5);
       expect(cols.profile).toBe(12);
       expect(cols.model).toBe(7);
+      expect(cols.target).toBe(5);
       expect(cols.status).toBe(14);
     }
   });

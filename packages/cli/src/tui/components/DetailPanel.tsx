@@ -72,6 +72,12 @@ export function DetailPanel({
           <Text>{session.model}</Text>
         </Box>
         <Box>
+          <Text dimColor>{'Target:   '}</Text>
+          <Text color={session.executionTarget === 'aci' ? 'cyan' : undefined}>
+            {session.executionTarget}
+          </Text>
+        </Box>
+        <Box>
           <Text dimColor>{'Profile:  '}</Text>
           <Text>{session.profileName}</Text>
         </Box>

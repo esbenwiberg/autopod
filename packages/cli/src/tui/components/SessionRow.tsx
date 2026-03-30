@@ -27,6 +27,10 @@ export function SessionRow({ session, selected, columns }: SessionRowProps): Rea
         {'  '}
         <Text>{truncate(session.model, columns.model).padEnd(columns.model)}</Text>
         {'  '}
+        <Text color={session.executionTarget === 'aci' ? 'cyan' : undefined}>
+          {truncate(session.executionTarget, columns.target).padEnd(columns.target)}
+        </Text>
+        {'  '}
       </Text>
       <HeartbeatDot status={session.status} lastHeartbeatAt={session.lastHeartbeatAt} />
       <StatusBadge status={session.status} />

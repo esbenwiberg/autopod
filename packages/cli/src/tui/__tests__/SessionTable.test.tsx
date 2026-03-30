@@ -39,6 +39,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     baseBranch: null,
     acFrom: null,
     lastHeartbeatAt: null,
+    executionTarget: 'local' as const,
     ...overrides,
   };
 }
@@ -76,6 +77,7 @@ describe('SessionTable', () => {
     expect(output).toContain('PROFILE');
     expect(output).toContain('TASK');
     expect(output).toContain('MODEL');
+    expect(output).toContain('TGT');
     expect(output).toContain('STATUS');
   });
 
