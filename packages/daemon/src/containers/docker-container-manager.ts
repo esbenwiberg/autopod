@@ -1,4 +1,4 @@
-import { PassThrough, Writable } from 'node:stream';
+import { PassThrough, Readable, Writable } from 'node:stream';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import * as tar from 'tar-stream';
@@ -8,6 +8,7 @@ import type {
   ExecOptions,
   ExecResult,
   StreamingExecResult,
+  TtyExecResult,
 } from '../interfaces/container-manager.js';
 
 interface DockerContainerManagerOptions {
@@ -324,6 +325,63 @@ export class DockerContainerManager implements ContainerManager {
     this.logger.info({ containerId, command }, 'Streaming exec started');
 
     return { stdout: stdoutStream, stderr: stderrStream, exitCode, kill };
+  }
+
+  async execTty(
+    containerId: string,
+    command: string[],
+    options?: { cols?: number; rows?: number },
+  ): Promise<TtyExecResult> {
+    const container = this.docker.getContainer(containerId);
+
+    const exec = await container.exec({
+      Cmd: command,
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+    });
+
+    // With Tty: true Docker gives a raw duplex stream (no 8-byte header framing).
+    // We can read from it for output and write to it for stdin.
+    const stream = (await exec.start({ hijack: true, stdin: true })) as NodeJS.ReadWriteStream;
+
+    if (options?.cols && options?.rows) {
+      await exec.resize({ h: options.rows, w: options.cols }).catch(() => {});
+    }
+
+    const exitCode = new Promise<number>((resolve) => {
+      let resolved = false;
+      const check = async () => {
+        if (resolved) return;
+        resolved = true;
+        try {
+          const info = await exec.inspect();
+          resolve(info.ExitCode ?? 0);
+        } catch {
+          resolve(0);
+        }
+      };
+      (stream as NodeJS.ReadableStream & { on: Function }).on('end', check);
+      (stream as NodeJS.ReadableStream & { on: Function }).on('close', check);
+      (stream as NodeJS.ReadableStream & { on: Function }).on('error', check);
+    });
+
+    this.logger.info({ containerId, command }, 'TTY exec started');
+
+    return {
+      output: stream as unknown as Readable,
+      write: (data: Buffer | string) => {
+        (stream as NodeJS.WritableStream).write(data);
+      },
+      resize: async (cols: number, rows: number) => {
+        await exec.resize({ h: rows, w: cols }).catch(() => {});
+      },
+      kill: async () => {
+        (stream as any).destroy?.();
+      },
+      exitCode,
+    };
   }
 
   async refreshFirewall(containerId: string, script: string): Promise<void> {

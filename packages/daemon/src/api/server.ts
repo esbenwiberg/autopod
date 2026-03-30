@@ -16,6 +16,7 @@ import { requestLoggerPlugin } from './plugins/request-logger.js';
 import { healthRoutes } from './routes/health.js';
 import { profileRoutes } from './routes/profiles.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { terminalHandler } from './terminal.js';
 import { websocketHandler } from './websocket.js';
 import './types.js';
 
@@ -65,8 +66,9 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.imageBuilder,
   );
 
-  // WebSocket handler
+  // WebSocket handlers
   websocketHandler(app, deps.authModule, deps.eventBus, deps.eventRepo);
+  terminalHandler(app, deps.authModule, deps.sessionManager);
 
   // MCP handler for escalation tools
   mcpHandler(

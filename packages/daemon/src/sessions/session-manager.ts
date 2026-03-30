@@ -22,6 +22,7 @@ import type {
   ContainerManager,
   PrManager,
   RuntimeRegistry,
+  TtyExecResult,
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
@@ -168,6 +169,14 @@ export interface SessionManager {
    * Fire-and-forget safe — errors are logged but do not propagate.
    */
   refreshNetworkPolicy(profileName: string): Promise<void>;
+  /**
+   * Open an interactive TTY terminal in a running workspace pod.
+   * Only valid for workspace sessions in 'running' state.
+   */
+  openTerminal(
+    sessionId: string,
+    options?: { cols?: number; rows?: number },
+  ): Promise<TtyExecResult>;
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
@@ -1601,9 +1610,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         .list({ status: 'running' })
         .filter(
           (s) =>
-            s.profileName === profileName &&
-            s.executionTarget === 'local' &&
-            s.containerId != null,
+            s.profileName === profileName && s.executionTarget === 'local' && s.containerId != null,
         );
 
       if (runningSessions.length === 0) return;
@@ -1634,6 +1641,42 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }),
       );
+    },
+
+    async openTerminal(
+      sessionId: string,
+      options?: { cols?: number; rows?: number },
+    ): Promise<TtyExecResult> {
+      const session = sessionRepo.getOrThrow(sessionId);
+
+      if (session.outputMode !== 'workspace') {
+        throw new AutopodError(
+          'Terminal access is only available for workspace sessions',
+          'INVALID_OUTPUT_MODE',
+          400,
+        );
+      }
+
+      if (session.status !== 'running') {
+        throw new AutopodError(
+          `Cannot open terminal: session is '${session.status}', must be 'running'`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      if (!session.containerId) {
+        throw new AutopodError('Session has no container', 'CONTAINER_NOT_FOUND', 404);
+      }
+
+      const cm = containerManagerFactory.get(session.executionTarget);
+
+      // Try bash first, fall back to sh
+      try {
+        return await cm.execTty(session.containerId, ['bash'], options);
+      } catch {
+        return await cm.execTty(session.containerId, ['sh'], options);
+      }
     },
   };
 }
