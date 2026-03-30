@@ -3,16 +3,18 @@ export interface ColumnWidths {
   profile: number;
   task: number;
   model: number;
+  target: number;
   status: number;
 }
 
 const FIXED_ID = 5;
 const FIXED_PROFILE = 12;
 const FIXED_MODEL = 7;
+const FIXED_TARGET = 5;
 const FIXED_STATUS = 14;
-// 2 chars prefix (▸ ) + 4 column gaps of 2 chars each
-const GAPS = 2 + 4 * 2;
-const FIXED_TOTAL = FIXED_ID + FIXED_PROFILE + FIXED_MODEL + FIXED_STATUS + GAPS;
+// 2 chars prefix (▸ ) + 5 column gaps of 2 chars each
+const GAPS = 2 + 5 * 2;
+const FIXED_TOTAL = FIXED_ID + FIXED_PROFILE + FIXED_MODEL + FIXED_TARGET + FIXED_STATUS + GAPS;
 const MIN_TASK = 15;
 const MAX_TASK = 60;
 
@@ -29,6 +31,7 @@ export function calculateColumns(terminalWidth: number): ColumnWidths {
     profile: FIXED_PROFILE,
     task: taskWidth,
     model: FIXED_MODEL,
+    target: FIXED_TARGET,
     status: FIXED_STATUS,
   };
 }

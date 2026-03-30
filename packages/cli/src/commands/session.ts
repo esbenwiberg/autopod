@@ -37,6 +37,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
     .option('--ac-from <path>', 'Load acceptance criteria from a file in the repo')
     .option('--skip-validation', 'Skip validation phase')
+    .option('-t, --execution-target <target>', 'Execution target: local (Docker) or aci (Azure)')
     .action(
       async (
         profile: string,
@@ -48,8 +49,15 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
           baseBranch?: string;
           acFrom?: string;
           skipValidation?: boolean;
+          executionTarget?: string;
         },
       ) => {
+        if (opts.executionTarget && !['local', 'aci'].includes(opts.executionTarget)) {
+          console.error(
+            `Invalid execution target "${opts.executionTarget}". Must be "local" or "aci".`,
+          );
+          process.exit(1);
+        }
         const client = getClient();
         const session = await withSpinner('Starting session...', () =>
           client.createSession({
@@ -61,12 +69,14 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
             baseBranch: opts.baseBranch,
             acFrom: opts.acFrom,
             skipValidation: opts.skipValidation,
+            executionTarget: opts.executionTarget as 'local' | 'aci' | undefined,
           }),
         );
 
         console.log(chalk.green(`Session ${chalk.bold(session.id)} created.`));
         console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
         console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
+        console.log(`${chalk.bold('Target:')}   ${session.executionTarget}`);
         console.log(`${chalk.bold('Branch:')}   ${session.branch}`);
         console.log(chalk.dim(`Track progress: ap status ${session.id.slice(0, 8)}`));
       },
@@ -137,6 +147,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Task:')}         ${s.task}`);
         console.log(`${chalk.bold('Model:')}        ${s.model}`);
         console.log(`${chalk.bold('Runtime:')}      ${s.runtime}`);
+        console.log(`${chalk.bold('Target:')}       ${s.executionTarget}`);
         console.log(`${chalk.bold('Branch:')}       ${s.branch}`);
         console.log(
           `${chalk.bold('Duration:')}     ${formatDurationFromDates(s.startedAt, s.completedAt)}`,

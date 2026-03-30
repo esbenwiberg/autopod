@@ -1,4 +1,4 @@
-import type { Profile, Session } from '@autopod/shared';
+import type { ExecutionTarget, Profile, Session } from '@autopod/shared';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
@@ -11,7 +11,8 @@ type WizardStep =
   | { step: 'pick_profile'; profiles: Profile[] }
   | { step: 'enter_task'; profile: Profile }
   | { step: 'enter_ac'; profile: Profile; task: string; criteria: string[] }
-  | { step: 'creating'; profile: Profile; task: string; criteria: string[] }
+  | { step: 'pick_target'; profile: Profile; task: string; criteria: string[] }
+  | { step: 'creating'; profile: Profile; task: string; criteria: string[]; executionTarget: ExecutionTarget }
   | { step: 'error'; message: string };
 
 interface CreateSessionWizardProps {
@@ -101,12 +102,38 @@ export function CreateSessionWizard({
           setWizardState({ step: 'enter_ac', profile, task, criteria: [...criteria, criterion] })
         }
         onDone={(finalCriteria) => {
-          setWizardState({ step: 'creating', profile, task, criteria: finalCriteria });
+          setWizardState({ step: 'pick_target', profile, task, criteria: finalCriteria });
+        }}
+        onCancel={onCancel}
+      />
+    );
+  }
+
+  if (wizardState.step === 'pick_target') {
+    const { profile, task, criteria } = wizardState;
+    const targets: Array<{ value: ExecutionTarget; label: string; description: string }> = [
+      { value: 'local', label: 'Local (Docker)', description: profile.executionTarget === 'local' ? 'profile default' : '' },
+      { value: 'aci', label: 'ACI (Azure)', description: profile.executionTarget === 'aci' ? 'profile default' : '' },
+    ];
+    return (
+      <ListPicker
+        title="New Session — Execution Target"
+        items={targets}
+        renderItem={(item, selected) => (
+          <Text color={selected ? 'cyan' : undefined}>
+            {item.label}
+            {item.description ? <Text dimColor>  {item.description}</Text> : null}
+          </Text>
+        )}
+        onSelect={(item) => {
+          const executionTarget = item.value;
+          setWizardState({ step: 'creating', profile, task, criteria, executionTarget });
           void client
             .createSession({
               profileName: profile.name,
               task,
-              ...(finalCriteria.length > 0 ? { acceptanceCriteria: finalCriteria } : {}),
+              executionTarget,
+              ...(criteria.length > 0 ? { acceptanceCriteria: criteria } : {}),
             })
             .then(
               (session) => onComplete(session),
@@ -122,13 +149,14 @@ export function CreateSessionWizard({
   }
 
   if (wizardState.step === 'creating') {
-    const { profile, task, criteria } = wizardState;
+    const { profile, task, criteria, executionTarget } = wizardState;
     return (
       <WizardMessage
         color="cyan"
         title="Creating session..."
         lines={[
           `Profile: ${profile.name}`,
+          `Target:  ${executionTarget}`,
           `Task: ${task}`,
           ...(criteria.length > 0 ? [`AC: ${criteria.length} criteria`] : []),
         ]}
