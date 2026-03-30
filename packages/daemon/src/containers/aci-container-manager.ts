@@ -12,6 +12,7 @@ import type {
   ExecOptions,
   ExecResult,
   StreamingExecResult,
+  TtyExecResult,
 } from '../interfaces/container-manager.js';
 
 export interface AciContainerManagerConfig {
@@ -371,6 +372,19 @@ export class AciContainerManager implements ContainerManager {
       exitCode: exitCodePromise,
       kill,
     };
+  }
+
+  // ACI does not support interactive TTY sessions — terminal access requires local Docker.
+  async execTty(
+    _containerId: string,
+    _command: string[],
+    _options?: { cols?: number; rows?: number },
+  ): Promise<TtyExecResult> {
+    throw new AutopodError(
+      'Interactive terminal is not supported for Azure Container Instances sessions',
+      'NOT_SUPPORTED',
+      400,
+    );
   }
 
   /**

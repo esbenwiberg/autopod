@@ -63,7 +63,14 @@ describe('CopilotRuntime', () => {
         containerId: 'container-123',
         env: {},
       });
-      expect(args).toEqual(['-p', 'Fix the bug', '--allow-all', '--no-ask-user', '--no-auto-update', '-s']);
+      expect(args).toEqual([
+        '-p',
+        'Fix the bug',
+        '--allow-all',
+        '--no-ask-user',
+        '--no-auto-update',
+        '-s',
+      ]);
     });
   });
 
@@ -273,7 +280,9 @@ describe('CopilotRuntime', () => {
         workDir: '/workspace',
         containerId: 'container-123',
         env: { COPILOT_GITHUB_TOKEN: 'gho_test' },
-      })) { /* consume */ }
+      })) {
+        /* consume */
+      }
 
       // Now set up a fresh handle for the respawn
       const handle2 = createMockHandle();

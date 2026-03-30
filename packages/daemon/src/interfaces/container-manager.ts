@@ -1,5 +1,18 @@
 import type { Readable } from 'node:stream';
 
+export interface TtyExecResult {
+  /** Raw output stream (stdout+stderr merged via TTY) */
+  output: Readable;
+  /** Write data to container stdin */
+  write(data: Buffer | string): void;
+  /** Resize the terminal */
+  resize(cols: number, rows: number): Promise<void>;
+  /** Terminate the exec session */
+  kill(): Promise<void>;
+  /** Resolves with the exit code when the process ends */
+  exitCode: Promise<number>;
+}
+
 export interface ContainerSpawnConfig {
   image: string;
   sessionId: string;
@@ -54,4 +67,10 @@ export interface ContainerManager {
     command: string[],
     options?: ExecOptions & { env?: Record<string, string> },
   ): Promise<StreamingExecResult>;
+  /** Open an interactive TTY shell in the container (stdin + stdout+stderr merged). */
+  execTty(
+    containerId: string,
+    command: string[],
+    options?: { cols?: number; rows?: number },
+  ): Promise<TtyExecResult>;
 }

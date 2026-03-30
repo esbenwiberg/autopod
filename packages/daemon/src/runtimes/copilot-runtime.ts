@@ -90,7 +90,11 @@ export class CopilotRuntime implements Runtime {
 
     if (stderrText.trim()) {
       this.logger.warn(
-        { component: 'copilot-runtime', sessionId: config.sessionId, stderr: stderrText.slice(0, 1000) },
+        {
+          component: 'copilot-runtime',
+          sessionId: config.sessionId,
+          stderr: stderrText.slice(0, 1000),
+        },
         'copilot stderr',
       );
     }

@@ -5,6 +5,7 @@ export type {
   ExecResult,
   ExecOptions,
   StreamingExecResult,
+  TtyExecResult,
 } from './container-manager.js';
 export type {
   WorktreeManager,

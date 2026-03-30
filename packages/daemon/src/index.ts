@@ -2,9 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config as loadDotenv } from 'dotenv';
 import type { PendingRequests } from '@autopod/escalation-mcp';
+import { config as loadDotenv } from 'dotenv';
 import pino from 'pino';
+import {
+  createActionAuditRepository,
+  createActionEngine,
+  createActionRegistry,
+} from './actions/index.js';
 import { createServer } from './api/server.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
@@ -40,11 +45,6 @@ import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
-import {
-  createActionEngine,
-  createActionRegistry,
-  createActionAuditRepository,
-} from './actions/index.js';
 import { GhPrManager, GitHubApiPrManager } from './worktrees/pr-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -335,6 +335,11 @@ const notificationService = createNotificationService({
 });
 notificationService.start();
 
+// Serve the built PWA from the same process if the dist directory exists.
+// In the monorepo: packages/daemon/dist/ -> ../../web/dist
+// In production Docker: /app/packages/web/dist
+const webDistPath = path.join(__dirname, '../../web/dist');
+
 // Server
 const app = await createServer({
   authModule,
@@ -345,6 +350,7 @@ const app = await createServer({
   sessionBridge,
   pendingRequestsBySession,
   imageBuilder,
+  webDistPath,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),

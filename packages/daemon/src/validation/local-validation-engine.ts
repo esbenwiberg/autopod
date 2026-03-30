@@ -636,9 +636,7 @@ async function runTaskReview(
     ? `\n## REPO-SPECIFIC REVIEW RULES (these take precedence over standard rules)\n\n${config.codeReviewSkill}\n`
     : '';
 
-  const acSection = acList
-    ? `\n## ACCEPTANCE CRITERIA\n\n${acList}\n`
-    : '';
+  const acSection = acList ? `\n## ACCEPTANCE CRITERIA\n\n${acList}\n` : '';
 
   const commitLogSection = config.commitLog
     ? `\n## COMMIT HISTORY\n\nCommits on this branch (most recent first — use to understand progression and intent):\n\n${config.commitLog}\n`
@@ -665,14 +663,18 @@ ${config.diff}
 
 ## INSTRUCTIONS
 
-${acList ? `### Step 1: Requirements check
+${
+  acList
+    ? `### Step 1: Requirements check
 
 For each acceptance criterion above, determine whether the diff addresses it:
 - Mark met=true only if the diff clearly and fully implements the criterion
 - Mark met=false if the criterion is unaddressed or only partially implemented
 - Add a brief note if the criterion is partially met or needs context
 
-` : ''}### ${acList ? 'Step 2' : 'Step 1'}: Code review
+`
+    : ''
+}### ${acList ? 'Step 2' : 'Step 1'}: Code review
 
 Review ONLY the changed code across these dimensions. Only raise medium or high severity issues:
 
