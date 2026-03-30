@@ -1,10 +1,11 @@
-/** Persisted daemon connection config stored in localStorage. */
+/** Persisted connection config stored in localStorage. */
 
 const KEY = 'autopod:config';
 
 export interface StoredConfig {
   baseUrl: string;
-  token: string;
+  /** Only set in dev mode (token-paste flow). In prod, MSAL manages the token. */
+  devToken?: string;
 }
 
 export function loadConfig(): StoredConfig | null {

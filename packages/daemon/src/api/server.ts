@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs';
 import type { SessionBridge } from '@autopod/escalation-mcp';
 import type { PendingRequests } from '@autopod/escalation-mcp';
+import staticPlugin from '@fastify/static';
 import websocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
@@ -20,6 +22,18 @@ import { terminalHandler } from './terminal.js';
 import { websocketHandler } from './websocket.js';
 import './types.js';
 
+/** API path prefixes — requests to these are never served as static files. */
+const API_PREFIXES = [
+  '/sessions',
+  '/profiles',
+  '/health',
+  '/version',
+  '/config',
+  '/events',
+  '/mcp',
+  '/shutdown',
+];
+
 export interface ServerDependencies {
   authModule: AuthModule;
   sessionManager: SessionManager;
@@ -29,6 +43,8 @@ export interface ServerDependencies {
   sessionBridge: SessionBridge;
   pendingRequestsBySession: Map<string, PendingRequests>;
   imageBuilder?: ImageBuilder;
+  /** Absolute path to the built web PWA dist directory. If absent or missing, static serving is skipped. */
+  webDistPath?: string;
   logLevel?: string;
   prettyLog?: boolean;
   onShutdown?: () => void;
@@ -77,6 +93,27 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.pendingRequestsBySession,
     app.log as unknown as import('pino').Logger,
   );
+
+  // PWA static file serving — registered last so API routes take priority.
+  // Unknown non-API paths fall back to index.html for SPA client-side routing.
+  if (deps.webDistPath && existsSync(deps.webDistPath)) {
+    await app.register(staticPlugin, {
+      root: deps.webDistPath,
+      prefix: '/',
+      wildcard: false,
+      decorateReply: true,
+    });
+
+    app.setNotFoundHandler(async (request, reply) => {
+      const isApiPath = API_PREFIXES.some((prefix) => request.url.startsWith(prefix));
+      if (isApiPath) {
+        return reply.status(404).send({ error: 'Not found', path: request.url });
+      }
+      return reply.sendFile('index.html');
+    });
+
+    app.log.info({ webDistPath: deps.webDistPath }, 'Serving PWA from daemon');
+  }
 
   return app;
 }

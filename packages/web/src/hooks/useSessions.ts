@@ -35,49 +35,55 @@ export function useSessions(client: AutopodWebClient | null): {
   useEffect(() => {
     if (!client) return;
 
-    let ws: WebSocket;
     let closed = false;
 
     const connect = () => {
       if (closed) return;
-      ws = new WebSocket(client.eventsWsUrl());
-      wsRef.current = ws;
+      client
+        .eventsWsUrl()
+        .then((url) => {
+          if (closed) return;
+          const ws = new WebSocket(url);
+          wsRef.current = ws;
 
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'subscribe_all' }));
-      };
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ type: 'subscribe_all' }));
+          };
 
-      ws.onmessage = (ev) => {
-        try {
-          const event = JSON.parse(ev.data as string) as { type: string; session?: Session };
-          if (
-            event.type === 'session.created' ||
-            event.type === 'session.status_changed' ||
-            event.type === 'session.completed'
-          ) {
-            // Refresh the full list on structural changes
-            client
-              .listSessions()
-              .then(setSessions)
-              .catch(() => {});
-          }
-        } catch {
-          // Ignore malformed events
-        }
-      };
+          ws.onmessage = (ev) => {
+            try {
+              const event = JSON.parse(ev.data as string) as { type: string };
+              if (
+                event.type === 'session.created' ||
+                event.type === 'session.status_changed' ||
+                event.type === 'session.completed'
+              ) {
+                client
+                  .listSessions()
+                  .then(setSessions)
+                  .catch(() => {});
+              }
+            } catch {
+              // Ignore malformed events
+            }
+          };
 
-      ws.onclose = (ev) => {
-        if (!closed && ev.code !== 1000) {
-          setTimeout(connect, 3000);
-        }
-      };
+          ws.onclose = (ev) => {
+            if (!closed && ev.code !== 1000) {
+              setTimeout(connect, 3000);
+            }
+          };
+        })
+        .catch(() => {
+          if (!closed) setTimeout(connect, 5000);
+        });
     };
 
     connect();
 
     return () => {
       closed = true;
-      ws?.close(1000, 'unmount');
+      wsRef.current?.close(1000, 'unmount');
       wsRef.current = null;
     };
   }, [client]);

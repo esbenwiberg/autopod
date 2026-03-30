@@ -20,8 +20,10 @@ export function SessionDetail({
 }: SessionDetailProps): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [msgInput, setMsgInput] = useState('');
-  const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalWsUrl, setTerminalWsUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const showTerminal = terminalWsUrl !== null;
 
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -61,7 +63,7 @@ export function SessionDetail({
             type="button"
             className="btn-ghost"
             style={{ padding: '4px 10px' }}
-            onClick={() => setShowTerminal(false)}
+            onClick={() => setTerminalWsUrl(null)}
           >
             ← Back
           </button>
@@ -70,7 +72,7 @@ export function SessionDetail({
           </span>
         </div>
         <div style={{ flex: 1, overflow: 'hidden' }}>
-          <Terminal wsUrl={client.terminalWsUrl(session.id)} />
+          <Terminal wsUrl={terminalWsUrl} />
         </div>
       </div>
     );
@@ -329,7 +331,16 @@ export function SessionDetail({
         }}
       >
         {isWorkspace && isRunning && (
-          <button type="button" className="btn-ghost" onClick={() => setShowTerminal(true)}>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              client
+                .terminalWsUrl(session.id)
+                .then(setTerminalWsUrl)
+                .catch(() => {});
+            }}
+          >
             Terminal
           </button>
         )}

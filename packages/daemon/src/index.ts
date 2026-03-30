@@ -335,6 +335,11 @@ const notificationService = createNotificationService({
 });
 notificationService.start();
 
+// Serve the built PWA from the same process if the dist directory exists.
+// In the monorepo: packages/daemon/dist/ -> ../../web/dist
+// In production Docker: /app/packages/web/dist
+const webDistPath = path.join(__dirname, '../../web/dist');
+
 // Server
 const app = await createServer({
   authModule,
@@ -345,6 +350,7 @@ const app = await createServer({
   sessionBridge,
   pendingRequestsBySession,
   imageBuilder,
+  webDistPath,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),

@@ -1,4 +1,4 @@
-import { PassThrough, Readable, Writable } from 'node:stream';
+import { PassThrough, type Readable, Writable } from 'node:stream';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import * as tar from 'tar-stream';
