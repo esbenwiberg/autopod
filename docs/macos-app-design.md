@@ -170,11 +170,11 @@ An alternative top-level view toggled via toolbar segmented control: `[List] [Ca
 | `provisioning` | Spinner, "Setting up container..." |
 | `running` | Progress bar (phase X/Y), current phase description, latest activity line |
 | `awaiting_input` | Escalation question prominently displayed, suggested options, [Reply] button |
-| `validating` | Spinner with "Validating...", attempt X/Y |
-| `validated` | Validation checklist (smoke/tests/review), diff stats, [Approve] [Reject] |
+| `validating` | Spinner with "Validating...", attempt X/Y, [Open App] if `session.containerUrl` present |
+| `validated` | Validation checklist (smoke/tests/review), diff stats, [Approve] [Reject] [View Diff] [Open App] if `session.containerUrl` present |
+| `approved` / `merging` | "Creating PR..." spinner, PR link once `session.prUrl` is set |
+| `complete` | PR link (clickable, opens in browser), merged timestamp, diff stats |
 | `failed` | Error summary, attempt count, [Logs] [Retry] [Kill] |
-| `approved` / `merging` | "Creating PR..." spinner |
-| `complete` | PR link, merged timestamp, diff stats |
 | `killing` | "Stopping..." spinner + reason if triggered by user |
 | `killed` | "Killed" label, reason if available |
 
@@ -216,6 +216,7 @@ An alternative top-level view toggled via toolbar segmented control: `[List] [Ca
 - Each section expandable with details
 - Screenshots from validation (inline image viewer)
 - Task review reasoning and issues list
+- **[Open Live App]** button (if profile has app URL and container is still running) — opens in default browser via `NSWorkspace.shared.open(url)`. Lets reviewer compare live state against validation screenshots before approving.
 
 ### 4. Session Creation Sheet
 
@@ -488,7 +489,21 @@ New file: `packages/daemon/src/api/routes/terminal.ts`
 // - Returns exit code in close frame reason
 ```
 
-### 2. Session Diff Endpoint
+### 2. Session Response — `containerUrl` and `prUrl` fields
+
+The session API response needs two additional fields the desktop app depends on:
+
+```typescript
+// Add to session response:
+containerUrl: string | null  // Set when container is running (local: http://localhost:<port>, ACI: public URL)
+                              // Used for [Open App] button on validating/validated cards
+prUrl: string | null         // Set once PR is created (approved/merging/complete states)
+                              // Used for PR link on cards
+```
+
+The daemon already knows both values internally — this is just about surfacing them in the API response.
+
+### 4. Session Diff Endpoint
 
 New endpoint (if not already available via validation report):
 
@@ -497,7 +512,7 @@ GET /sessions/:sessionId/diff
   Returns: { files: [{ path, status, diff }], stats: { added, removed, changed } }
 ```
 
-### 3. Session Logs Endpoint
+### 5. Session Logs Endpoint
 
 Ensure agent events are queryable:
 

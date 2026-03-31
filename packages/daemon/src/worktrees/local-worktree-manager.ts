@@ -100,12 +100,40 @@ export class LocalWorktreeManager implements WorktreeManager {
         { cwd: bareRepoPath },
       );
 
+      // If the requested branch already exists on the remote, fetch it and use it
+      // as the start point so we don't blow away existing work with -B.
+      let startPoint = `refs/remotes/origin/${baseBranch}`;
+      if (branch !== baseBranch) {
+        try {
+          await execFileAsync(
+            'git',
+            ['fetch', authUrl, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+            { cwd: bareRepoPath },
+          );
+          // Fetch succeeded — branch exists on remote, use it as start point
+          startPoint = `refs/remotes/origin/${branch}`;
+          this.logger.info({ branch }, 'Branch exists on remote — resuming from it');
+        } catch {
+          // Branch doesn't exist on remote yet — normal for new sessions
+          this.logger.info({ branch }, 'Branch not found on remote — creating from baseBranch');
+        }
+      }
+
+      // Clean up stale worktree registration if a previous session left one behind
+      // (e.g. killed session whose cleanup didn't fully complete).
+      if (await this.pathExists(worktreePath)) {
+        this.logger.warn({ worktreePath }, 'Stale worktree directory exists — removing');
+        await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
+          cwd: bareRepoPath,
+        }).catch(() => fs.rm(worktreePath, { recursive: true, force: true }));
+      }
+      await execFileAsync('git', ['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+
       // -B force-creates branch to handle retry scenarios
-      // Use refs/remotes/origin/baseBranch as start point (matches the fetch above)
-      this.logger.info({ worktreePath, branch, baseBranch }, 'Creating worktree');
+      this.logger.info({ worktreePath, branch, startPoint }, 'Creating worktree');
       await execFileAsync(
         'git',
-        ['worktree', 'add', '-B', branch, worktreePath, `refs/remotes/origin/${baseBranch}`],
+        ['worktree', 'add', '-B', branch, worktreePath, startPoint],
         { cwd: bareRepoPath },
       );
     });

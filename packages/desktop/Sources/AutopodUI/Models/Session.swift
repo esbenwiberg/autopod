@@ -1,0 +1,142 @@
+import SwiftUI
+
+// MARK: - Status
+
+public enum SessionStatus: String, Sendable {
+    case queued, provisioning, running
+    case awaitingInput = "awaiting_input"
+    case validating, validated, failed
+    case approved, merging, complete
+    case killing, killed
+
+    public var label: String {
+        switch self {
+        case .awaitingInput: "awaiting input"
+        default: rawValue
+        }
+    }
+
+    public var color: Color {
+        switch self {
+        case .queued:        .secondary
+        case .provisioning:  .blue
+        case .running:       .green
+        case .awaitingInput: .orange
+        case .validating:    .blue
+        case .validated:     .green
+        case .failed:        .red
+        case .approved:      .green
+        case .merging:       .purple
+        case .complete:      .secondary
+        case .killing:       .red
+        case .killed:        .secondary
+        }
+    }
+
+    public var needsAttention: Bool {
+        switch self {
+        case .awaitingInput, .validated, .failed: true
+        default: false
+        }
+    }
+
+    public var isActive: Bool {
+        switch self {
+        case .provisioning, .running, .validating, .merging, .killing: true
+        default: false
+        }
+    }
+}
+
+// MARK: - Supporting types
+
+public struct DiffStats: Sendable {
+    public let added: Int
+    public let removed: Int
+    public let files: Int
+    public init(added: Int, removed: Int, files: Int) {
+        self.added = added; self.removed = removed; self.files = files
+    }
+}
+
+public struct ValidationChecks: Sendable {
+    public let smoke: Bool
+    public let tests: Bool
+    public let review: Bool
+    public init(smoke: Bool, tests: Bool, review: Bool) {
+        self.smoke = smoke; self.tests = tests; self.review = review
+    }
+}
+
+public struct PhaseProgress: Sendable {
+    public let current: Int
+    public let total: Int
+    public let description: String
+    public init(current: Int, total: Int, description: String) {
+        self.current = current; self.total = total; self.description = description
+    }
+}
+
+public struct AttemptInfo: Sendable {
+    public let current: Int
+    public let max: Int
+    public init(current: Int, max: Int) {
+        self.current = current; self.max = max
+    }
+}
+
+// MARK: - Session
+
+public struct Session: Identifiable, Sendable {
+    public let id: UUID
+    public var status: SessionStatus
+    public var branch: String
+    public var profileName: String
+    public var model: String
+    public var startedAt: Date
+
+    public var diffStats: DiffStats?
+    public var escalationQuestion: String?
+    public var validationChecks: ValidationChecks?
+    public var prUrl: URL?
+    public var containerUrl: URL?
+    public var phase: PhaseProgress?
+    public var latestActivity: String?
+    public var errorSummary: String?
+    public var attempts: AttemptInfo?
+    public var queuePosition: Int?
+
+    public var duration: String {
+        let minutes = Int(Date().timeIntervalSince(startedAt) / 60)
+        guard minutes > 0 else { return "<1m" }
+        guard minutes >= 60 else { return "\(minutes)m" }
+        return "\(minutes / 60)h \(minutes % 60)m"
+    }
+
+    public init(
+        id: UUID = UUID(),
+        status: SessionStatus,
+        branch: String,
+        profileName: String,
+        model: String,
+        startedAt: Date,
+        diffStats: DiffStats? = nil,
+        escalationQuestion: String? = nil,
+        validationChecks: ValidationChecks? = nil,
+        prUrl: URL? = nil,
+        containerUrl: URL? = nil,
+        phase: PhaseProgress? = nil,
+        latestActivity: String? = nil,
+        errorSummary: String? = nil,
+        attempts: AttemptInfo? = nil,
+        queuePosition: Int? = nil
+    ) {
+        self.id = id; self.status = status; self.branch = branch
+        self.profileName = profileName; self.model = model; self.startedAt = startedAt
+        self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
+        self.validationChecks = validationChecks; self.prUrl = prUrl
+        self.containerUrl = containerUrl; self.phase = phase
+        self.latestActivity = latestActivity; self.errorSummary = errorSummary
+        self.attempts = attempts; self.queuePosition = queuePosition
+    }
+}

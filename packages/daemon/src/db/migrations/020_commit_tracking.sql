@@ -1,0 +1,2 @@
+ALTER TABLE sessions ADD COLUMN commit_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN last_commit_at TEXT;

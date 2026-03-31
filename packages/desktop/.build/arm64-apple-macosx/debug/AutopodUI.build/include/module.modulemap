@@ -1,0 +1,3 @@
+module AutopodUI {
+    header "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/include/AutopodUI-Swift.h"
+}

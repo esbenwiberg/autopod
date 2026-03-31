@@ -9,6 +9,7 @@ interface MetricsBarProps {
   filesChanged: number;
   linesAdded: number;
   linesRemoved: number;
+  costUsd?: number;
 }
 
 export function MetricsBar({
@@ -17,9 +18,15 @@ export function MetricsBar({
   filesChanged,
   linesAdded,
   linesRemoved,
+  costUsd,
 }: MetricsBarProps): React.ReactElement {
   const toolCount = events.filter((e) => e.type === 'tool_use').length;
   const fileEvents = events.filter((e) => e.type === 'file_change').length;
+  const uniqueFiles = new Set(
+    events
+      .filter((e): e is import('@autopod/shared').AgentFileChangeEvent => e.type === 'file_change')
+      .map((e) => e.path),
+  ).size;
 
   const duration = startedAt ? formatElapsed(Date.now() - new Date(startedAt).getTime()) : '-';
 
@@ -35,18 +42,36 @@ export function MetricsBar({
       </Box>
       <Box>
         <Text dimColor>Files: </Text>
-        <Text>{filesChanged}</Text>
+        <Text>{filesChanged > 0 ? filesChanged : uniqueFiles > 0 ? uniqueFiles : 0}</Text>
       </Box>
       <Box>
         <Text dimColor>Lines: </Text>
-        <Text color="green">+{linesAdded}</Text>
-        <Text> </Text>
-        <Text color="red">-{linesRemoved}</Text>
+        {filesChanged > 0 ? (
+          <>
+            <Text color="green">+{linesAdded}</Text>
+            <Text> </Text>
+            <Text color="red">-{linesRemoved}</Text>
+          </>
+        ) : uniqueFiles > 0 ? (
+          <Text dimColor>-</Text>
+        ) : (
+          <>
+            <Text color="green">+{linesAdded}</Text>
+            <Text> </Text>
+            <Text color="red">-{linesRemoved}</Text>
+          </>
+        )}
       </Box>
       <Box>
         <Text dimColor>Time: </Text>
         <Text>{duration}</Text>
       </Box>
+      {costUsd != null && costUsd > 0 && (
+        <Box>
+          <Text dimColor>Cost: </Text>
+          <Text>${costUsd.toFixed(2)}</Text>
+        </Box>
+      )}
     </Box>
   );
 }

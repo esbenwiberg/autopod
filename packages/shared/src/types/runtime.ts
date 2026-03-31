@@ -66,6 +66,9 @@ export interface AgentCompleteEvent {
   type: 'complete';
   timestamp: string;
   result: string;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  costUsd?: number;
 }
 
 export interface AgentErrorEvent {

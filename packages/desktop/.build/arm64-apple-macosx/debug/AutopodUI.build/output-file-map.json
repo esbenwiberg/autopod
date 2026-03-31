@@ -1,0 +1,68 @@
+{
+  "": {
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/primary.swiftdeps"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Models/MockData.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/MockData.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/MockData.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/MockData~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/MockData.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/MockData.dia"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Models/Session.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/Session.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/Session.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/Session~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/Session.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/Session.dia"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Views/Cards/CardComparison.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardComparison.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardComparison.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardComparison~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardComparison.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardComparison.dia"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Views/Cards/CardFleetView.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardFleetView.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardFleetView.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardFleetView~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardFleetView.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/CardFleetView.dia"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Views/Cards/SessionCard.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCard.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCard.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCard~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCard.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCard.dia"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Views/Cards/SessionCardB.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardB.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardB.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardB~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardB.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardB.dia"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Views/Cards/SessionCardC.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardC.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardC.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardC~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardC.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardC.dia"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Views/Cards/SessionCardFinal.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardFinal.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardFinal.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardFinal~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardFinal.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/SessionCardFinal.dia"
+  },
+  "/Users/ewi/repos/autopod/packages/desktop/Sources/AutopodUI/Views/Shared/StatusDot.swift": {
+    "dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/StatusDot.d",
+    "object": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/StatusDot.swift.o",
+    "swiftmodule": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/StatusDot~partial.swiftmodule",
+    "swift-dependencies": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/StatusDot.swiftdeps",
+    "diagnostics": "/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/AutopodUI.build/StatusDot.dia"
+  }
+}

@@ -60,6 +60,11 @@ export interface Session {
   acFrom: string | null;
   recoveryWorktreePath: string | null;
   lastHeartbeatAt: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  commitCount: number;
+  lastCommitAt: string | null;
 }
 
 export interface CreateSessionRequest {

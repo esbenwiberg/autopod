@@ -52,6 +52,11 @@ export interface SessionUpdates {
   acceptanceCriteria?: string[] | null;
   recoveryWorktreePath?: string | null;
   lastHeartbeatAt?: string | null;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+  commitCount?: number;
+  lastCommitAt?: string | null;
 }
 
 export interface SessionStats {
@@ -111,6 +116,11 @@ function rowToSession(row: Record<string, unknown>): Session {
     acFrom: (row.ac_from as string) ?? null,
     recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
     lastHeartbeatAt: (row.last_heartbeat_at as string) ?? null,
+    inputTokens: (row.input_tokens as number) ?? 0,
+    outputTokens: (row.output_tokens as number) ?? 0,
+    costUsd: (row.cost_usd as number) ?? 0,
+    commitCount: (row.commit_count as number) ?? 0,
+    lastCommitAt: (row.last_commit_at as string) ?? null,
   };
 }
 
@@ -244,6 +254,26 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.recoveryWorktreePath !== undefined) {
         setClauses.push('recovery_worktree_path = @recoveryWorktreePath');
         params.recoveryWorktreePath = changes.recoveryWorktreePath;
+      }
+      if (changes.inputTokens !== undefined) {
+        setClauses.push('input_tokens = @inputTokens');
+        params.inputTokens = changes.inputTokens;
+      }
+      if (changes.outputTokens !== undefined) {
+        setClauses.push('output_tokens = @outputTokens');
+        params.outputTokens = changes.outputTokens;
+      }
+      if (changes.costUsd !== undefined) {
+        setClauses.push('cost_usd = @costUsd');
+        params.costUsd = changes.costUsd;
+      }
+      if (changes.commitCount !== undefined) {
+        setClauses.push('commit_count = @commitCount');
+        params.commitCount = changes.commitCount;
+      }
+      if (changes.lastCommitAt !== undefined) {
+        setClauses.push('last_commit_at = @lastCommitAt');
+        params.lastCommitAt = changes.lastCommitAt;
       }
 
       if (setClauses.length === 0) return;

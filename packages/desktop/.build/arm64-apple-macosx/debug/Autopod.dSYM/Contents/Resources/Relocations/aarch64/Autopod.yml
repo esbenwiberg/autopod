@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/ewi/repos/autopod/packages/desktop/.build/arm64-apple-macosx/debug/Autopod'
+relocations:     []
+...

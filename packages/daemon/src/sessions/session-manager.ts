@@ -193,6 +193,58 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   /** Active auto-stop timers for preview containers, keyed by sessionId. */
   const previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /** Active commit polling intervals, keyed by sessionId. */
+  const commitPollers = new Map<string, ReturnType<typeof setInterval>>();
+
+  const COMMIT_POLL_INTERVAL_MS = 60_000;
+
+  /** Start polling git commit count inside a running container. */
+  function startCommitPolling(sessionId: string): void {
+    stopCommitPolling(sessionId);
+    const poll = async () => {
+      try {
+        const session = sessionRepo.getOrThrow(sessionId);
+        if (!session.containerId || session.status !== 'running') {
+          stopCommitPolling(sessionId);
+          return;
+        }
+        const baseBranch = session.baseBranch ?? 'main';
+        const cm = containerManagerFactory.get(session.executionTarget);
+        const [countResult, timeResult] = await Promise.all([
+          cm.execInContainer(
+            session.containerId,
+            ['git', 'rev-list', '--count', 'HEAD', `^${baseBranch}`],
+            { cwd: '/workspace', timeout: 5_000 },
+          ),
+          cm.execInContainer(session.containerId, ['git', 'log', '-1', '--format=%cI'], {
+            cwd: '/workspace',
+            timeout: 5_000,
+          }),
+        ]);
+        const commitCount = Number.parseInt(countResult.stdout.trim(), 10) || 0;
+        const lastCommitAt = timeResult.exitCode === 0 ? timeResult.stdout.trim() : null;
+        sessionRepo.update(sessionId, { commitCount, lastCommitAt });
+      } catch {
+        // Silently skip — container may be busy or gone
+        logger.debug({ sessionId }, 'Commit polling failed, skipping cycle');
+      }
+    };
+    // Run first poll immediately, then every interval
+    poll();
+    const interval = setInterval(poll, COMMIT_POLL_INTERVAL_MS);
+    interval.unref();
+    commitPollers.set(sessionId, interval);
+  }
+
+  /** Stop commit polling for a session. */
+  function stopCommitPolling(sessionId: string): void {
+    const interval = commitPollers.get(sessionId);
+    if (interval) {
+      clearInterval(interval);
+      commitPollers.delete(sessionId);
+    }
+  }
+
   /** Cancel and remove an auto-stop timer for a session if one exists. */
   function clearPreviewTimer(sessionId: string): void {
     const timer = previewTimers.get(sessionId);
@@ -674,63 +726,76 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     },
 
     async consumeAgentEvents(sessionId: string, events: AsyncIterable<AgentEvent>): Promise<void> {
-      for await (const event of events) {
-        eventBus.emit({
-          type: 'session.agent_activity',
-          timestamp: event.timestamp,
-          sessionId,
-          event,
-        });
+      startCommitPolling(sessionId);
+      try {
+        for await (const event of events) {
+          eventBus.emit({
+            type: 'session.agent_activity',
+            timestamp: event.timestamp,
+            sessionId,
+            event,
+          });
 
-        if (event.type === 'escalation') {
-          const session = sessionRepo.getOrThrow(sessionId);
-          if (session.status === 'running') {
-            const escalationPayload = event.payload.payload;
-            const escalationSummary =
-              'question' in escalationPayload
-                ? escalationPayload.question
-                : 'description' in escalationPayload
-                  ? escalationPayload.description
-                  : 'Agent requested input';
-            emitActivityStatus(
-              sessionId,
-              `Waiting for human input [${event.escalationType}]: ${escalationSummary}`,
-            );
-            transition(session, 'awaiting_input', {
-              pendingEscalation: event.payload,
-              escalationCount: session.escalationCount + 1,
+          if (event.type === 'escalation') {
+            const session = sessionRepo.getOrThrow(sessionId);
+            if (session.status === 'running') {
+              const escalationPayload = event.payload.payload;
+              const escalationSummary =
+                'question' in escalationPayload
+                  ? escalationPayload.question
+                  : 'description' in escalationPayload
+                    ? escalationPayload.description
+                    : 'Agent requested input';
+              emitActivityStatus(
+                sessionId,
+                `Waiting for human input [${event.escalationType}]: ${escalationSummary}`,
+              );
+              transition(session, 'awaiting_input', {
+                pendingEscalation: event.payload,
+                escalationCount: session.escalationCount + 1,
+              });
+            }
+          } else if (event.type === 'plan') {
+            sessionRepo.update(sessionId, {
+              plan: { summary: event.summary, steps: event.steps },
             });
+          } else if (event.type === 'progress') {
+            sessionRepo.update(sessionId, {
+              progress: {
+                phase: event.phase,
+                description: event.description,
+                currentPhase: event.currentPhase,
+                totalPhases: event.totalPhases,
+              },
+            });
+          } else if (
+            event.type === 'status' &&
+            event.message.includes('Claude session initialized')
+          ) {
+            // Persist claude session ID to DB for pause/resume survival across daemon restarts
+            const match = event.message.match(/\(([^)]+)\)$/);
+            if (match?.[1]) {
+              sessionRepo.update(sessionId, { claudeSessionId: match[1] });
+            }
+          } else if (event.type === 'complete' && event.totalInputTokens) {
+            sessionRepo.update(sessionId, {
+              inputTokens: event.totalInputTokens,
+              outputTokens: event.totalOutputTokens ?? 0,
+              costUsd: event.costUsd ?? 0,
+            });
+          } else if (event.type === 'error' && event.fatal) {
+            const session = sessionRepo.getOrThrow(sessionId);
+            if (session.status === 'running') {
+              emitActivityStatus(sessionId, `Agent failed: ${event.message}`);
+              transition(session, 'failed', { completedAt: new Date().toISOString() });
+            }
+            break;
+          } else if (event.type === 'tool_use' || event.type === 'file_change') {
+            touchHeartbeat(sessionId);
           }
-        } else if (event.type === 'plan') {
-          sessionRepo.update(sessionId, {
-            plan: { summary: event.summary, steps: event.steps },
-          });
-        } else if (event.type === 'progress') {
-          sessionRepo.update(sessionId, {
-            progress: {
-              phase: event.phase,
-              description: event.description,
-              currentPhase: event.currentPhase,
-              totalPhases: event.totalPhases,
-            },
-          });
-        } else if (
-          event.type === 'status' &&
-          event.message.includes('Claude session initialized')
-        ) {
-          // Persist claude session ID to DB for pause/resume survival across daemon restarts
-          const match = event.message.match(/\(([^)]+)\)$/);
-          if (match?.[1]) {
-            sessionRepo.update(sessionId, { claudeSessionId: match[1] });
-          }
-        } else if (event.type === 'error' && event.fatal) {
-          const session = sessionRepo.getOrThrow(sessionId);
-          if (session.status === 'running') {
-            emitActivityStatus(sessionId, `Agent failed: ${event.message}`);
-            transition(session, 'failed', { completedAt: new Date().toISOString() });
-          }
-          break;
         }
+      } finally {
+        stopCommitPolling(sessionId);
       }
     },
 
@@ -1601,9 +1666,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         .list({ status: 'running' })
         .filter(
           (s) =>
-            s.profileName === profileName &&
-            s.executionTarget === 'local' &&
-            s.containerId != null,
+            s.profileName === profileName && s.executionTarget === 'local' && s.containerId != null,
         );
 
       if (runningSessions.length === 0) return;

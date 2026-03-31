@@ -17,6 +17,7 @@ import { useSelection } from './hooks/useSelection.js';
 import type { UseSessionStateReturn } from './hooks/useSessionState.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import type { UseWebSocketReturn } from './hooks/useWebSocket.js';
+import { formatToolUse, getToolUseKey } from './utils/formatToolUse.js';
 import { calculateColumns } from './utils/layout.js';
 
 type UIMode =
@@ -658,17 +659,40 @@ function ActivityLogOverlay({
     return <Text dimColor>No events recorded</Text>;
   }
 
+  // Pre-compute streak warnings: flag runs of 5+ identical consecutive tool_use events
+  const tail = events.slice(-40);
+  const streakIndices = new Set<number>();
+  let streakStart = 0;
+  for (let j = 1; j <= tail.length; j++) {
+    const prev = tail[j - 1];
+    const curr = tail[j];
+    const sameKey =
+      curr &&
+      prev &&
+      curr.type === 'tool_use' &&
+      prev.type === 'tool_use' &&
+      getToolUseKey(curr) === getToolUseKey(prev);
+    if (!sameKey) {
+      const streakLen = j - streakStart;
+      if (streakLen >= 5) {
+        for (let k = streakStart; k < j; k++) streakIndices.add(k);
+      }
+      streakStart = j;
+    }
+  }
+
   return (
     <Box flexDirection="column">
-      {events.slice(-40).map((event, i) => {
+      {tail.map((event, i) => {
         const ts = new Date(event.timestamp).toLocaleTimeString();
+        const isStreak = streakIndices.has(i);
         let detail: string;
         switch (event.type) {
           case 'status':
             detail = event.message;
             break;
           case 'tool_use':
-            detail = `${event.tool}(${Object.keys(event.input).join(', ')})`;
+            detail = formatToolUse(event.tool, event.input, 90);
             break;
           case 'file_change':
             detail = `${event.action} ${event.path}`;
@@ -686,7 +710,8 @@ function ActivityLogOverlay({
             detail = event.type;
         }
         return (
-          <Text key={`log-${i}`} dimColor wrap="truncate">
+          <Text key={`log-${i}`} dimColor={!isStreak} wrap="truncate">
+            {isStreak ? '\u26A0 ' : ''}
             {ts} [{event.type}] {detail}
           </Text>
         );

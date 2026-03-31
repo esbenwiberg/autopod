@@ -1,6 +1,7 @@
 import type { AgentEvent } from '@autopod/shared';
 import { Box, Text } from 'ink';
 import type React from 'react';
+import { formatToolUse, getToolUseKey } from '../utils/formatToolUse.js';
 
 interface ActivityFeedProps {
   events: AgentEvent[];
@@ -55,7 +56,7 @@ function getEventText(event: AgentEvent): string {
     case 'status':
       return event.message;
     case 'tool_use':
-      return `${event.tool}`;
+      return formatToolUse(event.tool, event.input, 60);
     case 'file_change':
       return `${event.action} ${event.path}`;
     case 'complete':
@@ -71,12 +72,33 @@ function getEventText(event: AgentEvent): string {
   }
 }
 
+interface CollapsedEvent {
+  event: AgentEvent;
+  repeatCount: number;
+}
+
+function collapseRepeats(events: AgentEvent[]): CollapsedEvent[] {
+  const result: CollapsedEvent[] = [];
+  for (const event of events) {
+    const prev = result[result.length - 1];
+    if (
+      prev &&
+      event.type === 'tool_use' &&
+      prev.event.type === 'tool_use' &&
+      getToolUseKey(event) === getToolUseKey(prev.event)
+    ) {
+      prev.repeatCount++;
+      prev.event = event; // keep the latest timestamp
+    } else {
+      result.push({ event, repeatCount: 1 });
+    }
+  }
+  return result;
+}
+
 export function ActivityFeed({ events, maxLines }: ActivityFeedProps): React.ReactElement {
-  // Show most recent high-level events — filter out tool_use (too verbose; visible in log view)
-  const visibleEvents = events
-    .filter((e) => e.type !== 'tool_use')
-    .slice(-maxLines)
-    .reverse();
+  const collapsed = collapseRepeats(events);
+  const visibleEvents = collapsed.slice(-maxLines).reverse();
 
   if (visibleEvents.length === 0) {
     return (
@@ -91,10 +113,13 @@ export function ActivityFeed({ events, maxLines }: ActivityFeedProps): React.Rea
       <Text bold dimColor>
         Activity
       </Text>
-      {visibleEvents.map((event, i) => (
+      {visibleEvents.map(({ event, repeatCount }, i) => (
         <Box key={`${event.timestamp}-${i}`}>
           <Text color={getEventColor(event)}>{getEventIcon(event)} </Text>
-          <Text wrap="truncate">{getEventText(event)}</Text>
+          <Text wrap="truncate">
+            {getEventText(event)}
+            {repeatCount > 1 ? ` (x${repeatCount})` : ''}
+          </Text>
         </Box>
       ))}
     </Box>

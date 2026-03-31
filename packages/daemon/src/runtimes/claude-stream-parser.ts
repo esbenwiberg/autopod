@@ -177,10 +177,16 @@ export class ClaudeStreamParser {
         const resultText =
           (typeof event.result === 'string' ? event.result : null) ??
           'Claude agent completed';
+        const cost = event.cost as
+          | { input_tokens: number; output_tokens: number }
+          | undefined;
         return {
           type: 'complete',
           timestamp: ts,
           result: typeof resultText === 'string' ? resultText : String(resultText),
+          totalInputTokens: cost?.input_tokens,
+          totalOutputTokens: cost?.output_tokens,
+          costUsd: cost ? estimateCost(cost.input_tokens, cost.output_tokens) : undefined,
         };
       }
 
@@ -203,4 +209,16 @@ export class ClaudeStreamParser {
       }
     }
   }
+}
+
+/**
+ * Rough cost estimate based on published Claude pricing.
+ * Rates are per million tokens — update when pricing changes.
+ */
+function estimateCost(inputTokens: number, outputTokens: number): number {
+  // Default to Sonnet-tier pricing as a reasonable middle ground.
+  // Exact model isn't available in the stream; this gives a ballpark.
+  const INPUT_COST_PER_M = 3.0;
+  const OUTPUT_COST_PER_M = 15.0;
+  return (inputTokens * INPUT_COST_PER_M + outputTokens * OUTPUT_COST_PER_M) / 1_000_000;
 }

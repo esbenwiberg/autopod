@@ -18,6 +18,21 @@ interface DetailPanelProps {
   totalAttempts?: number;
 }
 
+function formatTokens(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(0)}K`;
+  return String(count);
+}
+
+function formatElapsed(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const mins = Math.floor(seconds / 60);
+  const hrs = Math.floor(mins / 60);
+  if (hrs > 0) return `${hrs}h ${mins % 60}m`;
+  if (mins > 0) return `${mins}m`;
+  return `${seconds}s`;
+}
+
 function formatDuration(startedAt: string | null, completedAt: string | null): string {
   if (!startedAt) return '-';
   const start = new Date(startedAt).getTime();
@@ -44,6 +59,22 @@ export function DetailPanel({
   }
 
   const validation = displayedValidation ?? session.lastValidationResult;
+
+  // Derive live file count from agent events for running sessions (DB stats are only
+  // populated at completion, so they show 0 during execution).
+  const liveUniqueFiles = new Set(
+    events
+      .filter((e): e is import('@autopod/shared').AgentFileChangeEvent => e.type === 'file_change')
+      .map((e) => e.path),
+  ).size;
+  const displayFiles =
+    session.filesChanged > 0 ? `${session.filesChanged} changed` : `${liveUniqueFiles} changed`;
+  const displayLines =
+    session.filesChanged > 0
+      ? `, +${session.linesAdded} -${session.linesRemoved}`
+      : liveUniqueFiles > 0
+        ? ''
+        : `, +${session.linesAdded} -${session.linesRemoved}`;
 
   return (
     <Box flexDirection="column" paddingX={1} borderStyle="single" borderColor="gray">
@@ -92,9 +123,39 @@ export function DetailPanel({
         <Box>
           <Text dimColor>{'Files:    '}</Text>
           <Text>
-            {session.filesChanged} changed, +{session.linesAdded} -{session.linesRemoved}
+            {displayFiles}
+            {displayLines}
           </Text>
         </Box>
+        {session.status === 'running' && (
+          <Box>
+            <Text dimColor>{'Commits:  '}</Text>
+            {(() => {
+              const runningMins = session.startedAt
+                ? Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60_000)
+                : 0;
+              const stale = runningMins >= 30 && session.commitCount === 0;
+              const lastAgo = session.lastCommitAt
+                ? formatElapsed(Date.now() - new Date(session.lastCommitAt).getTime())
+                : null;
+              return (
+                <Text color={stale ? 'yellow' : undefined}>
+                  {session.commitCount}
+                  {lastAgo ? ` (last: ${lastAgo} ago)` : ''}
+                </Text>
+              );
+            })()}
+          </Box>
+        )}
+        {(session.costUsd > 0 || session.inputTokens > 0) && (
+          <Box>
+            <Text dimColor>{'Cost:     '}</Text>
+            <Text>
+              ${session.costUsd.toFixed(2)} ({formatTokens(session.inputTokens)} in /{' '}
+              {formatTokens(session.outputTokens)} out)
+            </Text>
+          </Box>
+        )}
         {session.previewUrl ? (
           <Box>
             <Text dimColor>{'Preview:  '}</Text>
@@ -145,6 +206,7 @@ export function DetailPanel({
             filesChanged={session.filesChanged}
             linesAdded={session.linesAdded}
             linesRemoved={session.linesRemoved}
+            costUsd={session.costUsd}
           />
         </Box>
       )}
