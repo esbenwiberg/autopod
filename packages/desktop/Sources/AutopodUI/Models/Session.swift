@@ -1,5 +1,13 @@
 import SwiftUI
 
+// MARK: - Output mode (mirrors daemon outputMode)
+
+public enum OutputMode: String, Sendable {
+    case pr          // Worker pod — agent-driven, creates PR
+    case workspace   // Workspace pod — interactive, human-driven, pushes branch
+    case artifact    // Research/output — agent-driven, no PR
+}
+
 // MARK: - Status
 
 public enum SessionStatus: String, Sendable {
@@ -7,6 +15,7 @@ public enum SessionStatus: String, Sendable {
     case awaitingInput = "awaiting_input"
     case validating, validated, failed
     case approved, merging, complete
+    case paused
     case killing, killed
 
     public var label: String {
@@ -28,6 +37,7 @@ public enum SessionStatus: String, Sendable {
         case .approved:      .green
         case .merging:       .purple
         case .complete:      .secondary
+        case .paused:        .yellow
         case .killing:       .red
         case .killed:        .secondary
         }
@@ -88,12 +98,21 @@ public struct AttemptInfo: Sendable {
 // MARK: - Session
 
 public struct Session: Identifiable, Sendable {
-    public let id: UUID
+    public let id: String
     public var status: SessionStatus
+    public var outputMode: OutputMode
     public var branch: String
     public var profileName: String
+    public var task: String
     public var model: String
     public var startedAt: Date
+
+    /// Base branch this session was forked from (workspace handoff)
+    public var baseBranch: String?
+    /// Path to AC file loaded from repo (workspace handoff)
+    public var acFrom: String?
+    /// Acceptance criteria (loaded from acFrom or manual input)
+    public var acceptanceCriteria: [String]?
 
     public var diffStats: DiffStats?
     public var escalationQuestion: String?
@@ -106,6 +125,14 @@ public struct Session: Identifiable, Sendable {
     public var attempts: AttemptInfo?
     public var queuePosition: Int?
 
+    // Token / cost tracking
+    public var inputTokens: Int
+    public var outputTokens: Int
+    public var costUsd: Double
+    public var commitCount: Int
+
+    public var isWorkspace: Bool { outputMode == .workspace }
+
     public var duration: String {
         let minutes = Int(Date().timeIntervalSince(startedAt) / 60)
         guard minutes > 0 else { return "<1m" }
@@ -114,12 +141,17 @@ public struct Session: Identifiable, Sendable {
     }
 
     public init(
-        id: UUID = UUID(),
+        id: String = UUID().uuidString,
         status: SessionStatus,
+        outputMode: OutputMode = .pr,
         branch: String,
         profileName: String,
+        task: String = "",
         model: String,
         startedAt: Date,
+        baseBranch: String? = nil,
+        acFrom: String? = nil,
+        acceptanceCriteria: [String]? = nil,
         diffStats: DiffStats? = nil,
         escalationQuestion: String? = nil,
         validationChecks: ValidationChecks? = nil,
@@ -129,14 +161,22 @@ public struct Session: Identifiable, Sendable {
         latestActivity: String? = nil,
         errorSummary: String? = nil,
         attempts: AttemptInfo? = nil,
-        queuePosition: Int? = nil
+        queuePosition: Int? = nil,
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
+        costUsd: Double = 0,
+        commitCount: Int = 0
     ) {
-        self.id = id; self.status = status; self.branch = branch
-        self.profileName = profileName; self.model = model; self.startedAt = startedAt
+        self.id = id; self.status = status; self.outputMode = outputMode
+        self.branch = branch; self.profileName = profileName; self.task = task
+        self.model = model; self.startedAt = startedAt; self.baseBranch = baseBranch
+        self.acFrom = acFrom; self.acceptanceCriteria = acceptanceCriteria
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
         self.validationChecks = validationChecks; self.prUrl = prUrl
         self.containerUrl = containerUrl; self.phase = phase
         self.latestActivity = latestActivity; self.errorSummary = errorSummary
         self.attempts = attempts; self.queuePosition = queuePosition
+        self.inputTokens = inputTokens; self.outputTokens = outputTokens
+        self.costUsd = costUsd; self.commitCount = commitCount
     }
 }

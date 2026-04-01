@@ -1,0 +1,257 @@
+import SwiftUI
+
+/// Modal sheet for creating a new session.
+public struct CreateSessionSheet: View {
+    @Binding public var isPresented: Bool
+    public var actions: SessionActions
+    public var profileNames: [String]
+    public init(
+        isPresented: Binding<Bool>,
+        actions: SessionActions = .preview,
+        profileNames: [String] = ["my-app", "webapp", "backend"]
+    ) {
+        self._isPresented = isPresented
+        self.actions = actions
+        self.profileNames = profileNames
+    }
+
+    @State private var selectedProfile = "my-app"
+    @State private var task = ""
+    @State private var selectedModel = "claude-opus"
+    @State private var outputMode = "pr"
+    @State private var baseBranch = ""
+    @State private var acFromPath = ""
+    @State private var criteria: [String] = [""]
+
+    private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
+    private let models = ["claude-opus", "claude-sonnet"]
+    private let outputs = [("pr", "Worker (PR)"), ("workspace", "Workspace (Interactive)"), ("artifact", "Artifact")]
+
+    private var isWorkspace: Bool { outputMode == "workspace" }
+    private var canCreate: Bool {
+        isWorkspace || !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("New Session")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    isPresented = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 12)
+
+            Divider()
+
+            // Form
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // Profile
+                    formSection("Profile") {
+                        Picker("", selection: $selectedProfile) {
+                            ForEach(profiles, id: \.self) { p in
+                                Text(p).tag(p)
+                            }
+                        }
+                        .labelsHidden()
+                    }
+
+                    // Type + Model
+                    HStack(alignment: .top, spacing: 16) {
+                        formSection("Type") {
+                            Picker("", selection: $outputMode) {
+                                ForEach(outputs, id: \.0) { value, label in
+                                    Text(label).tag(value)
+                                }
+                            }
+                            .labelsHidden()
+                        }
+                        if !isWorkspace {
+                            formSection("Model") {
+                                Picker("", selection: $selectedModel) {
+                                    ForEach(models, id: \.self) { m in
+                                        Text(m).tag(m)
+                                    }
+                                }
+                                .labelsHidden()
+                            }
+                        }
+                    }
+
+                    if isWorkspace {
+                        // Workspace info
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.teal)
+                            Text("Workspace pods are interactive — no agent, no task. You'll get a shell to work in.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(10)
+                        .background(.teal.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    // Task (not for workspace)
+                    if !isWorkspace {
+                        formSection("Task") {
+                            TextEditor(text: $task)
+                                .font(.system(.body, design: .default))
+                                .frame(minHeight: 80, maxHeight: 150)
+                                .padding(6)
+                                .background(Color(nsColor: .controlBackgroundColor))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                                )
+                                .overlay(alignment: .topLeading) {
+                                    if task.isEmpty {
+                                        Text("Describe what the agent should build...")
+                                            .font(.body)
+                                            .foregroundStyle(.tertiary)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 12)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
+                        }
+                    }
+
+                    // Base branch (optional — for workspace handoff)
+                    if !isWorkspace {
+                        formSection("Base Branch (optional)") {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.branch")
+                                    .foregroundStyle(.tertiary)
+                                    .font(.system(size: 11))
+                                TextField("main", text: $baseBranch)
+                                    .textFieldStyle(.plain)
+                                    .font(.system(.callout, design: .monospaced))
+                            }
+                            .padding(8)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+
+                    // AC from file (optional — for workspace handoff)
+                    if !isWorkspace && !baseBranch.isEmpty {
+                        formSection("AC File Path (optional)") {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.text")
+                                    .foregroundStyle(.tertiary)
+                                    .font(.system(size: 11))
+                                TextField("e.g. specs/auth-ac.md", text: $acFromPath)
+                                    .textFieldStyle(.plain)
+                                    .font(.system(.callout, design: .monospaced))
+                            }
+                            .padding(8)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+
+                    // Acceptance criteria (manual — only for worker/artifact, and only if no AC file)
+                    if !isWorkspace && acFromPath.isEmpty {
+                    formSection("Acceptance Criteria") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(criteria.indices, id: \.self) { index in
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark.square")
+                                        .foregroundStyle(.tertiary)
+                                        .font(.system(size: 12))
+                                    TextField("Criterion \(index + 1)", text: $criteria[index])
+                                        .textFieldStyle(.plain)
+                                        .font(.callout)
+                                    if criteria.count > 1 {
+                                        Button {
+                                            criteria.remove(at: index)
+                                        } label: {
+                                            Image(systemName: "minus.circle")
+                                                .foregroundStyle(.red.opacity(0.6))
+                                                .font(.system(size: 12))
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(Color(nsColor: .controlBackgroundColor))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                            Button {
+                                criteria.append("")
+                            } label: {
+                                Label("Add criterion", systemImage: "plus")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    Text("Optional — helps the agent validate its own work")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    } // end if !isWorkspace
+                }
+                .padding(20)
+            }
+
+            Divider()
+
+            // Actions
+            HStack {
+                Spacer()
+                Button("Cancel") { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
+                Button(isWorkspace ? "Create Workspace" : "Create Session") {
+                    Task {
+                        let ac = criteria.filter { !$0.isEmpty }
+                        _ = await actions.createSession(
+                            selectedProfile, task, selectedModel,
+                            outputMode, ac.isEmpty ? nil : ac,
+                            baseBranch.isEmpty ? nil : baseBranch,
+                            acFromPath.isEmpty ? nil : acFromPath
+                        )
+                        isPresented = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canCreate)
+            }
+            .padding(16)
+        }
+        .frame(width: 480, height: 560)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func formSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(.caption).weight(.semibold))
+                .foregroundStyle(.secondary)
+            content()
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview("Create session") {
+    @Previewable @State var show = true
+    CreateSessionSheet(isPresented: $show)
+}

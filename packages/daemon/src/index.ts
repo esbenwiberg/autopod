@@ -9,6 +9,7 @@ import { createServer } from './api/server.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { loadOrCreateKey } from './crypto/credentials-cipher.js';
+import { createSessionTokenIssuer } from './crypto/session-tokens.js';
 import { createDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrate.js';
 import type { AuthModule } from './interfaces/index.js';
@@ -82,7 +83,8 @@ const actionAuditRepo = createActionAuditRepository(db);
 const actionRegistry = createActionRegistry(logger);
 
 // Credentials encryption key (generated on first run, persisted at ~/.autopod/secrets.key)
-const credentialsCipher = loadOrCreateKey(path.join(os.homedir(), '.autopod', 'secrets.key'));
+const secretsKeyPath = path.join(os.homedir(), '.autopod', 'secrets.key');
+const credentialsCipher = loadOrCreateKey(secretsKeyPath);
 
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
@@ -335,6 +337,9 @@ const notificationService = createNotificationService({
 });
 notificationService.start();
 
+// Session token issuer (HMAC-based, derived from secrets.key)
+const sessionTokenIssuer = createSessionTokenIssuer(secretsKeyPath);
+
 // Server
 const app = await createServer({
   authModule,
@@ -344,7 +349,10 @@ const app = await createServer({
   eventRepo,
   sessionBridge,
   pendingRequestsBySession,
+  containerManagerFactory,
+  docker,
   imageBuilder,
+  sessionTokenIssuer,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),

@@ -4,6 +4,8 @@ public enum MockData: Sendable {
     public static let all: [Session] = [
         awaitingInput, validated, failed,
         running, runningEarly, validating,
+        workspaceActive, workspaceComplete,
+        workerFromWorkspace,
         queued, provisioning, merging, complete, killed,
     ]
 
@@ -54,6 +56,44 @@ public enum MockData: Sendable {
         containerUrl: URL(string: "http://localhost:3002"),
         attempts: AttemptInfo(current: 1, max: 3)
     )
+
+    // MARK: - Workspace pods
+
+    public static let workspaceActive = Session(
+        status: .running, outputMode: .workspace, branch: "plan/auth-redesign",
+        profileName: "my-app", model: "—",
+        startedAt: .minutesAgo(25),
+        diffStats: DiffStats(added: 15, removed: 0, files: 3),
+        containerUrl: URL(string: "http://localhost:3003"),
+        latestActivity: "Interactive — user attached"
+    )
+
+    public static let workspaceComplete = Session(
+        status: .complete, outputMode: .workspace, branch: "plan/migrate-db",
+        profileName: "backend", model: "—",
+        startedAt: .minutesAgo(60),
+        diffStats: DiffStats(added: 42, removed: 0, files: 5),
+        latestActivity: "Branch pushed"
+    )
+
+    // Worker spawned from a workspace branch
+    public static let workerFromWorkspace = Session(
+        status: .running, outputMode: .pr, branch: "feat/auth-redesign",
+        profileName: "my-app", model: "claude-opus",
+        startedAt: .minutesAgo(6),
+        baseBranch: "plan/auth-redesign",
+        acFrom: "specs/auth-ac.md",
+        acceptanceCriteria: [
+            "Users can sign in with Google OAuth",
+            "OAuth tokens are stored encrypted at rest",
+            "Existing session middleware is preserved",
+        ],
+        diffStats: DiffStats(added: 56, removed: 8, files: 6),
+        phase: PhaseProgress(current: 5, total: 10, description: "Implementing OAuth callback"),
+        latestActivity: "Writing src/auth/google.ts"
+    )
+
+    // MARK: - Other states
 
     public static let queued = Session(
         status: .queued, branch: "feat/i18n", profileName: "webapp", model: "claude-opus",

@@ -1,5 +1,6 @@
 export {
   createSessionManager,
+  type ContainerManagerFactory,
   type SessionManager,
   type SessionManagerDependencies,
 } from './session-manager.js';

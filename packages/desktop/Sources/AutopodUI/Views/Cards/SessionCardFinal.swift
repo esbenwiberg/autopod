@@ -4,7 +4,10 @@ import SwiftUI
 /// Mix of A (status dots, shadows) and B (accent stripe, density).
 public struct SessionCardFinal: View {
     public let session: Session
-    public init(session: Session) { self.session = session }
+    public var actions: SessionActions
+    public init(session: Session, actions: SessionActions = .preview) {
+        self.session = session; self.actions = actions
+    }
 
     @State private var isExpanded = false
     @State private var isHovered = false
@@ -71,6 +74,9 @@ public struct SessionCardFinal: View {
                     .font(.system(.callout, design: .monospaced).weight(.medium))
                     .lineLimit(1)
                 Spacer()
+                if session.isWorkspace {
+                    modeBadge
+                }
                 statusBadge
             }
 
@@ -85,8 +91,45 @@ public struct SessionCardFinal: View {
         }
     }
 
+    private var modeBadge: some View {
+        Text("workspace")
+            .font(.system(.caption2).weight(.medium))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(.teal.opacity(0.1))
+            .foregroundStyle(.teal)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
     @ViewBuilder
     private var compactSummary: some View {
+        if session.isWorkspace {
+            workspaceCompactSummary
+        } else {
+            workerCompactSummary
+        }
+    }
+
+    @ViewBuilder
+    private var workspaceCompactSummary: some View {
+        switch session.status {
+        case .running:
+            Label("Interactive", systemImage: "terminal")
+                .font(.caption)
+                .foregroundStyle(.teal)
+        case .complete:
+            Label("Branch pushed", systemImage: "arrow.up.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        default:
+            Text(session.status.label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var workerCompactSummary: some View {
         switch session.status {
         case .running:
             if let phase = session.phase {
@@ -171,16 +214,59 @@ public struct SessionCardFinal: View {
             HStack(spacing: 4) {
                 Text(session.profileName)
                     .foregroundStyle(.secondary)
-                Text("·")
-                    .foregroundStyle(.quaternary)
-                Text(session.model)
-                    .foregroundStyle(.tertiary)
+                if !session.isWorkspace {
+                    Text("·")
+                        .foregroundStyle(.quaternary)
+                    Text(session.model)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .font(.caption2)
             .padding(.top, 8)
 
+            // Base branch origin (workspace handoff)
+            if let base = session.baseBranch {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.branch")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.teal)
+                    Text("from \(base)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.teal)
+                }
+            }
+
             // State-specific detail
-            expandedStateContent
+            if session.isWorkspace {
+                workspaceExpandedContent
+            } else {
+                expandedStateContent
+            }
+
+            // Acceptance criteria (compact)
+            if let criteria = session.acceptanceCriteria, !criteria.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("AC (\(criteria.count))")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(criteria.prefix(3).enumerated()), id: \.offset) { _, ac in
+                        HStack(spacing: 4) {
+                            Image(systemName: "square")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.tertiary)
+                            Text(ac)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    if criteria.count > 3 {
+                        Text("+\(criteria.count - 3) more")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
 
             // Diff stats
             if let diff = session.diffStats {
@@ -203,6 +289,53 @@ public struct SessionCardFinal: View {
     }
 
     @ViewBuilder
+    private var workspaceExpandedContent: some View {
+        switch session.status {
+        case .running:
+            VStack(alignment: .leading, spacing: 8) {
+                if let activity = session.latestActivity {
+                    Text(activity)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button {
+                } label: {
+                    Label("Attach Terminal", systemImage: "terminal")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.teal)
+
+                Button {
+                } label: {
+                    Label("Launch Worker", systemImage: "arrow.right.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Create a worker session starting from this workspace's branch")
+            }
+        case .complete:
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Branch pushed — ready for worker", systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                } label: {
+                    Label("Launch Worker", systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.blue)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
     private var expandedStateContent: some View {
         switch session.status {
         case .running:
@@ -213,6 +346,7 @@ public struct SessionCardFinal: View {
                         .foregroundStyle(.secondary)
                 }
                 Button {
+                    Task { await actions.nudge(session.id) }
                 } label: {
                     Label("Nudge", systemImage: "hand.tap")
                         .frame(maxWidth: .infinity)
@@ -237,6 +371,7 @@ public struct SessionCardFinal: View {
                 }
                 HStack(spacing: 6) {
                     Button {
+                        // Reply opens detail panel — tap the card to select it
                     } label: {
                         Label("Reply", systemImage: "arrowshape.turn.up.left")
                             .frame(maxWidth: .infinity)
@@ -245,6 +380,7 @@ public struct SessionCardFinal: View {
                     .controlSize(.small)
                     .tint(.orange)
                     Button {
+                        Task { await actions.nudge(session.id) }
                     } label: {
                         Label("Nudge", systemImage: "hand.tap")
                     }
@@ -264,6 +400,7 @@ public struct SessionCardFinal: View {
                 }
                 HStack(spacing: 6) {
                     Button {
+                        Task { await actions.approve(session.id) }
                     } label: {
                         Label("Approve", systemImage: "checkmark")
                             .frame(maxWidth: .infinity)
@@ -271,7 +408,9 @@ public struct SessionCardFinal: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(.green)
-                    Button("Reject") {}
+                    Button("Reject") {
+                        Task { await actions.reject(session.id, nil) }
+                    }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
@@ -307,6 +446,7 @@ public struct SessionCardFinal: View {
                 }
                 HStack(spacing: 6) {
                     Button {
+                        Task { await actions.retry(session.id) }
                     } label: {
                         Label("Retry", systemImage: "arrow.clockwise")
                             .frame(maxWidth: .infinity)
@@ -391,12 +531,18 @@ public struct SessionCardFinal: View {
     .background(Color(nsColor: .windowBackgroundColor))
 }
 
+#Preview("Workspace pods") {
+    HStack(alignment: .top, spacing: 10) {
+        SessionCardFinal(session: MockData.workspaceActive)
+        SessionCardFinal(session: MockData.workspaceComplete)
+        SessionCardFinal(session: MockData.workerFromWorkspace)
+    }
+    .padding(24)
+    .background(Color(nsColor: .windowBackgroundColor))
+}
+
 #Preview("Mixed fleet") {
-    let sessions: [Session] = [
-        MockData.awaitingInput, MockData.validated, MockData.failed,
-        MockData.running, MockData.runningEarly, MockData.validating,
-        MockData.complete, MockData.killed,
-    ]
+    let sessions: [Session] = MockData.all
     ScrollView {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 10)], alignment: .leading, spacing: 10) {
             ForEach(sessions) { session in

@@ -1,0 +1,156 @@
+import SwiftUI
+
+/// Sidebar with smart groups, profiles, and connection status.
+public struct SidebarView: View {
+    public let sessions: [Session]
+    @Binding public var selection: SidebarItem
+    @Binding public var showCreateSheet: Bool
+    public var isConnected: Bool
+    public var connectionLabel: String
+
+    public init(
+        sessions: [Session],
+        selection: Binding<SidebarItem>,
+        showCreateSheet: Binding<Bool>,
+        isConnected: Bool = true,
+        connectionLabel: String = "localhost:3000"
+    ) {
+        self.sessions = sessions
+        self._selection = selection
+        self._showCreateSheet = showCreateSheet
+        self.isConnected = isConnected
+        self.connectionLabel = connectionLabel
+    }
+
+    private var attentionCount: Int { sessions.filter { $0.status.needsAttention }.count }
+    private var runningCount: Int { sessions.filter { $0.status.isActive && !$0.isWorkspace }.count }
+    private var workspaceCount: Int { sessions.filter { $0.isWorkspace }.count }
+    private var completedCount: Int { sessions.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }.count }
+    private var profiles: [String] { Array(Set(sessions.map(\.profileName))).sorted() }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Connection indicator
+            connectionHeader
+
+            Divider().padding(.bottom, 8)
+
+            // New session button
+            Button {
+                showCreateSheet = true
+            } label: {
+                Label("New Session", systemImage: "plus.circle.fill")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+
+            // Smart groups
+            List(selection: $selection) {
+                Section("Sessions") {
+                    sidebarRow(.attention, icon: "exclamationmark.circle.fill", color: .orange, badge: attentionCount)
+                    sidebarRow(.running, icon: "play.circle.fill", color: .green, badge: runningCount)
+                    sidebarRow(.workspaces, icon: "terminal.fill", color: .teal, badge: workspaceCount)
+                    sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
+                    sidebarRow(.all, icon: "square.grid.2x2", color: .blue, badge: sessions.count)
+                }
+
+                Section("Profiles") {
+                    ForEach(profiles, id: \.self) { profile in
+                        sidebarRow(.profile(profile), icon: "folder.fill", color: .cyan, badge: sessions.filter { $0.profileName == profile }.count)
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+
+            Spacer()
+
+            // Bottom bar — settings
+            Divider()
+            HStack {
+                Button {
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(12)
+        }
+        .frame(minWidth: 180, idealWidth: 200, maxWidth: 220)
+    }
+
+    // MARK: - Connection header
+
+    private var connectionHeader: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(isConnected ? .green : .red)
+                .frame(width: 7, height: 7)
+            Text(connectionLabel)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Row
+
+    private func sidebarRow(_ item: SidebarItem, icon: String, color: Color, badge: Int) -> some View {
+        Label {
+            HStack {
+                Text(item.label)
+                Spacer()
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.system(.caption2).weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(color.opacity(0.12))
+                        .foregroundStyle(color)
+                        .clipShape(Capsule())
+                }
+            }
+        } icon: {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+        }
+        .tag(item)
+    }
+}
+
+// MARK: - Sidebar items
+
+public enum SidebarItem: Hashable {
+    case attention
+    case running
+    case workspaces
+    case completed
+    case all
+    case profile(String)
+
+    public var label: String {
+        switch self {
+        case .attention: "Attention"
+        case .running: "Running"
+        case .workspaces: "Workspaces"
+        case .completed: "Completed"
+        case .all: "All Sessions"
+        case .profile(let name): name
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview("Sidebar") {
+    @Previewable @State var selection: SidebarItem = .attention
+    @Previewable @State var showCreate = false
+    SidebarView(sessions: MockData.all, selection: $selection, showCreateSheet: $showCreate)
+        .frame(height: 500)
+}
