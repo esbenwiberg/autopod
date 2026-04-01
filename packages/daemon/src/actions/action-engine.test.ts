@@ -5,6 +5,28 @@ import { type ActionEngine, createActionEngine } from './action-engine.js';
 import type { ActionRegistry } from './action-registry.js';
 import type { ActionAuditRepository } from './audit-repository.js';
 
+// Prevent real network calls — handlers throw immediately so tests stay fast
+vi.mock('./handlers/github-handler.js', () => ({
+  createGitHubHandler: () => ({
+    execute: vi.fn().mockRejectedValue(new Error('GitHub API unavailable in test environment')),
+  }),
+}));
+vi.mock('./handlers/ado-handler.js', () => ({
+  createAdoHandler: () => ({
+    execute: vi.fn().mockRejectedValue(new Error('ADO API unavailable in test environment')),
+  }),
+}));
+vi.mock('./handlers/azure-logs-handler.js', () => ({
+  createAzureLogsHandler: () => ({
+    execute: vi.fn().mockRejectedValue(new Error('Azure Logs API unavailable in test environment')),
+  }),
+}));
+vi.mock('./generic-http-handler.js', () => ({
+  createGenericHttpHandler: () => ({
+    execute: vi.fn().mockRejectedValue(new Error('HTTP handler unavailable in test environment')),
+  }),
+}));
+
 // ─── Test helpers ───────────────────────────────────────────────
 
 const testAction: ActionDefinition = {
