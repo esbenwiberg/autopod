@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { AuthError } from '@autopod/shared';
 import type { AuthToken } from '@autopod/shared';
 import {
@@ -6,6 +9,15 @@ import {
   writeCredentials,
 } from '../config/credential-store.js';
 import { MsalClient } from './msal-client.js';
+
+/** Read the daemon's dev token written to ~/.autopod/dev-token on first run. */
+function readDevToken(): string | null {
+  try {
+    return readFileSync(join(homedir(), '.autopod', 'dev-token'), 'utf-8').trim();
+  } catch {
+    return null;
+  }
+}
 
 let msalClient: MsalClient | null = null;
 
@@ -25,6 +37,8 @@ export function getMsalClient(): MsalClient {
 export async function getToken(): Promise<string> {
   const creds = readCredentials();
   if (!creds) {
+    const devToken = readDevToken();
+    if (devToken) return devToken;
     throw new AuthError('Not authenticated. Run: ap login');
   }
 

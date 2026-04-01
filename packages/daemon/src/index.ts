@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -98,38 +99,60 @@ const validationRepo = createValidationRepository(db);
 const eventBus = createEventBus(eventRepo, logger);
 
 // Auth module (dev stub — real Entra ID module plugs in for production)
+//
+// In dev mode a random token is generated on first run and written to
+// ~/.autopod/dev-token (chmod 600). The CLI reads it automatically so
+// `ap` commands work without `ap login`. Any other caller must present
+// the same token — "accept any Bearer string" is no longer allowed.
+function getOrCreateDevToken(): string {
+  const dir = path.join(os.homedir(), '.autopod');
+  const tokenPath = path.join(dir, 'dev-token');
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    return fs.readFileSync(tokenPath, 'utf-8').trim();
+  } catch {
+    const token = randomBytes(32).toString('hex');
+    fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+    return token;
+  }
+}
+
+const DEV_TOKEN = IS_DEV ? getOrCreateDevToken() : null;
+if (IS_DEV) {
+  logger.info({ path: path.join(os.homedir(), '.autopod', 'dev-token') }, 'Dev auth token path');
+}
+
+const devPayload = () => ({
+  oid: 'dev-user',
+  preferred_username: 'developer',
+  name: 'Developer',
+  roles: ['admin' as const],
+  aud: 'autopod',
+  iss: 'autopod-dev',
+  exp: Math.floor(Date.now() / 1000) + 3600,
+  iat: Math.floor(Date.now() / 1000),
+});
+
 const authModule: AuthModule = {
-  async validateToken(_token: string) {
-    // Stub: accept any token in dev, reject all in prod
+  async validateToken(token: string) {
     if (!IS_DEV) {
       const { AuthError } = await import('@autopod/shared');
       throw new AuthError('Auth module not configured');
     }
-    return {
-      oid: 'dev-user',
-      preferred_username: 'developer',
-      name: 'Developer',
-      roles: ['admin' as const],
-      aud: 'autopod',
-      iss: 'autopod-dev',
-      exp: Math.floor(Date.now() / 1000) + 3600,
-      iat: Math.floor(Date.now() / 1000),
-    };
+    if (token !== DEV_TOKEN) {
+      const { AuthError } = await import('@autopod/shared');
+      throw new AuthError('Invalid dev token');
+    }
+    return devPayload();
   },
-  validateTokenSync(_token: string) {
+  validateTokenSync(token: string) {
     if (!IS_DEV) {
       throw new Error('Auth module not configured');
     }
-    return {
-      oid: 'dev-user',
-      preferred_username: 'developer',
-      name: 'Developer',
-      roles: ['admin' as const],
-      aud: 'autopod',
-      iss: 'autopod-dev',
-      exp: Math.floor(Date.now() / 1000) + 3600,
-      iat: Math.floor(Date.now() / 1000),
-    };
+    if (token !== DEV_TOKEN) {
+      throw new Error('Invalid dev token');
+    }
+    return devPayload();
   },
 };
 
