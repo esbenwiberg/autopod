@@ -138,21 +138,47 @@ public struct ValidationTab: View {
     _ title: String, icon: String,
     @ViewBuilder content: @escaping () -> Content
   ) -> some View {
-    DisclosureGroup {
-      VStack(alignment: .leading, spacing: 8) {
-        content()
+    CollapsibleSection(title: title, icon: icon, content: content)
+  }
+}
+
+/// Expandable section with its own state — fixes DisclosureGroup not toggling.
+private struct CollapsibleSection<Content: View>: View {
+  let title: String
+  let icon: String
+  @ViewBuilder let content: () -> Content
+  @State private var isExpanded = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Button {
+        withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+      } label: {
+        HStack(spacing: 6) {
+          Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .frame(width: 12)
+          Image(systemName: icon)
+            .font(.system(size: 11))
+            .foregroundStyle(.blue)
+          Text(title)
+            .font(.system(.subheadline).weight(.semibold))
+          Spacer()
+        }
+        .contentShape(Rectangle())
       }
-      .padding(.top, 6)
-    } label: {
-      HStack(spacing: 6) {
-        Image(systemName: icon)
-          .font(.system(size: 11))
-          .foregroundStyle(.blue)
-        Text(title)
-          .font(.system(.subheadline).weight(.semibold))
+      .buttonStyle(.plain)
+      .padding(12)
+
+      if isExpanded {
+        Divider().padding(.horizontal, 12)
+        VStack(alignment: .leading, spacing: 8) {
+          content()
+        }
+        .padding(12)
       }
     }
-    .padding(12)
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
   }

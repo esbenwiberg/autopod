@@ -214,7 +214,7 @@ public struct MainView: View {
     private var cardGrid: some View {
         ScrollView {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 230), spacing: 10)],
+                columns: [GridItem(.adaptive(minimum: 260), spacing: 10)],
                 alignment: .leading,
                 spacing: 10
             ) {

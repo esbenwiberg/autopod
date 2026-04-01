@@ -9,10 +9,7 @@ public struct SessionCardFinal: View {
         self.session = session; self.actions = actions
     }
 
-    @State private var isExpanded = false
     @State private var isHovered = false
-
-    private var showExpandedByDefault: Bool { session.status.needsAttention }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -21,22 +18,10 @@ public struct SessionCardFinal: View {
                 .frame(height: 2.5)
                 .opacity(session.status.needsAttention ? 1 : 0.4)
 
-            VStack(alignment: .leading, spacing: 0) {
-                // Header — always visible, click to toggle
-                compactContent
-                    .contentShape(Rectangle())
-                    .onTapGesture { withAnimation(.spring(duration: 0.25)) { isExpanded.toggle() } }
-
-                // Expanded detail — slides in
-                if isExpanded {
-                    Divider().padding(.horizontal, 4)
-                    expandedContent
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .padding(12)
+            compactContent
+                .padding(12)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .controlBackgroundColor))
@@ -58,9 +43,7 @@ public struct SessionCardFinal: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .scaleEffect(isHovered ? 1.01 : 1.0)
         .animation(.easeOut(duration: 0.15), value: isHovered)
-        .animation(.spring(duration: 0.25), value: isExpanded)
         .onHover { isHovered = $0 }
-        .onAppear { isExpanded = showExpandedByDefault }
     }
 
     // MARK: - Compact (always visible)
