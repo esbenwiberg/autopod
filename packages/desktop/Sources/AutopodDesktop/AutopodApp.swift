@@ -9,6 +9,7 @@ struct AutopodApp: App {
   @State private var profileStore = ProfileStore()
   @State private var actionHandler: ActionHandler?
   @State private var eventStream: EventStream?
+  @State private var terminalManager: TerminalManager?
   @State private var showSetup = false
 
   var body: some Scene {
@@ -19,6 +20,7 @@ struct AutopodApp: App {
         profileStore: profileStore,
         actionHandler: actionHandler,
         eventStream: eventStream,
+        terminalManager: terminalManager,
         showSetup: $showSetup
       )
       .onAppear {
@@ -40,8 +42,12 @@ struct AutopodApp: App {
             await profileStore.loadProfiles()
           }
 
+          // Terminal manager
+          let connToken = KeychainHelper.load(for: conn.id) ?? ""
+          terminalManager = TerminalManager(baseURL: conn.url, token: connToken)
+
           // Start event stream
-          let token = KeychainHelper.load(for: conn.id) ?? ""
+          let token = connToken
           let stream = EventStream(sessionStore: sessionStore)
           stream.connect(baseURL: conn.url, token: token)
           eventStream = stream
@@ -74,6 +80,7 @@ struct AppRootView: View {
   let profileStore: ProfileStore
   let actionHandler: ActionHandler?
   let eventStream: EventStream?
+  let terminalManager: TerminalManager?
   @Binding var showSetup: Bool
 
   @State private var showError = false
@@ -93,6 +100,12 @@ struct AppRootView: View {
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
       sessionEvents: eventStream?.sessionEvents ?? [:],
+      sessionDiffs: sessionStore.sessionDiffs,
+      terminalOutput: terminalManager?.output ?? "",
+      terminalState: terminalManager?.state ?? "disconnected",
+      onTerminalInput: { text in terminalManager?.sendInput(text) },
+      onTerminalConnect: { sessionId in terminalManager?.connect(sessionId: sessionId) },
+      onTerminalDisconnect: { terminalManager?.disconnect() },
       onRefresh: {
         await sessionStore.loadSessions()
         await profileStore.loadProfiles()
@@ -104,6 +117,8 @@ struct AppRootView: View {
         }
         if let id = sessionId {
           eventStream?.subscribeToSession(id)
+          // Load diff for the selected session
+          Task { await sessionStore.loadDiff(id) }
         }
       }
     )

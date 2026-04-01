@@ -5,8 +5,27 @@ public struct DetailPanelView: View {
     public let session: Session
     public let events: [AgentEvent]
     public var actions: SessionActions
-    public init(session: Session, events: [AgentEvent], actions: SessionActions = .preview) {
+    public var diffString: String?
+    public var terminalOutput: String
+    public var terminalState: String
+    public var onTerminalInput: ((String) -> Void)?
+    public var onTerminalConnect: (() -> Void)?
+    public var onTerminalDisconnect: (() -> Void)?
+
+    public init(
+        session: Session, events: [AgentEvent], actions: SessionActions = .preview,
+        diffString: String? = nil,
+        terminalOutput: String = "", terminalState: String = "disconnected",
+        onTerminalInput: ((String) -> Void)? = nil,
+        onTerminalConnect: (() -> Void)? = nil,
+        onTerminalDisconnect: (() -> Void)? = nil
+    ) {
         self.session = session; self.events = events; self.actions = actions
+        self.diffString = diffString
+        self.terminalOutput = terminalOutput; self.terminalState = terminalState
+        self.onTerminalInput = onTerminalInput
+        self.onTerminalConnect = onTerminalConnect
+        self.onTerminalDisconnect = onTerminalDisconnect
     }
 
     @State private var selectedTab: DetailTab = .overview
@@ -26,8 +45,15 @@ public struct DetailPanelView: View {
                 switch selectedTab {
                 case .overview:  OverviewTab(session: session, events: events, actions: actions)
                 case .logs:      LogStreamView(events: events, sessionBranch: session.branch)
-                case .diff:      DiffTab(session: session)
-                case .terminal:  TerminalTab(session: session)
+                case .diff:      DiffTab(session: session, diffString: diffString)
+                case .terminal:  TerminalTab(
+                    session: session,
+                    terminalOutput: terminalOutput,
+                    terminalState: terminalState,
+                    onInput: onTerminalInput,
+                    onConnect: onTerminalConnect,
+                    onDisconnect: onTerminalDisconnect
+                )
                 case .validation: ValidationTab(session: session)
                 }
             }

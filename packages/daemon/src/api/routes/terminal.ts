@@ -1,5 +1,5 @@
-import type { FastifyInstance } from 'fastify';
 import type Dockerode from 'dockerode';
+import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../../interfaces/index.js';
 import type { ContainerManagerFactory, SessionManager } from '../../sessions/session-manager.js';
@@ -29,8 +29,8 @@ export function terminalRoutes(
       const { sessionId } = request.params as { sessionId: string };
       const url = new URL(request.url, 'http://localhost');
       const token = url.searchParams.get('token');
-      const cols = parseInt(url.searchParams.get('cols') ?? '80', 10);
-      const rows = parseInt(url.searchParams.get('rows') ?? '24', 10);
+      const cols = Number.parseInt(url.searchParams.get('cols') ?? '80', 10);
+      const rows = Number.parseInt(url.searchParams.get('rows') ?? '24', 10);
 
       // Auth
       if (!token) {
@@ -58,7 +58,11 @@ export function terminalRoutes(
         return;
       }
 
-      if (session.status !== 'running' && session.status !== 'paused' && session.status !== 'awaiting_input') {
+      if (
+        session.status !== 'running' &&
+        session.status !== 'paused' &&
+        session.status !== 'awaiting_input'
+      ) {
         socket.close(4004, `Container not active (status: ${session.status})`);
         return;
       }
@@ -94,12 +98,15 @@ export function terminalRoutes(
 
           stream.on('end', () => {
             // Exec finished — close WebSocket with exit code
-            exec.inspect().then((info) => {
-              const exitCode = info.ExitCode ?? 0;
-              socket.close(1000, `exit:${exitCode}`);
-            }).catch(() => {
-              socket.close(1000, 'exit:0');
-            });
+            exec
+              .inspect()
+              .then((info) => {
+                const exitCode = info.ExitCode ?? 0;
+                socket.close(1000, `exit:${exitCode}`);
+              })
+              .catch(() => {
+                socket.close(1000, 'exit:0');
+              });
           });
 
           stream.on('error', (err: Error) => {
@@ -113,7 +120,11 @@ export function terminalRoutes(
               // Try to parse as JSON control message
               try {
                 const msg = JSON.parse(data);
-                if (msg.type === 'resize' && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+                if (
+                  msg.type === 'resize' &&
+                  typeof msg.cols === 'number' &&
+                  typeof msg.rows === 'number'
+                ) {
                   // Resize the TTY
                   exec.resize({ h: msg.rows, w: msg.cols }).catch((err: Error) => {
                     request.log.warn({ err, sessionId }, 'Terminal resize failed');

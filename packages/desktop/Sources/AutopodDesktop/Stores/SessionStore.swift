@@ -14,6 +14,9 @@ public final class SessionStore {
   public private(set) var isLoading = false
   public private(set) var error: String?
 
+  /// Cached diff strings keyed by session ID
+  public private(set) var sessionDiffs: [String: String] = [:]
+
   // MARK: - Computed groupings
 
   public var selectedSession: Session? {
@@ -69,6 +72,20 @@ public final class SessionStore {
       }
     } catch {
       // Silent refresh failure — don't overwrite existing data
+    }
+  }
+
+  // MARK: - Diff
+
+  public func loadDiff(_ sessionId: String) async {
+    guard let api else { return }
+    do {
+      let response = try await api.getSessionDiff(sessionId)
+      // Reconstruct the raw diff string from structured files
+      let raw = response.files.map(\.diff).joined(separator: "\n")
+      sessionDiffs[sessionId] = raw
+    } catch {
+      // Diff not available — that's fine, it'll show empty state
     }
   }
 

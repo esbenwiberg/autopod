@@ -10,6 +10,12 @@ public struct MainView: View {
     public var actions: SessionActions
     public var profileNames: [String]
     public var sessionEvents: [String: [AgentEvent]]
+    public var sessionDiffs: [String: String]
+    public var terminalOutput: String
+    public var terminalState: String
+    public var onTerminalInput: ((String) -> Void)?
+    public var onTerminalConnect: ((String) -> Void)?
+    public var onTerminalDisconnect: (() -> Void)?
     public var onRefresh: (() async -> Void)?
     public var onSelectSession: ((String?) -> Void)?
 
@@ -25,6 +31,12 @@ public struct MainView: View {
         actions: SessionActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
         sessionEvents: [String: [AgentEvent]] = [:],
+        sessionDiffs: [String: String] = [:],
+        terminalOutput: String = "",
+        terminalState: String = "disconnected",
+        onTerminalInput: ((String) -> Void)? = nil,
+        onTerminalConnect: ((String) -> Void)? = nil,
+        onTerminalDisconnect: (() -> Void)? = nil,
         onRefresh: (() async -> Void)? = nil,
         onSelectSession: ((String?) -> Void)? = nil
     ) {
@@ -37,6 +49,12 @@ public struct MainView: View {
         self.actions = actions
         self.profileNames = profileNames
         self.sessionEvents = sessionEvents
+        self.sessionDiffs = sessionDiffs
+        self.terminalOutput = terminalOutput
+        self.terminalState = terminalState
+        self.onTerminalInput = onTerminalInput
+        self.onTerminalConnect = onTerminalConnect
+        self.onTerminalDisconnect = onTerminalDisconnect
         self.onRefresh = onRefresh
         self.onSelectSession = onSelectSession
     }
@@ -82,7 +100,13 @@ public struct MainView: View {
                 DetailPanelView(
                     session: session,
                     events: eventsForSession(session),
-                    actions: actions
+                    actions: actions,
+                    diffString: sessionDiffs[session.id],
+                    terminalOutput: terminalOutput,
+                    terminalState: terminalState,
+                    onTerminalInput: onTerminalInput,
+                    onTerminalConnect: { onTerminalConnect?(session.id) },
+                    onTerminalDisconnect: onTerminalDisconnect
                 )
             } else {
                 emptyDetail

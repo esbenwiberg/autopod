@@ -114,6 +114,10 @@ public actor DaemonAPI {
     try await request("GET", "/sessions/\(id)/validations")
   }
 
+  public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
+    try await request("GET", "/sessions/\(id)/diff")
+  }
+
   public func getReportToken(_ id: String) async throws -> (token: String?, reportUrl: String) {
     let res: ReportTokenResponse = try await request("GET", "/sessions/\(id)/report/token")
     return (res.token, res.reportUrl)
