@@ -81,6 +81,8 @@ export function rowToProfile(
     privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
     registryPat: decryptPat(row.registry_pat),
     containerMemoryGb: (row.container_memory_gb as number | null) ?? null,
+    buildTimeout: (row.build_timeout as number | null) ?? 300,
+    testTimeout: (row.test_timeout as number | null) ?? 600,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -187,6 +189,7 @@ export function createProfileStore(
           extends, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
           private_registries, registry_pat, container_memory_gb,
+          build_timeout, test_timeout,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
@@ -195,6 +198,7 @@ export function createProfileStore(
           @extends, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
           @privateRegistries, @registryPat, @containerMemoryGb,
+          @buildTimeout, @testTimeout,
           @createdAt, @updatedAt
         )
       `).run({
@@ -229,6 +233,8 @@ export function createProfileStore(
         privateRegistries: JSON.stringify(parsed.privateRegistries),
         registryPat: encryptPat(parsed.registryPat),
         containerMemoryGb: parsed.containerMemoryGb ?? null,
+        buildTimeout: parsed.buildTimeout,
+        testTimeout: parsed.testTimeout,
         createdAt: now,
         updatedAt: now,
       });
@@ -399,6 +405,14 @@ export function createProfileStore(
       if (parsed.containerMemoryGb !== undefined) {
         setClauses.push('container_memory_gb = @containerMemoryGb');
         fieldMap.containerMemoryGb = parsed.containerMemoryGb ?? null;
+      }
+      if (parsed.buildTimeout !== undefined) {
+        setClauses.push('build_timeout = @buildTimeout');
+        fieldMap.buildTimeout = parsed.buildTimeout;
+      }
+      if (parsed.testTimeout !== undefined) {
+        setClauses.push('test_timeout = @testTimeout');
+        fieldMap.testTimeout = parsed.testTimeout;
       }
 
       if (setClauses.length === 0) {

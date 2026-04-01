@@ -82,6 +82,7 @@ function getSessionHotkeys(status: SessionStatus | null, ctx: SessionHotkeyConte
     case 'killed':
       contextual.push({ key: 'l', label: 'logs' });
       if (ctx.hasValidationResult) contextual.push({ key: 'w', label: 'report' });
+      contextual.push({ key: 'v', label: 'validate' });
       contextual.push({ key: 'R', label: 'retry' });
       contextual.push({ key: 'D', label: 'delete' });
       break;

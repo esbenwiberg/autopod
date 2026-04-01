@@ -411,7 +411,10 @@ function collectDemuxedOutput(
         if ('destroy' in stream && typeof (stream as any).destroy === 'function') {
           (stream as any).destroy();
         }
-        settle(new Error(`Exec timed out after ${timeout}ms`));
+        const partialOutput = [stdoutBuf, stderrBuf].filter(Boolean).join('\n').slice(-5_000);
+        const err = new Error(`Exec timed out after ${timeout}ms`);
+        (err as any).partialOutput = partialOutput;
+        settle(err);
       }, timeout);
     }
   });

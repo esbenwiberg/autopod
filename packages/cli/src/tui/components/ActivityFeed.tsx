@@ -97,7 +97,9 @@ function collapseRepeats(events: AgentEvent[]): CollapsedEvent[] {
 }
 
 export function ActivityFeed({ events, maxLines }: ActivityFeedProps): React.ReactElement {
-  const collapsed = collapseRepeats(events);
+  // Filter out tool_result noise before collapsing
+  const meaningful = events.filter((e) => !(e.type === 'tool_use' && e.tool === 'tool_result'));
+  const collapsed = collapseRepeats(meaningful);
   const visibleEvents = collapsed.slice(-maxLines).reverse();
 
   if (visibleEvents.length === 0) {

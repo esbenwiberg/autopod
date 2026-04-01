@@ -209,14 +209,13 @@ export class ClaudeRuntime implements Runtime {
       config.model,
       '--output-format',
       'stream-json',
+      '--verbose',
       '--permission-mode',
       'bypassPermissions',
     ];
 
-    // Only add verbose/debug when explicitly requested — on long sessions these flags
-    // bloat the conversation context, compounding API latency on every subsequent turn.
     if (process.env.AUTOPOD_DEBUG_AGENT === '1') {
-      args.push('--verbose', '--debug');
+      args.push('--debug');
     }
 
     // Deterministic session ID for tracking
@@ -247,12 +246,13 @@ export class ClaudeRuntime implements Runtime {
       message,
       '--output-format',
       'stream-json',
+      '--verbose',
       '--permission-mode',
       'bypassPermissions',
     ];
 
     if (process.env.AUTOPOD_DEBUG_AGENT === '1') {
-      args.push('--verbose', '--debug');
+      args.push('--debug');
     }
 
     if (claudeSessionId) {

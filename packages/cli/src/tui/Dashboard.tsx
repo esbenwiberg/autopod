@@ -320,7 +320,7 @@ export function Dashboard({
         }
       },
       v: () => {
-        if (currentSession?.status === 'failed' && currentSessionId) {
+        if ((currentSession?.status === 'failed' || currentSession?.status === 'killed') && currentSessionId) {
           void client.triggerValidation(currentSessionId).catch(() => {
             showToast('Failed to trigger validation', 'red');
           });
@@ -366,8 +366,17 @@ export function Dashboard({
       },
       w: () => {
         if (selectedSession?.lastValidationResult) {
-          const reportUrl = `${daemonUrl.replace(/\/$/, '')}/sessions/${selectedSession.id}/report`;
-          openUrl(reportUrl);
+          void client
+            .getReportToken(selectedSession.id)
+            .then((res) => {
+              const base = daemonUrl.replace(/\/$/, '');
+              openUrl(`${base}${res.reportUrl}`);
+            })
+            .catch(() => {
+              // Fallback: open without token (will work in dev mode)
+              const reportUrl = `${daemonUrl.replace(/\/$/, '')}/sessions/${selectedSession.id}/report`;
+              openUrl(reportUrl);
+            });
         }
       },
       '<': () => {
@@ -681,38 +690,51 @@ function ActivityLogOverlay({
     }
   }
 
+  // Filter out tool_result noise — they just echo tool_use_id with no useful info
+  const displayEvents = tail.filter(
+    (e) => !(e.type === 'tool_use' && e.tool === 'tool_result'),
+  );
+
   return (
     <Box flexDirection="column">
-      {tail.map((event, i) => {
+      {displayEvents.map((event, i) => {
         const ts = new Date(event.timestamp).toLocaleTimeString();
         const isStreak = streakIndices.has(i);
+        let tag: string;
         let detail: string;
         switch (event.type) {
           case 'status':
+            tag = 'status';
             detail = event.message;
             break;
           case 'tool_use':
+            tag = 'tool';
             detail = formatToolUse(event.tool, event.input, 90);
             break;
           case 'file_change':
-            detail = `${event.action} ${event.path}`;
+            tag = event.action;
+            detail = event.path;
             break;
           case 'complete':
+            tag = 'done';
             detail = event.result;
             break;
           case 'error':
+            tag = event.fatal ? 'FATAL' : 'error';
             detail = event.message;
             break;
           case 'escalation':
+            tag = 'escalation';
             detail = `${event.escalationType}: ${'question' in event.payload ? event.payload.question : ''}`;
             break;
           default:
-            detail = event.type;
+            tag = event.type;
+            detail = '';
         }
         return (
           <Text key={`log-${i}`} dimColor={!isStreak} wrap="truncate">
             {isStreak ? '\u26A0 ' : ''}
-            {ts} [{event.type}] {detail}
+            {ts} [{tag}] {detail}
           </Text>
         );
       })}

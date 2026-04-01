@@ -14,6 +14,10 @@ export interface ValidationEngineConfig {
   diff: string;
   reviewerModel?: string;
   testCommand?: string | null;
+  /** Build phase timeout in ms. Default 300_000 (5 min). */
+  buildTimeout?: number;
+  /** Test phase timeout in ms. Default 600_000 (10 min). */
+  testTimeout?: number;
   acceptanceCriteria?: string[];
   /** Repo-specific review rules loaded from e.g. skills/code-review.md in the worktree */
   codeReviewSkill?: string;

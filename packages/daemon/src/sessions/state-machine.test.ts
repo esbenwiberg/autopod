@@ -29,6 +29,14 @@ describe('state-machine', () => {
       expect(() => validateTransition('s1', 'failed', 'killing')).not.toThrow();
     });
 
+    it('allows re-validation from failed state', () => {
+      expect(() => validateTransition('s1', 'failed', 'validating')).not.toThrow();
+    });
+
+    it('allows re-validation from killed state', () => {
+      expect(() => validateTransition('s1', 'killed', 'validating')).not.toThrow();
+    });
+
     it('throws InvalidStateTransitionError for invalid transitions', () => {
       expect(() => validateTransition('s1', 'queued', 'running')).toThrow(
         InvalidStateTransitionError,

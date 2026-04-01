@@ -3,7 +3,15 @@ dist/
 .turbo/
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 .env
 .env.local
 coverage/
 .pnpm-store/
+.DS_Store
+*.key
+packages/desktop/.build/
+packages/desktop/.swiftpm/xcode/xcuserdata/
+packages/desktop/Autopod.xcodeproj/xcuserdata/
+packages/desktop/Autopod.xcodeproj/project.xcworkspace/

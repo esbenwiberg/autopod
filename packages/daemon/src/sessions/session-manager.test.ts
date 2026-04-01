@@ -127,7 +127,11 @@ function createMockContainerManager(): ContainerManager {
   return {
     spawn: vi.fn(async () => 'container-123'),
     kill: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+    start: vi.fn(async () => {}),
+    refreshFirewall: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
+    readFile: vi.fn(async () => ''),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     execStreaming: vi.fn(),
@@ -812,7 +816,7 @@ describe('SessionManager', () => {
       await manager.processSession(session.id);
 
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
-      const nugetCall = writeCalls.find(([, path]) => path === '/workspace/NuGet.config');
+      const nugetCall = writeCalls.find(([, path]) => path.toLowerCase() === '/workspace/nuget.config');
       expect(nugetCall).toBeDefined();
       const content = nugetCall![2] as string;
       expect(content).toContain('<packageSources>');
@@ -849,7 +853,7 @@ describe('SessionManager', () => {
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
       const writtenPaths = writeCalls.map(([, path]) => path);
       expect(writtenPaths).toContain('/workspace/.npmrc');
-      expect(writtenPaths).toContain('/workspace/NuGet.config');
+      expect(writtenPaths.some((p) => p.toLowerCase() === '/workspace/nuget.config')).toBe(true);
     });
 
     it('does not write registry files when profile has no registries', async () => {
@@ -1255,6 +1259,50 @@ describe('SessionManager', () => {
       // No resume — max retries exhausted on this attempt
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
       expect(manager.getSession(session.id).status).toBe('failed');
+    });
+  });
+
+  describe('re-validation from terminal states', () => {
+    it('allows re-validation from killed state and resets attempt counter', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, {
+        status: 'killed',
+        containerId: 'ctr-1',
+        validationAttempts: 3,
+      });
+
+      await manager.triggerValidation(session.id, { force: true });
+
+      const result = manager.getSession(session.id);
+      expect(result.status).toBe('validated');
+      expect(result.validationAttempts).toBe(1);
+    });
+
+    it('resets attempt counter when re-validating from failed state', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        validationAttempts: 3,
+      });
+
+      await manager.triggerValidation(session.id, { force: true });
+
+      const result = manager.getSession(session.id);
+      expect(result.status).toBe('validated');
+      expect(result.validationAttempts).toBe(1);
     });
   });
 

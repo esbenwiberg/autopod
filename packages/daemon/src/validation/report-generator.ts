@@ -8,6 +8,8 @@ import type { StoredValidation } from '../sessions/validation-repository.js';
 export function generateValidationReport(
   session: Session,
   validations: StoredValidation[],
+  /** Session-scoped auth token — passed to preview API calls */
+  sessionToken?: string,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -43,13 +45,20 @@ export function generateValidationReport(
     ${validations.length > 0 ? `showTab(${validations[validations.length - 1].attempt});` : ''}
 
     // ── Preview controls ──
+    var _sessionToken = ${sessionToken ? `'${escapeHtml(sessionToken)}'` : 'null'};
+    function _previewUrl(path) {
+      var url = window.location.origin + path;
+      if (_sessionToken) url += (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(_sessionToken);
+      return url;
+    }
+
     async function startPreview() {
       const btn = document.getElementById('preview-start-btn');
       const status = document.getElementById('preview-status');
       if (btn) btn.disabled = true;
       if (btn) btn.textContent = 'Starting…';
       try {
-        const res = await fetch(window.location.origin + '/sessions/${escapeHtml(session.id)}/preview', { method: 'POST' });
+        const res = await fetch(_previewUrl('/sessions/${escapeHtml(session.id)}/preview'), { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed to start preview');
         if (status) status.innerHTML = 'Preview running at <a href="' + data.previewUrl + '" target="_blank" class="text-blue-600 underline">' + data.previewUrl + '</a>';
@@ -70,7 +79,7 @@ export function generateValidationReport(
       if (btn) btn.disabled = true;
       if (btn) btn.textContent = 'Stopping…';
       try {
-        const res = await fetch(window.location.origin + '/sessions/${escapeHtml(session.id)}/preview', { method: 'DELETE' });
+        const res = await fetch(_previewUrl('/sessions/${escapeHtml(session.id)}/preview'), { method: 'DELETE' });
         if (!res.ok) { const data = await res.json(); throw new Error(data.message || 'Failed to stop preview'); }
         if (status) status.textContent = 'Preview stopped';
         if (btn) btn.textContent = 'Stop Preview';

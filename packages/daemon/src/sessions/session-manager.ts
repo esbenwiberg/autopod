@@ -38,7 +38,11 @@ import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask } from './recovery-context.js';
-import { buildRegistryFiles } from './registry-injector.js';
+import {
+  buildRegistryFiles,
+  detectNuGetConfigPath,
+  validateRegistryFiles,
+} from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
 import { resolveSkills } from './skill-resolver.js';
@@ -150,7 +154,7 @@ export interface SessionManager {
   nudgeSession(sessionId: string, message: string): void;
   killSession(sessionId: string): Promise<void>;
   completeSession(sessionId: string): Promise<{ pushError?: string }>;
-  triggerValidation(sessionId: string): Promise<void>;
+  triggerValidation(sessionId: string, options?: { force?: boolean }): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
   startPreview(sessionId: string): Promise<{ previewUrl: string }>;
   stopPreview(sessionId: string): Promise<void>;
@@ -294,6 +298,14 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
     }
     return { SESSION_ID: session.id, ...result.env };
+  }
+
+  function touchHeartbeat(sessionId: string): void {
+    try {
+      sessionRepo.update(sessionId, { lastHeartbeatAt: new Date().toISOString() });
+    } catch {
+      // Best-effort — don't crash on heartbeat failures
+    }
   }
 
   function emitActivityStatus(sessionId: string, message: string): void {
@@ -618,13 +630,38 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         // Write private registry config files (.npmrc / NuGet.config)
-        const registryFiles = buildRegistryFiles(profile.privateRegistries, profile.registryPat);
+        const hasNuget = profile.privateRegistries.some((r) => r.type === 'nuget');
+        const nugetConfigPath = hasNuget
+          ? await detectNuGetConfigPath(containerManager, containerId)
+          : undefined;
+        const registryFiles = buildRegistryFiles(
+          profile.privateRegistries,
+          profile.registryPat,
+          nugetConfigPath,
+        );
         for (const file of registryFiles) {
           await containerManager.writeFile(containerId, file.path, file.content);
           logger.info(
             { sessionId, path: file.path, bytes: file.content.length },
             'Wrote registry config file to container',
           );
+        }
+
+        // Early validation: verify registry configs are parseable before agent starts
+        if (registryFiles.length > 0) {
+          try {
+            await validateRegistryFiles(containerManager, containerId, registryFiles);
+            logger.info({ sessionId }, 'Registry config validation passed');
+          } catch (regErr) {
+            logger.error(
+              { sessionId, err: regErr },
+              'Registry config validation failed — session will likely fail at build time',
+            );
+            emitActivityStatus(
+              sessionId,
+              `⚠ Registry config check failed: ${(regErr as Error).message}`,
+            );
+          }
         }
 
         // Start the agent — recovery mode uses resume for Claude, fresh spawn for others
@@ -1175,12 +1212,19 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       return { pushError };
     },
 
-    async triggerValidation(sessionId: string): Promise<void> {
+    async triggerValidation(sessionId: string, options?: { force?: boolean }): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
       const profile = profileStore.get(session.profileName);
+      const force = options?.force ?? false;
+
+      // Reset attempt counter when re-validating from a terminal/failed state
+      const fromTerminal = session.status === 'failed' || session.status === 'killed';
+      if (fromTerminal) {
+        sessionRepo.update(sessionId, { validationAttempts: 0 });
+      }
 
       const s1 = transition(session, 'validating');
-      const attempt = s1.validationAttempts + 1;
+      const attempt = (fromTerminal ? 0 : s1.validationAttempts) + 1;
       sessionRepo.update(sessionId, { validationAttempts: attempt });
 
       eventBus.emit({
@@ -1195,6 +1239,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       try {
         if (!session.containerId) {
           throw new Error(`Session ${sessionId} has no container — cannot validate`);
+        }
+
+        // Restart the container if it was stopped (e.g. after max attempts exhausted)
+        if (force) {
+          const cm = containerManagerFactory.get(session.executionTarget);
+          await cm.start(session.containerId);
         }
 
         // Get the actual diff and commit log for AI task review
@@ -1225,6 +1275,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             task: session.task,
             diff,
             testCommand: profile.testCommand,
+            buildTimeout: profile.buildTimeout * 1_000,
+            testTimeout: profile.testTimeout * 1_000,
             reviewerModel: profile.escalation.askAi.model,
             acceptanceCriteria: session.acceptanceCriteria ?? undefined,
             codeReviewSkill,
@@ -1397,7 +1449,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               logger.warn({ err, sessionId }, 'Failed to stop container post-validation');
             }
           }
-        } else if (attempt < profile.maxValidationAttempts) {
+        } else if (force || attempt < profile.maxValidationAttempts) {
           emitActivityStatus(
             sessionId,
             `Validation failed (attempt ${attempt}/${profile.maxValidationAttempts}) — retrying`,
@@ -1470,13 +1522,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
     },
 
-    touchHeartbeat(sessionId: string): void {
-      try {
-        sessionRepo.update(sessionId, { lastHeartbeatAt: new Date().toISOString() });
-      } catch {
-        // Best-effort — don't crash on heartbeat failures
-      }
-    },
+    touchHeartbeat,
 
     async deleteSession(sessionId: string): Promise<void> {
       clearPreviewTimer(sessionId);

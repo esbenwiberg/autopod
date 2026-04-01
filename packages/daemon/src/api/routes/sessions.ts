@@ -1,9 +1,14 @@
 import { createSessionRequestSchema, sendMessageSchema } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
+import type { SessionTokenIssuer } from '../../crypto/session-tokens.js';
 import type { SessionManager } from '../../sessions/index.js';
 import { generateValidationReport } from '../../validation/report-generator.js';
 
-export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManager): void {
+export function sessionRoutes(
+  app: FastifyInstance,
+  sessionManager: SessionManager,
+  sessionTokenIssuer?: SessionTokenIssuer,
+): void {
   // POST /sessions — create a new session
   app.post('/sessions', async (request, reply) => {
     const body = createSessionRequestSchema.parse(request.body);
@@ -60,19 +65,39 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
     return sessionManager.getValidationHistory(sessionId);
   });
 
-  // GET /sessions/:sessionId/report — HTML validation report
-  app.get('/sessions/:sessionId/report', async (request, reply) => {
+  // GET /sessions/:sessionId/report — HTML validation report (session-token auth)
+  app.get(
+    '/sessions/:sessionId/report',
+    { config: { auth: 'session-token' } },
+    async (request, reply) => {
+      const { sessionId } = request.params as { sessionId: string };
+      const queryToken = (request.query as Record<string, string>)?.token;
+      const session = sessionManager.getSession(sessionId);
+      const validations = sessionManager.getValidationHistory(sessionId);
+      const html = generateValidationReport(session, validations, queryToken);
+      reply.type('text/html').send(html);
+    },
+  );
+
+  // GET /sessions/:sessionId/report/token — generate a session token for report access
+  app.get('/sessions/:sessionId/report/token', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
-    const session = sessionManager.getSession(sessionId);
-    const validations = sessionManager.getValidationHistory(sessionId);
-    const html = generateValidationReport(session, validations);
-    reply.type('text/html').send(html);
+    // Verify session exists
+    sessionManager.getSession(sessionId);
+    if (!sessionTokenIssuer) {
+      return { token: null, reportUrl: `/sessions/${sessionId}/report` };
+    }
+    const token = sessionTokenIssuer.generate(sessionId);
+    return {
+      token,
+      reportUrl: `/sessions/${sessionId}/report?token=${encodeURIComponent(token)}`,
+    };
   });
 
   // POST /sessions/:sessionId/validate — trigger validation
   app.post('/sessions/:sessionId/validate', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
-    await sessionManager.triggerValidation(sessionId);
+    await sessionManager.triggerValidation(sessionId, { force: true });
     return { ok: true };
   });
 
@@ -131,18 +156,26 @@ export function sessionRoutes(app: FastifyInstance, sessionManager: SessionManag
     return { ok: true };
   });
 
-  // POST /sessions/:sessionId/preview — start preview (restart stopped container)
-  app.post('/sessions/:sessionId/preview', async (request) => {
-    const { sessionId } = request.params as { sessionId: string };
-    return sessionManager.startPreview(sessionId);
-  });
+  // POST /sessions/:sessionId/preview — start preview (session-token auth)
+  app.post(
+    '/sessions/:sessionId/preview',
+    { config: { auth: 'session-token' } },
+    async (request) => {
+      const { sessionId } = request.params as { sessionId: string };
+      return sessionManager.startPreview(sessionId);
+    },
+  );
 
-  // DELETE /sessions/:sessionId/preview — stop preview (stop running container)
-  app.delete('/sessions/:sessionId/preview', async (request) => {
-    const { sessionId } = request.params as { sessionId: string };
-    await sessionManager.stopPreview(sessionId);
-    return { ok: true };
-  });
+  // DELETE /sessions/:sessionId/preview — stop preview (session-token auth)
+  app.delete(
+    '/sessions/:sessionId/preview',
+    { config: { auth: 'session-token' } },
+    async (request) => {
+      const { sessionId } = request.params as { sessionId: string };
+      await sessionManager.stopPreview(sessionId);
+      return { ok: true };
+    },
+  );
 
   // DELETE /sessions/:sessionId — delete a terminal session
   app.delete('/sessions/:sessionId', async (request, reply) => {

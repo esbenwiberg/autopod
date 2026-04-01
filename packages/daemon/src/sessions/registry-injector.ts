@@ -1,5 +1,7 @@
 import type { PrivateRegistry } from '@autopod/shared';
 
+import type { ContainerManager } from '../interfaces/container-manager.js';
+
 export interface RegistryFile {
   /** Absolute path inside the container */
   path: string;
@@ -16,6 +18,7 @@ export interface RegistryFile {
 export function buildRegistryFiles(
   registries: PrivateRegistry[],
   pat: string | null,
+  nugetConfigPath = '/workspace/nuget.config',
 ): RegistryFile[] {
   if (registries.length === 0 || !pat) return [];
 
@@ -33,12 +36,40 @@ export function buildRegistryFiles(
 
   if (nugetRegistries.length > 0) {
     files.push({
-      path: '/workspace/NuGet.config',
+      path: nugetConfigPath,
       content: generateNuGetConfig(nugetRegistries, pat),
     });
   }
 
   return files;
+}
+
+/**
+ * Detect the existing NuGet config file path in the container workspace.
+ * .NET SDK searches case-insensitively, so we must match the repo's casing
+ * to avoid creating a second file that causes confusion.
+ *
+ * Returns the detected path or the default lowercase path.
+ */
+export async function detectNuGetConfigPath(
+  containerManager: ContainerManager,
+  containerId: string,
+): Promise<string> {
+  try {
+    // List files matching any NuGet.Config casing in the workspace root
+    const result = await containerManager.execInContainer(
+      containerId,
+      ['sh', '-c', 'ls /workspace/[Nn][Uu][Gg][Ee][Tt].[Cc][Oo][Nn][Ff][Ii][Gg] 2>/dev/null'],
+      { timeout: 5_000 },
+    );
+    const existing = result.stdout.trim().split('\n').filter(Boolean);
+    if (existing.length > 0) {
+      return existing[0]; // Match the existing casing
+    }
+  } catch {
+    // Container probe failed — fall through to default
+  }
+  return '/workspace/nuget.config';
 }
 
 /**
@@ -101,10 +132,10 @@ export function generateNuGetConfig(registries: PrivateRegistry[], pat: string):
 
   for (const reg of registries) {
     const name = deriveFeedName(reg.url);
-    lines.push(`    <${escapeXml(name)}>`);
+    lines.push(`    <${name}>`);
     lines.push('      <add key="Username" value="autopod" />');
     lines.push(`      <add key="ClearTextPassword" value="${escapeXml(pat)}" />`);
-    lines.push(`    </${escapeXml(name)}>`);
+    lines.push(`    </${name}>`);
   }
 
   lines.push('  </packageSourceCredentials>');
@@ -112,6 +143,50 @@ export function generateNuGetConfig(registries: PrivateRegistry[], pat: string):
   lines.push('');
 
   return lines.join('\n');
+}
+
+/**
+ * Validate that registry config files written to the container are functional.
+ * Runs early — right after writing — so we fail fast instead of discovering
+ * broken configs hours later during validation.
+ *
+ * Throws if any check fails with a descriptive error.
+ */
+export async function validateRegistryFiles(
+  containerManager: ContainerManager,
+  containerId: string,
+  registryFiles: RegistryFile[],
+): Promise<void> {
+  for (const file of registryFiles) {
+    if (file.path.endsWith('.npmrc')) {
+      // Quick check: npm config parse
+      const result = await containerManager.execInContainer(
+        containerId,
+        ['sh', '-c', `npm config list --location=project 2>&1`],
+        { cwd: '/workspace', timeout: 15_000 },
+      );
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `Registry check failed: .npmrc is invalid — npm config list exited ${result.exitCode}: ${result.stderr.slice(0, 500)}`,
+        );
+      }
+    }
+
+    if (file.path.toLowerCase().endsWith('nuget.config')) {
+      // Check 1: XML is parseable (dotnet nuget list source reads the config)
+      const result = await containerManager.execInContainer(
+        containerId,
+        ['sh', '-c', `dotnet nuget list source --configfile ${file.path} 2>&1`],
+        { cwd: '/workspace', timeout: 30_000 },
+      );
+      if (result.exitCode !== 0) {
+        const output = `${result.stdout}\n${result.stderr}`.trim();
+        throw new Error(
+          `Registry check failed: ${file.path} is invalid — dotnet nuget list source exited ${result.exitCode}: ${output.slice(0, 500)}`,
+        );
+      }
+    }
+  }
 }
 
 /** Ensure URL ends with / (required for npm registry URLs) */
@@ -141,13 +216,31 @@ function deriveFeedName(url: string): string {
       const parsed = new URL(url);
       const segments = parsed.pathname.split('/').filter(Boolean);
       const last = segments.at(-1) ?? 'feed';
-      name = `${parsed.hostname}-${last}`.replace(/[^a-zA-Z0-9-]/g, '-');
+      name = `${parsed.hostname}-${last}`;
     } catch {
       return 'private-feed';
     }
   }
-  // XML element names cannot start with a digit — prefix with underscore if needed
-  return /^\d/.test(name) ? `_${name}` : name;
+  return sanitizeElementName(name);
+}
+
+/**
+ * Sanitize a string for use as an XML element name.
+ * Element names may only contain letters, digits, hyphens, underscores, and periods.
+ * They cannot start with a digit, hyphen, or period.
+ */
+function sanitizeElementName(name: string): string {
+  // Replace invalid characters with hyphens
+  let safe = name.replace(/[^a-zA-Z0-9._-]/g, '-');
+  // Collapse consecutive hyphens
+  safe = safe.replace(/-{2,}/g, '-');
+  // Strip leading/trailing hyphens
+  safe = safe.replace(/^-+|-+$/g, '');
+  // Element names cannot start with a digit, period, or hyphen — prefix with underscore
+  if (!safe || /^[^a-zA-Z_]/.test(safe)) {
+    safe = `_${safe}`;
+  }
+  return safe || 'private-feed';
 }
 
 function escapeXml(str: string): string {

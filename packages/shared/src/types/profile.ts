@@ -50,6 +50,10 @@ export interface Profile {
   providerCredentials: ProviderCredentials | null;
   /** Optional test command to run after build (e.g. 'pnpm test') */
   testCommand?: string | null;
+  /** Build phase timeout in seconds. Default 300 (5 min). */
+  buildTimeout: number;
+  /** Test phase timeout in seconds. Default 600 (10 min). */
+  testTimeout: number;
   /** PR provider — determines which service creates/merges pull requests */
   prProvider: 'github' | 'ado';
   /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */

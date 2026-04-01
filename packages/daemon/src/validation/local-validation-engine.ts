@@ -121,11 +121,24 @@ async function runBuild(
   const buildStart = Date.now();
   log?.info({ buildCommand: config.buildCommand }, 'running build');
 
-  const result = await containerManager.execInContainer(
-    config.containerId,
-    ['sh', '-c', config.buildCommand],
-    { cwd: '/workspace', timeout: 120_000 },
-  );
+  let result: { stdout: string; stderr: string; exitCode: number };
+  try {
+    result = await containerManager.execInContainer(
+      config.containerId,
+      ['sh', '-c', config.buildCommand],
+      { cwd: '/workspace', timeout: config.buildTimeout ?? 300_000 },
+    );
+  } catch (err) {
+    const duration = Date.now() - buildStart;
+    const partial = (err as any)?.partialOutput ?? '';
+    const message = err instanceof Error ? err.message : String(err);
+    log?.warn({ duration }, `build timed out: ${message}`);
+    return {
+      status: 'fail' as const,
+      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 10_000),
+      duration,
+    };
+  }
 
   const duration = Date.now() - buildStart;
   const output = `${result.stdout}\n${result.stderr}`.trim();
@@ -159,11 +172,25 @@ async function runTests(
   const testStart = Date.now();
   log?.info({ testCommand: config.testCommand }, 'running tests');
 
-  const result = await containerManager.execInContainer(
-    config.containerId,
-    ['sh', '-c', config.testCommand],
-    { cwd: '/workspace', timeout: 300_000 },
-  );
+  let result: { stdout: string; stderr: string; exitCode: number };
+  try {
+    result = await containerManager.execInContainer(
+      config.containerId,
+      ['sh', '-c', config.testCommand],
+      { cwd: '/workspace', timeout: config.testTimeout ?? 600_000 },
+    );
+  } catch (err) {
+    const duration = Date.now() - testStart;
+    const partial = (err as any)?.partialOutput ?? '';
+    const message = err instanceof Error ? err.message : String(err);
+    log?.warn({ duration }, `tests timed out: ${message}`);
+    return {
+      status: 'fail' as const,
+      duration,
+      stdout: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 10_000),
+      stderr: '',
+    };
+  }
 
   const duration = Date.now() - testStart;
   const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);

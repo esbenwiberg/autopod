@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { formatDurationFromDates, formatStatus } from '../output/colors.js';
+import { formatToolUse } from '../tui/utils/formatToolUse.js';
 import { withJsonOutput } from '../output/json.js';
 import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
@@ -375,11 +376,8 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
           console.log(`${ts} ${chalk.dim(inner.message)}`);
           break;
         case 'tool_use': {
-          const inputSummary =
-            Object.keys(inner.input).length > 0
-              ? chalk.dim(` ${JSON.stringify(inner.input).slice(0, 80)}`)
-              : '';
-          console.log(`${ts} ${chalk.cyan(`[tool] ${inner.tool}`)}${inputSummary}`);
+          if (inner.tool === 'tool_result') break; // skip noisy tool_result acks
+          console.log(`${ts} ${chalk.cyan(`[tool]`)} ${formatToolUse(inner.tool, inner.input, 80)}`);
           break;
         }
         case 'file_change': {

@@ -109,6 +109,13 @@ export class AutopodClient {
     return this.request<string>('GET', `/sessions/${id}/logs${params}`);
   }
 
+  async getReportToken(id: string): Promise<{ token: string | null; reportUrl: string }> {
+    return this.request<{ token: string | null; reportUrl: string }>(
+      'GET',
+      `/sessions/${id}/report/token`,
+    );
+  }
+
   async startPreview(id: string): Promise<{ previewUrl: string }> {
     return this.request<{ previewUrl: string }>('POST', `/sessions/${id}/preview`);
   }

@@ -121,12 +121,11 @@ export class LocalWorktreeManager implements WorktreeManager {
 
       // Clean up stale worktree registration if a previous session left one behind
       // (e.g. killed session whose cleanup didn't fully complete).
-      if (await this.pathExists(worktreePath)) {
-        this.logger.warn({ worktreePath }, 'Stale worktree directory exists — removing');
-        await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
-          cwd: bareRepoPath,
-        }).catch(() => fs.rm(worktreePath, { recursive: true, force: true }));
-      }
+      // Always try both git worktree remove AND fs.rm — either alone can leave remnants.
+      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
+        cwd: bareRepoPath,
+      }).catch(() => {});
+      await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
       await execFileAsync('git', ['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
 
       // -B force-creates branch to handle retry scenarios
