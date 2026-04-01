@@ -47,6 +47,33 @@ public struct ValidationTab: View {
             .controlSize(.regular)
           }
 
+          // Acceptance criteria (full list)
+          if let criteria = session.acceptanceCriteria, !criteria.isEmpty {
+            detailSection("Acceptance Criteria (\(criteria.count))", icon: "checklist") {
+              VStack(alignment: .leading, spacing: 6) {
+                if let source = session.acFrom {
+                  HStack(spacing: 3) {
+                    Image(systemName: "doc.text")
+                      .font(.system(size: 9))
+                    Text(source)
+                      .font(.system(.caption2, design: .monospaced))
+                  }
+                  .foregroundStyle(.tertiary)
+                }
+                ForEach(Array(criteria.enumerated()), id: \.offset) { _, criterion in
+                  HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "square")
+                      .font(.system(size: 12))
+                      .foregroundStyle(.secondary)
+                      .padding(.top, 1)
+                    Text(criterion)
+                      .font(.callout)
+                  }
+                }
+              }
+            }
+          }
+
           // Placeholder for detailed results (requires validation history from REST)
           detailSection("Smoke Tests", icon: "flame") {
             Text(checks.smoke ? "All smoke checks passed" : "Smoke checks failed")

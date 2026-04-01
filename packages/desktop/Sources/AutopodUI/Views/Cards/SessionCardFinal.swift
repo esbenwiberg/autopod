@@ -36,7 +36,7 @@ public struct SessionCardFinal: View {
             }
             .padding(12)
         }
-        .frame(width: isExpanded ? 260 : 230)
+        .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .controlBackgroundColor))

@@ -21,9 +21,9 @@ struct OverviewTab: View {
                     planSection(phase)
                 }
 
-                // Acceptance criteria
+                // Acceptance criteria (compact — full list in Validation tab)
                 if let criteria = session.acceptanceCriteria, !criteria.isEmpty {
-                    acceptanceCriteriaSection(criteria)
+                    acSummary(criteria)
                 }
 
                 // Metrics row
@@ -129,39 +129,25 @@ struct OverviewTab: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Acceptance criteria
+    // MARK: - Acceptance criteria (compact)
 
-    private func acceptanceCriteriaSection(_ criteria: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Text("Acceptance Criteria")
-                    .font(.system(.subheadline).weight(.semibold))
-                Spacer()
-                if let source = session.acFrom {
-                    HStack(spacing: 3) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 9))
-                        Text(source)
-                            .font(.system(.caption2, design: .monospaced))
-                    }
+    private func acSummary(_ criteria: [String]) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checklist")
+                .foregroundStyle(.blue)
+            Text("\(criteria.count) acceptance criteria")
+                .font(.subheadline)
+            Spacer()
+            if let source = session.acFrom {
+                Text(source)
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                }
             }
-
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(criteria.enumerated()), id: \.offset) { _, criterion in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "square")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 1)
-                        Text(criterion)
-                            .font(.callout)
-                    }
-                }
-            }
+            Text("See Validation tab")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
-        .padding(14)
+        .padding(12)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
