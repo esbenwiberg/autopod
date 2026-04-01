@@ -59,6 +59,10 @@ struct AutopodApp: App {
     }
     .windowStyle(.titleBar)
     .defaultSize(width: 1200, height: 700)
+    .commands {
+      // Required for text fields to work in SPM executables (no default Edit menu)
+      CommandGroup(replacing: .textEditing) {}
+    }
 
     MenuBarExtra {
       MenuBarView(
