@@ -106,7 +106,7 @@ export function createNotificationService(deps: {
       // Extract screenshots from page results for Teams card
       const screenshots = event.result.smoke.pages
         .filter((p) => p.screenshotBase64)
-        .map((p) => ({ pagePath: p.path, base64: p.screenshotBase64! }));
+        .map((p) => ({ pagePath: p.path, base64: p.screenshotBase64 ?? '' }));
 
       const notification: SessionValidatedNotification = {
         type: notificationType,

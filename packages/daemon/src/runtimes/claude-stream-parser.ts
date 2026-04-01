@@ -51,6 +51,7 @@ const FILE_CHANGE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
  * Parses NDJSON output from `claude --output-format stream-json` into
  * normalized AgentEvent types. Same pattern as CodexStreamParser.
  */
+// biome-ignore lint/complexity/noStaticOnlyClass: used as a namespace with static methods matching CodexStreamParser pattern
 export class ClaudeStreamParser {
   static async *parse(
     stream: Readable,
@@ -160,9 +161,7 @@ export class ClaudeStreamParser {
         const toolResultBlock = userContent.find((b) => b.type === 'tool_result');
         if (!toolResultBlock) return null;
 
-        const output =
-          event.tool_use_result?.stdout ??
-          toolResultBlock.content?.slice(0, 2000);
+        const output = event.tool_use_result?.stdout ?? toolResultBlock.content?.slice(0, 2000);
 
         return {
           type: 'tool_use',
@@ -175,11 +174,8 @@ export class ClaudeStreamParser {
 
       case 'result': {
         const resultText =
-          (typeof event.result === 'string' ? event.result : null) ??
-          'Claude agent completed';
-        const cost = event.cost as
-          | { input_tokens: number; output_tokens: number }
-          | undefined;
+          (typeof event.result === 'string' ? event.result : null) ?? 'Claude agent completed';
+        const cost = event.cost as { input_tokens: number; output_tokens: number } | undefined;
         return {
           type: 'complete',
           timestamp: ts,

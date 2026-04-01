@@ -1,4 +1,4 @@
-import { createSessionRequestSchema, sendMessageSchema } from '@autopod/shared';
+import { type SessionStatus, createSessionRequestSchema, sendMessageSchema } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { SessionTokenIssuer } from '../../crypto/session-tokens.js';
 import type { SessionManager } from '../../sessions/index.js';
@@ -32,7 +32,7 @@ export function sessionRoutes(
     const query = request.query as { profileName?: string; status?: string; userId?: string };
     return sessionManager.listSessions({
       profileName: query.profileName,
-      status: query.status as any,
+      status: query.status as SessionStatus | undefined,
       userId: query.userId,
     });
   });

@@ -162,7 +162,7 @@ export async function validateRegistryFiles(
       // Quick check: npm config parse
       const result = await containerManager.execInContainer(
         containerId,
-        ['sh', '-c', `npm config list --location=project 2>&1`],
+        ['sh', '-c', 'npm config list --location=project 2>&1'],
         { cwd: '/workspace', timeout: 15_000 },
       );
       if (result.exitCode !== 0) {

@@ -132,7 +132,9 @@ describe('Extended Route Tests', () => {
     const worktreeManager = {
       create: vi.fn().mockResolvedValue({ worktreePath: '/tmp/wt', bareRepoPath: '/tmp/bare.git' }),
       cleanup: vi.fn().mockResolvedValue(undefined),
-      getDiffStats: vi.fn().mockResolvedValue({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 }),
+      getDiffStats: vi
+        .fn()
+        .mockResolvedValue({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 }),
       getDiff: vi.fn().mockResolvedValue('diff --git a/file.ts b/file.ts\n+added line'),
       mergeBranch: vi.fn().mockResolvedValue(undefined),
       commitFiles: vi.fn().mockResolvedValue(undefined),
@@ -145,13 +147,25 @@ describe('Extended Route Tests', () => {
         type: 'claude' as const,
         spawn: vi.fn().mockReturnValue(
           (async function* () {
-            yield { type: 'status' as const, timestamp: new Date().toISOString(), message: 'Working' };
-            yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'Done' };
+            yield {
+              type: 'status' as const,
+              timestamp: new Date().toISOString(),
+              message: 'Working',
+            };
+            yield {
+              type: 'complete' as const,
+              timestamp: new Date().toISOString(),
+              result: 'Done',
+            };
           })(),
         ),
         resume: vi.fn().mockReturnValue(
           (async function* () {
-            yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'Resumed' };
+            yield {
+              type: 'complete' as const,
+              timestamp: new Date().toISOString(),
+              result: 'Resumed',
+            };
           })(),
         ),
         abort: vi.fn().mockResolvedValue(undefined),
@@ -167,7 +181,12 @@ describe('Extended Route Tests', () => {
         smoke: {
           status: 'pass',
           build: { status: 'pass', output: 'ok', duration: 1000 },
-          health: { status: 'pass', url: 'http://localhost:3000/', responseCode: 200, duration: 100 },
+          health: {
+            status: 'pass',
+            url: 'http://localhost:3000/',
+            responseCode: 200,
+            duration: 100,
+          },
           pages: [],
         },
         taskReview: null,
@@ -176,6 +195,7 @@ describe('Extended Route Tests', () => {
       }),
     };
 
+    // biome-ignore lint/style/useConst: assigned after sessionQueue to break circular dependency
     let sessionManager: ReturnType<typeof createSessionManager>;
 
     const sessionQueue = createSessionQueue(
@@ -697,8 +717,8 @@ describe('Extended Route Tests', () => {
         '--- a/src/app.ts',
         '+++ b/src/app.ts',
         '@@ -1,3 +1,4 @@',
-        ' import express from \'express\';',
-        '+import cors from \'cors\';',
+        " import express from 'express';",
+        "+import cors from 'cors';",
         ' ',
         ' const app = express();',
       ].join('\n');
@@ -780,6 +800,7 @@ describe('Extended Route Tests', () => {
       const escalationRepo2 = createEscalationRepository(db2);
       const eventBus2 = createEventBus(eventRepo2, logger);
 
+      // biome-ignore lint/style/useConst: assigned after sq2 to break circular dependency
       let sm2: ReturnType<typeof createSessionManager>;
       const sq2 = createSessionQueue(1, async (id) => sm2.processSession(id), logger);
       sm2 = createSessionManager({

@@ -1,5 +1,7 @@
 import type { Profile } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProfileStore } from '../profiles/index.js';
+import type { AcrClient } from './acr-client.js';
 import { ImageBuilder } from './image-builder.js';
 
 function mockProfile(overrides: Partial<Profile> = {}): Profile {
@@ -58,18 +60,18 @@ function createMockDeps() {
       inspect: vi.fn().mockResolvedValue({ Size: 512 * 1_048_576 }),
     }),
     modem: { followProgress: followProgressCb },
-  } as any;
+  } as unknown as import('dockerode');
 
   const mockAcr = {
     push: vi.fn().mockResolvedValue('sha256:abc123'),
     pull: vi.fn().mockResolvedValue(undefined),
     exists: vi.fn().mockResolvedValue(true),
-  } as any;
+  } as unknown as AcrClient;
 
   const mockProfileStore = {
     update: vi.fn(),
     get: vi.fn(),
-  } as any;
+  } as unknown as ProfileStore;
 
   return { mockDocker, mockAcr, mockProfileStore, followProgressCb };
 }

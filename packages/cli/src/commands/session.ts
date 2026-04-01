@@ -1,12 +1,12 @@
-import type { AgentActivityEvent, Session, SystemEvent } from '@autopod/shared';
+import type { AgentActivityEvent, Session, SessionStatus, SystemEvent } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { formatDurationFromDates, formatStatus } from '../output/colors.js';
-import { formatToolUse } from '../tui/utils/formatToolUse.js';
 import { withJsonOutput } from '../output/json.js';
 import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
+import { formatToolUse } from '../tui/utils/formatToolUse.js';
 import { resolveSessionId } from '../utils/id-resolver.js';
 
 const sessionColumns: ColumnDef<Session>[] = [
@@ -93,7 +93,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
           return;
         }
         for (const [status, count] of entries) {
-          console.log(`  ${formatStatus(status as any)}  ${count}`);
+          console.log(`  ${formatStatus(status as SessionStatus)}  ${count}`);
         }
       });
     });
@@ -377,7 +377,9 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
           break;
         case 'tool_use': {
           if (inner.tool === 'tool_result') break; // skip noisy tool_result acks
-          console.log(`${ts} ${chalk.cyan(`[tool]`)} ${formatToolUse(inner.tool, inner.input, 80)}`);
+          console.log(
+            `${ts} ${chalk.cyan('[tool]')} ${formatToolUse(inner.tool, inner.input, 80)}`,
+          );
           break;
         }
         case 'file_change': {

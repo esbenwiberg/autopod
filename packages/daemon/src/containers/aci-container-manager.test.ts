@@ -101,9 +101,7 @@ describe('AciContainerManager', () => {
             expect.objectContaining({
               name: 'agent',
               command: ['sleep', 'infinity'],
-              environmentVariables: expect.arrayContaining([
-                { name: 'MY_VAR', value: 'value' },
-              ]),
+              environmentVariables: expect.arrayContaining([{ name: 'MY_VAR', value: 'value' }]),
             }),
           ]),
         }),
@@ -202,14 +200,21 @@ describe('AciContainerManager', () => {
       const manager = createManager();
       // Inject a fake poll entry
       const fakeTimer = setInterval(() => {}, 10_000);
-      (manager as any).activePolls.set('autopod-sess-1', {
-        timer: fakeTimer,
-        aborted: false,
-      });
+      (manager as unknown as { activePolls: Map<string, unknown> }).activePolls.set(
+        'autopod-sess-1',
+        {
+          timer: fakeTimer,
+          aborted: false,
+        },
+      );
 
       await manager.kill('autopod-sess-1');
 
-      expect((manager as any).activePolls.has('autopod-sess-1')).toBe(false);
+      expect(
+        (manager as unknown as { activePolls: Map<string, unknown> }).activePolls.has(
+          'autopod-sess-1',
+        ),
+      ).toBe(false);
       clearInterval(fakeTimer);
     });
   });
@@ -415,7 +420,11 @@ describe('AciContainerManager', () => {
 
       await expect(result.kill()).resolves.toBeUndefined();
 
-      expect((manager as any).activePolls.has('autopod-sess-1')).toBe(false);
+      expect(
+        (manager as unknown as { activePolls: Map<string, unknown> }).activePolls.has(
+          'autopod-sess-1',
+        ),
+      ).toBe(false);
     });
   });
 

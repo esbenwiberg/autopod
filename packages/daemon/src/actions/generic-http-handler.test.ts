@@ -1,3 +1,4 @@
+import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGenericHttpHandler } from './generic-http-handler.js';
@@ -15,12 +16,12 @@ function mockResponse(
 
 const logger = pino({ level: 'silent' });
 
-function makeAction(overrides: Partial<any> = {}): any {
+function makeAction(overrides: Partial<ActionDefinition> = {}): ActionDefinition {
   return {
     name: 'test_action',
     description: '',
-    group: {} as any,
-    handler: {} as any,
+    group: 'http',
+    handler: 'http',
     params: {},
     response: { fields: [] },
     ...overrides,
@@ -266,7 +267,7 @@ describe('createGenericHttpHandler', () => {
       getSecret: () => undefined,
     });
 
-    const result: any = await handler.execute(
+    const result = await handler.execute(
       makeAction({
         endpoint: {
           url: 'https://api.example.com/items',
@@ -299,7 +300,7 @@ describe('createGenericHttpHandler', () => {
       getSecret: () => undefined,
     });
 
-    const result: any = await handler.execute(
+    const result = await handler.execute(
       makeAction({
         endpoint: {
           url: 'https://api.example.com/item/1',

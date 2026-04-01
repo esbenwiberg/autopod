@@ -1,3 +1,4 @@
+import type { Session } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
@@ -45,7 +46,7 @@ export function terminalRoutes(
       }
 
       // Get session and container
-      let session;
+      let session: Session;
       try {
         session = sessionManager.getSession(sessionId);
       } catch {
@@ -79,15 +80,11 @@ export function terminalRoutes(
             AttachStdout: true,
             AttachStderr: true,
             Tty: true,
-            Env: [`TERM=xterm-256color`, `COLUMNS=${cols}`, `LINES=${rows}`],
+            Env: ['TERM=xterm-256color', `COLUMNS=${cols}`, `LINES=${rows}`],
             WorkingDir: '/workspace',
           });
 
-          const stream = await exec.start({
-            hijack: true,
-            stdin: true,
-            Tty: true,
-          } as any);
+          const stream = await exec.start({ hijack: true, stdin: true, Tty: true });
 
           // stdout → WebSocket (binary frames)
           stream.on('data', (chunk: Buffer) => {
@@ -144,8 +141,9 @@ export function terminalRoutes(
           socket.on('close', () => {
             // Client disconnected — kill the exec stream
             try {
-              if ('destroy' in stream && typeof (stream as any).destroy === 'function') {
-                (stream as any).destroy();
+              const destroyable = stream as NodeJS.ReadWriteStream & { destroy?: () => void };
+              if (typeof destroyable.destroy === 'function') {
+                destroyable.destroy();
               }
             } catch {
               // Best effort cleanup

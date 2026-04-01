@@ -168,6 +168,7 @@ const runtimeRegistry = createRuntimeRegistry([
 const validationEngine = createLocalValidationEngine(containerManager, logger);
 
 // Session queue + manager (circular dep resolved via closure)
+// biome-ignore lint/style/useConst: assigned after sessionQueue to break circular dependency
 let sessionManager: ReturnType<typeof createSessionManager>;
 
 const sessionQueue = createSessionQueue(

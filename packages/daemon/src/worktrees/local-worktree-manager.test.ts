@@ -1,4 +1,4 @@
-import { type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalWorktreeManager } from './local-worktree-manager.js';
@@ -102,19 +102,23 @@ describe('LocalWorktreeManager', () => {
 
   describe('sanitizeRepoUrl', () => {
     it('converts a GitHub URL to a safe cache key', () => {
-      const result = (manager as any).sanitizeRepoUrl('https://github.com/org/repo.git');
+      const result = (
+        manager as unknown as { sanitizeRepoUrl: (url: string) => string }
+      ).sanitizeRepoUrl('https://github.com/org/repo.git');
       expect(result).toBe('github.com_org_repo');
     });
 
     it('handles URLs without .git suffix', () => {
-      const result = (manager as any).sanitizeRepoUrl('https://github.com/org/repo');
+      const result = (
+        manager as unknown as { sanitizeRepoUrl: (url: string) => string }
+      ).sanitizeRepoUrl('https://github.com/org/repo');
       expect(result).toBe('github.com_org_repo');
     });
 
     it('handles ADO URLs with colons and slashes', () => {
-      const result = (manager as any).sanitizeRepoUrl(
-        'https://dev.azure.com/myorg/myproject/_git/myrepo',
-      );
+      const result = (
+        manager as unknown as { sanitizeRepoUrl: (url: string) => string }
+      ).sanitizeRepoUrl('https://dev.azure.com/myorg/myproject/_git/myrepo');
       expect(result).toBe('dev.azure.com_myorg_myproject__git_myrepo');
     });
   });
@@ -125,15 +129,16 @@ describe('LocalWorktreeManager', () => {
 
   describe('injectPat', () => {
     it('injects PAT into https URL', () => {
-      const result = (manager as any).injectPat('https://github.com/org/repo.git', 'mytoken');
+      const result = (
+        manager as unknown as { injectPat: (url: string, pat: string) => string }
+      ).injectPat('https://github.com/org/repo.git', 'mytoken');
       expect(result).toBe('https://:mytoken@github.com/org/repo.git');
     });
 
     it('replaces existing userinfo before injecting', () => {
-      const result = (manager as any).injectPat(
-        'https://old-token@github.com/org/repo.git',
-        'new-token',
-      );
+      const result = (
+        manager as unknown as { injectPat: (url: string, pat: string) => string }
+      ).injectPat('https://old-token@github.com/org/repo.git', 'new-token');
       expect(result).toBe('https://:new-token@github.com/org/repo.git');
     });
   });
@@ -144,8 +149,11 @@ describe('LocalWorktreeManager', () => {
 
   describe('parseDiffStats', () => {
     it('parses standard git diff --stat output', () => {
-      const output = ` src/foo.ts | 10 ++++++----\n 1 file changed, 6 insertions(+), 4 deletions(-)`;
-      const result = (manager as any).parseDiffStats(output);
+      const output =
+        ' src/foo.ts | 10 ++++++----\n 1 file changed, 6 insertions(+), 4 deletions(-)';
+      const result = (
+        manager as unknown as { parseDiffStats: (output: string) => object }
+      ).parseDiffStats(output);
       expect(result).toEqual({ filesChanged: 1, linesAdded: 6, linesRemoved: 4 });
     });
 
@@ -155,18 +163,24 @@ describe('LocalWorktreeManager', () => {
         ' src/b.ts | 3 ---',
         ' 2 files changed, 5 insertions(+), 3 deletions(-)',
       ].join('\n');
-      const result = (manager as any).parseDiffStats(output);
+      const result = (
+        manager as unknown as { parseDiffStats: (output: string) => object }
+      ).parseDiffStats(output);
       expect(result).toEqual({ filesChanged: 2, linesAdded: 5, linesRemoved: 3 });
     });
 
     it('returns zeros for empty output', () => {
-      const result = (manager as any).parseDiffStats('');
+      const result = (
+        manager as unknown as { parseDiffStats: (output: string) => object }
+      ).parseDiffStats('');
       expect(result).toEqual({ filesChanged: 0, linesAdded: 0, linesRemoved: 0 });
     });
 
     it('handles output with only insertions', () => {
       const output = ' 1 file changed, 10 insertions(+)';
-      const result = (manager as any).parseDiffStats(output);
+      const result = (
+        manager as unknown as { parseDiffStats: (output: string) => object }
+      ).parseDiffStats(output);
       expect(result).toEqual({ filesChanged: 1, linesAdded: 10, linesRemoved: 0 });
     });
   });
@@ -332,7 +346,11 @@ describe('LocalWorktreeManager', () => {
       const order: number[] = [];
 
       const run = (id: number, delay: number) =>
-        (manager as any).withRepoLock('same-key', async () => {
+        (
+          manager as unknown as {
+            withRepoLock: (key: string, fn: () => Promise<void>) => Promise<void>;
+          }
+        ).withRepoLock('same-key', async () => {
           order.push(id);
           await new Promise((r) => setTimeout(r, delay));
           order.push(-id);
@@ -348,7 +366,11 @@ describe('LocalWorktreeManager', () => {
       const finished: string[] = [];
 
       const run = (key: string, delay: number) =>
-        (manager as any).withRepoLock(key, async () => {
+        (
+          manager as unknown as {
+            withRepoLock: (key: string, fn: () => Promise<void>) => Promise<void>;
+          }
+        ).withRepoLock(key, async () => {
           started.push(key);
           await new Promise((r) => setTimeout(r, delay));
           finished.push(key);
@@ -516,7 +538,10 @@ describe('LocalWorktreeManager', () => {
         pat: 'cached-pat',
       });
 
-      const patCache = (manager as any).patCache as Map<string, string>;
+      const patCache = (manager as unknown as { patCache: Map<string, string> }).patCache as Map<
+        string,
+        string
+      >;
       expect([...patCache.values()]).toContain('cached-pat');
     });
   });

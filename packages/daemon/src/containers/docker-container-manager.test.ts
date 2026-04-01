@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream';
+import type Dockerode from 'dockerode';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DockerContainerManager } from './docker-container-manager.js';
@@ -26,8 +27,8 @@ function createMockContainer(overrides: Record<string, unknown> = {}) {
 function createMockMuxStream(stdout = '', stderr = '') {
   const stream = new PassThrough();
   // Tag it so the demux mock can identify it
-  (stream as any)._mockStdout = stdout;
-  (stream as any)._mockStderr = stderr;
+  (stream as PassThrough & { _mockStdout?: string; _mockStderr?: string })._mockStdout = stdout;
+  (stream as PassThrough & { _mockStdout?: string; _mockStderr?: string })._mockStderr = stderr;
   // Drain readable side so 'end' event fires when we call .end()
   stream.resume();
   process.nextTick(() => stream.end());
@@ -52,14 +53,18 @@ function createMockDocker(container = createMockContainer()) {
     getContainer: vi.fn().mockReturnValue(container),
     modem: {
       demuxStream: vi.fn(
-        (stream: any, stdoutWriter: NodeJS.WritableStream, stderrWriter: NodeJS.WritableStream) => {
+        (
+          stream: { _mockStdout?: string; _mockStderr?: string },
+          stdoutWriter: NodeJS.WritableStream,
+          stderrWriter: NodeJS.WritableStream,
+        ) => {
           // Write mock data if present
           if (stream._mockStdout) stdoutWriter.write(stream._mockStdout);
           if (stream._mockStderr) stderrWriter.write(stream._mockStderr);
         },
       ),
     },
-  } as any;
+  } as unknown as Dockerode;
 }
 
 // ─── Tests ───────────────────────────────────────────────────
@@ -102,7 +107,7 @@ describe('DockerContainerManager', () => {
     it('maps env vars to KEY=VALUE format', async () => {
       await manager.spawn(baseConfig);
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.Env).toEqual(expect.arrayContaining(['SESSION_ID=sess-abc', 'PORT=3000']));
     });
 
@@ -112,7 +117,7 @@ describe('DockerContainerManager', () => {
         ports: [{ container: 3000, host: 12345 }],
       });
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.ExposedPorts).toEqual({ '3000/tcp': {} });
       expect(createCall.HostConfig.PortBindings).toEqual({
         '3000/tcp': [{ HostPort: '12345' }],
@@ -128,7 +133,7 @@ describe('DockerContainerManager', () => {
         ],
       });
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.ExposedPorts).toEqual({
         '3000/tcp': {},
         '8080/tcp': {},
@@ -142,7 +147,7 @@ describe('DockerContainerManager', () => {
     it('skips port config when no ports provided', async () => {
       await manager.spawn(baseConfig);
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.ExposedPorts).toEqual({});
       expect(createCall.HostConfig.PortBindings).toBeUndefined();
     });
@@ -153,14 +158,14 @@ describe('DockerContainerManager', () => {
         volumes: [{ host: '/tmp/worktree/abc', container: '/workspace' }],
       });
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.HostConfig.Binds).toEqual(['/tmp/worktree/abc:/workspace']);
     });
 
     it('skips volume config when no volumes provided', async () => {
       await manager.spawn(baseConfig);
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.HostConfig.Binds).toBeUndefined();
     });
 
@@ -170,7 +175,7 @@ describe('DockerContainerManager', () => {
         networkName: 'autopod-net',
       });
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.HostConfig.NetworkMode).toBe('autopod-net');
       expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN']);
     });
@@ -178,7 +183,7 @@ describe('DockerContainerManager', () => {
     it('does NOT set NetworkMode when networkName absent', async () => {
       await manager.spawn(baseConfig);
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.HostConfig.NetworkMode).toBeUndefined();
       expect(createCall.HostConfig.CapAdd).toBeUndefined();
     });
@@ -362,7 +367,9 @@ describe('DockerContainerManager', () => {
       await manager.writeFile('abc123', '/workspace/CLAUDE.md', '# Hello');
 
       expect(container.putArchive).toHaveBeenCalledTimes(1);
-      const [tarBuffer, options] = container.putArchive.mock.calls[0]!;
+      const call0 = container.putArchive.mock.calls[0];
+      expect(call0).toBeDefined();
+      const [tarBuffer, options] = call0 ?? [];
       expect(tarBuffer).toBeInstanceOf(Buffer);
       expect(options).toEqual({ path: '/' });
     });
@@ -371,7 +378,7 @@ describe('DockerContainerManager', () => {
       await manager.writeFile('abc123', '/etc/config.json', '{}');
 
       // The tar buffer should contain the entry at 'etc/config.json' (no leading slash)
-      const [tarBuffer] = container.putArchive.mock.calls[0]!;
+      const [tarBuffer] = container.putArchive.mock.calls[0] ?? [];
       expect(tarBuffer.length).toBeGreaterThan(0);
     });
 
@@ -543,7 +550,7 @@ describe('DockerContainerManager', () => {
         firewallScript: '#!/bin/sh\necho "firewall applied"',
       });
 
-      const createCall = docker.createContainer.mock.calls[0]![0];
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
 
       // Container config
       expect(createCall.Image).toBe('autopod-node22:latest');

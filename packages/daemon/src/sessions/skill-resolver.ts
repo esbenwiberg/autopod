@@ -35,7 +35,7 @@ async function resolveOne(skill: InjectedSkill, logger: Logger): Promise<Resolve
       case 'github':
         return await resolveGithub(skill, source, logger);
       default:
-        logger.warn({ skill: skill.name }, `Unknown skill source type — skipping`);
+        logger.warn({ skill: skill.name }, 'Unknown skill source type — skipping');
         return null;
     }
   } catch (err) {

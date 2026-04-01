@@ -26,7 +26,7 @@ function createMockHandle(options?: { exitCode?: number }): StreamingExecResult 
   };
 
   // Helper to finish the stream: push null on stdout and resolve exitCode
-  (handle as any).finish = (code?: number) => {
+  (handle as unknown as { finish: (code?: number) => void }).finish = (code?: number) => {
     stdout.push(null);
     resolveExitCode?.(code ?? options?.exitCode ?? 0);
   };

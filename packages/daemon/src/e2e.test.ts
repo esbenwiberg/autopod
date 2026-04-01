@@ -144,7 +144,8 @@ describe('E2E: validation failure with retry', () => {
 
     // Runtime was resumed once with correction feedback
     expect(runtime.resume).toHaveBeenCalledTimes(1);
-    const resumeArgs = vi.mocked(runtime.resume).mock.calls[0]!;
+    const resumeArgs = vi.mocked(runtime.resume).mock.calls[0] ?? [];
+
     expect(resumeArgs[0]).toBe(session.id); // sessionId
     expect(resumeArgs[1]).toContain('Validation Failed'); // correction message
 

@@ -1,3 +1,4 @@
+import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGitHubHandler } from './github-handler.js';
@@ -20,12 +21,12 @@ function mockResponse(
 
 const logger = pino({ level: 'silent' });
 
-function makeAction(name: string, fields: string[] = []): any {
+function makeAction(name: string, fields: string[] = []): ActionDefinition {
   return {
     name,
     description: '',
-    group: {} as any,
-    handler: {} as any,
+    group: 'github',
+    handler: 'github',
     params: {},
     response: { fields },
   };
@@ -153,7 +154,7 @@ describe('createGitHubHandler', () => {
       getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
     });
 
-    const result: any = await handler.execute(makeAction('read_file', ['content', 'path']), {
+    const result = await handler.execute(makeAction('read_file', ['content', 'path']), {
       repo: 'octocat/hello-world',
       path: 'src/index.js',
     });
@@ -174,7 +175,7 @@ describe('createGitHubHandler', () => {
       getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
     });
 
-    const result: any = await handler.execute(makeAction('read_pr_diff', ['filename', 'patch']), {
+    const result = await handler.execute(makeAction('read_pr_diff', ['filename', 'patch']), {
       repo: 'octocat/hello-world',
       pr_number: 1,
       file_path: 'src/foo.ts',

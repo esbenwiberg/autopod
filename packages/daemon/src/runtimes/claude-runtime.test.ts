@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream';
+import type { AgentErrorEvent, SpawnConfig } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -57,7 +58,7 @@ function emitLine(stdout: PassThrough, obj: unknown) {
 describe('ClaudeRuntime', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    delete process.env.AUTOPOD_DEBUG_AGENT;
+    process.env.AUTOPOD_DEBUG_AGENT = undefined;
   });
 
   // ---------------------------------------------------------------------------
@@ -70,7 +71,9 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      const args = (runtime as any).buildSpawnArgs({
+      const args = (
+        runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+      ).buildSpawnArgs({
         sessionId: 'abc',
         task: 'Add a test',
         model: 'claude-opus-4-5',
@@ -94,7 +97,9 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      const args = (runtime as any).buildSpawnArgs({
+      const args = (
+        runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+      ).buildSpawnArgs({
         sessionId: 'abc',
         task: 'task',
         model: 'opus',
@@ -112,7 +117,9 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      const args = (runtime as any).buildSpawnArgs({
+      const args = (
+        runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+      ).buildSpawnArgs({
         sessionId: 'abc',
         task: 'task',
         model: 'opus',
@@ -129,7 +136,9 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      const args = (runtime as any).buildSpawnArgs({
+      const args = (
+        runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+      ).buildSpawnArgs({
         sessionId: 'abc',
         task: 'task',
         model: 'opus',
@@ -146,7 +155,9 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      const args = (runtime as any).buildSpawnArgs({
+      const args = (
+        runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+      ).buildSpawnArgs({
         sessionId: 'abc',
         task: 'task',
         model: 'opus',
@@ -170,7 +181,9 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      const args = (runtime as any).buildSpawnArgs({
+      const args = (
+        runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+      ).buildSpawnArgs({
         sessionId: 'abc',
         task: 'task',
         model: 'opus',
@@ -194,7 +207,9 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      const args = (runtime as any).buildResumeArgs('Continue please', 'claude-session-xyz');
+      const args = (
+        runtime as unknown as { buildResumeArgs: (msg: string, id?: string) => string[] }
+      ).buildResumeArgs('Continue please', 'claude-session-xyz');
 
       expect(args).toContain('--resume');
       expect(args).toContain('claude-session-xyz');
@@ -205,7 +220,9 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      const args = (runtime as any).buildResumeArgs('Continue please', undefined);
+      const args = (
+        runtime as unknown as { buildResumeArgs: (msg: string, id?: string) => string[] }
+      ).buildResumeArgs('Continue please', undefined);
 
       expect(args).not.toContain('--resume');
     });
@@ -277,8 +294,8 @@ describe('ClaudeRuntime', () => {
 
       const errorEvent = events.find((e) => e.type === 'error');
       expect(errorEvent).toBeDefined();
-      expect((errorEvent as any).message).toContain('exited with code 1');
-      expect((errorEvent as any).fatal).toBe(true);
+      expect((errorEvent as unknown as AgentErrorEvent).message).toContain('exited with code 1');
+      expect((errorEvent as unknown as AgentErrorEvent).fatal).toBe(true);
     });
 
     it('does not yield an error event on exit code 0', async () => {
@@ -302,7 +319,9 @@ describe('ClaudeRuntime', () => {
         events.push(event);
       }
 
-      const fatalError = events.find((e) => e.type === 'error' && (e as any).fatal === true);
+      const fatalError = events.find(
+        (e) => e.type === 'error' && (e as unknown as AgentErrorEvent).fatal === true,
+      );
       expect(fatalError).toBeUndefined();
     });
 
@@ -335,7 +354,7 @@ describe('ClaudeRuntime', () => {
       }
 
       const stderrEvent = events.find(
-        (e) => e.type === 'error' && (e as any).message.includes('[stderr]'),
+        (e) => e.type === 'error' && (e as unknown as AgentErrorEvent).message.includes('[stderr]'),
       );
       expect(stderrEvent).toBeDefined();
     });
@@ -388,7 +407,11 @@ describe('ClaudeRuntime', () => {
         /* consume */
       }
 
-      expect((runtime as any).handles.has('track-sess')).toBe(false);
+      expect(
+        (runtime as unknown as { handles: Map<string, StreamingExecResult> }).handles.has(
+          'track-sess',
+        ),
+      ).toBe(false);
     });
   });
 
@@ -448,7 +471,11 @@ describe('ClaudeRuntime', () => {
         /* consume */
       }
 
-      expect((runtime as any).handles.has('track-resume')).toBe(false);
+      expect(
+        (runtime as unknown as { handles: Map<string, StreamingExecResult> }).handles.has(
+          'track-resume',
+        ),
+      ).toBe(false);
     });
   });
 
@@ -462,13 +489,18 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      (runtime as any).handles.set('sess-1', handle);
+      (runtime as unknown as { handles: Map<string, StreamingExecResult> }).handles.set(
+        'sess-1',
+        handle,
+      );
       runtime.setClaudeSessionId('sess-1', 'claude-xyz');
 
       await runtime.abort('sess-1');
 
       expect(handle.kill).toHaveBeenCalled();
-      expect((runtime as any).handles.has('sess-1')).toBe(false);
+      expect(
+        (runtime as unknown as { handles: Map<string, StreamingExecResult> }).handles.has('sess-1'),
+      ).toBe(false);
       expect(runtime.getClaudeSessionId('sess-1')).toBeUndefined();
     });
 
@@ -492,13 +524,18 @@ describe('ClaudeRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      (runtime as any).handles.set('sess-1', handle);
+      (runtime as unknown as { handles: Map<string, StreamingExecResult> }).handles.set(
+        'sess-1',
+        handle,
+      );
       runtime.setClaudeSessionId('sess-1', 'claude-preserve-me');
 
       await runtime.suspend('sess-1');
 
       expect(handle.kill).toHaveBeenCalled();
-      expect((runtime as any).handles.has('sess-1')).toBe(false);
+      expect(
+        (runtime as unknown as { handles: Map<string, StreamingExecResult> }).handles.has('sess-1'),
+      ).toBe(false);
       // Session ID preserved (unlike abort)
       expect(runtime.getClaudeSessionId('sess-1')).toBe('claude-preserve-me');
     });

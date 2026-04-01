@@ -179,9 +179,12 @@ export class GitHubApiPrManager implements PrManager {
       'Merging pull request via GitHub API',
     );
 
-    const prResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`, {
-      headers: this.headers,
-    });
+    const prResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,
+      {
+        headers: this.headers,
+      },
+    );
     if (!prResponse.ok) {
       const text = await prResponse.text();
       throw new Error(`GitHub API error fetching PR ${prResponse.status}: ${text}`);

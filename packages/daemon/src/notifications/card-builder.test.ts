@@ -43,7 +43,7 @@ describe('Card Builder', () => {
 
     it('includes green header', () => {
       const card = buildValidatedCard(notification);
-      const header = card.body[0]!;
+      const header = card.body[0];
       expect(header.text).toContain('Validated');
       expect(header.color).toBe('good');
     });
@@ -124,7 +124,7 @@ describe('Card Builder', () => {
     it('produces valid card with attention color', () => {
       const card = buildFailedCard(notification);
       expect(card.type).toBe('AdaptiveCard');
-      const header = card.body[0]!;
+      const header = card.body[0];
       expect(header.color).toBe('attention');
       expect(header.text).toContain('Failed');
     });
@@ -176,7 +176,7 @@ describe('Card Builder', () => {
       const card = buildNeedsInputCard(notification);
       expect(card.type).toBe('AdaptiveCard');
 
-      const header = card.body[0]!;
+      const header = card.body[0];
       expect(header.color).toBe('warning');
       expect(header.text).toContain('Input');
 
@@ -252,7 +252,7 @@ describe('Card Builder', () => {
     it('produces valid card with attention color', () => {
       const card = buildErrorCard(notification);
       expect(card.type).toBe('AdaptiveCard');
-      const header = card.body[0]!;
+      const header = card.body[0];
       expect(header.color).toBe('attention');
     });
 

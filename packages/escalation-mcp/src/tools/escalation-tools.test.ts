@@ -52,7 +52,11 @@ describe('askAi', () => {
   it('creates and resolves an escalation record', async () => {
     const bridge = makeBridge();
 
-    await askAi('sess-1', { question: 'Help me', context: 'some context', domain: 'backend' }, bridge);
+    await askAi(
+      'sess-1',
+      { question: 'Help me', context: 'some context', domain: 'backend' },
+      bridge,
+    );
 
     expect(bridge.createEscalation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -130,12 +134,7 @@ describe('askHuman', () => {
   it('returns the human response when resolved', async () => {
     const bridge = makeBridge();
 
-    const promise = askHuman(
-      'sess-1',
-      { question: 'Should I proceed?' },
-      bridge,
-      pendingRequests,
-    );
+    const promise = askHuman('sess-1', { question: 'Should I proceed?' }, bridge, pendingRequests);
 
     // Simulate human responding — find the escalation ID that was created
     const createCall = (bridge.createEscalation as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
@@ -226,11 +225,11 @@ describe('reportPlan', () => {
       bridge,
     );
 
-    expect(bridge.reportPlan).toHaveBeenCalledWith(
-      'sess-1',
-      'Refactor auth module',
-      ['Extract interface', 'Add tests', 'Deploy'],
-    );
+    expect(bridge.reportPlan).toHaveBeenCalledWith('sess-1', 'Refactor auth module', [
+      'Extract interface',
+      'Add tests',
+      'Deploy',
+    ]);
   });
 
   it('returns a confirmation message with step count', async () => {

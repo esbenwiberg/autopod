@@ -48,7 +48,7 @@ describe('TeamsAdapter', () => {
     );
 
     // Verify envelope structure
-    const parsed = JSON.parse(capturedBody!);
+    const parsed = JSON.parse(capturedBody ?? '');
     expect(parsed.type).toBe('message');
     expect(parsed.attachments).toHaveLength(1);
     expect(parsed.attachments[0].contentType).toBe('application/vnd.microsoft.card.adaptive');
