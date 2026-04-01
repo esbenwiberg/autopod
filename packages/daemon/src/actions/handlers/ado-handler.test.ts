@@ -1,3 +1,4 @@
+import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAdoHandler } from './ado-handler.js';
@@ -15,12 +16,12 @@ function mockResponse(
 
 const logger = pino({ level: 'silent' });
 
-function makeAction(name: string, fields: string[] = []): any {
+function makeAction(name: string, fields: string[] = []): ActionDefinition {
   return {
     name,
     description: '',
-    group: {} as any,
-    handler: {} as any,
+    group: 'ado',
+    handler: 'ado',
     params: {},
     response: { fields },
   };
@@ -128,7 +129,7 @@ describe('createAdoHandler', () => {
       getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
     });
 
-    const result: any = await handler.execute(makeAction('search_workitems', ['id']), {
+    const result = await handler.execute(makeAction('search_workitems', ['id']), {
       org: 'myorg',
       project: 'myproject',
       query: 'login bug',

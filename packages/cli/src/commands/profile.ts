@@ -1,4 +1,4 @@
-import { execSync, spawn as cpSpawn } from 'node:child_process';
+import { spawn as cpSpawn, execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -236,8 +236,11 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       const credsPath = path.join(configDir, 'github.com.tokens.json');
       if (fs.existsSync(credsPath)) {
         try {
-          const credsJson = JSON.parse(fs.readFileSync(credsPath, 'utf-8')) as Record<string, unknown>;
-          authToken = typeof credsJson['token'] === 'string' ? credsJson['token'] : undefined;
+          const credsJson = JSON.parse(fs.readFileSync(credsPath, 'utf-8')) as Record<
+            string,
+            unknown
+          >;
+          authToken = typeof credsJson.token === 'string' ? credsJson.token : undefined;
         } catch {
           /* fall through to keychain */
         }
@@ -246,10 +249,11 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       // macOS keychain fallback — security CLI will prompt for access if needed
       if (!authToken && process.platform === 'darwin') {
         try {
-          authToken = execSync('security find-generic-password -s "copilot-cli" -w', {
-            encoding: 'utf-8',
-            stdio: ['inherit', 'pipe', 'inherit'],
-          }).trim() || undefined;
+          authToken =
+            execSync('security find-generic-password -s "copilot-cli" -w', {
+              encoding: 'utf-8',
+              stdio: ['inherit', 'pipe', 'inherit'],
+            }).trim() || undefined;
         } catch {
           /* keychain read failed */
         }
@@ -329,7 +333,11 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         ),
       );
 
-      console.log(chalk.yellow('When the Claude REPL opens, type /login and complete the OAuth flow, then exit with /exit.\n'));
+      console.log(
+        chalk.yellow(
+          'When the Claude REPL opens, type /login and complete the OAuth flow, then exit with /exit.\n',
+        ),
+      );
 
       await new Promise<void>((resolve, reject) => {
         const proc = cpSpawn('claude', [], {
@@ -441,7 +449,6 @@ async function openInEditor(data: unknown): Promise<unknown> {
     }
   }
 }
-
 
 function confirm(question: string): Promise<boolean> {
   const readline = require('node:readline') as typeof import('node:readline');

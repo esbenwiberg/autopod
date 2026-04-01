@@ -14,7 +14,7 @@ export function authPlugin(
   authModule: AuthModule,
   sessionTokenIssuer?: SessionTokenIssuer,
 ): void {
-  app.decorateRequest('user', null as any);
+  app.decorateRequest('user', null);
 
   app.addHook('preHandler', async (request: FastifyRequest) => {
     const routeConfig = request.routeOptions?.config as

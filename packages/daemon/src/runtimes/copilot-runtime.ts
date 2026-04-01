@@ -47,7 +47,7 @@ export class CopilotRuntime implements Runtime {
 
     const args = this.buildSpawnArgs(config);
     const env = this.buildEnv(config);
-    const copilotModel = config.env['COPILOT_MODEL'] ?? null;
+    const copilotModel = config.env.COPILOT_MODEL ?? null;
     if (copilotModel) this.lastModels.set(config.sessionId, copilotModel);
 
     this.logger.info({
@@ -90,7 +90,11 @@ export class CopilotRuntime implements Runtime {
 
     if (stderrText.trim()) {
       this.logger.warn(
-        { component: 'copilot-runtime', sessionId: config.sessionId, stderr: stderrText.slice(0, 1000) },
+        {
+          component: 'copilot-runtime',
+          sessionId: config.sessionId,
+          stderr: stderrText.slice(0, 1000),
+        },
         'copilot stderr',
       );
     }
@@ -185,7 +189,7 @@ export class CopilotRuntime implements Runtime {
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
     const args: string[] = ['-p', config.task];
-    const copilotModel = config.env['COPILOT_MODEL'];
+    const copilotModel = config.env.COPILOT_MODEL;
     if (copilotModel) args.push('--model', copilotModel);
     args.push('--allow-all', '--no-ask-user', '--no-auto-update', '-s');
     return args;

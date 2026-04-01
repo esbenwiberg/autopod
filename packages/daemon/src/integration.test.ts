@@ -166,6 +166,7 @@ describe('Integration', () => {
       }),
     };
 
+    // biome-ignore lint/style/useConst: assigned after sessionQueue to break circular dependency
     let sessionManager: ReturnType<typeof createSessionManager>;
 
     const sessionQueue = createSessionQueue(

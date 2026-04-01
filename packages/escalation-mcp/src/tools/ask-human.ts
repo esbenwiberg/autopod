@@ -41,7 +41,7 @@ export async function askHuman(
     // Timeout or cancellation — return a message rather than throwing INTERNAL_ERROR
     const isTimeout = err instanceof Error && err.message.includes('timed out');
     return isTimeout
-      ? `[No response received within the timeout period. Please check in with the human separately and continue with your best judgement.]`
+      ? '[No response received within the timeout period. Please check in with the human separately and continue with your best judgement.]'
       : `[Escalation cancelled: ${err instanceof Error ? err.message : String(err)}]`;
   }
 }

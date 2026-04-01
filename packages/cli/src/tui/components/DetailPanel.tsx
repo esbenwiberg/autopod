@@ -248,8 +248,8 @@ export function DetailPanel({
                     .trim()
                     .split('\n')
                     .slice(-8)
-                    .map((line, i) => (
-                      <Text key={i} dimColor wrap="truncate">
+                    .map((line) => (
+                      <Text key={line} dimColor wrap="truncate">
                         {line}
                       </Text>
                     ))}
@@ -263,18 +263,18 @@ export function DetailPanel({
               )}
               {validation.smoke.pages
                 .filter((p) => p.status === 'fail')
-                .map((page, i) => (
-                  <Box key={i} flexDirection="column">
+                .map((page) => (
+                  <Box key={page.path} flexDirection="column">
                     <Text color="red">Page {page.path} failed:</Text>
                     {page.assertions
                       .filter((a) => !a.passed)
-                      .map((a, j) => (
-                        <Text key={j} dimColor wrap="truncate">
+                      .map((a) => (
+                        <Text key={`${a.type}-${a.selector}`} dimColor wrap="truncate">
                           {`  ${a.type} ${a.selector}: expected "${a.expected}" got "${a.actual}"`}
                         </Text>
                       ))}
-                    {page.consoleErrors.map((e, j) => (
-                      <Text key={j} dimColor wrap="truncate">
+                    {page.consoleErrors.map((e) => (
+                      <Text key={e} dimColor wrap="truncate">
                         {`  console: ${e}`}
                       </Text>
                     ))}
@@ -298,8 +298,8 @@ export function DetailPanel({
               </Box>
               {validation.acValidation.results
                 .filter((r) => !r.passed)
-                .map((r, i) => (
-                  <Box key={i} flexDirection="column" marginLeft={2}>
+                .map((r) => (
+                  <Box key={r.criterion} flexDirection="column" marginLeft={2}>
                     <Text color="red" wrap="truncate">
                       ✗ {r.criterion}
                     </Text>
@@ -336,8 +336,8 @@ export function DetailPanel({
                       {validation.taskReview.reasoning}
                     </Text>
                   )}
-                  {validation.taskReview.issues.map((issue, i) => (
-                    <Text key={i} color="red" wrap="truncate">
+                  {validation.taskReview.issues.map((issue) => (
+                    <Text key={issue} color="red" wrap="truncate">
                       {`• ${issue}`}
                     </Text>
                   ))}

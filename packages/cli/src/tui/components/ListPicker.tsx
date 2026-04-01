@@ -28,7 +28,8 @@ export function ListPicker<T>({
     }
     if (key.return) {
       if (items.length > 0) {
-        onSelect(items[selectedIndex]!);
+        const item = items[selectedIndex];
+        if (item !== undefined) onSelect(item);
       }
       return;
     }

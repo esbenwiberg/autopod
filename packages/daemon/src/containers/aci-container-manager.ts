@@ -328,7 +328,7 @@ export class AciContainerManager implements ContainerManager {
               this.activePolls.delete(containerId);
               stdoutStream.end();
               stderrStream.end();
-              resolve(Number.parseInt(exitMatch[1]!, 10));
+              resolve(Number.parseInt(exitMatch[1] ?? '0', 10));
               return;
             }
           }
@@ -414,7 +414,7 @@ export class AciContainerManager implements ContainerManager {
 
             // Try to get exit code from final log output
             const exitMatch = content.match(/EXIT_CODE=(\d+)/);
-            resolve(exitMatch ? Number.parseInt(exitMatch[1]!, 10) : 0);
+            resolve(exitMatch ? Number.parseInt(exitMatch[1] ?? '0', 10) : 0);
           }
         } catch (err: unknown) {
           if (aborted) return;

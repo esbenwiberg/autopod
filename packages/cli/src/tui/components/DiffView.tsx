@@ -33,7 +33,7 @@ export function DiffView({ diff, onClose }: DiffViewProps): React.ReactElement {
           else if (line.startsWith('@@')) color = 'cyan';
 
           return (
-            <Text key={i} color={color}>
+            <Text key={`${i}-${line}`} color={color}>
               {line}
             </Text>
           );

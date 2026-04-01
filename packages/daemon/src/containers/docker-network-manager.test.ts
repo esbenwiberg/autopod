@@ -18,7 +18,7 @@ function createMockDocker() {
     instance: {
       getNetwork: getNetworkFn,
       createNetwork: createNetworkFn,
-    } as any,
+    } as unknown as import('dockerode'),
   };
 }
 

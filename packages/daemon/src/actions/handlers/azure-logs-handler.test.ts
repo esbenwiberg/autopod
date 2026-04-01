@@ -1,3 +1,4 @@
+import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAzureLogsHandler } from './azure-logs-handler.js';
@@ -15,12 +16,12 @@ function mockResponse(
 
 const logger = pino({ level: 'silent' });
 
-function makeAction(name: string, fields: string[] = []): any {
+function makeAction(name: string, fields: string[] = []): ActionDefinition {
   return {
     name,
     description: '',
-    group: {} as any,
-    handler: {} as any,
+    group: 'azure-logs',
+    handler: 'azure-logs',
     params: {},
     response: { fields },
   };
@@ -168,7 +169,7 @@ describe('createAzureLogsHandler', () => {
       getSecret: (ref) => (ref === 'AZURE_MONITOR_TOKEN' ? 'token' : undefined),
     });
 
-    const result: any = await handler.execute(makeAction('query_logs'), {
+    const result = await handler.execute(makeAction('query_logs'), {
       workspace_id: 'ws-123',
       query: 'MyTable',
     });
@@ -191,7 +192,7 @@ describe('createAzureLogsHandler', () => {
       getSecret: (ref) => (ref === 'AZURE_MONITOR_TOKEN' ? 'token' : undefined),
     });
 
-    const result: any = await handler.execute(makeAction('query_logs'), {
+    const result = await handler.execute(makeAction('query_logs'), {
       workspace_id: 'ws-123',
       query: 'EmptyTable',
     });

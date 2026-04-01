@@ -320,7 +320,10 @@ export function Dashboard({
         }
       },
       v: () => {
-        if ((currentSession?.status === 'failed' || currentSession?.status === 'killed') && currentSessionId) {
+        if (
+          (currentSession?.status === 'failed' || currentSession?.status === 'killed') &&
+          currentSessionId
+        ) {
           void client.triggerValidation(currentSessionId).catch(() => {
             showToast('Failed to trigger validation', 'red');
           });
@@ -346,8 +349,7 @@ export function Dashboard({
         if (currentSession?.previewUrl) {
           openUrl(currentSession.previewUrl);
         } else if (
-          currentSession &&
-          currentSession.containerId &&
+          currentSession?.containerId &&
           ['validated', 'failed'].includes(currentSession.status)
         ) {
           // Container is stopped — launch preview
@@ -429,8 +431,6 @@ export function Dashboard({
       showToast,
       filterText,
       handlePause,
-      handleNudge,
-      handleDelete,
       daemonUrl,
       refresh,
       validationAttempts,
@@ -691,15 +691,14 @@ function ActivityLogOverlay({
   }
 
   // Filter out tool_result noise — they just echo tool_use_id with no useful info
-  const displayEvents = tail.filter(
-    (e) => !(e.type === 'tool_use' && e.tool === 'tool_result'),
-  );
+  const displayEvents = tail.filter((e) => !(e.type === 'tool_use' && e.tool === 'tool_result'));
 
   return (
     <Box flexDirection="column">
       {displayEvents.map((event, i) => {
         const ts = new Date(event.timestamp).toLocaleTimeString();
         const isStreak = streakIndices.has(i);
+        const eventKey = `${event.type}-${event.timestamp}-${i}`;
         let tag: string;
         let detail: string;
         switch (event.type) {
@@ -732,7 +731,7 @@ function ActivityLogOverlay({
             detail = '';
         }
         return (
-          <Text key={`log-${i}`} dimColor={!isStreak} wrap="truncate">
+          <Text key={eventKey} dimColor={!isStreak} wrap="truncate">
             {isStreak ? '\u26A0 ' : ''}
             {ts} [{tag}] {detail}
           </Text>

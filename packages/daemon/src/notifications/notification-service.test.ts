@@ -211,8 +211,8 @@ describe('NotificationService', () => {
         expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
       });
 
-      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0]!;
-      expect(card.body[0]?.text).toContain('Validated');
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0];
+      expect(card?.body[0]?.text).toContain('Validated');
     });
 
     it('sends failed card on fail', async () => {
@@ -249,8 +249,8 @@ describe('NotificationService', () => {
         expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
       });
 
-      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0]!;
-      expect(card.body[0]?.text).toContain('Failed');
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0];
+      expect(card?.body[0]?.text).toContain('Failed');
     });
   });
 
@@ -278,8 +278,8 @@ describe('NotificationService', () => {
         expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
       });
 
-      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0]!;
-      expect(card.body[0]?.text).toContain('Input');
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0];
+      expect(card?.body[0]?.text).toContain('Input');
     });
 
     it('does NOT send for ask_ai escalation', async () => {
@@ -349,8 +349,8 @@ describe('NotificationService', () => {
         expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
       });
 
-      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0]!;
-      expect(card.body[0]?.text).toContain('Error');
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0];
+      expect(card?.body[0]?.text).toContain('Error');
     });
 
     it('does not send for non-failed status changes', async () => {

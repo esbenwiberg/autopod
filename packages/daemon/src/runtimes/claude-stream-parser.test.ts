@@ -5,7 +5,7 @@ import { ClaudeStreamParser } from './claude-stream-parser.js';
 const SESSION_ID = 'test-session';
 
 function fakeLogger() {
-  return { debug: () => {}, info: () => {}, warn: () => {} } as any;
+  return { debug: () => {}, info: () => {}, warn: () => {} } as unknown as import('pino').Logger;
 }
 
 describe('ClaudeStreamParser.mapEvent', () => {

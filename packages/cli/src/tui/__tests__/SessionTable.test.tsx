@@ -58,7 +58,7 @@ describe('SessionTable', () => {
     const { lastFrame } = render(
       <SessionTable sessions={sessions} selectedIndex={0} columns={columns} maxRows={10} />,
     );
-    const output = lastFrame()!;
+    const output = lastFrame() ?? '';
     expect(output).toContain('abc12');
     expect(output).toContain('web-app');
     expect(output).toContain('Fix the login page');
@@ -71,7 +71,7 @@ describe('SessionTable', () => {
     const { lastFrame } = render(
       <SessionTable sessions={sessions} selectedIndex={0} columns={columns} maxRows={10} />,
     );
-    const output = lastFrame()!;
+    const output = lastFrame() ?? '';
     expect(output).toContain('ID');
     expect(output).toContain('PROFILE');
     expect(output).toContain('TASK');
@@ -84,7 +84,7 @@ describe('SessionTable', () => {
     const { lastFrame } = render(
       <SessionTable sessions={sessions} selectedIndex={0} columns={columns} maxRows={10} />,
     );
-    const output = lastFrame()!;
+    const output = lastFrame() ?? '';
     // Selected row should have the ▸ prefix
     expect(output).toContain('\u25B8');
   });
@@ -98,7 +98,7 @@ describe('SessionTable', () => {
     const { lastFrame } = render(
       <SessionTable sessions={sessions} selectedIndex={1} columns={columns} maxRows={10} />,
     );
-    const output = lastFrame()!;
+    const output = lastFrame() ?? '';
     expect(output).toContain('ses01');
     expect(output).toContain('ses02');
     expect(output).toContain('ses03');

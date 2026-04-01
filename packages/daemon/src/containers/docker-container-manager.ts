@@ -281,14 +281,17 @@ export class DockerContainerManager implements ContainerManager {
     this.docker.modem.demuxStream(muxStream, stdoutStream, stderrStream);
 
     // When the mux stream ends, close both output streams
-    (muxStream as NodeJS.ReadableStream & { on: Function }).on('end', () => {
+    (muxStream as NodeJS.ReadableStream & { on: (...args: unknown[]) => unknown }).on('end', () => {
       stdoutStream.end();
       stderrStream.end();
     });
-    (muxStream as NodeJS.ReadableStream & { on: Function }).on('error', (err: Error) => {
-      stdoutStream.destroy(err);
-      stderrStream.destroy(err);
-    });
+    (muxStream as NodeJS.ReadableStream & { on: (...args: unknown[]) => unknown }).on(
+      'error',
+      (err: Error) => {
+        stdoutStream.destroy(err);
+        stderrStream.destroy(err);
+      },
+    );
 
     // Resolve exit code once the stream closes and we can inspect the exec.
     // Listen to 'end', 'error', and 'close' — destroy() only emits 'close'.
@@ -305,7 +308,7 @@ export class DockerContainerManager implements ContainerManager {
         }
       };
 
-      const mux = muxStream as NodeJS.ReadableStream & { on: Function };
+      const mux = muxStream as NodeJS.ReadableStream & { on: (...args: unknown[]) => unknown };
       mux.on('end', checkExit);
       mux.on('error', checkExit);
       // destroy() emits 'close' but not 'end' — must handle this too
@@ -314,8 +317,9 @@ export class DockerContainerManager implements ContainerManager {
 
     const kill = async () => {
       // Destroy the mux stream to abort the exec
-      if ('destroy' in muxStream && typeof (muxStream as any).destroy === 'function') {
-        (muxStream as any).destroy();
+      const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
+      if (typeof destroyable.destroy === 'function') {
+        destroyable.destroy();
       }
       stdoutStream.destroy();
       stderrStream.destroy();
@@ -402,18 +406,25 @@ function collectDemuxedOutput(
     // Use dockerode's modem demuxer to split stdout/stderr
     docker.modem.demuxStream(stream, stdoutWriter, stderrWriter);
 
-    (stream as NodeJS.ReadableStream & { on: Function }).on('end', () => settle());
-    (stream as NodeJS.ReadableStream & { on: Function }).on('error', (err: Error) => settle(err));
+    (stream as NodeJS.ReadableStream & { on: (...args: unknown[]) => unknown }).on('end', () =>
+      settle(),
+    );
+    (stream as NodeJS.ReadableStream & { on: (...args: unknown[]) => unknown }).on(
+      'error',
+      (err: Error) => settle(err),
+    );
 
     if (timeout && timeout > 0) {
       timer = setTimeout(() => {
         // Attempt to destroy the stream to abort the exec
-        if ('destroy' in stream && typeof (stream as any).destroy === 'function') {
-          (stream as any).destroy();
+        const destroyableStream = stream as NodeJS.ReadableStream & { destroy?: () => void };
+        if (typeof destroyableStream.destroy === 'function') {
+          destroyableStream.destroy();
         }
         const partialOutput = [stdoutBuf, stderrBuf].filter(Boolean).join('\n').slice(-5_000);
-        const err = new Error(`Exec timed out after ${timeout}ms`);
-        (err as any).partialOutput = partialOutput;
+        const err = Object.assign(new Error(`Exec timed out after ${timeout}ms`), {
+          partialOutput,
+        });
         settle(err);
       }, timeout);
     }

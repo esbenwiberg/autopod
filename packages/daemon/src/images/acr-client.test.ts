@@ -26,7 +26,7 @@ function createMockDocker() {
     (
       _stream: unknown,
       onComplete: (err: Error | null) => void,
-      onProgress?: (event: any) => void,
+      onProgress?: (event: { aux?: { Digest?: string } }) => void,
     ) => {
       if (onProgress) {
         onProgress({ aux: { Digest: 'sha256:deadbeef' } });
@@ -43,7 +43,7 @@ function createMockDocker() {
     }),
     pull: vi.fn().mockResolvedValue('mock-pull-stream'),
     modem: { followProgress: followProgressCb },
-  } as any;
+  } as unknown as import('dockerode');
 }
 
 describe('AcrClient', () => {

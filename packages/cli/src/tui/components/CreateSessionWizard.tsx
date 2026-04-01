@@ -188,8 +188,8 @@ function AcInput({
       <Text bold color="yellow">
         Acceptance Criteria (optional)
       </Text>
-      {criteria.map((c, i) => (
-        <Text key={i} color="green">
+      {criteria.map((c) => (
+        <Text key={c} color="green">
           {'  ✓ '}
           {c}
         </Text>
@@ -227,8 +227,8 @@ function WizardMessage({
       <Text bold color={color}>
         {title}
       </Text>
-      {lines.map((line, i) => (
-        <Text key={i} dimColor>
+      {lines.map((line) => (
+        <Text key={line} dimColor>
           {line}
         </Text>
       ))}
