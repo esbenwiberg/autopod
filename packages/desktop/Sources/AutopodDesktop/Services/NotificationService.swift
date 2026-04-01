@@ -7,11 +7,17 @@ import AutopodUI
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Sendable {
   static let shared = NotificationService()
 
+  /// Whether notifications are available (requires app bundle with bundle ID)
+  private var isAvailable: Bool {
+    Bundle.main.bundleIdentifier != nil
+  }
+
   private override init() {
     super.init()
   }
 
   func requestPermission() async {
+    guard isAvailable else { return }
     let center = UNUserNotificationCenter.current()
     center.delegate = self
     _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
@@ -56,6 +62,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Sen
   }
 
   func registerCategories() {
+    guard isAvailable else { return }
     let approve = UNNotificationAction(identifier: "APPROVE", title: "Approve", options: [])
     let view = UNNotificationAction(identifier: "VIEW", title: "View", options: [.foreground])
 
@@ -85,6 +92,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Sen
   // MARK: - Private
 
   private func post(id: String, content: UNMutableNotificationContent) {
+    guard isAvailable else { return }
     let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
     UNUserNotificationCenter.current().add(request)
   }
