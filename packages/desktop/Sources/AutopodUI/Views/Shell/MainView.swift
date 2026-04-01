@@ -281,7 +281,7 @@ struct SessionListRow: View {
         HStack(spacing: 10) {
             StatusDot(status: session.status)
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.branch)
+                Text(session.id)
                     .font(.system(.callout, design: .monospaced).weight(.medium))
                     .lineLimit(1)
                 Text(session.profileName)

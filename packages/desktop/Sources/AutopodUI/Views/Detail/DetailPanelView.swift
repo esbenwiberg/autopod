@@ -68,7 +68,7 @@ public struct DetailPanelView: View {
         HStack(spacing: 10) {
             StatusDot(status: session.status)
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.branch)
+                Text(session.id)
                     .font(.system(.title3, design: .monospaced).weight(.semibold))
                 HStack(spacing: 6) {
                     Text(session.profileName)

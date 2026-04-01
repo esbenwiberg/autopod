@@ -67,10 +67,10 @@ public struct SessionCardFinal: View {
 
     private var compactContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Top row: dot + branch + badge
+            // Top row: dot + ID + badge
             HStack(spacing: 7) {
                 StatusDot(status: session.status)
-                Text(session.branch)
+                Text(session.id)
                     .font(.system(.callout, design: .monospaced).weight(.medium))
                     .lineLimit(1)
                 Spacer()
