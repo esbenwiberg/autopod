@@ -43,7 +43,7 @@ public final class ConnectionManager {
     let connections = ConnectionStore.loadAll()
     if let activeId = ConnectionStore.activeConnectionId(),
        let saved = connections.first(where: { $0.id == activeId }),
-       let token = KeychainHelper.load(for: saved.id) {
+       let token = KeychainHelper.load(for: saved.id) ?? ConnectionStore.loadToken(for: saved.id) {
       connection = saved
       api = DaemonAPI(baseURL: saved.url, token: token)
       // Kick off initial health check
@@ -57,8 +57,9 @@ public final class ConnectionManager {
   public func addAndConnect(name: String, url: URL, token: String) async throws {
     let conn = DaemonConnection(name: name, url: url)
 
-    // Save token to Keychain
-    try KeychainHelper.save(token: token, for: conn.id)
+    // Save token to Keychain + UserDefaults fallback
+    try? KeychainHelper.save(token: token, for: conn.id)
+    ConnectionStore.saveToken(token, for: conn.id)
 
     // Save connection metadata
     var connections = ConnectionStore.loadAll()

@@ -39,6 +39,19 @@ public enum ConnectionStore {
     UserDefaults.standard.set(data, forKey: key)
   }
 
+  // Token fallback — UserDefaults for when Keychain isn't available (SPM/unsigned builds)
+  public static func saveToken(_ token: String, for id: UUID) {
+    UserDefaults.standard.set(token, forKey: "autopod.token.\(id.uuidString)")
+  }
+
+  public static func loadToken(for id: UUID) -> String? {
+    UserDefaults.standard.string(forKey: "autopod.token.\(id.uuidString)")
+  }
+
+  public static func deleteToken(for id: UUID) {
+    UserDefaults.standard.removeObject(forKey: "autopod.token.\(id.uuidString)")
+  }
+
   public static func activeConnectionId() -> UUID? {
     guard let str = UserDefaults.standard.string(forKey: activeKey) else { return nil }
     return UUID(uuidString: str)

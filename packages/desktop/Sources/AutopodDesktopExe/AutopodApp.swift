@@ -40,7 +40,7 @@ struct AutopodApp: App {
           profileStore.configure(api: api)
           actionHandler = ActionHandler(api: api, sessionStore: sessionStore)
 
-          let connToken = KeychainHelper.load(for: conn.id) ?? ""
+          let connToken = KeychainHelper.load(for: conn.id) ?? ConnectionStore.loadToken(for: conn.id) ?? ""
           terminalManager = TerminalManager(baseURL: conn.url, token: connToken)
 
           let stream = EventStream(sessionStore: sessionStore)
