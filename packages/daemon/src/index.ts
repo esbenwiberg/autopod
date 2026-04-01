@@ -56,7 +56,7 @@ loadDotenv(); // load .env if present (no-op if missing)
 const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const PORT = Number.parseInt(process.env.PORT ?? '3100', 10);
-const HOST = process.env.HOST ?? '0.0.0.0';
+const HOST = process.env.HOST ?? '127.0.0.1';
 const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
