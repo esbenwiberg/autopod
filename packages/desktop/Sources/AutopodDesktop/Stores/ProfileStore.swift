@@ -13,6 +13,8 @@ public final class ProfileStore {
 
   private var api: DaemonAPI?
 
+  public init() {}
+
   public var profileNames: [String] {
     profiles.map(\.name).sorted()
   }

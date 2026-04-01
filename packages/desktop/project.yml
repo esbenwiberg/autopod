@@ -1,0 +1,41 @@
+name: Autopod
+options:
+  bundleIdPrefix: com.autopod
+  deploymentTarget:
+    macOS: "15.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+
+packages:
+  AutopodDesktop:
+    path: .
+
+targets:
+  Autopod:
+    type: application
+    platform: macOS
+    sources:
+      - path: Autopod
+    dependencies:
+      - package: AutopodDesktop
+        product: AutopodUI
+      - package: AutopodDesktop
+        product: AutopodClient
+      - package: AutopodDesktop
+        product: AutopodDesktop
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.autopod.desktop
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Autopod/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Autopod/Autopod.entitlements
+        INFOPLIST_KEY_CFBundleDisplayName: Autopod
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        CODE_SIGN_STYLE: Automatic
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/../Frameworks"

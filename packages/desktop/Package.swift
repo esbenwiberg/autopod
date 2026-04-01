@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "AutopodUI", targets: ["AutopodUI"]),
         .library(name: "AutopodClient", targets: ["AutopodClient"]),
+        .library(name: "AutopodDesktop", targets: ["AutopodDesktop"]),
     ],
     targets: [
         .target(
@@ -17,10 +18,15 @@ let package = Package(
             name: "AutopodClient",
             path: "Sources/AutopodClient"
         ),
-        .executableTarget(
+        .target(
             name: "AutopodDesktop",
             dependencies: ["AutopodUI", "AutopodClient"],
             path: "Sources/AutopodDesktop"
+        ),
+        .executableTarget(
+            name: "AutopodDesktopExe",
+            dependencies: ["AutopodUI", "AutopodClient", "AutopodDesktop"],
+            path: "Sources/AutopodDesktopExe"
         ),
         .testTarget(
             name: "AutopodClientTests",

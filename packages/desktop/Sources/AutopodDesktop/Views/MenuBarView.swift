@@ -2,10 +2,14 @@ import SwiftUI
 import AutopodUI
 
 /// Menubar dropdown showing fleet status at a glance.
-struct MenuBarView: View {
-  let sessions: [Session]
-  let actions: SessionActions
-  var onOpenDashboard: () -> Void = {}
+public struct MenuBarView: View {
+  public let sessions: [Session]
+  public var actions: SessionActions
+  public var onOpenDashboard: () -> Void = {}
+
+  public init(sessions: [Session], actions: SessionActions = .preview, onOpenDashboard: @escaping () -> Void = {}) {
+    self.sessions = sessions; self.actions = actions; self.onOpenDashboard = onOpenDashboard
+  }
 
   private var attentionSessions: [Session] {
     sessions.filter { $0.status.needsAttention }
@@ -15,7 +19,7 @@ struct MenuBarView: View {
     sessions.filter { $0.status.isActive }
   }
 
-  var body: some View {
+  public var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       // Header
       HStack {

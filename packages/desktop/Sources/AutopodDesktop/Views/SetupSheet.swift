@@ -2,9 +2,9 @@ import SwiftUI
 import AutopodClient
 
 /// First-launch sheet for adding a daemon connection.
-struct SetupSheet: View {
-  @Binding var isPresented: Bool
-  let connectionManager: ConnectionManager
+public struct SetupSheet: View {
+  @Binding public var isPresented: Bool
+  public let connectionManager: ConnectionManager
 
   @State private var name = "Local"
   @State private var urlString = "http://localhost:3000"
@@ -26,7 +26,12 @@ struct SetupSheet: View {
     canTest && testResult == .success
   }
 
-  var body: some View {
+  public init(isPresented: Binding<Bool>, connectionManager: ConnectionManager) {
+    self._isPresented = isPresented
+    self.connectionManager = connectionManager
+  }
+
+  public var body: some View {
     VStack(spacing: 0) {
       // Header
       VStack(spacing: 6) {

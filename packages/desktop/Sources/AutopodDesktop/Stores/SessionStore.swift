@@ -17,6 +17,8 @@ public final class SessionStore {
   /// Cached diff strings keyed by session ID
   public private(set) var sessionDiffs: [String: String] = [:]
 
+  public init() {}
+
   // MARK: - Computed groupings
 
   public var selectedSession: Session? {

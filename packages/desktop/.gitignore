@@ -1,6 +1,9 @@
 # Swift build artifacts
 .build/
+build/
 .swiftpm/
 DerivedData/
 *.xcuserstate
 xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/

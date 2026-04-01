@@ -2,13 +2,17 @@ import SwiftUI
 import AutopodClient
 
 /// App settings — connections and notification preferences.
-struct SettingsView: View {
-  let connectionManager: ConnectionManager
-  @Binding var isPresented: Bool
+public struct SettingsView: View {
+  public let connectionManager: ConnectionManager
+  @Binding public var isPresented: Bool
+
+  public init(connectionManager: ConnectionManager, isPresented: Binding<Bool>) {
+    self.connectionManager = connectionManager; self._isPresented = isPresented
+  }
 
   @State private var showAddConnection = false
 
-  var body: some View {
+  public var body: some View {
     VStack(spacing: 0) {
       // Header
       HStack {

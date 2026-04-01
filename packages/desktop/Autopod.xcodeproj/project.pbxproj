@@ -1,0 +1,356 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		3E484C58043E8C8A3293021B /* AutopodXcodeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BB9EEED149664897DB6336A /* AutopodXcodeApp.swift */; };
+		90A9E894168A67EAB46A4D19 /* AutopodDesktop in Frameworks */ = {isa = PBXBuildFile; productRef = BDB2D6FDAD7D667CBAE61EF2 /* AutopodDesktop */; };
+		BB87E9C3D740F0D4331818E4 /* AutopodClient in Frameworks */ = {isa = PBXBuildFile; productRef = 0782144CF1A2F315FDDE031D /* AutopodClient */; };
+		DE60CEF8820282F0E727278E /* AutopodUI in Frameworks */ = {isa = PBXBuildFile; productRef = A111EB59597890B84446BE35 /* AutopodUI */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		12208E2EED87E3A82F4A092D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		664F30957CDB3B4C6C0C2228 /* desktop */ = {isa = PBXFileReference; lastKnownFileType = folder; name = desktop; path = .; sourceTree = SOURCE_ROOT; };
+		6BB9EEED149664897DB6336A /* AutopodXcodeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopodXcodeApp.swift; sourceTree = "<group>"; };
+		AE5001939FC64E7ECDF24040 /* Autopod.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Autopod.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DEDDBCF3EB87CD0DFECD0063 /* Autopod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Autopod.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7CF860B73AB5C71DD8F7C179 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DE60CEF8820282F0E727278E /* AutopodUI in Frameworks */,
+				BB87E9C3D740F0D4331818E4 /* AutopodClient in Frameworks */,
+				90A9E894168A67EAB46A4D19 /* AutopodDesktop in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		08149C3909E596D3237B841C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AE5001939FC64E7ECDF24040 /* Autopod.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		27E0FBBF78500038DBEFA5CD /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				664F30957CDB3B4C6C0C2228 /* desktop */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		81A471FCF4803830A0EC4CBF = {
+			isa = PBXGroup;
+			children = (
+				C650B9520F2DE52751081DAF /* Autopod */,
+				27E0FBBF78500038DBEFA5CD /* Packages */,
+				08149C3909E596D3237B841C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C650B9520F2DE52751081DAF /* Autopod */ = {
+			isa = PBXGroup;
+			children = (
+				DEDDBCF3EB87CD0DFECD0063 /* Autopod.entitlements */,
+				6BB9EEED149664897DB6336A /* AutopodXcodeApp.swift */,
+				12208E2EED87E3A82F4A092D /* Info.plist */,
+			);
+			path = Autopod;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		5ADCAA5844CD011B40E9E9A4 /* Autopod */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D778BAF9AE0950F6B10C652E /* Build configuration list for PBXNativeTarget "Autopod" */;
+			buildPhases = (
+				325A42A4DFA848A04E451DAA /* Sources */,
+				7CF860B73AB5C71DD8F7C179 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Autopod;
+			packageProductDependencies = (
+				A111EB59597890B84446BE35 /* AutopodUI */,
+				0782144CF1A2F315FDDE031D /* AutopodClient */,
+				BDB2D6FDAD7D667CBAE61EF2 /* AutopodDesktop */,
+			);
+			productName = Autopod;
+			productReference = AE5001939FC64E7ECDF24040 /* Autopod.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		90B0DD27D8DD49AD06BB4E98 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					5ADCAA5844CD011B40E9E9A4 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = CFE7FB8D85F21322F8282913 /* Build configuration list for PBXProject "Autopod" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 81A471FCF4803830A0EC4CBF;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				43A88FCB30A2B2A3D29F3ED7 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 08149C3909E596D3237B841C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5ADCAA5844CD011B40E9E9A4 /* Autopod */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		325A42A4DFA848A04E451DAA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3E484C58043E8C8A3293021B /* AutopodXcodeApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		05390D70B9035327B410E77E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		097CB5EDFE2D3E577ED33214 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Autopod/Autopod.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = Autopod/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Autopod;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.autopod.desktop;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		48E20C8C06532F8D3CAEB895 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C65C4371B0732519B865F400 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Autopod/Autopod.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = Autopod/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Autopod;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.autopod.desktop;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CFE7FB8D85F21322F8282913 /* Build configuration list for PBXProject "Autopod" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				48E20C8C06532F8D3CAEB895 /* Debug */,
+				05390D70B9035327B410E77E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D778BAF9AE0950F6B10C652E /* Build configuration list for PBXNativeTarget "Autopod" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				097CB5EDFE2D3E577ED33214 /* Debug */,
+				C65C4371B0732519B865F400 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		43A88FCB30A2B2A3D29F3ED7 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0782144CF1A2F315FDDE031D /* AutopodClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutopodClient;
+		};
+		A111EB59597890B84446BE35 /* AutopodUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutopodUI;
+		};
+		BDB2D6FDAD7D667CBAE61EF2 /* AutopodDesktop */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutopodDesktop;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 90B0DD27D8DD49AD06BB4E98 /* Project object */;
+}
