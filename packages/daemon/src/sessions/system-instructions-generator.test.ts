@@ -92,7 +92,8 @@ describe('generateSystemInstructions', () => {
 
     expect(md).toContain('Session ID: abc12345');
     expect(md).toContain('Profile: test-profile');
-    expect(md).toContain('Task: Add dark mode');
+    expect(md).toContain('Add dark mode');
+    expect(md).toContain('<!-- BEGIN USER TASK -->');
   });
 
   it('includes MCP server URL', () => {

@@ -17,6 +17,7 @@ import type {
 } from '@autopod/shared';
 import { AutopodError, CONTAINER_HOME_DIR, generateSessionId } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
 import { getBaseImage } from '../images/dockerfile-generator.js';
 import type {
   ContainerManager,
@@ -135,6 +136,9 @@ export interface SessionManagerDependencies {
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
   /** Pending MCP ask_human requests keyed by sessionId — used to resolve escalations */
   pendingRequestsBySession?: Map<string, PendingRequests>;
+  /** Used to generate a session-scoped Bearer token injected into the container so it can
+   * authenticate calls to the /mcp/:sessionId endpoint. Optional for backwards compat. */
+  sessionTokenIssuer?: SessionTokenIssuer;
   logger: Logger;
 }
 
@@ -588,9 +592,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', systemInstructions);
         }
 
+        // Generate a session-scoped token so the container can authenticate its MCP calls.
+        // The token is passed as Authorization: Bearer on the escalation MCP server config
+        // and verified by the /mcp/:sessionId route handler.
+        const mcpSessionToken = deps.sessionTokenIssuer?.generate(sessionId);
+        const escalationHeaders = mcpSessionToken
+          ? { Authorization: `Bearer ${mcpSessionToken}` }
+          : undefined;
+
         // Build MCP server list for runtime
         const mcpServers = [
-          { name: 'escalation', url: mcpUrl },
+          { name: 'escalation', url: mcpUrl, headers: escalationHeaders },
           ...proxiedMcpServers.map((s) => ({ name: s.name, url: s.url, headers: s.headers })),
         ];
 

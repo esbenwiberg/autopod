@@ -3,12 +3,14 @@ import { type PendingRequests, createEscalationMcpServer } from '@autopod/escala
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
 
 export function mcpHandler(
   app: FastifyInstance,
   bridge: SessionBridge,
   pendingRequestsBySession: Map<string, PendingRequests>,
   logger: Logger,
+  sessionTokenIssuer?: SessionTokenIssuer,
 ): void {
   // Only pendingRequests is stored per session — the McpServer is created fresh per
   // HTTP request to avoid the "Already connected to a transport" error from the MCP SDK,
@@ -36,7 +38,13 @@ export function mcpHandler(
   // A fresh McpServer + transport is created per request so the server instance is
   // never in an "already connected" state. The pendingRequests object is reused across
   // requests to preserve in-flight ask_human / report_blocker state.
-  app.all('/mcp/:sessionId', { config: { auth: false } }, async (request, reply) => {
+  //
+  // When a sessionTokenIssuer is available the endpoint requires a session-scoped
+  // Bearer token (injected into the container environment during provisioning).
+  // This prevents any caller who knows a sessionId from invoking escalation tools
+  // for sessions they don't own.
+  const authConfig = sessionTokenIssuer ? 'session-token' : (false as const);
+  app.all('/mcp/:sessionId', { config: { auth: authConfig } }, async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
 
     let pendingRequests: PendingRequests;

@@ -30,7 +30,15 @@ export function generateSystemInstructions(
   lines.push('');
   lines.push(`Session ID: ${session.id}`);
   lines.push(`Profile: ${session.profileName}`);
-  lines.push(`Task: ${session.task}`);
+  lines.push('');
+  // Wrap the user-supplied task in explicit boundary markers so the LLM can distinguish
+  // it from system instructions. This is a prompt-injection mitigation: even if the task
+  // text contains adversarial instructions they are clearly scoped as user-provided data.
+  lines.push('## Task');
+  lines.push('');
+  lines.push('<!-- BEGIN USER TASK -->');
+  lines.push(session.task);
+  lines.push('<!-- END USER TASK -->');
   lines.push('');
 
   // Injected sections (sorted by priority — earlier = higher in document)
@@ -126,9 +134,12 @@ export function generateSystemInstructions(
       'Your changes must satisfy these criteria. The system will independently verify each one in a browser after you commit:',
     );
     lines.push('');
+    // Acceptance criteria are user-supplied — wrap in boundary markers.
+    lines.push('<!-- BEGIN USER ACCEPTANCE CRITERIA -->');
     for (const ac of session.acceptanceCriteria) {
       lines.push(`- ${ac}`);
     }
+    lines.push('<!-- END USER ACCEPTANCE CRITERIA -->');
     lines.push('');
 
     lines.push('### Self-Validation');
@@ -159,7 +170,10 @@ export function generateSystemInstructions(
   if (profile.customInstructions) {
     lines.push('## Custom Instructions');
     lines.push('');
+    // Custom instructions are profile-admin-supplied — wrap in boundary markers.
+    lines.push('<!-- BEGIN CUSTOM INSTRUCTIONS -->');
     lines.push(profile.customInstructions);
+    lines.push('<!-- END CUSTOM INSTRUCTIONS -->');
     lines.push('');
   }
 

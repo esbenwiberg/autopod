@@ -5,7 +5,8 @@ const REDACTED_VALUE = '[REDACTED]';
 
 /**
  * Sanitize a string by applying PII pattern matching.
- * Fail-open: if a regex throws, the text passes through unchanged (with a console warning).
+ * Fail-open: if a regex throws, the text passes through unchanged.
+ * The error is logged to stderr so it can be monitored and investigated.
  */
 export function sanitize(text: string, config: DataSanitizationConfig): string {
   const preset = config.preset ?? 'standard';
@@ -24,8 +25,14 @@ export function sanitize(text: string, config: DataSanitizationConfig): string {
         }
         return pattern.replacement;
       });
-    } catch {
-      // Fail-open: regex error shouldn't block content — silently skip
+    } catch (err) {
+      // Fail-open: regex error shouldn't block content, but log it so it can be monitored.
+      // A silently skipped pattern means PII may pass through unredacted.
+      // Use globalThis.console to avoid a lib: dom dependency in this zero-dep package.
+      (globalThis as { console?: { error: (...a: unknown[]) => void } }).console?.error(
+        `[autopod/sanitize] PII pattern '${pattern.name}' threw an error — content passed through unredacted:`,
+        err,
+      );
     }
   }
 

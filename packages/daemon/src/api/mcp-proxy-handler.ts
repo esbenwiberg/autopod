@@ -3,6 +3,20 @@ import { type ProcessContentConfig, processContent } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 
+// Private / link-local IPv4 ranges and localhost that must not be reachable via the proxy.
+const PRIVATE_HOST_REGEX =
+  /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|10(\.\d{1,3}){3}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|192\.168(\.\d{1,3}){2}|169\.254(\.\d{1,3}){2}|::1|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:)$/i;
+
+/** Returns true if the URL resolves to a private/loopback address (SSRF guard). */
+function isPrivateUrl(rawUrl: string): boolean {
+  try {
+    const { hostname } = new URL(rawUrl);
+    return PRIVATE_HOST_REGEX.test(hostname);
+  } catch {
+    return true; // Malformed URL — block it
+  }
+}
+
 export interface McpProxyConfig {
   /** Map of sessionId → injected MCP servers for that session */
   getServersForSession: (sessionId: string) => InjectedMcpServer[];
@@ -43,6 +57,17 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
         return reply
           .status(404)
           .send({ error: `MCP server '${serverName}' not found for session` });
+      }
+
+      // SSRF guard: reject requests targeting private/loopback addresses.
+      if (isPrivateUrl(server.url)) {
+        log.warn(
+          { sessionId, serverName, url: server.url },
+          'MCP proxy: blocked SSRF attempt to private address',
+        );
+        return reply
+          .status(403)
+          .send({ error: `MCP server '${serverName}' URL resolves to a private address` });
       }
 
       log.debug({ sessionId, serverName, method: request.method }, 'Proxying MCP request');

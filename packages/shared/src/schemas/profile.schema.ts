@@ -59,10 +59,26 @@ const smokePageSchema = z.object({
   assertions: z.array(pageAssertionSchema).optional(),
 });
 
+// Validates hostnames and IPs used in network allowlists.
+// Only alphanumerics, dots, and hyphens are permitted (plus a leading '*.' for wildcards).
+// This prevents shell injection when hostnames are embedded in generated firewall scripts.
+const SAFE_HOSTNAME_REGEX =
+  /^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$|^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+
 const networkPolicySchema = z.object({
   enabled: z.boolean(),
   mode: z.enum(['allow-all', 'deny-all', 'restricted']).optional(),
-  allowedHosts: z.array(z.string().min(1)).default([]),
+  allowedHosts: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .regex(
+          SAFE_HOSTNAME_REGEX,
+          'Invalid hostname: only alphanumerics, dots, and hyphens are allowed (optionally prefixed with *. for wildcards)',
+        ),
+    )
+    .default([]),
   replaceDefaults: z.boolean().optional(),
 });
 

@@ -87,6 +87,10 @@ const actionRegistry = createActionRegistry(logger);
 const secretsKeyPath = path.join(os.homedir(), '.autopod', 'secrets.key');
 const credentialsCipher = loadOrCreateKey(secretsKeyPath);
 
+// Session token issuer (HMAC-based, derived from secrets.key).
+// Declared early so it can be passed to createSessionManager for container authentication.
+const sessionTokenIssuer = createSessionTokenIssuer(secretsKeyPath);
+
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
 const sessionRepo = createSessionRepository(db);
@@ -306,6 +310,7 @@ sessionManager = createSessionManager({
     claudeMdSections: JSON.parse(process.env.DAEMON_CLAUDE_MD_SECTIONS ?? '[]'),
   },
   pendingRequestsBySession,
+  sessionTokenIssuer,
   logger,
 });
 
@@ -360,9 +365,6 @@ const notificationService = createNotificationService({
   logger,
 });
 notificationService.start();
-
-// Session token issuer (HMAC-based, derived from secrets.key)
-const sessionTokenIssuer = createSessionTokenIssuer(secretsKeyPath);
 
 // Server
 const app = await createServer({
