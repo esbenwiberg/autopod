@@ -68,6 +68,8 @@ export function resolveResultPath(obj: unknown, resultPath: string | undefined):
 }
 
 const DEFAULT_TIMEOUT = 15_000;
+/** Reject responses larger than this to prevent memory exhaustion. */
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB
 
 /**
  * Fetch with timeout support.
@@ -86,4 +88,24 @@ export async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Parse JSON from a response while enforcing a size limit.
+ * Throws if the response body exceeds MAX_RESPONSE_BYTES.
+ */
+export async function readSafeJson(response: Response): Promise<unknown> {
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null && Number.parseInt(contentLength, 10) > MAX_RESPONSE_BYTES) {
+    throw new Error(
+      `Response too large (${contentLength} bytes, limit ${MAX_RESPONSE_BYTES}). Use more specific query parameters to reduce results.`,
+    );
+  }
+  const text = await response.text();
+  if (text.length > MAX_RESPONSE_BYTES) {
+    throw new Error(
+      `Response too large (${text.length} chars, limit ${MAX_RESPONSE_BYTES}). Use more specific query parameters to reduce results.`,
+    );
+  }
+  return JSON.parse(text);
 }

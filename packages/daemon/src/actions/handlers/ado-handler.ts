@@ -1,6 +1,6 @@
 import type { ActionDefinition } from '@autopod/shared';
 import type { ActionHandler, HandlerConfig } from './handler.js';
-import { fetchWithTimeout, pickFields, pickFieldsArray } from './handler.js';
+import { fetchWithTimeout, pickFields, pickFieldsArray, readSafeJson } from './handler.js';
 
 const ADO_API_VERSION = '7.1';
 
@@ -28,7 +28,7 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
       throw new Error(`ADO API ${response.status}: ${body.slice(0, 200)}`);
     }
 
-    return response.json();
+    return readSafeJson(response);
   }
 
   async function adoPost(url: string, body: unknown): Promise<unknown> {
@@ -47,7 +47,7 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
       throw new Error(`ADO API ${response.status}: ${text.slice(0, 200)}`);
     }
 
-    return response.json();
+    return readSafeJson(response);
   }
 
   return {
@@ -74,12 +74,19 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
           const state = params.state as string | undefined;
           const type = params.type as string | undefined;
 
-          // Build WIQL query
-          let wiql = `SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType] FROM WorkItems WHERE [System.TeamProject] = '${project}'`;
+          const escapedProject = project.replace(/'/g, "''");
 
-          // If the query looks like a WIQL fragment, use it directly
+          // Build WIQL query
+          let wiql = `SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType] FROM WorkItems WHERE [System.TeamProject] = '${escapedProject}'`;
+
+          // If the query looks like a raw WIQL fragment, append it as an AND clause
+          // rather than replacing the whole query — this preserves the project scope filter.
           if (query.toUpperCase().includes('WHERE') || query.startsWith('[')) {
-            wiql = query;
+            log.warn(
+              { org, project },
+              'Raw WIQL fragment detected — appending project scope filter',
+            );
+            wiql += ` AND (${query})`;
           } else {
             wiql += ` AND [System.Title] CONTAINS '${query.replace(/'/g, "''")}'`;
           }
