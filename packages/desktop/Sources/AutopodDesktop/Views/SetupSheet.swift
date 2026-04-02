@@ -7,7 +7,7 @@ public struct SetupSheet: View {
   public let connectionManager: ConnectionManager
 
   @State private var name = "Local"
-  @State private var urlString = "http://localhost:3000"
+  @State private var urlString = "http://localhost:3100"
   @State private var token = ""
   @State private var isTesting = false
   @State private var isSaving = false
@@ -57,7 +57,7 @@ public struct SetupSheet: View {
         }
 
         field("Daemon URL") {
-          TextField("http://localhost:3000", text: $urlString)
+          TextField("http://localhost:3100", text: $urlString)
             .textFieldStyle(.roundedBorder)
             .font(.system(.callout, design: .monospaced))
         }
@@ -69,7 +69,7 @@ public struct SetupSheet: View {
               .font(.system(.callout, design: .monospaced))
             if isLocalUrl {
               Button("Dev token") {
-                if let t = readLocalDevToken() {
+                if let t = DaemonConnection.readLocalDevToken() {
                   token = t
                   testResult = nil
                 }
@@ -141,6 +141,12 @@ public struct SetupSheet: View {
     }
     .frame(width: 420, height: 380)
     .background(Color(nsColor: .windowBackgroundColor))
+    .onAppear {
+      // Auto-fill dev token for local connections
+      if isLocalUrl, token.isEmpty, let t = DaemonConnection.readLocalDevToken() {
+        token = t
+      }
+    }
   }
 
   // MARK: - Helpers
@@ -158,12 +164,6 @@ public struct SetupSheet: View {
 
   private var isLocalUrl: Bool {
     urlString.contains("localhost") || urlString.contains("127.0.0.1")
-  }
-
-  private func readLocalDevToken() -> String? {
-    let path = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".autopod/dev-token")
-    return try? String(contentsOf: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   private func testConnection() async {

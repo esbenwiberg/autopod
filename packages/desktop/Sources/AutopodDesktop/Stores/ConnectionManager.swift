@@ -28,6 +28,9 @@ public final class ConnectionManager {
   public private(set) var connection: DaemonConnection?
   public private(set) var api: DaemonAPI?
 
+  /// The token currently in use — read this instead of re-reading Keychain.
+  public private(set) var activeToken: String?
+
   public var isConnected: Bool { state == .connected }
 
   public var connectionLabel: String {
@@ -42,12 +45,26 @@ public final class ConnectionManager {
     // Restore saved connection on launch
     let connections = ConnectionStore.loadAll()
     if let activeId = ConnectionStore.activeConnectionId(),
-       let saved = connections.first(where: { $0.id == activeId }),
-       let token = KeychainHelper.load(for: saved.id) ?? ConnectionStore.loadToken(for: saved.id) {
-      connection = saved
-      api = DaemonAPI(baseURL: saved.url, token: token)
-      // Kick off initial health check
-      Task { await connectToActive() }
+       let saved = connections.first(where: { $0.id == activeId }) {
+      // For local connections, prefer the live dev token over stale Keychain value
+      let token: String? = if saved.isLocal {
+        DaemonConnection.readLocalDevToken()
+          ?? KeychainHelper.load(for: saved.id)
+          ?? ConnectionStore.loadToken(for: saved.id)
+      } else {
+        KeychainHelper.load(for: saved.id) ?? ConnectionStore.loadToken(for: saved.id)
+      }
+
+      if let token {
+        connection = saved
+        activeToken = token
+        api = DaemonAPI(baseURL: saved.url, token: token)
+        // Persist refreshed token
+        try? KeychainHelper.save(token: token, for: saved.id)
+        ConnectionStore.saveToken(token, for: saved.id)
+        // Kick off initial health check
+        Task { await connectToActive() }
+      }
     }
   }
 
@@ -69,6 +86,7 @@ public final class ConnectionManager {
 
     // Create API client and connect
     connection = conn
+    activeToken = token
     api = DaemonAPI(baseURL: url, token: token)
     await connectToActive()
   }
@@ -143,9 +161,34 @@ public final class ConnectionManager {
         state = .connected
       }
     } catch {
+      // For local connections, try refreshing the dev token (daemon may have restarted)
+      if let conn = connection, conn.isLocal, await refreshDevToken(for: conn) {
+        return  // Refreshed — next poll will use the new token
+      }
       if state == .connected {
         state = .error("Lost connection")
       }
+    }
+  }
+
+  /// Try to read a fresh dev token from disk. Returns true if token was updated.
+  private func refreshDevToken(for conn: DaemonConnection) async -> Bool {
+    guard let freshToken = DaemonConnection.readLocalDevToken(),
+          freshToken != activeToken else { return false }
+
+    // Token changed — rebuild the API client
+    activeToken = freshToken
+    api = DaemonAPI(baseURL: conn.url, token: freshToken)
+    try? KeychainHelper.save(token: freshToken, for: conn.id)
+    ConnectionStore.saveToken(freshToken, for: conn.id)
+
+    // Test the new token
+    do {
+      _ = try await api!.healthCheck()
+      state = .connected
+      return true
+    } catch {
+      return false
     }
   }
 }
