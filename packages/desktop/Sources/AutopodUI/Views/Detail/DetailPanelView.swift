@@ -169,7 +169,7 @@ public struct DetailPanelView: View {
     // MARK: - Tab bar
 
     private var tabBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             ForEach(DetailTab.allCases, id: \.self) { tab in
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selectedTab = tab }
@@ -182,13 +182,14 @@ public struct DetailPanelView: View {
                                 .font(.system(.caption).weight(selectedTab == tab ? .semibold : .regular))
                         }
                         .foregroundStyle(selectedTab == tab ? .primary : .secondary)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 10)
                         .padding(.top, 6)
 
                         Rectangle()
                             .fill(selectedTab == tab ? Color.accentColor : .clear)
                             .frame(height: 2)
                     }
+                    .fixedSize()
                 }
                 .buttonStyle(.plain)
             }
