@@ -131,6 +131,9 @@ public struct Session: Identifiable, Sendable {
     public var costUsd: Double
     public var commitCount: Int
 
+    /// Linked session ID for session chaining (workspace ↔ worker handoff)
+    public var linkedSessionId: String?
+
     public var isWorkspace: Bool { outputMode == .workspace }
 
     public var duration: String {
@@ -165,7 +168,8 @@ public struct Session: Identifiable, Sendable {
         inputTokens: Int = 0,
         outputTokens: Int = 0,
         costUsd: Double = 0,
-        commitCount: Int = 0
+        commitCount: Int = 0,
+        linkedSessionId: String? = nil
     ) {
         self.id = id; self.status = status; self.outputMode = outputMode
         self.branch = branch; self.profileName = profileName; self.task = task
@@ -178,5 +182,6 @@ public struct Session: Identifiable, Sendable {
         self.attempts = attempts; self.queuePosition = queuePosition
         self.inputTokens = inputTokens; self.outputTokens = outputTokens
         self.costUsd = costUsd; self.commitCount = commitCount
+        self.linkedSessionId = linkedSessionId
     }
 }

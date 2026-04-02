@@ -155,6 +155,11 @@ export interface SessionManager {
   killSession(sessionId: string): Promise<void>;
   completeSession(sessionId: string): Promise<{ pushError?: string }>;
   triggerValidation(sessionId: string, options?: { force?: boolean }): Promise<void>;
+  /** Pull latest from remote branch and re-run validation without agent rework on failure.
+   *  Used after human fixes via a linked workspace pod. */
+  revalidateSession(sessionId: string): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
+  /** Create a linked workspace pod on the same branch as a failed worker session for human fixes. */
+  fixManually(sessionId: string, userId: string): Promise<Session>;
   deleteSession(sessionId: string): Promise<void>;
   startPreview(sessionId: string): Promise<{ previewUrl: string }>;
   stopPreview(sessionId: string): Promise<void>;
@@ -365,6 +370,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             outputMode: request.outputMode ?? profile.outputMode ?? 'pr',
             baseBranch: request.baseBranch ?? null,
             acFrom: request.acFrom ?? null,
+            linkedSessionId: request.linkedSessionId ?? null,
           });
           break;
         } catch (err: unknown) {
@@ -1212,6 +1218,35 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         },
       });
 
+      // Auto-revalidate linked worker session if this workspace was a fix
+      if (session.linkedSessionId && !pushError) {
+        try {
+          const linked = sessionRepo.getOrThrow(session.linkedSessionId);
+          if (linked.status === 'failed') {
+            logger.info(
+              { workspaceId: sessionId, workerId: session.linkedSessionId },
+              'Workspace completed — auto-revalidating linked worker',
+            );
+            emitActivityStatus(
+              session.linkedSessionId,
+              `Linked workspace ${sessionId} completed — pulling changes and revalidating…`,
+            );
+            // Fire and forget — don't block workspace completion on revalidation
+            this.revalidateSession(session.linkedSessionId).catch((err) => {
+              logger.warn(
+                { err, workspaceId: sessionId, workerId: session.linkedSessionId },
+                'Auto-revalidation of linked worker failed',
+              );
+            });
+          }
+        } catch (err) {
+          logger.warn(
+            { err, sessionId, linkedSessionId: session.linkedSessionId },
+            'Failed to check linked session for auto-revalidation',
+          );
+        }
+      }
+
       logger.info({ sessionId, pushError }, 'Workspace session completed');
       return { pushError };
     },
@@ -1514,6 +1549,264 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }
       }
+    },
+
+    async revalidateSession(
+      sessionId: string,
+    ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
+      const session = sessionRepo.getOrThrow(sessionId);
+      if (session.status !== 'failed') {
+        throw new AutopodError(
+          `Cannot revalidate session ${sessionId} in status ${session.status} — only failed sessions can be revalidated`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!session.worktreePath) {
+        throw new AutopodError(
+          `Session ${sessionId} has no worktree — cannot pull latest`,
+          'INVALID_STATE',
+          400,
+        );
+      }
+
+      // Pull latest from remote branch (human may have pushed fixes)
+      emitActivityStatus(sessionId, 'Pulling latest changes from remote branch…');
+      const { newCommits } = await worktreeManager.pullBranch(session.worktreePath);
+
+      if (!newCommits) {
+        logger.info({ sessionId }, 'No new commits on branch — skipping revalidation');
+        emitActivityStatus(sessionId, 'No new commits found — nothing to revalidate');
+        return { newCommits: false, result: 'fail' };
+      }
+
+      logger.info({ sessionId }, 'New commits found — running revalidation');
+      emitActivityStatus(sessionId, 'New commits detected — starting revalidation…');
+
+      // Reset validation attempts for the fresh human-driven validation
+      sessionRepo.update(sessionId, { validationAttempts: 0 });
+
+      // Transition to validating
+      transition(session, 'validating');
+
+      // Re-run validation (force=true restarts container, but we don't want agent retry on failure)
+      const profile = profileStore.get(session.profileName);
+      const attempt = 1;
+      sessionRepo.update(sessionId, { validationAttempts: attempt });
+
+      emitActivityStatus(sessionId, 'Starting revalidation (human fix)…');
+
+      try {
+        if (!session.containerId) {
+          throw new Error(`Session ${sessionId} has no container — cannot validate`);
+        }
+
+        // Restart the container with updated worktree
+        const cm = containerManagerFactory.get(session.executionTarget);
+        await cm.start(session.containerId);
+
+        const [diff, commitLog] = session.worktreePath
+          ? await Promise.all([
+              worktreeManager.getDiff(session.worktreePath, profile.defaultBranch),
+              worktreeManager.getCommitLog(session.worktreePath, profile.defaultBranch),
+            ])
+          : ['', ''];
+
+        const codeReviewSkill = session.worktreePath
+          ? await loadCodeReviewSkill(session.worktreePath, logger)
+          : undefined;
+
+        let result: Awaited<ReturnType<typeof validationEngine.validate>>;
+        try {
+          result = await validationEngine.validate({
+            sessionId,
+            containerId: session.containerId,
+            previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
+            buildCommand: profile.buildCommand,
+            startCommand: profile.startCommand,
+            healthPath: profile.healthPath,
+            healthTimeout: profile.healthTimeout,
+            smokePages: profile.smokePages,
+            attempt,
+            task: session.task,
+            diff,
+            testCommand: profile.testCommand,
+            buildTimeout: profile.buildTimeout * 1_000,
+            testTimeout: profile.testTimeout * 1_000,
+            reviewerModel: profile.escalation.askAi.model,
+            acceptanceCriteria: session.acceptanceCriteria ?? undefined,
+            codeReviewSkill,
+            commitLog: commitLog || undefined,
+          });
+        } catch (validateErr) {
+          logger.error({ err: validateErr, sessionId }, 'Revalidation engine threw unexpectedly');
+          result = {
+            sessionId,
+            attempt,
+            timestamp: new Date().toISOString(),
+            overall: 'fail',
+            smoke: {
+              status: 'fail',
+              build: { status: 'fail', output: String(validateErr), duration: 0 },
+              health: { status: 'fail', url: '', responseCode: null, duration: 0 },
+              pages: [],
+            },
+            taskReview: null,
+            duration: 0,
+          };
+        }
+
+        sessionRepo.update(sessionId, { lastValidationResult: result });
+        validationRepo?.insert(sessionId, attempt, result);
+
+        eventBus.emit({
+          type: 'session.validation_completed',
+          timestamp: new Date().toISOString(),
+          sessionId,
+          result,
+        });
+
+        const s2 = sessionRepo.getOrThrow(sessionId);
+
+        if (isTerminalState(s2.status) || s2.status === 'killing') {
+          return { newCommits: true, result: 'fail' };
+        }
+
+        if (result.overall === 'pass') {
+          emitActivityStatus(sessionId, 'Revalidation passed — human fix worked!');
+
+          // Push branch and create PR (same as triggerValidation pass path)
+          let prUrl: string | null = null;
+          const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+          if (prManager && s2.worktreePath) {
+            try {
+              await worktreeManager.commitFiles(
+                s2.worktreePath,
+                ['.autopod/screenshots'],
+                'chore: add validation screenshots',
+              );
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to commit screenshots');
+            }
+
+            try {
+              await worktreeManager.mergeBranch({
+                worktreePath: s2.worktreePath,
+                targetBranch: profile.defaultBranch,
+              });
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to push branch for PR');
+            }
+
+            try {
+              const stats = await worktreeManager.getDiffStats(
+                s2.worktreePath,
+                profile.defaultBranch,
+              );
+              sessionRepo.update(sessionId, {
+                filesChanged: stats.filesChanged,
+                linesAdded: stats.linesAdded,
+                linesRemoved: stats.linesRemoved,
+              });
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to recompute diff stats');
+            }
+
+            try {
+              emitActivityStatus(sessionId, 'Creating PR…');
+              const s3 = sessionRepo.getOrThrow(sessionId);
+              prUrl = await prManager.createPr({
+                worktreePath: s2.worktreePath,
+                repoUrl: profile.repoUrl,
+                branch: s2.branch,
+                baseBranch: profile.defaultBranch,
+                sessionId,
+                task: s2.task,
+                profileName: s2.profileName,
+                validationResult: result,
+                filesChanged: s3.filesChanged,
+                linesAdded: s3.linesAdded,
+                linesRemoved: s3.linesRemoved,
+                previewUrl: s2.previewUrl,
+                screenshots: [],
+              });
+              if (prUrl) emitActivityStatus(sessionId, `PR created: ${prUrl}`);
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');
+              emitActivityStatus(sessionId, 'PR creation failed — session still validated');
+            }
+          }
+
+          transition(s2, 'validated', { prUrl });
+
+          // Stop the container
+          if (s2.containerId) {
+            try {
+              const cm2 = containerManagerFactory.get(s2.executionTarget);
+              await cm2.stop(s2.containerId);
+            } catch (err) {
+              logger.warn({ err, sessionId }, 'Failed to stop container post-revalidation');
+            }
+          }
+
+          return { newCommits: true, result: 'pass' };
+        }
+
+        // Validation failed — stay in failed state, no agent rework
+        emitActivityStatus(
+          sessionId,
+          'Revalidation failed — human fix did not resolve all issues',
+        );
+        transition(s2, 'failed');
+
+        if (s2.containerId) {
+          try {
+            const cm2 = containerManagerFactory.get(s2.executionTarget);
+            await cm2.stop(s2.containerId);
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to stop container post-revalidation');
+          }
+        }
+
+        return { newCommits: true, result: 'fail' };
+      } catch (err) {
+        logger.error({ err, sessionId }, 'Revalidation error');
+        const s2 = sessionRepo.getOrThrow(sessionId);
+        transition(s2, 'failed');
+        return { newCommits: true, result: 'fail' };
+      }
+    },
+
+    fixManually(sessionId: string, userId: string): Promise<Session> {
+      const worker = sessionRepo.getOrThrow(sessionId);
+      if (worker.status !== 'failed') {
+        throw new AutopodError(
+          `Cannot fix session ${sessionId} in status ${worker.status} — only failed sessions`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      // Create a workspace session on the same branch, linked to the failed worker
+      const workspace = this.createSession(
+        {
+          profileName: worker.profileName,
+          task: `Human fix for failed session ${worker.id}: ${worker.task}`,
+          branch: worker.branch,
+          outputMode: 'workspace',
+          baseBranch: worker.baseBranch ?? undefined,
+          linkedSessionId: worker.id,
+        },
+        userId,
+      );
+
+      logger.info(
+        { workerId: sessionId, workspaceId: workspace.id },
+        'Created linked workspace for human fix',
+      );
+      emitActivityStatus(sessionId, `Human fix workspace created: ${workspace.id}`);
+
+      return workspace;
     },
 
     notifyEscalation(sessionId: string, escalation: EscalationRequest): void {

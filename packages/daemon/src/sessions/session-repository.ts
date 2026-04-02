@@ -18,6 +18,7 @@ export interface NewSession {
   outputMode: OutputMode;
   baseBranch?: string | null;
   acFrom?: string | null;
+  linkedSessionId?: string | null;
 }
 
 export interface SessionFilters {
@@ -57,6 +58,7 @@ export interface SessionUpdates {
   costUsd?: number;
   commitCount?: number;
   lastCommitAt?: string | null;
+  linkedSessionId?: string | null;
 }
 
 export interface SessionStats {
@@ -121,6 +123,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     costUsd: (row.cost_usd as number) ?? 0,
     commitCount: (row.commit_count as number) ?? 0,
     lastCommitAt: (row.last_commit_at as string) ?? null,
+    linkedSessionId: (row.linked_session_id as string) ?? null,
   };
 }
 
@@ -131,11 +134,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         INSERT INTO sessions (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
-          output_mode, base_branch, ac_from
+          output_mode, base_branch, ac_from, linked_session_id
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
-          @outputMode, @baseBranch, @acFrom
+          @outputMode, @baseBranch, @acFrom, @linkedSessionId
         )
       `).run({
         id: session.id,
@@ -155,6 +158,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         outputMode: session.outputMode,
         baseBranch: session.baseBranch ?? null,
         acFrom: session.acFrom ?? null,
+        linkedSessionId: session.linkedSessionId ?? null,
       });
     },
 
@@ -274,6 +278,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.lastCommitAt !== undefined) {
         setClauses.push('last_commit_at = @lastCommitAt');
         params.lastCommitAt = changes.lastCommitAt;
+      }
+      if (changes.linkedSessionId !== undefined) {
+        setClauses.push('linked_session_id = @linkedSessionId');
+        params.linkedSessionId = changes.linkedSessionId;
       }
 
       if (setClauses.length === 0) return;

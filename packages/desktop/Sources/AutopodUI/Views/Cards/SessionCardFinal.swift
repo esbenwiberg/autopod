@@ -49,7 +49,7 @@ public struct SessionCardFinal: View {
                     .padding(.bottom, 12)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: density == .detailed ? .infinity : nil, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .controlBackgroundColor))
@@ -247,36 +247,23 @@ public struct SessionCardFinal: View {
                 }
             }
 
+            // Linked session indicator
+            if let linked = session.linkedSessionId {
+                HStack(spacing: 4) {
+                    Image(systemName: "link")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.purple)
+                    Text(session.isWorkspace ? "fixes \(linked)" : "← \(linked)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.purple)
+                }
+            }
+
             // State-specific detail
             if session.isWorkspace {
                 workspaceExpandedContent
             } else {
                 expandedStateContent
-            }
-
-            // Acceptance criteria (compact)
-            if let criteria = session.acceptanceCriteria, !criteria.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("AC (\(criteria.count))")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(Array(criteria.prefix(3).enumerated()), id: \.offset) { _, ac in
-                        HStack(spacing: 4) {
-                            Image(systemName: "square")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.tertiary)
-                            Text(ac)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    if criteria.count > 3 {
-                        Text("+\(criteria.count - 3) more")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
             }
 
             // Diff stats
@@ -318,14 +305,29 @@ public struct SessionCardFinal: View {
                 .controlSize(.small)
                 .tint(.teal)
 
-                Button {
-                } label: {
-                    Label("Launch Worker", systemImage: "arrow.right.circle")
-                        .frame(maxWidth: .infinity)
+                if session.linkedSessionId == nil {
+                    Button {
+                    } label: {
+                        Label("Launch Worker", systemImage: "arrow.right.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Create a worker session starting from this workspace's branch")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Create a worker session starting from this workspace's branch")
+
+                if session.linkedSessionId != nil {
+                    Button {
+                        Task { await actions.revalidate(session.linkedSessionId!) }
+                    } label: {
+                        Label("Revalidate Worker", systemImage: "checkmark.arrow.trianglehead.counterclockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.orange)
+                    .help("Pull latest and re-run validation on the linked worker session")
+                }
             }
         case .complete:
             VStack(alignment: .leading, spacing: 8) {
@@ -457,14 +459,21 @@ public struct SessionCardFinal: View {
                 }
                 HStack(spacing: 6) {
                     Button {
-                        Task { await actions.retry(session.id) }
+                        Task { await actions.rework(session.id) }
                     } label: {
-                        Label("Retry", systemImage: "arrow.clockwise")
+                        Label("Rework", systemImage: "arrow.clockwise")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(.red)
+                    Button {
+                        Task { await actions.fixManually(session.id) }
+                    } label: {
+                        Label("Fix", systemImage: "wrench.and.screwdriver")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                     Button("Logs") {}
                         .buttonStyle(.bordered)
                         .controlSize(.small)

@@ -39,6 +39,11 @@ struct OverviewTab: View {
                     errorSection
                 }
 
+                // Session chain
+                if session.linkedSessionId != nil {
+                    chainSection
+                }
+
                 // Recent activity
                 activityFeed
             }
@@ -274,6 +279,120 @@ struct OverviewTab: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.red.opacity(0.15), lineWidth: 1)
         )
+    }
+
+    // MARK: - Session chain
+
+    private var chainSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "link")
+                    .foregroundStyle(.purple)
+                Text("Session Chain")
+                    .font(.system(.subheadline).weight(.semibold))
+            }
+
+            if let linked = session.linkedSessionId {
+                VStack(alignment: .leading, spacing: 0) {
+                    if session.isWorkspace {
+                        // This workspace fixes a worker
+                        chainNode(
+                            id: linked,
+                            label: "Worker",
+                            detail: "failed — this workspace provides fixes",
+                            icon: "gearshape",
+                            color: .red,
+                            isCurrent: false
+                        )
+                        chainConnector()
+                        chainNode(
+                            id: session.id,
+                            label: "Fix (workspace)",
+                            detail: session.status.label,
+                            icon: "wrench.and.screwdriver",
+                            color: .teal,
+                            isCurrent: true
+                        )
+                        chainConnector()
+                        chainNode(
+                            id: nil,
+                            label: "Revalidation",
+                            detail: "triggers on push or workspace exit",
+                            icon: "checkmark.arrow.trianglehead.counterclockwise",
+                            color: .secondary,
+                            isCurrent: false
+                        )
+                    } else {
+                        // This worker was spawned from a workspace
+                        chainNode(
+                            id: linked,
+                            label: "Workspace",
+                            detail: "planning / preparation",
+                            icon: "terminal",
+                            color: .teal,
+                            isCurrent: false
+                        )
+                        chainConnector()
+                        chainNode(
+                            id: session.id,
+                            label: "Worker",
+                            detail: session.status.label,
+                            icon: "gearshape",
+                            color: session.status.color,
+                            isCurrent: true
+                        )
+                    }
+                }
+                .padding(10)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private func chainNode(
+        id: String?,
+        label: String,
+        detail: String,
+        icon: String,
+        color: Color,
+        isCurrent: Bool
+    ) -> some View {
+        HStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(isCurrent ? color.opacity(0.2) : color.opacity(0.1))
+                    .frame(width: 22, height: 22)
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(color)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    if let id {
+                        Text(id)
+                            .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    }
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func chainConnector() -> some View {
+        HStack {
+            Rectangle()
+                .fill(Color.purple.opacity(0.3))
+                .frame(width: 1, height: 16)
+                .padding(.leading, 10)
+            Spacer()
+        }
     }
 
     // MARK: - Activity feed

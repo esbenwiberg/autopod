@@ -43,6 +43,7 @@ public struct SessionResponse: Codable, Sendable {
   public let costUsd: Double
   public let commitCount: Int
   public let lastCommitAt: String?
+  public let linkedSessionId: String?
 }
 
 // MARK: - Nested types
@@ -114,6 +115,7 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var outputMode: String?
   public var baseBranch: String?
   public var acFrom: String?
+  public var linkedSessionId: String?
 
   public init(
     profileName: String,
@@ -126,7 +128,8 @@ public struct CreateSessionRequest: Codable, Sendable {
     acceptanceCriteria: [String]? = nil,
     outputMode: String? = nil,
     baseBranch: String? = nil,
-    acFrom: String? = nil
+    acFrom: String? = nil,
+    linkedSessionId: String? = nil
   ) {
     self.profileName = profileName
     self.task = task
@@ -139,6 +142,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.outputMode = outputMode
     self.baseBranch = baseBranch
     self.acFrom = acFrom
+    self.linkedSessionId = linkedSessionId
   }
 }
 

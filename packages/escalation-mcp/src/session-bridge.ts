@@ -42,4 +42,12 @@ export interface SessionBridge {
     command: string[],
     options?: { cwd?: string; timeout?: number },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
+
+  /** Get the linked session ID for a workspace (if any). */
+  getLinkedSessionId(sessionId: string): string | null;
+
+  /** Trigger revalidation on a linked failed worker session (pull + validate, no agent). */
+  revalidateLinkedSession(
+    linkedSessionId: string,
+  ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
 }

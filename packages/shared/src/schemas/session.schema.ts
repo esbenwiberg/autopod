@@ -29,6 +29,7 @@ export const createSessionRequestSchema = z.object({
       message: 'acFrom must be a relative path without ".." segments',
     })
     .optional(),
+  linkedSessionId: z.string().min(1).max(16).optional(),
 });
 
 export const sessionStatusSchema = z.enum([

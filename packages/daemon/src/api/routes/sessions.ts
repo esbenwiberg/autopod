@@ -94,11 +94,26 @@ export function sessionRoutes(
     };
   });
 
-  // POST /sessions/:sessionId/validate — trigger validation
+  // POST /sessions/:sessionId/validate — trigger validation (agent rework on failure)
   app.post('/sessions/:sessionId/validate', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
     await sessionManager.triggerValidation(sessionId, { force: true });
     return { ok: true };
+  });
+
+  // POST /sessions/:sessionId/revalidate — pull latest + validate only (no agent rework)
+  app.post('/sessions/:sessionId/revalidate', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const result = await sessionManager.revalidateSession(sessionId);
+    return result;
+  });
+
+  // POST /sessions/:sessionId/fix-manually — create linked workspace for human fixes
+  app.post('/sessions/:sessionId/fix-manually', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const workspace = await sessionManager.fixManually(sessionId, request.user.oid);
+    reply.status(201);
+    return workspace;
   });
 
   // POST /sessions/:sessionId/approve — approve session

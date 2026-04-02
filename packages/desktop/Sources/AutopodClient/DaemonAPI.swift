@@ -92,6 +92,14 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/sessions/\(id)/validate")
   }
 
+  public func revalidateSession(_ id: String) async throws -> RevalidateResponse {
+    try await request("POST", "/sessions/\(id)/revalidate")
+  }
+
+  public func fixManually(_ id: String) async throws -> SessionResponse {
+    try await request("POST", "/sessions/\(id)/fix-manually")
+  }
+
   public func pauseSession(_ id: String) async throws {
     let _: OkResponse = try await request("POST", "/sessions/\(id)/pause")
   }
@@ -228,6 +236,11 @@ public actor DaemonAPI {
 
 struct OkResponse: Codable {
   let ok: Bool?
+}
+
+public struct RevalidateResponse: Codable, Sendable {
+  public let newCommits: Bool
+  public let result: String
 }
 
 struct EmptyResponse: Codable {

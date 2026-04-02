@@ -11,7 +11,9 @@ public struct SessionActions: Sendable {
   public var kill: @MainActor @Sendable (String) async -> Void
   public var complete: @MainActor @Sendable (String) async -> Void
   public var pause: @MainActor @Sendable (String) async -> Void
-  public var retry: @MainActor @Sendable (String) async -> Void
+  public var rework: @MainActor @Sendable (String) async -> Void
+  public var fixManually: @MainActor @Sendable (String) async -> String?
+  public var revalidate: @MainActor @Sendable (String) async -> Void
   public var createSession: @MainActor @Sendable (String, String, String, String?, [String]?, String?, String?) async -> String?
   // createSession params: profileName, task, model, outputMode, acceptanceCriteria, baseBranch, acFrom → returns session ID or nil
   public var approveAll: @MainActor @Sendable () async -> Void
@@ -25,7 +27,9 @@ public struct SessionActions: Sendable {
     kill: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     complete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     pause: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    retry: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    rework: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    fixManually: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
+    revalidate: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     createSession: @escaping @MainActor @Sendable (String, String, String, String?, [String]?, String?, String?) async -> String? = { _, _, _, _, _, _, _ in nil },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
     killAllFailed: @escaping @MainActor @Sendable () async -> Void = {}
@@ -37,7 +41,9 @@ public struct SessionActions: Sendable {
     self.kill = kill
     self.complete = complete
     self.pause = pause
-    self.retry = retry
+    self.rework = rework
+    self.fixManually = fixManually
+    self.revalidate = revalidate
     self.createSession = createSession
     self.approveAll = approveAll
     self.killAllFailed = killAllFailed

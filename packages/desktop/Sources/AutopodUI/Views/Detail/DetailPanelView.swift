@@ -137,13 +137,20 @@ public struct DetailPanelView: View {
 
             case .failed:
                 Button {
-                    Task { await actions.retry(session.id) }
+                    Task { await actions.rework(session.id) }
                 } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
+                    Label("Rework", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.red)
+                Button {
+                    Task { await actions.fixManually(session.id) }
+                } label: {
+                    Label("Fix Manually", systemImage: "wrench.and.screwdriver")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
             default:
                 EmptyView()

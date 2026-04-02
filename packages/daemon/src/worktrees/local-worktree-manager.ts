@@ -264,6 +264,25 @@ export class LocalWorktreeManager implements WorktreeManager {
     await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath });
   }
 
+  async pullBranch(worktreePath: string): Promise<{ newCommits: boolean }> {
+    this.logger.info({ worktreePath }, 'Pulling latest from origin');
+    const { stdout: headBefore } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      cwd: worktreePath,
+    });
+    const authUrl = await this.getAuthUrl(worktreePath);
+    const { stdout: branch } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: worktreePath,
+    });
+    await execFileAsync('git', ['fetch', authUrl, branch.trim()], { cwd: worktreePath });
+    await execFileAsync('git', ['merge', 'FETCH_HEAD', '--ff-only'], { cwd: worktreePath });
+    const { stdout: headAfter } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      cwd: worktreePath,
+    });
+    const newCommits = headBefore.trim() !== headAfter.trim();
+    this.logger.info({ worktreePath, newCommits }, 'Pull complete');
+    return { newCommits };
+  }
+
   async getCommitLog(worktreePath: string, baseBranch: string, maxCommits = 20): Promise<string> {
     try {
       const { stdout } = await execFileAsync(

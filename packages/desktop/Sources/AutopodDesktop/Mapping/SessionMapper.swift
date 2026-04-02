@@ -118,7 +118,8 @@ public enum SessionMapper {
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       costUsd: response.costUsd,
-      commitCount: response.commitCount
+      commitCount: response.commitCount,
+      linkedSessionId: response.linkedSessionId
     )
   }
 

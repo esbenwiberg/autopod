@@ -212,5 +212,17 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       const cm = containerManagerFactory.get(session.executionTarget);
       return cm.execInContainer(session.containerId, command, options);
     },
+
+    getLinkedSessionId(sessionId: string): string | null {
+      const session = sessionManager.getSession(sessionId);
+      return session.linkedSessionId;
+    },
+
+    async revalidateLinkedSession(
+      linkedSessionId: string,
+    ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
+      logger.info({ linkedSessionId }, 'Triggering revalidation of linked worker session');
+      return sessionManager.revalidateSession(linkedSessionId);
+    },
   };
 }

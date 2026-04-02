@@ -28,7 +28,9 @@ public final class ActionHandler {
       kill: { [weak self] id in await self?.kill(id) },
       complete: { [weak self] id in await self?.complete(id) },
       pause: { [weak self] id in await self?.pause(id) },
-      retry: { [weak self] id in await self?.retry(id) },
+      rework: { [weak self] id in await self?.rework(id) },
+      fixManually: { [weak self] id in await self?.fixManually(id) },
+      revalidate: { [weak self] id in await self?.revalidate(id) },
       createSession: { [weak self] profile, task, model, output, ac, base, acFrom in
         await self?.createSession(
           profileName: profile, task: task, model: model,
@@ -119,11 +121,36 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
-  public func retry(_ sessionId: String) async {
-    // Kill then the user can recreate — or trigger validation retry
-    pendingAction = "retry-\(sessionId)"
+  public func rework(_ sessionId: String) async {
+    pendingAction = "rework-\(sessionId)"
     do {
       try await api.triggerValidation(sessionId)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func fixManually(_ sessionId: String) async -> String? {
+    pendingAction = "fix-\(sessionId)"
+    do {
+      let workspace = try await api.fixManually(sessionId)
+      let session = SessionMapper.map(workspace)
+      sessionStore.upsertSession(session)
+      pendingAction = nil
+      return workspace.id
+    } catch {
+      lastError = error.localizedDescription
+      pendingAction = nil
+      return nil
+    }
+  }
+
+  public func revalidate(_ sessionId: String) async {
+    pendingAction = "revalidate-\(sessionId)"
+    do {
+      _ = try await api.revalidateSession(sessionId)
+      // Status will be updated via WebSocket event
     } catch {
       lastError = error.localizedDescription
     }

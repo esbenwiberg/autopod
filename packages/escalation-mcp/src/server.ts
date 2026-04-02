@@ -138,6 +138,31 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
   );
 
+  // ─── Revalidation tool (only for workspace pods linked to a failed worker) ───
+  const linkedId = bridge.getLinkedSessionId(sessionId);
+  if (linkedId) {
+    server.tool(
+      'trigger_revalidation',
+      'Trigger revalidation on the linked failed worker session. Call after you have committed and pushed your fixes. Pulls latest changes and runs validation (build, tests, smoke, AI review). Returns the result.',
+      {},
+      async () => {
+        const result = await bridge.revalidateLinkedSession(linkedId);
+        let text: string;
+        if (!result.newCommits) {
+          text =
+            'No new commits found on the branch. Make sure you have committed and pushed your changes before triggering revalidation.';
+        } else if (result.result === 'pass') {
+          text =
+            'Revalidation PASSED! The linked worker session has been transitioned to validated.';
+        } else {
+          text =
+            'Revalidation FAILED. The fixes did not resolve all issues. Check the validation results and try again.';
+        }
+        return { content: [{ type: 'text' as const, text }] };
+      },
+    );
+  }
+
   // ─── Dynamic action tools ────────────────────────────────────
   // Register one MCP tool per available action from the profile's action policy
   if (availableActions) {

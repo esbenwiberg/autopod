@@ -65,6 +65,7 @@ export interface Session {
   costUsd: number;
   commitCount: number;
   lastCommitAt: string | null;
+  linkedSessionId: string | null;
 }
 
 export interface CreateSessionRequest {
@@ -79,6 +80,7 @@ export interface CreateSessionRequest {
   outputMode?: OutputMode;
   baseBranch?: string;
   acFrom?: string;
+  linkedSessionId?: string;
 }
 
 export interface SessionSummary {
