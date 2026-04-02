@@ -116,6 +116,33 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
     };
   }, [selectedSessionId, baseUrl, token, sessions]);
 
+  // Periodically re-fetch the selected session while it's active so tokens/cost stay live
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const session = sessions.find((s) => s.id === selectedSessionId);
+    if (!session || !['running', 'paused', 'validating'].includes(session.status)) return;
+
+    const interval = setInterval(() => {
+      void (async () => {
+        try {
+          const updated = await fetchJson<Session>(
+            `${baseUrl}/sessions/${selectedSessionId}`,
+            token,
+          );
+          setSelectedSession(updated);
+          // Also keep the list copy in sync for metrics that show in the row
+          setSessions((prev) =>
+            prev.map((s) => (s.id === selectedSessionId ? { ...s, ...updated } : s)),
+          );
+        } catch {
+          // Silently ignore — stale data is fine
+        }
+      })();
+    }, 5_000);
+
+    return () => clearInterval(interval);
+  }, [selectedSessionId, sessions, baseUrl, token]);
+
   const handleEvent = useCallback((event: SystemEvent) => {
     switch (event.type) {
       case 'session.created': {
@@ -154,6 +181,17 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
               plan: null,
               progress: null,
               claudeSessionId: null,
+              outputMode: 'pr',
+              baseBranch: null,
+              acFrom: null,
+              recoveryWorktreePath: null,
+              lastHeartbeatAt: null,
+              inputTokens: 0,
+              outputTokens: 0,
+              costUsd: 0,
+              commitCount: 0,
+              lastCommitAt: null,
+              linkedSessionId: null,
             },
           ]);
         });

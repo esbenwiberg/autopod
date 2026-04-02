@@ -286,7 +286,10 @@ async function runHealthCheck(
     .catch(() => '');
 
   if (startOutput) {
-    log?.warn({ startOutput: startOutput.slice(0, 500) }, 'start command output on health check failure');
+    log?.warn(
+      { startOutput: startOutput.slice(0, 500) },
+      'start command output on health check failure',
+    );
   }
 
   return {
