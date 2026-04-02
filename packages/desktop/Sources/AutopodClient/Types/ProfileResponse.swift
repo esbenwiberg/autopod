@@ -60,12 +60,27 @@ public struct EscalationConfigResponse: Codable, Sendable {
   public var askAi: AskAiConfigResponse
   public var autoPauseAfter: Int
   public var humanResponseTimeout: Int
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    askHuman = try decodeBoolOrInt(c, key: .askHuman)
+    askAi = try c.decode(AskAiConfigResponse.self, forKey: .askAi)
+    autoPauseAfter = try c.decode(Int.self, forKey: .autoPauseAfter)
+    humanResponseTimeout = try c.decode(Int.self, forKey: .humanResponseTimeout)
+  }
 }
 
 public struct AskAiConfigResponse: Codable, Sendable {
   public var enabled: Bool
   public var model: String
   public var maxCalls: Int
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
+    model = try c.decode(String.self, forKey: .model)
+    maxCalls = try c.decode(Int.self, forKey: .maxCalls)
+  }
 }
 
 public struct NetworkPolicyResponse: Codable, Sendable {
@@ -73,7 +88,16 @@ public struct NetworkPolicyResponse: Codable, Sendable {
   public var mode: String?
   public var allowedHosts: [String]
   public var replaceDefaults: Bool?
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
+    mode = try c.decodeIfPresent(String.self, forKey: .mode)
+    allowedHosts = try c.decode([String].self, forKey: .allowedHosts)
+    replaceDefaults = try decodeBoolOrIntIfPresent(c, key: .replaceDefaults)
+  }
 }
+
 
 public struct PrivateRegistryResponse: Codable, Sendable {
   public var type: String
@@ -83,16 +107,19 @@ public struct PrivateRegistryResponse: Codable, Sendable {
 
 public struct InjectedMcpServerResponse: Codable, Sendable {
   public let name: String
-  // Other fields vary — keep minimal for now
+  public let url: String?
+  public let description: String?
 }
 
 public struct InjectedClaudeMdSectionResponse: Codable, Sendable {
-  public let name: String?
+  public let heading: String?
   public let content: String?
+  public let priority: Int?
 }
 
 public struct InjectedSkillResponse: Codable, Sendable {
   public let name: String?
+  public let description: String?
 }
 
 // MARK: - Warm result

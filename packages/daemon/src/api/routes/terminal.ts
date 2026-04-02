@@ -112,11 +112,17 @@ export function terminalRoutes(
           });
 
           // WebSocket → stdin
-          socket.on('message', (data: Buffer | string) => {
-            if (typeof data === 'string') {
-              // Try to parse as JSON control message
+          // Note: the `ws` library delivers all messages as Buffer regardless of
+          // frame type. The second parameter `isBinary` distinguishes text frames
+          // (used for JSON control messages like resize) from binary frames (raw
+          // stdin bytes). We must NOT use `typeof data === 'string'` — it's always
+          // false with `ws`.
+          socket.on('message', (rawData: Buffer, isBinary: boolean) => {
+            if (!isBinary) {
+              // Text frame — might be a JSON control message
+              const text = rawData.toString('utf8');
               try {
-                const msg = JSON.parse(data);
+                const msg = JSON.parse(text);
                 if (
                   msg.type === 'resize' &&
                   typeof msg.cols === 'number' &&
@@ -131,10 +137,10 @@ export function terminalRoutes(
               } catch {
                 // Not JSON — treat as text input
               }
-              stream.write(data);
+              stream.write(text);
             } else {
               // Binary frame — raw stdin bytes
-              stream.write(data);
+              stream.write(rawData);
             }
           });
 

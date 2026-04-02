@@ -6,24 +6,29 @@ public struct DetailPanelView: View {
     public let events: [AgentEvent]
     public var actions: SessionActions
     public var diffString: String?
-    public var terminalOutput: String
     public var terminalState: String
-    public var onTerminalInput: ((String) -> Void)?
+    public var terminalDataPipe: TerminalDataPipe?
+    public var onTerminalSendData: (([UInt8]) -> Void)?
+    public var onTerminalResize: ((Int, Int) -> Void)?
     public var onTerminalConnect: (() -> Void)?
     public var onTerminalDisconnect: (() -> Void)?
 
     public init(
         session: Session, events: [AgentEvent], actions: SessionActions = .preview,
         diffString: String? = nil,
-        terminalOutput: String = "", terminalState: String = "disconnected",
-        onTerminalInput: ((String) -> Void)? = nil,
+        terminalState: String = "disconnected",
+        terminalDataPipe: TerminalDataPipe? = nil,
+        onTerminalSendData: (([UInt8]) -> Void)? = nil,
+        onTerminalResize: ((Int, Int) -> Void)? = nil,
         onTerminalConnect: (() -> Void)? = nil,
         onTerminalDisconnect: (() -> Void)? = nil
     ) {
         self.session = session; self.events = events; self.actions = actions
         self.diffString = diffString
-        self.terminalOutput = terminalOutput; self.terminalState = terminalState
-        self.onTerminalInput = onTerminalInput
+        self.terminalState = terminalState
+        self.terminalDataPipe = terminalDataPipe
+        self.onTerminalSendData = onTerminalSendData
+        self.onTerminalResize = onTerminalResize
         self.onTerminalConnect = onTerminalConnect
         self.onTerminalDisconnect = onTerminalDisconnect
     }
@@ -48,9 +53,10 @@ public struct DetailPanelView: View {
                 case .diff:      DiffTab(session: session, diffString: diffString)
                 case .terminal:  TerminalTab(
                     session: session,
-                    terminalOutput: terminalOutput,
                     terminalState: terminalState,
-                    onInput: onTerminalInput,
+                    dataPipe: terminalDataPipe,
+                    onSendData: onTerminalSendData,
+                    onResize: onTerminalResize,
                     onConnect: onTerminalConnect,
                     onDisconnect: onTerminalDisconnect
                 )
@@ -78,6 +84,7 @@ public struct DetailPanelView: View {
                     Text("·")
                         .foregroundStyle(.quaternary)
                     Text(session.duration)
+                        .contentTransition(.numericText())
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -87,6 +94,7 @@ public struct DetailPanelView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        .background(.regularMaterial)
     }
 
     @ViewBuilder
@@ -164,7 +172,7 @@ public struct DetailPanelView: View {
         HStack(spacing: 0) {
             ForEach(DetailTab.allCases, id: \.self) { tab in
                 Button {
-                    withAnimation(.easeOut(duration: 0.12)) { selectedTab = tab }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selectedTab = tab }
                 } label: {
                     VStack(spacing: 4) {
                         HStack(spacing: 4) {

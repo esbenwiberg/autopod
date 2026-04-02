@@ -52,6 +52,15 @@ public struct AssertionResultResponse: Codable, Sendable {
   public let expected: String?
   public let actual: String?
   public let passed: Bool
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    selector = try c.decode(String.self, forKey: .selector)
+    type = try c.decode(String.self, forKey: .type)
+    expected = try c.decodeIfPresent(String.self, forKey: .expected)
+    actual = try c.decodeIfPresent(String.self, forKey: .actual)
+    passed = try decodeBoolOrInt(c, key: .passed)
+  }
 }
 
 // MARK: - Test
@@ -76,6 +85,14 @@ public struct AcCheckResponse: Codable, Sendable {
   public let passed: Bool
   public let screenshot: String?
   public let reasoning: String
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    criterion = try c.decode(String.self, forKey: .criterion)
+    passed = try decodeBoolOrInt(c, key: .passed)
+    screenshot = try c.decodeIfPresent(String.self, forKey: .screenshot)
+    reasoning = try c.decode(String.self, forKey: .reasoning)
+  }
 }
 
 // MARK: - Task Review
@@ -94,4 +111,11 @@ public struct RequirementsCheckResponse: Codable, Sendable {
   public let criterion: String
   public let met: Bool
   public let note: String?
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    criterion = try c.decode(String.self, forKey: .criterion)
+    met = try decodeBoolOrInt(c, key: .met)
+    note = try c.decodeIfPresent(String.self, forKey: .note)
+  }
 }

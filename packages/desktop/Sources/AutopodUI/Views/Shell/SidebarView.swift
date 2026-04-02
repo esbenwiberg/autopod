@@ -51,16 +51,16 @@ public struct SidebarView: View {
             List(selection: $selection) {
                 Section("Sessions") {
                     sidebarRow(.attention, icon: "exclamationmark.circle.fill", color: .orange, badge: attentionCount)
-                    sidebarRow(.running, icon: "play.circle.fill", color: .green, badge: runningCount)
-                    sidebarRow(.workspaces, icon: "terminal.fill", color: .teal, badge: workspaceCount)
+                    sidebarRow(.running, icon: "play.circle.fill", color: .secondary, badge: runningCount)
+                    sidebarRow(.workspaces, icon: "terminal.fill", color: .secondary, badge: workspaceCount)
                     sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
-                    sidebarRow(.all, icon: "square.grid.2x2", color: .blue, badge: sessions.count)
-                    sidebarRow(.analytics, icon: "chart.bar.fill", color: .purple, badge: 0)
+                    sidebarRow(.all, icon: "square.grid.2x2", color: .secondary, badge: sessions.count)
+                    sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
                 }
 
                 Section("Profiles") {
                     ForEach(profiles, id: \.self) { profile in
-                        sidebarRow(.profile(profile), icon: "folder.fill", color: .cyan, badge: sessions.filter { $0.profileName == profile }.count)
+                        sidebarRow(.profile(profile), icon: "folder.fill", color: .secondary, badge: sessions.filter { $0.profileName == profile }.count)
                     }
                 }
             }
@@ -81,6 +81,7 @@ public struct SidebarView: View {
             }
             .padding(12)
         }
+        .background(.ultraThinMaterial)
         .frame(minWidth: 180, idealWidth: 200, maxWidth: 220)
     }
 

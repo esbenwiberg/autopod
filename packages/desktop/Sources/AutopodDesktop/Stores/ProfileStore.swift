@@ -33,6 +33,7 @@ public final class ProfileStore {
       let responses = try await api.listProfiles()
       profiles = ProfileMapper.map(responses)
     } catch {
+      print("[ProfileStore] Failed to load profiles: \(error)")
       self.error = error.localizedDescription
     }
     isLoading = false

@@ -1,138 +1,267 @@
 import SwiftUI
 import AutopodClient
+import AutopodUI
 
-/// App settings — connections and notification preferences.
-public struct SettingsView: View {
-  public let connectionManager: ConnectionManager
-  @Binding public var isPresented: Bool
+// MARK: - Settings sections
 
-  public init(connectionManager: ConnectionManager, isPresented: Binding<Bool>) {
-    self.connectionManager = connectionManager; self._isPresented = isPresented
-  }
+enum SettingsSection: Hashable {
+    case connections
+    case profiles
+    case notifications
+    case about
 
-  @State private var showAddConnection = false
-
-  public var body: some View {
-    VStack(spacing: 0) {
-      // Header
-      HStack {
-        Text("Settings")
-          .font(.headline)
-        Spacer()
-        Button { isPresented = false } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.tertiary)
-            .font(.title3)
+    var label: String {
+        switch self {
+        case .connections:   "Connections"
+        case .profiles:      "Profiles"
+        case .notifications: "Notifications"
+        case .about:         "About"
         }
-        .buttonStyle(.borderless)
-      }
-      .padding(.horizontal, 20)
-      .padding(.top, 20)
-      .padding(.bottom, 12)
-
-      Divider()
-
-      TabView {
-        connectionsTab
-          .tabItem { Label("Connections", systemImage: "server.rack") }
-
-        notificationsTab
-          .tabItem { Label("Notifications", systemImage: "bell") }
-
-        aboutTab
-          .tabItem { Label("About", systemImage: "info.circle") }
-      }
-      .padding(16)
     }
-    .frame(width: 480, height: 400)
-    .background(Color(nsColor: .windowBackgroundColor))
-  }
 
-  // MARK: - Connections
+    var icon: String {
+        switch self {
+        case .connections:   "server.rack"
+        case .profiles:      "person.crop.rectangle.stack"
+        case .notifications: "bell"
+        case .about:         "info.circle"
+        }
+    }
+}
 
-  private var connectionsTab: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      let connections = ConnectionStore.loadAll()
+// MARK: - Settings view
 
-      if connections.isEmpty {
-        Text("No saved connections")
-          .font(.caption)
-          .foregroundStyle(.tertiary)
-          .frame(maxWidth: .infinity, alignment: .center)
-          .padding(.top, 20)
-      } else {
-        ForEach(connections) { conn in
-          HStack {
-            Circle()
-              .fill(connectionManager.connection?.id == conn.id && connectionManager.isConnected ? .green : .secondary)
-              .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-              Text(conn.name)
-                .font(.callout.weight(.medium))
-              Text(conn.label)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
+/// App settings — sidebar-based layout with connections, profiles, notifications, and about.
+public struct SettingsView: View {
+    public let connectionManager: ConnectionManager
+    public let profiles: [Profile]
+    public let profileError: String?
+    @Binding public var isPresented: Bool
+
+    public init(connectionManager: ConnectionManager, profiles: [Profile], profileError: String? = nil, isPresented: Binding<Bool>) {
+        self.connectionManager = connectionManager
+        self.profiles = profiles
+        self.profileError = profileError
+        self._isPresented = isPresented
+    }
+
+    @State private var selectedSection: SettingsSection = .profiles
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Settings")
+                    .font(.headline)
+                Spacer()
+                Button { isPresented = false } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 12)
+
+            Divider()
+
+            // Sidebar + Content
+            HStack(spacing: 0) {
+                settingsSidebar
+                Divider()
+                settingsContent
+            }
+        }
+        .frame(width: 720, height: 500)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: - Sidebar
+
+    private var settingsSidebar: some View {
+        VStack(spacing: 1) {
+            ForEach([SettingsSection.connections, .profiles, .notifications], id: \.self) { section in
+                sidebarRow(section)
             }
             Spacer()
-            if connectionManager.connection?.id == conn.id {
-              Text("Active")
-                .font(.caption2)
-                .foregroundStyle(.green)
-            }
-            Button {
-              connectionManager.removeConnection(conn.id)
-            } label: {
-              Image(systemName: "trash")
-                .foregroundStyle(.red.opacity(0.6))
-            }
-            .buttonStyle(.borderless)
-          }
-          .padding(10)
-          .background(Color(nsColor: .controlBackgroundColor))
-          .clipShape(RoundedRectangle(cornerRadius: 8))
+            sidebarRow(.about)
         }
-      }
-
-      Spacer()
+        .padding(10)
+        .frame(width: 160)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
-  }
 
-  // MARK: - Notifications
-
-  @AppStorage("notify.escalation") private var notifyEscalation = true
-  @AppStorage("notify.validation") private var notifyValidation = true
-  @AppStorage("notify.failure") private var notifyFailure = true
-  @AppStorage("notify.completion") private var notifyCompletion = true
-
-  private var notificationsTab: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Toggle("Escalation (agent needs input)", isOn: $notifyEscalation)
-      Toggle("Validation complete", isOn: $notifyValidation)
-      Toggle("Session failed", isOn: $notifyFailure)
-      Toggle("Session complete", isOn: $notifyCompletion)
-      Spacer()
-      Text("Notifications require macOS permission")
-        .font(.caption)
-        .foregroundStyle(.tertiary)
+    private func sidebarRow(_ section: SettingsSection) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                selectedSection = section
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: section.icon)
+                    .font(.system(size: 12))
+                    .frame(width: 18)
+                    .foregroundStyle(selectedSection == section ? .white : .blue)
+                Text(section.label)
+                    .font(.system(.callout))
+                    .foregroundStyle(selectedSection == section ? .white : .primary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selectedSection == section ? Color.accentColor : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
-  }
 
-  // MARK: - About
+    // MARK: - Content
 
-  private var aboutTab: some View {
-    VStack(spacing: 12) {
-      Image(systemName: "server.rack")
-        .font(.system(size: 36))
-        .foregroundStyle(.blue)
-      Text("Autopod Desktop")
-        .font(.title3.weight(.semibold))
-      Text("Native macOS client for orchestrating Autopod sessions")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.center)
-      Spacer()
+    @ViewBuilder
+    private var settingsContent: some View {
+        switch selectedSection {
+        case .connections:   connectionsContent
+        case .profiles:      profilesContent
+        case .notifications: notificationsContent
+        case .about:         aboutContent
+        }
     }
-    .frame(maxWidth: .infinity)
-    .padding(.top, 20)
-  }
+
+    // MARK: - Connections
+
+    private var connectionsContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Connections")
+                .font(.title3.weight(.semibold))
+            Text("Saved daemon connections.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            let connections = ConnectionStore.loadAll()
+
+            if connections.isEmpty {
+                Spacer()
+                Text("No saved connections")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(connections) { conn in
+                            HStack {
+                                Circle()
+                                    .fill(connectionManager.connection?.id == conn.id && connectionManager.isConnected ? .green : .secondary)
+                                    .frame(width: 8, height: 8)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(conn.name)
+                                        .font(.callout.weight(.medium))
+                                    Text(conn.label)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if connectionManager.connection?.id == conn.id {
+                                    Text("Active")
+                                        .font(.caption2)
+                                        .foregroundStyle(.green)
+                                }
+                                Button {
+                                    connectionManager.removeConnection(conn.id)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .foregroundStyle(.red.opacity(0.6))
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            .padding(10)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+                Spacer()
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - Profiles
+
+    private var profilesContent: some View {
+        VStack(spacing: 0) {
+            if let profileError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text(profileError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.red.opacity(0.08))
+            }
+            ProfileListView(profiles: profiles)
+        }
+    }
+
+    // MARK: - Notifications
+
+    @AppStorage("notify.escalation") private var notifyEscalation = true
+    @AppStorage("notify.validation") private var notifyValidation = true
+    @AppStorage("notify.failure") private var notifyFailure = true
+    @AppStorage("notify.completion") private var notifyCompletion = true
+
+    private var notificationsContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Notifications")
+                .font(.title3.weight(.semibold))
+            Text("Control which events trigger macOS notifications.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Escalation (agent needs input)", isOn: $notifyEscalation)
+                Toggle("Validation complete", isOn: $notifyValidation)
+                Toggle("Session failed", isOn: $notifyFailure)
+                Toggle("Session complete", isOn: $notifyCompletion)
+            }
+            .padding(.top, 4)
+
+            Spacer()
+
+            Text("Notifications require macOS permission in System Settings.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(20)
+    }
+
+    // MARK: - About
+
+    private var aboutContent: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "server.rack")
+                .font(.system(size: 36))
+                .foregroundStyle(.blue)
+            Text("Autopod Desktop")
+                .font(.title3.weight(.semibold))
+            Text("Native macOS client for orchestrating Autopod sessions.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(20)
+    }
 }

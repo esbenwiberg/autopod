@@ -11,9 +11,10 @@ public struct MainView: View {
     public var profileNames: [String]
     public var sessionEvents: [String: [AgentEvent]]
     public var sessionDiffs: [String: String]
-    public var terminalOutput: String
     public var terminalState: String
-    public var onTerminalInput: ((String) -> Void)?
+    public var terminalDataPipe: TerminalDataPipe?
+    public var onTerminalSendData: (([UInt8]) -> Void)?
+    public var onTerminalResize: ((Int, Int) -> Void)?
     public var onTerminalConnect: ((String) -> Void)?
     public var onTerminalDisconnect: (() -> Void)?
     public var onRefresh: (() async -> Void)?
@@ -32,9 +33,10 @@ public struct MainView: View {
         profileNames: [String] = ["my-app", "webapp", "backend"],
         sessionEvents: [String: [AgentEvent]] = [:],
         sessionDiffs: [String: String] = [:],
-        terminalOutput: String = "",
         terminalState: String = "disconnected",
-        onTerminalInput: ((String) -> Void)? = nil,
+        terminalDataPipe: TerminalDataPipe? = nil,
+        onTerminalSendData: (([UInt8]) -> Void)? = nil,
+        onTerminalResize: ((Int, Int) -> Void)? = nil,
         onTerminalConnect: ((String) -> Void)? = nil,
         onTerminalDisconnect: (() -> Void)? = nil,
         onRefresh: (() async -> Void)? = nil,
@@ -50,9 +52,10 @@ public struct MainView: View {
         self.profileNames = profileNames
         self.sessionEvents = sessionEvents
         self.sessionDiffs = sessionDiffs
-        self.terminalOutput = terminalOutput
         self.terminalState = terminalState
-        self.onTerminalInput = onTerminalInput
+        self.terminalDataPipe = terminalDataPipe
+        self.onTerminalSendData = onTerminalSendData
+        self.onTerminalResize = onTerminalResize
         self.onTerminalConnect = onTerminalConnect
         self.onTerminalDisconnect = onTerminalDisconnect
         self.onRefresh = onRefresh
@@ -109,9 +112,10 @@ public struct MainView: View {
                     events: eventsForSession(session),
                     actions: actions,
                     diffString: sessionDiffs[session.id],
-                    terminalOutput: terminalOutput,
                     terminalState: terminalState,
-                    onTerminalInput: onTerminalInput,
+                    terminalDataPipe: terminalDataPipe,
+                    onTerminalSendData: onTerminalSendData,
+                    onTerminalResize: onTerminalResize,
                     onTerminalConnect: { onTerminalConnect?(session.id) },
                     onTerminalDisconnect: onTerminalDisconnect
                 )

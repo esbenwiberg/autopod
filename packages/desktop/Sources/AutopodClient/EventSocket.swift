@@ -144,7 +144,7 @@ public actor EventSocket {
       } catch {
         // Connection lost — trigger reconnect
         if !Task.isCancelled {
-          await scheduleReconnect()
+            scheduleReconnect()
         }
         return
       }

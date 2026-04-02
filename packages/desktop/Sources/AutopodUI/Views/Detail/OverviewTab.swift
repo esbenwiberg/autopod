@@ -165,72 +165,29 @@ struct OverviewTab: View {
     // MARK: - Metrics
 
     private var metricsRow: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                metricItem(
-                    icon: "clock",
-                    value: session.duration,
-                    label: "Duration"
-                )
-                Divider().frame(height: 30)
-                if let diff = session.diffStats {
-                    metricItem(
-                        icon: "doc.text",
-                        value: "\(diff.files)",
-                        label: "Files"
-                    )
-                    Divider().frame(height: 30)
-                    metricItem(
-                        icon: "plus",
-                        value: "\(diff.added)",
-                        label: "Added",
-                        color: .green
-                    )
-                    Divider().frame(height: 30)
-                    metricItem(
-                        icon: "minus",
-                        value: "\(diff.removed)",
-                        label: "Removed",
-                        color: .red
-                    )
-                    Divider().frame(height: 30)
-                }
-                metricItem(
-                    icon: "wrench",
-                    value: "\(events.filter { $0.type == .toolUse }.count)",
-                    label: "Tool calls"
-                )
+        let metrics: [(icon: String, value: String, label: String, color: Color)] = {
+            var items: [(String, String, String, Color)] = [
+                ("clock", session.duration, "Duration", .primary),
+            ]
+            if let diff = session.diffStats {
+                items.append(("doc.text", "\(diff.files)", "Files", .primary))
+                items.append(("plus", "\(diff.added)", "Added", .green))
+                items.append(("minus", "\(diff.removed)", "Removed", .red))
             }
-
+            items.append(("wrench", "\(events.filter { $0.type == .toolUse }.count)", "Tool calls", .primary))
             if session.inputTokens > 0 || session.costUsd > 0 || session.status == .running || session.status == .paused {
-                Divider()
-                HStack(spacing: 0) {
-                    metricItem(
-                        icon: "arrow.up.circle",
-                        value: formatTokens(session.inputTokens),
-                        label: "In tokens",
-                        color: session.inputTokens > 0 ? .primary : .secondary
-                    )
-                    Divider().frame(height: 30)
-                    metricItem(
-                        icon: "arrow.down.circle",
-                        value: formatTokens(session.outputTokens),
-                        label: "Out tokens",
-                        color: session.outputTokens > 0 ? .primary : .secondary
-                    )
-                    Divider().frame(height: 30)
-                    metricItem(
-                        icon: "dollarsign.circle",
-                        value: String(format: "$%.3f", session.costUsd),
-                        label: "Cost",
-                        color: session.costUsd > 0 ? .primary : .secondary
-                    )
-                }
+                items.append(("arrow.up.circle", formatTokens(session.inputTokens), "In tokens", session.inputTokens > 0 ? .primary : .secondary))
+                items.append(("arrow.down.circle", formatTokens(session.outputTokens), "Out tokens", session.outputTokens > 0 ? .primary : .secondary))
+                items.append(("dollarsign.circle", String(format: "$%.3f", session.costUsd), "Cost", session.costUsd > 0 ? .primary : .secondary))
+            }
+            return items
+        }()
+
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
+            ForEach(Array(metrics.enumerated()), id: \.offset) { _, metric in
+                metricItem(icon: metric.icon, value: metric.value, label: metric.label, color: metric.color)
             }
         }
-        .padding(.vertical, 10)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func formatTokens(_ count: Int) -> String {
@@ -240,13 +197,14 @@ struct OverviewTab: View {
     }
 
     private func metricItem(icon: String, value: String, label: String, color: Color = .primary) -> some View {
-        VStack(spacing: 3) {
-            HStack(spacing: 3) {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
                 Text(value)
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                    .monospacedDigit()
                     .foregroundStyle(color)
             }
             Text(label)
@@ -254,6 +212,10 @@ struct OverviewTab: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Commits
@@ -409,7 +371,7 @@ struct OverviewTab: View {
                             label: "Fix (workspace)",
                             detail: session.status.label,
                             icon: "wrench.and.screwdriver",
-                            color: .teal,
+                            color: .blue,
                             isCurrent: true
                         )
                         chainConnector()
@@ -428,7 +390,7 @@ struct OverviewTab: View {
                             label: "Workspace",
                             detail: "planning / preparation",
                             icon: "terminal",
-                            color: .teal,
+                            color: .secondary,
                             isCurrent: false
                         )
                         chainConnector()
@@ -487,7 +449,7 @@ struct OverviewTab: View {
     private func chainConnector() -> some View {
         HStack {
             Rectangle()
-                .fill(Color.purple.opacity(0.3))
+                .fill(Color.secondary.opacity(0.3))
                 .frame(width: 1, height: 16)
                 .padding(.leading, 10)
             Spacer()

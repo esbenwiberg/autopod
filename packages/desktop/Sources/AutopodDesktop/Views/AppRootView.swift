@@ -48,9 +48,10 @@ public struct AppRootView: View {
       profileNames: profileStore.profileNames,
       sessionEvents: eventStream?.sessionEvents ?? [:],
       sessionDiffs: sessionStore.sessionDiffs,
-      terminalOutput: terminalManager?.output ?? "",
       terminalState: terminalManager?.state ?? "disconnected",
-      onTerminalInput: { text in terminalManager?.sendInput(text) },
+      terminalDataPipe: terminalManager?.dataPipe,
+      onTerminalSendData: { bytes in terminalManager?.sendData(bytes) },
+      onTerminalResize: { cols, rows in terminalManager?.resize(cols: cols, rows: rows) },
       onTerminalConnect: { sessionId in terminalManager?.connect(sessionId: sessionId) },
       onTerminalDisconnect: { terminalManager?.disconnect() },
       onRefresh: {
@@ -84,8 +85,15 @@ public struct AppRootView: View {
     .sheet(isPresented: $showSettings) {
       SettingsView(
         connectionManager: connectionManager,
+        profiles: profileStore.profiles,
+        profileError: profileStore.error,
         isPresented: $showSettings
       )
+    }
+    .onChange(of: showSettings) { _, isShowing in
+      if isShowing {
+        Task { await profileStore.loadProfiles() }
+      }
     }
     .toolbar {
       ToolbarItem(placement: .automatic) {

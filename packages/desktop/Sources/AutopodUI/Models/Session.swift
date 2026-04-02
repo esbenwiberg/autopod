@@ -27,19 +27,19 @@ public enum SessionStatus: String, Sendable {
 
     public var color: Color {
         switch self {
-        case .queued:        .secondary
+        case .queued:        .gray
         case .provisioning:  .blue
-        case .running:       .green
+        case .running:       .blue
         case .awaitingInput: .orange
         case .validating:    .blue
-        case .validated:     .green
+        case .validated:     .secondary
         case .failed:        .red
-        case .approved:      .green
-        case .merging:       .purple
+        case .approved:      .secondary
+        case .merging:       .blue
         case .complete:      .secondary
-        case .paused:        .yellow
+        case .paused:        .gray
         case .killing:       .red
-        case .killed:        .secondary
+        case .killed:        .gray
         }
     }
 

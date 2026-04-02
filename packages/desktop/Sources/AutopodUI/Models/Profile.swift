@@ -24,10 +24,13 @@ public struct Profile: Identifiable, Sendable {
     public var customInstructions: String?
     public var containerMemoryGb: Double?
 
-    // Credentials (display masked, edit separately)
+    // Credentials — `hasXxxPat` reflects API state; `xxxPat` holds new values being set
     public var hasGithubPat: Bool
     public var hasAdoPat: Bool
     public var hasRegistryPat: Bool
+    public var githubPat: String?
+    public var adoPat: String?
+    public var registryPat: String?
 
     // Network policy
     public var networkEnabled: Bool
@@ -40,10 +43,15 @@ public struct Profile: Identifiable, Sendable {
     // Smoke pages
     public var smokePages: [SmokePage]
 
-    // Counts for injected items (shown as badges, edited in sub-views)
-    public var mcpServerCount: Int
-    public var claudeMdSectionCount: Int
-    public var skillCount: Int
+    // Injected items
+    public var mcpServers: [InjectedMcpServer]
+    public var claudeMdSections: [InjectedClaudeMdSection]
+    public var skills: [InjectedSkill]
+
+    // Convenience counts (for badges / list views)
+    public var mcpServerCount: Int { mcpServers.count }
+    public var claudeMdSectionCount: Int { claudeMdSections.count }
+    public var skillCount: Int { skills.count }
 
     public var createdAt: Date
     public var updatedAt: Date
@@ -61,10 +69,13 @@ public struct Profile: Identifiable, Sendable {
         modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
         customInstructions: String? = nil, containerMemoryGb: Double? = nil,
         hasGithubPat: Bool = false, hasAdoPat: Bool = false, hasRegistryPat: Bool = false,
+        githubPat: String? = nil, adoPat: String? = nil, registryPat: String? = nil,
         networkEnabled: Bool = false, networkMode: NetworkPolicyMode = .restricted,
         allowedHosts: [String] = [],
         privateRegistries: [PrivateRegistry] = [], smokePages: [SmokePage] = [],
-        mcpServerCount: Int = 0, claudeMdSectionCount: Int = 0, skillCount: Int = 0,
+        mcpServers: [InjectedMcpServer] = [],
+        claudeMdSections: [InjectedClaudeMdSection] = [],
+        skills: [InjectedSkill] = [],
         createdAt: Date = Date(), updatedAt: Date = Date()
     ) {
         self.name = name; self.repoUrl = repoUrl; self.defaultBranch = defaultBranch
@@ -79,11 +90,12 @@ public struct Profile: Identifiable, Sendable {
         self.containerMemoryGb = containerMemoryGb
         self.hasGithubPat = hasGithubPat; self.hasAdoPat = hasAdoPat
         self.hasRegistryPat = hasRegistryPat
+        self.githubPat = githubPat; self.adoPat = adoPat; self.registryPat = registryPat
         self.networkEnabled = networkEnabled; self.networkMode = networkMode
         self.allowedHosts = allowedHosts; self.privateRegistries = privateRegistries
         self.smokePages = smokePages
-        self.mcpServerCount = mcpServerCount; self.claudeMdSectionCount = claudeMdSectionCount
-        self.skillCount = skillCount
+        self.mcpServers = mcpServers; self.claudeMdSections = claudeMdSections
+        self.skills = skills
         self.createdAt = createdAt; self.updatedAt = updatedAt
     }
 }
@@ -165,6 +177,31 @@ public struct SmokePage: Sendable {
     public init(path: String) { self.path = path }
 }
 
+public struct InjectedMcpServer: Sendable {
+    public var name: String
+    public var url: String
+    public var description: String?
+    public init(name: String = "", url: String = "", description: String? = nil) {
+        self.name = name; self.url = url; self.description = description
+    }
+}
+
+public struct InjectedClaudeMdSection: Sendable {
+    public var heading: String
+    public var content: String
+    public init(heading: String = "", content: String = "") {
+        self.heading = heading; self.content = content
+    }
+}
+
+public struct InjectedSkill: Sendable {
+    public var name: String
+    public var description: String?
+    public init(name: String = "", description: String? = nil) {
+        self.name = name; self.description = description
+    }
+}
+
 // MARK: - Mock profiles
 
 public enum MockProfiles: Sendable {
@@ -183,7 +220,16 @@ public enum MockProfiles: Sendable {
         networkEnabled: true, networkMode: .restricted,
         allowedHosts: ["api.stripe.com", "auth.google.com"],
         smokePages: [SmokePage(path: "/"), SmokePage(path: "/login"), SmokePage(path: "/dashboard")],
-        mcpServerCount: 1, claudeMdSectionCount: 2, skillCount: 3
+        mcpServers: [InjectedMcpServer(name: "browser", url: "http://localhost:9222", description: "Chrome DevTools")],
+        claudeMdSections: [
+            InjectedClaudeMdSection(heading: "Coding Standards", content: "Use strict TypeScript."),
+            InjectedClaudeMdSection(heading: "Testing", content: "Always write tests.")
+        ],
+        skills: [
+            InjectedSkill(name: "deploy", description: "Deploy to staging"),
+            InjectedSkill(name: "lint", description: "Run linter"),
+            InjectedSkill(name: "db-migrate", description: "Run database migrations")
+        ]
     )
 
     public static let webapp = Profile(

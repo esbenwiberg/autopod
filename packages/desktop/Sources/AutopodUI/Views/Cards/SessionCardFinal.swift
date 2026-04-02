@@ -37,8 +37,8 @@ public struct SessionCardFinal: View {
         VStack(alignment: .leading, spacing: 0) {
             // Accent stripe
             session.status.color
-                .frame(height: 2.5)
-                .opacity(session.status.needsAttention ? 1 : 0.4)
+                .frame(height: 2)
+                .opacity(session.status.needsAttention ? 0.9 : 0.25)
 
             compactContent
                 .padding(12)
@@ -54,22 +54,23 @@ public struct SessionCardFinal: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .controlBackgroundColor))
                 .shadow(
-                    color: .black.opacity(isHovered ? 0.12 : 0.05),
-                    radius: isHovered ? 10 : 4,
-                    y: isHovered ? 3 : 1
+                    color: .black.opacity(isHovered ? 0.08 : 0.03),
+                    radius: isHovered ? 8 : 3,
+                    y: isHovered ? 2 : 1
                 )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(
-                    session.status.needsAttention
-                        ? session.status.color.opacity(0.25)
-                        : Color(nsColor: .separatorColor).opacity(0.5),
-                    lineWidth: session.status.needsAttention ? 1 : 0.5
+                    isHovered
+                        ? Color.accentColor.opacity(0.3)
+                        : session.status.needsAttention
+                            ? session.status.color.opacity(0.2)
+                            : Color(nsColor: .separatorColor).opacity(0.3),
+                    lineWidth: isHovered || session.status.needsAttention ? 1 : 0.5
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .scaleEffect(isHovered ? 1.01 : 1.0)
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .onHover { isHovered = $0 }
     }
@@ -101,17 +102,17 @@ public struct SessionCardFinal: View {
     }
 
     private var modeBadge: some View {
-        let (label, color): (String, Color) = switch session.outputMode {
-        case .pr:        ("PR",  .blue)
-        case .artifact:  ("ART", .purple)
-        case .workspace: ("WS",  .teal)
+        let label: String = switch session.outputMode {
+        case .pr:        "PR"
+        case .artifact:  "ART"
+        case .workspace: "WS"
         }
         return Text(label)
             .font(.system(.caption2).weight(.medium))
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(color.opacity(0.1))
-            .foregroundStyle(color)
+            .background(Color.secondary.opacity(0.08))
+            .foregroundStyle(.secondary)
             .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
@@ -130,7 +131,7 @@ public struct SessionCardFinal: View {
         case .running:
             Label("Interactive", systemImage: "terminal")
                 .font(.caption)
-                .foregroundStyle(.teal)
+                .foregroundStyle(.secondary)
         case .complete:
             Label("Branch pushed", systemImage: "arrow.up.circle")
                 .font(.caption)
@@ -195,7 +196,7 @@ public struct SessionCardFinal: View {
                 ProgressView().scaleEffect(0.5)
                 Text("Creating PR...")
                     .font(.caption)
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(.secondary)
             }
         case .complete:
             if session.prUrl != nil {
@@ -215,8 +216,8 @@ public struct SessionCardFinal: View {
             .font(.system(.caption2).weight(.medium))
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(session.status.color.opacity(0.1))
-            .foregroundStyle(session.status.color)
+            .background(session.status.color.opacity(0.08))
+            .foregroundStyle(session.status.color.opacity(0.85))
             .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
@@ -243,10 +244,10 @@ public struct SessionCardFinal: View {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.branch")
                         .font(.system(size: 9))
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(.secondary)
                     Text("from \(base)")
                         .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -255,10 +256,10 @@ public struct SessionCardFinal: View {
                 HStack(spacing: 4) {
                     Image(systemName: "link")
                         .font(.system(size: 9))
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(.secondary)
                     Text(session.isWorkspace ? "fixes \(linked)" : "← \(linked)")
                         .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -273,7 +274,7 @@ public struct SessionCardFinal: View {
             if let diff = session.diffStats {
                 HStack(spacing: 5) {
                     Image(systemName: "doc.text")
-                        .font(.system(size: 9))
+                        .font(.system(size: 8))
                         .foregroundStyle(.tertiary)
                     Text("+\(diff.added)")
                         .foregroundStyle(.green)
@@ -285,6 +286,7 @@ public struct SessionCardFinal: View {
                         .foregroundStyle(.secondary)
                 }
                 .font(.system(.caption2, design: .monospaced))
+                .monospacedDigit()
             }
         }
     }
@@ -306,7 +308,6 @@ public struct SessionCardFinal: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .tint(.teal)
 
                 if session.linkedSessionId == nil {
                     Button {
@@ -328,7 +329,6 @@ public struct SessionCardFinal: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .tint(.orange)
                     .help("Pull latest and re-run validation on the linked worker session")
                 }
             }

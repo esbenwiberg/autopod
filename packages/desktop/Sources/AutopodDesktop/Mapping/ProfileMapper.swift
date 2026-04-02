@@ -45,9 +45,15 @@ public enum ProfileMapper {
         PrivateRegistry(type: RegistryType(rawValue: $0.type) ?? .npm, url: $0.url, scope: $0.scope)
       },
       smokePages: response.smokePages.map { SmokePage(path: $0.path) },
-      mcpServerCount: response.mcpServers.count,
-      claudeMdSectionCount: response.claudeMdSections.count,
-      skillCount: response.skills.count,
+      mcpServers: response.mcpServers.map {
+        InjectedMcpServer(name: $0.name, url: $0.url ?? "", description: $0.description)
+      },
+      claudeMdSections: response.claudeMdSections.map {
+        InjectedClaudeMdSection(heading: $0.heading ?? "", content: $0.content ?? "")
+      },
+      skills: response.skills.map {
+        InjectedSkill(name: $0.name ?? "", description: $0.description)
+      },
       createdAt: SessionMapper.parseDate(response.createdAt),
       updatedAt: SessionMapper.parseDate(response.updatedAt)
     )

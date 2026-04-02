@@ -9,9 +9,15 @@ let package = Package(
         .library(name: "AutopodClient", targets: ["AutopodClient"]),
         .library(name: "AutopodDesktop", targets: ["AutopodDesktop"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
+    ],
     targets: [
         .target(
             name: "AutopodUI",
+            dependencies: [
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
+            ],
             path: "Sources/AutopodUI"
         ),
         .target(

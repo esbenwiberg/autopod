@@ -19,8 +19,8 @@ public struct StatusDot: View {
                 Circle()
                     .fill(status.color)
                     .frame(width: 10, height: 10)
-                    .scaleEffect(pulse ? 1.3 : 1.0)
-                    .opacity(pulse ? 0.6 : 1.0)
+                    .scaleEffect(pulse ? 1.15 : 1.0)
+                    .opacity(pulse ? 0.7 : 1.0)
                     .onAppear {
                         withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                             pulse = true
@@ -58,7 +58,7 @@ public struct StatusDot: View {
                 Circle()
                     .fill(status.color)
                     .frame(width: 10, height: 10)
-                    .shadow(color: status.color.opacity(0.8), radius: pulse ? 5 : 2)
+                    .shadow(color: status.color.opacity(0.6), radius: pulse ? 4 : 2)
                     .onAppear {
                         withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
                             pulse = true

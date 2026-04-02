@@ -1,14 +1,16 @@
 import Foundation
 import AutopodClient
+import AutopodUI
 
 /// Manages terminal WebSocket connections for session detail views.
+/// Feeds raw PTY bytes into a TerminalDataPipe for SwiftTerm rendering.
 @Observable
 @MainActor
 public final class TerminalManager {
 
-  public private(set) var output = ""
   public private(set) var state = "disconnected"
   public private(set) var connectedSessionId: String?
+  public let dataPipe = TerminalDataPipe()
 
   private var socket: TerminalSocket?
   private let baseURL: URL
@@ -22,26 +24,14 @@ public final class TerminalManager {
   public func connect(sessionId: String, cols: Int = 120, rows: Int = 40) {
     disconnect()
     connectedSessionId = sessionId
-    output = ""
 
+    let pipe = dataPipe
     let sock = TerminalSocket(
       baseURL: baseURL,
       token: token,
-      onData: { [weak self] data in
-        Task { @MainActor [weak self] in
-          if let text = String(data: data, encoding: .utf8) {
-            // Strip ANSI escape codes for basic text rendering
-            let clean = text.replacingOccurrences(
-              of: "\\x1b\\[[0-9;]*[a-zA-Z]",
-              with: "",
-              options: .regularExpression
-            )
-            self?.output += clean
-            // Cap output at 100KB to prevent memory issues
-            if let output = self?.output, output.count > 100_000 {
-              self?.output = String(output.suffix(80_000))
-            }
-          }
+      onData: { data in
+        Task { @MainActor in
+          pipe.feed(data)
         }
       },
       onStateChange: { [weak self] newState in
@@ -71,9 +61,9 @@ public final class TerminalManager {
     connectedSessionId = nil
   }
 
-  public func sendInput(_ text: String) {
+  public func sendData(_ bytes: [UInt8]) {
     Task {
-      await socket?.send(text: text)
+      await socket?.send(data: Data(bytes))
     }
   }
 

@@ -59,6 +59,7 @@ public final class SessionStore {
       let responses = try await api.listSessions()
       sessions = SessionMapper.map(responses)
     } catch {
+      print("[SessionStore] Failed to load sessions: \(error)")
       self.error = error.localizedDescription
     }
     isLoading = false
