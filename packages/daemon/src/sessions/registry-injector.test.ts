@@ -2,8 +2,9 @@ import type { PrivateRegistry } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
+  NUGET_CONFIG_PATH,
+  NPM_RC_PATH,
   buildRegistryFiles,
-  detectNuGetConfigPath,
   generateNpmrc,
   generateNuGetConfig,
   validateRegistryFiles,
@@ -21,33 +22,24 @@ describe('buildRegistryFiles', () => {
     expect(buildRegistryFiles(regs, null)).toEqual([]);
   });
 
-  it('generates .npmrc for npm registries', () => {
+  it('generates .npmrc at user-level home path', () => {
     const regs: PrivateRegistry[] = [
       { type: 'npm', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/npm/registry/' },
     ];
     const files = buildRegistryFiles(regs, 'my-pat');
     expect(files).toHaveLength(1);
-    expect(files[0].path).toBe('/workspace/.npmrc');
+    expect(files[0].path).toBe(NPM_RC_PATH);
     expect(files[0].content).toContain('my-pat');
   });
 
-  it('uses default lowercase nuget.config path', () => {
+  it('generates NuGet.config at user-level home path', () => {
     const regs: PrivateRegistry[] = [
       { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
     ];
     const files = buildRegistryFiles(regs, 'my-pat');
     expect(files).toHaveLength(1);
-    expect(files[0].path).toBe('/workspace/nuget.config');
+    expect(files[0].path).toBe(NUGET_CONFIG_PATH);
     expect(files[0].content).toContain('my-pat');
-  });
-
-  it('uses custom nuget.config path when provided', () => {
-    const regs: PrivateRegistry[] = [
-      { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
-    ];
-    const files = buildRegistryFiles(regs, 'my-pat', '/workspace/NuGet.Config');
-    expect(files).toHaveLength(1);
-    expect(files[0].path).toBe('/workspace/NuGet.Config');
   });
 
   it('generates both files when both types present', () => {
@@ -57,7 +49,7 @@ describe('buildRegistryFiles', () => {
     ];
     const files = buildRegistryFiles(regs, 'my-pat');
     expect(files).toHaveLength(2);
-    expect(files.map((f) => f.path)).toEqual(['/workspace/.npmrc', '/workspace/nuget.config']);
+    expect(files.map((f) => f.path)).toEqual([NPM_RC_PATH, NUGET_CONFIG_PATH]);
   });
 });
 
@@ -123,7 +115,7 @@ describe('generateNpmrc', () => {
 });
 
 describe('generateNuGetConfig', () => {
-  it('generates valid NuGet.config XML', () => {
+  it('generates valid NuGet.config XML without <clear />', () => {
     const regs: PrivateRegistry[] = [
       {
         type: 'nuget',
@@ -134,8 +126,10 @@ describe('generateNuGetConfig', () => {
     expect(content).toContain('<?xml version="1.0"');
     expect(content).toContain('<configuration>');
     expect(content).toContain('<packageSources>');
-    expect(content).toContain('<clear />');
-    expect(content).toContain('nuget.org');
+    // No <clear /> — user-level config must not wipe existing sources
+    expect(content).not.toContain('<clear />');
+    // No hardcoded nuget.org — workspace config handles public sources
+    expect(content).not.toContain('nuget.org');
     expect(content).toContain('myorg-shared');
     expect(content).toContain('<packageSourceCredentials>');
     expect(content).toContain('ClearTextPassword');
@@ -212,8 +206,6 @@ describe('generateNuGetConfig', () => {
 
   it('sanitizes feed name with special chars instead of XML-escaping element tags', () => {
     // Feed names derived from URLs should never produce XML entity escapes in tag names.
-    // The old code used escapeXml() on element names which would produce invalid XML
-    // like <org&amp;co-feed> — entity refs are illegal in tag names.
     const regs: PrivateRegistry[] = [
       {
         type: 'nuget',
@@ -222,7 +214,6 @@ describe('generateNuGetConfig', () => {
     ];
     const content = generateNuGetConfig(regs, 'pat');
     // Element tag names in packageSourceCredentials must be clean XML names
-    // (no entity references like &amp; — those are only valid in attribute values/text)
     const credSection = content.split('<packageSourceCredentials>')[1];
     const tagNames = credSection.match(/<\/?([^>\s/]+)/g) ?? [];
     for (const tag of tagNames) {
@@ -252,34 +243,6 @@ describe('generateNuGetConfig', () => {
   });
 });
 
-describe('detectNuGetConfigPath', () => {
-  function mockContainerManager(stdout: string, exitCode = 0): ContainerManager {
-    return {
-      execInContainer: vi.fn().mockResolvedValue({ stdout, stderr: '', exitCode }),
-    } as unknown as ContainerManager;
-  }
-
-  it('returns existing file path when found', async () => {
-    const cm = mockContainerManager('/workspace/NuGet.Config\n');
-    const path = await detectNuGetConfigPath(cm, 'ctr-1');
-    expect(path).toBe('/workspace/NuGet.Config');
-  });
-
-  it('returns default lowercase path when no existing file', async () => {
-    const cm = mockContainerManager('');
-    const path = await detectNuGetConfigPath(cm, 'ctr-1');
-    expect(path).toBe('/workspace/nuget.config');
-  });
-
-  it('returns default path when exec fails', async () => {
-    const cm = {
-      execInContainer: vi.fn().mockRejectedValue(new Error('container gone')),
-    } as unknown as ContainerManager;
-    const path = await detectNuGetConfigPath(cm, 'ctr-1');
-    expect(path).toBe('/workspace/nuget.config');
-  });
-});
-
 describe('validateRegistryFiles', () => {
   function mockCm(results: Record<string, { stdout: string; stderr: string; exitCode: number }>) {
     return {
@@ -297,7 +260,7 @@ describe('validateRegistryFiles', () => {
     const cm = mockCm({
       'dotnet nuget': { stdout: 'Registered Sources:\n  1. nuget.org', stderr: '', exitCode: 0 },
     });
-    const files = [{ path: '/workspace/nuget.config', content: '<valid/>' }];
+    const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.toBeUndefined();
   });
 
@@ -309,9 +272,9 @@ describe('validateRegistryFiles', () => {
         exitCode: 1,
       },
     });
-    const files = [{ path: '/workspace/nuget.config', content: 'garbage' }];
+    const files = [{ path: NUGET_CONFIG_PATH, content: 'garbage' }];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).rejects.toThrow(
-      /Registry check failed.*nuget\.config is invalid/,
+      /Registry check failed.*NuGet\.Config is invalid/,
     );
   });
 
@@ -319,7 +282,7 @@ describe('validateRegistryFiles', () => {
     const cm = mockCm({
       'npm config': { stdout: '', stderr: 'Invalid config', exitCode: 1 },
     });
-    const files = [{ path: '/workspace/.npmrc', content: 'garbage' }];
+    const files = [{ path: NPM_RC_PATH, content: 'garbage' }];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).rejects.toThrow(
       /Registry check failed.*\.npmrc is invalid/,
     );
@@ -331,8 +294,8 @@ describe('validateRegistryFiles', () => {
       'dotnet nuget': { stdout: 'Sources', stderr: '', exitCode: 0 },
     });
     const files = [
-      { path: '/workspace/.npmrc', content: 'ok' },
-      { path: '/workspace/nuget.config', content: 'ok' },
+      { path: NPM_RC_PATH, content: 'ok' },
+      { path: NUGET_CONFIG_PATH, content: 'ok' },
     ];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.toBeUndefined();
     expect(cm.execInContainer).toHaveBeenCalledTimes(2);

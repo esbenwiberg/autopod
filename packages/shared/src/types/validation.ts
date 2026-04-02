@@ -30,6 +30,8 @@ export interface HealthResult {
   url: string;
   responseCode: number | null;
   duration: number;
+  /** Stdout/stderr captured from the start command (only populated on failure for diagnostics) */
+  startOutput?: string;
 }
 
 export interface PageResult {
