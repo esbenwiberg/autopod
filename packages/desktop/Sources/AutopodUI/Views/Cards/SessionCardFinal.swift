@@ -63,10 +63,10 @@ public struct SessionCardFinal: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(
                     isHovered
-                        ? Color.accentColor.opacity(0.3)
+                        ? Color.accentColor.opacity(0.35)
                         : session.status.needsAttention
-                            ? session.status.color.opacity(0.2)
-                            : Color(nsColor: .separatorColor).opacity(0.3),
+                            ? session.status.color.opacity(0.3)
+                            : Color(nsColor: .separatorColor).opacity(0.6),
                     lineWidth: isHovered || session.status.needsAttention ? 1 : 0.5
                 )
         )
