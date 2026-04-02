@@ -63,6 +63,7 @@ public struct MainView: View {
     @State private var showCreateSheet = false
     @State private var showCommandPalette = false
     @State private var viewMode: ViewMode = .cards
+    @State private var cardDensity: CardDensity = .detailed
 
     private var selectedSession: Session? {
         sessions.first { $0.id == selectedSessionId }
@@ -165,6 +166,14 @@ public struct MainView: View {
                 .foregroundStyle(.blue)
                 .clipShape(Capsule())
             Spacer()
+            if viewMode == .cards {
+                Picker("", selection: $cardDensity) {
+                    Text("Compact").tag(CardDensity.compact)
+                    Text("Detailed").tag(CardDensity.detailed)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+            }
             Picker("", selection: $viewMode) {
                 Image(systemName: "rectangle.grid.2x2").tag(ViewMode.cards)
                 Image(systemName: "list.bullet").tag(ViewMode.list)
@@ -219,7 +228,7 @@ public struct MainView: View {
                 spacing: 10
             ) {
                 ForEach(filteredSessions) { session in
-                    SessionCardFinal(session: session, actions: actions)
+                    SessionCardFinal(session: session, actions: actions, density: cardDensity)
                         .onTapGesture { selectedSessionId = session.id }
                 }
             }

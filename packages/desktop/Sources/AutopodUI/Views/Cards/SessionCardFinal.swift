@@ -1,12 +1,34 @@
 import SwiftUI
 
-/// Two-state session card: compact for fleet scanning, expanded for taking action.
+/// Controls card information density in the fleet grid.
+public enum CardDensity: String, CaseIterable {
+    case compact
+    case detailed
+
+    public var label: String {
+        switch self {
+        case .compact: "Compact"
+        case .detailed: "Detailed"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .compact: "rectangle.grid.2x2"
+        case .detailed: "square.grid.2x2"
+        }
+    }
+}
+
+/// Two-state session card: compact for fleet scanning, detailed for at-a-glance actions.
 /// Mix of A (status dots, shadows) and B (accent stripe, density).
 public struct SessionCardFinal: View {
     public let session: Session
     public var actions: SessionActions
-    public init(session: Session, actions: SessionActions = .preview) {
-        self.session = session; self.actions = actions
+    public var density: CardDensity
+
+    public init(session: Session, actions: SessionActions = .preview, density: CardDensity = .detailed) {
+        self.session = session; self.actions = actions; self.density = density
     }
 
     @State private var isHovered = false
@@ -20,6 +42,12 @@ public struct SessionCardFinal: View {
 
             compactContent
                 .padding(12)
+
+            if density == .detailed {
+                expandedContent
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .top)
         .background(
@@ -493,43 +521,44 @@ public struct SessionCardFinal: View {
 
 // MARK: - Previews
 
-#Preview("Compact — fleet scan") {
+#Preview("Compact") {
     HStack(alignment: .top, spacing: 10) {
-        SessionCardFinal(session: MockData.running)
-        SessionCardFinal(session: MockData.runningEarly)
-        SessionCardFinal(session: MockData.queued)
-        SessionCardFinal(session: MockData.provisioning)
+        SessionCardFinal(session: MockData.running, density: .compact)
+        SessionCardFinal(session: MockData.awaitingInput, density: .compact)
+        SessionCardFinal(session: MockData.validated, density: .compact)
+        SessionCardFinal(session: MockData.failed, density: .compact)
     }
     .padding(24)
     .background(Color(nsColor: .windowBackgroundColor))
 }
 
-#Preview("Auto-expanded — needs attention") {
+#Preview("Detailed") {
     HStack(alignment: .top, spacing: 10) {
-        SessionCardFinal(session: MockData.awaitingInput)
-        SessionCardFinal(session: MockData.validated)
-        SessionCardFinal(session: MockData.failed)
+        SessionCardFinal(session: MockData.running, density: .detailed)
+        SessionCardFinal(session: MockData.awaitingInput, density: .detailed)
+        SessionCardFinal(session: MockData.validated, density: .detailed)
+        SessionCardFinal(session: MockData.failed, density: .detailed)
     }
     .padding(24)
     .background(Color(nsColor: .windowBackgroundColor))
 }
 
-#Preview("Workspace pods") {
+#Preview("Workspace pods — detailed") {
     HStack(alignment: .top, spacing: 10) {
-        SessionCardFinal(session: MockData.workspaceActive)
-        SessionCardFinal(session: MockData.workspaceComplete)
-        SessionCardFinal(session: MockData.workerFromWorkspace)
+        SessionCardFinal(session: MockData.workspaceActive, density: .detailed)
+        SessionCardFinal(session: MockData.workspaceComplete, density: .detailed)
+        SessionCardFinal(session: MockData.workerFromWorkspace, density: .detailed)
     }
     .padding(24)
     .background(Color(nsColor: .windowBackgroundColor))
 }
 
-#Preview("Mixed fleet") {
+#Preview("Mixed fleet — detailed") {
     let sessions: [Session] = MockData.all
     ScrollView {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 10)], alignment: .leading, spacing: 10) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], alignment: .leading, spacing: 10) {
             ForEach(sessions) { session in
-                SessionCardFinal(session: session)
+                SessionCardFinal(session: session, density: .detailed)
             }
         }
         .padding(24)
