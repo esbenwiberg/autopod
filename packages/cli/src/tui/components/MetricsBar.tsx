@@ -10,6 +10,8 @@ interface MetricsBarProps {
   linesAdded: number;
   linesRemoved: number;
   costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export function MetricsBar({
@@ -19,6 +21,8 @@ export function MetricsBar({
   linesAdded,
   linesRemoved,
   costUsd,
+  inputTokens = 0,
+  outputTokens = 0,
 }: MetricsBarProps): React.ReactElement {
   const toolCount = events.filter((e) => e.type === 'tool_use').length;
   const fileEvents = events.filter((e) => e.type === 'file_change').length;
@@ -66,12 +70,17 @@ export function MetricsBar({
         <Text dimColor>Time: </Text>
         <Text>{duration}</Text>
       </Box>
-      {costUsd != null && costUsd > 0 && (
-        <Box>
-          <Text dimColor>Cost: </Text>
-          <Text>${costUsd.toFixed(2)}</Text>
-        </Box>
-      )}
+      <Box>
+        <Text dimColor>Tok: </Text>
+        <Text dimColor={inputTokens === 0}>{formatTokens(inputTokens)}</Text>
+        <Text dimColor>&#8593;</Text>
+        <Text dimColor={outputTokens === 0}>{formatTokens(outputTokens)}</Text>
+        <Text dimColor>&#8595;</Text>
+      </Box>
+      <Box>
+        <Text dimColor>Cost: </Text>
+        <Text dimColor={costUsd == null || costUsd === 0}>${(costUsd ?? 0).toFixed(3)}</Text>
+      </Box>
     </Box>
   );
 }

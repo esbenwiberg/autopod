@@ -127,33 +127,79 @@ export function DetailPanel({
             {displayLines}
           </Text>
         </Box>
-        {session.status === 'running' && (
+        {session.commitCount > 0 || session.status === 'running' ? (
+          <Box flexDirection="column">
+            <Box>
+              <Text dimColor>{'Commits:  '}</Text>
+              {(() => {
+                const runningMins = session.startedAt
+                  ? Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60_000)
+                  : 0;
+                const stale = runningMins >= 30 && session.commitCount === 0;
+                const lastAgo = session.lastCommitAt
+                  ? formatElapsed(Date.now() - new Date(session.lastCommitAt).getTime())
+                  : null;
+                const pace =
+                  runningMins > 0 && session.commitCount > 0
+                    ? ((session.commitCount / runningMins) * 60).toFixed(1)
+                    : null;
+                // Visual dot timeline: up to 10 dots, filled per commit
+                const maxDots = 10;
+                const filled = Math.min(session.commitCount, maxDots);
+                const empty = maxDots - filled;
+                const dots = '\u25CF'.repeat(filled) + '\u25CB'.repeat(empty);
+                const color = stale ? 'yellow' : session.commitCount > 0 ? 'green' : undefined;
+                return (
+                  <Box flexDirection="column">
+                    <Box gap={1}>
+                      <Text color={color}>{dots}</Text>
+                      <Text color={color}>
+                        {session.commitCount}
+                        {pace ? ` (~${pace}/hr)` : ''}
+                      </Text>
+                    </Box>
+                    {lastAgo && (
+                      <Text dimColor>
+                        {'          '}last {lastAgo} ago
+                      </Text>
+                    )}
+                    {stale && (
+                      <Text color="yellow">{'          '}no commits yet — agent may be stuck</Text>
+                    )}
+                  </Box>
+                );
+              })()}
+            </Box>
+          </Box>
+        ) : null}
+        {(session.status === 'running' ||
+          session.status === 'paused' ||
+          session.costUsd > 0 ||
+          session.inputTokens > 0) && (
           <Box>
-            <Text dimColor>{'Commits:  '}</Text>
-            {(() => {
-              const runningMins = session.startedAt
-                ? Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60_000)
-                : 0;
-              const stale = runningMins >= 30 && session.commitCount === 0;
-              const lastAgo = session.lastCommitAt
-                ? formatElapsed(Date.now() - new Date(session.lastCommitAt).getTime())
-                : null;
-              return (
-                <Text color={stale ? 'yellow' : undefined}>
-                  {session.commitCount}
-                  {lastAgo ? ` (last: ${lastAgo} ago)` : ''}
-                </Text>
-              );
-            })()}
+            <Text dimColor>{'Tokens:   '}</Text>
+            <Text dimColor={session.inputTokens === 0}>
+              {formatTokens(session.inputTokens)}
+              <Text dimColor>\u2191 </Text>
+              {formatTokens(session.outputTokens)}
+              <Text dimColor>\u2193</Text>
+            </Text>
+            {session.costUsd > 0 || session.status === 'running' || session.status === 'paused' ? (
+              <Text dimColor={session.costUsd === 0}>
+                {' '}
+                <Text dimColor>— $</Text>
+                {session.costUsd.toFixed(3)}
+              </Text>
+            ) : null}
           </Box>
         )}
-        {(session.costUsd > 0 || session.inputTokens > 0) && (
+        {session.linkedSessionId && (
           <Box>
-            <Text dimColor>{'Cost:     '}</Text>
-            <Text>
-              ${session.costUsd.toFixed(2)} ({formatTokens(session.inputTokens)} in /{' '}
-              {formatTokens(session.outputTokens)} out)
+            <Text dimColor>{'Linked:   '}</Text>
+            <Text color="cyan">
+              {'\u21C6'} {session.linkedSessionId}
             </Text>
+            <Text dimColor> (press [g] to jump)</Text>
           </Box>
         )}
         {session.previewUrl ? (
@@ -207,6 +253,8 @@ export function DetailPanel({
             linesAdded={session.linesAdded}
             linesRemoved={session.linesRemoved}
             costUsd={session.costUsd}
+            inputTokens={session.inputTokens}
+            outputTokens={session.outputTokens}
           />
         </Box>
       )}
