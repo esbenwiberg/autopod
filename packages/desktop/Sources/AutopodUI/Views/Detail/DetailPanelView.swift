@@ -169,33 +169,32 @@ public struct DetailPanelView: View {
     // MARK: - Tab bar
 
     private var tabBar: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             ForEach(DetailTab.allCases, id: \.self) { tab in
+                let isSelected = selectedTab == tab
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selectedTab = tab }
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
                 } label: {
-                    VStack(spacing: 4) {
-                        HStack(spacing: 4) {
-                            Image(systemName: tab.icon)
-                                .font(.system(size: 10))
-                            Text(tab.label)
-                                .font(.system(.caption).weight(selectedTab == tab ? .semibold : .regular))
-                        }
-                        .foregroundStyle(selectedTab == tab ? .primary : .secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.top, 6)
-
-                        Rectangle()
-                            .fill(selectedTab == tab ? Color.accentColor : .clear)
-                            .frame(height: 2)
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 11))
+                        Text(tab.label)
+                            .font(.system(.subheadline).weight(isSelected ? .semibold : .regular))
                     }
-                    .fixedSize()
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isSelected ? Color.white.opacity(0.08) : .clear)
+                    )
                 }
                 .buttonStyle(.plain)
             }
             Spacer()
         }
         .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Placeholder tabs
