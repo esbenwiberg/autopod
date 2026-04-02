@@ -38,11 +38,7 @@ import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask } from './recovery-context.js';
-import {
-  buildRegistryFiles,
-  detectNuGetConfigPath,
-  validateRegistryFiles,
-} from './registry-injector.js';
+import { buildRegistryFiles, validateRegistryFiles } from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
 import { resolveSkills } from './skill-resolver.js';
@@ -629,15 +625,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           );
         }
 
-        // Write private registry config files (.npmrc / NuGet.config)
-        const hasNuget = profile.privateRegistries.some((r) => r.type === 'nuget');
-        const nugetConfigPath = hasNuget
-          ? await detectNuGetConfigPath(containerManager, containerId)
-          : undefined;
+        // Write private registry config files (.npmrc / NuGet.config) to user-level
+        // paths inside the container so the workspace's own config is never overwritten.
         const registryFiles = buildRegistryFiles(
           profile.privateRegistries,
           profile.registryPat,
-          nugetConfigPath,
         );
         for (const file of registryFiles) {
           await containerManager.writeFile(containerId, file.path, file.content);

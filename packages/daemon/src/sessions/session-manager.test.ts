@@ -785,7 +785,7 @@ describe('SessionManager', () => {
       await manager.processSession(session.id);
 
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
-      const npmrcCall = writeCalls.find(([, path]) => path === '/workspace/.npmrc');
+      const npmrcCall = writeCalls.find(([, path]) => path.endsWith('.npmrc'));
       expect(npmrcCall).toBeDefined();
       const content = npmrcCall![2] as string;
       expect(content).toContain(
@@ -816,8 +816,8 @@ describe('SessionManager', () => {
       await manager.processSession(session.id);
 
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
-      const nugetCall = writeCalls.find(
-        ([, path]) => path.toLowerCase() === '/workspace/nuget.config',
+      const nugetCall = writeCalls.find(([, path]) =>
+        path.toLowerCase().endsWith('nuget.config'),
       );
       expect(nugetCall).toBeDefined();
       const content = nugetCall![2] as string;
@@ -854,8 +854,8 @@ describe('SessionManager', () => {
 
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
       const writtenPaths = writeCalls.map(([, path]) => path);
-      expect(writtenPaths).toContain('/workspace/.npmrc');
-      expect(writtenPaths.some((p) => p.toLowerCase() === '/workspace/nuget.config')).toBe(true);
+      expect(writtenPaths.some((p) => p.endsWith('.npmrc'))).toBe(true);
+      expect(writtenPaths.some((p) => p.toLowerCase().endsWith('nuget.config'))).toBe(true);
     });
 
     it('does not write registry files when profile has no registries', async () => {

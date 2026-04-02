@@ -10,15 +10,31 @@ export interface RegistryFile {
 }
 
 /**
+ * Paths for user-level registry config files inside the container.
+ * Writing to user-level (~/) is non-destructive: the workspace's own
+ * .npmrc / NuGet.config is left untouched.
+ *
+ * - npm: ~/.npmrc  — project .npmrc takes precedence, but user-level adds
+ *   scoped registry mappings + auth tokens without conflict.
+ * - NuGet: ~/.nuget/NuGet/NuGet.Config — dotnet merges user-level config
+ *   with solution-level config; no <clear /> so existing sources are kept.
+ */
+const CONTAINER_HOME = '/home/autopod';
+export const NPM_RC_PATH = `${CONTAINER_HOME}/.npmrc`;
+export const NUGET_CONFIG_PATH = `${CONTAINER_HOME}/.nuget/NuGet/NuGet.Config`;
+
+/**
  * Generate container files (.npmrc and/or NuGet.config) for authenticating
  * against private Azure DevOps package feeds.
+ *
+ * Both files are written to user-level locations inside the container so the
+ * workspace's own config files are never overwritten.
  *
  * Returns an empty array if there are no registries or no PAT.
  */
 export function buildRegistryFiles(
   registries: PrivateRegistry[],
   pat: string | null,
-  nugetConfigPath = '/workspace/nuget.config',
 ): RegistryFile[] {
   if (registries.length === 0 || !pat) return [];
 
@@ -29,47 +45,19 @@ export function buildRegistryFiles(
 
   if (npmRegistries.length > 0) {
     files.push({
-      path: '/workspace/.npmrc',
+      path: NPM_RC_PATH,
       content: generateNpmrc(npmRegistries, pat),
     });
   }
 
   if (nugetRegistries.length > 0) {
     files.push({
-      path: nugetConfigPath,
+      path: NUGET_CONFIG_PATH,
       content: generateNuGetConfig(nugetRegistries, pat),
     });
   }
 
   return files;
-}
-
-/**
- * Detect the existing NuGet config file path in the container workspace.
- * .NET SDK searches case-insensitively, so we must match the repo's casing
- * to avoid creating a second file that causes confusion.
- *
- * Returns the detected path or the default lowercase path.
- */
-export async function detectNuGetConfigPath(
-  containerManager: ContainerManager,
-  containerId: string,
-): Promise<string> {
-  try {
-    // List files matching any NuGet.Config casing in the workspace root
-    const result = await containerManager.execInContainer(
-      containerId,
-      ['sh', '-c', 'ls /workspace/[Nn][Uu][Gg][Ee][Tt].[Cc][Oo][Nn][Ff][Ii][Gg] 2>/dev/null'],
-      { timeout: 5_000 },
-    );
-    const existing = result.stdout.trim().split('\n').filter(Boolean);
-    if (existing.length > 0) {
-      return existing[0]; // Match the existing casing
-    }
-  } catch {
-    // Container probe failed — fall through to default
-  }
-  return '/workspace/nuget.config';
 }
 
 /**
@@ -107,7 +95,11 @@ export function generateNpmrc(registries: PrivateRegistry[], pat: string): strin
 }
 
 /**
- * Generate NuGet.config for Azure DevOps NuGet feeds.
+ * Generate a user-level NuGet.config for Azure DevOps NuGet feeds.
+ *
+ * Written to ~/.nuget/NuGet/NuGet.Config (user-level), which dotnet merges
+ * with any solution-level NuGet.config. No <clear /> is used — existing
+ * package sources in the workspace config are preserved.
  *
  * Uses ClearTextPassword with PAT (standard for CI/container use).
  * The `packageSourceCredentials` section key must match the source name
@@ -118,8 +110,6 @@ export function generateNuGetConfig(registries: PrivateRegistry[], pat: string):
     '<?xml version="1.0" encoding="utf-8"?>',
     '<configuration>',
     '  <packageSources>',
-    '    <clear />',
-    '    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />',
   ];
 
   for (const reg of registries) {

@@ -135,7 +135,7 @@ async function runBuild(
     log?.warn({ duration }, `build timed out: ${message}`);
     return {
       status: 'fail' as const,
-      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 10_000),
+      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
       duration,
     };
   }
@@ -152,7 +152,7 @@ async function runBuild(
 
   return {
     status,
-    output: output.slice(0, 10_000), // Cap output size
+    output: output.slice(0, 50_000), // Cap output size
     duration,
   };
 }
@@ -187,7 +187,7 @@ async function runTests(
     return {
       status: 'fail' as const,
       duration,
-      stdout: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 10_000),
+      stdout: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
       stderr: '',
     };
   }
@@ -204,8 +204,8 @@ async function runTests(
   return {
     status,
     duration,
-    stdout: result.stdout.slice(0, 10_000),
-    stderr: result.stderr.slice(0, 10_000),
+    stdout: result.stdout.slice(0, 50_000),
+    stderr: result.stderr.slice(0, 50_000),
   };
 }
 
@@ -232,12 +232,15 @@ async function runHealthCheck(
 
   log?.info({ startCommand: config.startCommand, url, timeoutMs }, 'starting app for health check');
 
-  // Start the app in the background so it doesn't block
-  // Fire-and-forget: we don't await the long-running server process
+  // Start the app in the background, redirecting output to a log file so we can
+  // retrieve it for diagnostics if the health check fails.
+  const startLogPath = '/tmp/autopod-start.log';
   containerManager
-    .execInContainer(config.containerId, ['sh', '-c', `${config.startCommand} &`], {
-      cwd: '/workspace',
-    })
+    .execInContainer(
+      config.containerId,
+      ['sh', '-c', `${config.startCommand} > ${startLogPath} 2>&1 &`],
+      { cwd: '/workspace' },
+    )
     .catch((err) => {
       log?.warn(
         { err },
@@ -245,7 +248,7 @@ async function runHealthCheck(
       );
     });
 
-  // Poll for health
+  // Poll for health — accept any 2xx response (200, 201, 204, etc.)
   const pollIntervalMs = 2_000;
   let lastResponseCode: number | null = null;
 
@@ -256,13 +259,13 @@ async function runHealthCheck(
       });
       lastResponseCode = response.status;
 
-      if (response.status === 200) {
+      if (response.status >= 200 && response.status < 300) {
         const duration = Date.now() - healthStart;
-        log?.info({ url, duration }, 'health check passed');
-        return { status: 'pass' as const, url, responseCode: 200, duration };
+        log?.info({ url, status: response.status, duration }, 'health check passed');
+        return { status: 'pass' as const, url, responseCode: response.status, duration };
       }
 
-      log?.debug({ url, status: response.status }, 'health check got non-200, retrying');
+      log?.debug({ url, status: response.status }, 'health check got non-2xx, retrying');
     } catch {
       log?.debug({ url }, 'health check fetch failed, retrying');
     }
@@ -277,7 +280,22 @@ async function runHealthCheck(
   const duration = Date.now() - healthStart;
   log?.warn({ url, lastResponseCode, duration }, 'health check timed out');
 
-  return { status: 'fail' as const, url, responseCode: lastResponseCode, duration };
+  // Collect startup output to help diagnose why the server didn't come up
+  const startOutput = await containerManager
+    .readFile(config.containerId, startLogPath)
+    .catch(() => '');
+
+  if (startOutput) {
+    log?.warn({ startOutput: startOutput.slice(0, 500) }, 'start command output on health check failure');
+  }
+
+  return {
+    status: 'fail' as const,
+    url,
+    responseCode: lastResponseCode,
+    duration,
+    startOutput: startOutput.slice(0, 5_000) || undefined,
+  };
 }
 
 // ── Page validation phase ───────────────────────────────────────────────────
