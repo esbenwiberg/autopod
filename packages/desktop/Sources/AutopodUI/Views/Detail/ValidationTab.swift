@@ -74,26 +74,78 @@ public struct ValidationTab: View {
             }
           }
 
-          // Placeholder for detailed results (requires validation history from REST)
-          detailSection("Smoke Tests", icon: "flame") {
+          // Build / Smoke
+          detailSection("Build & Smoke Tests", icon: "flame", expanded: !checks.smoke) {
             Text(checks.smoke ? "All smoke checks passed" : "Smoke checks failed")
               .font(.callout)
               .foregroundStyle(checks.smoke ? .green : .red)
-            Text("Detailed results available in validation report")
-              .font(.caption)
-              .foregroundStyle(.tertiary)
+            if let output = checks.buildOutput {
+              Text("Build Output")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+              ScrollView(.horizontal, showsIndicators: true) {
+                Text(output)
+                  .font(.system(.caption2, design: .monospaced))
+                  .foregroundStyle(.red.opacity(0.9))
+                  .textSelection(.enabled)
+              }
+              .frame(maxHeight: 200)
+              .padding(8)
+              .background(Color.black.opacity(0.3))
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
           }
 
-          detailSection("Test Suite", icon: "testtube.2") {
+          // Test Suite
+          detailSection("Test Suite", icon: "testtube.2", expanded: checks.testOutput != nil) {
             Text(checks.tests ? "All tests passed" : "Tests failed or skipped")
               .font(.callout)
               .foregroundStyle(checks.tests ? .green : .secondary)
+            if let output = checks.testOutput {
+              Text("Test Output")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+              ScrollView(.horizontal, showsIndicators: true) {
+                Text(output)
+                  .font(.system(.caption2, design: .monospaced))
+                  .foregroundStyle(.red.opacity(0.9))
+                  .textSelection(.enabled)
+              }
+              .frame(maxHeight: 200)
+              .padding(8)
+              .background(Color.black.opacity(0.3))
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
           }
 
-          detailSection("Code Review", icon: "eye") {
+          // Code Review
+          detailSection("Code Review", icon: "eye", expanded: !checks.review) {
             Text(checks.review ? "AI review passed" : "Review flagged issues")
               .font(.callout)
               .foregroundStyle(checks.review ? .green : .red)
+            if let reasoning = checks.reviewReasoning {
+              Text(reasoning)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            }
+            if let issues = checks.reviewIssues, !issues.isEmpty {
+              VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
+                  HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                      .font(.system(size: 9))
+                      .foregroundStyle(.red)
+                      .padding(.top, 2)
+                    Text(issue)
+                      .font(.caption)
+                  }
+                }
+              }
+              .padding(.top, 4)
+            }
           }
 
         } else {
@@ -135,10 +187,10 @@ public struct ValidationTab: View {
   }
 
   private func detailSection<Content: View>(
-    _ title: String, icon: String,
+    _ title: String, icon: String, expanded: Bool = false,
     @ViewBuilder content: @escaping () -> Content
   ) -> some View {
-    CollapsibleSection(title: title, icon: icon, content: content)
+    CollapsibleSection(title: title, icon: icon, content: content, initiallyExpanded: expanded)
   }
 }
 
@@ -147,15 +199,18 @@ private struct CollapsibleSection<Content: View>: View {
   let title: String
   let icon: String
   @ViewBuilder let content: () -> Content
-  @State private var isExpanded = false
+  var initiallyExpanded: Bool = false
+  @State private var isExpanded: Bool?
+
+  private var expanded: Bool { isExpanded ?? initiallyExpanded }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       Button {
-        withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+        withAnimation(.easeOut(duration: 0.15)) { isExpanded = !expanded }
       } label: {
         HStack(spacing: 6) {
-          Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+          Image(systemName: expanded ? "chevron.down" : "chevron.right")
             .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(.tertiary)
             .frame(width: 12)
@@ -171,7 +226,7 @@ private struct CollapsibleSection<Content: View>: View {
       .buttonStyle(.plain)
       .padding(12)
 
-      if isExpanded {
+      if expanded {
         Divider().padding(.horizontal, 12)
         VStack(alignment: .leading, spacing: 8) {
           content()

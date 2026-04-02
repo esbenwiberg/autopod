@@ -73,8 +73,18 @@ public struct ValidationChecks: Sendable {
     public let smoke: Bool
     public let tests: Bool
     public let review: Bool
-    public init(smoke: Bool, tests: Bool, review: Bool) {
+    public let buildOutput: String?
+    public let testOutput: String?
+    public let reviewIssues: [String]?
+    public let reviewReasoning: String?
+    public init(
+        smoke: Bool, tests: Bool, review: Bool,
+        buildOutput: String? = nil, testOutput: String? = nil,
+        reviewIssues: [String]? = nil, reviewReasoning: String? = nil
+    ) {
         self.smoke = smoke; self.tests = tests; self.review = review
+        self.buildOutput = buildOutput; self.testOutput = testOutput
+        self.reviewIssues = reviewIssues; self.reviewReasoning = reviewReasoning
     }
 }
 

@@ -39,10 +39,21 @@ public enum SessionMapper {
     // Map validation checks from last validation result
     let validationChecks: ValidationChecks? = {
       guard let v = response.lastValidationResult else { return nil }
+      let buildOutput = v.smoke.build.status == "fail" && !v.smoke.build.output.isEmpty
+        ? v.smoke.build.output : nil
+      let testOutput: String? = {
+        guard let t = v.test, t.status == "fail" else { return nil }
+        let combined = [t.stdout, t.stderr].compactMap { $0 }.joined(separator: "\n")
+        return combined.isEmpty ? nil : combined
+      }()
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
         tests: v.test?.status == "pass",
-        review: v.taskReview?.status == "pass"
+        review: v.taskReview?.status == "pass",
+        buildOutput: buildOutput,
+        testOutput: testOutput,
+        reviewIssues: v.taskReview?.issues,
+        reviewReasoning: v.taskReview?.reasoning
       )
     }()
 
