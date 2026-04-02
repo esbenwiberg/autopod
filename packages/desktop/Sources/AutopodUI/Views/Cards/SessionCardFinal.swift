@@ -85,9 +85,7 @@ public struct SessionCardFinal: View {
                     .font(.system(.callout, design: .monospaced).weight(.medium))
                     .lineLimit(1)
                 Spacer()
-                if session.isWorkspace {
-                    modeBadge
-                }
+                modeBadge
                 statusBadge
             }
 
@@ -103,12 +101,17 @@ public struct SessionCardFinal: View {
     }
 
     private var modeBadge: some View {
-        Text("workspace")
+        let (label, color): (String, Color) = switch session.outputMode {
+        case .pr:        ("PR",  .blue)
+        case .artifact:  ("ART", .purple)
+        case .workspace: ("WS",  .teal)
+        }
+        return Text(label)
             .font(.system(.caption2).weight(.medium))
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(.teal.opacity(0.1))
-            .foregroundStyle(.teal)
+            .background(color.opacity(0.1))
+            .foregroundStyle(color)
             .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 

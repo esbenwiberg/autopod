@@ -29,6 +29,11 @@ struct OverviewTab: View {
                 // Metrics row
                 metricsRow
 
+                // Commit activity (running/paused or any session with commits)
+                if session.commitCount > 0 || session.status == .running || session.status == .paused {
+                    commitSection
+                }
+
                 // Validation summary (if available)
                 if let checks = session.validationChecks {
                     validationSummary(checks)
@@ -160,44 +165,78 @@ struct OverviewTab: View {
     // MARK: - Metrics
 
     private var metricsRow: some View {
-        HStack(spacing: 0) {
-            metricItem(
-                icon: "clock",
-                value: session.duration,
-                label: "Duration"
-            )
-            Divider().frame(height: 30)
-            if let diff = session.diffStats {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
                 metricItem(
-                    icon: "doc.text",
-                    value: "\(diff.files)",
-                    label: "Files"
+                    icon: "clock",
+                    value: session.duration,
+                    label: "Duration"
                 )
                 Divider().frame(height: 30)
+                if let diff = session.diffStats {
+                    metricItem(
+                        icon: "doc.text",
+                        value: "\(diff.files)",
+                        label: "Files"
+                    )
+                    Divider().frame(height: 30)
+                    metricItem(
+                        icon: "plus",
+                        value: "\(diff.added)",
+                        label: "Added",
+                        color: .green
+                    )
+                    Divider().frame(height: 30)
+                    metricItem(
+                        icon: "minus",
+                        value: "\(diff.removed)",
+                        label: "Removed",
+                        color: .red
+                    )
+                    Divider().frame(height: 30)
+                }
                 metricItem(
-                    icon: "plus",
-                    value: "\(diff.added)",
-                    label: "Added",
-                    color: .green
-                )
-                Divider().frame(height: 30)
-                metricItem(
-                    icon: "minus",
-                    value: "\(diff.removed)",
-                    label: "Removed",
-                    color: .red
+                    icon: "wrench",
+                    value: "\(events.filter { $0.type == .toolUse }.count)",
+                    label: "Tool calls"
                 )
             }
-            Divider().frame(height: 30)
-            metricItem(
-                icon: "wrench",
-                value: "\(events.filter { $0.type == .toolUse }.count)",
-                label: "Tool calls"
-            )
+
+            if session.inputTokens > 0 || session.costUsd > 0 || session.status == .running || session.status == .paused {
+                Divider()
+                HStack(spacing: 0) {
+                    metricItem(
+                        icon: "arrow.up.circle",
+                        value: formatTokens(session.inputTokens),
+                        label: "In tokens",
+                        color: session.inputTokens > 0 ? .primary : .secondary
+                    )
+                    Divider().frame(height: 30)
+                    metricItem(
+                        icon: "arrow.down.circle",
+                        value: formatTokens(session.outputTokens),
+                        label: "Out tokens",
+                        color: session.outputTokens > 0 ? .primary : .secondary
+                    )
+                    Divider().frame(height: 30)
+                    metricItem(
+                        icon: "dollarsign.circle",
+                        value: String(format: "$%.3f", session.costUsd),
+                        label: "Cost",
+                        color: session.costUsd > 0 ? .primary : .secondary
+                    )
+                }
+            }
         }
         .padding(.vertical, 10)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+        if count >= 1_000 { return "\(count / 1_000)K" }
+        return "\(count)"
     }
 
     private func metricItem(icon: String, value: String, label: String, color: Color = .primary) -> some View {
@@ -215,6 +254,66 @@ struct OverviewTab: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Commits
+
+    private var commitSection: some View {
+        let elapsed = Date().timeIntervalSince(session.startedAt)
+        let elapsedMins = elapsed / 60
+        let pace: String? = elapsedMins > 0 && session.commitCount > 0
+            ? String(format: "%.1f/hr", Double(session.commitCount) / elapsedMins * 60)
+            : nil
+        let isStale = elapsedMins >= 30 && session.commitCount == 0
+            && (session.status == .running || session.status == .paused)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(isStale ? .yellow : .secondary)
+                Text("Commits")
+                    .font(.system(.subheadline).weight(.semibold))
+                Spacer()
+                if let pace {
+                    Text(pace)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Dot timeline — up to 12 dots
+            let maxDots = 12
+            let filled = min(session.commitCount, maxDots)
+            HStack(spacing: 3) {
+                ForEach(0..<maxDots, id: \.self) { i in
+                    Circle()
+                        .fill(i < filled ? Color.green : Color(nsColor: .separatorColor))
+                        .frame(width: 8, height: 8)
+                }
+                if session.commitCount > maxDots {
+                    Text("+\(session.commitCount - maxDots)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(session.commitCount) commit\(session.commitCount == 1 ? "" : "s")")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(session.commitCount > 0 ? .primary : .secondary)
+            }
+
+            if isStale {
+                Label("No commits yet — agent may be stuck", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.yellow)
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isStale ? Color.yellow.opacity(0.3) : Color.clear, lineWidth: 1)
+        )
     }
 
     // MARK: - Validation summary
