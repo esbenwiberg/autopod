@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "AutopodDesktop",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v26)],
     products: [
         .library(name: "AutopodUI", targets: ["AutopodUI"]),
         .library(name: "AutopodClient", targets: ["AutopodClient"]),

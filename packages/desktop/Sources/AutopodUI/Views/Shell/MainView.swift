@@ -76,6 +76,7 @@ public struct MainView: View {
         case .workspaces:     sessions.filter { $0.isWorkspace }
         case .completed:      sessions.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:            sessions
+        case .analytics:      []
         case .profile(let p): sessions.filter { $0.profileName == p }
         }
     }
@@ -90,12 +91,17 @@ public struct MainView: View {
                 connectionLabel: connectionLabel
             )
         } content: {
-            VStack(spacing: 0) {
-                contentToolbar
-                Divider()
-                contentArea
+            if sidebarSelection == .analytics {
+                AnalyticsView(sessions: sessions)
+                    .frame(minWidth: 600)
+            } else {
+                VStack(spacing: 0) {
+                    contentToolbar
+                    Divider()
+                    contentArea
+                }
+                .frame(minWidth: 500)
             }
-            .frame(minWidth: 500)
         } detail: {
             if let session = selectedSession {
                 DetailPanelView(
