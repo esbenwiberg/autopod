@@ -8,15 +8,15 @@ describe('calculateColumns', () => {
     expect(cols.profile).toBe(12);
     expect(cols.model).toBe(7);
     expect(cols.status).toBe(14);
-    // Fixed total: 5+12+7+14 + 2(prefix) + 4*2(gaps) = 48
-    // Task = min(60, 120 - 48) = 60
+    // Fixed total: 5+12+7+3+14 + 2(prefix) + 5*2(gaps) = 53
+    // Task = min(60, 120 - 53) = 60
     expect(cols.task).toBe(60);
   });
 
   it('calculates columns for a standard 80-wide terminal', () => {
     const cols = calculateColumns(80);
-    // Task = 80 - 48 = 32
-    expect(cols.task).toBe(32);
+    // Task = 80 - 53 = 27
+    expect(cols.task).toBe(27);
   });
 
   it('enforces minimum task width of 15', () => {
