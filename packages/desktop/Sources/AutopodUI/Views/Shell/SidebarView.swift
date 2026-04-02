@@ -55,6 +55,7 @@ public struct SidebarView: View {
                     sidebarRow(.workspaces, icon: "terminal.fill", color: .teal, badge: workspaceCount)
                     sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
                     sidebarRow(.all, icon: "square.grid.2x2", color: .blue, badge: sessions.count)
+                    sidebarRow(.analytics, icon: "chart.bar.fill", color: .purple, badge: 0)
                 }
 
                 Section("Profiles") {
@@ -132,6 +133,7 @@ public enum SidebarItem: Hashable {
     case workspaces
     case completed
     case all
+    case analytics
     case profile(String)
 
     public var label: String {
@@ -141,6 +143,7 @@ public enum SidebarItem: Hashable {
         case .workspaces: "Workspaces"
         case .completed: "Completed"
         case .all: "All Sessions"
+        case .analytics: "Analytics"
         case .profile(let name): name
         }
     }
