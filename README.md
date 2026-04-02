@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/Node-22-green?logo=node.js&logoColor=white" alt="Node 22">
   <img src="https://img.shields.io/badge/Fastify-5-black?logo=fastify&logoColor=white" alt="Fastify">
   <img src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white" alt="SQLite">
@@ -146,6 +146,9 @@ After validation, the container is **stopped** (not removed). Launch an on-deman
 <tr><td>🧪</td><td><b>Workspace pods</b></td><td>Interactive containers for manual prep, then hand off to automated agents</td></tr>
 <tr><td>🔐</td><td><b>Private registries</b></td><td>npm and NuGet feeds from Azure DevOps — credentials injected automatically</td></tr>
 <tr><td>⚡</td><td><b>Skills injection</b></td><td>Custom slash commands from local files or GitHub repos, injected into agent containers</td></tr>
+<tr><td>🖥️</td><td><b>macOS desktop app</b></td><td>Native SwiftUI app for session monitoring — three-column layout, live terminal, diff viewer</td></tr>
+<tr><td>♻️</td><td><b>Session recovery</b></td><td>Daemon auto-recovers in-flight sessions on restart — no lost work on redeploy</td></tr>
+<tr><td>💡</td><td><b>Liveness heartbeat</b></td><td>Green/yellow/red dot per session — spot stalled agents at a glance in TUI and desktop</td></tr>
 </table>
 
 ---
@@ -371,7 +374,7 @@ ap attach <id>                              # Shell into a workspace pod (auto-p
 ap watch                     # Launch TUI dashboard
 ```
 
-Real-time session overview via WebSocket. Progress bars with phase-aware coloring, plan panel showing the agent's declared implementation steps, and a metrics bar tracking tool calls, file edits, lines changed, and elapsed time.
+Real-time session overview via WebSocket. Progress bars with phase-aware coloring, plan panel showing the agent's declared implementation steps, a metrics bar tracking tool calls, file edits, lines changed, and elapsed time, and a per-session liveness dot (green = active, yellow = slow, red = stalled).
 
 | Key | Action |
 |-----|--------|
@@ -416,6 +419,11 @@ ap profile create my-app \
   --max-validation-attempts 3 \
   --instructions "Use TypeScript. Prefer Tailwind CSS. Keep it accessible." \
   --extends frontend-base
+
+# Additional options (set in profile YAML)
+# containerMemoryGb: 4        # Container memory limit (default: no limit)
+# buildTimeout: 300           # Build phase timeout in seconds (default: 300)
+# testTimeout: 600            # Test phase timeout in seconds (default: 600)
 ```
 
 ### PR providers
@@ -819,10 +827,11 @@ autopod/
     cli/               # Commander CLI + Ink TUI dashboard
     escalation-mcp/    # MCP server injected into agent containers (escalation, actions, browser validation)
     validator/         # Playwright smoke tests + AI task review
+    desktop/           # macOS native app (SwiftUI + AppKit)
   e2e/                 # End-to-end tests
   infra/               # Azure Bicep IaC
   templates/           # Base Dockerfiles per stack
-  plans/               # Architecture docs and implementation plans
+  docs/                # Architecture docs and implementation plans
 ```
 
 ### Commands
@@ -844,11 +853,22 @@ npx pnpm --filter @autopod/cli test
 npx pnpm --filter @autopod/shared test
 ```
 
+### macOS desktop app
+
+The `packages/desktop` directory contains a native Swift/SwiftUI app (not part of the pnpm workspace). Build it with Xcode or:
+
+```bash
+cd packages/desktop
+xcodebuild -scheme Autopod -configuration Debug build
+```
+
+The app connects to the same daemon via HTTP/WebSocket. Features: three-column session browser, live terminal (SwiftTerm), diff viewer, validation report panel, and a session token-based auth flow.
+
 ### Tech stack
 
 | Tool | Why |
 |------|-----|
-| **TypeScript 5.9** | Type safety from CLI to daemon to container |
+| **TypeScript 5.7** | Type safety from CLI to daemon to container |
 | **Fastify 5** | Fast, schema-validated HTTP + WebSocket |
 | **SQLite** (better-sqlite3) | Zero-config embedded state, ACID transactions |
 | **Ink** (React for terminals) | Rich TUI dashboard |
@@ -930,6 +950,18 @@ Workspace pods give you an interactive container (same image and setup as agent 
 <summary><b>Can agents use private npm/NuGet feeds?</b></summary>
 
 Yes. Add `privateRegistries` to your profile with your Azure DevOps feed URLs and a `registryPat`. autopod generates `.npmrc` and `NuGet.config` files in the container at startup. The PAT is encrypted at rest.
+</details>
+
+<details>
+<summary><b>Is there a desktop app?</b></summary>
+
+Yes — `packages/desktop` is a native macOS app built with SwiftUI and AppKit. It gives you a three-column session browser (sidebar → session list → detail panel), a live terminal view (SwiftTerm), a diff viewer, and a validation report tab. Build with Xcode. It connects to the same daemon as the CLI.
+</details>
+
+<details>
+<summary><b>What happens if the daemon restarts mid-session?</b></summary>
+
+autopod recovers. On startup, the daemon scans for sessions that were `provisioning` or `running` at shutdown and re-attaches to their containers. Work in progress is not lost — the agent resumes from where the container left off.
 </details>
 
 ---
