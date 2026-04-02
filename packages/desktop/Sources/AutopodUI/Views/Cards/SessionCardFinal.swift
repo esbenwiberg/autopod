@@ -66,8 +66,8 @@ public struct SessionCardFinal: View {
                         ? Color.accentColor.opacity(0.4)
                         : session.status.needsAttention
                             ? session.status.color.opacity(0.35)
-                            : Color.white.opacity(0.1),
-                    lineWidth: 1
+                            : Color.white.opacity(0.15),
+                    lineWidth: 1.5
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
