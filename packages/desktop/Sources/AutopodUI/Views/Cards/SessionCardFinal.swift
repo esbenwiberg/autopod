@@ -63,11 +63,11 @@ public struct SessionCardFinal: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(
                     isHovered
-                        ? Color.accentColor.opacity(0.35)
+                        ? Color.accentColor.opacity(0.4)
                         : session.status.needsAttention
-                            ? session.status.color.opacity(0.3)
-                            : Color(nsColor: .separatorColor).opacity(0.6),
-                    lineWidth: isHovered || session.status.needsAttention ? 1 : 0.5
+                            ? session.status.color.opacity(0.35)
+                            : Color.white.opacity(0.1),
+                    lineWidth: 1
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
