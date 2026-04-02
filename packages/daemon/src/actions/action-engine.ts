@@ -62,7 +62,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       if (override?.requiresApproval) {
         return {
           success: false,
-          error: `Action '${actionName}' requires human approval`,
+          error: `Action '${actionName}' requires human approval before it can run. Use the ask_human escalation tool to request approval, describe what you want to do and why, then retry the action once approved.`,
           sanitized: false,
           quarantined: false,
         };
@@ -196,11 +196,15 @@ function applyDefaults(
   return resolved;
 }
 
+const SENSITIVE_PARAM_PATTERN = /token|password|secret|pat|key|credential|auth|bearer|api[_-]?key/i;
+
 /** Remove potentially sensitive values from params before audit logging */
 function sanitizeParamsForAudit(params: Record<string, unknown>): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(params)) {
-    if (typeof value === 'string' && value.length > 500) {
+    if (SENSITIVE_PARAM_PATTERN.test(key)) {
+      sanitized[key] = '[redacted]';
+    } else if (typeof value === 'string' && value.length > 500) {
       sanitized[key] = `${value.slice(0, 100)}... [truncated]`;
     } else {
       sanitized[key] = value;

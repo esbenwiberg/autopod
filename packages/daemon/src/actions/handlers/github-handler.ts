@@ -1,12 +1,20 @@
 import type { ActionDefinition } from '@autopod/shared';
 import type { ActionHandler, HandlerConfig } from './handler.js';
-import { fetchWithTimeout, pickFields, pickFieldsArray } from './handler.js';
+import { fetchWithTimeout, pickFields, pickFieldsArray, readSafeJson } from './handler.js';
 
 const GITHUB_API = 'https://api.github.com';
 
-/** Simple in-memory rate limit tracker */
-let rateLimitRemaining = 5000;
-let rateLimitReset = 0;
+/** Per-token rate limit state. Keyed by token suffix to avoid storing full tokens in memory. */
+interface RateLimitState {
+  remaining: number;
+  reset: number; // Unix epoch seconds
+}
+const rateLimitByToken = new Map<string, RateLimitState>();
+
+function tokenKey(token: string): string {
+  // Use last 12 chars — enough to differentiate tokens without exposing full value
+  return token.slice(-12);
+}
 
 export function createGitHubHandler(config: HandlerConfig): ActionHandler {
   const { logger, getSecret } = config;
@@ -19,13 +27,16 @@ export function createGitHubHandler(config: HandlerConfig): ActionHandler {
   }
 
   async function githubFetch(path: string, accept?: string): Promise<unknown> {
-    // Respect rate limits
-    if (rateLimitRemaining <= 10 && Date.now() / 1000 < rateLimitReset) {
-      const waitSec = Math.ceil(rateLimitReset - Date.now() / 1000);
+    const token = getToken();
+    const key = tokenKey(token);
+    const rateState = rateLimitByToken.get(key) ?? { remaining: 5000, reset: 0 };
+
+    // Respect primary rate limits per token
+    if (rateState.remaining <= 10 && Date.now() / 1000 < rateState.reset) {
+      const waitSec = Math.ceil(rateState.reset - Date.now() / 1000);
       throw new Error(`GitHub rate limit exceeded — resets in ${waitSec}s`);
     }
 
-    const token = getToken();
     const response = await fetchWithTimeout(`${GITHUB_API}${path}`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -35,14 +46,25 @@ export function createGitHubHandler(config: HandlerConfig): ActionHandler {
       timeout: 15_000,
     });
 
-    // Track rate limits
+    // Track rate limits per token
     const remaining = response.headers.get('x-ratelimit-remaining');
     const reset = response.headers.get('x-ratelimit-reset');
-    if (remaining) rateLimitRemaining = Number.parseInt(remaining, 10);
-    if (reset) rateLimitReset = Number.parseInt(reset, 10);
+    rateLimitByToken.set(key, {
+      remaining: remaining !== null ? Number.parseInt(remaining, 10) : rateState.remaining,
+      reset: reset !== null ? Number.parseInt(reset, 10) : rateState.reset,
+    });
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
+      // Secondary rate limit returns 403 with a Retry-After header
+      if (response.status === 403 && response.headers.get('retry-after')) {
+        const retryAfter = response.headers.get('retry-after');
+        throw new Error(`GitHub secondary rate limit hit — retry after ${retryAfter}s`);
+      }
+      // 403 without Retry-After may also be secondary rate limit
+      if (response.status === 403 && body.includes('secondary rate limit')) {
+        throw new Error('GitHub secondary rate limit hit — wait 60s before retrying');
+      }
       throw new Error(`GitHub API ${response.status}: ${body.slice(0, 200)}`);
     }
 
@@ -51,7 +73,7 @@ export function createGitHubHandler(config: HandlerConfig): ActionHandler {
       return { diff: await response.text() };
     }
 
-    return response.json();
+    return readSafeJson(response);
   }
 
   async function paginate(path: string, maxResults: number): Promise<unknown[]> {

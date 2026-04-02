@@ -4,6 +4,7 @@ import {
   fetchWithTimeout,
   pickFields,
   pickFieldsArray,
+  readSafeJson,
   resolveResultPath,
 } from './handlers/handler.js';
 
@@ -110,7 +111,7 @@ export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
         throw new Error(`HTTP ${response.status} from ${action.name}: ${text.slice(0, 200)}`);
       }
 
-      const data = await response.json();
+      const data = await readSafeJson(response);
 
       // Resolve result path (e.g. 'data.results')
       const resolved = resolveResultPath(data, action.response.resultPath);
