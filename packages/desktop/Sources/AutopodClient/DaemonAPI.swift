@@ -182,11 +182,11 @@ public actor DaemonAPI {
     var req = URLRequest(url: url)
     req.httpMethod = method
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
     req.timeoutInterval = 30
 
     if let body {
+      req.setValue("application/json", forHTTPHeaderField: "Content-Type")
       req.httpBody = body
     }
 
