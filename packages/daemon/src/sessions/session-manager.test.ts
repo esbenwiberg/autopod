@@ -816,9 +816,7 @@ describe('SessionManager', () => {
       await manager.processSession(session.id);
 
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
-      const nugetCall = writeCalls.find(([, path]) =>
-        path.toLowerCase().endsWith('nuget.config'),
-      );
+      const nugetCall = writeCalls.find(([, path]) => path.toLowerCase().endsWith('nuget.config'));
       expect(nugetCall).toBeDefined();
       const content = nugetCall![2] as string;
       expect(content).toContain('<packageSources>');

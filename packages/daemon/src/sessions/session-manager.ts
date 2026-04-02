@@ -645,10 +645,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Write private registry config files (.npmrc / NuGet.config) to user-level
         // paths inside the container so the workspace's own config is never overwritten.
-        const registryFiles = buildRegistryFiles(
-          profile.privateRegistries,
-          profile.registryPat,
-        );
+        const registryFiles = buildRegistryFiles(profile.privateRegistries, profile.registryPat);
         for (const file of registryFiles) {
           await containerManager.writeFile(containerId, file.path, file.content);
           logger.info(
@@ -1753,10 +1750,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         // Validation failed — stay in failed state, no agent rework
-        emitActivityStatus(
-          sessionId,
-          'Revalidation failed — human fix did not resolve all issues',
-        );
+        emitActivityStatus(sessionId, 'Revalidation failed — human fix did not resolve all issues');
         transition(s2, 'failed');
 
         if (s2.containerId) {

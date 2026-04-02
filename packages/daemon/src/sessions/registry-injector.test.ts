@@ -2,8 +2,8 @@ import type { PrivateRegistry } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
-  NUGET_CONFIG_PATH,
   NPM_RC_PATH,
+  NUGET_CONFIG_PATH,
   buildRegistryFiles,
   generateNpmrc,
   generateNuGetConfig,
