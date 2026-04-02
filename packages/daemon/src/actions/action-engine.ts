@@ -69,7 +69,21 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       }
       if (override?.allowedResources?.length) {
         const resource = (params.repo as string) ?? (params.org as string);
-        if (resource && !override.allowedResources.includes(resource)) {
+        if (!resource) {
+          // allowedResources is set but the action carries no repo/org identifier —
+          // deny to prevent bypassing resource restrictions via resource-agnostic params.
+          log.warn(
+            { sessionId, actionName },
+            'allowedResources set but action has no repo/org param — denying',
+          );
+          return {
+            success: false,
+            error: `Action '${actionName}' is blocked: allowedResources is configured but no resource identifier was provided`,
+            sanitized: false,
+            quarantined: false,
+          };
+        }
+        if (!override.allowedResources.includes(resource)) {
           return {
             success: false,
             error: `Action '${actionName}' not allowed for resource '${resource}'`,

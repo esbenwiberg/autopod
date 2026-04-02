@@ -2,6 +2,11 @@ import type { InjectedMcpServer, NetworkPolicy, NetworkPolicyMode } from '@autop
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 
+// Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
+// Blocks shell metacharacters even if an unsafe value somehow bypassed schema validation.
+const SAFE_HOST_REGEX =
+  /^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$|^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+
 const NETWORK_NAME = 'autopod-net';
 
 export const DEFAULT_ALLOWED_HOSTS = [
@@ -161,6 +166,12 @@ export class DockerNetworkManager {
     lines.push('ALLOWED_IPS=""');
 
     for (const host of allowedHosts) {
+      // Defense-in-depth: skip any host that contains characters unsafe in shell scripts.
+      // This guards against injection even if a value bypassed schema validation.
+      if (!SAFE_HOST_REGEX.test(host)) {
+        this.logger.warn({ host }, 'Skipping unsafe hostname in firewall script generation');
+        continue;
+      }
       // If it looks like an IP already, use it directly
       if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
         lines.push(`ALLOWED_IPS="$ALLOWED_IPS ${host}"`);

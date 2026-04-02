@@ -102,6 +102,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.sessionBridge,
     deps.pendingRequestsBySession,
     app.log as unknown as import('pino').Logger,
+    deps.sessionTokenIssuer,
   );
 
   return app;
