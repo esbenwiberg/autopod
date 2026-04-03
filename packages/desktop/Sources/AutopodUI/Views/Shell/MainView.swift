@@ -79,8 +79,10 @@ public struct MainView: View {
         case .workspaces:     sessions.filter { $0.isWorkspace }
         case .completed:      sessions.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:            sessions
-        case .analytics:      []
-        case .profile(let p): sessions.filter { $0.profileName == p }
+        case .analytics:        []
+        case .featureOverview:  []
+        case .deepDive:         []
+        case .profile(let p):   sessions.filter { $0.profileName == p }
         }
     }
 
@@ -96,6 +98,12 @@ public struct MainView: View {
         } content: {
             if sidebarSelection == .analytics {
                 AnalyticsView(sessions: sessions)
+                    .frame(minWidth: 600)
+            } else if sidebarSelection == .featureOverview {
+                FeatureOverviewView()
+                    .frame(minWidth: 600)
+            } else if sidebarSelection == .deepDive {
+                FeatureDeepDiveView()
                     .frame(minWidth: 600)
             } else {
                 VStack(spacing: 0) {

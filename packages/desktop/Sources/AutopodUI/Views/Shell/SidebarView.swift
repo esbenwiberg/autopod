@@ -68,7 +68,15 @@ public struct SidebarView: View {
 
             Spacer()
 
-            // Bottom bar — settings
+            // Bottom bar — explore links + settings
+            Divider()
+            VStack(spacing: 2) {
+                exploreButton(.featureOverview, icon: "sparkles", label: "Overview")
+                exploreButton(.deepDive, icon: "book.pages", label: "Deep Dive")
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+
             Divider()
             HStack {
                 Button {
@@ -103,6 +111,28 @@ public struct SidebarView: View {
 
     // MARK: - Row
 
+    private func exploreButton(_ item: SidebarItem, icon: String, label: String) -> some View {
+        Button {
+            selection = item
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(selection == item ? .blue : .secondary)
+                    .frame(width: 18)
+                Text(label)
+                    .font(.system(.caption).weight(.medium))
+                    .foregroundStyle(selection == item ? .primary : .secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(selection == item ? Color.blue.opacity(0.1) : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+    }
+
     private func sidebarRow(_ item: SidebarItem, icon: String, color: Color, badge: Int) -> some View {
         Label {
             HStack {
@@ -136,6 +166,8 @@ public enum SidebarItem: Hashable {
     case all
     case analytics
     case profile(String)
+    case featureOverview
+    case deepDive
 
     public var label: String {
         switch self {
@@ -146,6 +178,8 @@ public enum SidebarItem: Hashable {
         case .all: "All Sessions"
         case .analytics: "Analytics"
         case .profile(let name): name
+        case .featureOverview: "Overview"
+        case .deepDive: "Deep Dive"
         }
     }
 }
