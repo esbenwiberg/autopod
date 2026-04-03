@@ -46,6 +46,11 @@ describe('DockerNetworkManager', () => {
   describe('computeAllowlist()', () => {
     const GATEWAY = '172.17.0.1';
 
+    it('includes NuGet hosts in defaults', () => {
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('api.nuget.org');
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('globalcdn.nuget.org');
+    });
+
     it('includes default hosts when replaceDefaults is false', () => {
       const result = manager.computeAllowlist(makePolicy(), [], GATEWAY);
       for (const host of DEFAULT_ALLOWED_HOSTS) {

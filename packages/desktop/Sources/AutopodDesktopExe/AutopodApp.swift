@@ -29,28 +29,18 @@ struct AutopodApp: App {
         if connectionManager.connection == nil {
           showSetup = true
         }
+        // Handle race: connection may already be established before onChange is registered
+        if connectionManager.isConnected {
+          wireUpConnection()
+        }
         Task {
           await NotificationService.shared.requestPermission()
           NotificationService.shared.registerCategories()
         }
       }
       .onChange(of: connectionManager.isConnected) { _, connected in
-        if connected, let api = connectionManager.api, let conn = connectionManager.connection {
-          sessionStore.configure(api: api)
-          profileStore.configure(api: api)
-          actionHandler = ActionHandler(api: api, sessionStore: sessionStore)
-
-          let connToken = connectionManager.activeToken ?? ""
-          terminalManager = TerminalManager(baseURL: conn.url, token: connToken)
-
-          let stream = EventStream(sessionStore: sessionStore)
-          stream.connect(baseURL: conn.url, token: connToken)
-          eventStream = stream
-
-          Task {
-            await sessionStore.loadSessions()
-            await profileStore.loadProfiles()
-          }
+        if connected {
+          wireUpConnection()
         } else {
           eventStream?.disconnect()
           eventStream = nil
@@ -73,5 +63,27 @@ struct AutopodApp: App {
       Image(systemName: count > 0 ? "\(min(count, 50)).circle.fill" : "circle")
     }
     .menuBarExtraStyle(.window)
+  }
+
+  /// Configure stores and start streaming once the daemon connection is live.
+  private func wireUpConnection() {
+    guard let api = connectionManager.api,
+          let conn = connectionManager.connection else { return }
+
+    sessionStore.configure(api: api)
+    profileStore.configure(api: api)
+    actionHandler = ActionHandler(api: api, sessionStore: sessionStore)
+
+    let connToken = connectionManager.activeToken ?? ""
+    terminalManager = TerminalManager(baseURL: conn.url, token: connToken)
+
+    let stream = EventStream(sessionStore: sessionStore)
+    stream.connect(baseURL: conn.url, token: connToken)
+    eventStream = stream
+
+    Task {
+      await sessionStore.loadSessions()
+      await profileStore.loadProfiles()
+    }
   }
 }

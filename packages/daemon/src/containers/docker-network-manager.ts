@@ -14,6 +14,9 @@ export const DEFAULT_ALLOWED_HOSTS = [
   'api.openai.com',
   'registry.npmjs.org',
   'pypi.org',
+  // NuGet (.NET package registry + CDN)
+  'api.nuget.org',
+  'globalcdn.nuget.org',
   'github.com',
   'objects.githubusercontent.com',
   'raw.githubusercontent.com',

@@ -30,6 +30,7 @@ public struct TerminalEmulatorView: NSViewRepresentable {
     let tv = TerminalView(frame: .zero)
     tv.configureNativeColors()
     tv.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    tv.nativeScroller = true
     tv.terminalDelegate = context.coordinator
 
     // Register to receive data from the pipe
