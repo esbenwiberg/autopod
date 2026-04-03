@@ -78,6 +78,9 @@ public struct EscalationPayload: Codable, Sendable {
   public let description: String?
   public let attempted: [String]?
   public let needs: String?
+  // Action approval fields
+  public let actionName: String?
+  public let params: [String: AnyCodable]?
 }
 
 public struct EscalationReply: Codable, Sendable {

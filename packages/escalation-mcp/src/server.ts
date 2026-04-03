@@ -174,6 +174,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
           action.name,
           input as Record<string, unknown>,
           bridge,
+          pendingRequests,
         );
         return { content: [{ type: 'text' as const, text: response }] };
       });

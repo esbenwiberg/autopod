@@ -126,6 +126,7 @@ public struct Session: Identifiable, Sendable {
 
     public var diffStats: DiffStats?
     public var escalationQuestion: String?
+    public var escalationType: String?
     public var validationChecks: ValidationChecks?
     public var prUrl: URL?
     public var containerUrl: URL?
@@ -167,6 +168,7 @@ public struct Session: Identifiable, Sendable {
         acceptanceCriteria: [String]? = nil,
         diffStats: DiffStats? = nil,
         escalationQuestion: String? = nil,
+        escalationType: String? = nil,
         validationChecks: ValidationChecks? = nil,
         prUrl: URL? = nil,
         containerUrl: URL? = nil,
@@ -186,6 +188,7 @@ public struct Session: Identifiable, Sendable {
         self.model = model; self.startedAt = startedAt; self.baseBranch = baseBranch
         self.acFrom = acFrom; self.acceptanceCriteria = acceptanceCriteria
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
+        self.escalationType = escalationType
         self.validationChecks = validationChecks; self.prUrl = prUrl
         self.containerUrl = containerUrl; self.phase = phase
         self.latestActivity = latestActivity; self.errorSummary = errorSummary

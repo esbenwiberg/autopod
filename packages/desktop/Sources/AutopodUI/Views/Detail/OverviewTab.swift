@@ -13,7 +13,11 @@ struct OverviewTab: View {
             VStack(alignment: .leading, spacing: 20) {
                 // Escalation card (if pending)
                 if session.status == .awaitingInput, let question = session.escalationQuestion {
-                    escalationCard(question)
+                    if session.escalationType == "action_approval" {
+                        actionApprovalCard(question)
+                    } else {
+                        escalationCard(question)
+                    }
                 }
 
                 // Progress / plan
@@ -95,6 +99,50 @@ struct OverviewTab: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Action approval
+
+    private func actionApprovalCard(_ question: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "shield.checkered")
+                    .foregroundStyle(.purple)
+                Text("Action requires approval")
+                    .font(.system(.subheadline).weight(.semibold))
+            }
+
+            Text(question)
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Button {
+                    replyText = "approved"
+                    sendReply()
+                } label: {
+                    Label("Approve", systemImage: "checkmark.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+
+                Button {
+                    replyText = "rejected"
+                    sendReply()
+                } label: {
+                    Label("Reject", systemImage: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+            }
+        }
+        .padding(14)
+        .background(Color.purple.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.purple.opacity(0.2), lineWidth: 1)
         )
     }
 

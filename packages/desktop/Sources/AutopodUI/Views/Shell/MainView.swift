@@ -81,8 +81,14 @@ public struct MainView: View {
     private var wiredActions: SessionActions {
         var a = actions
         a.attachTerminal = { [onTerminalConnect] sessionId in
+            let wasAlreadySelected = selectedSessionId == sessionId
             selectedSessionId = sessionId
-            requestedDetailTab = .terminal
+            if wasAlreadySelected {
+                requestedDetailTab = .terminal
+            } else {
+                // DetailPanelView is freshly created — delay so onChange can observe the change.
+                DispatchQueue.main.async { requestedDetailTab = .terminal }
+            }
             onTerminalConnect?(sessionId)
         }
         return a
@@ -97,6 +103,7 @@ public struct MainView: View {
         case .all:            sessions
         case .analytics:        []
         case .featureOverview:  []
+        case .salesPitch:       []
         case .profile(let p):   sessions.filter { $0.profileName == p }
         }
     }
@@ -115,6 +122,9 @@ public struct MainView: View {
             if sidebarSelection == .analytics {
                 AnalyticsView(sessions: sessions)
                     .frame(minWidth: 600)
+            } else if sidebarSelection == .salesPitch {
+                SalesPitchView()
+                    .frame(minWidth: 600)
             } else if sidebarSelection == .featureOverview {
                 FeatureOverviewView(selectedFeature: $selectedFeature)
                     .frame(minWidth: 600)
@@ -127,7 +137,23 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if sidebarSelection == .featureOverview {
+            if sidebarSelection == .salesPitch {
+                VStack(spacing: 10) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(
+                            .linearGradient(
+                                colors: [.blue, .purple],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    Text("Autopod")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if sidebarSelection == .featureOverview {
                 if let feature = selectedFeature {
                     FeatureDetailPanelView(feature: feature) { related in
                         selectedFeature = related

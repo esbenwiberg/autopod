@@ -30,10 +30,17 @@ public enum SessionMapper {
     let status = SessionStatus(rawValue: response.status) ?? .queued
     let outputMode = OutputMode(rawValue: response.outputMode) ?? .pr
 
-    // Map escalation question from pending escalation
+    // Map escalation from pending escalation
     let escalationQuestion: String? = {
       guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
+      if esc.type == "action_approval", let actionName = esc.payload.actionName {
+        return "Approve action: \(actionName)"
+      }
       return esc.payload.question ?? esc.payload.description
+    }()
+    let escalationType: String? = {
+      guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
+      return esc.type
     }()
 
     // Map validation checks from last validation result
@@ -119,6 +126,7 @@ public enum SessionMapper {
       acceptanceCriteria: response.acceptanceCriteria,
       diffStats: diffStats,
       escalationQuestion: escalationQuestion,
+      escalationType: escalationType,
       validationChecks: validationChecks,
       prUrl: response.prUrl.flatMap { URL(string: $0) },
       containerUrl: response.previewUrl.flatMap { URL(string: $0) },

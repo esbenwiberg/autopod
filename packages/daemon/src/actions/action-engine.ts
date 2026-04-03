@@ -59,10 +59,10 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
 
       // 2. Check overrides (approval required, resource restrictions)
       const override = (policy.actionOverrides ?? []).find((o) => o.action === actionName);
-      if (override?.requiresApproval) {
+      if (override?.requiresApproval && !request.skipApprovalCheck) {
         return {
           success: false,
-          error: `Action '${actionName}' requires human approval before it can run. Use the ask_human escalation tool to request approval, describe what you want to do and why, then retry the action once approved.`,
+          error: `Action '${actionName}' requires human approval. This check should be handled by the MCP layer — if you see this, the approval flow was bypassed.`,
           sanitized: false,
           quarantined: false,
         };

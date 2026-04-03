@@ -74,7 +74,8 @@ public struct SidebarView: View {
             // Bottom bar — explore link + settings
             Divider()
             VStack(spacing: 2) {
-                exploreButton(.featureOverview, icon: "sparkles", label: "Overview")
+                exploreButton(.salesPitch, icon: "bolt.fill", label: "Why Autopod")
+                exploreButton(.featureOverview, icon: "sparkles", label: "How it Works")
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -171,6 +172,7 @@ public enum SidebarItem: Hashable {
     case analytics
     case profile(String)
     case featureOverview
+    case salesPitch
 
     public var label: String {
         switch self {
@@ -181,7 +183,8 @@ public enum SidebarItem: Hashable {
         case .all: "All Sessions"
         case .analytics: "Analytics"
         case .profile(let name): name
-        case .featureOverview: "Overview"
+        case .featureOverview: "How it Works"
+        case .salesPitch: "Why Autopod"
         }
     }
 }

@@ -86,6 +86,7 @@ export type {
   AskHumanPayload,
   AskAiPayload,
   ReportBlockerPayload,
+  ActionApprovalPayload,
   EscalationResponse,
 } from './types/escalation.js';
 

@@ -45,8 +45,12 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         { escalationId: escalation.id, sessionId: escalation.sessionId, type: escalation.type },
         'Escalation created',
       );
-      // Transition session to awaiting_input so the TUI shows the pending question
-      if (escalation.type === 'ask_human' || escalation.type === 'report_blocker') {
+      // Transition session to awaiting_input so the TUI shows the pending question/approval
+      if (
+        escalation.type === 'ask_human' ||
+        escalation.type === 'report_blocker' ||
+        escalation.type === 'action_approval'
+      ) {
         sessionManager.notifyEscalation(escalation.sessionId, escalation);
       }
     },
@@ -147,10 +151,21 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       return nudgeRepo.consumeNext(sessionId);
     },
 
+    actionRequiresApproval(sessionId: string, actionName: string): boolean {
+      const session = sessionManager.getSession(sessionId);
+      const profile = profileStore.get(session.profileName);
+      if (!profile.actionPolicy) return false;
+      const override = (profile.actionPolicy.actionOverrides ?? []).find(
+        (o) => o.action === actionName,
+      );
+      return override?.requiresApproval ?? false;
+    },
+
     async executeAction(
       sessionId: string,
       actionName: string,
       params: Record<string, unknown>,
+      options?: { skipApprovalCheck?: boolean },
     ): Promise<ActionResponse> {
       const session = sessionManager.getSession(sessionId);
       const profile = profileStore.get(session.profileName);
@@ -176,7 +191,10 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       const actionEngine = makeActionEngine(profile);
       logger.info({ sessionId, actionName }, 'Executing action via bridge');
       sessionManager.touchHeartbeat(sessionId);
-      return actionEngine.execute({ sessionId, actionName, params }, profile.actionPolicy);
+      return actionEngine.execute(
+        { sessionId, actionName, params, skipApprovalCheck: options?.skipApprovalCheck },
+        profile.actionPolicy,
+      );
     },
 
     getAvailableActions(sessionId: string): ActionDefinition[] {

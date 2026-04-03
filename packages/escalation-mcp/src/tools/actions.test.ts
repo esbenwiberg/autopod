@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { PendingRequests } from '../pending-requests.js';
 import { actionParamsToZodShape, executeAction } from './actions.js';
 
 interface ActionResponse {
@@ -9,10 +10,18 @@ interface ActionResponse {
   quarantined: boolean;
 }
 
-function makeBridge(response: ActionResponse) {
+function makeBridge(response: ActionResponse, requiresApproval = false) {
   return {
+    actionRequiresApproval: vi.fn().mockReturnValue(requiresApproval),
     executeAction: vi.fn().mockResolvedValue(response),
+    createEscalation: vi.fn(),
+    incrementEscalationCount: vi.fn(),
+    getHumanResponseTimeout: vi.fn().mockReturnValue(300),
   };
+}
+
+function makePendingRequests() {
+  return new PendingRequests();
 }
 
 describe('executeAction', () => {
@@ -23,8 +32,9 @@ describe('executeAction', () => {
       sanitized: false,
       quarantined: false,
     });
+    const pr = makePendingRequests();
 
-    const result = await executeAction('sess-1', 'deploy', { env: 'prod' }, bridge as never);
+    const result = await executeAction('sess-1', 'deploy', { env: 'prod' }, bridge as never, pr);
 
     expect(result).toBe(JSON.stringify({ status: 'ok', count: 3 }, null, 2));
   });
@@ -36,8 +46,9 @@ describe('executeAction', () => {
       sanitized: false,
       quarantined: false,
     });
+    const pr = makePendingRequests();
 
-    const result = await executeAction('sess-1', 'deploy', {}, bridge as never);
+    const result = await executeAction('sess-1', 'deploy', {}, bridge as never, pr);
 
     expect(result).toBe('Action failed: timeout exceeded');
   });
@@ -49,23 +60,25 @@ describe('executeAction', () => {
       sanitized: false,
       quarantined: true,
     });
+    const pr = makePendingRequests();
 
-    const result = await executeAction('sess-1', 'deploy', {}, bridge as never);
+    const result = await executeAction('sess-1', 'deploy', {}, bridge as never, pr);
 
     expect(result).toContain('quarantined');
     expect(result).toContain('injection detection');
     expect(result).toContain(JSON.stringify({ value: 'filtered' }, null, 2));
   });
 
-  it('passes correct args to bridge.executeAction', async () => {
+  it('passes correct args to bridge.executeAction when no approval needed', async () => {
     const bridge = makeBridge({
       success: true,
       data: null,
       sanitized: false,
       quarantined: false,
     });
+    const pr = makePendingRequests();
 
-    await executeAction('sess-99', 'restart', { force: true }, bridge as never);
+    await executeAction('sess-99', 'restart', { force: true }, bridge as never, pr);
 
     expect(bridge.executeAction).toHaveBeenCalledOnce();
     expect(bridge.executeAction).toHaveBeenCalledWith('sess-99', 'restart', { force: true });
@@ -78,10 +91,89 @@ describe('executeAction', () => {
       sanitized: false,
       quarantined: false,
     });
+    const pr = makePendingRequests();
 
-    const result = await executeAction('sess-1', 'noop', {}, bridge as never);
+    const result = await executeAction('sess-1', 'noop', {}, bridge as never, pr);
 
     expect(result).toBe('null');
+  });
+
+  // ─── Approval flow tests ────────────────────────────────────
+  it('blocks and executes after human approves', async () => {
+    const bridge = makeBridge(
+      { success: true, data: { merged: true }, sanitized: false, quarantined: false },
+      true, // requiresApproval
+    );
+    const pr = makePendingRequests();
+
+    // Start execution (will block on pendingRequests)
+    const resultPromise = executeAction('sess-1', 'create-pr', { repo: 'foo' }, bridge as never, pr);
+
+    // Simulate human approval after a tick
+    await new Promise((r) => setTimeout(r, 10));
+    const escalationId = bridge.createEscalation.mock.calls[0]?.[0]?.id as string;
+    expect(escalationId).toBeTruthy();
+    pr.resolve(escalationId, 'approved');
+
+    const result = await resultPromise;
+
+    expect(bridge.createEscalation).toHaveBeenCalledOnce();
+    expect(bridge.createEscalation.mock.calls[0][0].type).toBe('action_approval');
+    expect(bridge.createEscalation.mock.calls[0][0].payload.actionName).toBe('create-pr');
+    expect(bridge.executeAction).toHaveBeenCalledWith('sess-1', 'create-pr', { repo: 'foo' }, {
+      skipApprovalCheck: true,
+    });
+    expect(result).toContain('merged');
+  });
+
+  it('returns rejection message when human rejects', async () => {
+    const bridge = makeBridge(
+      { success: true, data: null, sanitized: false, quarantined: false },
+      true,
+    );
+    const pr = makePendingRequests();
+
+    const resultPromise = executeAction('sess-1', 'delete-issue', { id: '42' }, bridge as never, pr);
+
+    await new Promise((r) => setTimeout(r, 10));
+    const escalationId = bridge.createEscalation.mock.calls[0]?.[0]?.id as string;
+    pr.resolve(escalationId, 'rejected: too dangerous');
+
+    const result = await resultPromise;
+
+    expect(result).toContain('rejected');
+    expect(result).toContain('too dangerous');
+    // Action should NOT have been executed
+    expect(bridge.executeAction).not.toHaveBeenCalled();
+  });
+
+  it('returns timeout error when human does not respond', async () => {
+    const bridge = makeBridge(
+      { success: true, data: null, sanitized: false, quarantined: false },
+      true,
+    );
+    // Set very short timeout (50ms)
+    bridge.getHumanResponseTimeout.mockReturnValue(0.05);
+    const pr = makePendingRequests();
+
+    const result = await executeAction('sess-1', 'deploy', {}, bridge as never, pr);
+
+    expect(result).toContain('not approved');
+    expect(result).toContain('timeout');
+    expect(bridge.executeAction).not.toHaveBeenCalled();
+  });
+
+  it('does not create escalation when approval not required', async () => {
+    const bridge = makeBridge(
+      { success: true, data: { ok: true }, sanitized: false, quarantined: false },
+      false,
+    );
+    const pr = makePendingRequests();
+
+    await executeAction('sess-1', 'list-issues', {}, bridge as never, pr);
+
+    expect(bridge.createEscalation).not.toHaveBeenCalled();
+    expect(bridge.actionRequiresApproval).toHaveBeenCalledWith('sess-1', 'list-issues');
   });
 });
 

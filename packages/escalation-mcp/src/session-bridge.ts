@@ -24,11 +24,14 @@ export interface SessionBridge {
     totalPhases: number,
   ): void;
   consumeMessages(sessionId: string): { hasMessage: boolean; message?: string };
+  /** Check if an action requires human approval before execution */
+  actionRequiresApproval(sessionId: string, actionName: string): boolean;
   /** Execute an action via the action control plane */
   executeAction(
     sessionId: string,
     actionName: string,
     params: Record<string, unknown>,
+    options?: { skipApprovalCheck?: boolean },
   ): Promise<ActionResponse>;
   /** Get all action definitions available for a session's profile */
   getAvailableActions(sessionId: string): ActionDefinition[];

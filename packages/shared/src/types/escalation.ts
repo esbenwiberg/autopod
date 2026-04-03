@@ -1,11 +1,11 @@
-export type EscalationType = 'ask_human' | 'ask_ai' | 'report_blocker';
+export type EscalationType = 'ask_human' | 'ask_ai' | 'report_blocker' | 'action_approval';
 
 export interface EscalationRequest {
   id: string;
   sessionId: string;
   type: EscalationType;
   timestamp: string;
-  payload: AskHumanPayload | AskAiPayload | ReportBlockerPayload;
+  payload: AskHumanPayload | AskAiPayload | ReportBlockerPayload | ActionApprovalPayload;
   response: EscalationResponse | null;
 }
 
@@ -25,6 +25,12 @@ export interface ReportBlockerPayload {
   description: string;
   attempted: string[];
   needs: string;
+}
+
+export interface ActionApprovalPayload {
+  actionName: string;
+  params: Record<string, unknown>;
+  description: string;
 }
 
 export interface EscalationResponse {

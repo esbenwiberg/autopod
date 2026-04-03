@@ -97,6 +97,8 @@ export interface ActionRequest {
   sessionId: string;
   actionName: string;
   params: Record<string, unknown>;
+  /** Set by MCP layer after human approval — bypasses requiresApproval check in engine */
+  skipApprovalCheck?: boolean;
 }
 
 export interface ActionResponse {
