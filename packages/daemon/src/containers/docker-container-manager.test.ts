@@ -221,6 +221,41 @@ describe('DockerContainerManager', () => {
       expect(id).toBe('abc123deadbeef');
     });
 
+    it('removes stale container on 409 and retries', async () => {
+      const freshContainer = createMockContainer({ id: 'fresh123' });
+      const staleContainer = createMockContainer();
+
+      // First createContainer → 409, second → success
+      docker.createContainer
+        .mockRejectedValueOnce(Object.assign(new Error('name already in use'), { statusCode: 409 }))
+        .mockResolvedValueOnce(freshContainer);
+      docker.getContainer.mockReturnValue(staleContainer);
+
+      const id = await manager.spawn(baseConfig);
+
+      expect(id).toBe('fresh123');
+      expect(staleContainer.stop).toHaveBeenCalledWith({ t: 5 });
+      expect(staleContainer.remove).toHaveBeenCalledWith({ force: true });
+      expect(docker.createContainer).toHaveBeenCalledTimes(2);
+    });
+
+    it('removes stale container on 409 even if stop fails', async () => {
+      const freshContainer = createMockContainer({ id: 'fresh123' });
+      const staleContainer = createMockContainer({
+        stop: vi.fn().mockRejectedValue(Object.assign(new Error('not running'), { statusCode: 304 })),
+      });
+
+      docker.createContainer
+        .mockRejectedValueOnce(Object.assign(new Error('name already in use'), { statusCode: 409 }))
+        .mockResolvedValueOnce(freshContainer);
+      docker.getContainer.mockReturnValue(staleContainer);
+
+      const id = await manager.spawn(baseConfig);
+
+      expect(id).toBe('fresh123');
+      expect(staleContainer.remove).toHaveBeenCalledWith({ force: true });
+    });
+
     it('propagates errors from createContainer', async () => {
       docker.createContainer.mockRejectedValue(new Error('image not found'));
 

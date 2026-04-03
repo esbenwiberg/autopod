@@ -71,16 +71,48 @@ export class DockerContainerManager implements ContainerManager {
       hostConfig.ExtraHosts = ['host.docker.internal:host-gateway'];
     }
 
-    const container = await this.docker.createContainer({
-      Image: config.image,
-      name: containerName,
-      Env: env,
-      Cmd: ['sleep', 'infinity'],
-      WorkingDir: '/workspace',
-      User: 'autopod',
-      ExposedPorts: exposedPorts,
-      HostConfig: hostConfig,
-    });
+    let container: Dockerode.Container;
+    try {
+      container = await this.docker.createContainer({
+        Image: config.image,
+        name: containerName,
+        Env: env,
+        Cmd: ['sleep', 'infinity'],
+        WorkingDir: '/workspace',
+        User: 'autopod',
+        ExposedPorts: exposedPorts,
+        HostConfig: hostConfig,
+      });
+    } catch (err: unknown) {
+      // If a stale container with the same name exists (e.g. daemon crashed mid-provisioning
+      // before the containerId was persisted), remove it and retry.
+      if (isExpectedError(err, [409])) {
+        this.logger.warn(
+          { containerName },
+          'Stale container with same name exists — removing and retrying',
+        );
+        const stale = this.docker.getContainer(containerName);
+        try {
+          await stale.stop({ t: 5 });
+        } catch {
+          // may already be stopped
+        }
+        await stale.remove({ force: true });
+
+        container = await this.docker.createContainer({
+          Image: config.image,
+          name: containerName,
+          Env: env,
+          Cmd: ['sleep', 'infinity'],
+          WorkingDir: '/workspace',
+          User: 'autopod',
+          ExposedPorts: exposedPorts,
+          HostConfig: hostConfig,
+        });
+      } else {
+        throw err;
+      }
+    }
 
     await container.start();
 
