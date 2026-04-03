@@ -302,6 +302,7 @@ public struct SessionCardFinal: View {
                         .foregroundStyle(.secondary)
                 }
                 Button {
+                    actions.attachTerminal(session.id)
                 } label: {
                     Label("Attach Terminal", systemImage: "terminal")
                         .frame(maxWidth: .infinity)

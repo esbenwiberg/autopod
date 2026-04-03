@@ -19,6 +19,7 @@ public struct MainView: View {
     public var onTerminalDisconnect: (() -> Void)?
     public var onRefresh: (() async -> Void)?
     public var onSelectSession: ((String?) -> Void)?
+    public var onShowSettings: (() -> Void)?
 
     @Binding public var selectedSessionId: String?
 
@@ -40,7 +41,8 @@ public struct MainView: View {
         onTerminalConnect: ((String) -> Void)? = nil,
         onTerminalDisconnect: (() -> Void)? = nil,
         onRefresh: (() async -> Void)? = nil,
-        onSelectSession: ((String?) -> Void)? = nil
+        onSelectSession: ((String?) -> Void)? = nil,
+        onShowSettings: (() -> Void)? = nil
     ) {
         self.sessions = sessions
         self._selectedSessionId = selectedSessionId
@@ -60,6 +62,7 @@ public struct MainView: View {
         self.onTerminalDisconnect = onTerminalDisconnect
         self.onRefresh = onRefresh
         self.onSelectSession = onSelectSession
+        self.onShowSettings = onShowSettings
     }
 
     @State private var sidebarSelection: SidebarItem = .attention
@@ -67,9 +70,22 @@ public struct MainView: View {
     @State private var showCommandPalette = false
     @State private var viewMode: ViewMode = .cards
     @State private var cardDensity: CardDensity = .detailed
+    @State private var selectedFeature: FeatureCategory?
+    @State private var requestedDetailTab: DetailTab?
 
     private var selectedSession: Session? {
         sessions.first { $0.id == selectedSessionId }
+    }
+
+    /// Actions with `attachTerminal` wired to navigate + connect.
+    private var wiredActions: SessionActions {
+        var a = actions
+        a.attachTerminal = { [onTerminalConnect] sessionId in
+            selectedSessionId = sessionId
+            requestedDetailTab = .terminal
+            onTerminalConnect?(sessionId)
+        }
+        return a
     }
 
     private var filteredSessions: [Session] {
@@ -81,7 +97,6 @@ public struct MainView: View {
         case .all:            sessions
         case .analytics:        []
         case .featureOverview:  []
-        case .deepDive:         []
         case .profile(let p):   sessions.filter { $0.profileName == p }
         }
     }
@@ -93,17 +108,15 @@ public struct MainView: View {
                 selection: $sidebarSelection,
                 showCreateSheet: $showCreateSheet,
                 isConnected: isConnected,
-                connectionLabel: connectionLabel
+                connectionLabel: connectionLabel,
+                onShowSettings: onShowSettings
             )
         } content: {
             if sidebarSelection == .analytics {
                 AnalyticsView(sessions: sessions)
                     .frame(minWidth: 600)
             } else if sidebarSelection == .featureOverview {
-                FeatureOverviewView()
-                    .frame(minWidth: 600)
-            } else if sidebarSelection == .deepDive {
-                FeatureDeepDiveView()
+                FeatureOverviewView(selectedFeature: $selectedFeature)
                     .frame(minWidth: 600)
             } else {
                 VStack(spacing: 0) {
@@ -114,18 +127,35 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if let session = selectedSession {
+            if sidebarSelection == .featureOverview {
+                if let feature = selectedFeature {
+                    FeatureDetailPanelView(feature: feature) { related in
+                        selectedFeature = related
+                    }
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.tertiary)
+                        Text("Select a feature")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if let session = selectedSession {
                 DetailPanelView(
                     session: session,
                     events: eventsForSession(session),
-                    actions: actions,
+                    actions: wiredActions,
                     diffString: sessionDiffs[session.id],
                     terminalState: terminalState,
                     terminalDataPipe: terminalDataPipe,
                     onTerminalSendData: onTerminalSendData,
                     onTerminalResize: onTerminalResize,
                     onTerminalConnect: { onTerminalConnect?(session.id) },
-                    onTerminalDisconnect: onTerminalDisconnect
+                    onTerminalDisconnect: onTerminalDisconnect,
+                    requestedTab: $requestedDetailTab
                 )
             } else {
                 emptyDetail
@@ -246,7 +276,7 @@ public struct MainView: View {
                 spacing: 10
             ) {
                 ForEach(filteredSessions) { session in
-                    SessionCardFinal(session: session, actions: actions, density: cardDensity)
+                    SessionCardFinal(session: session, actions: wiredActions, density: cardDensity)
                         .onTapGesture { selectedSessionId = session.id }
                 }
             }

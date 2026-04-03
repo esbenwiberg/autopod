@@ -66,6 +66,9 @@ public struct AppRootView: View {
           eventStream?.subscribeToSession(id)
           Task { await sessionStore.loadDiff(id) }
         }
+      },
+      onShowSettings: {
+        showSettings = true
       }
     )
     .alert("Error", isPresented: $showError) {
@@ -93,42 +96,6 @@ public struct AppRootView: View {
     .onChange(of: showSettings) { _, isShowing in
       if isShowing {
         Task { await profileStore.loadProfiles() }
-      }
-    }
-    .toolbar {
-      ToolbarItem(placement: .automatic) {
-        HStack(spacing: 12) {
-          Button {
-            showSettings = true
-          } label: {
-            Image(systemName: "gearshape")
-          }
-          .help("Settings")
-
-          Button {
-            Task { await sessionStore.loadSessions() }
-          } label: {
-            Image(systemName: "arrow.clockwise")
-          }
-          .help("Refresh sessions")
-          .disabled(!connectionManager.isConnected)
-
-          HStack(spacing: 5) {
-            Circle()
-              .fill(connectionManager.isConnected ? .green : .red)
-              .frame(width: 7, height: 7)
-            Text(connectionManager.connectionLabel)
-              .font(.system(.caption2, design: .monospaced))
-              .foregroundStyle(.secondary)
-            if let ws = eventStream?.connectionState, ws != "Connected" && ws != "Disconnected" {
-              Text("(\(ws))")
-                .font(.system(.caption2))
-                .foregroundStyle(.orange)
-            }
-          }
-          .onTapGesture { showSetup = true }
-          .help(connectionManager.state.label)
-        }
       }
     }
   }

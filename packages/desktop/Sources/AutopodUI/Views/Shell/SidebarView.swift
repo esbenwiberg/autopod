@@ -7,19 +7,22 @@ public struct SidebarView: View {
     @Binding public var showCreateSheet: Bool
     public var isConnected: Bool
     public var connectionLabel: String
+    public var onShowSettings: (() -> Void)?
 
     public init(
         sessions: [Session],
         selection: Binding<SidebarItem>,
         showCreateSheet: Binding<Bool>,
         isConnected: Bool = true,
-        connectionLabel: String = "localhost:3000"
+        connectionLabel: String = "localhost:3000",
+        onShowSettings: (() -> Void)? = nil
     ) {
         self.sessions = sessions
         self._selection = selection
         self._showCreateSheet = showCreateSheet
         self.isConnected = isConnected
         self.connectionLabel = connectionLabel
+        self.onShowSettings = onShowSettings
     }
 
     private var attentionCount: Int { sessions.filter { $0.status.needsAttention }.count }
@@ -68,11 +71,10 @@ public struct SidebarView: View {
 
             Spacer()
 
-            // Bottom bar — explore links + settings
+            // Bottom bar — explore link + settings
             Divider()
             VStack(spacing: 2) {
                 exploreButton(.featureOverview, icon: "sparkles", label: "Overview")
-                exploreButton(.deepDive, icon: "book.pages", label: "Deep Dive")
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -80,11 +82,13 @@ public struct SidebarView: View {
             Divider()
             HStack {
                 Button {
+                    onShowSettings?()
                 } label: {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
+                .help("Settings")
                 Spacer()
             }
             .padding(12)
@@ -167,7 +171,6 @@ public enum SidebarItem: Hashable {
     case analytics
     case profile(String)
     case featureOverview
-    case deepDive
 
     public var label: String {
         switch self {
@@ -179,7 +182,6 @@ public enum SidebarItem: Hashable {
         case .analytics: "Analytics"
         case .profile(let name): name
         case .featureOverview: "Overview"
-        case .deepDive: "Deep Dive"
         }
     }
 }

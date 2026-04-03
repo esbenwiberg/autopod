@@ -12,6 +12,7 @@ public struct DetailPanelView: View {
     public var onTerminalResize: ((Int, Int) -> Void)?
     public var onTerminalConnect: (() -> Void)?
     public var onTerminalDisconnect: (() -> Void)?
+    @Binding public var requestedTab: DetailTab?
 
     public init(
         session: Session, events: [AgentEvent], actions: SessionActions = .preview,
@@ -21,7 +22,8 @@ public struct DetailPanelView: View {
         onTerminalSendData: (([UInt8]) -> Void)? = nil,
         onTerminalResize: ((Int, Int) -> Void)? = nil,
         onTerminalConnect: (() -> Void)? = nil,
-        onTerminalDisconnect: (() -> Void)? = nil
+        onTerminalDisconnect: (() -> Void)? = nil,
+        requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
         self.session = session; self.events = events; self.actions = actions
         self.diffString = diffString
@@ -31,6 +33,7 @@ public struct DetailPanelView: View {
         self.onTerminalResize = onTerminalResize
         self.onTerminalConnect = onTerminalConnect
         self.onTerminalDisconnect = onTerminalDisconnect
+        self._requestedTab = requestedTab
     }
 
     @State private var selectedTab: DetailTab = .overview
@@ -66,6 +69,11 @@ public struct DetailPanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: requestedTab) { _, tab in
+            guard let tab else { return }
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
+            requestedTab = nil
+        }
     }
 
     // MARK: - Header
@@ -204,7 +212,7 @@ public struct DetailPanelView: View {
 
 // MARK: - Tab enum
 
-enum DetailTab: CaseIterable {
+public enum DetailTab: CaseIterable {
     case overview, logs, diff, terminal, validation
 
     var label: String {
