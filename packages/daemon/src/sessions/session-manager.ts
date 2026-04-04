@@ -585,6 +585,36 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }
 
+        // Write private registry config files (.npmrc / NuGet.config) to user-level
+        // paths inside the container. Runs for ALL session types including workspace pods.
+        // Fall back to adoPat when registryPat isn't set — they're usually the same
+        // PAT for ADO-hosted feeds, and requiring both is a footgun.
+        const effectiveRegistryPat = profile.registryPat ?? profile.adoPat ?? null;
+        const registryFiles = buildRegistryFiles(profile.privateRegistries, effectiveRegistryPat);
+        for (const file of registryFiles) {
+          await containerManager.writeFile(containerId, file.path, file.content);
+          logger.info(
+            { sessionId, path: file.path, bytes: file.content.length },
+            'Wrote registry config file to container',
+          );
+        }
+
+        // Patch workspace NuGet.config files with ADO credentials — repos that use
+        // <clear /> in their config wipe user-level sources, so we inject credentials
+        // directly into the workspace config for any ADO feeds it defines.
+        if (effectiveRegistryPat && isDotnet) {
+          try {
+            await patchWorkspaceNuGetCredentials(
+              containerManager,
+              containerId,
+              effectiveRegistryPat,
+              logger,
+            );
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to patch workspace NuGet credentials');
+          }
+        }
+
         // Workspace sessions: container stays alive, no agent/validation/PR
         if (session.outputMode === 'workspace') {
           logger.info({ sessionId }, 'Workspace session running — awaiting manual attach');
@@ -684,20 +714,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           );
         }
 
-        // Write private registry config files (.npmrc / NuGet.config) to user-level
-        // paths inside the container so the workspace's own config is never overwritten.
-        // Fall back to adoPat when registryPat isn't set — they're usually the same
-        // PAT for ADO-hosted feeds, and requiring both is a footgun.
-        const effectiveRegistryPat = profile.registryPat ?? profile.adoPat ?? null;
-        const registryFiles = buildRegistryFiles(profile.privateRegistries, effectiveRegistryPat);
-        for (const file of registryFiles) {
-          await containerManager.writeFile(containerId, file.path, file.content);
-          logger.info(
-            { sessionId, path: file.path, bytes: file.content.length },
-            'Wrote registry config file to container',
-          );
-        }
-
         // Early validation: verify registry configs are parseable before agent starts
         if (registryFiles.length > 0) {
           try {
@@ -712,22 +728,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               sessionId,
               `⚠ Registry config check failed: ${(regErr as Error).message}`,
             );
-          }
-        }
-
-        // Patch workspace NuGet.config files with ADO credentials — repos that use
-        // <clear /> in their config wipe user-level sources, so we inject credentials
-        // directly into the workspace config for any ADO feeds it defines.
-        if (effectiveRegistryPat && isDotnet) {
-          try {
-            await patchWorkspaceNuGetCredentials(
-              containerManager,
-              containerId,
-              effectiveRegistryPat,
-              logger,
-            );
-          } catch (err) {
-            logger.warn({ err, sessionId }, 'Failed to patch workspace NuGet credentials');
           }
         }
 
