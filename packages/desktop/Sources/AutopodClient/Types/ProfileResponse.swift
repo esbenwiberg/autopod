@@ -77,7 +77,7 @@ public struct EscalationConfigResponse: Codable, Sendable {
   public var humanResponseTimeout: Int
 
   public init() {
-    askHuman = true; askAi = .init(); autoPauseAfter = 0; humanResponseTimeout = 3600
+    askHuman = true; askAi = .init(); autoPauseAfter = 1; humanResponseTimeout = 3600
   }
 
   public init(from decoder: any Decoder) throws {

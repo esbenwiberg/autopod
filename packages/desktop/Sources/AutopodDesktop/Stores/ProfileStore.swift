@@ -43,8 +43,8 @@ public final class ProfileStore {
 
   public func saveProfile(_ profile: Profile) async throws {
     guard let api else { return }
-    let body = ProfileMapper.mapToResponse(profile)
-    let response = try await api.updateProfile(profile.name, body: body)
+    let fields = ProfileMapper.mapToFields(profile)
+    let response = try await api.patchProfile(profile.name, fields: fields)
     let updated = ProfileMapper.map(response)
     if let idx = profiles.firstIndex(where: { $0.name == profile.name }) {
       profiles[idx] = updated
@@ -53,8 +53,9 @@ public final class ProfileStore {
 
   public func createProfile(_ profile: Profile) async throws {
     guard let api else { return }
-    let body = ProfileMapper.mapToResponse(profile)
-    let response = try await api.createProfile(body)
+    var fields = ProfileMapper.mapToFields(profile)
+    fields["name"] = profile.name
+    let response = try await api.createProfileFromFields(fields)
     let created = ProfileMapper.map(response)
     profiles.append(created)
   }

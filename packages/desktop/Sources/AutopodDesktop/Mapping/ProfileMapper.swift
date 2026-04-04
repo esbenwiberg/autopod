@@ -63,50 +63,56 @@ public enum ProfileMapper {
     responses.map { map($0) }
   }
 
-  // MARK: - Profile → ProfileResponse
+  // MARK: - Profile → partial update dictionary
 
-  public static func mapToResponse(_ profile: Profile) -> ProfileResponse {
-    var r = ProfileResponse()
-    r.name = profile.name
-    r.repoUrl = profile.repoUrl
-    r.defaultBranch = profile.defaultBranch
-    r.template = profile.template.rawValue
-    r.buildCommand = profile.buildCommand
-    r.startCommand = profile.startCommand
-    r.healthPath = profile.healthPath
-    r.healthTimeout = profile.healthTimeout
-    r.smokePages = profile.smokePages.map { .init(path: $0.path, assertions: nil) }
-    r.maxValidationAttempts = profile.maxValidationAttempts
-    r.defaultModel = profile.defaultModel
-    r.defaultRuntime = profile.defaultRuntime.rawValue
-    r.executionTarget = profile.executionTarget.rawValue
-    r.customInstructions = profile.customInstructions
-    r.outputMode = "pr"
-    r.modelProvider = profile.modelProvider.rawValue
-    r.testCommand = profile.testCommand
-    r.buildTimeout = profile.buildTimeout
-    r.testTimeout = profile.testTimeout
-    r.prProvider = profile.prProvider.rawValue
-    r.adoPat = profile.adoPat
-    r.githubPat = profile.githubPat
-    r.registryPat = profile.registryPat
-    r.containerMemoryGb = profile.containerMemoryGb
-    r.mcpServers = profile.mcpServers.map {
-      InjectedMcpServerResponse(name: $0.name, url: $0.url, description: $0.description)
-    }
-    r.claudeMdSections = profile.claudeMdSections.map {
-      InjectedClaudeMdSectionResponse(heading: $0.heading, content: $0.content, priority: nil)
-    }
-    r.skills = profile.skills.map {
-      InjectedSkillResponse(name: $0.name, description: $0.description)
-    }
-    r.privateRegistries = profile.privateRegistries.map {
-      PrivateRegistryResponse(type: $0.type.rawValue, url: $0.url, scope: $0.scope)
-    }
+  /// Build a dictionary of fields the editor can round-trip safely.
+  /// Complex nested types that the UI doesn't fully model (escalation, skills.source)
+  /// are excluded — the PATCH endpoint only updates fields present in the body.
+  public static func mapToFields(_ profile: Profile) -> [String: Any] {
+    var d: [String: Any] = [
+      "repoUrl": profile.repoUrl,
+      "defaultBranch": profile.defaultBranch,
+      "template": profile.template.rawValue,
+      "buildCommand": profile.buildCommand,
+      "startCommand": profile.startCommand,
+      "healthPath": profile.healthPath,
+      "healthTimeout": profile.healthTimeout,
+      "maxValidationAttempts": profile.maxValidationAttempts,
+      "defaultModel": profile.defaultModel,
+      "defaultRuntime": profile.defaultRuntime.rawValue,
+      "executionTarget": profile.executionTarget.rawValue,
+      "modelProvider": profile.modelProvider.rawValue,
+      "buildTimeout": profile.buildTimeout,
+      "testTimeout": profile.testTimeout,
+      "prProvider": profile.prProvider.rawValue,
+      "smokePages": profile.smokePages.map { ["path": $0.path] },
+      "privateRegistries": profile.privateRegistries.map {
+        var r: [String: Any] = ["type": $0.type.rawValue, "url": $0.url]
+        if let scope = $0.scope { r["scope"] = scope }
+        return r
+      },
+      "allowedHosts": profile.allowedHosts,
+    ]
+
+    // Optional fields — only include if set
+    if let v = profile.customInstructions { d["customInstructions"] = v }
+    if let v = profile.testCommand { d["testCommand"] = v }
+    if let v = profile.containerMemoryGb { d["containerMemoryGb"] = v }
+    if let v = profile.githubPat { d["githubPat"] = v }
+    if let v = profile.adoPat { d["adoPat"] = v }
+    if let v = profile.registryPat { d["registryPat"] = v }
+
+    // Network policy
     if profile.networkEnabled {
-      r.networkPolicy = .init(enabled: true, mode: profile.networkMode.rawValue,
-                              allowedHosts: profile.allowedHosts, replaceDefaults: nil)
+      d["networkPolicy"] = [
+        "enabled": true,
+        "mode": profile.networkMode.rawValue,
+        "allowedHosts": profile.allowedHosts,
+      ] as [String: Any]
+    } else {
+      d["networkPolicy"] = ["enabled": false, "mode": "restricted", "allowedHosts": []] as [String: Any]
     }
-    return r
+
+    return d
   }
 }

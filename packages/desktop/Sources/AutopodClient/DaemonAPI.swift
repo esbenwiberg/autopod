@@ -149,6 +149,18 @@ public actor DaemonAPI {
     try await request("PUT", "/profiles/\(name)", body: try encode(body))
   }
 
+  /// Partial update — only sends the fields present in the dictionary.
+  public func patchProfile(_ name: String, fields: [String: Any]) async throws -> ProfileResponse {
+    let body = try JSONSerialization.data(withJSONObject: fields)
+    return try await request("PATCH", "/profiles/\(name)", body: body)
+  }
+
+  /// Create profile from a raw dictionary.
+  public func createProfileFromFields(_ fields: [String: Any]) async throws -> ProfileResponse {
+    let body = try JSONSerialization.data(withJSONObject: fields)
+    return try await request("POST", "/profiles", body: body)
+  }
+
   public func deleteProfile(_ name: String) async throws {
     let _: EmptyResponse = try await request("DELETE", "/profiles/\(name)")
   }
