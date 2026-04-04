@@ -90,11 +90,25 @@ public struct AppRootView: View {
         connectionManager: connectionManager,
         profiles: profileStore.profiles,
         profileError: profileStore.error,
-        onSaveProfile: { profile in
-          Task { try? await profileStore.saveProfile(profile) }
+        onSaveProfile: { [profileStore] profile in
+          Task {
+            do {
+              try await profileStore.saveProfile(profile)
+            } catch {
+              print("[AppRootView] Failed to save profile: \(error)")
+              profileStore.error = error.localizedDescription
+            }
+          }
         },
-        onCreateProfile: { profile in
-          Task { try? await profileStore.createProfile(profile) }
+        onCreateProfile: { [profileStore] profile in
+          Task {
+            do {
+              try await profileStore.createProfile(profile)
+            } catch {
+              print("[AppRootView] Failed to create profile: \(error)")
+              profileStore.error = error.localizedDescription
+            }
+          }
         },
         isPresented: $showSettings
       )

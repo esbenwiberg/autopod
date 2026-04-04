@@ -9,7 +9,7 @@ public final class ProfileStore {
 
   public private(set) var profiles: [Profile] = []
   public private(set) var isLoading = false
-  public private(set) var error: String?
+  public var error: String?
 
   private var api: DaemonAPI?
 
