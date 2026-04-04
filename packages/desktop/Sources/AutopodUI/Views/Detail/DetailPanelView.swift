@@ -174,10 +174,27 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
 
             default:
-                EmptyView()
+                if session.isTerminal {
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             }
         }
+        .confirmationDialog("Delete session \(session.id)?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                Task { await actions.delete(session.id) }
+            }
+        } message: {
+            Text("This will permanently remove the session record.")
+        }
     }
+
+    @State private var showDeleteConfirmation = false
 
     // MARK: - Tab bar
 

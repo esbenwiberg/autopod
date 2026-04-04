@@ -1,4 +1,9 @@
-import type { InjectedMcpServer, NetworkPolicy, NetworkPolicyMode } from '@autopod/shared';
+import type {
+  InjectedMcpServer,
+  NetworkPolicy,
+  NetworkPolicyMode,
+  PrivateRegistry,
+} from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 
@@ -9,15 +14,21 @@ const SAFE_HOST_REGEX =
 
 const NETWORK_NAME = 'autopod-net';
 
+/** Public NuGet v3 service index — used to discover CDN backend hosts at provisioning time */
+const NUGET_PUBLIC_INDEX = 'https://api.nuget.org/v3/index.json';
+
+/** Timeout for NuGet service index fetches during provisioning */
+const NUGET_DISCOVERY_TIMEOUT_MS = 10_000;
+
 export const DEFAULT_ALLOWED_HOSTS = [
   'api.anthropic.com',
   'api.openai.com',
   'registry.npmjs.org',
   'pypi.org',
-  // NuGet (.NET package registry + CDN + Azure Front Door)
+  // NuGet — specific hosts only; CDN/blob backends are discovered dynamically
+  // via resolveNugetBackendHosts() at provisioning time
   'api.nuget.org',
   'globalcdn.nuget.org',
-  'azurefd.net',
   'nupkg.nuget.org',
   'github.com',
   'objects.githubusercontent.com',
@@ -76,7 +87,8 @@ export class DockerNetworkManager {
 
   /**
    * Compute the effective allowlist for a session, merging defaults,
-   * profile policy, daemon gateway, and MCP server hosts.
+   * profile policy, daemon gateway, MCP server hosts, and dynamically
+   * discovered hosts.
    *
    * Wildcard entries (e.g. `*.example.com`) are resolved by stripping the
    * `*.` prefix and resolving the parent domain. This is best-effort: it works
@@ -87,6 +99,7 @@ export class DockerNetworkManager {
     policy: NetworkPolicy,
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
+    additionalHosts: string[] = [],
   ): string[] {
     const hosts = new Set<string>();
 
@@ -101,6 +114,11 @@ export class DockerNetworkManager {
     for (const h of policy.allowedHosts) {
       // *.example.com → resolve example.com (best-effort wildcard support)
       hosts.add(h.startsWith('*.') ? h.slice(2) : h);
+    }
+
+    // Add dynamically discovered hosts (e.g. NuGet CDN backends)
+    for (const h of additionalHosts) {
+      hosts.add(h);
     }
 
     // Add daemon gateway so the container can reach the daemon's MCP endpoint
@@ -161,7 +179,9 @@ export class DockerNetworkManager {
 
     if (mode === 'deny-all') {
       lines.push('');
-      lines.push('# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)');
+      lines.push(
+        '# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)',
+      );
       lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
       lines.push('');
       lines.push('echo "Firewall: deny-all mode — all outbound blocked"');
@@ -196,41 +216,115 @@ export class DockerNetworkManager {
       }),
     );
 
-    // Collect cloud wildcard domains whose subdomains can't be predicted at setup time
-    // (e.g. blob.core.windows.net → *.blob.core.windows.net for Azure Blob Storage).
-    // These get a second-pass container-side resolution rule that runs on-demand.
-    const cloudWildcards = allowedHosts.filter((h) =>
-      /^(blob\.core\.windows\.net|azurewebsites\.net|azurefd\.net|azureedge\.net)$/.test(h),
+    // Collect resolvable hostnames for the container-side second pass
+    const resolvableHosts = allowedHosts.filter(
+      (h) => SAFE_HOST_REGEX.test(h) && !/^\d+\.\d+\.\d+\.\d+$/.test(h),
     );
 
     lines.push('');
-    lines.push(`# ${cidrs.size} CIDRs resolved from ${allowedHosts.length} hosts`);
+    lines.push(
+      `# ${cidrs.size} CIDRs resolved from ${allowedHosts.length} hosts (daemon-side DNS)`,
+    );
     for (const cidr of cidrs) {
       lines.push(`iptables -A OUTPUT -d "${cidr}" -j ACCEPT`);
     }
 
-    // For cloud wildcard domains, allow any subdomain resolution via on-demand DNS.
-    // The REJECT rule uses a custom chain so we can insert ACCEPT rules dynamically.
-    if (cloudWildcards.length > 0) {
+    // Second pass: resolve allowed hosts from the container's perspective.
+    // CDN services (Azure Front Door, NuGet, etc.) return different IPs depending
+    // on the resolver's location. The daemon may resolve to one set of /24 ranges
+    // while the container's DNS returns a different set. This pass catches the gap.
+    //
+    // Uses getent (available in all our container images) and deduplicates against
+    // existing rules via iptables -C (check) before inserting.
+    if (resolvableHosts.length > 0) {
       lines.push('');
-      lines.push('# Cloud wildcard domains — allow all HTTPS to these TLDs');
-      lines.push('# Subdomains are unpredictable (Azure storage account names, CDN nodes, etc.)');
-      for (const domain of cloudWildcards) {
-        // Use iptables string match on TLS SNI to allow any subdomain
-        // Falls back to allowing port 443 broadly if string match isn't available
-        lines.push(
-          `iptables -A OUTPUT -p tcp --dport 443 -m string --algo bm --string ".${domain}" -j ACCEPT 2>/dev/null || true`,
-        );
-      }
+      lines.push('# Container-side DNS resolution pass (covers CDN PoP differences)');
+      lines.push('container_resolve() {');
+      lines.push('  for host in "$@"; do');
+      lines.push(
+        '    for ip in $(getent ahostsv4 "$host" 2>/dev/null | awk \'{print $1}\' | sort -u); do',
+      );
+      lines.push('      cidr="$(echo "$ip" | awk -F. \'{print $1"."$2"."$3".0/24"}\')"');
+      lines.push('      iptables -C OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || \\');
+      lines.push('        iptables -I OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true');
+      lines.push('    done');
+      lines.push('  done');
+      lines.push('}');
+      lines.push(`container_resolve ${resolvableHosts.map((h) => `"${h}"`).join(' ')}`);
     }
 
     lines.push('');
     lines.push('# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)');
     lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
     lines.push('');
-    lines.push(`echo "Firewall: restricted mode — ${cidrs.size} CIDRs allowed"`);
+    lines.push(
+      `echo "Firewall: restricted mode — ${cidrs.size} CIDRs (daemon) + container-side resolution"`,
+    );
 
     return lines.join('\n');
+  }
+
+  /**
+   * Discover CDN/blob storage backend hostnames from NuGet feed service indices.
+   *
+   * NuGet feeds expose a v3 service index (JSON) that lists resource endpoints.
+   * Package downloads often redirect to CDN or blob storage hosts (e.g.
+   * `*.blob.core.windows.net`) whose subdomains are unpredictable at config time.
+   *
+   * This method fetches each feed's service index, extracts all hostnames from
+   * the resource URLs, and also probes the public NuGet index when `includePublic`
+   * is true (default). The discovered hosts are then passed to `computeAllowlist()`
+   * so that the firewall CIDRs cover the actual download targets.
+   *
+   * Non-fatal: fetch failures are logged and silently skipped.
+   */
+  async resolveNugetBackendHosts(
+    registries: PrivateRegistry[],
+    includePublic = true,
+  ): Promise<string[]> {
+    const nugetFeeds = registries.filter((r) => r.type === 'nuget').map((r) => r.url);
+
+    // Always probe public NuGet for .NET sessions (CDN hosts rotate)
+    if (includePublic) {
+      nugetFeeds.push(NUGET_PUBLIC_INDEX);
+    }
+
+    if (nugetFeeds.length === 0) return [];
+
+    const hosts = new Set<string>();
+    await Promise.all(
+      nugetFeeds.map(async (feedUrl) => {
+        try {
+          const resp = await fetch(feedUrl, {
+            signal: AbortSignal.timeout(NUGET_DISCOVERY_TIMEOUT_MS),
+            headers: { Accept: 'application/json' },
+          });
+          if (!resp.ok) return;
+          const index = (await resp.json()) as { resources?: { '@id'?: string }[] };
+          if (!Array.isArray(index.resources)) return;
+
+          for (const resource of index.resources) {
+            const id = resource['@id'];
+            if (typeof id !== 'string') continue;
+            try {
+              const parsed = new URL(id);
+              if (SAFE_HOST_REGEX.test(parsed.hostname)) {
+                hosts.add(parsed.hostname);
+              }
+            } catch {
+              // Malformed resource URL — skip
+            }
+          }
+        } catch {
+          this.logger.warn(
+            { feedUrl },
+            'Failed to fetch NuGet service index for firewall discovery',
+          );
+        }
+      }),
+    );
+
+    return [...hosts];
   }
 
   /**
@@ -241,12 +335,13 @@ export class DockerNetworkManager {
     policy: NetworkPolicy | null,
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
+    additionalHosts: string[] = [],
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
     await this.ensureNetwork();
 
-    const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp);
+    const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp, additionalHosts);
     const firewallScript = await this.generateFirewallScript(allowlist, policy.mode);
 
     return {

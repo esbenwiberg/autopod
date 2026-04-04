@@ -51,6 +51,15 @@ describe('DockerNetworkManager', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('globalcdn.nuget.org');
     });
 
+    it('does not include cloud wildcard domains in defaults', () => {
+      // Cloud domains like azurefd.net and blob.core.windows.net should NOT be
+      // in defaults — they would open HTTPS broadly for every session.
+      // Backend hosts are discovered dynamically via resolveNugetBackendHosts().
+      expect(DEFAULT_ALLOWED_HOSTS).not.toContain('azurefd.net');
+      expect(DEFAULT_ALLOWED_HOSTS).not.toContain('blob.core.windows.net');
+      expect(DEFAULT_ALLOWED_HOSTS).not.toContain('nuget.org');
+    });
+
     it('includes default hosts when replaceDefaults is false', () => {
       const result = manager.computeAllowlist(makePolicy(), [], GATEWAY);
       for (const host of DEFAULT_ALLOWED_HOSTS) {
@@ -84,6 +93,15 @@ describe('DockerNetworkManager', () => {
       );
       expect(result).toContain('custom.example.com');
       expect(result).toContain('another.dev');
+    });
+
+    it('adds additional hosts from dynamic discovery', () => {
+      const result = manager.computeAllowlist(makePolicy(), [], GATEWAY, [
+        'cdn1.blob.core.windows.net',
+        'cdn2.azureedge.net',
+      ]);
+      expect(result).toContain('cdn1.blob.core.windows.net');
+      expect(result).toContain('cdn2.azureedge.net');
     });
 
     it('extracts hostnames from MCP server URLs', () => {
@@ -142,9 +160,18 @@ describe('DockerNetworkManager', () => {
 
     it('resolves real hostnames to /24 CIDRs via daemon DNS', async () => {
       const script = await manager.generateFirewallScript(['api.nuget.org']);
-      // Should contain CIDR rules resolved by Node.js DNS (not getent)
+      // Should contain CIDR rules resolved by Node.js DNS
       expect(script).toContain('.0/24');
-      expect(script).not.toContain('getent');
+    });
+
+    it('includes container-side DNS resolution pass for resolvable hosts', async () => {
+      const script = await manager.generateFirewallScript(['api.nuget.org', '10.0.0.1']);
+      // Should include container-side getent resolution for hostnames (not raw IPs)
+      expect(script).toContain('container_resolve');
+      expect(script).toContain('getent ahostsv4');
+      expect(script).toContain('"api.nuget.org"');
+      // Raw IPs should not be in the container_resolve call
+      expect(script).not.toContain('container_resolve "10.0.0.1"');
     });
 
     it('gracefully skips unresolvable hostnames', async () => {
@@ -180,6 +207,13 @@ describe('DockerNetworkManager', () => {
       expect(script).toContain('--state ESTABLISHED,RELATED -j ACCEPT');
     });
 
+    it('does not include cloud wildcard or string match rules', async () => {
+      // Cloud wildcards were removed — backend hosts are now discovered dynamically
+      const script = await manager.generateFirewallScript(['blob.core.windows.net']);
+      expect(script).not.toContain('-m string');
+      expect(script).not.toContain('--dport 443 -j ACCEPT');
+    });
+
     describe('allow-all mode', () => {
       it('has no REJECT rule', async () => {
         const script = await manager.generateFirewallScript([], 'allow-all');
@@ -203,6 +237,110 @@ describe('DockerNetworkManager', () => {
         const script = await manager.generateFirewallScript([], 'deny-all');
         expect(script).toContain('--dport 53 -j ACCEPT');
       });
+    });
+  });
+
+  describe('resolveNugetBackendHosts()', () => {
+    it('returns empty array when no NuGet registries configured and public disabled', async () => {
+      const result = await manager.resolveNugetBackendHosts([], false);
+      expect(result).toEqual([]);
+    });
+
+    it('fetches public NuGet index by default', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            resources: [
+              {
+                '@id': 'https://api.nuget.org/v3/registration5-semver1/',
+                '@type': 'RegistrationsBaseUrl',
+              },
+              { '@id': 'https://azuresearch-usnc.nuget.org/query', '@type': 'SearchQueryService' },
+              {
+                '@id': 'https://az320820.vo.msecnd.net/packages/',
+                '@type': 'PackageBaseAddress/3.0.0',
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+      const result = await manager.resolveNugetBackendHosts([], true);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(result).toContain('api.nuget.org');
+      expect(result).toContain('azuresearch-usnc.nuget.org');
+      expect(result).toContain('az320820.vo.msecnd.net');
+
+      fetchSpy.mockRestore();
+    });
+
+    it('discovers blob storage hosts from ADO NuGet feed', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            resources: [
+              {
+                '@id': 'https://pkgs.dev.azure.com/myorg/_packaging/feed/nuget/v3/flat2/',
+                '@type': 'PackageBaseAddress/3.0.0',
+              },
+              {
+                '@id': 'https://kd2vsblobprodsu6weus81.blob.core.windows.net/packages/',
+                '@type': 'PackageBaseAddress/3.0.0',
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+      const result = await manager.resolveNugetBackendHosts(
+        [
+          {
+            type: 'nuget',
+            url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/nuget/v3/index.json',
+          },
+        ],
+        false,
+      );
+      expect(result).toContain('kd2vsblobprodsu6weus81.blob.core.windows.net');
+
+      fetchSpy.mockRestore();
+    });
+
+    it('skips non-NuGet registries', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+      const result = await manager.resolveNugetBackendHosts(
+        [{ type: 'npm', url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/npm/registry/' }],
+        false,
+      );
+      expect(result).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      fetchSpy.mockRestore();
+    });
+
+    it('handles fetch failures gracefully', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValueOnce(new Error('Network timeout'));
+
+      const result = await manager.resolveNugetBackendHosts([], true);
+      expect(result).toEqual([]);
+
+      fetchSpy.mockRestore();
+    });
+
+    it('handles malformed service index responses', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response('not json', { status: 200 }));
+
+      const result = await manager.resolveNugetBackendHosts([], true);
+      expect(result).toEqual([]);
+
+      fetchSpy.mockRestore();
     });
   });
 
@@ -280,6 +418,19 @@ describe('DockerNetworkManager', () => {
       expect(result?.firewallScript).toContain('#!/bin/sh');
       // Hostnames are now resolved to CIDRs by the daemon, not embedded as strings
       expect(result?.firewallScript).toContain('iptables -A OUTPUT -d');
+    });
+
+    it('passes additional hosts through to allowlist', async () => {
+      docker.mock._inspect.mockResolvedValueOnce({});
+      const result = await manager.buildNetworkConfig(
+        makePolicy({ enabled: true, allowedHosts: [] }),
+        [],
+        GATEWAY,
+        ['extra-cdn.blob.core.windows.net'],
+      );
+      expect(result).not.toBeNull();
+      // The extra host should be resolved to a CIDR
+      expect(result?.firewallScript).toContain('.0/24');
     });
   });
 });

@@ -39,7 +39,8 @@ public final class ActionHandler {
         )
       },
       approveAll: { [weak self] in await self?.approveAllValidated() },
-      killAllFailed: { [weak self] in await self?.killAllFailed() }
+      killAllFailed: { [weak self] in await self?.killAllFailed() },
+      delete: { [weak self] id in await self?.deleteSession(id) }
     )
   }
 
@@ -201,6 +202,17 @@ public final class ActionHandler {
     do {
       _ = try await api.killAllFailed()
       await sessionStore.loadSessions()
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func deleteSession(_ sessionId: String) async {
+    pendingAction = "delete-\(sessionId)"
+    do {
+      try await api.deleteSession(sessionId)
+      sessionStore.removeSession(sessionId)
     } catch {
       lastError = error.localizedDescription
     }

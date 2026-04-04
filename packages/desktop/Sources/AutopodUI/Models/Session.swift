@@ -147,6 +147,14 @@ public struct Session: Identifiable, Sendable {
 
     public var isWorkspace: Bool { outputMode == .workspace }
 
+    /// Whether this session is in a terminal state and can be deleted.
+    public var isTerminal: Bool {
+        switch status {
+        case .complete, .killed, .failed: true
+        default: false
+        }
+    }
+
     public var duration: String {
         let minutes = Int(Date().timeIntervalSince(startedAt) / 60)
         guard minutes > 0 else { return "<1m" }

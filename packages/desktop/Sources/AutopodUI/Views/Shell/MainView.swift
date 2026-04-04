@@ -97,6 +97,7 @@ public struct MainView: View {
     private var filteredSessions: [Session] {
         switch sidebarSelection {
         case .attention:      sessions.filter { $0.status.needsAttention }
+        case .active:         sessions.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
         case .running:        sessions.filter { $0.status.isActive && !$0.isWorkspace }
         case .workspaces:     sessions.filter { $0.isWorkspace }
         case .completed:      sessions.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }

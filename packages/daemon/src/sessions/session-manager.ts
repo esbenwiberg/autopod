@@ -323,10 +323,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
    * container's native /workspace (overlayfs) — this avoids VirtioFS getcwd() bugs
    * on Docker Desktop for Mac. We sync back before any host-side git operations.
    */
-  async function syncWorkspaceBack(
-    containerId: string,
-    cm: ContainerManager,
-  ): Promise<void> {
+  async function syncWorkspaceBack(containerId: string, cm: ContainerManager): Promise<void> {
     await cm.execInContainer(
       containerId,
       [
@@ -497,10 +494,26 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         ) {
           const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
           const gatewayIp = await networkManager.getGatewayIp();
+
+          // For .NET sessions, discover CDN/blob storage backend hosts from NuGet
+          // feed service indices so the firewall CIDRs cover actual download targets.
+          const isDotnet = profile.template.startsWith('dotnet');
+          const nugetBackendHosts = isDotnet
+            ? await networkManager.resolveNugetBackendHosts(profile.privateRegistries, true)
+            : [];
+          if (nugetBackendHosts.length > 0) {
+            logger.info(
+              { hosts: nugetBackendHosts },
+              'Discovered %d NuGet backend hosts for firewall',
+              nugetBackendHosts.length,
+            );
+          }
+
           const netConfig = await networkManager.buildNetworkConfig(
             profile.networkPolicy,
             mergedServers,
             gatewayIp,
+            nugetBackendHosts,
           );
           if (netConfig) {
             networkName = netConfig.networkName;
@@ -2110,10 +2123,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
       const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
       const gatewayIp = await networkManager.getGatewayIp();
+
+      const isDotnet = profile.template.startsWith('dotnet');
+      const nugetBackendHosts = isDotnet
+        ? await networkManager.resolveNugetBackendHosts(profile.privateRegistries, true)
+        : [];
+
       const netConfig = await networkManager.buildNetworkConfig(
         profile.networkPolicy,
         mergedServers,
         gatewayIp,
+        nugetBackendHosts,
       );
       if (!netConfig) return;
 

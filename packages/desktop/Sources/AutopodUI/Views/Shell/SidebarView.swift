@@ -26,6 +26,7 @@ public struct SidebarView: View {
     }
 
     private var attentionCount: Int { sessions.filter { $0.status.needsAttention }.count }
+    private var activeCount: Int { sessions.filter { $0.status.isActive || $0.status.needsAttention }.filter { !$0.isWorkspace }.count }
     private var runningCount: Int { sessions.filter { $0.status.isActive && !$0.isWorkspace }.count }
     private var workspaceCount: Int { sessions.filter { $0.isWorkspace }.count }
     private var completedCount: Int { sessions.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }.count }
@@ -54,6 +55,7 @@ public struct SidebarView: View {
             List(selection: $selection) {
                 Section("Sessions") {
                     sidebarRow(.attention, icon: "exclamationmark.circle.fill", color: .orange, badge: attentionCount)
+                    sidebarRow(.active, icon: "bolt.circle.fill", color: .blue, badge: activeCount)
                     sidebarRow(.running, icon: "play.circle.fill", color: .secondary, badge: runningCount)
                     sidebarRow(.workspaces, icon: "terminal.fill", color: .secondary, badge: workspaceCount)
                     sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
@@ -165,6 +167,7 @@ public struct SidebarView: View {
 
 public enum SidebarItem: Hashable {
     case attention
+    case active
     case running
     case workspaces
     case completed
@@ -177,6 +180,7 @@ public enum SidebarItem: Hashable {
     public var label: String {
         switch self {
         case .attention: "Attention"
+        case .active: "Active"
         case .running: "Running"
         case .workspaces: "Workspaces"
         case .completed: "Completed"

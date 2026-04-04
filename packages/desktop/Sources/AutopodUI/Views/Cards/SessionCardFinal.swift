@@ -482,6 +482,7 @@ public struct SessionCardFinal: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
+                deleteButton
             }
 
         case .validating:
@@ -504,19 +505,45 @@ public struct SessionCardFinal: View {
             }
 
         case .complete:
-            if let url = session.prUrl {
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Label("PR #\(url.lastPathComponent)", systemImage: "arrow.up.right.square.fill")
-                        .frame(maxWidth: .infinity)
+            VStack(alignment: .leading, spacing: 6) {
+                if let url = session.prUrl {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label("PR #\(url.lastPathComponent)", systemImage: "arrow.up.right.square.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                deleteButton
             }
+
+        case .killed:
+            deleteButton
 
         default:
             EmptyView()
+        }
+    }
+
+    @State private var showDeleteConfirmation = false
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            showDeleteConfirmation = true
+        } label: {
+            Label("Delete", systemImage: "trash")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .confirmationDialog("Delete session \(session.id)?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                Task { await actions.delete(session.id) }
+            }
+        } message: {
+            Text("This will permanently remove the session record.")
         }
     }
 

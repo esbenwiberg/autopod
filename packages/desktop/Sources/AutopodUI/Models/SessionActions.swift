@@ -19,6 +19,7 @@ public struct SessionActions: Sendable {
   public var attachTerminal: @MainActor @Sendable (String) -> Void
   public var approveAll: @MainActor @Sendable () async -> Void
   public var killAllFailed: @MainActor @Sendable () async -> Void
+  public var delete: @MainActor @Sendable (String) async -> Void
 
   public init(
     approve: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -34,7 +35,8 @@ public struct SessionActions: Sendable {
     createSession: @escaping @MainActor @Sendable (String, String, String, String?, [String]?, String?, String?) async -> String? = { _, _, _, _, _, _, _ in nil },
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
-    killAllFailed: @escaping @MainActor @Sendable () async -> Void = {}
+    killAllFailed: @escaping @MainActor @Sendable () async -> Void = {},
+    delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in }
   ) {
     self.approve = approve
     self.reject = reject
@@ -50,6 +52,7 @@ public struct SessionActions: Sendable {
     self.attachTerminal = attachTerminal
     self.approveAll = approveAll
     self.killAllFailed = killAllFailed
+    self.delete = delete
   }
 
   /// No-op instance for previews
