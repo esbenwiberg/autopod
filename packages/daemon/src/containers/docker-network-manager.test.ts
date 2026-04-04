@@ -125,88 +125,83 @@ describe('DockerNetworkManager', () => {
   });
 
   describe('generateFirewallScript()', () => {
-    it('starts with #!/bin/sh', () => {
-      const script = manager.generateFirewallScript([]);
+    it('starts with #!/bin/sh', async () => {
+      const script = await manager.generateFirewallScript([]);
       expect(script.startsWith('#!/bin/sh')).toBe(true);
     });
 
-    it('contains iptables rules for each host', () => {
-      const script = manager.generateFirewallScript(['example.com']);
+    it('contains iptables rules for resolved hosts', async () => {
+      const script = await manager.generateFirewallScript(['example.com']);
       expect(script).toContain('iptables -A OUTPUT');
     });
 
-    it('adds IP addresses directly without resolution', () => {
-      const script = manager.generateFirewallScript(['10.0.0.1']);
-      expect(script).toContain('ALLOWED_IPS="$ALLOWED_IPS 10.0.0.1"');
-      expect(script).not.toContain('getent ahostsv4 "10.0.0.1"');
+    it('adds IP addresses directly', async () => {
+      const script = await manager.generateFirewallScript(['10.0.0.1']);
+      expect(script).toContain('10.0.0.1');
     });
 
-    it('uses getent for hostname resolution', () => {
-      const script = manager.generateFirewallScript(['api.example.com']);
-      expect(script).toContain('getent ahostsv4 "api.example.com"');
+    it('resolves real hostnames to /24 CIDRs via daemon DNS', async () => {
+      const script = await manager.generateFirewallScript(['api.nuget.org']);
+      // Should contain CIDR rules resolved by Node.js DNS (not getent)
+      expect(script).toContain('.0/24');
+      expect(script).not.toContain('getent');
     });
 
-    it('has DNS allow rules for port 53', () => {
-      const script = manager.generateFirewallScript([]);
+    it('gracefully skips unresolvable hostnames', async () => {
+      const script = await manager.generateFirewallScript(['this-host-does-not-exist.invalid']);
+      // Should still have the REJECT rule even if resolution fails
+      expect(script).toContain('iptables -A OUTPUT -j REJECT');
+    });
+
+    it('has DNS allow rules for port 53', async () => {
+      const script = await manager.generateFirewallScript([]);
       expect(script).toContain('--dport 53 -j ACCEPT');
       expect(script).toContain('-p udp --dport 53');
       expect(script).toContain('-p tcp --dport 53');
     });
 
-    it('has a final REJECT rule in restricted mode', () => {
-      const script = manager.generateFirewallScript([], 'restricted');
+    it('has a final REJECT rule in restricted mode', async () => {
+      const script = await manager.generateFirewallScript([], 'restricted');
       expect(script).toContain('iptables -A OUTPUT -j REJECT');
     });
 
-    it('has a final REJECT rule when mode is omitted (defaults to restricted)', () => {
-      const script = manager.generateFirewallScript([]);
+    it('has a final REJECT rule when mode is omitted (defaults to restricted)', async () => {
+      const script = await manager.generateFirewallScript([]);
       expect(script).toContain('iptables -A OUTPUT -j REJECT');
     });
 
-    it('has loopback allow', () => {
-      const script = manager.generateFirewallScript([]);
+    it('has loopback allow', async () => {
+      const script = await manager.generateFirewallScript([]);
       expect(script).toContain('-o lo -j ACCEPT');
     });
 
-    it('has ESTABLISHED,RELATED allow', () => {
-      const script = manager.generateFirewallScript([]);
+    it('has ESTABLISHED,RELATED allow', async () => {
+      const script = await manager.generateFirewallScript([]);
       expect(script).toContain('--state ESTABLISHED,RELATED -j ACCEPT');
     });
 
     describe('allow-all mode', () => {
-      it('has no REJECT rule', () => {
-        const script = manager.generateFirewallScript([], 'allow-all');
+      it('has no REJECT rule', async () => {
+        const script = await manager.generateFirewallScript([], 'allow-all');
         expect(script).not.toContain('iptables -A OUTPUT -j REJECT');
       });
 
-      it('still allows loopback and established', () => {
-        const script = manager.generateFirewallScript([], 'allow-all');
+      it('still allows loopback and established', async () => {
+        const script = await manager.generateFirewallScript([], 'allow-all');
         expect(script).toContain('-o lo -j ACCEPT');
         expect(script).toContain('--state ESTABLISHED,RELATED -j ACCEPT');
-      });
-
-      it('does not include host resolution or IP allowances', () => {
-        const script = manager.generateFirewallScript(['example.com'], 'allow-all');
-        expect(script).not.toContain('getent ahostsv4');
-        expect(script).not.toContain('ALLOWED_IPS');
       });
     });
 
     describe('deny-all mode', () => {
-      it('has a REJECT rule', () => {
-        const script = manager.generateFirewallScript([], 'deny-all');
+      it('has a REJECT rule', async () => {
+        const script = await manager.generateFirewallScript([], 'deny-all');
         expect(script).toContain('iptables -A OUTPUT -j REJECT');
       });
 
-      it('allows DNS', () => {
-        const script = manager.generateFirewallScript([], 'deny-all');
+      it('allows DNS', async () => {
+        const script = await manager.generateFirewallScript([], 'deny-all');
         expect(script).toContain('--dport 53 -j ACCEPT');
-      });
-
-      it('does not include host resolution or IP allowances', () => {
-        const script = manager.generateFirewallScript(['example.com'], 'deny-all');
-        expect(script).not.toContain('getent ahostsv4');
-        expect(script).not.toContain('ALLOWED_IPS');
       });
     });
   });
@@ -222,17 +217,6 @@ describe('DockerNetworkManager', () => {
       );
       expect(result).toContain('example.com');
       expect(result).not.toContain('*.example.com');
-    });
-
-    it('wildcard parent domain appears in generated firewall script', () => {
-      const hosts = manager.computeAllowlist(
-        makePolicy({ allowedHosts: ['*.my-company.com'], replaceDefaults: true }),
-        [],
-        GATEWAY,
-      );
-      const script = manager.generateFirewallScript(hosts);
-      expect(script).toContain('getent ahostsv4 "my-company.com"');
-      expect(script).not.toContain('*.my-company.com');
     });
 
     it('leaves non-wildcard hosts unchanged', () => {
@@ -294,7 +278,8 @@ describe('DockerNetworkManager', () => {
       expect(result).not.toBeNull();
       expect(result?.networkName).toBe('autopod-net');
       expect(result?.firewallScript).toContain('#!/bin/sh');
-      expect(result?.firewallScript).toContain('example.com');
+      // Hostnames are now resolved to CIDRs by the daemon, not embedded as strings
+      expect(result?.firewallScript).toContain('iptables -A OUTPUT -d');
     });
   });
 });

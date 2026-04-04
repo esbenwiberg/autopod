@@ -133,7 +133,10 @@ export class DockerNetworkManager {
    * Note: there is a brief window (~ms) between flush and new rules where all
    * traffic is allowed — acceptable for this use case.
    */
-  generateFirewallScript(allowedHosts: string[], mode: NetworkPolicyMode = 'restricted'): string {
+  async generateFirewallScript(
+    allowedHosts: string[],
+    mode: NetworkPolicyMode = 'restricted',
+  ): Promise<string> {
     const lines = ['#!/bin/sh', 'set -e', ''];
 
     lines.push('# Flush existing OUTPUT rules');
@@ -165,47 +168,44 @@ export class DockerNetworkManager {
       return lines.join('\n');
     }
 
-    // restricted — resolve hosts to IPs and allow them
-    lines.push('');
-    lines.push('# Resolve allowed hosts to IPs');
-    lines.push('ALLOWED_IPS=""');
+    // restricted — resolve hosts to IPs on the daemon side (reliable DNS) and
+    // expand to /24 CIDRs to handle CDN IP rotation.
+    // Previous approach resolved inside the container, but Docker's embedded DNS
+    // on custom bridge networks isn't always ready immediately after container start.
+    const cidrs = new Set<string>();
+    await Promise.all(
+      allowedHosts.map(async (host) => {
+        if (!SAFE_HOST_REGEX.test(host)) {
+          this.logger.warn({ host }, 'Skipping unsafe hostname in firewall script generation');
+          return;
+        }
+        if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+          cidrs.add(host);
+          return;
+        }
+        try {
+          const { resolve4 } = await import('node:dns/promises');
+          const ips = await resolve4(host);
+          for (const ip of ips) {
+            const parts = ip.split('.');
+            cidrs.add(`${parts[0]}.${parts[1]}.${parts[2]}.0/24`);
+          }
+        } catch {
+          this.logger.warn({ host }, 'Failed to resolve host for firewall allowlist');
+        }
+      }),
+    );
 
-    for (const host of allowedHosts) {
-      // Defense-in-depth: skip any host that contains characters unsafe in shell scripts.
-      // This guards against injection even if a value bypassed schema validation.
-      if (!SAFE_HOST_REGEX.test(host)) {
-        this.logger.warn({ host }, 'Skipping unsafe hostname in firewall script generation');
-        continue;
-      }
-      // If it looks like an IP already, use it directly
-      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-        lines.push(`ALLOWED_IPS="$ALLOWED_IPS ${host}"`);
-      } else {
-        // Resolve to IPv4 only (iptables v4 chokes on IPv6) and expand each IP to
-        // its /24 subnet. CDNs (NuGet, npm, etc.) rotate IPs via DNS load balancing —
-        // a single resolved IP goes stale within minutes. /24 covers rotation within
-        // the same datacenter, which is fine for egress filtering.
-        lines.push(
-          `for ip in $(getent ahostsv4 "${host}" 2>/dev/null | awk '{print $1}' | sort -u); do`,
-        );
-        lines.push(
-          `  cidr=$(echo "$ip" | awk -F. '{print $1"."$2"."$3".0/24"}')`,
-        );
-        lines.push(`  ALLOWED_IPS="$ALLOWED_IPS $cidr"`);
-        lines.push('done');
-      }
+    lines.push('');
+    lines.push(`# ${cidrs.size} CIDRs resolved from ${allowedHosts.length} hosts`);
+    for (const cidr of cidrs) {
+      lines.push(`iptables -A OUTPUT -d "${cidr}" -j ACCEPT`);
     }
-
-    lines.push('');
-    lines.push('# Allow traffic to each resolved IP');
-    lines.push('for ip in $ALLOWED_IPS; do');
-    lines.push('  iptables -A OUTPUT -d "$ip" -j ACCEPT');
-    lines.push('done');
     lines.push('');
     lines.push('# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)');
     lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
     lines.push('');
-    lines.push('echo "Firewall rules applied: $(echo $ALLOWED_IPS | wc -w) IPs allowed"');
+    lines.push(`echo "Firewall: restricted mode — ${cidrs.size} CIDRs allowed"`);
 
     return lines.join('\n');
   }
@@ -224,7 +224,7 @@ export class DockerNetworkManager {
     await this.ensureNetwork();
 
     const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp);
-    const firewallScript = this.generateFirewallScript(allowlist, policy.mode);
+    const firewallScript = await this.generateFirewallScript(allowlist, policy.mode);
 
     return {
       networkName: NETWORK_NAME,
