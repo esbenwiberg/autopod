@@ -40,6 +40,18 @@ public struct ProfileResponse: Codable, Sendable {
   public var containerMemoryGb: Double?
   public var createdAt: String
   public var updatedAt: String
+
+  /// Empty init for building responses programmatically (reverse mapping).
+  public init() {
+    name = ""; repoUrl = ""; defaultBranch = "main"; template = "node22"
+    buildCommand = ""; startCommand = ""; healthPath = "/"; healthTimeout = 120
+    smokePages = []; maxValidationAttempts = 3; defaultModel = "opus"
+    defaultRuntime = "claude"; executionTarget = "local"
+    escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
+    outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300
+    testTimeout = 600; prProvider = "github"; privateRegistries = []
+    createdAt = ""; updatedAt = ""
+  }
 }
 
 // MARK: - Nested types
@@ -47,6 +59,9 @@ public struct ProfileResponse: Codable, Sendable {
 public struct SmokePageResponse: Codable, Sendable {
   public var path: String
   public var assertions: [PageAssertionResponse]?
+  public init(path: String, assertions: [PageAssertionResponse]? = nil) {
+    self.path = path; self.assertions = assertions
+  }
 }
 
 public struct PageAssertionResponse: Codable, Sendable {
@@ -60,6 +75,10 @@ public struct EscalationConfigResponse: Codable, Sendable {
   public var askAi: AskAiConfigResponse
   public var autoPauseAfter: Int
   public var humanResponseTimeout: Int
+
+  public init() {
+    askHuman = true; askAi = .init(); autoPauseAfter = 0; humanResponseTimeout = 3600
+  }
 
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -75,6 +94,8 @@ public struct AskAiConfigResponse: Codable, Sendable {
   public var model: String
   public var maxCalls: Int
 
+  public init() { enabled = true; model = "sonnet"; maxCalls = 3 }
+
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     enabled = try decodeBoolOrInt(c, key: .enabled)
@@ -88,6 +109,11 @@ public struct NetworkPolicyResponse: Codable, Sendable {
   public var mode: String?
   public var allowedHosts: [String]
   public var replaceDefaults: Bool?
+
+  public init(enabled: Bool, mode: String?, allowedHosts: [String], replaceDefaults: Bool?) {
+    self.enabled = enabled; self.mode = mode; self.allowedHosts = allowedHosts
+    self.replaceDefaults = replaceDefaults
+  }
 
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -103,23 +129,35 @@ public struct PrivateRegistryResponse: Codable, Sendable {
   public var type: String
   public var url: String
   public var scope: String?
+  public init(type: String, url: String, scope: String? = nil) {
+    self.type = type; self.url = url; self.scope = scope
+  }
 }
 
 public struct InjectedMcpServerResponse: Codable, Sendable {
-  public let name: String
-  public let url: String?
-  public let description: String?
+  public var name: String
+  public var url: String?
+  public var description: String?
+  public init(name: String, url: String?, description: String?) {
+    self.name = name; self.url = url; self.description = description
+  }
 }
 
 public struct InjectedClaudeMdSectionResponse: Codable, Sendable {
-  public let heading: String?
-  public let content: String?
-  public let priority: Int?
+  public var heading: String?
+  public var content: String?
+  public var priority: Int?
+  public init(heading: String?, content: String?, priority: Int?) {
+    self.heading = heading; self.content = content; self.priority = priority
+  }
 }
 
 public struct InjectedSkillResponse: Codable, Sendable {
-  public let name: String?
-  public let description: String?
+  public var name: String?
+  public var description: String?
+  public init(name: String?, description: String?) {
+    self.name = name; self.description = description
+  }
 }
 
 // MARK: - Warm result

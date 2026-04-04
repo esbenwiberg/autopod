@@ -74,8 +74,16 @@ export function terminalRoutes(
       // Create exec with TTY
       const startTerminal = async () => {
         try {
+          // Use tmux if available — `new-session -A -s main` creates or reattaches
+          // to a persistent session named "main". This means WebSocket reconnects
+          // pick up right where the user left off instead of losing shell state.
+          // Falls back to plain bash if tmux isn't installed.
           const exec = await container.exec({
-            Cmd: ['/bin/bash', '-l'],
+            Cmd: [
+              '/bin/sh',
+              '-c',
+              'command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s main || exec /bin/bash -l',
+            ],
             AttachStdin: true,
             AttachStdout: true,
             AttachStderr: true,
@@ -128,8 +136,11 @@ export function terminalRoutes(
                   typeof msg.cols === 'number' &&
                   typeof msg.rows === 'number'
                 ) {
-                  // Resize the TTY
-                  exec.resize({ h: msg.rows, w: msg.cols }).catch((err: Error) => {
+                  // Clamp to sane values — the desktop client can send bogus dimensions
+                  // before layout settles (e.g. cols=-2 from a zero-frame TerminalView).
+                  const w = Math.max(1, Math.min(msg.cols, 500));
+                  const h = Math.max(1, Math.min(msg.rows, 500));
+                  exec.resize({ h, w }).catch((err: Error) => {
                     request.log.warn({ err, sessionId }, 'Terminal resize failed');
                   });
                   return;

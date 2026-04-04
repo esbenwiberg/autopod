@@ -179,6 +179,88 @@ export async function validateRegistryFiles(
   }
 }
 
+/**
+ * Patch workspace NuGet.config files with credentials for ADO feeds.
+ *
+ * Many repos use `<clear />` in their NuGet.config which wipes user-level configs.
+ * This function finds ADO package sources defined in workspace configs and injects
+ * credentials via `dotnet nuget update source`, which modifies the config in-place.
+ */
+export async function patchWorkspaceNuGetCredentials(
+  containerManager: ContainerManager,
+  containerId: string,
+  pat: string,
+  logger: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void },
+): Promise<void> {
+  // Find NuGet.config files in the workspace (max depth 2 to avoid scanning node_modules etc.)
+  const findResult = await containerManager.execInContainer(
+    containerId,
+    ['find', '/workspace', '-maxdepth', '2', '-iname', 'nuget.config'],
+    { timeout: 10_000 },
+  );
+  const configPaths = findResult.stdout.trim().split('\n').filter(Boolean);
+  if (configPaths.length === 0) return;
+
+  for (const configPath of configPaths) {
+    // List sources defined in this config
+    const listResult = await containerManager.execInContainer(
+      containerId,
+      ['dotnet', 'nuget', 'list', 'source', '--configfile', configPath, '--format', 'short'],
+      { timeout: 15_000 },
+    );
+    if (listResult.exitCode !== 0) continue;
+
+    // Parse source lines: "E https://pkgs.dev.azure.com/..." format
+    // Each line is like "E  https://..." or "  2.  sourcename [Enabled]"
+    // The short format gives: "E https://url"
+    const lines = listResult.stdout.split('\n').filter((l) => l.includes('pkgs.dev.azure.com'));
+    if (lines.length === 0) continue;
+
+    // Read the config file to find source names for ADO feeds
+    const configContent = await containerManager.readFile(containerId, configPath);
+    const sourcePattern =
+      /<add\s+key="([^"]+)"\s+value="(https?:\/\/pkgs\.dev\.azure\.com\/[^"]+)"/g;
+    let match: RegExpExecArray | null;
+    const adoSources: { name: string; url: string }[] = [];
+
+    while ((match = sourcePattern.exec(configContent)) !== null) {
+      adoSources.push({ name: match[1]!, url: match[2]! });
+    }
+
+    for (const source of adoSources) {
+      const updateResult = await containerManager.execInContainer(
+        containerId,
+        [
+          'dotnet',
+          'nuget',
+          'update',
+          'source',
+          source.name,
+          '--username',
+          'autopod',
+          '--password',
+          pat,
+          '--store-password-in-clear-text',
+          '--configfile',
+          configPath,
+        ],
+        { timeout: 15_000 },
+      );
+      if (updateResult.exitCode === 0) {
+        logger.info(
+          { configPath, source: source.name },
+          'Patched NuGet.config with ADO feed credentials',
+        );
+      } else {
+        logger.warn(
+          { configPath, source: source.name, stderr: updateResult.stderr.slice(0, 300) },
+          'Failed to patch NuGet.config with credentials',
+        );
+      }
+    }
+  }
+}
+
 /** Ensure URL ends with / (required for npm registry URLs) */
 function ensureTrailingSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`;

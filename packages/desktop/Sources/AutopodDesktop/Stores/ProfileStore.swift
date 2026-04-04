@@ -41,6 +41,24 @@ public final class ProfileStore {
 
   // MARK: - CRUD
 
+  public func saveProfile(_ profile: Profile) async throws {
+    guard let api else { return }
+    let body = ProfileMapper.mapToResponse(profile)
+    let response = try await api.updateProfile(profile.name, body: body)
+    let updated = ProfileMapper.map(response)
+    if let idx = profiles.firstIndex(where: { $0.name == profile.name }) {
+      profiles[idx] = updated
+    }
+  }
+
+  public func createProfile(_ profile: Profile) async throws {
+    guard let api else { return }
+    let body = ProfileMapper.mapToResponse(profile)
+    let response = try await api.createProfile(body)
+    let created = ProfileMapper.map(response)
+    profiles.append(created)
+  }
+
   public func deleteProfile(_ name: String) async throws {
     guard let api else { return }
     try await api.deleteProfile(name)

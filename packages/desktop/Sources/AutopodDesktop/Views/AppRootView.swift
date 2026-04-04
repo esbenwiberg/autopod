@@ -90,6 +90,12 @@ public struct AppRootView: View {
         connectionManager: connectionManager,
         profiles: profileStore.profiles,
         profileError: profileStore.error,
+        onSaveProfile: { profile in
+          Task { try? await profileStore.saveProfile(profile) }
+        },
+        onCreateProfile: { profile in
+          Task { try? await profileStore.createProfile(profile) }
+        },
         isPresented: $showSettings
       )
     }

@@ -33,6 +33,7 @@ public struct TerminalTab: View {
   }
 
   private var isConnected: Bool { terminalState == "connected" }
+  private var isReconnecting: Bool { terminalState.hasPrefix("reconnecting") }
 
   public var body: some View {
     if isActive {
@@ -40,33 +41,35 @@ public struct TerminalTab: View {
         terminalToolbar
         Divider()
 
-        if isConnected, let pipe = dataPipe {
+        if let pipe = dataPipe, (isConnected || isReconnecting) {
+          // Keep the terminal view alive during reconnection so scrollback is preserved
           TerminalEmulatorView(
             dataPipe: pipe,
             onSendData: { bytes in onSendData?(bytes) },
             onResize: { cols, rows in onResize?(cols, rows) }
           )
         } else {
-          // Not yet connected — prompt to connect
+          // Not yet connected — auto-connect on appear, show manual button as fallback
           VStack(spacing: 12) {
-            Image(systemName: "terminal")
-              .font(.system(size: 36))
-              .foregroundStyle(.tertiary)
-            Text(isConnected ? "Connecting…" : "Terminal disconnected")
+            ProgressView()
+              .controlSize(.regular)
+            Text("Connecting…")
               .font(.subheadline)
               .foregroundStyle(.secondary)
-            if !isConnected {
-              Button {
-                onConnect?()
-              } label: {
-                Label("Connect", systemImage: "play.circle")
-              }
-              .buttonStyle(.borderedProminent)
-              .controlSize(.regular)
+            Button {
+              onConnect?()
+            } label: {
+              Label("Retry", systemImage: "arrow.clockwise")
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .foregroundStyle(.secondary)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background(.black)
+          .background(Color(nsColor: NSColor(red: 0.12, green: 0.12, blue: 0.18, alpha: 1)))
+          .onAppear {
+            onConnect?()
+          }
         }
       }
     } else {
@@ -86,10 +89,16 @@ public struct TerminalTab: View {
     }
   }
 
+  private var statusColor: Color {
+    if isConnected { return .green }
+    if isReconnecting { return .yellow }
+    return .red
+  }
+
   private var terminalToolbar: some View {
     HStack(spacing: 8) {
       Circle()
-        .fill(isConnected ? .green : .red)
+        .fill(statusColor)
         .frame(width: 7, height: 7)
       Text(isConnected ? "Connected" : terminalState)
         .font(.caption)
@@ -105,7 +114,7 @@ public struct TerminalTab: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-      } else if isActive {
+      } else if isActive && !isReconnecting {
         Button {
           onConnect?()
         } label: {

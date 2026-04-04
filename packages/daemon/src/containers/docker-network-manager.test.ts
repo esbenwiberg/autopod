@@ -138,12 +138,12 @@ describe('DockerNetworkManager', () => {
     it('adds IP addresses directly without resolution', () => {
       const script = manager.generateFirewallScript(['10.0.0.1']);
       expect(script).toContain('ALLOWED_IPS="$ALLOWED_IPS 10.0.0.1"');
-      expect(script).not.toContain('getent ahosts "10.0.0.1"');
+      expect(script).not.toContain('getent ahostsv4 "10.0.0.1"');
     });
 
     it('uses getent for hostname resolution', () => {
       const script = manager.generateFirewallScript(['api.example.com']);
-      expect(script).toContain('getent ahosts "api.example.com"');
+      expect(script).toContain('getent ahostsv4 "api.example.com"');
     });
 
     it('has DNS allow rules for port 53', () => {
@@ -153,14 +153,14 @@ describe('DockerNetworkManager', () => {
       expect(script).toContain('-p tcp --dport 53');
     });
 
-    it('has a final DROP rule in restricted mode', () => {
+    it('has a final REJECT rule in restricted mode', () => {
       const script = manager.generateFirewallScript([], 'restricted');
-      expect(script).toContain('iptables -A OUTPUT -j DROP');
+      expect(script).toContain('iptables -A OUTPUT -j REJECT');
     });
 
-    it('has a final DROP rule when mode is omitted (defaults to restricted)', () => {
+    it('has a final REJECT rule when mode is omitted (defaults to restricted)', () => {
       const script = manager.generateFirewallScript([]);
-      expect(script).toContain('iptables -A OUTPUT -j DROP');
+      expect(script).toContain('iptables -A OUTPUT -j REJECT');
     });
 
     it('has loopback allow', () => {
@@ -174,9 +174,9 @@ describe('DockerNetworkManager', () => {
     });
 
     describe('allow-all mode', () => {
-      it('has no DROP rule', () => {
+      it('has no REJECT rule', () => {
         const script = manager.generateFirewallScript([], 'allow-all');
-        expect(script).not.toContain('iptables -A OUTPUT -j DROP');
+        expect(script).not.toContain('iptables -A OUTPUT -j REJECT');
       });
 
       it('still allows loopback and established', () => {
@@ -187,15 +187,15 @@ describe('DockerNetworkManager', () => {
 
       it('does not include host resolution or IP allowances', () => {
         const script = manager.generateFirewallScript(['example.com'], 'allow-all');
-        expect(script).not.toContain('getent ahosts');
+        expect(script).not.toContain('getent ahostsv4');
         expect(script).not.toContain('ALLOWED_IPS');
       });
     });
 
     describe('deny-all mode', () => {
-      it('has a DROP rule', () => {
+      it('has a REJECT rule', () => {
         const script = manager.generateFirewallScript([], 'deny-all');
-        expect(script).toContain('iptables -A OUTPUT -j DROP');
+        expect(script).toContain('iptables -A OUTPUT -j REJECT');
       });
 
       it('allows DNS', () => {
@@ -205,7 +205,7 @@ describe('DockerNetworkManager', () => {
 
       it('does not include host resolution or IP allowances', () => {
         const script = manager.generateFirewallScript(['example.com'], 'deny-all');
-        expect(script).not.toContain('getent ahosts');
+        expect(script).not.toContain('getent ahostsv4');
         expect(script).not.toContain('ALLOWED_IPS');
       });
     });
@@ -231,7 +231,7 @@ describe('DockerNetworkManager', () => {
         GATEWAY,
       );
       const script = manager.generateFirewallScript(hosts);
-      expect(script).toContain('getent ahosts "my-company.com"');
+      expect(script).toContain('getent ahostsv4 "my-company.com"');
       expect(script).not.toContain('*.my-company.com');
     });
 

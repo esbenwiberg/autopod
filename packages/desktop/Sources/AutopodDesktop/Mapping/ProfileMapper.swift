@@ -62,4 +62,51 @@ public enum ProfileMapper {
   public static func map(_ responses: [ProfileResponse]) -> [Profile] {
     responses.map { map($0) }
   }
+
+  // MARK: - Profile → ProfileResponse
+
+  public static func mapToResponse(_ profile: Profile) -> ProfileResponse {
+    var r = ProfileResponse()
+    r.name = profile.name
+    r.repoUrl = profile.repoUrl
+    r.defaultBranch = profile.defaultBranch
+    r.template = profile.template.rawValue
+    r.buildCommand = profile.buildCommand
+    r.startCommand = profile.startCommand
+    r.healthPath = profile.healthPath
+    r.healthTimeout = profile.healthTimeout
+    r.smokePages = profile.smokePages.map { .init(path: $0.path, assertions: nil) }
+    r.maxValidationAttempts = profile.maxValidationAttempts
+    r.defaultModel = profile.defaultModel
+    r.defaultRuntime = profile.defaultRuntime.rawValue
+    r.executionTarget = profile.executionTarget.rawValue
+    r.customInstructions = profile.customInstructions
+    r.outputMode = "pr"
+    r.modelProvider = profile.modelProvider.rawValue
+    r.testCommand = profile.testCommand
+    r.buildTimeout = profile.buildTimeout
+    r.testTimeout = profile.testTimeout
+    r.prProvider = profile.prProvider.rawValue
+    r.adoPat = profile.adoPat
+    r.githubPat = profile.githubPat
+    r.registryPat = profile.registryPat
+    r.containerMemoryGb = profile.containerMemoryGb
+    r.mcpServers = profile.mcpServers.map {
+      InjectedMcpServerResponse(name: $0.name, url: $0.url, description: $0.description)
+    }
+    r.claudeMdSections = profile.claudeMdSections.map {
+      InjectedClaudeMdSectionResponse(heading: $0.heading, content: $0.content, priority: nil)
+    }
+    r.skills = profile.skills.map {
+      InjectedSkillResponse(name: $0.name, description: $0.description)
+    }
+    r.privateRegistries = profile.privateRegistries.map {
+      PrivateRegistryResponse(type: $0.type.rawValue, url: $0.url, scope: $0.scope)
+    }
+    if profile.networkEnabled {
+      r.networkPolicy = .init(enabled: true, mode: profile.networkMode.rawValue,
+                              allowedHosts: profile.allowedHosts, replaceDefaults: nil)
+    }
+    return r
+  }
 }

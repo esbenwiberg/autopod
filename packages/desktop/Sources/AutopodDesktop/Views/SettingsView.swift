@@ -36,12 +36,18 @@ public struct SettingsView: View {
     public let connectionManager: ConnectionManager
     public let profiles: [Profile]
     public let profileError: String?
+    public var onSaveProfile: ((Profile) -> Void)?
+    public var onCreateProfile: ((Profile) -> Void)?
     @Binding public var isPresented: Bool
 
-    public init(connectionManager: ConnectionManager, profiles: [Profile], profileError: String? = nil, isPresented: Binding<Bool>) {
+    public init(connectionManager: ConnectionManager, profiles: [Profile], profileError: String? = nil,
+                onSaveProfile: ((Profile) -> Void)? = nil, onCreateProfile: ((Profile) -> Void)? = nil,
+                isPresented: Binding<Bool>) {
         self.connectionManager = connectionManager
         self.profiles = profiles
         self.profileError = profileError
+        self.onSaveProfile = onSaveProfile
+        self.onCreateProfile = onCreateProfile
         self._isPresented = isPresented
     }
 
@@ -209,7 +215,7 @@ public struct SettingsView: View {
                 .padding(.vertical, 8)
                 .background(Color.red.opacity(0.08))
             }
-            ProfileListView(profiles: profiles)
+            ProfileListView(profiles: profiles, onSave: onSaveProfile, onCreate: onCreateProfile)
         }
     }
 

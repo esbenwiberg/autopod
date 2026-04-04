@@ -936,7 +936,7 @@ describe('SessionManager', () => {
         const volumes = spawnCalls[0]?.[0]?.volumes;
         expect(volumes).toEqual(
           expect.arrayContaining([
-            expect.objectContaining({ host: '/tmp/worktree/existing', container: '/workspace' }),
+            expect.objectContaining({ host: '/tmp/worktree/existing', container: '/mnt/worktree' }),
           ]),
         );
 

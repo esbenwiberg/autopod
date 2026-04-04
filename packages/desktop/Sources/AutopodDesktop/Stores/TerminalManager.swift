@@ -40,6 +40,7 @@ public final class TerminalManager {
           case .disconnected: self?.state = "disconnected"
           case .connecting: self?.state = "connecting"
           case .connected: self?.state = "connected"
+          case .reconnecting(let attempt): self?.state = "reconnecting (\(attempt))"
           case .error(let msg): self?.state = "error: \(msg)"
           }
         }

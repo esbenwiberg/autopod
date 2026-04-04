@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     iptables \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 (for npm frontend builds)

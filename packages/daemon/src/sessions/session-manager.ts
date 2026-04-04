@@ -39,7 +39,11 @@ import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask } from './recovery-context.js';
-import { buildRegistryFiles, validateRegistryFiles } from './registry-injector.js';
+import {
+  buildRegistryFiles,
+  patchWorkspaceNuGetCredentials,
+  validateRegistryFiles,
+} from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
 import { resolveSkills } from './skill-resolver.js';
@@ -313,6 +317,27 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     }
   }
 
+  /**
+   * Copy workspace changes from container back to the host worktree (bind mount).
+   * The worktree is bind-mounted at /mnt/worktree while the agent works on the
+   * container's native /workspace (overlayfs) — this avoids VirtioFS getcwd() bugs
+   * on Docker Desktop for Mac. We sync back before any host-side git operations.
+   */
+  async function syncWorkspaceBack(
+    containerId: string,
+    cm: ContainerManager,
+  ): Promise<void> {
+    await cm.execInContainer(
+      containerId,
+      [
+        'sh',
+        '-c',
+        'find /mnt/worktree -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -a /workspace/. /mnt/worktree/',
+      ],
+      { timeout: 120_000 },
+    );
+  }
+
   function emitActivityStatus(sessionId: string, message: string): void {
     eventBus.emit({
       type: 'session.agent_activity',
@@ -495,7 +520,14 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const containerEnv: Record<string, string> = {
           SESSION_ID: sessionId,
           PORT: String(CONTAINER_APP_PORT),
-          ...(isDotnet ? { MSBUILDNODECOUNT: '4' } : {}),
+          ...(isDotnet
+            ? {
+                MSBUILDNODECOUNT: '4',
+                // Disable MSBuild's TerminalLogger — it crashes with ArgumentOutOfRangeException
+                // when terminal dimensions are unavailable (non-TTY exec contexts).
+                MSBUILDTERMINALLOGGER: 'false',
+              }
+            : {}),
         };
 
         const containerId = await containerManager.spawn({
@@ -504,7 +536,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           env: containerEnv,
           ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
           volumes: [
-            { host: worktreePath, container: '/workspace' },
+            { host: worktreePath, container: '/mnt/worktree' },
             { host: bareRepoPath, container: bareRepoPath },
           ],
           networkName,
@@ -513,6 +545,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             ? profile.containerMemoryGb * 1024 * 1024 * 1024
             : undefined,
         });
+
+        // Copy worktree content from bind mount to container's native filesystem.
+        // VirtioFS bind mounts break getcwd() on Docker Desktop for Mac — overlayfs does not.
+        emitStatus('Populating workspace…');
+        await containerManager.execInContainer(
+          containerId,
+          ['cp', '-a', '/mnt/worktree/.', '/workspace/'],
+          { timeout: 120_000 },
+        );
 
         const previewUrl = `http://localhost:${hostPort}`;
         session = transition(session, 'running', {
@@ -645,7 +686,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Write private registry config files (.npmrc / NuGet.config) to user-level
         // paths inside the container so the workspace's own config is never overwritten.
-        const registryFiles = buildRegistryFiles(profile.privateRegistries, profile.registryPat);
+        // Fall back to adoPat when registryPat isn't set — they're usually the same
+        // PAT for ADO-hosted feeds, and requiring both is a footgun.
+        const effectiveRegistryPat = profile.registryPat ?? profile.adoPat ?? null;
+        const registryFiles = buildRegistryFiles(profile.privateRegistries, effectiveRegistryPat);
         for (const file of registryFiles) {
           await containerManager.writeFile(containerId, file.path, file.content);
           logger.info(
@@ -668,6 +712,22 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               sessionId,
               `⚠ Registry config check failed: ${(regErr as Error).message}`,
             );
+          }
+        }
+
+        // Patch workspace NuGet.config files with ADO credentials — repos that use
+        // <clear /> in their config wipe user-level sources, so we inject credentials
+        // directly into the workspace config for any ADO feeds it defines.
+        if (effectiveRegistryPat && isDotnet) {
+          try {
+            await patchWorkspaceNuGetCredentials(
+              containerManager,
+              containerId,
+              effectiveRegistryPat,
+              logger,
+            );
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to patch workspace NuGet credentials');
           }
         }
 
@@ -855,6 +915,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         session.status === 'failed'
       ) {
         return;
+      }
+
+      // Sync workspace back to host worktree before any host-side git reads
+      if (session.containerId && session.worktreePath) {
+        try {
+          const cm = containerManagerFactory.get(session.executionTarget);
+          await syncWorkspaceBack(session.containerId, cm);
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Failed to sync workspace back to host');
+        }
       }
 
       // Get diff stats (compare branch against base to catch committed changes)
@@ -1167,6 +1237,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
 
+      // Sync workspace changes back to host worktree before pushing
+      if (session.containerId && session.worktreePath) {
+        try {
+          const cm = containerManagerFactory.get(session.executionTarget);
+          await syncWorkspaceBack(session.containerId, cm);
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Failed to sync workspace before push');
+        }
+      }
+
       // Push the branch to origin before completing, then clean up the worktree.
       // Only remove the worktree if push succeeds — don't lose uncommitted work.
       let pushError: string | undefined;
@@ -1283,6 +1363,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           await cm.start(session.containerId);
         }
 
+        // Sync workspace back before reading diff/commit log from host worktree
+        if (session.worktreePath) {
+          try {
+            const cm = containerManagerFactory.get(session.executionTarget);
+            await syncWorkspaceBack(session.containerId, cm);
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to sync workspace before validation');
+          }
+        }
+
         // Get the actual diff and commit log for AI task review
         const [diff, commitLog] = session.worktreePath
           ? await Promise.all([
@@ -1340,7 +1430,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           };
         }
 
-        // Collect screenshots from the host worktree (volume-mounted from container)
+        // Sync workspace after validation — screenshots and build artifacts are now in /workspace
+        if (session.worktreePath) {
+          try {
+            const cm = containerManagerFactory.get(session.executionTarget);
+            await syncWorkspaceBack(session.containerId, cm);
+          } catch (err) {
+            logger.warn({ err, sessionId }, 'Failed to sync workspace after validation');
+          }
+        }
+
+        // Collect screenshots from the host worktree
         if (session.worktreePath && result.smoke.pages.length > 0) {
           try {
             const screenshots = await collectScreenshots(session.worktreePath, result.smoke.pages);

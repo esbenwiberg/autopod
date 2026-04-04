@@ -14,9 +14,11 @@ export const DEFAULT_ALLOWED_HOSTS = [
   'api.openai.com',
   'registry.npmjs.org',
   'pypi.org',
-  // NuGet (.NET package registry + CDN)
+  // NuGet (.NET package registry + CDN + Azure Front Door)
   'api.nuget.org',
   'globalcdn.nuget.org',
+  'azurefd.net',
+  'nupkg.nuget.org',
   'github.com',
   'objects.githubusercontent.com',
   'raw.githubusercontent.com',
@@ -123,8 +125,8 @@ export class DockerNetworkManager {
    * Generate an iptables firewall script. Behaviour depends on mode:
    *
    * - 'allow-all'  — flush rules, allow loopback + established; no DROP (open egress)
-   * - 'deny-all'   — flush rules, allow loopback + established + DNS, DROP everything else
-   * - 'restricted' — (default) resolve allowed hosts to IPs, allow them, DROP the rest
+   * - 'deny-all'   — flush rules, allow loopback + established + DNS, REJECT everything else
+   * - 'restricted' — (default) resolve allowed hosts to IPs, allow them, REJECT the rest
    *
    * The script is idempotent: it always flushes OUTPUT before re-applying rules,
    * making it safe to re-exec on a running container for live policy updates.
@@ -156,8 +158,8 @@ export class DockerNetworkManager {
 
     if (mode === 'deny-all') {
       lines.push('');
-      lines.push('# Drop everything else outbound');
-      lines.push('iptables -A OUTPUT -j DROP');
+      lines.push('# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)');
+      lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
       lines.push('');
       lines.push('echo "Firewall: deny-all mode — all outbound blocked"');
       return lines.join('\n');
@@ -179,10 +181,17 @@ export class DockerNetworkManager {
       if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
         lines.push(`ALLOWED_IPS="$ALLOWED_IPS ${host}"`);
       } else {
+        // Resolve to IPv4 only (iptables v4 chokes on IPv6) and expand each IP to
+        // its /24 subnet. CDNs (NuGet, npm, etc.) rotate IPs via DNS load balancing —
+        // a single resolved IP goes stale within minutes. /24 covers rotation within
+        // the same datacenter, which is fine for egress filtering.
         lines.push(
-          `for ip in $(getent ahosts "${host}" 2>/dev/null | awk '{print $1}' | sort -u); do`,
+          `for ip in $(getent ahostsv4 "${host}" 2>/dev/null | awk '{print $1}' | sort -u); do`,
         );
-        lines.push(`  ALLOWED_IPS="$ALLOWED_IPS $ip"`);
+        lines.push(
+          `  cidr=$(echo "$ip" | awk -F. '{print $1"."$2"."$3".0/24"}')`,
+        );
+        lines.push(`  ALLOWED_IPS="$ALLOWED_IPS $cidr"`);
         lines.push('done');
       }
     }
@@ -193,8 +202,8 @@ export class DockerNetworkManager {
     lines.push('  iptables -A OUTPUT -d "$ip" -j ACCEPT');
     lines.push('done');
     lines.push('');
-    lines.push('# Drop everything else outbound');
-    lines.push('iptables -A OUTPUT -j DROP');
+    lines.push('# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)');
+    lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
     lines.push('');
     lines.push('echo "Firewall rules applied: $(echo $ALLOWED_IPS | wc -w) IPs allowed"');
 

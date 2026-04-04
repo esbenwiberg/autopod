@@ -48,13 +48,18 @@ public struct DetailPanelView: View {
 
             Divider()
 
-            // Tab content
-            Group {
+            // Tab content — terminal is kept alive across tab switches so the
+            // SwiftTerm NSView (and its scrollback buffer) isn't destroyed.
+            ZStack {
                 switch selectedTab {
-                case .overview:  OverviewTab(session: session, events: events, actions: actions)
-                case .logs:      LogStreamView(events: events, sessionBranch: session.branch)
-                case .diff:      DiffTab(session: session, diffString: diffString)
-                case .terminal:  TerminalTab(
+                case .overview:   OverviewTab(session: session, events: events, actions: actions)
+                case .logs:       LogStreamView(events: events, sessionBranch: session.branch)
+                case .diff:       DiffTab(session: session, diffString: diffString)
+                case .validation: ValidationTab(session: session)
+                case .terminal:   EmptyView()
+                }
+
+                TerminalTab(
                     session: session,
                     terminalState: terminalState,
                     dataPipe: terminalDataPipe,
@@ -63,8 +68,8 @@ public struct DetailPanelView: View {
                     onConnect: onTerminalConnect,
                     onDisconnect: onTerminalDisconnect
                 )
-                case .validation: ValidationTab(session: session)
-                }
+                .opacity(selectedTab == .terminal ? 1 : 0)
+                .allowsHitTesting(selectedTab == .terminal)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

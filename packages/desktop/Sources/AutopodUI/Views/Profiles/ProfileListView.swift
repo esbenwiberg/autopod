@@ -3,7 +3,11 @@ import SwiftUI
 /// Profile list — shows all profiles with quick stats, click to edit.
 public struct ProfileListView: View {
     public let profiles: [Profile]
-    public init(profiles: [Profile]) { self.profiles = profiles }
+    public var onSave: ((Profile) -> Void)?
+    public var onCreate: ((Profile) -> Void)?
+    public init(profiles: [Profile], onSave: ((Profile) -> Void)? = nil, onCreate: ((Profile) -> Void)? = nil) {
+        self.profiles = profiles; self.onSave = onSave; self.onCreate = onCreate
+    }
 
     @State private var selectedProfile: Profile?
     @State private var showCreateSheet = false
@@ -46,12 +50,13 @@ public struct ProfileListView: View {
             }
         }
         .sheet(item: $selectedProfile) { profile in
-            ProfileEditorView(profile: profile, isNew: false)
+            ProfileEditorView(profile: profile, isNew: false, onSave: onSave)
         }
         .sheet(isPresented: $showCreateSheet) {
             ProfileEditorView(
                 profile: Profile(name: "", repoUrl: ""),
-                isNew: true
+                isNew: true,
+                onSave: onCreate
             )
         }
     }

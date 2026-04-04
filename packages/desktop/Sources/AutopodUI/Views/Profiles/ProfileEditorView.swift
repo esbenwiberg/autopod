@@ -94,10 +94,12 @@ struct HelpBadge: View {
 public struct ProfileEditorView: View {
     @State public var profile: Profile
     public let isNew: Bool
+    public var onSave: ((Profile) -> Void)?
 
-    public init(profile: Profile, isNew: Bool) {
+    public init(profile: Profile, isNew: Bool, onSave: ((Profile) -> Void)? = nil) {
         self._profile = State(initialValue: profile)
         self.isNew = isNew
+        self.onSave = onSave
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -233,7 +235,10 @@ public struct ProfileEditorView: View {
             Spacer()
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
-            Button(isNew ? "Create" : "Save") { dismiss() }
+            Button(isNew ? "Create" : "Save") {
+                onSave?(profile)
+                dismiss()
+            }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(isNew && profile.name.isEmpty)

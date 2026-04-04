@@ -28,9 +28,7 @@ public struct TerminalEmulatorView: NSViewRepresentable {
 
   public func makeNSView(context: Context) -> TerminalView {
     let tv = TerminalView(frame: .zero)
-    tv.configureNativeColors()
-    tv.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-    tv.nativeScroller = true
+    Self.applyTheme(tv)
     tv.terminalDelegate = context.coordinator
 
     // Register to receive data from the pipe
@@ -38,14 +36,24 @@ public struct TerminalEmulatorView: NSViewRepresentable {
       tv.feed(byteArray: ArraySlice(bytes))
     }
 
-    // Report initial size after layout settles
-    let resizeCb = onResize
-    DispatchQueue.main.async(execute: DispatchWorkItem {
-      let dims = tv.getTerminal().getDims()
-      resizeCb(dims.cols, dims.rows)
-    })
+    // Report initial size once SwiftTerm has a real frame (not .zero).
+    // The view isn't laid out yet inside makeNSView, so getDims() returns
+    // garbage (e.g. cols=-2). Wait for the first sizeChanged delegate call instead.
 
     return tv
+  }
+
+  // MARK: - Theme
+
+  private static func applyTheme(_ tv: TerminalView) {
+    // Dark terminal with warm tones (Catppuccin Mocha-inspired)
+    tv.nativeBackgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.18, alpha: 1) // #1e1e2e
+    tv.nativeForegroundColor = NSColor(red: 0.80, green: 0.81, blue: 0.89, alpha: 1) // #cdd6f4
+    tv.caretColor = NSColor(red: 0.95, green: 0.55, blue: 0.66, alpha: 1)            // #f38ba8
+    tv.caretTextColor = NSColor(red: 0.12, green: 0.12, blue: 0.18, alpha: 1)        // match bg
+
+    // Font — SF Mono at a comfortable size with relaxed line spacing
+    tv.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
   }
 
   public func updateNSView(_ tv: TerminalView, context: Context) {
