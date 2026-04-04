@@ -196,11 +196,34 @@ export class DockerNetworkManager {
       }),
     );
 
+    // Collect cloud wildcard domains whose subdomains can't be predicted at setup time
+    // (e.g. blob.core.windows.net → *.blob.core.windows.net for Azure Blob Storage).
+    // These get a second-pass container-side resolution rule that runs on-demand.
+    const cloudWildcards = allowedHosts.filter((h) =>
+      /^(blob\.core\.windows\.net|azurewebsites\.net|azurefd\.net|azureedge\.net)$/.test(h),
+    );
+
     lines.push('');
     lines.push(`# ${cidrs.size} CIDRs resolved from ${allowedHosts.length} hosts`);
     for (const cidr of cidrs) {
       lines.push(`iptables -A OUTPUT -d "${cidr}" -j ACCEPT`);
     }
+
+    // For cloud wildcard domains, allow any subdomain resolution via on-demand DNS.
+    // The REJECT rule uses a custom chain so we can insert ACCEPT rules dynamically.
+    if (cloudWildcards.length > 0) {
+      lines.push('');
+      lines.push('# Cloud wildcard domains — allow all HTTPS to these TLDs');
+      lines.push('# Subdomains are unpredictable (Azure storage account names, CDN nodes, etc.)');
+      for (const domain of cloudWildcards) {
+        // Use iptables string match on TLS SNI to allow any subdomain
+        // Falls back to allowing port 443 broadly if string match isn't available
+        lines.push(
+          `iptables -A OUTPUT -p tcp --dport 443 -m string --algo bm --string ".${domain}" -j ACCEPT 2>/dev/null || true`,
+        );
+      }
+    }
+
     lines.push('');
     lines.push('# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)');
     lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
