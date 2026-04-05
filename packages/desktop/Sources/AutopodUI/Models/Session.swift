@@ -69,6 +69,63 @@ public struct DiffStats: Sendable {
     }
 }
 
+// MARK: - Validation detail types
+
+public struct HealthCheckDetail: Sendable {
+    public let status: String
+    public let url: String
+    public let responseCode: Int?
+    public let duration: Int
+    public init(status: String, url: String, responseCode: Int?, duration: Int) {
+        self.status = status; self.url = url
+        self.responseCode = responseCode; self.duration = duration
+    }
+}
+
+public struct AssertionDetail: Sendable {
+    public let selector: String
+    public let type: String
+    public let expected: String?
+    public let actual: String?
+    public let passed: Bool
+    public init(selector: String, type: String, expected: String?, actual: String?, passed: Bool) {
+        self.selector = selector; self.type = type
+        self.expected = expected; self.actual = actual; self.passed = passed
+    }
+}
+
+public struct PageDetail: Sendable {
+    public let path: String
+    public let status: String
+    public let consoleErrors: [String]
+    public let assertions: [AssertionDetail]
+    public let loadTime: Int
+    public init(path: String, status: String, consoleErrors: [String], assertions: [AssertionDetail], loadTime: Int) {
+        self.path = path; self.status = status
+        self.consoleErrors = consoleErrors; self.assertions = assertions; self.loadTime = loadTime
+    }
+}
+
+public struct AcCheckDetail: Sendable {
+    public let criterion: String
+    public let passed: Bool
+    public let reasoning: String
+    public init(criterion: String, passed: Bool, reasoning: String) {
+        self.criterion = criterion; self.passed = passed; self.reasoning = reasoning
+    }
+}
+
+public struct RequirementCheckDetail: Sendable {
+    public let criterion: String
+    public let met: Bool
+    public let note: String?
+    public init(criterion: String, met: Bool, note: String?) {
+        self.criterion = criterion; self.met = met; self.note = note
+    }
+}
+
+// MARK: - Validation checks
+
 public struct ValidationChecks: Sendable {
     public let smoke: Bool
     public let tests: Bool
@@ -77,17 +134,30 @@ public struct ValidationChecks: Sendable {
     public let testOutput: String?
     public let reviewIssues: [String]?
     public let reviewReasoning: String?
+    public let healthCheck: HealthCheckDetail?
+    public let pages: [PageDetail]?
+    public let acValidation: Bool?
+    public let acChecks: [AcCheckDetail]?
+    public let requirementsCheck: [RequirementCheckDetail]?
     public init(
         smoke: Bool, tests: Bool, review: Bool,
         buildOutput: String? = nil, testOutput: String? = nil,
-        reviewIssues: [String]? = nil, reviewReasoning: String? = nil
+        reviewIssues: [String]? = nil, reviewReasoning: String? = nil,
+        healthCheck: HealthCheckDetail? = nil,
+        pages: [PageDetail]? = nil,
+        acValidation: Bool? = nil,
+        acChecks: [AcCheckDetail]? = nil,
+        requirementsCheck: [RequirementCheckDetail]? = nil
     ) {
         self.smoke = smoke; self.tests = tests; self.review = review
         self.buildOutput = buildOutput; self.testOutput = testOutput
         self.reviewIssues = reviewIssues; self.reviewReasoning = reviewReasoning
+        self.healthCheck = healthCheck; self.pages = pages
+        self.acValidation = acValidation; self.acChecks = acChecks
+        self.requirementsCheck = requirementsCheck
     }
 
-    public var allPassed: Bool { smoke && tests && review }
+    public var allPassed: Bool { smoke && tests && review && (acValidation ?? true) }
 }
 
 public struct PhaseProgress: Sendable {

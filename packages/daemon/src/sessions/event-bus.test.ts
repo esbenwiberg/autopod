@@ -155,6 +155,27 @@ describe('event-bus', () => {
     expect(received).toHaveLength(1);
   });
 
+  it('delivers event twice when same callback is both global and session subscriber', () => {
+    const repo = createMockEventRepo();
+    const bus = createEventBus(repo, logger);
+
+    // This demonstrates the bug: if a single callback is registered as both
+    // a global subscriber AND a session-scoped subscriber, it receives
+    // every session event twice. The fix lives in websocket.ts which avoids
+    // registering the duplicate subscription.
+    const received: SystemEvent[] = [];
+    const callback = (e: SystemEvent) => received.push(e);
+
+    bus.subscribe(callback);
+    bus.subscribeToSession('s1', callback);
+
+    bus.emit(makeStatusEvent('s1'));
+
+    // The event bus correctly delivers to both subscriber sets — it's the
+    // caller's responsibility not to register the same callback in both.
+    expect(received).toHaveLength(2);
+  });
+
   it('cleans up session subscriber map when last subscriber removed', () => {
     const repo = createMockEventRepo();
     const bus = createEventBus(repo, logger);

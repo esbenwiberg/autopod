@@ -17,14 +17,13 @@ public struct CreateSessionSheet: View {
 
     @State private var selectedProfile = "my-app"
     @State private var task = ""
-    @State private var selectedModel = "claude-opus"
+    @State private var modelText = ""
     @State private var outputMode = "pr"
     @State private var baseBranch = ""
     @State private var acFromPath = ""
     @State private var criteria: [String] = [""]
 
     private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
-    private let models = ["claude-opus", "claude-sonnet"]
     private let outputs = [("pr", "Worker (PR)"), ("workspace", "Workspace (Interactive)"), ("artifact", "Artifact")]
 
     private var isWorkspace: Bool { outputMode == "workspace" }
@@ -78,13 +77,18 @@ public struct CreateSessionSheet: View {
                             .labelsHidden()
                         }
                         if !isWorkspace {
-                            formSection("Model") {
-                                Picker("", selection: $selectedModel) {
-                                    ForEach(models, id: \.self) { m in
-                                        Text(m).tag(m)
-                                    }
+                            formSection("Model (optional)") {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "cpu")
+                                        .foregroundStyle(.tertiary)
+                                        .font(.system(size: 11))
+                                    TextField("profile default", text: $modelText)
+                                        .textFieldStyle(.plain)
+                                        .font(.system(.callout, design: .monospaced))
                                 }
-                                .labelsHidden()
+                                .padding(8)
+                                .background(Color(nsColor: .controlBackgroundColor))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
                             }
                         }
                     }
@@ -220,8 +224,9 @@ public struct CreateSessionSheet: View {
                 Button(isWorkspace ? "Create Workspace" : "Create Session") {
                     Task {
                         let ac = criteria.filter { !$0.isEmpty }
+                        let model = modelText.trimmingCharacters(in: .whitespacesAndNewlines)
                         _ = await actions.createSession(
-                            selectedProfile, task, selectedModel,
+                            selectedProfile, task, model.isEmpty ? nil : model,
                             outputMode, ac.isEmpty ? nil : ac,
                             baseBranch.isEmpty ? nil : baseBranch,
                             acFromPath.isEmpty ? nil : acFromPath

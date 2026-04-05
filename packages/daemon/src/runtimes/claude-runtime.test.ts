@@ -90,6 +90,35 @@ describe('ClaudeRuntime', () => {
       expect(args).toContain('stream-json');
       expect(args).toContain('--permission-mode');
       expect(args).toContain('bypassPermissions');
+      expect(args).toContain('--append-system-prompt-file');
+      expect(args).toContain('/home/autopod/.autopod/system-instructions.md');
+    });
+
+    it('resolves short model aliases to full model IDs', () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      const buildArgs = (model: string) =>
+        (
+          runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+        ).buildSpawnArgs({
+          sessionId: 'abc',
+          task: 'task',
+          model,
+          workDir: '/workspace',
+          containerId: 'c1',
+          env: {},
+        });
+
+      // Short aliases → full model IDs
+      expect(buildArgs('sonnet')).toContain('claude-sonnet-4-6');
+      expect(buildArgs('opus')).toContain('claude-opus-4-6');
+      expect(buildArgs('haiku')).toContain('claude-haiku-4-5');
+
+      // Full model IDs pass through unchanged
+      expect(buildArgs('claude-sonnet-4-5')).toContain('claude-sonnet-4-5');
+      expect(buildArgs('claude-opus-4-6')).toContain('claude-opus-4-6');
     });
 
     it('includes --session-id flag', () => {
@@ -213,6 +242,8 @@ describe('ClaudeRuntime', () => {
 
       expect(args).toContain('--resume');
       expect(args).toContain('claude-session-xyz');
+      expect(args).toContain('--append-system-prompt-file');
+      expect(args).toContain('/home/autopod/.autopod/system-instructions.md');
     });
 
     it('omits --resume when claudeSessionId is undefined', () => {

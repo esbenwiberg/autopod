@@ -634,12 +634,14 @@ describe('Session Lifecycle E2E', () => {
 
       await manager.processSession(session.id);
 
-      // The CLAUDE.md written to the container should mention available actions
+      // The system instructions written to the container should mention available actions
       const writeFileCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
-      const claudeMdCall = writeFileCalls.find((c) => c[1] === '/workspace/CLAUDE.md');
-      expect(claudeMdCall).toBeDefined();
-      const claudeMdContent = claudeMdCall?.[2] as string;
-      expect(claudeMdContent).toContain('search_docs');
+      const instructionsCall = writeFileCalls.find(
+        (c) => c[1] === '/home/autopod/.autopod/system-instructions.md',
+      );
+      expect(instructionsCall).toBeDefined();
+      const instructionsContent = instructionsCall?.[2] as string;
+      expect(instructionsContent).toContain('search_docs');
     });
   });
 

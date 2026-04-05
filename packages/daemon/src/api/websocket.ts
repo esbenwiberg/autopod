@@ -64,9 +64,14 @@ export function websocketHandler(
         const msg = JSON.parse(data.toString());
 
         if (msg.type === 'subscribe' && msg.sessionId) {
-          const unsub = eventBus.subscribeToSession(msg.sessionId, sendEvent);
+          // Only register a session-scoped subscription if the client doesn't already
+          // have a global subscription — otherwise the same event gets delivered twice
+          // (once via global, once via session-scoped).
+          if (!client.subscriptions.has('*')) {
+            const unsub = eventBus.subscribeToSession(msg.sessionId, sendEvent);
+            client.unsubscribers.set(msg.sessionId, unsub);
+          }
           client.subscriptions.add(msg.sessionId);
-          client.unsubscribers.set(msg.sessionId, unsub);
           socket.send(JSON.stringify({ type: 'subscribed', sessionId: msg.sessionId }));
         } else if (msg.type === 'unsubscribe' && msg.sessionId) {
           const unsub = client.unsubscribers.get(msg.sessionId);

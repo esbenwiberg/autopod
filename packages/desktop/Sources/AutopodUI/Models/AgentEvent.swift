@@ -3,10 +3,10 @@ import SwiftUI
 // MARK: - Event types (aligned with packages/shared/src/types/runtime.ts)
 
 public enum AgentEventType: String, Sendable {
-    case status       // AgentStatusEvent — state transitions
-    case toolUse      // AgentToolUseEvent — tool calls (Read, Edit, Bash, etc.)
-    case toolResult   // tool_result acks — filtered out in UI (noise)
-    case fileChange   // AgentFileChangeEvent — file created/modified/deleted
+    case status                    // AgentStatusEvent — state transitions
+    case toolUse = "tool_use"      // AgentToolUseEvent — tool calls (Read, Edit, Bash, etc.)
+    case toolResult = "tool_result" // tool_result acks — filtered out in UI (noise)
+    case fileChange = "file_change" // AgentFileChangeEvent — file created/modified/deleted
     case escalation   // AgentEscalationEvent — ask_human / ask_ai / report_blocker
     case plan         // AgentPlanEvent — plan summary with steps
     case progress     // AgentProgressEvent — phase progress tracking

@@ -16,6 +16,7 @@ import type {
   SessionStatus,
 } from '@autopod/shared';
 import {
+  AUTOPOD_INSTRUCTIONS_PATH,
   AutopodError,
   CONTAINER_HOME_DIR,
   DEFAULT_CONTAINER_MEMORY_GB,
@@ -704,12 +705,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           injectedSkills: mergedSkills.filter((s) => resolvedSkillNames.includes(s.name)),
         });
 
-        // Claude reads CLAUDE.md from the workspace; Copilot reads copilot-instructions.md
-        // (passed via customInstructions in SpawnConfig — written by the runtime)
-        if (session.runtime === 'claude') {
-          emitStatus('Writing CLAUDE.md to container…');
-          await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', systemInstructions);
-        }
+        // Write system instructions to a path outside /workspace so the repo's own
+        // CLAUDE.md / copilot-instructions.md is never overwritten.
+        // Claude CLI reads this via --append-system-prompt-file; Copilot via customInstructions.
+        emitStatus('Writing system instructions to container…');
+        await containerManager.writeFile(containerId, AUTOPOD_INSTRUCTIONS_PATH, systemInstructions);
 
         // Generate a session-scoped token so the container can authenticate its MCP calls.
         // The token is passed as Authorization: Bearer on the escalation MCP server config
@@ -782,6 +782,30 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const runtime = runtimeRegistry.get(session.runtime);
         let events: AsyncIterable<AgentEvent>;
 
+        // For Copilot, defensively merge the repo's own instructions (if any) with ours.
+        // We can't be sure Copilot CLI reads both $COPILOT_HOME/copilot-instructions.md
+        // and .github/copilot-instructions.md, so prepend the repo's file to be safe.
+        let copilotInstructions: string | undefined;
+        if (session.runtime === 'copilot') {
+          copilotInstructions = systemInstructions;
+          try {
+            const repoInstructions = await containerManager.readFile(
+              containerId,
+              '/workspace/.github/copilot-instructions.md',
+            );
+            if (repoInstructions.trim()) {
+              copilotInstructions =
+                repoInstructions + '\n\n---\n\n' + systemInstructions;
+              logger.info(
+                { sessionId },
+                'Merged repo copilot-instructions.md with autopod system instructions',
+              );
+            }
+          } catch {
+            // No repo-level copilot instructions — use ours as-is
+          }
+        }
+
         if (isRecovery && session.runtime === 'claude' && session.claudeSessionId) {
           // Attempt Claude --resume with persisted session ID
           emitStatus('Resuming Claude session…');
@@ -804,7 +828,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               model: session.model,
               workDir: '/workspace',
               containerId,
-              customInstructions: session.runtime === 'copilot' ? systemInstructions : undefined,
+              customInstructions: copilotInstructions,
               env: secretEnv,
               mcpServers,
             });
@@ -818,7 +842,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             model: session.model,
             workDir: '/workspace',
             containerId,
-            customInstructions: session.runtime === 'copilot' ? systemInstructions : undefined,
+            customInstructions: copilotInstructions,
             env: secretEnv,
             mcpServers,
           });
@@ -830,7 +854,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             model: session.model,
             workDir: '/workspace',
             containerId,
-            customInstructions: session.runtime === 'copilot' ? systemInstructions : undefined,
+            customInstructions: copilotInstructions,
             env: secretEnv,
             mcpServers,
           });
@@ -1693,6 +1717,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             `Validation failed (attempt ${attempt}/${profile.maxValidationAttempts}) — retrying`,
           );
           // Build correction message with structured feedback for the agent
+          emitActivityStatus(sessionId, 'Sending validation feedback to agent…');
           const cm = containerManagerFactory.get(s2.executionTarget);
           const correctionMessage = await buildCorrectionMessage(s2, profile, result, cm);
 
@@ -1700,11 +1725,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           transition(s2, 'running');
 
           // Resume the agent with correction feedback
+          emitActivityStatus(sessionId, 'Agent working on fixes…');
           const resumeEnv = await getResumeEnv(s2);
           const runtime = runtimeRegistry.get(s2.runtime);
           if (!s2.containerId) throw new Error(`Session ${sessionId} has no container`);
           const events = runtime.resume(sessionId, correctionMessage, s2.containerId, resumeEnv);
           await this.consumeAgentEvents(sessionId, events);
+          emitActivityStatus(sessionId, 'Agent finished applying fixes');
           await this.handleCompletion(sessionId);
 
           logger.info(

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { AUTOPOD_INSTRUCTIONS_PATH } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -201,12 +202,21 @@ export class ClaudeRuntime implements Runtime {
     this.claudeSessionIds.set(sessionId, claudeSessionId);
   }
 
+  private resolveModelId(model: string): string {
+    const aliases: Record<string, string> = {
+      opus: 'claude-opus-4-6',
+      sonnet: 'claude-sonnet-4-6',
+      haiku: 'claude-haiku-4-5',
+    };
+    return aliases[model] ?? model;
+  }
+
   private buildSpawnArgs(config: SpawnConfig): string[] {
     const args = [
       '-p',
       config.task,
       '--model',
-      config.model,
+      this.resolveModelId(config.model),
       '--output-format',
       'stream-json',
       '--verbose',
@@ -220,6 +230,9 @@ export class ClaudeRuntime implements Runtime {
 
     // Deterministic session ID for tracking
     args.push('--session-id', randomUUID());
+
+    // Inject autopod system instructions without overwriting the repo's CLAUDE.md
+    args.push('--append-system-prompt-file', AUTOPOD_INSTRUCTIONS_PATH);
 
     // MCP server configuration
     if (config.mcpServers && config.mcpServers.length > 0) {
@@ -254,6 +267,9 @@ export class ClaudeRuntime implements Runtime {
     if (process.env.AUTOPOD_DEBUG_AGENT === '1') {
       args.push('--debug');
     }
+
+    // Inject autopod system instructions without overwriting the repo's CLAUDE.md
+    args.push('--append-system-prompt-file', AUTOPOD_INSTRUCTIONS_PATH);
 
     if (claudeSessionId) {
       args.push('--resume', claudeSessionId);

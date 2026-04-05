@@ -160,7 +160,7 @@ public final class ActionHandler {
   }
 
   public func createSession(
-    profileName: String, task: String, model: String,
+    profileName: String, task: String, model: String?,
     outputMode: String?, acceptanceCriteria: [String]?,
     baseBranch: String?, acFrom: String?
   ) async -> String? {
@@ -168,7 +168,7 @@ public final class ActionHandler {
     let req = CreateSessionRequest(
       profileName: profileName,
       task: task,
-      model: model,
+      model: model?.isEmpty == true ? nil : model,
       acceptanceCriteria: acceptanceCriteria?.filter { !$0.isEmpty },
       outputMode: outputMode,
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,

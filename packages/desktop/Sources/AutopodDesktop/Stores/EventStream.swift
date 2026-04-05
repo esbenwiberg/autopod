@@ -208,21 +208,29 @@ public final class EventStream {
   }
 
   private func mapAgentEvent(_ response: AgentEventResponse, id: Int) -> AgentEvent {
-    let type = AgentEventType(rawValue: response.type) ?? .output
+    var type = AgentEventType(rawValue: response.type) ?? .output
+    // tool_result events arrive as {type: "tool_use", tool: "tool_result"} from the stream parser
+    if type == .toolUse && response.tool == "tool_result" {
+      type = .toolResult
+    }
     let date = SessionMapper.parseDate(response.timestamp)
 
     let summary: String = {
       switch response.type {
       case "status": return response.message ?? "Status update"
-      case "tool_use": return response.tool.map { "Used \($0)" } ?? "Tool use"
+      case "tool_use":
+        guard let tool = response.tool else { return "Tool use" }
+        let detail = EventStream.toolSummary(tool: tool, input: response.input)
+        return detail.map { "\(tool) \(EventStream.truncate($0, max: 100))" } ?? tool
       case "file_change":
         let action = response.action ?? "changed"
-        return response.path.map { "\(action) \($0)" } ?? "File changed"
+        let path = response.path.map { EventStream.shortenPath($0) } ?? "file"
+        return "\(action) \(path)"
       case "escalation": return response.payload?.question ?? "Escalation"
       case "plan": return response.summary ?? "Plan created"
       case "progress": return response.description ?? "Phase progress"
       case "error": return response.message ?? "Error"
-      case "complete": return "Task complete"
+      case "complete": return "Agent finished"
       default: return response.message ?? response.type
       }
     }()
@@ -236,6 +244,50 @@ public final class EventStream {
       toolName: response.tool,
       isFatal: response.fatal ?? false
     )
+  }
+
+  // MARK: - Summary helpers
+
+  /// Extract a human-readable detail string from a tool's input parameters.
+  private static func toolSummary(tool: String, input: AnyCodable?) -> String? {
+    guard let input else { return nil }
+    switch tool {
+    case "Bash":
+      return input["command"]?.stringValue
+    case "Read":
+      return input["file_path"]?.stringValue.map { shortenPath($0) }
+    case "Edit", "MultiEdit":
+      return input["file_path"]?.stringValue.map { shortenPath($0) }
+    case "Write":
+      return input["file_path"]?.stringValue.map { shortenPath($0) }
+    case "Grep":
+      let pattern = input["pattern"]?.stringValue
+      let path = input["path"]?.stringValue.map { shortenPath($0) }
+      if let pattern, let path { return "\"\(pattern)\" in \(path)" }
+      return pattern.map { "\"\($0)\"" }
+    case "Glob":
+      return input["pattern"]?.stringValue
+    case "TodoWrite":
+      return input["todos"]?.stringValue
+    default:
+      // For unknown tools, try common field names
+      return input["command"]?.stringValue
+        ?? input["file_path"]?.stringValue.map { shortenPath($0) }
+        ?? input["query"]?.stringValue
+    }
+  }
+
+  /// Strip /workspace/ prefix and leading ./ from container paths.
+  private static func shortenPath(_ path: String) -> String {
+    var p = path
+    if p.hasPrefix("/workspace/") { p = String(p.dropFirst("/workspace/".count)) }
+    if p.hasPrefix("./") { p = String(p.dropFirst(2)) }
+    return p
+  }
+
+  /// Truncate to max characters, appending ellipsis if needed.
+  private static func truncate(_ s: String, max: Int) -> String {
+    s.count <= max ? s : String(s.prefix(max)) + "…"
   }
 
   // MARK: - State change

@@ -19,6 +19,13 @@ export const DEFAULT_CONTAINER_MEMORY_GB = 10;
 export const CONTAINER_USER = 'autopod';
 export const CONTAINER_HOME_DIR = '/home/autopod';
 
+/**
+ * Path inside the container where autopod writes its generated system instructions.
+ * Deliberately outside `/workspace` so it never overwrites the repo's own CLAUDE.md.
+ * Claude CLI reads this via `--append-system-prompt-file`; Copilot via `customInstructions`.
+ */
+export const AUTOPOD_INSTRUCTIONS_PATH = '/home/autopod/.autopod/system-instructions.md';
+
 export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
   queued: ['provisioning', 'killing'],
   provisioning: ['running', 'killing'],

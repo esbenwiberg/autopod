@@ -517,6 +517,67 @@ describe('LocalWorktreeManager', () => {
       expect(setUrlCmd).not.toContain('super-secret-token');
     });
 
+    it('falls back to local baseBranch ref when remote fetch fails (fork scenario)', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-dir')) {
+            cb(null, { stdout: '.', stderr: '' }); // bare repo exists
+          } else if (cmd.includes('fetch')) {
+            // All remote fetches fail — neither parent nor fork branch pushed
+            cb(new Error('fatal: couldn\'t find remote ref'));
+          } else if (cmd.includes('rev-parse --verify refs/heads/autopod/parent-branch')) {
+            // But it exists locally in the bare repo
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.create({
+        repoUrl: 'https://github.com/org/repo.git',
+        branch: 'autopod/forked-session',
+        baseBranch: 'autopod/parent-branch',
+      });
+
+      const cmds = execFileMock.mock.calls.map((c: string[][]) => c[1]?.join(' ') ?? '');
+      const worktreeAddCmd = cmds.find((c: string) => c.includes('worktree add'));
+      expect(worktreeAddCmd).toBeDefined();
+      // Should use the local ref, not refs/remotes/origin/...
+      expect(worktreeAddCmd).toContain('refs/heads/autopod/parent-branch');
+      expect(result.worktreePath).toContain('autopod_forked-session');
+    });
+
+    it('throws when baseBranch not found on remote or locally', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-dir')) {
+            cb(null, { stdout: '.', stderr: '' });
+          } else if (cmd.includes('fetch') && cmd.includes('gone-branch')) {
+            cb(new Error('fatal: couldn\'t find remote ref'));
+          } else if (cmd.includes('rev-parse --verify refs/heads/gone-branch')) {
+            cb(new Error('fatal: Needed a single revision'));
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com/org/repo.git',
+          branch: 'autopod/new-session',
+          baseBranch: 'gone-branch',
+        }),
+      ).rejects.toThrow('baseBranch "gone-branch" not found on remote or locally');
+    });
+
     it('stores PAT in cache for later push operations', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {

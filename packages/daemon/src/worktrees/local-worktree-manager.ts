@@ -94,15 +94,39 @@ export class LocalWorktreeManager implements WorktreeManager {
       // Use auth URL directly so the credential is never persisted in git config.
       this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
       // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
-      await execFileAsync(
-        'git',
-        ['fetch', authUrl, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
-        { cwd: bareRepoPath },
-      );
+      // Fetch baseBranch from remote. If the branch hasn't been pushed yet (e.g. forking
+      // a session that failed before pushing), fall back to the local ref in the bare repo.
+      let baseBranchRef = `refs/remotes/origin/${baseBranch}`;
+      try {
+        await execFileAsync(
+          'git',
+          ['fetch', authUrl, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
+          { cwd: bareRepoPath },
+        );
+      } catch {
+        // Remote fetch failed — check if the branch exists locally (created by a prior
+        // session's `git worktree add -B` and still in the bare repo after cleanup).
+        try {
+          await execFileAsync(
+            'git',
+            ['rev-parse', '--verify', `refs/heads/${baseBranch}`],
+            { cwd: bareRepoPath },
+          );
+          baseBranchRef = `refs/heads/${baseBranch}`;
+          this.logger.info(
+            { baseBranch },
+            'baseBranch not on remote — using local ref from bare repo',
+          );
+        } catch {
+          throw new Error(
+            `baseBranch "${baseBranch}" not found on remote or locally in ${bareRepoPath}`,
+          );
+        }
+      }
 
       // If the requested branch already exists on the remote, fetch it and use it
       // as the start point so we don't blow away existing work with -B.
-      let startPoint = `refs/remotes/origin/${baseBranch}`;
+      let startPoint = baseBranchRef;
       if (branch !== baseBranch) {
         try {
           await execFileAsync(

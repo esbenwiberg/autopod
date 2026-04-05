@@ -217,4 +217,16 @@ public struct AnyCodable: Codable, Sendable {
     case .dict(let v): try container.encode(v)
     }
   }
+
+  // MARK: - Accessors
+
+  public subscript(key: String) -> AnyCodable? {
+    if case .dict(let d) = storage { return d[key] }
+    return nil
+  }
+
+  public var stringValue: String? {
+    if case .string(let s) = storage { return s }
+    return nil
+  }
 }

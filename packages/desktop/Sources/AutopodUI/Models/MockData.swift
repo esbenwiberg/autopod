@@ -29,7 +29,40 @@ public enum MockData: Sendable {
         status: .validated, branch: "fix/auth-flow", profileName: "webapp", model: "claude-sonnet",
         startedAt: .minutesAgo(18),
         diffStats: DiffStats(added: 55, removed: 12, files: 5),
-        validationChecks: ValidationChecks(smoke: false, tests: false, review: false),
+        validationChecks: ValidationChecks(
+            smoke: false, tests: false, review: false,
+            buildOutput: nil,
+            testOutput: "FAIL src/auth/login.test.ts\n  ✕ should redirect after login (42ms)\n    Expected: 302\n    Received: 500",
+            reviewIssues: ["Missing error handling in OAuth callback route", "SQL injection risk in user lookup query"],
+            reviewReasoning: "The implementation has two medium-severity issues that should be addressed before merge.",
+            healthCheck: HealthCheckDetail(status: "fail", url: "http://localhost:3000/health", responseCode: 502, duration: 3200),
+            pages: [
+                PageDetail(
+                    path: "/login", status: "fail",
+                    consoleErrors: ["TypeError: Cannot read property 'auth' of undefined"],
+                    assertions: [
+                        AssertionDetail(selector: "#login-form", type: "visible", expected: "visible", actual: "not found", passed: false),
+                        AssertionDetail(selector: "#oauth-button", type: "exists", expected: nil, actual: nil, passed: false),
+                    ],
+                    loadTime: 4500
+                ),
+                PageDetail(
+                    path: "/dashboard", status: "pass",
+                    consoleErrors: [],
+                    assertions: [AssertionDetail(selector: "#main-content", type: "visible", expected: nil, actual: nil, passed: true)],
+                    loadTime: 800
+                ),
+            ],
+            acValidation: false,
+            acChecks: [
+                AcCheckDetail(criterion: "Login form renders correctly", passed: false, reasoning: "Login form element not found — page returns 502"),
+                AcCheckDetail(criterion: "OAuth tokens stored encrypted at rest", passed: true, reasoning: "Verified AES-256 encryption in storage layer"),
+            ],
+            requirementsCheck: [
+                RequirementCheckDetail(criterion: "OAuth callback handles errors", met: false, note: "No error handling in callback route"),
+                RequirementCheckDetail(criterion: "Session middleware preserved", met: true, note: "Fully met"),
+            ]
+        ),
         attempts: AttemptInfo(current: 1, max: 3)
     )
 

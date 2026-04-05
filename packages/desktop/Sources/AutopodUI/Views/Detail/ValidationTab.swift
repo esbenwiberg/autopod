@@ -18,6 +18,9 @@ public struct ValidationTab: View {
           HStack(spacing: 20) {
             validationBadge("Smoke", passed: checks.smoke, icon: "flame")
             validationBadge("Tests", passed: checks.tests, icon: "testtube.2")
+            if let acPassed = checks.acValidation {
+              validationBadge("AC", passed: acPassed, icon: "checklist.checked")
+            }
             validationBadge("Review", passed: checks.review, icon: "eye")
           }
           .padding(16)
@@ -95,6 +98,80 @@ public struct ValidationTab: View {
               .background(Color.black.opacity(0.3))
               .clipShape(RoundedRectangle(cornerRadius: 6))
             }
+            if let health = checks.healthCheck, health.status == "fail" {
+              VStack(alignment: .leading, spacing: 4) {
+                Text("Health Check")
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                  Label(health.url, systemImage: "link")
+                    .font(.system(.caption2, design: .monospaced))
+                  if let code = health.responseCode {
+                    Text("HTTP \(code)")
+                      .font(.caption2.weight(.medium))
+                      .foregroundStyle(.red)
+                  } else {
+                    Text("No response")
+                      .font(.caption2)
+                      .foregroundStyle(.red)
+                  }
+                }
+              }
+              .padding(.top, 4)
+            }
+            if let pages = checks.pages?.filter({ $0.status == "fail" }), !pages.isEmpty {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("Failed Pages")
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.secondary)
+                ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
+                  VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                      Text(page.path)
+                        .font(.system(.caption, design: .monospaced).weight(.medium))
+                      Spacer()
+                      Text("\(page.loadTime)ms")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    }
+                    ForEach(Array(page.assertions.filter { !$0.passed }.enumerated()), id: \.offset) { _, a in
+                      HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "xmark.circle.fill")
+                          .font(.system(size: 9))
+                          .foregroundStyle(.red)
+                          .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 1) {
+                          Text("\(a.type): \(a.selector)")
+                            .font(.system(.caption2, design: .monospaced))
+                          if let expected = a.expected, let actual = a.actual {
+                            Text("expected \(expected), got \(actual)")
+                              .font(.caption2)
+                              .foregroundStyle(.secondary)
+                          }
+                        }
+                      }
+                    }
+                    if !page.consoleErrors.isEmpty {
+                      VStack(alignment: .leading, spacing: 2) {
+                        Text("Console Errors")
+                          .font(.caption2.weight(.semibold))
+                          .foregroundStyle(.orange)
+                        ForEach(Array(page.consoleErrors.enumerated()), id: \.offset) { _, err in
+                          Text(err)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.orange.opacity(0.9))
+                            .lineLimit(3)
+                        }
+                      }
+                    }
+                  }
+                  .padding(8)
+                  .background(Color.red.opacity(0.05))
+                  .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+              }
+              .padding(.top, 4)
+            }
           }
 
           // Test Suite
@@ -117,6 +194,37 @@ public struct ValidationTab: View {
               .padding(8)
               .background(Color.black.opacity(0.3))
               .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+          }
+
+          // AC Validation
+          if let acChecks = checks.acChecks, checks.acValidation != nil {
+            detailSection("AC Validation", icon: "checklist.checked",
+                          expanded: checks.acValidation == false) {
+              Text(checks.acValidation == true
+                   ? "All acceptance criteria verified"
+                   : "Some criteria not met")
+                .font(.callout)
+                .foregroundStyle(checks.acValidation == true ? .green : .red)
+              VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(acChecks.enumerated()), id: \.offset) { _, check in
+                  HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: check.passed
+                          ? "checkmark.circle.fill" : "xmark.circle.fill")
+                      .font(.system(size: 11))
+                      .foregroundStyle(check.passed ? .green : .red)
+                      .padding(.top, 1)
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text(check.criterion)
+                        .font(.callout)
+                      Text(check.reasoning)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                  }
+                }
+              }
+              .padding(.top, 4)
             }
           }
 
@@ -145,6 +253,32 @@ public struct ValidationTab: View {
                 }
               }
               .padding(.top, 4)
+            }
+            if let reqs = checks.requirementsCheck, !reqs.isEmpty {
+              VStack(alignment: .leading, spacing: 4) {
+                Text("Requirements Coverage")
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.secondary)
+                  .padding(.top, 4)
+                ForEach(Array(reqs.enumerated()), id: \.offset) { _, req in
+                  HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: req.met
+                          ? "checkmark.circle.fill" : "xmark.circle.fill")
+                      .font(.system(size: 9))
+                      .foregroundStyle(req.met ? .green : .red)
+                      .padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 1) {
+                      Text(req.criterion)
+                        .font(.caption)
+                      if let note = req.note {
+                        Text(note)
+                          .font(.caption2)
+                          .foregroundStyle(.secondary)
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
 
@@ -249,8 +383,7 @@ private struct CollapsibleSection<Content: View>: View {
 
 #Preview("Validation — failed") {
   ValidationTab(
-    session: MockData.failed,
-    checks: ValidationChecks(smoke: true, tests: false, review: false)
+    session: MockData.validatedFailed
   )
-  .frame(width: 500, height: 500)
+  .frame(width: 500, height: 700)
 }

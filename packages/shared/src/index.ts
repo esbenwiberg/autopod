@@ -149,6 +149,7 @@ export {
   VALID_STATUS_TRANSITIONS,
   CONTAINER_USER,
   CONTAINER_HOME_DIR,
+  AUTOPOD_INSTRUCTIONS_PATH,
 } from './constants.js';
 
 // Schemas (runtime values — Zod objects)

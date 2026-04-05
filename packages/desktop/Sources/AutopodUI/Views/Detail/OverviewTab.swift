@@ -25,10 +25,8 @@ struct OverviewTab: View {
                     planSection(phase)
                 }
 
-                // Acceptance criteria (compact — full list in Validation tab)
-                if let criteria = session.acceptanceCriteria, !criteria.isEmpty {
-                    acSummary(criteria)
-                }
+                // Session prompt
+                promptSection
 
                 // Metrics row
                 metricsRow
@@ -187,23 +185,18 @@ struct OverviewTab: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Acceptance criteria (compact)
+    // MARK: - Session prompt
 
-    private func acSummary(_ criteria: [String]) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checklist")
-                .foregroundStyle(.blue)
-            Text("\(criteria.count) acceptance criteria")
+    private var promptSection: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "text.quote")
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            Text(session.task)
                 .font(.subheadline)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
             Spacer()
-            if let source = session.acFrom {
-                Text(source)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
-            Text("See Validation tab")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
         .padding(12)
         .background(Color(nsColor: .controlBackgroundColor))

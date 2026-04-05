@@ -53,6 +53,30 @@ public enum SessionMapper {
         let combined = [t.stdout, t.stderr].compactMap { $0 }.joined(separator: "\n")
         return combined.isEmpty ? nil : combined
       }()
+      let healthCheck = HealthCheckDetail(
+        status: v.smoke.health.status,
+        url: v.smoke.health.url,
+        responseCode: v.smoke.health.responseCode,
+        duration: v.smoke.health.duration
+      )
+      let pages: [PageDetail]? = v.smoke.status == "pass" ? nil : v.smoke.pages.map { p in
+        PageDetail(
+          path: p.path,
+          status: p.status,
+          consoleErrors: p.consoleErrors,
+          assertions: p.assertions.map { a in
+            AssertionDetail(selector: a.selector, type: a.type, expected: a.expected, actual: a.actual, passed: a.passed)
+          },
+          loadTime: p.loadTime
+        )
+      }
+      let acValidation: Bool? = v.acValidation.map { $0.status == "pass" }
+      let acChecks: [AcCheckDetail]? = v.acValidation?.results.map { r in
+        AcCheckDetail(criterion: r.criterion, passed: r.passed, reasoning: r.reasoning)
+      }
+      let requirementsCheck: [RequirementCheckDetail]? = v.taskReview?.requirementsCheck?.map { r in
+        RequirementCheckDetail(criterion: r.criterion, met: r.met, note: r.note)
+      }
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
         tests: v.test?.status == "pass",
@@ -60,7 +84,12 @@ public enum SessionMapper {
         buildOutput: buildOutput,
         testOutput: testOutput,
         reviewIssues: v.taskReview?.issues,
-        reviewReasoning: v.taskReview?.reasoning
+        reviewReasoning: v.taskReview?.reasoning,
+        healthCheck: healthCheck,
+        pages: pages,
+        acValidation: acValidation,
+        acChecks: acChecks,
+        requirementsCheck: requirementsCheck
       )
     }()
 

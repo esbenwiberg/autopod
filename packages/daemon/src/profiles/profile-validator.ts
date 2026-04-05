@@ -5,7 +5,6 @@ export interface ProfileValidationResult {
   errors: string[];
 }
 
-const KNOWN_MODELS = ['opus', 'sonnet', 'haiku', 'gpt-5.2', 'codex'];
 const KNOWN_RUNTIMES = ['claude', 'codex'];
 const VALID_TEMPLATES: StackTemplate[] = ['node22', 'node22-pw', 'dotnet9', 'python312', 'custom'];
 
@@ -84,10 +83,12 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
-  // Default model
+  // Default model — free-form string; runtimes resolve aliases at spawn time
   const defaultModel = input.defaultModel;
-  if (defaultModel !== undefined && !KNOWN_MODELS.includes(defaultModel as string)) {
-    errors.push(`defaultModel must be one of: ${KNOWN_MODELS.join(', ')}`);
+  if (defaultModel !== undefined && typeof defaultModel !== 'string') {
+    errors.push('defaultModel must be a string');
+  } else if (typeof defaultModel === 'string' && defaultModel.trim().length === 0) {
+    errors.push('defaultModel must not be empty');
   }
 
   // Default runtime

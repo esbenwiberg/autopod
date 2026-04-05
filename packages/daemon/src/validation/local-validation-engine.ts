@@ -462,10 +462,11 @@ Example:
 Respond ONLY with the JSON array, no markdown fences or extra text.`;
 
   try {
+    const reviewTimeout = config.reviewTimeout ?? 300_000;
     const { stdout } = await execFileAsync(
       'claude',
-      ['-p', prompt, '--model', config.reviewerModel ?? 'sonnet', '--output-format', 'text'],
-      { timeout: 120_000, maxBuffer: 1024 * 1024 },
+      ['-p', '--model', config.reviewerModel ?? 'sonnet', '--output-format', 'text'],
+      { input: prompt, timeout: reviewTimeout, maxBuffer: 2 * 1024 * 1024 },
     );
 
     return parseAcInstructionsJson(stdout.trim());
@@ -512,10 +513,11 @@ Requirements:
 Respond ONLY with the script code. No markdown fences, no explanation.`;
 
   try {
+    const reviewTimeout = config.reviewTimeout ?? 300_000;
     const { stdout: scriptCode } = await execFileAsync(
       'claude',
-      ['-p', prompt, '--model', config.reviewerModel ?? 'sonnet', '--output-format', 'text'],
-      { timeout: 120_000, maxBuffer: 1024 * 1024 },
+      ['-p', '--model', config.reviewerModel ?? 'sonnet', '--output-format', 'text'],
+      { input: prompt, timeout: reviewTimeout, maxBuffer: 2 * 1024 * 1024 },
     );
 
     // Strip any markdown fences the LLM might add
@@ -771,12 +773,14 @@ Status rules:
 - "uncertain": task is clear but diff is inconclusive without runtime context (use sparingly)`;
 
   try {
+    const reviewTimeout = config.reviewTimeout ?? 300_000;
     const { stdout } = await execFileAsync(
       'claude',
-      ['-p', prompt, '--model', config.reviewerModel, '--output-format', 'text'],
+      ['-p', '--model', config.reviewerModel, '--output-format', 'text'],
       {
-        timeout: 120_000,
-        maxBuffer: 1024 * 1024, // 1 MB
+        input: prompt,
+        timeout: reviewTimeout,
+        maxBuffer: 2 * 1024 * 1024,
       },
     );
 

@@ -116,10 +116,15 @@ describe('ProfileValidator', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('should reject unknown model', () => {
+  it('should accept any model string', () => {
     const result = validateProfile({ ...validInput, defaultModel: 'gpt-3' });
+    expect(result.valid).toBe(true);
+  });
+
+  it('should reject empty model string', () => {
+    const result = validateProfile({ ...validInput, defaultModel: '' });
     expect(result.valid).toBe(false);
-    expect(result.errors[0]).toContain('opus');
+    expect(result.errors[0]).toContain('empty');
   });
 
   it('should reject unknown runtime', () => {
@@ -148,7 +153,7 @@ describe('ProfileValidator', () => {
       startCommand: 'node server.js',
       healthPath: 'no-slash',
       healthTimeout: 5,
-      defaultModel: 'unknown',
+      defaultModel: '',
       defaultRuntime: 'unknown',
       maxValidationAttempts: 0,
     });

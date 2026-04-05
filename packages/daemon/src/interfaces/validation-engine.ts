@@ -23,6 +23,8 @@ export interface ValidationEngineConfig {
   codeReviewSkill?: string;
   /** Git commit log between base branch and HEAD (one-line format) */
   commitLog?: string;
+  /** AI review phase timeout in ms. Default 300_000 (5 min). */
+  reviewTimeout?: number;
 }
 
 export interface ValidationEngine {
