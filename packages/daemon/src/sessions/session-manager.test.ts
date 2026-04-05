@@ -10,7 +10,7 @@ import type {
 import { AutopodError, InvalidStateTransitionError, SessionNotFoundError } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import pino from 'pino';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
 vi.mock('node:child_process', () => ({
@@ -875,6 +875,18 @@ describe('SessionManager', () => {
     });
 
     describe('recovery mode', () => {
+      const recoveryWorktree = '/tmp/worktree/existing';
+
+      beforeEach(() => {
+        // Create a fake worktree directory with a .git marker so the recovery
+        // viability check (fs.access) passes in processSession.
+        fs.mkdirSync(path.join(recoveryWorktree, '.git'), { recursive: true });
+      });
+
+      afterEach(() => {
+        fs.rmSync(recoveryWorktree, { recursive: true, force: true });
+      });
+
       /**
        * Configure execFile mock to handle:
        * - deriveBareRepoPath: git rev-parse --git-common-dir
@@ -1080,6 +1092,32 @@ describe('SessionManager', () => {
         const updated = manager.getSession(session.id);
         expect(updated.status).toBe('validated');
       });
+    });
+
+    it('falls back to fresh worktree when recovery path is missing', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Recover missing', skipValidation: true },
+        'user-1',
+      );
+
+      // Set recovery path to a directory that does NOT exist
+      ctx.sessionRepo.update(session.id, {
+        recoveryWorktreePath: '/tmp/worktree/gone',
+      });
+
+      await manager.processSession(session.id);
+
+      // Should have fallen back to worktreeManager.create
+      expect(ctx.worktreeManager.create).toHaveBeenCalled();
+
+      // Session should still complete normally
+      const updated = manager.getSession(session.id);
+      expect(updated.status).toBe('validated');
+
+      // recoveryWorktreePath should be cleared
+      expect(updated.recoveryWorktreePath).toBeNull();
     });
 
     it('does not write registry files when registryPat is null', async () => {
@@ -1303,6 +1341,57 @@ describe('SessionManager', () => {
       const result = manager.getSession(session.id);
       expect(result.status).toBe('validated');
       expect(result.validationAttempts).toBe(1);
+    });
+
+    it('re-provisions with fresh container when force-reworking from failed with worktree', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktrees/test-branch',
+        validationAttempts: 3,
+      });
+
+      await manager.triggerValidation(session.id, { force: true });
+
+      const result = manager.getSession(session.id);
+      // Session should be re-queued for fresh provisioning, not validated in-place
+      expect(result.status).toBe('queued');
+      expect(result.containerId).toBeNull();
+      expect(result.validationAttempts).toBe(0);
+      expect(result.recoveryWorktreePath).toBe('/tmp/worktrees/test-branch');
+      expect(ctx.enqueuedSessions).toContain(session.id);
+      // Old container should be killed
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
+    });
+
+    it('re-provisions from validated state with worktree on force rework', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, {
+        status: 'validated',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktrees/test-branch',
+        validationAttempts: 2,
+      });
+
+      await manager.triggerValidation(session.id, { force: true });
+
+      const result = manager.getSession(session.id);
+      expect(result.status).toBe('queued');
+      expect(result.recoveryWorktreePath).toBe('/tmp/worktrees/test-branch');
+      expect(ctx.enqueuedSessions).toContain(session.id);
     });
   });
 

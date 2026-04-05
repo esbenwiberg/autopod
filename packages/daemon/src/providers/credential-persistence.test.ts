@@ -67,20 +67,20 @@ describe('persistRefreshedCredentials', () => {
     });
   });
 
-  it('skips persist when container creds are not newer', async () => {
+  it('skips persist when container refresh token matches stored', async () => {
     const containerCreds = JSON.stringify({
       claudeAiOauth: {
-        accessToken: 'old-access',
-        refreshToken: 'old-refresh',
-        expiresAt: new Date('2026-03-20T11:00:00Z').getTime(), // older
+        accessToken: 'new-access',
+        refreshToken: 'same-refresh', // same as stored
+        expiresAt: new Date('2026-03-20T14:00:00Z').getTime(),
       },
     });
 
     const currentCreds: MaxCredentials = {
       provider: 'max',
       accessToken: 'current-access',
-      refreshToken: 'current-refresh',
-      expiresAt: '2026-03-20T12:00:00Z', // newer
+      refreshToken: 'same-refresh', // matches container
+      expiresAt: '2026-03-20T12:00:00Z',
     };
 
     const cm = makeContainerManager(containerCreds);
@@ -89,6 +89,34 @@ describe('persistRefreshedCredentials', () => {
     await persistRefreshedCredentials('ctr-1', cm, ps, 'test-profile', logger);
 
     expect(ps.update).not.toHaveBeenCalled();
+  });
+
+  it('persists when refresh token differs even with older expiry', async () => {
+    const containerCreds = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'rotated-access',
+        refreshToken: 'rotated-refresh', // different from stored
+        expiresAt: new Date('2026-03-20T11:00:00Z').getTime(), // older expiry
+      },
+    });
+
+    const currentCreds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'current-access',
+      refreshToken: 'old-refresh', // stale — already burned by Claude Code
+      expiresAt: '2026-03-20T12:00:00Z', // newer expiry but invalid token
+    };
+
+    const cm = makeContainerManager(containerCreds);
+    const ps = makeProfileStore(currentCreds);
+
+    await persistRefreshedCredentials('ctr-1', cm, ps, 'test-profile', logger);
+
+    expect(ps.update).toHaveBeenCalledWith('test-profile', {
+      providerCredentials: expect.objectContaining({
+        refreshToken: 'rotated-refresh',
+      }),
+    });
   });
 
   it('handles readFile failure gracefully', async () => {

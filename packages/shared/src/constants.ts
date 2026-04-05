@@ -10,6 +10,7 @@ export const MAX_BUILD_LOG_LENGTH = 10_000;
 export const MAX_DIFF_LENGTH = 50_000;
 export const SCREENSHOT_QUALITY = 80;
 export const EVENT_LOG_RETENTION_DAYS = 30;
+export const DEFAULT_CONTAINER_MEMORY_GB = 10;
 
 /**
  * Container user identity — all agent containers run as this non-root user.
@@ -25,8 +26,8 @@ export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = 
   awaiting_input: ['running', 'killing'],
   paused: ['running', 'killing'],
   validating: ['validated', 'running', 'failed', 'killing'],
-  validated: ['approved', 'running', 'killing'],
-  failed: ['running', 'validating', 'killing'],
+  validated: ['approved', 'running', 'validating', 'killing', 'queued'],
+  failed: ['running', 'validating', 'killing', 'queued'],
   approved: ['merging'],
   merging: ['complete'],
   complete: [],

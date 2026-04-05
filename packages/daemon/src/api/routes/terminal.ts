@@ -97,7 +97,7 @@ export function terminalRoutes(
           // stdout → WebSocket (binary frames)
           stream.on('data', (chunk: Buffer) => {
             if (socket.readyState === socket.OPEN) {
-              socket.send(chunk);
+              socket.send(chunk, { binary: true });
             }
           });
 

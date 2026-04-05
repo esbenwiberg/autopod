@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
@@ -15,7 +15,12 @@ import type {
   Session,
   SessionStatus,
 } from '@autopod/shared';
-import { AutopodError, CONTAINER_HOME_DIR, generateSessionId } from '@autopod/shared';
+import {
+  AutopodError,
+  CONTAINER_HOME_DIR,
+  DEFAULT_CONTAINER_MEMORY_GB,
+  generateSessionId,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
 import { getBaseImage } from '../images/dockerfile-generator.js';
@@ -292,12 +297,39 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   /**
    * Build provider env for resume calls.
    * Needed because OAuth tokens may have been rotated since the initial spawn.
+   *
+   * Before refreshing via the OAuth endpoint, we attempt to recover the latest
+   * credentials directly from the container filesystem — Claude Code writes
+   * rotated tokens there, and our post-exec persistence may have silently failed.
    */
   async function getResumeEnv(session: Session): Promise<Record<string, string> | undefined> {
     const profile = profileStore.get(session.profileName);
     const provider = profile.modelProvider;
     // Only MAX provider needs fresh env on resume (token rotation)
     if (provider !== 'max') return undefined;
+
+    // Recover latest tokens from the container before we try to refresh.
+    // The container is the source of truth — Claude Code rotates tokens during use
+    // and writes them to ~/.claude/.credentials.json. If our earlier persistence
+    // missed the update, the profile store has a stale (already-invalidated) refresh
+    // token and the OAuth refresh will fail with invalid_grant.
+    if (session.containerId) {
+      try {
+        await persistRefreshedCredentials(
+          session.containerId,
+          containerManagerFactory.get(session.executionTarget),
+          profileStore,
+          session.profileName,
+          logger,
+        );
+      } catch (err) {
+        logger.warn(
+          { err, sessionId: session.id },
+          'Could not recover credentials from container before resume — will try profile store',
+        );
+      }
+    }
+
     const result = await buildProviderEnv(profile, session.id, logger);
     // Also re-write credential files to container in case tokens were rotated
     if (result.containerFiles.length > 0 && session.containerId) {
@@ -450,7 +482,23 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         let worktreePath: string;
         let bareRepoPath: string;
 
+        // Validate recovery worktree is still a usable git directory.
+        // It may have been cleaned up by another session's kill (e.g. shared worktree path).
+        let recoveryViable = false;
         if (isRecovery && session.recoveryWorktreePath) {
+          try {
+            await access(path.join(session.recoveryWorktreePath, '.git'));
+            recoveryViable = true;
+          } catch {
+            logger.warn(
+              { sessionId, worktreePath: session.recoveryWorktreePath },
+              'Recovery worktree missing or not a git directory — falling back to fresh worktree',
+            );
+            sessionRepo.update(sessionId, { recoveryWorktreePath: null });
+          }
+        }
+
+        if (recoveryViable && session.recoveryWorktreePath) {
           worktreePath = session.recoveryWorktreePath;
           bareRepoPath = await deriveBareRepoPath(worktreePath);
           // Clear recovery flag now that we've captured the path
@@ -485,6 +533,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const containerManager = containerManagerFactory.get(session.executionTarget);
 
         // Compute network isolation config (Docker only, opt-in via profile)
+        // Domain-based filtering via dnsmasq+ipset handles CDN wildcards natively —
+        // no need for NuGet backend host discovery.
         let networkName: string | undefined;
         let firewallScript: string | undefined;
         if (
@@ -494,26 +544,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         ) {
           const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
           const gatewayIp = await networkManager.getGatewayIp();
-
-          // For .NET sessions, discover CDN/blob storage backend hosts from NuGet
-          // feed service indices so the firewall CIDRs cover actual download targets.
-          const isDotnet = profile.template.startsWith('dotnet');
-          const nugetBackendHosts = isDotnet
-            ? await networkManager.resolveNugetBackendHosts(profile.privateRegistries, true)
-            : [];
-          if (nugetBackendHosts.length > 0) {
-            logger.info(
-              { hosts: nugetBackendHosts },
-              'Discovered %d NuGet backend hosts for firewall',
-              nugetBackendHosts.length,
-            );
-          }
-
           const netConfig = await networkManager.buildNetworkConfig(
             profile.networkPolicy,
             mergedServers,
             gatewayIp,
-            nugetBackendHosts,
           );
           if (netConfig) {
             networkName = netConfig.networkName;
@@ -554,9 +588,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           ],
           networkName,
           firewallScript,
-          memoryBytes: profile.containerMemoryGb
-            ? profile.containerMemoryGb * 1024 * 1024 * 1024
-            : undefined,
+          memoryBytes:
+            (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
         });
 
         // Copy worktree content from bind mount to container's native filesystem.
@@ -1002,12 +1035,22 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       emitActivityStatus(sessionId, 'Resuming agent with message…');
-      const resumeEnv = await getResumeEnv(session);
-      const runtime = runtimeRegistry.get(session.runtime);
-      if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
-      const events = runtime.resume(sessionId, message, session.containerId, resumeEnv);
-      await this.consumeAgentEvents(sessionId, events);
-      await this.handleCompletion(sessionId);
+      try {
+        const resumeEnv = await getResumeEnv(session);
+        const runtime = runtimeRegistry.get(session.runtime);
+        if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
+        const events = runtime.resume(sessionId, message, session.containerId, resumeEnv);
+        await this.consumeAgentEvents(sessionId, events);
+        await this.handleCompletion(sessionId);
+      } catch (err) {
+        logger.error({ err, sessionId }, 'Failed to resume agent after message');
+        const s = sessionRepo.getOrThrow(sessionId);
+        if (!isTerminalState(s.status)) {
+          transition(s, 'failed');
+          emitActivityStatus(sessionId, `Resume failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        throw err;
+      }
     },
 
     async approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void> {
@@ -1102,13 +1145,24 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // Transition to running
       transition(session, 'running');
 
-      // Resume agent with rejection feedback
-      const resumeEnv = await getResumeEnv(session);
-      const runtime = runtimeRegistry.get(session.runtime);
-      if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
-      const events = runtime.resume(sessionId, rejectionMessage, session.containerId, resumeEnv);
-      await this.consumeAgentEvents(sessionId, events);
-      await this.handleCompletion(sessionId);
+      try {
+        // Resume agent with rejection feedback
+        const resumeEnv = await getResumeEnv(session);
+        const runtime = runtimeRegistry.get(session.runtime);
+        if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
+        const events = runtime.resume(sessionId, rejectionMessage, session.containerId, resumeEnv);
+        await this.consumeAgentEvents(sessionId, events);
+        await this.handleCompletion(sessionId);
+      } catch (err) {
+        // Roll back to failed — don't leave the session stuck in 'running' with no agent
+        logger.error({ err, sessionId }, 'Failed to resume agent after rejection');
+        const s = sessionRepo.getOrThrow(sessionId);
+        if (!isTerminalState(s.status)) {
+          transition(s, 'failed');
+          emitActivityStatus(sessionId, `Resume failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        throw err;
+      }
 
       logger.info(
         { sessionId, reason, previousStatus },
@@ -1343,11 +1397,46 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     async triggerValidation(sessionId: string, options?: { force?: boolean }): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
-      const profile = profileStore.get(session.profileName);
       const force = options?.force ?? false;
 
-      // Reset attempt counter when re-validating from a terminal/failed state
-      const fromTerminal = session.status === 'failed' || session.status === 'killed';
+      // When force-reworking from a terminal state, re-provision the session from scratch
+      // instead of trying to restart a potentially stale container. Docker Desktop's VirtioFS
+      // mounts can break after long idle periods, making the old container unreachable.
+      const fromTerminal =
+        session.status === 'failed' || session.status === 'killed' || session.status === 'validated';
+      if (force && fromTerminal && session.worktreePath) {
+        emitActivityStatus(sessionId, 'Re-provisioning session with fresh container…');
+
+        // Kill the old container (best-effort — it may already be dead)
+        if (session.containerId) {
+          try {
+            const cm = containerManagerFactory.get(session.executionTarget);
+            await cm.kill(session.containerId);
+          } catch {
+            // Container may already be removed — that's fine
+          }
+        }
+
+        // Re-queue through processSession with recovery worktree
+        sessionRepo.update(sessionId, {
+          validationAttempts: 0,
+          lastValidationResult: null,
+          containerId: null,
+          recoveryWorktreePath: session.worktreePath,
+        });
+        transition(session, 'queued');
+        enqueueSession(sessionId);
+
+        logger.info(
+          { sessionId, worktreePath: session.worktreePath },
+          'Rework: re-queued with fresh container provisioning',
+        );
+        return;
+      }
+
+      const profile = profileStore.get(session.profileName);
+
+      // Reset attempt counter when re-validating from a terminal/failed/validated state
       if (fromTerminal) {
         sessionRepo.update(sessionId, { validationAttempts: 0 });
       }
@@ -1886,9 +1975,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     fixManually(sessionId: string, userId: string): Promise<Session> {
       const worker = sessionRepo.getOrThrow(sessionId);
-      if (worker.status !== 'failed') {
+      if (worker.status !== 'failed' && worker.status !== 'validated') {
         throw new AutopodError(
-          `Cannot fix session ${sessionId} in status ${worker.status} — only failed sessions`,
+          `Cannot fix session ${sessionId} in status ${worker.status} — only failed or validated sessions`,
           'INVALID_STATE',
           409,
         );
@@ -2123,17 +2212,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
       const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
       const gatewayIp = await networkManager.getGatewayIp();
-
-      const isDotnet = profile.template.startsWith('dotnet');
-      const nugetBackendHosts = isDotnet
-        ? await networkManager.resolveNugetBackendHosts(profile.privateRegistries, true)
-        : [];
-
       const netConfig = await networkManager.buildNetworkConfig(
         profile.networkPolicy,
         mergedServers,
         gatewayIp,
-        nugetBackendHosts,
       );
       if (!netConfig) return;
 

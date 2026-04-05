@@ -59,21 +59,20 @@ export async function persistRefreshedCredentials(
     return;
   }
 
-  // Optimistic locking: only update if the new token expires later than what's stored
+  // Only update if the container has different credentials than what's stored.
+  // We compare refresh tokens (not expiry) because rotating refresh tokens
+  // invalidate the previous one — using a stale refresh token causes invalid_grant.
+  // Expiry-based comparison was wrong: a rotated token can have a shorter or equal
+  // expiry but still be the only valid refresh token.
   const currentProfile = profileStore.getRaw(profileName);
   const currentCreds = currentProfile.providerCredentials;
 
-  if (currentCreds?.provider === 'max') {
-    const currentExpiry = new Date(currentCreds.expiresAt).getTime();
-    const newExpiry = oauth.expiresAt;
-
-    if (newExpiry <= currentExpiry) {
-      logger.debug(
-        { profileName },
-        'Container credentials not newer than stored — skipping persist',
-      );
-      return;
-    }
+  if (currentCreds?.provider === 'max' && currentCreds.refreshToken === oauth.refreshToken) {
+    logger.debug(
+      { profileName },
+      'Container refresh token matches stored — skipping persist',
+    );
+    return;
   }
 
   // Build updated credentials — preserve all fields from the file
