@@ -66,7 +66,8 @@ public struct DetailPanelView: View {
                     onSendData: onTerminalSendData,
                     onResize: onTerminalResize,
                     onConnect: onTerminalConnect,
-                    onDisconnect: onTerminalDisconnect
+                    onDisconnect: onTerminalDisconnect,
+                    isSelected: selectedTab == .terminal
                 )
                 .opacity(selectedTab == .terminal ? 1 : 0)
                 .allowsHitTesting(selectedTab == .terminal)
@@ -142,19 +143,47 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
 
             case .validated:
-                Button {
-                    Task { await actions.approve(session.id) }
-                } label: {
-                    Label("Approve", systemImage: "checkmark")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.green)
-                Button("Reject") {
-                    Task { await actions.reject(session.id, nil) }
-                }
+                if session.validationChecks?.allPassed != false {
+                    // All checks passed (or no checks yet) — approve is primary
+                    Button {
+                        Task { await actions.approve(session.id) }
+                    } label: {
+                        Label("Approve", systemImage: "checkmark")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.green)
+                    Button("Reject") {
+                        Task { await actions.reject(session.id, nil) }
+                    }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                } else {
+                    // Validation failed — rework/fix actions are primary
+                    Button {
+                        Task { await actions.rework(session.id) }
+                    } label: {
+                        Label("Rework", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.orange)
+                    Button {
+                        Task { await actions.fixManually(session.id) }
+                    } label: {
+                        Label("Fix Manually", systemImage: "wrench.and.screwdriver")
+                    }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    forkButton
+                    Button {
+                        Task { await actions.approve(session.id) }
+                    } label: {
+                        Label("Approve Anyway", systemImage: "checkmark")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
 
             case .failed:
                 Button {
@@ -172,9 +201,11 @@ public struct DetailPanelView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                forkButton
 
             default:
                 if session.isTerminal {
+                    forkButton
                     Button(role: .destructive) {
                         showDeleteConfirmation = true
                     } label: {
@@ -195,6 +226,17 @@ public struct DetailPanelView: View {
     }
 
     @State private var showDeleteConfirmation = false
+
+    private var forkButton: some View {
+        Button {
+            Task { await actions.fork(session.id) }
+        } label: {
+            Label("Fork", systemImage: "arrow.triangle.branch")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("Create a new session with the same config, starting from this session's branch")
+    }
 
     // MARK: - Tab bar
 

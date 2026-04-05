@@ -9,6 +9,7 @@ public struct TerminalTab: View {
   public var onResize: ((Int, Int) -> Void)?
   public var onConnect: (() -> Void)?
   public var onDisconnect: (() -> Void)?
+  public var isSelected: Bool
 
   public init(
     session: Session,
@@ -17,7 +18,8 @@ public struct TerminalTab: View {
     onSendData: (([UInt8]) -> Void)? = nil,
     onResize: ((Int, Int) -> Void)? = nil,
     onConnect: (() -> Void)? = nil,
-    onDisconnect: (() -> Void)? = nil
+    onDisconnect: (() -> Void)? = nil,
+    isSelected: Bool = false
   ) {
     self.session = session
     self.terminalState = terminalState
@@ -26,6 +28,7 @@ public struct TerminalTab: View {
     self.onResize = onResize
     self.onConnect = onConnect
     self.onDisconnect = onDisconnect
+    self.isSelected = isSelected
   }
 
   private var isActive: Bool {
@@ -68,7 +71,17 @@ public struct TerminalTab: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .background(Color(nsColor: NSColor(red: 0.12, green: 0.12, blue: 0.18, alpha: 1)))
           .onAppear {
-            onConnect?()
+            // Only auto-connect when this tab is actually visible — connecting
+            // while hidden causes tmux to render for hardcoded 120x40 into a
+            // zero-sized SwiftTerm view, producing garbled output.
+            if isSelected {
+              onConnect?()
+            }
+          }
+          .onChange(of: isSelected) { _, selected in
+            if selected && !isConnected && !isReconnecting {
+              onConnect?()
+            }
           }
         }
       }
@@ -130,6 +143,6 @@ public struct TerminalTab: View {
 }
 
 #Preview("Terminal — not running") {
-  TerminalTab(session: MockData.complete)
+  TerminalTab(session: MockData.complete, isSelected: true)
     .frame(width: 500, height: 400)
 }

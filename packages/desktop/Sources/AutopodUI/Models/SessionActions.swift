@@ -19,6 +19,7 @@ public struct SessionActions: Sendable {
   public var attachTerminal: @MainActor @Sendable (String) -> Void
   public var approveAll: @MainActor @Sendable () async -> Void
   public var killAllFailed: @MainActor @Sendable () async -> Void
+  public var fork: @MainActor @Sendable (String) async -> String?
   public var delete: @MainActor @Sendable (String) async -> Void
 
   public init(
@@ -36,6 +37,7 @@ public struct SessionActions: Sendable {
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
     killAllFailed: @escaping @MainActor @Sendable () async -> Void = {},
+    fork: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in }
   ) {
     self.approve = approve
@@ -52,6 +54,7 @@ public struct SessionActions: Sendable {
     self.attachTerminal = attachTerminal
     self.approveAll = approveAll
     self.killAllFailed = killAllFailed
+    self.fork = fork
     self.delete = delete
   }
 

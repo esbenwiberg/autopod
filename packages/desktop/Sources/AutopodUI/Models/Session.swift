@@ -86,6 +86,8 @@ public struct ValidationChecks: Sendable {
         self.buildOutput = buildOutput; self.testOutput = testOutput
         self.reviewIssues = reviewIssues; self.reviewReasoning = reviewReasoning
     }
+
+    public var allPassed: Bool { smoke && tests && review }
 }
 
 public struct PhaseProgress: Sendable {

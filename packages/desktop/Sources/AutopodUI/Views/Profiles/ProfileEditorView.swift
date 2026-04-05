@@ -90,20 +90,34 @@ struct HelpBadge: View {
 
 // MARK: - Profile editor
 
+/// Callback for profile authentication flows.
+/// Parameters: profile name, provider ("max" or "copilot"), completion callback (error message or nil).
+public typealias ProfileAuthHandler = (String, String, @escaping (String?) -> Void) -> Void
+
 /// Profile editor — settings-style layout with sidebar section navigation and inline help.
 public struct ProfileEditorView: View {
     @State public var profile: Profile
     public let isNew: Bool
     public var onSave: ((Profile) -> Void)?
+    public var onAuthenticate: ProfileAuthHandler?
 
-    public init(profile: Profile, isNew: Bool, onSave: ((Profile) -> Void)? = nil) {
+    public init(profile: Profile, isNew: Bool, onSave: ((Profile) -> Void)? = nil,
+                onAuthenticate: ProfileAuthHandler? = nil) {
         self._profile = State(initialValue: profile)
         self.isNew = isNew
         self.onSave = onSave
+        self.onAuthenticate = onAuthenticate
     }
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedSection: ProfileSection = .general
+    @State private var authStatus: AuthStatus?
+
+    private enum AuthStatus: Equatable {
+        case inProgress(String)
+        case success(String)
+        case failure(String)
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -532,6 +546,68 @@ public struct ProfileEditorView: View {
 
     @ViewBuilder
     private var credentialFields: some View {
+        // Model provider authentication
+        if !isNew {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Model Provider Auth")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    Button {
+                        startAuth(provider: "max", label: "Claude MAX")
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.key")
+                            Text("Authenticate with Claude MAX")
+                        }
+                    }
+                    .disabled(onAuthenticate == nil || authStatus == .inProgress("max"))
+                    .help("Opens Claude CLI to complete OAuth login. Credentials are saved to this profile.")
+
+                    Button {
+                        startAuth(provider: "copilot", label: "Copilot")
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.key")
+                            Text("Authenticate with Copilot")
+                        }
+                    }
+                    .disabled(onAuthenticate == nil || authStatus == .inProgress("copilot"))
+                    .help("Opens GitHub Copilot login. Token is saved to this profile.")
+                }
+
+                // Status feedback
+                if let authStatus {
+                    HStack(spacing: 6) {
+                        switch authStatus {
+                        case .inProgress(let label):
+                            ProgressView().scaleEffect(0.6)
+                            Text("Authenticating with \(label)...")
+                                .foregroundStyle(.secondary)
+                        case .success(let msg):
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text(msg)
+                                .foregroundStyle(.green)
+                        case .failure(let msg):
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                            Text(msg)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .font(.caption)
+                } else {
+                    Text("Opens an interactive login flow in Terminal. Complete the OAuth flow, then return here.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Divider().padding(.vertical, 4)
+        }
+
         patRow("GitHub PAT", value: $profile.githubPat, isSet: profile.hasGithubPat,
                help: "Personal access token for GitHub — needed for PR creation and private repo cloning.")
         patRow("ADO PAT", value: $profile.adoPat, isSet: profile.hasAdoPat,
@@ -727,6 +803,19 @@ public struct ProfileEditorView: View {
                 }
             }
             content()
+        }
+    }
+
+    // MARK: - Auth flow trigger
+
+    private func startAuth(provider: String, label: String) {
+        authStatus = .inProgress(label)
+        onAuthenticate?(profile.name, provider) { errorMessage in
+            if let errorMessage {
+                authStatus = .failure(errorMessage)
+            } else {
+                authStatus = .success("Authenticated with \(label)")
+            }
         }
     }
 

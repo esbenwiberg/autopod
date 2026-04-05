@@ -40,6 +40,7 @@ public final class ActionHandler {
       },
       approveAll: { [weak self] in await self?.approveAllValidated() },
       killAllFailed: { [weak self] in await self?.killAllFailed() },
+      fork: { [weak self] id in await self?.forkSession(id) },
       delete: { [weak self] id in await self?.deleteSession(id) }
     )
   }
@@ -206,6 +207,27 @@ public final class ActionHandler {
       lastError = error.localizedDescription
     }
     pendingAction = nil
+  }
+
+  public func forkSession(_ sessionId: String) async -> String? {
+    pendingAction = "fork-\(sessionId)"
+    guard let source = sessionStore.sessions.first(where: { $0.id == sessionId }) else {
+      lastError = "Session \(sessionId) not found"
+      pendingAction = nil
+      return nil
+    }
+    // Create a new session with the same config, using the source branch as baseBranch
+    let result = await createSession(
+      profileName: source.profileName,
+      task: source.task,
+      model: source.model,
+      outputMode: source.outputMode.rawValue,
+      acceptanceCriteria: source.acceptanceCriteria,
+      baseBranch: source.branch,
+      acFrom: source.acFrom
+    )
+    pendingAction = nil
+    return result
   }
 
   public func deleteSession(_ sessionId: String) async {

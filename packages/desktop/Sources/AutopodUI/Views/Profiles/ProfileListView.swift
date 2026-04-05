@@ -5,8 +5,11 @@ public struct ProfileListView: View {
     public let profiles: [Profile]
     public var onSave: ((Profile) -> Void)?
     public var onCreate: ((Profile) -> Void)?
-    public init(profiles: [Profile], onSave: ((Profile) -> Void)? = nil, onCreate: ((Profile) -> Void)? = nil) {
+    public var onAuthenticate: ProfileAuthHandler?
+    public init(profiles: [Profile], onSave: ((Profile) -> Void)? = nil, onCreate: ((Profile) -> Void)? = nil,
+                onAuthenticate: ProfileAuthHandler? = nil) {
         self.profiles = profiles; self.onSave = onSave; self.onCreate = onCreate
+        self.onAuthenticate = onAuthenticate
     }
 
     @State private var selectedProfile: Profile?
@@ -50,7 +53,7 @@ public struct ProfileListView: View {
             }
         }
         .sheet(item: $selectedProfile) { profile in
-            ProfileEditorView(profile: profile, isNew: false, onSave: onSave)
+            ProfileEditorView(profile: profile, isNew: false, onSave: onSave, onAuthenticate: onAuthenticate)
         }
         .sheet(isPresented: $showCreateSheet) {
             ProfileEditorView(

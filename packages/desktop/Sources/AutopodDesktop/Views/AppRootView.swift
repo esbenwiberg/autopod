@@ -110,6 +110,33 @@ public struct AppRootView: View {
             }
           }
         },
+        onAuthenticateProfile: { [connectionManager, profileStore] (name: String, provider: String, completion: @escaping (String?) -> Void) in
+          guard let api = connectionManager.api else {
+            completion("Not connected to daemon")
+            return
+          }
+          let authenticator = ProfileAuthenticator(api: api)
+          Task {
+            do {
+              let msg: String
+              switch provider {
+              case "max":
+                msg = try await authenticator.authenticateMax(profileName: name)
+              case "copilot":
+                msg = try await authenticator.authenticateCopilot(profileName: name)
+              default:
+                completion("Unknown provider: \(provider)")
+                return
+              }
+              print("[AppRootView] \(msg)")
+              await profileStore.loadProfiles()
+              await MainActor.run { completion(nil) }
+            } catch {
+              print("[AppRootView] Auth failed: \(error)")
+              await MainActor.run { completion(error.localizedDescription) }
+            }
+          }
+        },
         isPresented: $showSettings
       )
     }

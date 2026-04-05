@@ -2,7 +2,7 @@ import Foundation
 
 public enum MockData: Sendable {
     public static let all: [Session] = [
-        awaitingInput, validated, failed,
+        awaitingInput, validated, validatedFailed, failed,
         running, runningEarly, validating,
         workspaceActive, workspaceComplete,
         workerFromWorkspace,
@@ -23,6 +23,14 @@ public enum MockData: Sendable {
         diffStats: DiffStats(added: 142, removed: 38, files: 8),
         validationChecks: ValidationChecks(smoke: true, tests: true, review: true),
         containerUrl: URL(string: "http://localhost:3001")
+    )
+
+    public static let validatedFailed = Session(
+        status: .validated, branch: "fix/auth-flow", profileName: "webapp", model: "claude-sonnet",
+        startedAt: .minutesAgo(18),
+        diffStats: DiffStats(added: 55, removed: 12, files: 5),
+        validationChecks: ValidationChecks(smoke: false, tests: false, review: false),
+        attempts: AttemptInfo(current: 1, max: 3)
     )
 
     public static let failed = Session(

@@ -163,9 +163,15 @@ public struct SessionCardFinal: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
         case .validated:
-            Label("Ready for review", systemImage: "checkmark.seal")
-                .font(.caption)
-                .foregroundStyle(.green)
+            if session.validationChecks?.allPassed != false {
+                Label("Ready for review", systemImage: "checkmark.seal")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            } else {
+                Label("Validation failed — needs action", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         case .failed:
             if let err = session.errorSummary {
                 Text(err)
@@ -415,21 +421,51 @@ public struct SessionCardFinal: View {
                         checkItem("Review", passed: checks.review)
                     }
                 }
-                HStack(spacing: 6) {
+                if session.validationChecks?.allPassed != false {
+                    // All checks passed — approve is primary
+                    HStack(spacing: 6) {
+                        Button {
+                            Task { await actions.approve(session.id) }
+                        } label: {
+                            Label("Approve", systemImage: "checkmark")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.green)
+                        Button("Reject") {
+                            Task { await actions.reject(session.id, nil) }
+                        }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                } else {
+                    // Validation failed — rework/fix actions are primary
+                    HStack(spacing: 6) {
+                        Button {
+                            Task { await actions.rework(session.id) }
+                        } label: {
+                            Label("Rework", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.orange)
+                        Button {
+                            Task { await actions.fixManually(session.id) }
+                        } label: {
+                            Label("Fix", systemImage: "wrench.and.screwdriver")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
                     Button {
                         Task { await actions.approve(session.id) }
                     } label: {
-                        Label("Approve", systemImage: "checkmark")
-                            .frame(maxWidth: .infinity)
+                        Label("Approve Anyway", systemImage: "checkmark")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .tint(.green)
-                    Button("Reject") {
-                        Task { await actions.reject(session.id, nil) }
-                    }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                 }
                 if session.containerUrl != nil {
                     Button {

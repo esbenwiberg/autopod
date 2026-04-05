@@ -22,6 +22,13 @@ public final class TerminalManager {
   }
 
   public func connect(sessionId: String, cols: Int = 120, rows: Int = 40) {
+    // Guard against double-connect: multiple code paths can trigger connect
+    // for the same session (e.g. attachTerminal action + tab onChange). Two
+    // simultaneous connections to the same tmux session cause doubled output
+    // because tmux sends data to both attached clients.
+    if connectedSessionId == sessionId && (state == "connected" || state == "connecting") {
+      return
+    }
     disconnect()
     connectedSessionId = sessionId
 
@@ -54,12 +61,13 @@ public final class TerminalManager {
   }
 
   public func disconnect() {
-    Task {
-      await socket?.disconnect()
-    }
+    let oldSocket = socket
     socket = nil
     state = "disconnected"
     connectedSessionId = nil
+    if let oldSocket {
+      Task { await oldSocket.disconnect() }
+    }
   }
 
   public func sendData(_ bytes: [UInt8]) {
