@@ -37,6 +37,7 @@ public struct DetailPanelView: View {
     }
 
     @State private var selectedTab: DetailTab = .overview
+    @State private var isTaskExpanded: Bool = false
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -85,26 +86,38 @@ public struct DetailPanelView: View {
     // MARK: - Header
 
     private var detailHeader: some View {
-        HStack(spacing: 10) {
-            StatusDot(status: session.status)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.id)
-                    .font(.system(.title3, design: .monospaced).weight(.semibold))
-                HStack(spacing: 6) {
-                    Text(session.profileName)
-                    Text("·")
-                        .foregroundStyle(.quaternary)
-                    Text(session.model)
-                    Text("·")
-                        .foregroundStyle(.quaternary)
-                    Text(session.duration)
-                        .contentTransition(.numericText())
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                StatusDot(status: session.status)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.id)
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    HStack(spacing: 6) {
+                        Text(session.profileName)
+                        Text("·")
+                            .foregroundStyle(.quaternary)
+                        Text(session.model)
+                        Text("·")
+                            .foregroundStyle(.quaternary)
+                        Text(session.duration)
+                            .contentTransition(.numericText())
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Spacer()
+                headerActions
             }
-            Spacer()
-            headerActions
+
+            if !session.task.isEmpty {
+                Text(session.task)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(isTaskExpanded ? nil : 2)
+                    .padding(.top, 8)
+                    .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { isTaskExpanded.toggle() } }
+                    .help("Click to \(isTaskExpanded ? "collapse" : "expand") task")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
