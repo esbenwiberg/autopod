@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Profile } from '@autopod/shared';
-import { createProfileSchema, updateProfileSchema } from '@autopod/shared';
+import { ProfileNotFoundError, createProfileSchema, updateProfileSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { parse, stringify } from 'yaml';
@@ -190,8 +190,12 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       // Verify profile exists
       try {
         await client.getProfile(name);
-      } catch {
-        console.error(chalk.red(`Profile "${name}" not found.`));
+      } catch (error) {
+        if (error instanceof ProfileNotFoundError) {
+          console.error(chalk.red(`Profile "${name}" not found.`));
+        } else {
+          console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+        }
         process.exit(1);
       }
 
@@ -293,8 +297,12 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       // Verify profile exists
       try {
         await client.getProfile(name);
-      } catch {
-        console.error(chalk.red(`Profile "${name}" not found.`));
+      } catch (error) {
+        if (error instanceof ProfileNotFoundError) {
+          console.error(chalk.red(`Profile "${name}" not found.`));
+        } else {
+          console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+        }
         process.exit(1);
       }
 

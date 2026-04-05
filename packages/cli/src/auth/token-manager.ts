@@ -35,10 +35,12 @@ export function getMsalClient(): MsalClient {
 }
 
 export async function getToken(): Promise<string> {
+  // Dev token takes priority — it's the daemon's actual auth token in dev mode
+  const devToken = readDevToken();
+  if (devToken) return devToken;
+
   const creds = readCredentials();
   if (!creds) {
-    const devToken = readDevToken();
-    if (devToken) return devToken;
     throw new AuthError('Not authenticated. Run: ap login');
   }
 
