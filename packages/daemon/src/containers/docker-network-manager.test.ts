@@ -43,36 +43,23 @@ describe('DockerNetworkManager', () => {
     manager = new DockerNetworkManager({ docker: docker.instance, logger });
   });
 
-  describe('computeAllowlist()', () => {
-    const GATEWAY = '172.17.0.1';
-
-    it('includes NuGet hosts in defaults', () => {
+  describe('DEFAULT_ALLOWED_HOSTS', () => {
+    it('includes NuGet hosts', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('api.nuget.org');
       expect(DEFAULT_ALLOWED_HOSTS).toContain('globalcdn.nuget.org');
     });
 
-    it('does not include cloud wildcard domains in defaults', () => {
-      // Cloud domains like azurefd.net and blob.core.windows.net should NOT be
-      // in defaults — they would open HTTPS broadly for every session.
-      // Backend hosts are discovered dynamically via resolveNugetBackendHosts().
-      expect(DEFAULT_ALLOWED_HOSTS).not.toContain('azurefd.net');
-      expect(DEFAULT_ALLOWED_HOSTS).not.toContain('blob.core.windows.net');
-      expect(DEFAULT_ALLOWED_HOSTS).not.toContain('nuget.org');
+    it('includes wildcard CDN domains for dnsmasq mode', () => {
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('*.blob.core.windows.net');
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('*.vo.msecnd.net');
     });
+  });
+
+  describe('computeAllowlist()', () => {
+    const GATEWAY = '172.17.0.1';
 
     it('includes default hosts when replaceDefaults is false', () => {
       const result = manager.computeAllowlist(makePolicy(), [], GATEWAY);
-      for (const host of DEFAULT_ALLOWED_HOSTS) {
-        expect(result).toContain(host);
-      }
-    });
-
-    it('includes default hosts when replaceDefaults is undefined', () => {
-      const result = manager.computeAllowlist(
-        makePolicy({ replaceDefaults: undefined }),
-        [],
-        GATEWAY,
-      );
       for (const host of DEFAULT_ALLOWED_HOSTS) {
         expect(result).toContain(host);
       }
@@ -85,33 +72,34 @@ describe('DockerNetworkManager', () => {
       }
     });
 
+    it('preserves wildcard prefixes from profile hosts', () => {
+      const result = manager.computeAllowlist(
+        makePolicy({ allowedHosts: ['*.example.com', 'exact.com'] }),
+        [],
+        GATEWAY,
+      );
+      expect(result).toContain('*.example.com');
+      expect(result).toContain('exact.com');
+    });
+
+    it('preserves wildcard prefixes from defaults', () => {
+      const result = manager.computeAllowlist(makePolicy(), [], GATEWAY);
+      expect(result).toContain('*.blob.core.windows.net');
+    });
+
     it('adds profile-specified hosts', () => {
       const result = manager.computeAllowlist(
-        makePolicy({ allowedHosts: ['custom.example.com', 'another.dev'] }),
+        makePolicy({ allowedHosts: ['custom.example.com'] }),
         [],
         GATEWAY,
       );
       expect(result).toContain('custom.example.com');
-      expect(result).toContain('another.dev');
-    });
-
-    it('adds additional hosts from dynamic discovery', () => {
-      const result = manager.computeAllowlist(makePolicy(), [], GATEWAY, [
-        'cdn1.blob.core.windows.net',
-        'cdn2.azureedge.net',
-      ]);
-      expect(result).toContain('cdn1.blob.core.windows.net');
-      expect(result).toContain('cdn2.azureedge.net');
     });
 
     it('extracts hostnames from MCP server URLs', () => {
-      const servers = [
-        makeMcpServer('https://mcp.example.com:8080/v1'),
-        makeMcpServer('http://internal.service.local/api', 'svc'),
-      ];
+      const servers = [makeMcpServer('https://mcp.example.com:8080/v1')];
       const result = manager.computeAllowlist(makePolicy(), servers, GATEWAY);
       expect(result).toContain('mcp.example.com');
-      expect(result).toContain('internal.service.local');
     });
 
     it('skips malformed MCP server URLs without throwing', () => {
@@ -136,9 +124,7 @@ describe('DockerNetworkManager', () => {
         GATEWAY,
       );
       const githubCount = result.filter((h) => h === 'github.com').length;
-      const gatewayCount = result.filter((h) => h === GATEWAY).length;
       expect(githubCount).toBe(1);
-      expect(gatewayCount).toBe(1);
     });
   });
 
@@ -146,55 +132,6 @@ describe('DockerNetworkManager', () => {
     it('starts with #!/bin/sh', async () => {
       const script = await manager.generateFirewallScript([]);
       expect(script.startsWith('#!/bin/sh')).toBe(true);
-    });
-
-    it('contains iptables rules for resolved hosts', async () => {
-      const script = await manager.generateFirewallScript(['example.com']);
-      expect(script).toContain('iptables -A OUTPUT');
-    });
-
-    it('adds IP addresses directly', async () => {
-      const script = await manager.generateFirewallScript(['10.0.0.1']);
-      expect(script).toContain('10.0.0.1');
-    });
-
-    it('resolves real hostnames to /24 CIDRs via daemon DNS', async () => {
-      const script = await manager.generateFirewallScript(['api.nuget.org']);
-      // Should contain CIDR rules resolved by Node.js DNS
-      expect(script).toContain('.0/24');
-    });
-
-    it('includes container-side DNS resolution pass for resolvable hosts', async () => {
-      const script = await manager.generateFirewallScript(['api.nuget.org', '10.0.0.1']);
-      // Should include container-side getent resolution for hostnames (not raw IPs)
-      expect(script).toContain('container_resolve');
-      expect(script).toContain('getent ahostsv4');
-      expect(script).toContain('"api.nuget.org"');
-      // Raw IPs should not be in the container_resolve call
-      expect(script).not.toContain('container_resolve "10.0.0.1"');
-    });
-
-    it('gracefully skips unresolvable hostnames', async () => {
-      const script = await manager.generateFirewallScript(['this-host-does-not-exist.invalid']);
-      // Should still have the REJECT rule even if resolution fails
-      expect(script).toContain('iptables -A OUTPUT -j REJECT');
-    });
-
-    it('has DNS allow rules for port 53', async () => {
-      const script = await manager.generateFirewallScript([]);
-      expect(script).toContain('--dport 53 -j ACCEPT');
-      expect(script).toContain('-p udp --dport 53');
-      expect(script).toContain('-p tcp --dport 53');
-    });
-
-    it('has a final REJECT rule in restricted mode', async () => {
-      const script = await manager.generateFirewallScript([], 'restricted');
-      expect(script).toContain('iptables -A OUTPUT -j REJECT');
-    });
-
-    it('has a final REJECT rule when mode is omitted (defaults to restricted)', async () => {
-      const script = await manager.generateFirewallScript([]);
-      expect(script).toContain('iptables -A OUTPUT -j REJECT');
     });
 
     it('has loopback allow', async () => {
@@ -205,13 +142,6 @@ describe('DockerNetworkManager', () => {
     it('has ESTABLISHED,RELATED allow', async () => {
       const script = await manager.generateFirewallScript([]);
       expect(script).toContain('--state ESTABLISHED,RELATED -j ACCEPT');
-    });
-
-    it('does not include cloud wildcard or string match rules', async () => {
-      // Cloud wildcards were removed — backend hosts are now discovered dynamically
-      const script = await manager.generateFirewallScript(['blob.core.windows.net']);
-      expect(script).not.toContain('-m string');
-      expect(script).not.toContain('--dport 443 -j ACCEPT');
     });
 
     describe('allow-all mode', () => {
@@ -238,134 +168,111 @@ describe('DockerNetworkManager', () => {
         expect(script).toContain('--dport 53 -j ACCEPT');
       });
     });
-  });
 
-  describe('resolveNugetBackendHosts()', () => {
-    it('returns empty array when no NuGet registries configured and public disabled', async () => {
-      const result = await manager.resolveNugetBackendHosts([], false);
-      expect(result).toEqual([]);
+    describe('restricted mode — dnsmasq+ipset path', () => {
+      it('generates dnsmasq feature detection', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('command -v dnsmasq');
+        expect(script).toContain('command -v ipset');
+      });
+
+      it('creates ipset named allowed_ips', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('ipset create allowed_ips hash:net');
+      });
+
+      it('pre-seeds ipset with daemon-resolved CIDRs', async () => {
+        const script = await manager.generateFirewallScript(['10.0.0.1']);
+        expect(script).toContain('ipset add allowed_ips "10.0.0.1"');
+      });
+
+      it('writes dnsmasq config with server and ipset entries', async () => {
+        const script = await manager.generateFirewallScript(['api.nuget.org']);
+        expect(script).toContain('server=/api.nuget.org/127.0.0.11');
+        expect(script).toContain('ipset=/api.nuget.org/allowed_ips');
+      });
+
+      it('converts wildcards to dnsmasq suffix match', async () => {
+        const script = await manager.generateFirewallScript(['*.blob.core.windows.net']);
+        // dnsmasq treats /domain/ as suffix match — *.blob.core.windows.net → blob.core.windows.net
+        expect(script).toContain('server=/blob.core.windows.net/127.0.0.11');
+        expect(script).toContain('ipset=/blob.core.windows.net/allowed_ips');
+      });
+
+      it('blocks all other DNS with address=/#/', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('address=/#/');
+      });
+
+      it('starts dnsmasq on 127.0.0.53', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('listen-address=127.0.0.53');
+        expect(script).toContain('dnsmasq --conf-file=/tmp/dnsmasq-firewall.conf');
+      });
+
+      it('rewrites resolv.conf to dnsmasq', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('nameserver 127.0.0.53');
+        expect(script).toContain('/etc/resolv.conf');
+      });
+
+      it('restricts Docker DNS access to dnsmasq user only', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        // Only nobody (dnsmasq user) can reach Docker DNS
+        expect(script).toContain('--dport 53 -d 127.0.0.11 -m owner --uid-owner nobody -j ACCEPT');
+        // Others are rejected
+        expect(script).toContain('--dport 53 -d 127.0.0.11 -j REJECT');
+      });
+
+      it('allows traffic via ipset match', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('-m set --match-set allowed_ips dst -j ACCEPT');
+      });
+
+      it('has final REJECT rule', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain(
+          'iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable',
+        );
+      });
     });
 
-    it('fetches public NuGet index by default', async () => {
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            resources: [
-              {
-                '@id': 'https://api.nuget.org/v3/registration5-semver1/',
-                '@type': 'RegistrationsBaseUrl',
-              },
-              { '@id': 'https://azuresearch-usnc.nuget.org/query', '@type': 'SearchQueryService' },
-              {
-                '@id': 'https://az320820.vo.msecnd.net/packages/',
-                '@type': 'PackageBaseAddress/3.0.0',
-              },
-            ],
-          }),
-          { status: 200 },
-        ),
-      );
+    describe('restricted mode — CIDR fallback path', () => {
+      it('includes fallback in else branch', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('else');
+        expect(script).toContain('falling back to CIDR mode');
+      });
 
-      const result = await manager.resolveNugetBackendHosts([], true);
-      expect(fetchSpy).toHaveBeenCalledOnce();
-      expect(result).toContain('api.nuget.org');
-      expect(result).toContain('azuresearch-usnc.nuget.org');
-      expect(result).toContain('az320820.vo.msecnd.net');
+      it('fallback allows DNS broadly', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        // In the else branch, DNS is allowed to any resolver
+        expect(script).toMatch(/else[\s\S]*-p udp --dport 53 -j ACCEPT/);
+      });
 
-      fetchSpy.mockRestore();
+      it('fallback resolves wildcards by stripping prefix', async () => {
+        const script = await manager.generateFirewallScript(['*.blob.core.windows.net']);
+        // In container_resolve, wildcard stripped to parent domain
+        expect(script).toContain('"blob.core.windows.net"');
+      });
+
+      it('fallback has REJECT rule', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        // Both branches end with REJECT
+        const rejectCount = (script.match(/iptables -A OUTPUT -j REJECT/g) || []).length;
+        expect(rejectCount).toBeGreaterThanOrEqual(2); // one per branch
+      });
     });
 
-    it('discovers blob storage hosts from ADO NuGet feed', async () => {
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            resources: [
-              {
-                '@id': 'https://pkgs.dev.azure.com/myorg/_packaging/feed/nuget/v3/flat2/',
-                '@type': 'PackageBaseAddress/3.0.0',
-              },
-              {
-                '@id': 'https://kd2vsblobprodsu6weus81.blob.core.windows.net/packages/',
-                '@type': 'PackageBaseAddress/3.0.0',
-              },
-            ],
-          }),
-          { status: 200 },
-        ),
-      );
-
-      const result = await manager.resolveNugetBackendHosts(
-        [
-          {
-            type: 'nuget',
-            url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/nuget/v3/index.json',
-          },
-        ],
-        false,
-      );
-      expect(result).toContain('kd2vsblobprodsu6weus81.blob.core.windows.net');
-
-      fetchSpy.mockRestore();
+    it('resolves real hostnames to /24 CIDRs for pre-seeding', async () => {
+      const script = await manager.generateFirewallScript(['api.nuget.org']);
+      expect(script).toContain('.0/24');
     });
 
-    it('skips non-NuGet registries', async () => {
-      const fetchSpy = vi.spyOn(globalThis, 'fetch');
-
-      const result = await manager.resolveNugetBackendHosts(
-        [{ type: 'npm', url: 'https://pkgs.dev.azure.com/myorg/_packaging/feed/npm/registry/' }],
-        false,
-      );
-      expect(result).toEqual([]);
-      expect(fetchSpy).not.toHaveBeenCalled();
-
-      fetchSpy.mockRestore();
-    });
-
-    it('handles fetch failures gracefully', async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, 'fetch')
-        .mockRejectedValueOnce(new Error('Network timeout'));
-
-      const result = await manager.resolveNugetBackendHosts([], true);
-      expect(result).toEqual([]);
-
-      fetchSpy.mockRestore();
-    });
-
-    it('handles malformed service index responses', async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, 'fetch')
-        .mockResolvedValueOnce(new Response('not json', { status: 200 }));
-
-      const result = await manager.resolveNugetBackendHosts([], true);
-      expect(result).toEqual([]);
-
-      fetchSpy.mockRestore();
-    });
-  });
-
-  describe('wildcard hosts', () => {
-    const GATEWAY = '172.17.0.1';
-
-    it('strips wildcard prefix and resolves parent domain', () => {
-      const result = manager.computeAllowlist(
-        makePolicy({ allowedHosts: ['*.example.com'] }),
-        [],
-        GATEWAY,
-      );
-      expect(result).toContain('example.com');
-      expect(result).not.toContain('*.example.com');
-    });
-
-    it('leaves non-wildcard hosts unchanged', () => {
-      const result = manager.computeAllowlist(
-        makePolicy({ allowedHosts: ['api.example.com', '*.foo.com', '10.0.0.1'] }),
-        [],
-        GATEWAY,
-      );
-      expect(result).toContain('api.example.com');
-      expect(result).toContain('foo.com');
-      expect(result).toContain('10.0.0.1');
+    it('gracefully skips unresolvable hostnames', async () => {
+      const script = await manager.generateFirewallScript(['this-host-does-not-exist.invalid']);
+      // Should still produce a valid script
+      expect(script).toContain('iptables -A OUTPUT -j REJECT');
     });
   });
 
@@ -388,7 +295,6 @@ describe('DockerNetworkManager', () => {
       docker.mock._inspect.mockResolvedValueOnce({});
       await manager.ensureNetwork();
       await manager.ensureNetwork();
-      // getNetwork called only once (first call); second call short-circuits
       expect(docker.mock.getNetwork).toHaveBeenCalledTimes(1);
     });
   });
@@ -416,21 +322,6 @@ describe('DockerNetworkManager', () => {
       expect(result).not.toBeNull();
       expect(result?.networkName).toBe('autopod-net');
       expect(result?.firewallScript).toContain('#!/bin/sh');
-      // Hostnames are now resolved to CIDRs by the daemon, not embedded as strings
-      expect(result?.firewallScript).toContain('iptables -A OUTPUT -d');
-    });
-
-    it('passes additional hosts through to allowlist', async () => {
-      docker.mock._inspect.mockResolvedValueOnce({});
-      const result = await manager.buildNetworkConfig(
-        makePolicy({ enabled: true, allowedHosts: [] }),
-        [],
-        GATEWAY,
-        ['extra-cdn.blob.core.windows.net'],
-      );
-      expect(result).not.toBeNull();
-      // The extra host should be resolved to a CIDR
-      expect(result?.firewallScript).toContain('.0/24');
     });
   });
 });

@@ -1,9 +1,4 @@
-import type {
-  InjectedMcpServer,
-  NetworkPolicy,
-  NetworkPolicyMode,
-  PrivateRegistry,
-} from '@autopod/shared';
+import type { InjectedMcpServer, NetworkPolicy, NetworkPolicyMode } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 
@@ -14,22 +9,24 @@ const SAFE_HOST_REGEX =
 
 const NETWORK_NAME = 'autopod-net';
 
-/** Public NuGet v3 service index — used to discover CDN backend hosts at provisioning time */
-const NUGET_PUBLIC_INDEX = 'https://api.nuget.org/v3/index.json';
-
-/** Timeout for NuGet service index fetches during provisioning */
-const NUGET_DISCOVERY_TIMEOUT_MS = 10_000;
+/** Docker's embedded DNS resolver address on custom bridge networks */
+const DOCKER_DNS = '127.0.0.11';
+/** Local dnsmasq listener — avoids conflict with Docker DNS */
+const DNSMASQ_LISTEN = '127.0.0.53';
 
 export const DEFAULT_ALLOWED_HOSTS = [
   'api.anthropic.com',
   'api.openai.com',
   'registry.npmjs.org',
   'pypi.org',
-  // NuGet — specific hosts only; CDN/blob backends are discovered dynamically
-  // via resolveNugetBackendHosts() at provisioning time
+  // NuGet (.NET package registry + CDN)
   'api.nuget.org',
   'globalcdn.nuget.org',
   'nupkg.nuget.org',
+  // Azure CDN wildcards — only effective in dnsmasq mode; covers ADO NuGet feed
+  // blob storage redirects and NuGet CDN endpoints with unpredictable subdomains
+  '*.blob.core.windows.net',
+  '*.vo.msecnd.net',
   'github.com',
   'objects.githubusercontent.com',
   'raw.githubusercontent.com',
@@ -87,19 +84,17 @@ export class DockerNetworkManager {
 
   /**
    * Compute the effective allowlist for a session, merging defaults,
-   * profile policy, daemon gateway, MCP server hosts, and dynamically
-   * discovered hosts.
+   * profile policy, daemon gateway, and MCP server hosts.
    *
-   * Wildcard entries (e.g. `*.example.com`) are resolved by stripping the
-   * `*.` prefix and resolving the parent domain. This is best-effort: it works
-   * when all subdomains share the same IP block, but won't cover CDN-dispersed
-   * hostnames where subdomains resolve to different PoPs.
+   * Wildcard entries (e.g. `*.blob.core.windows.net`) are preserved so that
+   * `generateFirewallScript()` can produce dnsmasq wildcard rules. In fallback
+   * CIDR mode, wildcards are stripped to the parent domain for best-effort
+   * DNS resolution.
    */
   computeAllowlist(
     policy: NetworkPolicy,
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
-    additionalHosts: string[] = [],
   ): string[] {
     const hosts = new Set<string>();
 
@@ -110,14 +105,8 @@ export class DockerNetworkManager {
       }
     }
 
-    // Add profile-specified hosts, normalising wildcard entries
+    // Add profile-specified hosts (wildcards preserved)
     for (const h of policy.allowedHosts) {
-      // *.example.com → resolve example.com (best-effort wildcard support)
-      hosts.add(h.startsWith('*.') ? h.slice(2) : h);
-    }
-
-    // Add dynamically discovered hosts (e.g. NuGet CDN backends)
-    for (const h of additionalHosts) {
       hosts.add(h);
     }
 
@@ -140,16 +129,24 @@ export class DockerNetworkManager {
   }
 
   /**
-   * Generate an iptables firewall script. Behaviour depends on mode:
+   * Generate a firewall script for the container. Behaviour depends on mode:
    *
    * - 'allow-all'  — flush rules, allow loopback + established; no DROP (open egress)
    * - 'deny-all'   — flush rules, allow loopback + established + DNS, REJECT everything else
-   * - 'restricted' — (default) resolve allowed hosts to IPs, allow them, REJECT the rest
+   * - 'restricted' — domain-based filtering via dnsmasq+ipset (preferred) or CIDR fallback
    *
-   * The script is idempotent: it always flushes OUTPUT before re-applying rules,
-   * making it safe to re-exec on a running container for live policy updates.
-   * Note: there is a brief window (~ms) between flush and new rules where all
-   * traffic is allowed — acceptable for this use case.
+   * **dnsmasq+ipset mode** (when dnsmasq and ipset are installed):
+   *   - dnsmasq acts as a filtering DNS resolver, only forwarding allowed domains
+   *   - Resolved IPs are auto-added to an ipset via dnsmasq's `--ipset` flag
+   *   - iptables allows only IPs in the ipset — true domain-based filtering
+   *   - Wildcard support is native: `*.blob.core.windows.net` covers all subdomains
+   *
+   * **CIDR fallback** (when dnsmasq/ipset not available):
+   *   - Resolves hosts to IPs on the daemon side, expands to /24 CIDRs
+   *   - Wildcards stripped to parent domain for best-effort resolution
+   *   - Less reliable for CDN services with rotating IPs
+   *
+   * The script is idempotent: safe to re-exec on a running container for live updates.
    */
   async generateFirewallScript(
     allowedHosts: string[],
@@ -172,12 +169,11 @@ export class DockerNetworkManager {
       return lines.join('\n');
     }
 
-    lines.push('');
-    lines.push('# Allow DNS (UDP + TCP port 53)');
-    lines.push('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
-    lines.push('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
-
     if (mode === 'deny-all') {
+      lines.push('');
+      lines.push('# Allow DNS');
+      lines.push('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
+      lines.push('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
       lines.push('');
       lines.push(
         '# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)',
@@ -188,21 +184,21 @@ export class DockerNetworkManager {
       return lines.join('\n');
     }
 
-    // restricted — resolve hosts to IPs on the daemon side (reliable DNS) and
-    // expand to /24 CIDRs to handle CDN IP rotation.
-    // Previous approach resolved inside the container, but Docker's embedded DNS
-    // on custom bridge networks isn't always ready immediately after container start.
+    // restricted mode — try dnsmasq+ipset, fall back to CIDR-only
+    const safeHosts = allowedHosts.filter((h) => SAFE_HOST_REGEX.test(h));
+    const ipHosts = safeHosts.filter((h) => /^\d+\.\d+\.\d+\.\d+$/.test(h));
+    const wildcardHosts = safeHosts.filter((h) => h.startsWith('*.'));
+    const exactHosts = safeHosts.filter(
+      (h) => !h.startsWith('*.') && !/^\d+\.\d+\.\d+\.\d+$/.test(h),
+    );
+
+    // Resolve exact hosts to /24 CIDRs (used by both modes for pre-seeding)
     const cidrs = new Set<string>();
+    for (const ip of ipHosts) {
+      cidrs.add(ip);
+    }
     await Promise.all(
-      allowedHosts.map(async (host) => {
-        if (!SAFE_HOST_REGEX.test(host)) {
-          this.logger.warn({ host }, 'Skipping unsafe hostname in firewall script generation');
-          return;
-        }
-        if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-          cidrs.add(host);
-          return;
-        }
+      exactHosts.map(async (host) => {
         try {
           const { resolve4 } = await import('node:dns/promises');
           const ips = await resolve4(host);
@@ -216,115 +212,140 @@ export class DockerNetworkManager {
       }),
     );
 
-    // Collect resolvable hostnames for the container-side second pass
-    const resolvableHosts = allowedHosts.filter(
-      (h) => SAFE_HOST_REGEX.test(h) && !/^\d+\.\d+\.\d+\.\d+$/.test(h),
-    );
-
-    lines.push('');
-    lines.push(
-      `# ${cidrs.size} CIDRs resolved from ${allowedHosts.length} hosts (daemon-side DNS)`,
-    );
-    for (const cidr of cidrs) {
-      lines.push(`iptables -A OUTPUT -d "${cidr}" -j ACCEPT`);
+    // Build dnsmasq domain entries: for each domain, generate server= and ipset= lines.
+    // dnsmasq treats /domain/ as a suffix match, so /blob.core.windows.net/ covers all subdomains.
+    const dnsmasqDomains: string[] = [];
+    for (const h of exactHosts) {
+      dnsmasqDomains.push(h);
+    }
+    for (const h of wildcardHosts) {
+      // *.blob.core.windows.net → blob.core.windows.net (dnsmasq suffix match)
+      dnsmasqDomains.push(h.slice(2));
     }
 
-    // Second pass: resolve allowed hosts from the container's perspective.
-    // CDN services (Azure Front Door, NuGet, etc.) return different IPs depending
-    // on the resolver's location. The daemon may resolve to one set of /24 ranges
-    // while the container's DNS returns a different set. This pass catches the gap.
-    //
-    // Uses getent (available in all our container images) and deduplicates against
-    // existing rules via iptables -C (check) before inserting.
+    // --- dnsmasq+ipset mode ---
+    lines.push('');
+    lines.push('# Attempt dnsmasq+ipset mode (domain-based filtering)');
+    lines.push('if command -v dnsmasq >/dev/null 2>&1 && command -v ipset >/dev/null 2>&1; then');
+    lines.push('');
+    lines.push('  # Stop any running dnsmasq');
+    lines.push('  killall dnsmasq 2>/dev/null || true');
+    lines.push('');
+    lines.push('  # Create ipset for allowed IPs');
+    lines.push('  ipset destroy allowed_ips 2>/dev/null || true');
+    lines.push('  ipset create allowed_ips hash:net');
+    lines.push('');
+
+    // Pre-seed ipset with daemon-resolved CIDRs
+    if (cidrs.size > 0) {
+      lines.push(`  # Pre-seed ipset with ${cidrs.size} daemon-resolved CIDRs`);
+      for (const cidr of cidrs) {
+        lines.push(`  ipset add allowed_ips "${cidr}" 2>/dev/null || true`);
+      }
+      lines.push('');
+    }
+
+    // Write dnsmasq config
+    lines.push('  # Write dnsmasq config');
+    lines.push("  cat > /tmp/dnsmasq-firewall.conf << 'DNSCONF'");
+    lines.push('no-resolv');
+    lines.push('no-hosts');
+    lines.push(`listen-address=${DNSMASQ_LISTEN}`);
+    lines.push('bind-interfaces');
+    // dnsmasq drops privileges to the dnsmasq user if it exists, otherwise nobody.
+    // We need a known user for the iptables owner match.
+    lines.push('user=nobody');
+    lines.push('');
+    lines.push('# Allowed domains — forward to Docker DNS and populate ipset');
+    for (const domain of dnsmasqDomains) {
+      lines.push(`server=/${domain}/${DOCKER_DNS}`);
+      lines.push(`ipset=/${domain}/allowed_ips`);
+    }
+    lines.push('');
+    lines.push('# Block everything else');
+    lines.push('address=/#/');
+    lines.push('DNSCONF');
+    lines.push('');
+
+    // Start dnsmasq
+    lines.push('  # Start dnsmasq');
+    lines.push('  dnsmasq --conf-file=/tmp/dnsmasq-firewall.conf --pid-file=/tmp/dnsmasq.pid');
+    lines.push('');
+
+    // Rewrite resolv.conf to use dnsmasq
+    lines.push('  # Point DNS to dnsmasq');
+    lines.push(`  echo "nameserver ${DNSMASQ_LISTEN}" > /etc/resolv.conf`);
+    lines.push('');
+
+    // iptables rules for dnsmasq mode
+    lines.push('  # DNS: only dnsmasq (nobody) can reach Docker DNS');
+    lines.push(
+      `  iptables -A OUTPUT -p udp --dport 53 -d ${DOCKER_DNS} -m owner --uid-owner nobody -j ACCEPT`,
+    );
+    lines.push(
+      `  iptables -A OUTPUT -p tcp --dport 53 -d ${DOCKER_DNS} -m owner --uid-owner nobody -j ACCEPT`,
+    );
+    lines.push('  # Block direct DNS to Docker resolver from other users');
+    lines.push(`  iptables -A OUTPUT -p udp --dport 53 -d ${DOCKER_DNS} -j REJECT`);
+    lines.push(`  iptables -A OUTPUT -p tcp --dport 53 -d ${DOCKER_DNS} -j REJECT`);
+    lines.push('  # Allow all users to reach dnsmasq (on loopback, already covered)');
+    lines.push('');
+    lines.push('  # Allow traffic to IPs in the ipset');
+    lines.push('  iptables -A OUTPUT -m set --match-set allowed_ips dst -j ACCEPT');
+    lines.push('');
+    lines.push('  # Reject everything else');
+    lines.push('  iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
+    lines.push('');
+    lines.push(
+      `  echo "Firewall: restricted mode (dnsmasq+ipset) — ${dnsmasqDomains.length} domains, ${cidrs.size} pre-seeded CIDRs"`,
+    );
+    lines.push('');
+
+    // --- CIDR fallback mode ---
+    lines.push('else');
+    lines.push('');
+    lines.push('  echo "dnsmasq/ipset not available — falling back to CIDR mode"');
+    lines.push('');
+    lines.push('  # Allow DNS');
+    lines.push('  iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
+    lines.push('  iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
+    lines.push('');
+
+    lines.push(`  # ${cidrs.size} CIDRs resolved from allowed hosts (daemon-side DNS)`);
+    for (const cidr of cidrs) {
+      lines.push(`  iptables -A OUTPUT -d "${cidr}" -j ACCEPT`);
+    }
+
+    // Container-side resolution pass for CIDR fallback
+    const resolvableHosts = [...exactHosts, ...wildcardHosts.map((h) => h.slice(2))];
     if (resolvableHosts.length > 0) {
       lines.push('');
-      lines.push('# Container-side DNS resolution pass (covers CDN PoP differences)');
-      lines.push('container_resolve() {');
-      lines.push('  for host in "$@"; do');
+      lines.push('  # Container-side DNS resolution (covers CDN PoP differences)');
+      lines.push('  container_resolve() {');
+      lines.push('    for host in "$@"; do');
       lines.push(
-        '    for ip in $(getent ahostsv4 "$host" 2>/dev/null | awk \'{print $1}\' | sort -u); do',
+        '      for ip in $(getent ahostsv4 "$host" 2>/dev/null | awk \'{print $1}\' | sort -u); do',
       );
-      lines.push('      cidr="$(echo "$ip" | awk -F. \'{print $1"."$2"."$3".0/24"}\')"');
-      lines.push('      iptables -C OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || \\');
-      lines.push('        iptables -I OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true');
+      lines.push('        cidr="$(echo "$ip" | awk -F. \'{print $1"."$2"."$3".0/24"}\')"');
+      lines.push('        iptables -C OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || \\');
+      lines.push('          iptables -I OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true');
+      lines.push('      done');
       lines.push('    done');
-      lines.push('  done');
-      lines.push('}');
-      lines.push(`container_resolve ${resolvableHosts.map((h) => `"${h}"`).join(' ')}`);
+      lines.push('  }');
+      lines.push(`  container_resolve ${resolvableHosts.map((h) => `"${h}"`).join(' ')}`);
     }
 
-    lines.push('');
-    lines.push('# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)');
-    lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
     lines.push('');
     lines.push(
-      `echo "Firewall: restricted mode — ${cidrs.size} CIDRs (daemon) + container-side resolution"`,
+      '  # Reject everything else outbound (REJECT, not DROP — fast failure for debugging)',
     );
+    lines.push('  iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
+    lines.push('');
+    lines.push(`  echo "Firewall: restricted mode (CIDR fallback) — ${cidrs.size} CIDRs"`);
+    lines.push('');
+    lines.push('fi');
 
     return lines.join('\n');
-  }
-
-  /**
-   * Discover CDN/blob storage backend hostnames from NuGet feed service indices.
-   *
-   * NuGet feeds expose a v3 service index (JSON) that lists resource endpoints.
-   * Package downloads often redirect to CDN or blob storage hosts (e.g.
-   * `*.blob.core.windows.net`) whose subdomains are unpredictable at config time.
-   *
-   * This method fetches each feed's service index, extracts all hostnames from
-   * the resource URLs, and also probes the public NuGet index when `includePublic`
-   * is true (default). The discovered hosts are then passed to `computeAllowlist()`
-   * so that the firewall CIDRs cover the actual download targets.
-   *
-   * Non-fatal: fetch failures are logged and silently skipped.
-   */
-  async resolveNugetBackendHosts(
-    registries: PrivateRegistry[],
-    includePublic = true,
-  ): Promise<string[]> {
-    const nugetFeeds = registries.filter((r) => r.type === 'nuget').map((r) => r.url);
-
-    // Always probe public NuGet for .NET sessions (CDN hosts rotate)
-    if (includePublic) {
-      nugetFeeds.push(NUGET_PUBLIC_INDEX);
-    }
-
-    if (nugetFeeds.length === 0) return [];
-
-    const hosts = new Set<string>();
-    await Promise.all(
-      nugetFeeds.map(async (feedUrl) => {
-        try {
-          const resp = await fetch(feedUrl, {
-            signal: AbortSignal.timeout(NUGET_DISCOVERY_TIMEOUT_MS),
-            headers: { Accept: 'application/json' },
-          });
-          if (!resp.ok) return;
-          const index = (await resp.json()) as { resources?: { '@id'?: string }[] };
-          if (!Array.isArray(index.resources)) return;
-
-          for (const resource of index.resources) {
-            const id = resource['@id'];
-            if (typeof id !== 'string') continue;
-            try {
-              const parsed = new URL(id);
-              if (SAFE_HOST_REGEX.test(parsed.hostname)) {
-                hosts.add(parsed.hostname);
-              }
-            } catch {
-              // Malformed resource URL — skip
-            }
-          }
-        } catch {
-          this.logger.warn(
-            { feedUrl },
-            'Failed to fetch NuGet service index for firewall discovery',
-          );
-        }
-      }),
-    );
-
-    return [...hosts];
   }
 
   /**
@@ -335,13 +356,12 @@ export class DockerNetworkManager {
     policy: NetworkPolicy | null,
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
-    additionalHosts: string[] = [],
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
     await this.ensureNetwork();
 
-    const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp, additionalHosts);
+    const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp);
     const firewallScript = await this.generateFirewallScript(allowlist, policy.mode);
 
     return {
