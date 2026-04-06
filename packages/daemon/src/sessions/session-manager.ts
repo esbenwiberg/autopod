@@ -622,7 +622,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           { timeout: 120_000 },
         );
 
-        const previewUrl = `http://localhost:${hostPort}`;
+        const previewUrl = `http://127.0.0.1:${hostPort}`;
         session = transition(session, 'running', {
           containerId,
           worktreePath,
@@ -1590,7 +1590,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           result = await validationEngine.validate({
             sessionId,
             containerId: session.containerId,
-            previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
+            previewUrl: session.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
             buildCommand: profile.buildCommand,
             startCommand: profile.startCommand,
             healthPath: profile.healthPath,
@@ -1920,7 +1920,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           result = await validationEngine.validate({
             sessionId,
             containerId: session.containerId,
-            previewUrl: session.previewUrl ?? `http://localhost:${CONTAINER_APP_PORT}`,
+            previewUrl: session.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
             buildCommand: profile.buildCommand,
             startCommand: profile.startCommand,
             healthPath: profile.healthPath,

@@ -66,6 +66,9 @@ RUN chown autopod:autopod /workspace
 USER autopod
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# Turborepo cache dir — /workspace/.turbo may not be writable depending on how
+# the worktree is mounted, so use /tmp which is always writable.
+ENV TURBO_CACHE_DIR=/tmp/.turbo
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
