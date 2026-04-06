@@ -46,15 +46,15 @@ public enum AgentEventType: String, Sendable {
 
     public var color: Color {
         switch self {
-        case .status:     .blue
-        case .toolUse:    .blue
+        case .status:     .cyan
+        case .toolUse:    .purple
         case .toolResult: .secondary
-        case .fileChange: .blue
+        case .fileChange: .green
         case .escalation: .orange
-        case .plan:       .secondary
-        case .progress:   .secondary
+        case .plan:       .blue
+        case .progress:   .teal
         case .error:      .red
-        case .complete:   .secondary
+        case .complete:   .green
         case .output:     .secondary
         }
     }
