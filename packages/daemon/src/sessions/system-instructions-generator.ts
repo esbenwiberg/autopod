@@ -191,6 +191,12 @@ export function generateSystemInstructions(
   lines.push('- You discover something unexpected that changes the nature or scope of the task');
   lines.push('- You are blocked and cannot make progress without more information');
   lines.push('- The task explicitly asks you to check in before acting');
+  lines.push(
+    '- You are about to install or add a **new dependency** ' +
+      '(npm install, pip install, dotnet add package, cargo add, etc.) — ' +
+      'call `ask_human` first, describe the package and why it is needed, and wait for approval. ' +
+      'Do not proceed with the install until approved.',
+  );
   lines.push('');
   lines.push(
     '**Important**: Human responses come through the MCP tool — do NOT write questions as text output. ' +

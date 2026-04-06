@@ -162,24 +162,41 @@ const authModule: AuthModule = {
 
 const worktreeManager = new LocalWorktreeManager({ logger });
 
-// Docker is required — all agent work runs inside containers
-const Dockerode = (await import('dockerode')).default;
-const docker = new Dockerode();
+const MOCK_DOCKER = process.env.AUTOPOD_MOCK_DOCKER === 'true';
 
-// Verify Docker is reachable before proceeding
-try {
-  await docker.ping();
-  logger.info('Docker connection verified');
-} catch (err) {
-  logger.fatal({ err }, 'autopod requires Docker Desktop — docker.ping() failed');
-  process.exit(1);
+// Docker is required for real sessions — all agent work runs inside containers.
+// Set AUTOPOD_MOCK_DOCKER=true to skip Docker entirely (API/health-check dev mode).
+const Dockerode = (await import('dockerode')).default;
+type DockerodeInstance = InstanceType<typeof Dockerode>;
+
+let docker: DockerodeInstance | undefined;
+let containerManager: ContainerManager;
+let networkManager: DockerNetworkManager | undefined;
+
+if (MOCK_DOCKER) {
+  logger.warn('AUTOPOD_MOCK_DOCKER=true — Docker disabled. Sessions will not run real containers.');
+  const { createDevMockContainerManager } = await import('./containers/mock-container-manager.js');
+  containerManager = createDevMockContainerManager();
+} else {
+  // Verify Docker is reachable before proceeding
+  const d = new Dockerode();
+  try {
+    await d.ping();
+    logger.info('Docker connection verified');
+  } catch (err) {
+    logger.fatal(
+      { err },
+      'autopod requires Docker Desktop — docker.ping() failed. Set AUTOPOD_MOCK_DOCKER=true to start without Docker.',
+    );
+    process.exit(1);
+  }
+  docker = d;
+  containerManager = new DockerContainerManager({ docker: d, logger });
+  networkManager = new DockerNetworkManager({ docker: d, logger });
 }
 
-const containerManager: ContainerManager = new DockerContainerManager({ docker, logger });
-const networkManager = new DockerNetworkManager({ docker, logger });
-
 let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
-if (ACR_REGISTRY_URL) {
+if (ACR_REGISTRY_URL && docker) {
   const { AcrClient } = await import('./images/acr-client.js');
   const { ImageBuilder } = await import('./images/image-builder.js');
   const acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, docker);
