@@ -14,6 +14,13 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
+/** Env vars applied to every git subprocess to prevent interactive prompts from hanging the daemon. */
+const GIT_ENV: Record<string, string> = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+} as Record<string, string>;
+
 export interface LocalWorktreeManagerConfig {
   cacheDir?: string;
   worktreeDir?: string;
@@ -83,7 +90,9 @@ export class LocalWorktreeManager implements WorktreeManager {
         // Clone with auth URL so the initial fetch authenticates, then immediately
         // reset origin to the clean URL — containers mount the bare repo and must
         // not be able to read the PAT from git config.
-        await execFileAsync('git', ['clone', '--bare', authUrl, bareRepoPath]);
+        await execFileAsync('git', ['clone', '--bare', authUrl, bareRepoPath], {
+          env: GIT_ENV,
+        });
         await execFileAsync('git', ['remote', 'set-url', 'origin', repoUrl], {
           cwd: bareRepoPath,
         });
@@ -101,7 +110,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         await execFileAsync(
           'git',
           ['fetch', authUrl, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
-          { cwd: bareRepoPath },
+          { cwd: bareRepoPath, env: GIT_ENV },
         );
       } catch {
         // Remote fetch failed — check if the branch exists locally (created by a prior
@@ -285,7 +294,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     // Push using auth URL so the PAT is never stored in git config.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
     const authUrl = await this.getAuthUrl(worktreePath);
-    await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath });
+    await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath, env: GIT_ENV });
   }
 
   async commitFiles(worktreePath: string, paths: string[], message: string): Promise<void> {
@@ -328,7 +337,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   async pushBranch(worktreePath: string): Promise<void> {
     this.logger.info({ worktreePath }, 'Pushing branch to origin');
     const authUrl = await this.getAuthUrl(worktreePath);
-    await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath });
+    await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath, env: GIT_ENV });
   }
 
   async pullBranch(worktreePath: string): Promise<{ newCommits: boolean }> {
@@ -340,7 +349,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     const { stdout: branch } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
     });
-    await execFileAsync('git', ['fetch', authUrl, branch.trim()], { cwd: worktreePath });
+    await execFileAsync('git', ['fetch', authUrl, branch.trim()], { cwd: worktreePath, env: GIT_ENV });
     await execFileAsync('git', ['merge', 'FETCH_HEAD', '--ff-only'], { cwd: worktreePath });
     const { stdout: headAfter } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
       cwd: worktreePath,
@@ -381,6 +390,13 @@ export class LocalWorktreeManager implements WorktreeManager {
     });
     const cleanUrl = remoteUrl.trim();
     const pat = this.patCache.get(bareRepoPath);
+    if (!pat) {
+      this.logger.warn(
+        { bareRepoPath },
+        'No PAT cached for this repo — git push/fetch will fail without credentials. ' +
+          'Add a GitHub PAT to the profile.',
+      );
+    }
     return pat ? this.injectPat(cleanUrl, pat) : cleanUrl;
   }
 

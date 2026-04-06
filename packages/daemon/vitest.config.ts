@@ -12,12 +12,17 @@ function shouldSkipDbTests(): boolean {
 
   try {
     const require = createRequire(import.meta.url);
-    require('better-sqlite3');
+    const Database = require('better-sqlite3');
+    // Actually open a database — require() alone can succeed even when the
+    // native binding is missing or broken at runtime (e.g. wrong arch,
+    // pnpm virtual-store rebuild quirks).
+    const db = new Database(':memory:');
+    db.close();
     return false;
   } catch {
     console.warn(
       '\n⚠  better-sqlite3 native bindings not available — skipping DB tests.\n' +
-        '   Run `npx node-gyp rebuild` in the better-sqlite3 package to fix, ' +
+        '   Run `npm rebuild better-sqlite3` or `npx pnpm rebuild better-sqlite3` to fix, ' +
         'or set SKIP_DB_TESTS=0 to force-include them.\n',
     );
     return true;
@@ -25,19 +30,19 @@ function shouldSkipDbTests(): boolean {
 }
 
 const dbTestPatterns = [
-  'src/integration.test.ts',
-  'src/e2e.test.ts',
-  'src/routes-extended.test.ts',
-  'src/sessions/session-manager.test.ts',
-  'src/sessions/session-repository.test.ts',
-  'src/sessions/session-lifecycle.e2e.test.ts',
-  'src/sessions/escalation-repository.test.ts',
-  'src/sessions/event-repository.test.ts',
-  'src/sessions/validation-repository.test.ts',
-  'src/sessions/local-reconciler.test.ts',
-  'src/profiles/profile-store.test.ts',
-  'src/actions/action-integration.test.ts',
-  'src/actions/audit-repository.test.ts',
+  '**/integration.test.ts',
+  '**/e2e.test.ts',
+  '**/routes-extended.test.ts',
+  '**/session-manager.test.ts',
+  '**/session-repository.test.ts',
+  '**/session-lifecycle.e2e.test.ts',
+  '**/escalation-repository.test.ts',
+  '**/event-repository.test.ts',
+  '**/validation-repository.test.ts',
+  '**/local-reconciler.test.ts',
+  '**/profile-store.test.ts',
+  '**/action-integration.test.ts',
+  '**/audit-repository.test.ts',
 ];
 
 export default defineConfig({
