@@ -68,10 +68,7 @@ export async function persistRefreshedCredentials(
   const currentCreds = currentProfile.providerCredentials;
 
   if (currentCreds?.provider === 'max' && currentCreds.refreshToken === oauth.refreshToken) {
-    logger.debug(
-      { profileName },
-      'Container refresh token matches stored — skipping persist',
-    );
+    logger.debug({ profileName }, 'Container refresh token matches stored — skipping persist');
     return;
   }
 

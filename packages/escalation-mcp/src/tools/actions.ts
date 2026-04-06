@@ -98,9 +98,12 @@ async function requestApproval(
   }
 }
 
-function formatResponse(
-  response: { success: boolean; data?: unknown; error?: string; quarantined: boolean },
-): string {
+function formatResponse(response: {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+  quarantined: boolean;
+}): string {
   if (!response.success) {
     return `Action failed: ${response.error}`;
   }

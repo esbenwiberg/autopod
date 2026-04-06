@@ -242,7 +242,9 @@ describe('DockerContainerManager', () => {
     it('removes stale container on 409 even if stop fails', async () => {
       const freshContainer = createMockContainer({ id: 'fresh123' });
       const staleContainer = createMockContainer({
-        stop: vi.fn().mockRejectedValue(Object.assign(new Error('not running'), { statusCode: 304 })),
+        stop: vi
+          .fn()
+          .mockRejectedValue(Object.assign(new Error('not running'), { statusCode: 304 })),
       });
 
       docker.createContainer

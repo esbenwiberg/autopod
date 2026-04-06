@@ -107,11 +107,9 @@ export class LocalWorktreeManager implements WorktreeManager {
         // Remote fetch failed — check if the branch exists locally (created by a prior
         // session's `git worktree add -B` and still in the bare repo after cleanup).
         try {
-          await execFileAsync(
-            'git',
-            ['rev-parse', '--verify', `refs/heads/${baseBranch}`],
-            { cwd: bareRepoPath },
-          );
+          await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${baseBranch}`], {
+            cwd: bareRepoPath,
+          });
           baseBranchRef = `refs/heads/${baseBranch}`;
           this.logger.info(
             { baseBranch },

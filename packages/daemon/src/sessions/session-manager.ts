@@ -709,7 +709,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // CLAUDE.md / copilot-instructions.md is never overwritten.
         // Claude CLI reads this via --append-system-prompt-file; Copilot via customInstructions.
         emitStatus('Writing system instructions to container…');
-        await containerManager.writeFile(containerId, AUTOPOD_INSTRUCTIONS_PATH, systemInstructions);
+        await containerManager.writeFile(
+          containerId,
+          AUTOPOD_INSTRUCTIONS_PATH,
+          systemInstructions,
+        );
 
         // Generate a session-scoped token so the container can authenticate its MCP calls.
         // The token is passed as Authorization: Bearer on the escalation MCP server config
@@ -794,8 +798,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               '/workspace/.github/copilot-instructions.md',
             );
             if (repoInstructions.trim()) {
-              copilotInstructions =
-                repoInstructions + '\n\n---\n\n' + systemInstructions;
+              copilotInstructions = `${repoInstructions}\n\n---\n\n${systemInstructions}`;
               logger.info(
                 { sessionId },
                 'Merged repo copilot-instructions.md with autopod system instructions',
@@ -1071,7 +1074,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const s = sessionRepo.getOrThrow(sessionId);
         if (!isTerminalState(s.status)) {
           transition(s, 'failed');
-          emitActivityStatus(sessionId, `Resume failed: ${err instanceof Error ? err.message : String(err)}`);
+          emitActivityStatus(
+            sessionId,
+            `Resume failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
         throw err;
       }
@@ -1183,7 +1189,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const s = sessionRepo.getOrThrow(sessionId);
         if (!isTerminalState(s.status)) {
           transition(s, 'failed');
-          emitActivityStatus(sessionId, `Resume failed: ${err instanceof Error ? err.message : String(err)}`);
+          emitActivityStatus(
+            sessionId,
+            `Resume failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
         throw err;
       }
@@ -1427,7 +1436,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // instead of trying to restart a potentially stale container. Docker Desktop's VirtioFS
       // mounts can break after long idle periods, making the old container unreachable.
       const fromTerminal =
-        session.status === 'failed' || session.status === 'killed' || session.status === 'validated';
+        session.status === 'failed' ||
+        session.status === 'killed' ||
+        session.status === 'validated';
       if (force && fromTerminal && session.worktreePath) {
         emitActivityStatus(sessionId, 'Re-provisioning session with fresh container…');
 
