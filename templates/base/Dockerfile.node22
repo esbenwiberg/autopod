@@ -17,6 +17,9 @@ RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
 # Global tools
 RUN npm install -g pnpm@9
 
+# Agent CLIs
+RUN npm install -g @anthropic-ai/claude-code @github/copilot
+
 # Working directory
 WORKDIR /workspace
 RUN chown autopod:autopod /workspace

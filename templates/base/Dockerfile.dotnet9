@@ -9,9 +9,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     && rm -rf /var/lib/apt/lists/*
 
+# Node.js 22 (required for agent CLIs)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user
 RUN groupadd --gid 1000 autopod && \
     useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod
+
+# Agent CLIs
+RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
 # Pre-warm NuGet cache with common restore patterns
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1

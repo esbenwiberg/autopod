@@ -30,6 +30,9 @@ RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
 # Global tools
 RUN npm install -g pnpm@9
 
+# Agent CLIs
+RUN npm install -g @anthropic-ai/claude-code @github/copilot
+
 # Pre-install Playwright Chromium (as root, then fix perms)
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN npx playwright install chromium && \
