@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# seed-dogfood-profile.sh — Create the autopod-self dog-fooding profile
+set -euo pipefail
+
+HOST="${AUTOPOD_HOST:-http://127.0.0.1:3100}"
+TOKEN_FILE="$HOME/.autopod/dev-token"
+
+if [ ! -f "$TOKEN_FILE" ]; then
+  echo "No dev token at $TOKEN_FILE — start the daemon first (./scripts/start-dev.sh)" >&2
+  exit 1
+fi
+
+TOKEN=$(cat "$TOKEN_FILE")
+
+BODY=$(cat <<'JSON'
+{
+  "name": "autopod-self",
+  "repoUrl": "https://github.com/esbenwiberg/autopod",
+  "defaultBranch": "main",
+  "template": "node22",
+  "buildCommand": "npx pnpm install && npx pnpm build",
+  "testCommand": "npx pnpm test",
+  "startCommand": "NODE_ENV=development PORT=$PORT node packages/daemon/dist/index.js",
+  "healthPath": "/health",
+  "healthTimeout": 120,
+  "smokePages": [{ "path": "/health" }],
+  "maxValidationAttempts": 3,
+  "defaultModel": "sonnet",
+  "defaultRuntime": "claude",
+  "networkPolicy": {
+    "enabled": true,
+    "mode": "deny-all"
+  },
+  "escalation": {
+    "askHuman": true,
+    "askAi": { "enabled": true, "model": "opus", "maxCalls": 5 },
+    "autoPauseAfter": 10,
+    "humanResponseTimeout": 7200
+  },
+  "outputMode": "pr",
+  "buildTimeout": 600,
+  "testTimeout": 600
+}
+JSON
+)
+
+RESPONSE=$(curl -sf -w "\n%{http_code}" \
+  -X POST "$HOST/profiles" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "$BODY" 2>&1) || {
+  CODE=$(echo "$RESPONSE" | tail -1)
+  BODY_OUT=$(echo "$RESPONSE" | sed '$d')
+  if echo "$BODY_OUT" | grep -q "already exists"; then
+    echo "Profile 'autopod-self' already exists. Use 'ap profile edit autopod-self' to update."
+    exit 0
+  fi
+  echo "Failed to create profile (HTTP $CODE):" >&2
+  echo "$BODY_OUT" >&2
+  exit 1
+}
+
+echo "Profile 'autopod-self' created."
+echo ""
+echo "Verify: curl -s $HOST/profiles/autopod-self | jq ."
+echo ""
+echo "Run a scenario:"
+echo "  ap run autopod-self \"<task description>\""
