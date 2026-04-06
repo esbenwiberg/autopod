@@ -59,6 +59,28 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('### Health Check Failed');
     lines.push(`The app did not respond at \`${result.smoke.health.url}\` within the timeout.`);
     lines.push(`Response code: ${result.smoke.health.responseCode ?? 'none'}`);
+
+    // Include the start command output — this is where the actual crash/error reason lives
+    if (result.smoke.health.startOutput) {
+      lines.push('');
+      lines.push('**Start command output** (from the process that should have started your app):');
+      lines.push('```');
+      lines.push(result.smoke.health.startOutput);
+      lines.push('```');
+    }
+
+    lines.push('');
+  }
+
+  // Test failures
+  if (result.test?.status === 'fail') {
+    lines.push('### Test Failures');
+    const testOutput = [result.test.stdout, result.test.stderr].filter(Boolean).join('\n').trim();
+    if (testOutput) {
+      lines.push('```');
+      lines.push(testOutput.slice(0, 10_000));
+      lines.push('```');
+    }
     lines.push('');
   }
 

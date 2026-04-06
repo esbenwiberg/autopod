@@ -20,7 +20,7 @@ BODY=$(cat <<'JSON'
   "template": "node22",
   "buildCommand": "npx pnpm install && npx pnpm build",
   "testCommand": "npx pnpm test",
-  "startCommand": "NODE_ENV=development PORT=$PORT node packages/daemon/dist/index.js",
+  "startCommand": "NODE_ENV=development AUTOPOD_MOCK_DOCKER=true PORT=$PORT node packages/daemon/dist/index.js",
   "healthPath": "/health",
   "healthTimeout": 120,
   "smokePages": [{ "path": "/health" }],

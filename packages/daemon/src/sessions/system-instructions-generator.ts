@@ -110,6 +110,11 @@ export function generateSystemInstructions(
     lines.push(`- Build: \`${profile.buildCommand}\``);
     lines.push(`- Start: \`${profile.startCommand}\``);
     lines.push(`- Health check: ${profile.healthPath}`);
+    lines.push(
+      '- **Port**: Your app must listen on `$PORT` (currently 3000). ' +
+        'Do NOT use port 3100 — that is the host daemon. ' +
+        'If you curl localhost:3100 you are hitting the control plane, not your app.',
+    );
     lines.push('');
   }
 
