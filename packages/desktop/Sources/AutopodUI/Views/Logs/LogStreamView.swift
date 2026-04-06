@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Full log viewer — streaming events with filters, auto-scroll, and search.
@@ -12,6 +13,7 @@ public struct LogStreamView: View {
     @State private var searchText = ""
     @State private var pinnedToBottom = true
     @State private var expandedEventId: Int?
+    @State private var showCopiedFeedback = false
 
     private var filteredEvents: [AgentEvent] {
         events.filter { event in
@@ -45,6 +47,15 @@ public struct LogStreamView: View {
                 Text("\(filteredEvents.count) events")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button {
+                    copyLogsToClipboard()
+                } label: {
+                    Image(systemName: showCopiedFeedback ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(showCopiedFeedback ? .green : .secondary)
+                .help("Copy logs to clipboard")
+                .disabled(filteredEvents.isEmpty)
                 Button {
                     pinnedToBottom.toggle()
                 } label: {
@@ -109,6 +120,28 @@ public struct LogStreamView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Copy
+
+    private func copyLogsToClipboard() {
+        let text = filteredEvents.map { event in
+            var line = "[\(event.timeString)] [\(event.type.label)]"
+            if let tool = event.toolName { line += " (\(tool))" }
+            line += " \(event.summary)"
+            if let detail = event.detail {
+                line += "\n    \(detail.replacingOccurrences(of: "\n", with: "\n    "))"
+            }
+            return line
+        }.joined(separator: "\n")
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+
+        withAnimation(.easeOut(duration: 0.15)) { showCopiedFeedback = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeOut(duration: 0.3)) { showCopiedFeedback = false }
+        }
     }
 
     // MARK: - Log content

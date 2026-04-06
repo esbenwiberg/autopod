@@ -1,6 +1,6 @@
 FROM node:22-slim
 
-# System deps + Playwright deps (Chromium)
+# System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -8,19 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables ipset dnsmasq \
     tmux \
     python3 build-essential \
-    # Playwright Chromium dependencies
-    libnss3 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libatspi2.0-0 \
-    libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user — remove the default node user (uid 1000) first
@@ -34,9 +21,12 @@ RUN npm install -g pnpm@9
 # Agent CLIs
 RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
-# Pre-install Playwright Chromium (as root, then fix perms)
+# Pre-install Playwright + Chromium with all system dependencies.
+# `playwright install --with-deps` installs the complete set of OS packages
+# that Chromium needs — don't hand-pick them, Playwright knows best.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN npx playwright install chromium && \
+RUN npm install -g playwright && \
+    playwright install --with-deps chromium && \
     chmod -R 755 /opt/pw-browsers
 
 # Working directory
@@ -46,9 +36,14 @@ RUN chown autopod:autopod /workspace
 USER autopod
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# Allow bare imports of globally installed packages (e.g. playwright in validation scripts)
+ENV NODE_PATH=/usr/local/lib/node_modules
 # Turborepo cache dir — /workspace/.turbo may not be writable depending on how
 # the worktree is mounted, so use /tmp which is always writable.
 ENV TURBO_CACHE_DIR=/tmp/.turbo
+# Point node-gyp at local Node headers so native addon rebuilds work offline
+# (critical for deny-all network policy containers).
+ENV npm_config_nodedir=/usr/local
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-3000}/health || exit 1

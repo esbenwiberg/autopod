@@ -4,6 +4,9 @@ export interface ValidationEngineConfig {
   sessionId: string;
   containerId: string;
   previewUrl: string;
+  /** URL reachable from inside the container (e.g. http://127.0.0.1:3000).
+   *  Used by Playwright scripts that run in-container. Falls back to previewUrl. */
+  containerBaseUrl?: string;
   buildCommand: string;
   startCommand: string;
   healthPath: string;
@@ -28,5 +31,8 @@ export interface ValidationEngineConfig {
 }
 
 export interface ValidationEngine {
-  validate(config: ValidationEngineConfig): Promise<ValidationResult>;
+  validate(
+    config: ValidationEngineConfig,
+    onProgress?: (message: string) => void,
+  ): Promise<ValidationResult>;
 }

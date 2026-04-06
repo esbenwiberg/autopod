@@ -15,7 +15,7 @@ function makeConfig(overrides: Partial<PlaywrightScriptConfig> = {}): Playwright
 describe('generateValidationScript', () => {
   it('contains chromium import', () => {
     const script = generateValidationScript(makeConfig());
-    expect(script).toContain("import { chromium } from 'playwright'");
+    expect(script).toContain("require('playwright')");
   });
 
   it('bakes config as JSON constant', () => {
@@ -66,7 +66,7 @@ describe('generateValidationScript', () => {
   it('produces valid script with empty pages array', () => {
     const script = generateValidationScript(makeConfig({ pages: [] }));
     // Should still be a syntactically complete script
-    expect(script).toContain("import { chromium } from 'playwright'");
+    expect(script).toContain("require('playwright')");
     expect(script).toContain('__AUTOPOD_PAGE_RESULTS_START__');
     // Config should have an empty pages array
     expect(script).toContain('"pages":[]');

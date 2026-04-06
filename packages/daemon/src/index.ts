@@ -321,7 +321,7 @@ sessionManager = createSessionManager({
   networkManager,
   prManagerFactory,
   enqueueSession: (id) => sessionQueue.enqueue(id),
-  mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? (HOST === '0.0.0.0' ? 'host.docker.internal' : HOST)}:${PORT}`,
+  mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? 'host.docker.internal'}:${PORT}`,
   daemonConfig: {
     mcpServers: JSON.parse(process.env.DAEMON_MCP_SERVERS ?? '[]'),
     claudeMdSections: JSON.parse(process.env.DAEMON_CLAUDE_MD_SECTIONS ?? '[]'),

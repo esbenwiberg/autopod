@@ -29,19 +29,25 @@ export function createLocalValidationEngine(
   const log = logger?.child({ component: 'local-validation-engine' });
 
   return {
-    async validate(config: ValidationEngineConfig): Promise<ValidationResult> {
+    async validate(
+      config: ValidationEngineConfig,
+      onProgress?: (message: string) => void,
+    ): Promise<ValidationResult> {
       const startTime = Date.now();
 
       // ── Phase 1: Build ──────────────────────────────────────────────
+      if (config.buildCommand) onProgress?.('Running build…');
       const buildResult = await runBuild(containerManager, config, log);
 
       // ── Phase 2: Test ───────────────────────────────────────────────
+      if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
       const testResult =
         buildResult.status === 'pass'
           ? await runTests(containerManager, config, log)
           : { status: 'skip' as const, duration: 0 };
 
       // ── Phase 3: Health check ───────────────────────────────────────
+      if (buildResult.status === 'pass' && config.startCommand) onProgress?.('Running health check…');
       const healthResult =
         buildResult.status === 'pass'
           ? await runHealthCheck(containerManager, config, log)
@@ -53,18 +59,23 @@ export function createLocalValidationEngine(
             };
 
       // ── Phase 4: Page validation ─────────────────────────────────────
+      if (healthResult.status === 'pass' && config.smokePages.length > 0)
+        onProgress?.('Validating pages…');
       const pages: PageResult[] =
         healthResult.status === 'pass' && config.smokePages.length > 0
           ? await runPageValidation(containerManager, config, log)
           : [];
 
       // ── Phase 5: AC Validation ────────────────────────────────────────
+      if (healthResult.status === 'pass' && config.acceptanceCriteria?.length)
+        onProgress?.('Checking acceptance criteria…');
       const acValidation =
         healthResult.status === 'pass'
           ? await runAcValidation(containerManager, config, log)
           : null;
 
       // ── Phase 6: AI Task Review ─────────────────────────────────────
+      onProgress?.('Running AI task review…');
       const taskReview = await runTaskReview(config, log);
 
       // ── Phase 7: Overall result ─────────────────────────────────────
@@ -311,7 +322,7 @@ async function runPageValidation(
   log?.info({ pageCount: config.smokePages.length }, 'running page validation');
 
   const script = generateValidationScript({
-    baseUrl: config.previewUrl,
+    baseUrl: config.containerBaseUrl ?? config.previewUrl,
     pages: config.smokePages,
     screenshotDir: '/workspace/.autopod/screenshots',
     navigationTimeout: 30_000,
@@ -331,7 +342,7 @@ async function runPageValidation(
   try {
     const result = await containerManager.execInContainer(
       config.containerId,
-      ['node', scriptPath],
+      ['sh', '-c', `NODE_PATH=\${NODE_PATH:-$(npm root -g)} node ${scriptPath}`],
       { cwd: '/workspace', timeout: config.smokePages.length * 45_000 },
     );
 
@@ -487,16 +498,18 @@ async function executeAcChecks(
     .map((inst, i) => `Check ${i + 1}: "${inst.criterion}"\nInstruction: ${inst.instruction}`)
     .join('\n\n');
 
+  const inContainerUrl = config.containerBaseUrl ?? config.previewUrl;
+
   const prompt = `You are a browser automation expert. Generate a Playwright script (ESM, using @playwright/test's chromium) that executes the following validation checks against a running web application.
 
-Base URL: ${config.previewUrl}
+Base URL: ${inContainerUrl}
 Screenshot directory: /tmp/autopod-ac-screenshots
 
 Checks to perform:
 ${instructionList}
 
 Requirements:
-- Use \`import { chromium } from 'playwright';\`
+- Use \`import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { chromium } = require('playwright');\` (ESM import ignores NODE_PATH, so use createRequire for CJS resolution)
 - Launch chromium with \`{ headless: true, args: ['--no-sandbox'] }\`
 - For each check: navigate to the appropriate URL, perform the validation, take a screenshot
 - Save screenshots as /tmp/autopod-ac-screenshots/check-{index}.png (0-indexed)
@@ -537,7 +550,7 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
     // Execute the script
     const result = await containerManager.execInContainer(
       config.containerId,
-      ['node', scriptPath],
+      ['sh', '-c', `NODE_PATH=\${NODE_PATH:-$(npm root -g)} node ${scriptPath}`],
       { cwd: '/workspace', timeout: instructions.length * 45_000 + 30_000 },
     );
 

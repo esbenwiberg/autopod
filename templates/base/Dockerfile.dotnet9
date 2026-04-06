@@ -38,6 +38,9 @@ USER autopod
 # Turborepo cache dir — /workspace/.turbo may not be writable depending on how
 # the worktree is mounted, so use /tmp which is always writable.
 ENV TURBO_CACHE_DIR=/tmp/.turbo
+# Point node-gyp at local Node headers so native addon rebuilds work offline
+# (nodesource installs headers under /usr/include/node/).
+ENV npm_config_nodedir=/usr
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-5000}/health || exit 1

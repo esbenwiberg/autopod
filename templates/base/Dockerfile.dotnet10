@@ -1,25 +1,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0
 
-# System deps + Playwright Chromium dependencies
+# System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
     iptables ipset dnsmasq \
     tmux \
-    # Playwright Chromium dependencies
-    libnss3 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2t64 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libatspi2.0-0 \
-    libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 (for npm frontend builds)
@@ -31,9 +18,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN groupadd --gid 1000 autopod 2>/dev/null || groupmod -n autopod "$(getent group 1000 | cut -d: -f1)" && \
     useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod 2>/dev/null || usermod -l autopod -d /home/autopod -m "$(getent passwd 1000 | cut -d: -f1)"
 
-# Pre-install Playwright Chromium (as root, then fix perms)
+# Pre-install Playwright + Chromium with all system dependencies.
+# `playwright install --with-deps` installs the complete set of OS packages
+# that Chromium needs — don't hand-pick them, Playwright knows best.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN npx playwright install chromium && \
+RUN npm install -g playwright && \
+    playwright install --with-deps chromium && \
     chmod -R 755 /opt/pw-browsers
 
 # Agent CLIs
@@ -66,9 +56,14 @@ RUN chown autopod:autopod /workspace
 USER autopod
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# Allow bare imports of globally installed packages (e.g. playwright in validation scripts)
+ENV NODE_PATH=/usr/lib/node_modules
 # Turborepo cache dir — /workspace/.turbo may not be writable depending on how
 # the worktree is mounted, so use /tmp which is always writable.
 ENV TURBO_CACHE_DIR=/tmp/.turbo
+# Point node-gyp at local Node headers so native addon rebuilds work offline
+# (nodesource installs headers under /usr/include/node/).
+ENV npm_config_nodedir=/usr
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-3000}/health || exit 1

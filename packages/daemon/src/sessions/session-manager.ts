@@ -588,6 +588,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const containerEnv: Record<string, string> = {
           SESSION_ID: sessionId,
           PORT: String(CONTAINER_APP_PORT),
+          HOST: '0.0.0.0', // bind to all interfaces inside container for Docker port forwarding
           ...(isDotnet
             ? {
                 MSBUILDNODECOUNT: '4',
@@ -1587,26 +1588,30 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         try {
-          result = await validationEngine.validate({
-            sessionId,
-            containerId: session.containerId,
-            previewUrl: session.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-            buildCommand: profile.buildCommand,
-            startCommand: profile.startCommand,
-            healthPath: profile.healthPath,
-            healthTimeout: profile.healthTimeout,
-            smokePages: profile.smokePages,
-            attempt,
-            task: session.task,
-            diff,
-            testCommand: profile.testCommand,
-            buildTimeout: profile.buildTimeout * 1_000,
-            testTimeout: profile.testTimeout * 1_000,
-            reviewerModel: profile.escalation.askAi.model || profile.defaultModel || 'sonnet',
-            acceptanceCriteria: session.acceptanceCriteria ?? undefined,
-            codeReviewSkill,
-            commitLog: commitLog || undefined,
-          });
+          result = await validationEngine.validate(
+            {
+              sessionId,
+              containerId: session.containerId,
+              previewUrl: session.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+              containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+              buildCommand: profile.buildCommand,
+              startCommand: profile.startCommand,
+              healthPath: profile.healthPath,
+              healthTimeout: profile.healthTimeout,
+              smokePages: profile.smokePages,
+              attempt,
+              task: session.task,
+              diff,
+              testCommand: profile.testCommand,
+              buildTimeout: profile.buildTimeout * 1_000,
+              testTimeout: profile.testTimeout * 1_000,
+              reviewerModel: profile.escalation.askAi.model || profile.defaultModel || 'sonnet',
+              acceptanceCriteria: session.acceptanceCriteria ?? undefined,
+              codeReviewSkill,
+              commitLog: commitLog || undefined,
+            },
+            (phase) => emitActivityStatus(sessionId, phase),
+          );
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies
           logger.error(
@@ -1690,6 +1695,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           sessionId,
           `Validation ${result.overall} — build: ${buildStatus}, health: ${healthStatus}, review: ${reviewStatus}`,
         );
+
+        // Surface review feedback so the user can see why it failed
+        if (result.taskReview && result.taskReview.status !== 'pass') {
+          if (result.taskReview.reasoning) {
+            emitActivityStatus(sessionId, `Review: ${result.taskReview.reasoning}`);
+          }
+          for (const issue of result.taskReview.issues) {
+            emitActivityStatus(sessionId, `  → ${issue}`);
+          }
+        }
 
         if (result.overall === 'pass') {
           emitActivityStatus(sessionId, `Validation passed (attempt ${attempt})`);
@@ -1917,26 +1932,30 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         try {
-          result = await validationEngine.validate({
-            sessionId,
-            containerId: session.containerId,
-            previewUrl: session.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-            buildCommand: profile.buildCommand,
-            startCommand: profile.startCommand,
-            healthPath: profile.healthPath,
-            healthTimeout: profile.healthTimeout,
-            smokePages: profile.smokePages,
-            attempt,
-            task: session.task,
-            diff,
-            testCommand: profile.testCommand,
-            buildTimeout: profile.buildTimeout * 1_000,
-            testTimeout: profile.testTimeout * 1_000,
-            reviewerModel: profile.escalation.askAi.model || profile.defaultModel || 'sonnet',
-            acceptanceCriteria: session.acceptanceCriteria ?? undefined,
-            codeReviewSkill,
-            commitLog: commitLog || undefined,
-          });
+          result = await validationEngine.validate(
+            {
+              sessionId,
+              containerId: session.containerId,
+              previewUrl: session.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+              containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+              buildCommand: profile.buildCommand,
+              startCommand: profile.startCommand,
+              healthPath: profile.healthPath,
+              healthTimeout: profile.healthTimeout,
+              smokePages: profile.smokePages,
+              attempt,
+              task: session.task,
+              diff,
+              testCommand: profile.testCommand,
+              buildTimeout: profile.buildTimeout * 1_000,
+              testTimeout: profile.testTimeout * 1_000,
+              reviewerModel: profile.escalation.askAi.model || profile.defaultModel || 'sonnet',
+              acceptanceCriteria: session.acceptanceCriteria ?? undefined,
+              codeReviewSkill,
+              commitLog: commitLog || undefined,
+            },
+            (phase) => emitActivityStatus(sessionId, phase),
+          );
         } catch (validateErr) {
           logger.error({ err: validateErr, sessionId }, 'Revalidation engine threw unexpectedly');
           result = {
@@ -2052,6 +2071,21 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         // Validation failed — stay in failed state, no agent rework
+        const buildStatus2 = result.smoke.build.status;
+        const healthStatus2 = result.smoke.health.status;
+        const reviewStatus2 = result.taskReview?.status ?? 'skip';
+        emitActivityStatus(
+          sessionId,
+          `Revalidation fail — build: ${buildStatus2}, health: ${healthStatus2}, review: ${reviewStatus2}`,
+        );
+        if (result.taskReview && result.taskReview.status !== 'pass') {
+          if (result.taskReview.reasoning) {
+            emitActivityStatus(sessionId, `Review: ${result.taskReview.reasoning}`);
+          }
+          for (const issue of result.taskReview.issues) {
+            emitActivityStatus(sessionId, `  → ${issue}`);
+          }
+        }
         emitActivityStatus(sessionId, 'Revalidation failed — human fix did not resolve all issues');
         transition(s2, 'failed');
 

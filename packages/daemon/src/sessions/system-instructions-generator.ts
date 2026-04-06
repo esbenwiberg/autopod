@@ -56,6 +56,12 @@ export function generateSystemInstructions(
   // MCP Servers section
   lines.push('## MCP Servers');
   lines.push('');
+  lines.push(
+    'MCP tools are available as native tool calls — invoke them directly. ' +
+      'Do NOT attempt to call MCP endpoints via curl, fetch, or HTTP requests. ' +
+      'Claude handles MCP transport automatically.',
+  );
+  lines.push('');
   lines.push('### Escalation & Monitoring');
   lines.push(`- URL: ${mcpServerUrl}`);
   lines.push('- Tools:');
@@ -108,6 +114,9 @@ export function generateSystemInstructions(
     lines.push('## Build & Run');
     lines.push('');
     lines.push(`- Build: \`${profile.buildCommand}\``);
+    if (profile.testCommand) {
+      lines.push(`- Test: \`${profile.testCommand}\``);
+    }
     lines.push(`- Start: \`${profile.startCommand}\``);
     lines.push(`- Health check: ${profile.healthPath}`);
     lines.push(
@@ -245,6 +254,29 @@ export function generateSystemInstructions(
     lines.push('- Use ask_human when uncertain rather than guessing');
     lines.push('- Do NOT modify configuration files unless required by the task');
   }
+  lines.push('');
+
+  lines.push('## Troubleshooting');
+  lines.push('');
+  lines.push(
+    '- **Native module errors** (e.g. `better-sqlite3`, `sharp`, `bcrypt`): ' +
+      'Run `npm rebuild` or re-run the install command once. ' +
+      'Do not manually debug node-gyp, node-pre-gyp, or compiler flags.',
+  );
+  lines.push(
+    '- **MCP tool failures**: If an MCP tool call fails, check your input format. ' +
+      'Do not try to replicate MCP calls via curl/HTTP. ' +
+      'Report persistent failures via `report_blocker`.',
+  );
+  lines.push(
+    '- **Validation is automatic**: After you commit and finish, the system independently runs ' +
+      'build, tests, health checks, smoke tests, and AC validation. ' +
+      'You do not need to replicate this pipeline. Use `validate_in_browser` for quick self-checks only.',
+  );
+  lines.push(
+    '- **Do not retry identical failing commands more than twice.** ' +
+      'Diagnose the root cause or try a different approach.',
+  );
   lines.push('');
 
   return lines.join('\n');

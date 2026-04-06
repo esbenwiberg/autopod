@@ -17,10 +17,10 @@ BODY=$(cat <<'JSON'
   "name": "autopod-self",
   "repoUrl": "https://github.com/esbenwiberg/autopod",
   "defaultBranch": "main",
-  "template": "node22",
-  "buildCommand": "npx pnpm install && npx pnpm build",
+  "template": "node22-pw",
+  "buildCommand": "npx pnpm install && npx pnpm rebuild better-sqlite3 && npx pnpm build",
   "testCommand": "npx pnpm test",
-  "startCommand": "NODE_ENV=development AUTOPOD_MOCK_DOCKER=true PORT=$PORT node packages/daemon/dist/index.js",
+  "startCommand": "NODE_ENV=development AUTOPOD_MOCK_DOCKER=true HOST=0.0.0.0 PORT=$PORT node packages/daemon/dist/index.js",
   "healthPath": "/health",
   "healthTimeout": 120,
   "smokePages": [{ "path": "/health" }],
@@ -39,7 +39,8 @@ BODY=$(cat <<'JSON'
   },
   "outputMode": "pr",
   "buildTimeout": 600,
-  "testTimeout": 600
+  "testTimeout": 600,
+  "customInstructions": "- The build command runs `npx pnpm rebuild better-sqlite3` to compile native bindings for this container. If you still see binding errors after build, do NOT debug node-gyp or compiler flags — report a blocker instead.\n- Do not try to read ~/.autopod/dev-token or authenticate with the daemon API. You have no access to the host daemon. All external communication goes through MCP tool calls.\n- The daemon runs on port 3100 on the HOST — you cannot access it from inside this container via localhost:3100.\n- Do not retry identical failing commands more than twice. Diagnose the root cause or try a different approach."
 }
 JSON
 )

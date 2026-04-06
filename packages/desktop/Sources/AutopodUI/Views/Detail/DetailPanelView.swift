@@ -42,6 +42,8 @@ public struct DetailPanelView: View {
     @State private var selectedTab: DetailTab = .overview
     @State private var isTaskExpanded: Bool = false
 
+    private var isTerminalAvailable: Bool { session.isWorkspace }
+
     public var body: some View {
         VStack(spacing: 0) {
             // Session header
@@ -63,24 +65,27 @@ public struct DetailPanelView: View {
                 case .terminal:   EmptyView()
                 }
 
-                TerminalTab(
-                    session: session,
-                    terminalState: terminalState,
-                    dataPipe: terminalDataPipe,
-                    onSendData: onTerminalSendData,
-                    onResize: onTerminalResize,
-                    onConnect: onTerminalConnect,
-                    onDisconnect: onTerminalDisconnect,
-                    isSelected: selectedTab == .terminal
-                )
-                .opacity(selectedTab == .terminal ? 1 : 0)
-                .allowsHitTesting(selectedTab == .terminal)
+                if isTerminalAvailable {
+                    TerminalTab(
+                        session: session,
+                        terminalState: terminalState,
+                        dataPipe: terminalDataPipe,
+                        onSendData: onTerminalSendData,
+                        onResize: onTerminalResize,
+                        onConnect: onTerminalConnect,
+                        onDisconnect: onTerminalDisconnect,
+                        isSelected: selectedTab == .terminal
+                    )
+                    .opacity(selectedTab == .terminal ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .terminal)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: requestedTab) { _, tab in
             guard let tab else { return }
+            guard tab != .terminal || isTerminalAvailable else { requestedTab = nil; return }
             withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
             requestedTab = nil
         }
@@ -260,6 +265,7 @@ public struct DetailPanelView: View {
         HStack(spacing: 4) {
             ForEach(DetailTab.allCases, id: \.self) { tab in
                 let isSelected = selectedTab == tab
+                let isDisabled = tab == .terminal && !isTerminalAvailable
                 Button {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
                 } label: {
@@ -269,7 +275,7 @@ public struct DetailPanelView: View {
                         Text(tab.label)
                             .font(.system(.subheadline).weight(isSelected ? .semibold : .regular))
                     }
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .foregroundStyle(isSelected ? .primary : isDisabled ? .tertiary : .secondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(
@@ -278,6 +284,8 @@ public struct DetailPanelView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(isDisabled)
+                .help(isDisabled ? "Terminal is only available for workspace sessions" : "")
             }
             Spacer()
         }

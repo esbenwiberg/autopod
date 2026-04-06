@@ -28,9 +28,13 @@ export function generateValidationScript(config: PlaywrightScriptConfig): string
   const configJson = JSON.stringify(merged);
 
   return `
-import { chromium } from 'playwright';
+import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+// Use createRequire so CJS resolution picks up NODE_PATH (ESM import ignores it)
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
 
 const CONFIG = ${configJson};
 
