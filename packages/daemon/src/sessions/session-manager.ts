@@ -1228,10 +1228,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       transition(session, 'running');
 
       try {
+        if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
+
+        // Container is stopped post-validation — restart it before resuming the agent
+        const cm = containerManagerFactory.get(session.executionTarget);
+        await cm.start(session.containerId);
+        logger.info({ sessionId, containerId: session.containerId }, 'Container restarted for rejection retry');
+
         // Resume agent with rejection feedback
         const resumeEnv = await getResumeEnv(session);
         const runtime = runtimeRegistry.get(session.runtime);
-        if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
         const events = runtime.resume(sessionId, rejectionMessage, session.containerId, resumeEnv);
         await this.consumeAgentEvents(sessionId, events);
         await this.handleCompletion(sessionId);

@@ -179,7 +179,7 @@ describe('ClaudeRuntime', () => {
       expect(args).not.toContain('--debug');
     });
 
-    it('includes --mcp-config when mcpServers is provided', () => {
+    it('includes --mcp-config with file path when mcpServers is provided', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -198,11 +198,7 @@ describe('ClaudeRuntime', () => {
 
       expect(args).toContain('--mcp-config');
       const configIdx = args.indexOf('--mcp-config');
-      const config = JSON.parse(args[configIdx + 1]);
-      expect(config.mcpServers.escalation).toMatchObject({
-        type: 'http',
-        url: 'http://localhost:3100/mcp',
-      });
+      expect(args[configIdx + 1]).toBe('/home/autopod/.autopod/mcp-config.json');
     });
 
     it('does not include --mcp-config when mcpServers is empty', () => {
@@ -223,6 +219,74 @@ describe('ClaudeRuntime', () => {
       });
 
       expect(args).not.toContain('--mcp-config');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // writeMcpConfig
+  // ---------------------------------------------------------------------------
+
+  describe('writeMcpConfig', () => {
+    it('writes MCP config JSON to the container', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      await (
+        runtime as unknown as {
+          writeMcpConfig: (config: SpawnConfig) => Promise<void>;
+        }
+      ).writeMcpConfig({
+        sessionId: 'abc',
+        task: 'task',
+        model: 'opus',
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+        mcpServers: [
+          {
+            name: 'escalation',
+            url: 'http://host.docker.internal:3100/mcp/abc',
+            headers: { Authorization: 'Bearer tok123' },
+          },
+        ],
+      });
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c1',
+        '/home/autopod/.autopod/mcp-config.json',
+        expect.any(String),
+      );
+
+      const written = (cm.writeFile as ReturnType<typeof vi.fn>).mock.calls[0]?.[2];
+      const parsed = JSON.parse(written);
+      expect(parsed.mcpServers.escalation).toMatchObject({
+        type: 'http',
+        url: 'http://host.docker.internal:3100/mcp/abc',
+        headers: { Authorization: 'Bearer tok123' },
+      });
+    });
+
+    it('skips writing when mcpServers is empty', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      await (
+        runtime as unknown as {
+          writeMcpConfig: (config: SpawnConfig) => Promise<void>;
+        }
+      ).writeMcpConfig({
+        sessionId: 'abc',
+        task: 'task',
+        model: 'opus',
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+        mcpServers: [],
+      });
+
+      expect(cm.writeFile).not.toHaveBeenCalled();
     });
   });
 

@@ -5,6 +5,9 @@ import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
 
+/** Path inside the container where the MCP config JSON is written. */
+const MCP_CONFIG_PATH = '/home/autopod/.autopod/mcp-config.json';
+
 /**
  * Claude CLI runtime adapter.
  *
@@ -26,6 +29,11 @@ export class ClaudeRuntime implements Runtime {
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    // Write MCP config to a file inside the container so Claude CLI can read it
+    // via --mcp-config <path>. Passing inline JSON breaks due to shell escaping
+    // inside containerManager.execStreaming().
+    await this.writeMcpConfig(config);
+
     const args = this.buildSpawnArgs(config);
 
     this.logger.info({
@@ -202,6 +210,27 @@ export class ClaudeRuntime implements Runtime {
     this.claudeSessionIds.set(sessionId, claudeSessionId);
   }
 
+  /** Write MCP server config to a JSON file inside the container. */
+  private async writeMcpConfig(config: SpawnConfig): Promise<void> {
+    if (!config.mcpServers || config.mcpServers.length === 0) return;
+
+    const servers: Record<string, { type: string; url: string; headers?: Record<string, string> }> =
+      {};
+    for (const server of config.mcpServers) {
+      servers[server.name] = {
+        type: 'http',
+        url: server.url,
+        ...(server.headers && { headers: server.headers }),
+      };
+    }
+
+    await this.containerManager.writeFile(
+      config.containerId,
+      MCP_CONFIG_PATH,
+      JSON.stringify({ mcpServers: servers }, null, 2),
+    );
+  }
+
   private resolveModelId(model: string): string {
     const aliases: Record<string, string> = {
       opus: 'claude-opus-4-6',
@@ -234,20 +263,10 @@ export class ClaudeRuntime implements Runtime {
     // Inject autopod system instructions without overwriting the repo's CLAUDE.md
     args.push('--append-system-prompt-file', AUTOPOD_INSTRUCTIONS_PATH);
 
-    // MCP server configuration
+    // MCP server configuration — the config file is pre-written to the container
+    // by writeMcpConfig() before spawn. We just point Claude at the file path.
     if (config.mcpServers && config.mcpServers.length > 0) {
-      const servers: Record<
-        string,
-        { type: string; url: string; headers?: Record<string, string> }
-      > = {};
-      for (const server of config.mcpServers) {
-        servers[server.name] = {
-          type: 'http',
-          url: server.url,
-          ...(server.headers && { headers: server.headers }),
-        };
-      }
-      args.push('--mcp-config', JSON.stringify({ mcpServers: servers }));
+      args.push('--mcp-config', MCP_CONFIG_PATH);
     }
 
     return args;
