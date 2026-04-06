@@ -73,6 +73,46 @@ public struct SessionCardFinal: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .onHover { isHovered = $0 }
+        .alert("Reject session", isPresented: $showRejectFeedback) {
+            TextField("What needs to change?", text: $rejectFeedbackText)
+            Button("Reject", role: .destructive) {
+                let feedback = rejectFeedbackText.isEmpty ? nil : rejectFeedbackText
+                rejectFeedbackText = ""
+                Task { await actions.reject(session.id, feedback) }
+            }
+            Button("Cancel", role: .cancel) {
+                rejectFeedbackText = ""
+            }
+        } message: {
+            Text("Tell the agent what to fix. Leave blank for a generic rejection.")
+        }
+        .alert("Reply to agent", isPresented: $showReplyInput) {
+            TextField("Your reply…", text: $replyInputText)
+            Button("Send") {
+                let message = replyInputText
+                replyInputText = ""
+                Task { await actions.reply(session.id, message) }
+            }
+            .disabled(replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {
+                replyInputText = ""
+            }
+        } message: {
+            Text("Respond to the agent's question.")
+        }
+        .alert("Nudge agent", isPresented: $showNudgeInput) {
+            TextField("Message for the agent…", text: $nudgeInputText)
+            Button("Send") {
+                let message = nudgeInputText.isEmpty ? "Please refocus on the task." : nudgeInputText
+                nudgeInputText = ""
+                Task { await actions.nudge(session.id, message) }
+            }
+            Button("Cancel", role: .cancel) {
+                nudgeInputText = ""
+            }
+        } message: {
+            Text("Send a message to redirect the agent. Leave blank for a default nudge.")
+        }
     }
 
     // MARK: - Compact (always visible)
@@ -369,14 +409,14 @@ public struct SessionCardFinal: View {
                         .foregroundStyle(.secondary)
                 }
                 Button {
-                    Task { await actions.nudge(session.id) }
+                    showNudgeInput = true
                 } label: {
                     Label("Nudge", systemImage: "hand.tap")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Send a gentle reminder to the agent to refocus")
+                .help("Send a message to the agent to refocus")
             }
 
         case .awaitingInput:
@@ -392,24 +432,15 @@ public struct SessionCardFinal: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                HStack(spacing: 6) {
-                    Button {
-                        // Reply opens detail panel — tap the card to select it
-                    } label: {
-                        Label("Reply", systemImage: "arrowshape.turn.up.left")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(.orange)
-                    Button {
-                        Task { await actions.nudge(session.id) }
-                    } label: {
-                        Label("Nudge", systemImage: "hand.tap")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                Button {
+                    showReplyInput = true
+                } label: {
+                    Label("Reply", systemImage: "arrowshape.turn.up.left")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.orange)
             }
 
         case .validated:
@@ -434,7 +465,7 @@ public struct SessionCardFinal: View {
                         .controlSize(.small)
                         .tint(.green)
                         Button("Reject") {
-                            Task { await actions.reject(session.id, nil) }
+                            showRejectFeedback = true
                         }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -563,6 +594,12 @@ public struct SessionCardFinal: View {
         }
     }
 
+    @State private var showReplyInput = false
+    @State private var replyInputText = ""
+    @State private var showNudgeInput = false
+    @State private var nudgeInputText = ""
+    @State private var showRejectFeedback = false
+    @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
 
     private var deleteButton: some View {

@@ -89,6 +89,32 @@ public struct DetailPanelView: View {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
             requestedTab = nil
         }
+        .alert("Reject session", isPresented: $showRejectFeedback) {
+            TextField("What needs to change?", text: $rejectFeedbackText)
+            Button("Reject", role: .destructive) {
+                let feedback = rejectFeedbackText.isEmpty ? nil : rejectFeedbackText
+                rejectFeedbackText = ""
+                Task { await actions.reject(session.id, feedback) }
+            }
+            Button("Cancel", role: .cancel) {
+                rejectFeedbackText = ""
+            }
+        } message: {
+            Text("Tell the agent what to fix. Leave blank for a generic rejection.")
+        }
+        .alert("Nudge agent", isPresented: $showNudgeInput) {
+            TextField("Message for the agent…", text: $nudgeInputText)
+            Button("Send") {
+                let message = nudgeInputText.isEmpty ? "Please refocus on the task." : nudgeInputText
+                nudgeInputText = ""
+                Task { await actions.nudge(session.id, message) }
+            }
+            Button("Cancel", role: .cancel) {
+                nudgeInputText = ""
+            }
+        } message: {
+            Text("Send a message to redirect the agent. Leave blank for a default nudge.")
+        }
     }
 
     // MARK: - Header
@@ -138,7 +164,7 @@ public struct DetailPanelView: View {
             switch session.status {
             case .running:
                 Button {
-                    Task { await actions.nudge(session.id) }
+                    showNudgeInput = true
                 } label: {
                     Label("Nudge", systemImage: "hand.tap")
                 }
@@ -155,13 +181,7 @@ public struct DetailPanelView: View {
 
             case .awaitingInput:
                 // Reply is handled in OverviewTab inline
-                Button {
-                    Task { await actions.nudge(session.id) }
-                } label: {
-                    Label("Nudge", systemImage: "hand.tap")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                EmptyView()
 
             case .validated:
                 if session.validationChecks?.allPassed != false {
@@ -175,7 +195,7 @@ public struct DetailPanelView: View {
                     .controlSize(.small)
                     .tint(.green)
                     Button("Reject") {
-                        Task { await actions.reject(session.id, nil) }
+                        showRejectFeedback = true
                     }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -246,6 +266,10 @@ public struct DetailPanelView: View {
         }
     }
 
+    @State private var showNudgeInput = false
+    @State private var nudgeInputText = ""
+    @State private var showRejectFeedback = false
+    @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
 
     private var forkButton: some View {

@@ -24,7 +24,7 @@ public final class ActionHandler {
       approve: { [weak self] id in await self?.approve(id) },
       reject: { [weak self] id, feedback in await self?.reject(id, feedback: feedback) },
       reply: { [weak self] id, message in await self?.reply(id, message: message) },
-      nudge: { [weak self] id in await self?.nudge(id) },
+      nudge: { [weak self] id, message in await self?.nudge(id, message: message) },
       kill: { [weak self] id in await self?.kill(id) },
       complete: { [weak self] id in await self?.complete(id) },
       pause: { [weak self] id in await self?.pause(id) },
@@ -82,10 +82,10 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
-  public func nudge(_ sessionId: String) async {
+  public func nudge(_ sessionId: String, message: String) async {
     pendingAction = "nudge-\(sessionId)"
     do {
-      try await api.nudgeSession(sessionId)
+      try await api.nudgeSession(sessionId, message: message)
     } catch {
       lastError = error.localizedDescription
     }

@@ -7,7 +7,7 @@ public struct SessionActions: Sendable {
   public var approve: @MainActor @Sendable (String) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void
   public var reply: @MainActor @Sendable (String, String) async -> Void
-  public var nudge: @MainActor @Sendable (String) async -> Void
+  public var nudge: @MainActor @Sendable (String, String) async -> Void
   public var kill: @MainActor @Sendable (String) async -> Void
   public var complete: @MainActor @Sendable (String) async -> Void
   public var pause: @MainActor @Sendable (String) async -> Void
@@ -26,7 +26,7 @@ public struct SessionActions: Sendable {
     approve: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     reject: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     reply: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },
-    nudge: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    nudge: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },
     kill: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     complete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     pause: @escaping @MainActor @Sendable (String) async -> Void = { _ in },

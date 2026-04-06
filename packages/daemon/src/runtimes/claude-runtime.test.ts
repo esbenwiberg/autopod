@@ -261,7 +261,7 @@ describe('ClaudeRuntime', () => {
       const written = (cm.writeFile as ReturnType<typeof vi.fn>).mock.calls[0]?.[2];
       const parsed = JSON.parse(written);
       expect(parsed.mcpServers.escalation).toMatchObject({
-        type: 'http',
+        type: 'streamable-http',
         url: 'http://host.docker.internal:3100/mcp/abc',
         headers: { Authorization: 'Bearer tok123' },
       });

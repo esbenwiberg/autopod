@@ -210,7 +210,7 @@ export class CopilotRuntime implements Runtime {
       > = {};
       for (const server of config.mcpServers) {
         mcpConfig[server.name] = {
-          type: 'http',
+          type: 'streamable-http',
           url: server.url,
           ...(server.headers && { headers: server.headers }),
         };
