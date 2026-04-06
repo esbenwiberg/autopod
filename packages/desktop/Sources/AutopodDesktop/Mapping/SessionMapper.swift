@@ -70,7 +70,7 @@ public enum SessionMapper {
           loadTime: p.loadTime
         )
       }
-      let acValidation: Bool? = v.acValidation.map { $0.status == "pass" }
+      let acValidation: Bool? = v.acValidation.flatMap { $0.status == "skip" ? nil : ($0.status == "pass") }
       let acChecks: [AcCheckDetail]? = v.acValidation?.results.map { r in
         AcCheckDetail(criterion: r.criterion, passed: r.passed, reasoning: r.reasoning)
       }

@@ -25,10 +25,10 @@ public struct ProfileResponse: Codable, Sendable {
   public var claudeMdSections: [InjectedClaudeMdSectionResponse]
   public var skills: [InjectedSkillResponse]
   public var networkPolicy: NetworkPolicyResponse?
-  public var actionPolicy: AnyCodable?  // Complex type, pass through as raw JSON
+  public var actionPolicy: ActionPolicyResponse?
   public var outputMode: String
   public var modelProvider: String
-  public var providerCredentials: AnyCodable?
+  public var providerCredentials: ProviderCredentialsResponse?
   public var testCommand: String?
   public var buildTimeout: Int
   public var testTimeout: Int
@@ -167,6 +167,77 @@ public struct WarmResult: Codable, Sendable {
   public let digest: String?
   public let sizeMb: Int
   public let buildDuration: Int?
+}
+
+// MARK: - Action Policy response types
+
+public struct ActionPolicyResponse: Codable, Sendable {
+  public var enabledGroups: [String]
+  public var actionOverrides: [ActionOverrideResponse]?
+  public var customActions: AnyCodable?  // Complex type — pass through
+  public var sanitization: DataSanitizationResponse
+  public var quarantine: QuarantineResponse?
+
+  public init() {
+    enabledGroups = []
+    sanitization = .init()
+  }
+}
+
+public struct ActionOverrideResponse: Codable, Sendable {
+  public var action: String
+  public var allowedResources: [String]?
+  public var requiresApproval: Bool?
+  public var disabled: Bool?
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    action = try c.decode(String.self, forKey: .action)
+    allowedResources = try c.decodeIfPresent([String].self, forKey: .allowedResources)
+    requiresApproval = try decodeBoolOrIntIfPresent(c, key: .requiresApproval)
+    disabled = try decodeBoolOrIntIfPresent(c, key: .disabled)
+  }
+}
+
+public struct DataSanitizationResponse: Codable, Sendable {
+  public var preset: String
+  public var allowedDomains: [String]?
+
+  public init() { preset = "standard" }
+}
+
+public struct QuarantineResponse: Codable, Sendable {
+  public var enabled: Bool
+  public var threshold: Int
+  public var blockThreshold: Int
+  public var onBlock: String
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
+    threshold = try c.decode(Int.self, forKey: .threshold)
+    blockThreshold = try c.decode(Int.self, forKey: .blockThreshold)
+    onBlock = try c.decode(String.self, forKey: .onBlock)
+  }
+}
+
+// MARK: - Provider Credentials response
+
+public struct ProviderCredentialsResponse: Codable, Sendable {
+  public var provider: String
+
+  // Only decode the provider field — actual credentials are sensitive
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    provider = try c.decode(String.self, forKey: .provider)
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(provider, forKey: .provider)
+  }
+
+  private enum CodingKeys: String, CodingKey { case provider }
 }
 
 // MARK: - AnyCodable (pass-through for complex/unknown JSON shapes)

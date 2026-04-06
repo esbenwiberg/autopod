@@ -44,10 +44,12 @@ public struct LogPopover: View {
                                 .frame(width: 5, height: 5)
                                 .padding(.top, 5)
 
+                            ScrollView(.horizontal, showsIndicators: true) {
                             Text(event.summary)
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(event.type == .error ? .red : .primary)
-                                .lineLimit(2)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)

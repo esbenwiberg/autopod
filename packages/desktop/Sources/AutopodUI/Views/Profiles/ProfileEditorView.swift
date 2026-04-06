@@ -6,8 +6,10 @@ enum ProfileSection: String, CaseIterable, Identifiable {
     case general
     case buildRun
     case agent
+    case escalation
     case infrastructure
     case network
+    case actions
     case validation
     case credentials
     case injections
@@ -19,8 +21,10 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .general:        "General"
         case .buildRun:       "Build & Run"
         case .agent:          "Agent"
+        case .escalation:     "Escalation"
         case .infrastructure: "Infrastructure"
         case .network:        "Network & Security"
+        case .actions:        "Actions"
         case .validation:     "Validation"
         case .credentials:    "Credentials"
         case .injections:     "Injections"
@@ -32,8 +36,10 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .general:        "info.circle"
         case .buildRun:       "hammer"
         case .agent:          "cpu"
+        case .escalation:     "bubble.left.and.exclamationmark.bubble.right"
         case .infrastructure: "server.rack"
         case .network:        "shield.checkered"
+        case .actions:        "bolt.shield"
         case .validation:     "globe"
         case .credentials:    "key"
         case .injections:     "syringe"
@@ -48,10 +54,14 @@ enum ProfileSection: String, CaseIterable, Identifiable {
             "Commands executed inside the container to build, test, and run the application."
         case .agent:
             "AI model and runtime configuration for code generation sessions."
+        case .escalation:
+            "Controls how and when the agent escalates to humans or other AI models."
         case .infrastructure:
             "Execution environment, resource limits, and service provider configuration."
         case .network:
             "Outbound network access controls for container isolation."
+        case .actions:
+            "Control plane actions the agent can execute — GitHub, ADO, Azure, and custom HTTP."
         case .validation:
             "Smoke test pages loaded after the app starts to verify correctness."
         case .credentials:
@@ -131,7 +141,7 @@ public struct ProfileEditorView: View {
             Divider()
             actionBar
         }
-        .frame(width: 860, height: 660)
+        .frame(width: 860, height: 700)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -207,8 +217,10 @@ public struct ProfileEditorView: View {
                 case .general:        generalFields
                 case .buildRun:       buildRunFields
                 case .agent:          agentFields
+                case .escalation:     escalationFields
                 case .infrastructure: infrastructureFields
                 case .network:        networkFields
+                case .actions:        actionFields
                 case .validation:     validationFields
                 case .credentials:    credentialFields
                 case .injections:     injectionFields
@@ -281,14 +293,34 @@ public struct ProfileEditorView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 180)
         }
-        fieldRow("Template", help: "Container image and toolchain — determines pre-installed runtimes and build tools.") {
-            Picker("", selection: $profile.template) {
-                ForEach(StackTemplate.allCases, id: \.self) { t in
-                    Text(t.label).tag(t)
+        HStack(spacing: 24) {
+            fieldRow("Template", help: "Container image and toolchain — determines pre-installed runtimes and build tools.") {
+                Picker("", selection: $profile.template) {
+                    ForEach(StackTemplate.allCases, id: \.self) { t in
+                        Text(t.label).tag(t)
+                    }
                 }
+                .labelsHidden()
+                .frame(width: 220)
             }
-            .labelsHidden()
-            .frame(width: 220)
+            fieldRow("Output Mode", help: "How the session delivers results — PR creates a pull request, Artifact collects output files, Workspace is interactive.") {
+                Picker("", selection: $profile.outputMode) {
+                    ForEach(OutputMode.allCases, id: \.self) { m in
+                        Text(m.label).tag(m)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 180)
+            }
+        }
+
+        fieldRow("Extends", help: "Inherit settings from another profile. Fields set here override the parent.") {
+            TextField("Parent profile name (optional)", text: Binding(
+                get: { profile.extendsProfile ?? "" },
+                set: { profile.extendsProfile = $0.isEmpty ? nil : $0 }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 280)
         }
     }
 
@@ -382,6 +414,85 @@ public struct ProfileEditorView: View {
         }
     }
 
+    // MARK: - Escalation
+
+    @ViewBuilder
+    private var escalationFields: some View {
+        Toggle(isOn: $profile.escalationAskHuman) {
+            HStack(spacing: 4) {
+                Text("Allow human escalation")
+                HelpBadge(text: "When enabled, the agent can pause and ask a human reviewer for guidance.")
+            }
+        }
+
+        Divider().padding(.vertical, 4)
+
+        Text("AI Consultation")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+
+        Toggle(isOn: $profile.escalationAskAiEnabled) {
+            HStack(spacing: 4) {
+                Text("Allow AI-to-AI consultation")
+                HelpBadge(text: "The agent can consult another AI model for second opinions or specialized knowledge.")
+            }
+        }
+
+        if profile.escalationAskAiEnabled {
+            HStack(spacing: 24) {
+                fieldRow("Consultation Model", help: "Which model to consult. Sonnet is cheaper; Opus is more thorough.") {
+                    Picker("", selection: $profile.escalationAskAiModel) {
+                        Text("Sonnet").tag("sonnet")
+                        Text("Opus").tag("opus")
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+                }
+                fieldRow("Max Calls", help: "Maximum number of AI consultations per session before forcing human escalation.") {
+                    Stepper("\(profile.escalationAskAiMaxCalls)", value: $profile.escalationAskAiMaxCalls, in: 1...20)
+                        .frame(width: 110)
+                }
+            }
+        }
+
+        Divider().padding(.vertical, 4)
+
+        Text("Guardrails")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+
+        HStack(spacing: 24) {
+            fieldRow("Auto-pause After", help: "Number of escalation attempts before the session is automatically paused. Prevents runaway loops.") {
+                Stepper("\(profile.escalationAutoPauseAfter)", value: $profile.escalationAutoPauseAfter, in: 1...20)
+                    .frame(width: 110)
+            }
+            fieldRow("Human Response Timeout", help: "Seconds to wait for a human response before timing out the escalation.") {
+                HStack(spacing: 4) {
+                    TextField("3600", value: $profile.escalationHumanResponseTimeout, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                    Text("sec")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+
+        // Human-friendly summary
+        HStack(spacing: 4) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.blue.opacity(0.6))
+            let hours = profile.escalationHumanResponseTimeout / 3600
+            let mins = (profile.escalationHumanResponseTimeout % 3600) / 60
+            Text(hours > 0
+                 ? "Human has \(hours)h \(mins)m to respond before timeout."
+                 : "Human has \(mins)m to respond before timeout.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.top, 2)
+    }
+
     // MARK: - Infrastructure
 
     @ViewBuilder
@@ -437,6 +548,52 @@ public struct ProfileEditorView: View {
                 .frame(width: 150)
             }
         }
+
+        // Provider credentials indicator
+        if let credType = profile.providerCredentialsType {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                Text("Provider credentials configured: \(credType)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 2)
+        }
+
+        // Warm image
+        if profile.warmImageTag != nil || profile.warmImageBuiltAt != nil {
+            Divider().padding(.vertical, 4)
+
+            Text("Warm Image")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 20) {
+                if let tag = profile.warmImageTag {
+                    HStack(spacing: 4) {
+                        Text("Tag:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(tag)
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                }
+                if let builtAt = profile.warmImageBuiltAt {
+                    HStack(spacing: 4) {
+                        Text("Built:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(builtAt)
+                            .font(.caption)
+                    }
+                }
+            }
+
+            Text("Warm images are pre-built by the daemon to speed up container startup. Managed automatically.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
     }
 
     // MARK: - Network & Security
@@ -487,6 +644,124 @@ public struct ProfileEditorView: View {
                                 .font(.caption)
                         }
                         .buttonStyle(.borderless)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    @ViewBuilder
+    private var actionFields: some View {
+        Toggle(isOn: $profile.actionPolicyEnabled) {
+            HStack(spacing: 4) {
+                Text("Enable action policy")
+                HelpBadge(text: "When enabled, agents can execute control-plane actions like reading GitHub issues, ADO work items, or calling custom HTTP endpoints.")
+            }
+        }
+
+        if profile.actionPolicyEnabled {
+            Divider().padding(.vertical, 4)
+
+            Text("Enabled Action Groups")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(ActionGroup.allCases, id: \.self) { group in
+                    Toggle(isOn: Binding(
+                        get: { profile.actionEnabledGroups.contains(group) },
+                        set: { enabled in
+                            if enabled { profile.actionEnabledGroups.insert(group) }
+                            else { profile.actionEnabledGroups.remove(group) }
+                        }
+                    )) {
+                        Text(group.label)
+                            .font(.callout)
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+
+            Divider().padding(.vertical, 4)
+
+            Text("Data Sanitization")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            fieldRow("Preset", help: "Controls how aggressively PII and sensitive data are stripped from action responses before the agent sees them.") {
+                Picker("", selection: $profile.actionSanitizationPreset) {
+                    ForEach(SanitizationPreset.allCases, id: \.self) { p in
+                        Text(p.label).tag(p)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 150)
+            }
+
+            Text(profile.actionSanitizationPreset.description)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.top, -8)
+
+            fieldRow("Allowed Domains", help: "Domains excluded from sanitization filtering. Data from these domains passes through unmodified.") {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(profile.actionSanitizationAllowedDomains.indices, id: \.self) { i in
+                        HStack(spacing: 6) {
+                            TextField("example.com", text: $profile.actionSanitizationAllowedDomains[i])
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                            Button {
+                                profile.actionSanitizationAllowedDomains.remove(at: i)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red.opacity(0.6))
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    Button {
+                        profile.actionSanitizationAllowedDomains.append("")
+                    } label: {
+                        Label("Add domain", systemImage: "plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            Divider().padding(.vertical, 4)
+
+            Text("Quarantine")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            Toggle(isOn: $profile.actionQuarantineEnabled) {
+                HStack(spacing: 4) {
+                    Text("Enable quarantine")
+                    HelpBadge(text: "Quarantine scores action responses for PII risk. High-scoring responses are blocked or escalated.")
+                }
+            }
+
+            if profile.actionQuarantineEnabled {
+                HStack(spacing: 24) {
+                    fieldRow("Warn Threshold", help: "PII score at which a warning is logged.") {
+                        Stepper("\(profile.actionQuarantineThreshold)", value: $profile.actionQuarantineThreshold, in: 1...10)
+                            .frame(width: 110)
+                    }
+                    fieldRow("Block Threshold", help: "PII score at which the response is blocked entirely.") {
+                        Stepper("\(profile.actionQuarantineBlockThreshold)", value: $profile.actionQuarantineBlockThreshold, in: 1...20)
+                            .frame(width: 110)
+                    }
+                    fieldRow("On Block", help: "What happens when a response is blocked — skip silently or escalate to human.") {
+                        Picker("", selection: $profile.actionQuarantineOnBlock) {
+                            ForEach(QuarantineOnBlock.allCases, id: \.self) { o in
+                                Text(o.label).tag(o)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 140)
                     }
                 }
             }

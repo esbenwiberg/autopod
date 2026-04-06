@@ -48,6 +48,35 @@ public struct Profile: Identifiable, Sendable {
     public var claudeMdSections: [InjectedClaudeMdSection]
     public var skills: [InjectedSkill]
 
+    // Escalation
+    public var escalationAskHuman: Bool
+    public var escalationAskAiEnabled: Bool
+    public var escalationAskAiModel: String
+    public var escalationAskAiMaxCalls: Int
+    public var escalationAutoPauseAfter: Int
+    public var escalationHumanResponseTimeout: Int
+
+    // Output & inheritance
+    public var outputMode: OutputMode
+    public var extendsProfile: String?
+
+    // Warm image (read-only, set by daemon)
+    public var warmImageTag: String?
+    public var warmImageBuiltAt: String?
+
+    // Action policy
+    public var actionPolicyEnabled: Bool
+    public var actionEnabledGroups: Set<ActionGroup>
+    public var actionSanitizationPreset: SanitizationPreset
+    public var actionSanitizationAllowedDomains: [String]
+    public var actionQuarantineEnabled: Bool
+    public var actionQuarantineThreshold: Int
+    public var actionQuarantineBlockThreshold: Int
+    public var actionQuarantineOnBlock: QuarantineOnBlock
+
+    // Provider credentials (read-only indicator)
+    public var providerCredentialsType: String?
+
     // Convenience counts (for badges / list views)
     public var mcpServerCount: Int { mcpServers.count }
     public var claudeMdSectionCount: Int { claudeMdSections.count }
@@ -76,6 +105,21 @@ public struct Profile: Identifiable, Sendable {
         mcpServers: [InjectedMcpServer] = [],
         claudeMdSections: [InjectedClaudeMdSection] = [],
         skills: [InjectedSkill] = [],
+        escalationAskHuman: Bool = true,
+        escalationAskAiEnabled: Bool = true, escalationAskAiModel: String = "sonnet",
+        escalationAskAiMaxCalls: Int = 3,
+        escalationAutoPauseAfter: Int = 1, escalationHumanResponseTimeout: Int = 3600,
+        outputMode: OutputMode = .pr, extendsProfile: String? = nil,
+        warmImageTag: String? = nil, warmImageBuiltAt: String? = nil,
+        actionPolicyEnabled: Bool = false,
+        actionEnabledGroups: Set<ActionGroup> = [],
+        actionSanitizationPreset: SanitizationPreset = .standard,
+        actionSanitizationAllowedDomains: [String] = [],
+        actionQuarantineEnabled: Bool = false,
+        actionQuarantineThreshold: Int = 3,
+        actionQuarantineBlockThreshold: Int = 5,
+        actionQuarantineOnBlock: QuarantineOnBlock = .askHuman,
+        providerCredentialsType: String? = nil,
         createdAt: Date = Date(), updatedAt: Date = Date()
     ) {
         self.name = name; self.repoUrl = repoUrl; self.defaultBranch = defaultBranch
@@ -96,6 +140,23 @@ public struct Profile: Identifiable, Sendable {
         self.smokePages = smokePages
         self.mcpServers = mcpServers; self.claudeMdSections = claudeMdSections
         self.skills = skills
+        self.escalationAskHuman = escalationAskHuman
+        self.escalationAskAiEnabled = escalationAskAiEnabled
+        self.escalationAskAiModel = escalationAskAiModel
+        self.escalationAskAiMaxCalls = escalationAskAiMaxCalls
+        self.escalationAutoPauseAfter = escalationAutoPauseAfter
+        self.escalationHumanResponseTimeout = escalationHumanResponseTimeout
+        self.outputMode = outputMode; self.extendsProfile = extendsProfile
+        self.warmImageTag = warmImageTag; self.warmImageBuiltAt = warmImageBuiltAt
+        self.actionPolicyEnabled = actionPolicyEnabled
+        self.actionEnabledGroups = actionEnabledGroups
+        self.actionSanitizationPreset = actionSanitizationPreset
+        self.actionSanitizationAllowedDomains = actionSanitizationAllowedDomains
+        self.actionQuarantineEnabled = actionQuarantineEnabled
+        self.actionQuarantineThreshold = actionQuarantineThreshold
+        self.actionQuarantineBlockThreshold = actionQuarantineBlockThreshold
+        self.actionQuarantineOnBlock = actionQuarantineOnBlock
+        self.providerCredentialsType = providerCredentialsType
         self.createdAt = createdAt; self.updatedAt = updatedAt
     }
 }
@@ -141,6 +202,49 @@ public enum PRProvider: String, CaseIterable, Sendable {
         switch self {
         case .github: "GitHub"
         case .ado:    "Azure DevOps"
+        }
+    }
+}
+
+public enum ActionGroup: String, CaseIterable, Sendable, Hashable {
+    case githubIssues = "github-issues"
+    case githubPrs = "github-prs"
+    case githubCode = "github-code"
+    case adoWorkitems = "ado-workitems"
+    case azureLogs = "azure-logs"
+    case custom
+
+    public var label: String {
+        switch self {
+        case .githubIssues:  "GitHub Issues"
+        case .githubPrs:     "GitHub PRs"
+        case .githubCode:    "GitHub Code"
+        case .adoWorkitems:  "ADO Work Items"
+        case .azureLogs:     "Azure Logs"
+        case .custom:        "Custom"
+        }
+    }
+}
+
+public enum SanitizationPreset: String, CaseIterable, Sendable {
+    case strict, standard, relaxed
+    public var label: String { rawValue.capitalized }
+    public var description: String {
+        switch self {
+        case .strict:   "Aggressive PII stripping — blocks most external data"
+        case .standard: "Balanced — strips obvious PII, allows structured data"
+        case .relaxed:  "Minimal filtering — trusts action responses"
+        }
+    }
+}
+
+public enum QuarantineOnBlock: String, CaseIterable, Sendable {
+    case skip
+    case askHuman = "ask_human"
+    public var label: String {
+        switch self {
+        case .skip:     "Skip (discard)"
+        case .askHuman: "Ask Human"
         }
     }
 }
@@ -229,7 +333,15 @@ public enum MockProfiles: Sendable {
             InjectedSkill(name: "deploy", description: "Deploy to staging"),
             InjectedSkill(name: "lint", description: "Run linter"),
             InjectedSkill(name: "db-migrate", description: "Run database migrations")
-        ]
+        ],
+        escalationAskHuman: true,
+        escalationAskAiEnabled: true, escalationAskAiModel: "sonnet",
+        escalationAskAiMaxCalls: 5,
+        escalationAutoPauseAfter: 2, escalationHumanResponseTimeout: 7200,
+        actionPolicyEnabled: true,
+        actionEnabledGroups: [.githubIssues, .githubPrs],
+        actionSanitizationPreset: .standard,
+        actionQuarantineEnabled: true
     )
 
     public static let webapp = Profile(

@@ -15,6 +15,12 @@ public enum ProfileMapper {
     let prProvider = PRProvider(rawValue: response.prProvider) ?? .github
     let networkMode = response.networkPolicy.flatMap { NetworkPolicyMode(rawValue: $0.mode ?? "restricted") } ?? .restricted
 
+    // Action policy
+    let ap = response.actionPolicy
+    let enabledGroups: Set<ActionGroup> = Set(
+      (ap?.enabledGroups ?? []).compactMap { ActionGroup(rawValue: $0) }
+    )
+
     return Profile(
       name: response.name,
       repoUrl: response.repoUrl,
@@ -54,6 +60,25 @@ public enum ProfileMapper {
       skills: response.skills.map {
         InjectedSkill(name: $0.name ?? "", description: $0.description)
       },
+      escalationAskHuman: response.escalation.askHuman,
+      escalationAskAiEnabled: response.escalation.askAi.enabled,
+      escalationAskAiModel: response.escalation.askAi.model,
+      escalationAskAiMaxCalls: response.escalation.askAi.maxCalls,
+      escalationAutoPauseAfter: response.escalation.autoPauseAfter,
+      escalationHumanResponseTimeout: response.escalation.humanResponseTimeout,
+      outputMode: OutputMode(rawValue: response.outputMode) ?? .pr,
+      extendsProfile: response.extends,
+      warmImageTag: response.warmImageTag,
+      warmImageBuiltAt: response.warmImageBuiltAt,
+      actionPolicyEnabled: ap != nil,
+      actionEnabledGroups: enabledGroups,
+      actionSanitizationPreset: SanitizationPreset(rawValue: ap?.sanitization.preset ?? "standard") ?? .standard,
+      actionSanitizationAllowedDomains: ap?.sanitization.allowedDomains ?? [],
+      actionQuarantineEnabled: ap?.quarantine?.enabled ?? false,
+      actionQuarantineThreshold: ap?.quarantine?.threshold ?? 3,
+      actionQuarantineBlockThreshold: ap?.quarantine?.blockThreshold ?? 5,
+      actionQuarantineOnBlock: QuarantineOnBlock(rawValue: ap?.quarantine?.onBlock ?? "ask_human") ?? .askHuman,
+      providerCredentialsType: response.providerCredentials?.provider,
       createdAt: SessionMapper.parseDate(response.createdAt),
       updatedAt: SessionMapper.parseDate(response.updatedAt)
     )
@@ -66,8 +91,6 @@ public enum ProfileMapper {
   // MARK: - Profile → partial update dictionary
 
   /// Build a dictionary of fields the editor can round-trip safely.
-  /// Complex nested types that the UI doesn't fully model (escalation, skills.source)
-  /// are excluded — the PATCH endpoint only updates fields present in the body.
   public static func mapToFields(_ profile: Profile) -> [String: Any] {
     var d: [String: Any] = [
       "repoUrl": profile.repoUrl,
@@ -85,6 +108,7 @@ public enum ProfileMapper {
       "buildTimeout": profile.buildTimeout,
       "testTimeout": profile.testTimeout,
       "prProvider": profile.prProvider.rawValue,
+      "outputMode": profile.outputMode.rawValue,
       "smokePages": profile.smokePages.map { ["path": $0.path] },
       "privateRegistries": profile.privateRegistries.map {
         var r: [String: Any] = ["type": $0.type.rawValue, "url": $0.url]
@@ -101,6 +125,19 @@ public enum ProfileMapper {
     if let v = profile.githubPat { d["githubPat"] = v }
     if let v = profile.adoPat { d["adoPat"] = v }
     if let v = profile.registryPat { d["registryPat"] = v }
+    if let v = profile.extendsProfile { d["extends"] = v }
+
+    // Escalation
+    d["escalation"] = [
+      "askHuman": profile.escalationAskHuman,
+      "askAi": [
+        "enabled": profile.escalationAskAiEnabled,
+        "model": profile.escalationAskAiModel,
+        "maxCalls": profile.escalationAskAiMaxCalls,
+      ] as [String: Any],
+      "autoPauseAfter": profile.escalationAutoPauseAfter,
+      "humanResponseTimeout": profile.escalationHumanResponseTimeout,
+    ] as [String: Any]
 
     // Network policy
     if profile.networkEnabled {
@@ -111,6 +148,28 @@ public enum ProfileMapper {
       ] as [String: Any]
     } else {
       d["networkPolicy"] = ["enabled": false, "mode": "restricted", "allowedHosts": []] as [String: Any]
+    }
+
+    // Action policy
+    if profile.actionPolicyEnabled {
+      var ap: [String: Any] = [
+        "enabledGroups": profile.actionEnabledGroups.map(\.rawValue),
+        "sanitization": [
+          "preset": profile.actionSanitizationPreset.rawValue,
+          "allowedDomains": profile.actionSanitizationAllowedDomains,
+        ] as [String: Any],
+      ]
+      if profile.actionQuarantineEnabled {
+        ap["quarantine"] = [
+          "enabled": true,
+          "threshold": profile.actionQuarantineThreshold,
+          "blockThreshold": profile.actionQuarantineBlockThreshold,
+          "onBlock": profile.actionQuarantineOnBlock.rawValue,
+        ] as [String: Any]
+      }
+      d["actionPolicy"] = ap
+    } else {
+      d["actionPolicy"] = NSNull()
     }
 
     return d

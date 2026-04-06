@@ -1690,10 +1690,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Emit detailed validation result
         const buildStatus = result.smoke.build.status;
         const healthStatus = result.smoke.health.status;
+        const acStatus = result.acValidation?.status ?? 'skip';
         const reviewStatus = result.taskReview?.status ?? 'skip';
         emitActivityStatus(
           sessionId,
-          `Validation ${result.overall} — build: ${buildStatus}, health: ${healthStatus}, review: ${reviewStatus}`,
+          `Validation ${result.overall} — build: ${buildStatus}, health: ${healthStatus}, ac: ${acStatus}, review: ${reviewStatus}`,
         );
 
         // Surface review feedback so the user can see why it failed
@@ -2073,10 +2074,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Validation failed — stay in failed state, no agent rework
         const buildStatus2 = result.smoke.build.status;
         const healthStatus2 = result.smoke.health.status;
+        const acStatus2 = result.acValidation?.status ?? 'skip';
         const reviewStatus2 = result.taskReview?.status ?? 'skip';
         emitActivityStatus(
           sessionId,
-          `Revalidation fail — build: ${buildStatus2}, health: ${healthStatus2}, review: ${reviewStatus2}`,
+          `Revalidation fail — build: ${buildStatus2}, health: ${healthStatus2}, ac: ${acStatus2}, review: ${reviewStatus2}`,
         );
         if (result.taskReview && result.taskReview.status !== 'pass') {
           if (result.taskReview.reasoning) {

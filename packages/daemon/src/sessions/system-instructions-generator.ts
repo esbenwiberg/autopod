@@ -260,8 +260,9 @@ export function generateSystemInstructions(
   lines.push('');
   lines.push(
     '- **Native module errors** (e.g. `better-sqlite3`, `sharp`, `bcrypt`): ' +
-      'Run `npm rebuild` or re-run the install command once. ' +
-      'Do not manually debug node-gyp, node-pre-gyp, or compiler flags.',
+      'Re-run the build command once. If native binding errors persist after one retry, ' +
+      'call `report_blocker` immediately — this is an infrastructure issue you CANNOT fix. ' +
+      'Do NOT run node-gyp directly, install Node headers, modify .npmrc, or change compiler flags.',
   );
   lines.push(
     '- **MCP tool failures**: If an MCP tool call fails, check your input format. ' +

@@ -2,10 +2,18 @@ import SwiftUI
 
 // MARK: - Output mode (mirrors daemon outputMode)
 
-public enum OutputMode: String, Sendable {
+public enum OutputMode: String, CaseIterable, Sendable {
     case pr          // Worker pod — agent-driven, creates PR
     case workspace   // Workspace pod — interactive, human-driven, pushes branch
     case artifact    // Research/output — agent-driven, no PR
+
+    public var label: String {
+        switch self {
+        case .pr:        "Pull Request"
+        case .artifact:  "Artifact"
+        case .workspace: "Workspace"
+        }
+    }
 }
 
 // MARK: - Status

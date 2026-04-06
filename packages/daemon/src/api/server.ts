@@ -79,7 +79,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
 
   // Diff routes (requires container manager)
   if (deps.containerManagerFactory) {
-    diffRoutes(app, deps.sessionManager, deps.containerManagerFactory);
+    diffRoutes(app, deps.sessionManager, deps.containerManagerFactory, deps.profileStore);
   }
 
   // Terminal WebSocket (requires docker instance)

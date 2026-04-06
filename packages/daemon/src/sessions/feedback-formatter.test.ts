@@ -171,6 +171,35 @@ describe('formatFeedback', () => {
       expect(output).not.toContain('Acceptance Criteria Failures');
     });
 
+    it('detects native binding errors in health check output and warns agent', () => {
+      const result = mockValidationResult({ healthFailed: true });
+      result.smoke.health.startOutput =
+        'Error: Cannot find module better-sqlite3\nRequire stack:\n- /workspace/node_modules/better-sqlite3';
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result,
+        task: 'Add requestDurationMs to /health',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(output).toContain('native module infrastructure error');
+      expect(output).toContain('report_blocker');
+      expect(output).toContain('Do NOT attempt to fix this yourself');
+    });
+
+    it('does not warn about native errors when health output has unrelated errors', () => {
+      const result = mockValidationResult({ healthFailed: true });
+      result.smoke.health.startOutput = 'Error: EADDRINUSE port 3000';
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result,
+        task: 'Fix something',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(output).not.toContain('native module infrastructure error');
+    });
+
     it('always includes the original task', () => {
       const result = formatFeedback({
         type: 'validation_failure',

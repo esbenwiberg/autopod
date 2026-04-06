@@ -69,6 +69,18 @@ function formatValidationFailure(input: ValidationFeedback): string {
       lines.push('```');
     }
 
+    // Detect native binding errors and tell the agent to stop trying to fix them
+    if (
+      result.smoke.health.startOutput &&
+      looksLikeNativeBindingError(result.smoke.health.startOutput)
+    ) {
+      lines.push(
+        '**⚠ This looks like a native module infrastructure error (e.g. better-sqlite3 bindings).** ' +
+          'Do NOT attempt to fix this yourself — do not run node-gyp, install headers, or modify .npmrc. ' +
+          'Call `report_blocker` with the error output above. This is an environment issue, not a code issue.',
+      );
+    }
+
     lines.push('');
   }
 
@@ -166,6 +178,22 @@ function formatHumanRejection(input: RejectionFeedback): string {
   lines.push(`Attempt budget reset. You have ${maxAttempts} validation attempts.`);
 
   return lines.join('\n');
+}
+
+const NATIVE_ERROR_PATTERNS = [
+  'MODULE_NOT_FOUND',
+  'was compiled against a different Node.js version',
+  'NODE_MODULE_VERSION',
+  'node-gyp',
+  'better-sqlite3',
+  'better_sqlite3.node',
+  'binding.node',
+  'prebuild-install',
+  'node-pre-gyp',
+];
+
+function looksLikeNativeBindingError(output: string): boolean {
+  return NATIVE_ERROR_PATTERNS.some((p) => output.includes(p));
 }
 
 function formatEscalationResponse(input: EscalationFeedback): string {

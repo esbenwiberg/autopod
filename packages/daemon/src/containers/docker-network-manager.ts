@@ -151,6 +151,7 @@ export class DockerNetworkManager {
   async generateFirewallScript(
     allowedHosts: string[],
     mode: NetworkPolicyMode = 'restricted',
+    daemonGatewayIp?: string,
   ): Promise<string> {
     const lines = ['#!/bin/sh', 'set -e', ''];
 
@@ -171,6 +172,20 @@ export class DockerNetworkManager {
 
     if (mode === 'deny-all') {
       lines.push('');
+      // Always allow the daemon gateway so the container can reach the MCP endpoint.
+      // Without this, escalation tools (ask_human, report_plan, etc.) are unreachable.
+      // host.docker.internal is in /etc/hosts (injected via ExtraHosts), not DNS,
+      // so we must resolve it via getent inside the container.
+      lines.push('# Allow daemon gateway (MCP escalation endpoint)');
+      lines.push(
+        'for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk \'{print $1}\' | sort -u); do',
+      );
+      lines.push('  iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+      lines.push('done');
+      if (daemonGatewayIp) {
+        lines.push(`iptables -A OUTPUT -d "${daemonGatewayIp}" -j ACCEPT 2>/dev/null || true`);
+      }
+      lines.push('');
       lines.push('# Allow DNS');
       lines.push('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
       lines.push('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
@@ -180,7 +195,7 @@ export class DockerNetworkManager {
       );
       lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
       lines.push('');
-      lines.push('echo "Firewall: deny-all mode — all outbound blocked"');
+      lines.push('echo "Firewall: deny-all mode — all outbound blocked (daemon gateway allowed)"');
       return lines.join('\n');
     }
 
@@ -244,6 +259,17 @@ export class DockerNetworkManager {
       }
       lines.push('');
     }
+
+    // host.docker.internal resolves from /etc/hosts (ExtraHosts), not DNS.
+    // dnsmasq has no-hosts so it can't resolve it, and Docker DNS doesn't know about it.
+    // Resolve it via getent inside the container and add the IP directly to the ipset.
+    lines.push('  # Ensure daemon gateway (host.docker.internal) is reachable for MCP');
+    lines.push(
+      '  for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk \'{print $1}\' | sort -u); do',
+    );
+    lines.push('    ipset add allowed_ips "$_gw_ip" 2>/dev/null || true');
+    lines.push('  done');
+    lines.push('');
 
     // Write dnsmasq config
     lines.push('  # Write dnsmasq config');
@@ -362,7 +388,7 @@ export class DockerNetworkManager {
     await this.ensureNetwork();
 
     const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp);
-    const firewallScript = await this.generateFirewallScript(allowlist, policy.mode);
+    const firewallScript = await this.generateFirewallScript(allowlist, policy.mode, daemonGatewayIp);
 
     return {
       networkName: NETWORK_NAME,

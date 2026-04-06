@@ -167,6 +167,21 @@ describe('DockerNetworkManager', () => {
         const script = await manager.generateFirewallScript([], 'deny-all');
         expect(script).toContain('--dport 53 -j ACCEPT');
       });
+
+      it('resolves host.docker.internal for daemon gateway access', async () => {
+        const script = await manager.generateFirewallScript([], 'deny-all');
+        expect(script).toContain('getent ahostsv4 host.docker.internal');
+        expect(script).toContain('iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+        // Gateway resolution must come before the REJECT rule
+        const gatewayIdx = script.indexOf('host.docker.internal');
+        const rejectIdx = script.indexOf('-j REJECT --reject-with');
+        expect(gatewayIdx).toBeLessThan(rejectIdx);
+      });
+
+      it('includes explicit gateway IP when provided', async () => {
+        const script = await manager.generateFirewallScript([], 'deny-all', '172.18.0.1');
+        expect(script).toContain('iptables -A OUTPUT -d "172.18.0.1" -j ACCEPT');
+      });
     });
 
     describe('restricted mode — dnsmasq+ipset path', () => {
@@ -184,6 +199,12 @@ describe('DockerNetworkManager', () => {
       it('pre-seeds ipset with daemon-resolved CIDRs', async () => {
         const script = await manager.generateFirewallScript(['10.0.0.1']);
         expect(script).toContain('ipset add allowed_ips "10.0.0.1"');
+      });
+
+      it('resolves host.docker.internal and adds to ipset for MCP access', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('getent ahostsv4 host.docker.internal');
+        expect(script).toContain('ipset add allowed_ips "$_gw_ip"');
       });
 
       it('writes dnsmasq config with server and ipset entries', async () => {

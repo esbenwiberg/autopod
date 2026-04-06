@@ -18,7 +18,7 @@ BODY=$(cat <<'JSON'
   "repoUrl": "https://github.com/esbenwiberg/autopod",
   "defaultBranch": "main",
   "template": "node22-pw",
-  "buildCommand": "npx pnpm install && npx pnpm rebuild better-sqlite3 && npx pnpm build",
+  "buildCommand": "npx pnpm install && npm_config_nodedir=/usr/local npx pnpm rebuild better-sqlite3 && npx pnpm build",
   "testCommand": "npx pnpm test",
   "startCommand": "NODE_ENV=development AUTOPOD_MOCK_DOCKER=true HOST=0.0.0.0 PORT=$PORT node packages/daemon/dist/index.js",
   "healthPath": "/health",
@@ -29,7 +29,7 @@ BODY=$(cat <<'JSON'
   "defaultRuntime": "claude",
   "networkPolicy": {
     "enabled": true,
-    "mode": "deny-all"
+    "mode": "restricted"
   },
   "escalation": {
     "askHuman": true,
@@ -40,7 +40,7 @@ BODY=$(cat <<'JSON'
   "outputMode": "pr",
   "buildTimeout": 600,
   "testTimeout": 600,
-  "customInstructions": "- The build command runs `npx pnpm rebuild better-sqlite3` to compile native bindings for this container. If you still see binding errors after build, do NOT debug node-gyp or compiler flags — report a blocker instead.\n- Do not try to read ~/.autopod/dev-token or authenticate with the daemon API. You have no access to the host daemon. All external communication goes through MCP tool calls.\n- The daemon runs on port 3100 on the HOST — you cannot access it from inside this container via localhost:3100.\n- Do not retry identical failing commands more than twice. Diagnose the root cause or try a different approach."
+  "customInstructions": "- The build command handles native addon compilation (better-sqlite3) automatically. If you see native binding errors AFTER the build command has already run, this is an infrastructure problem you CANNOT fix. Call `report_blocker` immediately. Do NOT run node-gyp, install headers, modify .npmrc, or change any build configuration.\n- Do not try to read ~/.autopod/dev-token or authenticate with the daemon API. You have no access to the host daemon. All external communication goes through MCP tool calls.\n- The daemon runs on port 3100 on the HOST — you cannot access it from inside this container via localhost:3100.\n- Do not retry identical failing commands more than twice. Diagnose the root cause or try a different approach."
 }
 JSON
 )

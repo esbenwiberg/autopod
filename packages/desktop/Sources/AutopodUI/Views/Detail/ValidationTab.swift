@@ -65,12 +65,24 @@ public struct ValidationTab: View {
                   }
                   .foregroundStyle(.tertiary)
                 }
-                ForEach(Array(criteria.enumerated()), id: \.offset) { _, criterion in
+                ForEach(Array(criteria.enumerated()), id: \.offset) { idx, criterion in
+                  let acResult: AcCheckDetail? = {
+                    guard let acChecks = checks.acChecks else { return nil }
+                    return acChecks.first(where: { $0.criterion == criterion })
+                        ?? (idx < acChecks.count ? acChecks[idx] : nil)
+                  }()
                   HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "square")
-                      .font(.system(size: 12))
-                      .foregroundStyle(.secondary)
-                      .padding(.top, 1)
+                    if let acResult {
+                      Image(systemName: acResult.passed ? "checkmark.square.fill" : "xmark.square.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(acResult.passed ? .green : .red)
+                        .padding(.top, 1)
+                    } else {
+                      Image(systemName: "square")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 1)
+                    }
                     Text(criterion)
                       .font(.callout)
                   }

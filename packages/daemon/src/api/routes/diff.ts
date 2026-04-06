@@ -1,5 +1,11 @@
+import { execFile } from 'node:child_process';
+import { access } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import type { FastifyInstance } from 'fastify';
+import type { ProfileStore } from '../../profiles/index.js';
 import type { ContainerManagerFactory, SessionManager } from '../../sessions/session-manager.js';
+
+const execFileAsync = promisify(execFile);
 
 interface DiffFile {
   path: string;
@@ -16,76 +22,29 @@ export function diffRoutes(
   app: FastifyInstance,
   sessionManager: SessionManager,
   containerManagerFactory: ContainerManagerFactory,
+  profileStore: ProfileStore,
 ): void {
   // GET /sessions/:sessionId/diff — get unified diff for a session
   app.get('/sessions/:sessionId/diff', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
     const session = sessionManager.getSession(sessionId);
 
-    if (!session.containerId) {
-      return { files: [], stats: { added: 0, removed: 0, changed: 0 } } satisfies DiffResponse;
+    const baseBranch = getBaseBranch(profileStore, session.profileName);
+
+    // Strategy 1: Try container-based diff (works when container is running)
+    let rawDiff = '';
+    if (session.containerId) {
+      rawDiff = await tryContainerDiff(
+        containerManagerFactory,
+        session.containerId,
+        session.executionTarget,
+        baseBranch,
+      );
     }
 
-    const cm = containerManagerFactory.get(session.executionTarget);
-    const workDir = '/workspace';
-
-    // Get the diff against the base branch (or HEAD~1 if no base)
-    const diffBase = session.baseBranch ?? session.branch.replace(/^feat\/|^fix\/|^refactor\//, '');
-
-    // First try diff against origin/main (or the default branch)
-    let rawDiff = '';
-    try {
-      // Fetch latest refs so we have something to diff against
-      const fetchResult = await cm.execInContainer(
-        session.containerId,
-        ['git', 'fetch', 'origin', '--quiet'],
-        { cwd: workDir, timeout: 15_000 },
-      );
-
-      // Try diffing against origin/<defaultBranch>
-      const profile = await getProfileForSession(sessionManager, session);
-      const baseBranch = profile?.defaultBranch ?? 'main';
-
-      const result = await cm.execInContainer(
-        session.containerId,
-        ['git', 'diff', `origin/${baseBranch}...HEAD`, '--no-color'],
-        { cwd: workDir, timeout: 30_000 },
-      );
-
-      if (result.exitCode === 0) {
-        rawDiff = result.stdout;
-      }
-    } catch {
-      // Fallback: diff against HEAD~1 or show all uncommitted changes
-      try {
-        const result = await cm.execInContainer(
-          session.containerId,
-          ['git', 'diff', 'HEAD', '--no-color'],
-          { cwd: workDir, timeout: 30_000 },
-        );
-        if (result.exitCode === 0 && result.stdout.trim()) {
-          rawDiff = result.stdout;
-        } else {
-          // Try committed changes
-          const logResult = await cm.execInContainer(
-            session.containerId,
-            ['git', 'log', '--oneline', '-1'],
-            { cwd: workDir, timeout: 5_000 },
-          );
-          if (logResult.exitCode === 0) {
-            const committed = await cm.execInContainer(
-              session.containerId,
-              ['git', 'diff', 'HEAD~1...HEAD', '--no-color'],
-              { cwd: workDir, timeout: 30_000 },
-            );
-            if (committed.exitCode === 0) {
-              rawDiff = committed.stdout;
-            }
-          }
-        }
-      } catch {
-        // Give up — no diff available
-      }
+    // Strategy 2: Fall back to host-side worktree diff (works after container stops)
+    if (!rawDiff.trim() && session.worktreePath) {
+      rawDiff = await tryWorktreeDiff(session.worktreePath, baseBranch);
     }
 
     if (!rawDiff.trim()) {
@@ -104,15 +63,124 @@ export function diffRoutes(
   });
 }
 
+// MARK: - Diff strategies
+
+async function tryContainerDiff(
+  containerManagerFactory: ContainerManagerFactory,
+  containerId: string,
+  executionTarget: string,
+  baseBranch: string,
+): Promise<string> {
+  const cm = containerManagerFactory.get(executionTarget);
+  const workDir = '/workspace';
+
+  try {
+    await cm.execInContainer(containerId, ['git', 'fetch', 'origin', '--quiet'], {
+      cwd: workDir,
+      timeout: 15_000,
+    });
+
+    const result = await cm.execInContainer(
+      containerId,
+      ['git', 'diff', `origin/${baseBranch}...HEAD`, '--no-color'],
+      { cwd: workDir, timeout: 30_000 },
+    );
+
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      return result.stdout;
+    }
+  } catch {
+    // Container may be stopped — fall through
+  }
+
+  // Fallback: uncommitted or last-commit diff
+  try {
+    const result = await cm.execInContainer(
+      containerId,
+      ['git', 'diff', 'HEAD', '--no-color'],
+      { cwd: workDir, timeout: 30_000 },
+    );
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      return result.stdout;
+    }
+
+    const committed = await cm.execInContainer(
+      containerId,
+      ['git', 'diff', 'HEAD~1...HEAD', '--no-color'],
+      { cwd: workDir, timeout: 30_000 },
+    );
+    if (committed.exitCode === 0) {
+      return committed.stdout;
+    }
+  } catch {
+    // Container unavailable
+  }
+
+  return '';
+}
+
+async function tryWorktreeDiff(worktreePath: string, baseBranch: string): Promise<string> {
+  try {
+    // Verify the worktree still exists on disk
+    await access(worktreePath);
+  } catch {
+    return '';
+  }
+
+  const bufOpts = { cwd: worktreePath, maxBuffer: 2 * 1024 * 1024 };
+
+  // Try merge-base diff first (committed changes since branching)
+  try {
+    const { stdout: mergeBase } = await execFileAsync(
+      'git',
+      ['merge-base', 'HEAD', baseBranch],
+      { cwd: worktreePath },
+    );
+
+    const { stdout: committedDiff } = await execFileAsync(
+      'git',
+      ['diff', mergeBase.trim(), 'HEAD', '--no-color'],
+      bufOpts,
+    );
+
+    // Also grab any uncommitted changes
+    const { stdout: uncommittedDiff } = await execFileAsync(
+      'git',
+      ['diff', 'HEAD', '--no-color'],
+      bufOpts,
+    );
+
+    const combined =
+      uncommittedDiff.trim() ? `${committedDiff}\n${uncommittedDiff}` : committedDiff;
+
+    if (combined.trim()) {
+      return combined;
+    }
+  } catch {
+    // merge-base may fail if baseBranch ref doesn't exist locally
+  }
+
+  // Last resort: diff HEAD~1
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff', 'HEAD~1...HEAD', '--no-color'],
+      bufOpts,
+    );
+    return stdout;
+  } catch {
+    return '';
+  }
+}
+
 // MARK: - Helpers
 
-function getProfileForSession(sessionManager: SessionManager, session: { profileName: string }) {
+function getBaseBranch(profileStore: ProfileStore, profileName: string): string {
   try {
-    // SessionManager may have a profile store reference
-    // For now, return null and use 'main' as default
-    return null;
+    const profile = profileStore.get(profileName);
+    return profile?.defaultBranch ?? 'main';
   } catch {
-    return null;
+    return 'main';
   }
 }
 
