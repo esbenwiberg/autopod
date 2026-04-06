@@ -65,10 +65,53 @@ export async function buildContinuationPrompt(
 }
 
 /**
+ * Build a rework prompt for sessions being retried after failure/rejection/kill.
+ * Unlike recovery (crash mid-work), rework starts a fresh agent with explicit
+ * context about what the previous attempt did and why it's being retried.
+ */
+export async function buildReworkPrompt(
+  session: Session,
+  worktreePath: string,
+  reason: string,
+): Promise<string> {
+  const gitLog = await getGitLog(worktreePath, 10);
+  const uncommittedDiff = await getUncommittedDiff(worktreePath);
+
+  return [
+    `REWORK: ${reason}`,
+    '',
+    `Task: ${session.task}`,
+    '',
+    gitLog
+      ? `Previous attempt made these commits:\n${gitLog}`
+      : 'No commits from the previous attempt.',
+    '',
+    uncommittedDiff ? `Uncommitted changes from previous attempt:\n${uncommittedDiff}` : '',
+    '',
+    'You have a fresh session. Review the existing state, then complete the task.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
  * Build a full recovery task for non-Claude runtimes (or Claude without a session ID).
  * Wraps the original task with recovery context so the agent has full awareness.
  */
 export async function buildRecoveryTask(session: Session, worktreePath: string): Promise<string> {
   const continuationContext = await buildContinuationPrompt(session, worktreePath);
   return `${session.task}\n\n---\n\nRECOVERY CONTEXT:\n${continuationContext}`;
+}
+
+/**
+ * Build a full rework task for non-Claude runtimes.
+ * Wraps the original task with rework context.
+ */
+export async function buildReworkTask(
+  session: Session,
+  worktreePath: string,
+  reason: string,
+): Promise<string> {
+  const reworkContext = await buildReworkPrompt(session, worktreePath, reason);
+  return `${session.task}\n\n---\n\nREWORK CONTEXT:\n${reworkContext}`;
 }

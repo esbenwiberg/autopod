@@ -190,22 +190,36 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   async getDiffStats(worktreePath: string, baseBranch?: string): Promise<DiffStats> {
     try {
-      // Compare committed changes against the base branch (the branch we forked from).
-      // Plain `git diff --stat HEAD` only shows *uncommitted* changes, which is empty
-      // when the agent commits as it goes (Claude Code does this).
       if (baseBranch) {
-        // Find the merge-base so we only count commits on this branch
+        // Compare committed changes on this branch against the base branch,
+        // PLUS any uncommitted changes the agent left behind without committing.
         const { stdout: mergeBase } = await execFileAsync(
           'git',
           ['merge-base', 'HEAD', baseBranch],
           { cwd: worktreePath },
         );
-        const { stdout } = await execFileAsync(
+
+        // Committed changes: merge-base..HEAD
+        const { stdout: committedStat } = await execFileAsync(
           'git',
           ['diff', '--stat', mergeBase.trim(), 'HEAD'],
           { cwd: worktreePath },
         );
-        return this.parseDiffStats(stdout);
+        const committed = this.parseDiffStats(committedStat);
+
+        // Uncommitted changes: working tree vs HEAD (staged + unstaged)
+        const { stdout: uncommittedStat } = await execFileAsync(
+          'git',
+          ['diff', '--stat', 'HEAD'],
+          { cwd: worktreePath },
+        );
+        const uncommitted = this.parseDiffStats(uncommittedStat);
+
+        return {
+          filesChanged: committed.filesChanged + uncommitted.filesChanged,
+          linesAdded: committed.linesAdded + uncommitted.linesAdded,
+          linesRemoved: committed.linesRemoved + uncommitted.linesRemoved,
+        };
       }
 
       // Fallback: uncommitted changes only (legacy behaviour)
@@ -224,11 +238,28 @@ export class LocalWorktreeManager implements WorktreeManager {
       const { stdout: mergeBase } = await execFileAsync('git', ['merge-base', 'HEAD', baseBranch], {
         cwd: worktreePath,
       });
-      const { stdout } = await execFileAsync('git', ['diff', mergeBase.trim(), 'HEAD'], {
-        cwd: worktreePath,
-        maxBuffer: 2 * 1024 * 1024,
-      });
-      return stdout.slice(0, maxLength);
+      const bufOpts = { cwd: worktreePath, maxBuffer: 2 * 1024 * 1024 };
+
+      // Committed changes: merge-base..HEAD
+      const { stdout: committedDiff } = await execFileAsync(
+        'git',
+        ['diff', mergeBase.trim(), 'HEAD'],
+        bufOpts,
+      );
+
+      // Uncommitted changes: working tree vs HEAD (staged + unstaged)
+      const { stdout: uncommittedDiff } = await execFileAsync(
+        'git',
+        ['diff', 'HEAD'],
+        bufOpts,
+      );
+
+      const combined =
+        uncommittedDiff.length > 0
+          ? `${committedDiff}\n${uncommittedDiff}`
+          : committedDiff;
+
+      return combined.slice(0, maxLength);
     } catch {
       return '';
     }
@@ -277,6 +308,20 @@ export class LocalWorktreeManager implements WorktreeManager {
       this.logger.info({ worktreePath, fileCount: paths.length }, 'Committed files');
     } catch (err) {
       this.logger.warn({ err, worktreePath }, 'Failed to commit files');
+    }
+  }
+
+  async commitPendingChanges(worktreePath: string, message: string): Promise<boolean> {
+    await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
+    try {
+      await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: worktreePath });
+      // Exit 0 → nothing staged
+      return false;
+    } catch {
+      // Exit non-zero → staged changes exist
+      await execFileAsync('git', ['commit', '-m', message], { cwd: worktreePath });
+      this.logger.info({ worktreePath }, 'Auto-committed pending changes');
+      return true;
     }
   }
 

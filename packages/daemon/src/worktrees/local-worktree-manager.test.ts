@@ -190,11 +190,57 @@ describe('LocalWorktreeManager', () => {
   // -------------------------------------------------------------------------
 
   describe('getDiffStats', () => {
-    it('returns diff stats using merge-base when baseBranch is provided', async () => {
-      setupExecFileMock({
-        'merge-base': { stdout: 'abc1234\n' },
-        'diff --stat': { stdout: ' 3 files changed, 15 insertions(+), 5 deletions(-)' },
-      });
+    it('returns committed diff stats when baseBranch is provided and working tree is clean', async () => {
+      let callCount = 0;
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('merge-base')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else if (cmd.includes('diff --stat')) {
+            callCount++;
+            // First call: committed diff (merge-base..HEAD)
+            // Second call: uncommitted diff (HEAD)
+            if (callCount === 1) {
+              cb(null, { stdout: ' 3 files changed, 15 insertions(+), 5 deletions(-)', stderr: '' });
+            } else {
+              cb(null, { stdout: '', stderr: '' });
+            }
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.getDiffStats('/tmp/worktree/sess', 'main');
+      expect(result).toEqual({ filesChanged: 3, linesAdded: 15, linesRemoved: 5 });
+    });
+
+    it('combines committed and uncommitted changes when both exist', async () => {
+      let callCount = 0;
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('merge-base')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else if (cmd.includes('diff --stat')) {
+            callCount++;
+            if (callCount === 1) {
+              // Committed: 2 files
+              cb(null, { stdout: ' 2 files changed, 10 insertions(+), 3 deletions(-)', stderr: '' });
+            } else {
+              // Uncommitted: 1 more file
+              cb(null, { stdout: ' 1 file changed, 5 insertions(+), 2 deletions(-)', stderr: '' });
+            }
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
 
       const result = await manager.getDiffStats('/tmp/worktree/sess', 'main');
       expect(result).toEqual({ filesChanged: 3, linesAdded: 15, linesRemoved: 5 });
@@ -250,6 +296,34 @@ describe('LocalWorktreeManager', () => {
       expect(result).toBe('x'.repeat(10));
     });
 
+    it('combines committed and uncommitted diffs', async () => {
+      const committedDiff = 'diff --git a/foo.ts b/foo.ts\n+committed\n';
+      const uncommittedDiff = 'diff --git a/bar.ts b/bar.ts\n+uncommitted\n';
+      let diffCallCount = 0;
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('merge-base')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else if (cmd.includes('diff')) {
+            diffCallCount++;
+            if (diffCallCount === 1) {
+              cb(null, { stdout: committedDiff, stderr: '' });
+            } else {
+              cb(null, { stdout: uncommittedDiff, stderr: '' });
+            }
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.getDiff('/tmp/worktree/sess', 'main');
+      expect(result).toBe(`${committedDiff}\n${uncommittedDiff}`);
+    });
+
     it('returns empty string on error', async () => {
       execFileMock.mockImplementation(
         (_file: string, _args: string[], arg3: unknown, arg4?: unknown) => {
@@ -261,6 +335,42 @@ describe('LocalWorktreeManager', () => {
 
       const result = await manager.getDiff('/not/a/repo', 'main');
       expect(result).toBe('');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // commitPendingChanges
+  // -------------------------------------------------------------------------
+
+  describe('commitPendingChanges', () => {
+    it('commits when there are staged changes', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('diff --cached --quiet')) {
+            // Exit non-zero → staged changes exist
+            cb(new Error('changes exist'), { stdout: '', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
+      expect(result).toBe(true);
+      // Verify git add -A, then diff --cached --quiet, then commit were called
+      expect(execFileMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('returns false when working tree is clean', async () => {
+      setupExecFileMock({}); // All commands succeed (including diff --cached --quiet)
+
+      const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
+      expect(result).toBe(false);
+      // Only git add -A and diff --cached --quiet (no commit)
+      expect(execFileMock).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -44,7 +44,12 @@ import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
-import { buildContinuationPrompt, buildRecoveryTask } from './recovery-context.js';
+import {
+  buildContinuationPrompt,
+  buildRecoveryTask,
+  buildReworkPrompt,
+  buildReworkTask,
+} from './recovery-context.js';
 import {
   buildRegistryFiles,
   patchWorkspaceNuGetCredentials,
@@ -403,6 +408,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const runtime = request.runtime ?? profile.defaultRuntime;
       const executionTarget = request.executionTarget ?? profile.executionTarget;
       const skipValidation = request.skipValidation ?? false;
+      const outputMode = request.outputMode ?? profile.outputMode ?? 'pr';
+
+      // deny-all network policy blocks all outbound — incompatible with cloud-backed runtimes
+      if (
+        outputMode !== 'workspace' &&
+        profile.networkPolicy?.enabled &&
+        profile.networkPolicy?.mode === 'deny-all'
+      ) {
+        throw new AutopodError(
+          `Network policy 'deny-all' blocks all outbound traffic, but runtime '${runtime}' requires API access. Use 'restricted' mode instead — the default allowlist includes the model API.`,
+          'INVALID_CONFIGURATION',
+          400,
+        );
+      }
 
       let id: string;
       for (let attempt = 0; attempt < 10; attempt++) {
@@ -475,6 +494,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       try {
         // Detect recovery mode before any provisioning work
         const isRecovery = !!session.recoveryWorktreePath;
+        const isRework = isRecovery && !!session.reworkReason;
 
         // Transition to provisioning
         session = transition(session, 'provisioning', { startedAt: new Date().toISOString() });
@@ -809,8 +829,27 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }
 
-        if (isRecovery && session.runtime === 'claude' && session.claudeSessionId) {
-          // Attempt Claude --resume with persisted session ID
+        if (isRework) {
+          // Rework: always a fresh spawn with rework-specific framing.
+          // claudeSessionId was already cleared by triggerValidation so we never
+          // resume a stale/broken session context.
+          emitStatus('Reworking session…');
+          const reworkTask = await buildReworkTask(session, worktreePath, session.reworkReason!);
+          events = runtime.spawn({
+            sessionId,
+            task: reworkTask,
+            model: session.model,
+            workDir: '/workspace',
+            containerId,
+            customInstructions: copilotInstructions,
+            env: secretEnv,
+            mcpServers,
+          });
+
+          // Clear rework reason now that it's been consumed (one-shot)
+          sessionRepo.update(sessionId, { reworkReason: null });
+        } else if (isRecovery && session.runtime === 'claude' && session.claudeSessionId) {
+          // Crash recovery: attempt Claude --resume with persisted session ID
           emitStatus('Resuming Claude session…');
 
           // Rehydrate the in-memory session ID map so resume() can find it
@@ -1000,8 +1039,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
       }
 
-      // Get diff stats (compare branch against base to catch committed changes)
+      // Auto-commit any uncommitted changes the agent left behind, then get diff stats
       if (session.worktreePath) {
+        try {
+          const committed = await worktreeManager.commitPendingChanges(
+            session.worktreePath,
+            'chore: auto-commit uncommitted agent changes',
+          );
+          if (committed) {
+            logger.info({ sessionId }, 'Auto-committed uncommitted agent changes');
+          }
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Failed to auto-commit pending changes');
+        }
+
         try {
           const profile = profileStore.get(session.profileName);
           const stats = await worktreeManager.getDiffStats(
@@ -1452,18 +1503,29 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }
 
-        // Re-queue through processSession with recovery worktree
+        // Re-queue through processSession with recovery worktree.
+        // Clear claudeSessionId so the agent gets a fresh spawn instead of resuming
+        // a stale/broken session context. Set reworkReason so processSession builds
+        // a rework-specific prompt instead of the generic "you were interrupted" recovery prompt.
+        const reworkReason =
+          session.status === 'failed'
+            ? 'Your previous attempt failed. Review what went wrong and try again.'
+            : session.status === 'killed'
+              ? 'Your previous session was killed. Start the task fresh.'
+              : 'Your previous work needs revision. Review and improve it.';
         sessionRepo.update(sessionId, {
           validationAttempts: 0,
           lastValidationResult: null,
           containerId: null,
+          claudeSessionId: null,
           recoveryWorktreePath: session.worktreePath,
+          reworkReason,
         });
         transition(session, 'queued');
         enqueueSession(sessionId);
 
         logger.info(
-          { sessionId, worktreePath: session.worktreePath },
+          { sessionId, worktreePath: session.worktreePath, reworkReason },
           'Rework: re-queued with fresh container provisioning',
         );
         return;

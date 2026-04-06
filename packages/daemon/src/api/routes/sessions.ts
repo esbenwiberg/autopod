@@ -1,4 +1,9 @@
-import { type SessionStatus, createSessionRequestSchema, sendMessageSchema } from '@autopod/shared';
+import {
+  AutopodError,
+  type SessionStatus,
+  createSessionRequestSchema,
+  sendMessageSchema,
+} from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { SessionTokenIssuer } from '../../crypto/session-tokens.js';
 import type { SessionManager } from '../../sessions/index.js';
@@ -22,9 +27,17 @@ export function sessionRoutes(
       }
     }
 
-    const session = sessionManager.createSession(body, request.user.oid);
-    reply.status(201);
-    return session;
+    try {
+      const session = sessionManager.createSession(body, request.user.oid);
+      reply.status(201);
+      return session;
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message };
+      }
+      throw err;
+    }
   });
 
   // GET /sessions — list sessions

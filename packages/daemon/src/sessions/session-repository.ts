@@ -52,6 +52,7 @@ export interface SessionUpdates {
   claudeSessionId?: string | null;
   acceptanceCriteria?: string[] | null;
   recoveryWorktreePath?: string | null;
+  reworkReason?: string | null;
   lastHeartbeatAt?: string | null;
   inputTokens?: number;
   outputTokens?: number;
@@ -117,6 +118,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     baseBranch: (row.base_branch as string) ?? null,
     acFrom: (row.ac_from as string) ?? null,
     recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
+    reworkReason: (row.rework_reason as string) ?? null,
     lastHeartbeatAt: (row.last_heartbeat_at as string) ?? null,
     inputTokens: (row.input_tokens as number) ?? 0,
     outputTokens: (row.output_tokens as number) ?? 0,
@@ -258,6 +260,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.recoveryWorktreePath !== undefined) {
         setClauses.push('recovery_worktree_path = @recoveryWorktreePath');
         params.recoveryWorktreePath = changes.recoveryWorktreePath;
+      }
+      if (changes.reworkReason !== undefined) {
+        setClauses.push('rework_reason = @reworkReason');
+        params.reworkReason = changes.reworkReason;
       }
       if (changes.inputTokens !== undefined) {
         setClauses.push('input_tokens = @inputTokens');

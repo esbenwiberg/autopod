@@ -7,7 +7,12 @@ vi.mock('node:child_process', () => ({
 }));
 
 import { execFile } from 'node:child_process';
-import { buildContinuationPrompt, buildRecoveryTask } from './recovery-context.js';
+import {
+  buildContinuationPrompt,
+  buildRecoveryTask,
+  buildReworkPrompt,
+  buildReworkTask,
+} from './recovery-context.js';
 
 // Helper: make execFile's callback-based API behave like the promisified version
 // promisify(execFile) calls execFile(cmd, args, opts, callback)
@@ -66,6 +71,7 @@ function makeSession(overrides?: Partial<Session>): Session {
     baseBranch: null,
     acFrom: null,
     recoveryWorktreePath: null,
+    reworkReason: null,
     ...overrides,
   };
 }
@@ -152,5 +158,64 @@ describe('buildRecoveryTask', () => {
     expect(task).toContain('Build the dashboard');
     expect(task).toContain('RECOVERY CONTEXT:');
     expect(task).toContain('No commits on this branch yet.');
+  });
+});
+
+describe('buildReworkPrompt', () => {
+  it('frames as rework with the reason and previous commits', async () => {
+    const gitLog = 'abc1234 Broken implementation';
+    mockExecFileResults([{ stdout: gitLog }, { stdout: '' }]);
+
+    const session = makeSession({ task: 'Fix the login bug' });
+    const reason = 'Your previous attempt failed. Review what went wrong and try again.';
+    const prompt = await buildReworkPrompt(session, '/tmp/worktree/recovery', reason);
+
+    expect(prompt).toContain('REWORK:');
+    expect(prompt).toContain(reason);
+    expect(prompt).toContain('Task: Fix the login bug');
+    expect(prompt).toContain('Previous attempt made these commits:');
+    expect(prompt).toContain('abc1234 Broken implementation');
+    // Should NOT contain recovery framing
+    expect(prompt).not.toContain('interrupted');
+    expect(prompt).not.toContain('recovered');
+  });
+
+  it('indicates no prior commits when git log is empty', async () => {
+    mockExecFileResults([{ stdout: '' }, { stdout: '' }]);
+
+    const session = makeSession();
+    const prompt = await buildReworkPrompt(
+      session,
+      '/tmp/worktree/recovery',
+      'Session was killed.',
+    );
+
+    expect(prompt).toContain('No commits from the previous attempt.');
+  });
+
+  it('includes uncommitted diff when present', async () => {
+    const diffStat = ' src/app.ts | 5 +++--\n 1 file changed';
+    mockExecFileResults([{ stdout: '' }, { stdout: diffStat }]);
+
+    const session = makeSession();
+    const prompt = await buildReworkPrompt(session, '/tmp/worktree/recovery', 'Needs revision.');
+
+    expect(prompt).toContain('Uncommitted changes from previous attempt:');
+    expect(prompt).toContain('src/app.ts');
+  });
+});
+
+describe('buildReworkTask', () => {
+  it('wraps original task with rework context', async () => {
+    const gitLog = 'abc1234 Partial work';
+    mockExecFileResults([{ stdout: gitLog }, { stdout: '' }]);
+
+    const session = makeSession({ task: 'Add dark mode' });
+    const task = await buildReworkTask(session, '/tmp/worktree/recovery', 'Validation failed.');
+
+    expect(task).toMatch(/^Add dark mode/);
+    expect(task).toContain('REWORK CONTEXT:');
+    expect(task).toContain('Validation failed.');
+    expect(task).not.toContain('RECOVERY CONTEXT');
   });
 });

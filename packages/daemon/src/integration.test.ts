@@ -624,6 +624,67 @@ describe('Integration', () => {
       expect(res.json().error).toContain('local');
     });
 
+    it('POST /sessions rejects deny-all network policy with cloud-backed runtime', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          name: 'deny-all-profile',
+          networkPolicy: {
+            enabled: true,
+            mode: 'deny-all',
+            allowedHosts: [],
+          },
+        },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'deny-all-profile',
+          task: 'This should fail',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toContain('deny-all');
+      expect(res.json().error).toContain('restricted');
+    });
+
+    it('POST /sessions allows deny-all network policy for workspace sessions', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          name: 'deny-all-workspace',
+          networkPolicy: {
+            enabled: true,
+            mode: 'deny-all',
+            allowedHosts: [],
+          },
+        },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'deny-all-workspace',
+          task: 'Interactive workspace',
+          outputMode: 'workspace',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+    });
+
     it('POST /sessions/:id/complete rejects non-workspace sessions', async () => {
       await app.inject({
         method: 'POST',

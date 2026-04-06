@@ -1053,6 +1053,48 @@ describe('SessionManager', () => {
         expect(task).toContain('def5678 Half-done work');
       });
 
+      it('uses fresh spawn with rework prompt when reworkReason is set', async () => {
+        const runtime = createMockRuntime();
+        (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+
+        const ctx = createTestContext(undefined, {});
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+
+        setupExecFileMock({ gitLog: 'abc1234 Previous broken work' });
+
+        const manager = createSessionManager(ctx.deps);
+        const session = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
+          'user-1',
+        );
+
+        // Simulate a rework: recoveryWorktreePath + reworkReason set, claudeSessionId cleared
+        ctx.sessionRepo.update(session.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Your previous attempt failed. Review what went wrong and try again.',
+          // claudeSessionId intentionally NOT set (cleared by triggerValidation)
+        });
+
+        await manager.processSession(session.id);
+
+        // Should use spawn (not resume) even for Claude runtime
+        expect(runtime.spawn).toHaveBeenCalled();
+        expect(runtime.resume).not.toHaveBeenCalled();
+
+        // Task should include rework context, not recovery context
+        const spawnCall = vi.mocked(runtime.spawn).mock.calls[0];
+        const task = spawnCall?.[0]?.task;
+        expect(task).toContain('Fix the bug');
+        expect(task).toContain('REWORK CONTEXT');
+        expect(task).toContain('Previous attempt made these commits');
+        expect(task).not.toContain('interrupted');
+        expect(task).not.toContain('RECOVERY CONTEXT');
+
+        // reworkReason should be cleared after consumption
+        const updated = manager.getSession(session.id);
+        expect(updated.reworkReason).toBeNull();
+      });
+
       it('falls back to fresh spawn when Claude resume throws', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
@@ -1355,6 +1397,7 @@ describe('SessionManager', () => {
         status: 'failed',
         containerId: 'ctr-1',
         worktreePath: '/tmp/worktrees/test-branch',
+        claudeSessionId: 'claude-ses-old',
         validationAttempts: 3,
       });
 
@@ -1366,6 +1409,10 @@ describe('SessionManager', () => {
       expect(result.containerId).toBeNull();
       expect(result.validationAttempts).toBe(0);
       expect(result.recoveryWorktreePath).toBe('/tmp/worktrees/test-branch');
+      // claudeSessionId should be cleared so we get a fresh spawn, not a stale resume
+      expect(result.claudeSessionId).toBeNull();
+      // reworkReason should be set to signal rework (not crash recovery)
+      expect(result.reworkReason).toBeTruthy();
       expect(ctx.enqueuedSessions).toContain(session.id);
       // Old container should be killed
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
