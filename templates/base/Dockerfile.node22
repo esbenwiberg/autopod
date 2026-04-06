@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     iptables ipset dnsmasq \
     tmux \
+    python3 build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user — remove the default node user (uid 1000) first
