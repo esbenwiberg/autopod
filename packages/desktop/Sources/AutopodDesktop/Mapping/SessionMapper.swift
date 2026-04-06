@@ -49,7 +49,7 @@ public enum SessionMapper {
       let buildOutput = v.smoke.build.status == "fail" && !v.smoke.build.output.isEmpty
         ? v.smoke.build.output : nil
       let testOutput: String? = {
-        guard let t = v.test, t.status == "fail" else { return nil }
+        guard let t = v.test, t.status != "pass" else { return nil }
         let combined = [t.stdout, t.stderr].compactMap { $0 }.joined(separator: "\n")
         return combined.isEmpty ? nil : combined
       }()
@@ -79,8 +79,8 @@ public enum SessionMapper {
       }
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
-        tests: v.test?.status == "pass",
-        review: v.taskReview?.status == "pass",
+        tests: mapTriState(v.test?.status),
+        review: mapTriState(v.taskReview?.status),
         buildOutput: buildOutput,
         testOutput: testOutput,
         reviewIssues: v.taskReview?.issues,
@@ -175,5 +175,16 @@ public enum SessionMapper {
 
   public static func map(_ responses: [SessionResponse]) -> [Session] {
     responses.map { map($0) }
+  }
+
+  // MARK: - Helpers
+
+  /// Maps a status string to a tri-state Bool: pass → true, fail → false, skip/uncertain/nil → nil.
+  static func mapTriState(_ status: String?) -> Bool? {
+    switch status {
+    case "pass": true
+    case "fail": false
+    default: nil
+    }
   }
 }

@@ -416,9 +416,9 @@ public struct SessionCardFinal: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let checks = session.validationChecks {
                     HStack(spacing: 10) {
-                        checkItem("Smoke", passed: checks.smoke)
-                        checkItem("Tests", passed: checks.tests)
-                        checkItem("Review", passed: checks.review)
+                        checkItem("Smoke", status: checks.smoke)
+                        checkItem("Tests", status: checks.tests)
+                        checkItem("Review", status: checks.review)
                     }
                 }
                 if session.validationChecks?.allPassed != false {
@@ -583,10 +583,12 @@ public struct SessionCardFinal: View {
         }
     }
 
-    private func checkItem(_ label: String, passed: Bool) -> some View {
+    private func checkItem(_ label: String, status: Bool?) -> some View {
         VStack(spacing: 3) {
-            Image(systemName: passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(passed ? .green : .red)
+            Image(systemName: status == true ? "checkmark.circle.fill"
+                  : status == false ? "xmark.circle.fill"
+                  : "minus.circle")
+                .foregroundStyle(status == true ? .green : status == false ? .red : .gray)
                 .font(.system(size: 14))
             Text(label)
                 .font(.caption2)

@@ -326,9 +326,9 @@ struct OverviewTab: View {
             Text("Validation")
                 .font(.system(.subheadline).weight(.semibold))
             HStack(spacing: 16) {
-                validationRow("Smoke Tests", passed: checks.smoke, icon: "flame")
-                validationRow("Test Suite", passed: checks.tests, icon: "testtube.2")
-                validationRow("Code Review", passed: checks.review, icon: "eye")
+                validationRow("Smoke Tests", status: checks.smoke, icon: "flame")
+                validationRow("Test Suite", status: checks.tests, icon: "testtube.2")
+                validationRow("Code Review", status: checks.review, icon: "eye")
             }
         }
         .padding(14)
@@ -336,15 +336,25 @@ struct OverviewTab: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    private func validationRow(_ label: String, passed: Bool, icon: String) -> some View {
-        VStack(spacing: 6) {
+    private func validationRow(_ label: String, status: Bool?, icon: String) -> some View {
+        let color: Color = switch status {
+        case true: .green
+        case false: .red
+        case nil: .gray
+        }
+        let iconName: String = switch status {
+        case true: "checkmark"
+        case false: "xmark"
+        case nil: "minus"
+        }
+        return VStack(spacing: 6) {
             ZStack {
                 Circle()
-                    .fill(passed ? Color.green.opacity(0.1) : Color.red.opacity(0.1))
+                    .fill(color.opacity(0.1))
                     .frame(width: 36, height: 36)
-                Image(systemName: passed ? "checkmark" : "xmark")
+                Image(systemName: iconName)
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(passed ? .green : .red)
+                    .foregroundStyle(color)
             }
             Text(label)
                 .font(.caption2)

@@ -128,8 +128,8 @@ public struct RequirementCheckDetail: Sendable {
 
 public struct ValidationChecks: Sendable {
     public let smoke: Bool
-    public let tests: Bool
-    public let review: Bool
+    public let tests: Bool?
+    public let review: Bool?
     public let buildOutput: String?
     public let testOutput: String?
     public let reviewIssues: [String]?
@@ -140,7 +140,7 @@ public struct ValidationChecks: Sendable {
     public let acChecks: [AcCheckDetail]?
     public let requirementsCheck: [RequirementCheckDetail]?
     public init(
-        smoke: Bool, tests: Bool, review: Bool,
+        smoke: Bool, tests: Bool? = nil, review: Bool? = nil,
         buildOutput: String? = nil, testOutput: String? = nil,
         reviewIssues: [String]? = nil, reviewReasoning: String? = nil,
         healthCheck: HealthCheckDetail? = nil,
@@ -157,7 +157,7 @@ public struct ValidationChecks: Sendable {
         self.requirementsCheck = requirementsCheck
     }
 
-    public var allPassed: Bool { smoke && tests && review && (acValidation ?? true) }
+    public var allPassed: Bool { smoke && (tests ?? true) && (review ?? true) && (acValidation ?? true) }
 }
 
 public struct PhaseProgress: Sendable {

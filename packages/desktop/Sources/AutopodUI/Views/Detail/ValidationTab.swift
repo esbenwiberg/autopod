@@ -4,6 +4,8 @@ import SwiftUI
 public struct ValidationTab: View {
   public let session: Session
   public let checks: ValidationChecks?
+  @State private var expandedBuildOutput = false
+  @State private var expandedTestOutput = false
 
   public init(session: Session, checks: ValidationChecks? = nil) {
     self.session = session
@@ -16,12 +18,12 @@ public struct ValidationTab: View {
         if let checks {
           // Summary
           HStack(spacing: 20) {
-            validationBadge("Smoke", passed: checks.smoke, icon: "flame")
-            validationBadge("Tests", passed: checks.tests, icon: "testtube.2")
+            validationBadge("Smoke", status: checks.smoke, icon: "flame")
+            validationBadge("Tests", status: checks.tests, icon: "testtube.2")
             if let acPassed = checks.acValidation {
-              validationBadge("AC", passed: acPassed, icon: "checklist.checked")
+              validationBadge("AC", status: acPassed, icon: "checklist.checked")
             }
-            validationBadge("Review", passed: checks.review, icon: "eye")
+            validationBadge("Review", status: checks.review, icon: "eye")
           }
           .padding(16)
           .frame(maxWidth: .infinity)
@@ -88,15 +90,16 @@ public struct ValidationTab: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
               ScrollView(.horizontal, showsIndicators: true) {
-                Text(output)
+                Text(expandedBuildOutput ? output : tailLines(output))
                   .font(.system(.caption2, design: .monospaced))
                   .foregroundStyle(.red.opacity(0.9))
                   .textSelection(.enabled)
               }
-              .frame(maxHeight: 200)
+              .frame(maxHeight: expandedBuildOutput ? .infinity : 300)
               .padding(8)
               .background(Color.black.opacity(0.3))
               .clipShape(RoundedRectangle(cornerRadius: 6))
+              outputToggle(expanded: $expandedBuildOutput, lineCount: output.split(separator: "\n").count)
             }
             if let health = checks.healthCheck, health.status == "fail" {
               VStack(alignment: .leading, spacing: 4) {
@@ -175,25 +178,42 @@ public struct ValidationTab: View {
           }
 
           // Test Suite
-          detailSection("Test Suite", icon: "testtube.2", expanded: checks.testOutput != nil) {
-            Text(checks.tests ? "All tests passed" : "Tests failed or skipped")
-              .font(.callout)
-              .foregroundStyle(checks.tests ? .green : .secondary)
+          detailSection("Test Suite", icon: "testtube.2", expanded: checks.tests == false) {
+            switch checks.tests {
+            case true:
+              Text("All tests passed")
+                .font(.callout)
+                .foregroundStyle(.green)
+            case false:
+              Text("Tests failed")
+                .font(.callout)
+                .foregroundStyle(.red)
+            case nil:
+              Text("Tests skipped")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+              Text(!checks.smoke
+                   ? "Build failed \u{2014} tests were not executed"
+                   : "No test command configured")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             if let output = checks.testOutput {
               Text("Test Output")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
               ScrollView(.horizontal, showsIndicators: true) {
-                Text(output)
+                Text(expandedTestOutput ? output : tailLines(output))
                   .font(.system(.caption2, design: .monospaced))
                   .foregroundStyle(.red.opacity(0.9))
                   .textSelection(.enabled)
               }
-              .frame(maxHeight: 200)
+              .frame(maxHeight: expandedTestOutput ? .infinity : 300)
               .padding(8)
               .background(Color.black.opacity(0.3))
               .clipShape(RoundedRectangle(cornerRadius: 6))
+              outputToggle(expanded: $expandedTestOutput, lineCount: output.split(separator: "\n").count)
             }
           }
 
@@ -229,10 +249,24 @@ public struct ValidationTab: View {
           }
 
           // Code Review
-          detailSection("Code Review", icon: "eye", expanded: !checks.review) {
-            Text(checks.review ? "AI review passed" : "Review flagged issues")
-              .font(.callout)
-              .foregroundStyle(checks.review ? .green : .red)
+          detailSection("Code Review", icon: "eye", expanded: checks.review == false) {
+            switch checks.review {
+            case true:
+              Text("AI review passed")
+                .font(.callout)
+                .foregroundStyle(.green)
+            case false:
+              Text("Review flagged issues")
+                .font(.callout)
+                .foregroundStyle(.red)
+            case nil:
+              Text("Review skipped")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+              Text("No reviewer model configured")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             if let reasoning = checks.reviewReasoning {
               Text(reasoning)
                 .font(.caption)
@@ -304,19 +338,48 @@ public struct ValidationTab: View {
     }
   }
 
-  private func validationBadge(_ label: String, passed: Bool, icon: String) -> some View {
-    VStack(spacing: 8) {
+  private func validationBadge(_ label: String, status: Bool?, icon: String) -> some View {
+    let color: Color = switch status {
+    case true: .green
+    case false: .red
+    case nil: .gray
+    }
+    let iconName: String = switch status {
+    case true: "checkmark"
+    case false: "xmark"
+    case nil: "minus"
+    }
+    return VStack(spacing: 8) {
       ZStack {
         Circle()
-          .fill(passed ? Color.green.opacity(0.1) : Color.red.opacity(0.1))
+          .fill(color.opacity(0.1))
           .frame(width: 44, height: 44)
-        Image(systemName: passed ? "checkmark" : "xmark")
+        Image(systemName: iconName)
           .font(.system(size: 16, weight: .bold))
-          .foregroundStyle(passed ? .green : .red)
+          .foregroundStyle(color)
       }
       Text(label)
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+  }
+
+  private func tailLines(_ text: String, count: Int = 100) -> String {
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    if lines.count <= count { return text }
+    return "\u{2026} (\(lines.count - count) lines truncated)\n" +
+           lines.suffix(count).joined(separator: "\n")
+  }
+
+  private func outputToggle(expanded: Binding<Bool>, lineCount: Int) -> some View {
+    Group {
+      if lineCount > 100 {
+        Button(expanded.wrappedValue ? "Show Less" : "Show All (\(lineCount) lines)") {
+          expanded.wrappedValue.toggle()
+        }
+        .font(.caption)
+        .foregroundStyle(.blue)
+      }
     }
   }
 
@@ -386,4 +449,15 @@ private struct CollapsibleSection<Content: View>: View {
     session: MockData.validatedFailed
   )
   .frame(width: 500, height: 700)
+}
+
+#Preview("Validation — skipped") {
+  ValidationTab(
+    session: MockData.validated,
+    checks: ValidationChecks(
+      smoke: false, tests: nil, review: nil,
+      buildOutput: "error: Module 'foo' not found\nexit code 1"
+    )
+  )
+  .frame(width: 500, height: 500)
 }

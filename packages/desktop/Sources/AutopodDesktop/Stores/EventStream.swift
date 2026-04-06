@@ -106,8 +106,8 @@ public final class EventStream {
       let passed = result.overall == "pass"
       let checks = ValidationChecks(
         smoke: result.smoke.status == "pass",
-        tests: result.test?.status == "pass",
-        review: result.taskReview?.status == "pass"
+        tests: SessionMapper.mapTriState(result.test?.status),
+        review: SessionMapper.mapTriState(result.taskReview?.status)
       )
       sessionStore.setValidationChecks(sessionId, checks: checks)
       // Notification
