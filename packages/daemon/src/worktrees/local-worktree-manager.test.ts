@@ -526,7 +526,7 @@ describe('LocalWorktreeManager', () => {
             cb(null, { stdout: '.', stderr: '' }); // bare repo exists
           } else if (cmd.includes('fetch')) {
             // All remote fetches fail — neither parent nor fork branch pushed
-            cb(new Error('fatal: couldn\'t find remote ref'));
+            cb(new Error("fatal: couldn't find remote ref"));
           } else if (cmd.includes('rev-parse --verify refs/heads/autopod/parent-branch')) {
             // But it exists locally in the bare repo
             cb(null, { stdout: 'abc1234\n', stderr: '' });
@@ -559,7 +559,7 @@ describe('LocalWorktreeManager', () => {
           if (cmd.includes('rev-parse --git-dir')) {
             cb(null, { stdout: '.', stderr: '' });
           } else if (cmd.includes('fetch') && cmd.includes('gone-branch')) {
-            cb(new Error('fatal: couldn\'t find remote ref'));
+            cb(new Error("fatal: couldn't find remote ref"));
           } else if (cmd.includes('rev-parse --verify refs/heads/gone-branch')) {
             cb(new Error('fatal: Needed a single revision'));
           } else {

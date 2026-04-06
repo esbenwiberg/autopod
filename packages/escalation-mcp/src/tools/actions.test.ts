@@ -107,7 +107,13 @@ describe('executeAction', () => {
     const pr = makePendingRequests();
 
     // Start execution (will block on pendingRequests)
-    const resultPromise = executeAction('sess-1', 'create-pr', { repo: 'foo' }, bridge as never, pr);
+    const resultPromise = executeAction(
+      'sess-1',
+      'create-pr',
+      { repo: 'foo' },
+      bridge as never,
+      pr,
+    );
 
     // Simulate human approval after a tick
     await new Promise((r) => setTimeout(r, 10));
@@ -120,9 +126,14 @@ describe('executeAction', () => {
     expect(bridge.createEscalation).toHaveBeenCalledOnce();
     expect(bridge.createEscalation.mock.calls[0][0].type).toBe('action_approval');
     expect(bridge.createEscalation.mock.calls[0][0].payload.actionName).toBe('create-pr');
-    expect(bridge.executeAction).toHaveBeenCalledWith('sess-1', 'create-pr', { repo: 'foo' }, {
-      skipApprovalCheck: true,
-    });
+    expect(bridge.executeAction).toHaveBeenCalledWith(
+      'sess-1',
+      'create-pr',
+      { repo: 'foo' },
+      {
+        skipApprovalCheck: true,
+      },
+    );
     expect(result).toContain('merged');
   });
 
@@ -133,7 +144,13 @@ describe('executeAction', () => {
     );
     const pr = makePendingRequests();
 
-    const resultPromise = executeAction('sess-1', 'delete-issue', { id: '42' }, bridge as never, pr);
+    const resultPromise = executeAction(
+      'sess-1',
+      'delete-issue',
+      { id: '42' },
+      bridge as never,
+      pr,
+    );
 
     await new Promise((r) => setTimeout(r, 10));
     const escalationId = bridge.createEscalation.mock.calls[0]?.[0]?.id as string;

@@ -220,11 +220,14 @@ export async function patchWorkspaceNuGetCredentials(
     const configContent = await containerManager.readFile(containerId, configPath);
     const sourcePattern =
       /<add\s+key="([^"]+)"\s+value="(https?:\/\/pkgs\.dev\.azure\.com\/[^"]+)"/g;
-    let match: RegExpExecArray | null;
     const adoSources: { name: string; url: string }[] = [];
 
-    while ((match = sourcePattern.exec(configContent)) !== null) {
-      adoSources.push({ name: match[1]!, url: match[2]! });
+    for (
+      let match = sourcePattern.exec(configContent);
+      match !== null;
+      match = sourcePattern.exec(configContent)
+    ) {
+      adoSources.push({ name: match[1] ?? '', url: match[2] ?? '' });
     }
 
     for (const source of adoSources) {
