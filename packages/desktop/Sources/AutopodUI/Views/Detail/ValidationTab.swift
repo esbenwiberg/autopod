@@ -263,9 +263,6 @@ public struct ValidationTab: View {
               Text("Review skipped")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-              Text("No reviewer model configured")
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
             if let reasoning = checks.reviewReasoning {
               Text(reasoning)
