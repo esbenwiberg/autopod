@@ -95,6 +95,11 @@ public final class EventStream {
       }
       // Full refresh to pick up any other changed fields
       Task { await sessionStore.refreshSession(sessionId) }
+      // Reload diff when entering states that imply code changes exist
+      let diffStates: Set<String> = ["validating", "validated", "approved", "merging", "complete"]
+      if diffStates.contains(newStatus) {
+        Task { await sessionStore.loadDiff(sessionId) }
+      }
 
     case .agentActivity(let sessionId, let agentEvent):
       handleAgentActivity(sessionId: sessionId, event: agentEvent)
@@ -114,8 +119,9 @@ public final class EventStream {
       if let session = sessionStore.sessions.first(where: { $0.id == sessionId }) {
         NotificationService.shared.notifyValidationComplete(session: session, passed: passed)
       }
-      // Full refresh for status change
+      // Full refresh for status change + reload diff (now available post-validation)
       Task { await sessionStore.refreshSession(sessionId) }
+      Task { await sessionStore.loadDiff(sessionId) }
 
     case .escalationCreated(let sessionId, let escalation):
       let question = escalation.payload.question ?? escalation.payload.description ?? "Input needed"

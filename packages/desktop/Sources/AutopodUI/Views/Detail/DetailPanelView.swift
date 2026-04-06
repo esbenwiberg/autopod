@@ -12,6 +12,7 @@ public struct DetailPanelView: View {
     public var onTerminalResize: ((Int, Int) -> Void)?
     public var onTerminalConnect: (() -> Void)?
     public var onTerminalDisconnect: (() -> Void)?
+    public var onRefreshDiff: (() -> Void)?
     @Binding public var requestedTab: DetailTab?
 
     public init(
@@ -23,6 +24,7 @@ public struct DetailPanelView: View {
         onTerminalResize: ((Int, Int) -> Void)? = nil,
         onTerminalConnect: (() -> Void)? = nil,
         onTerminalDisconnect: (() -> Void)? = nil,
+        onRefreshDiff: (() -> Void)? = nil,
         requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
         self.session = session; self.events = events; self.actions = actions
@@ -33,6 +35,7 @@ public struct DetailPanelView: View {
         self.onTerminalResize = onTerminalResize
         self.onTerminalConnect = onTerminalConnect
         self.onTerminalDisconnect = onTerminalDisconnect
+        self.onRefreshDiff = onRefreshDiff
         self._requestedTab = requestedTab
     }
 
@@ -55,7 +58,7 @@ public struct DetailPanelView: View {
                 switch selectedTab {
                 case .overview:   OverviewTab(session: session, events: events, actions: actions)
                 case .logs:       LogStreamView(events: events, sessionBranch: session.branch)
-                case .diff:       DiffTab(session: session, diffString: diffString)
+                case .diff:       DiffTab(session: session, diffString: diffString, onRefresh: onRefreshDiff)
                 case .validation: ValidationTab(session: session)
                 case .terminal:   EmptyView()
                 }

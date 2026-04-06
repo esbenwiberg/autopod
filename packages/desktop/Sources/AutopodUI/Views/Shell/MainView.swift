@@ -19,6 +19,7 @@ public struct MainView: View {
     public var onTerminalDisconnect: (() -> Void)?
     public var onRefresh: (() async -> Void)?
     public var onSelectSession: ((String?) -> Void)?
+    public var onRefreshDiff: ((String) -> Void)?
     public var onShowSettings: (() -> Void)?
 
     @Binding public var selectedSessionId: String?
@@ -42,6 +43,7 @@ public struct MainView: View {
         onTerminalDisconnect: (() -> Void)? = nil,
         onRefresh: (() async -> Void)? = nil,
         onSelectSession: ((String?) -> Void)? = nil,
+        onRefreshDiff: ((String) -> Void)? = nil,
         onShowSettings: (() -> Void)? = nil
     ) {
         self.sessions = sessions
@@ -62,6 +64,7 @@ public struct MainView: View {
         self.onTerminalDisconnect = onTerminalDisconnect
         self.onRefresh = onRefresh
         self.onSelectSession = onSelectSession
+        self.onRefreshDiff = onRefreshDiff
         self.onShowSettings = onShowSettings
     }
 
@@ -182,6 +185,7 @@ public struct MainView: View {
                     onTerminalResize: onTerminalResize,
                     onTerminalConnect: { onTerminalConnect?(session.id) },
                     onTerminalDisconnect: onTerminalDisconnect,
+                    onRefreshDiff: { onRefreshDiff?(session.id) },
                     requestedTab: $requestedDetailTab
                 )
             } else {

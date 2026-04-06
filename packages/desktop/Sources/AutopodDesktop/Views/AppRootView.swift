@@ -67,6 +67,9 @@ public struct AppRootView: View {
           Task { await sessionStore.loadDiff(id) }
         }
       },
+      onRefreshDiff: { sessionId in
+        Task { await sessionStore.loadDiff(sessionId) }
+      },
       onShowSettings: {
         showSettings = true
       }

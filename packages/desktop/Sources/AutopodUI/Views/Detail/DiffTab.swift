@@ -123,10 +123,12 @@ public enum DiffParser {
 public struct DiffTab: View {
   public let session: Session
   public let diffString: String?
+  public var onRefresh: (() -> Void)?
 
-  public init(session: Session, diffString: String? = nil) {
+  public init(session: Session, diffString: String? = nil, onRefresh: (() -> Void)? = nil) {
     self.session = session
     self.diffString = diffString
+    self.onRefresh = onRefresh
   }
 
   @State private var selectedFile: String?
@@ -152,6 +154,16 @@ public struct DiffTab: View {
           Text("Diff will be available after validation")
             .font(.caption)
             .foregroundStyle(.tertiary)
+        }
+        if let onRefresh {
+          Button {
+            onRefresh()
+          } label: {
+            Label("Refresh", systemImage: "arrow.clockwise")
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .padding(.top, 4)
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)

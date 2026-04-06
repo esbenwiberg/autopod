@@ -86,7 +86,12 @@ public final class SessionStore {
       let response = try await api.getSessionDiff(sessionId)
       // Reconstruct the raw diff string from structured files
       let raw = response.files.map(\.diff).joined(separator: "\n")
-      sessionDiffs[sessionId] = raw
+      // Only cache non-empty diffs — empty results should be retried on next event
+      if !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        sessionDiffs[sessionId] = raw
+      } else {
+        sessionDiffs.removeValue(forKey: sessionId)
+      }
     } catch {
       // Diff not available — that's fine, it'll show empty state
     }
