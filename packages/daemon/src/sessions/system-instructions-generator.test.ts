@@ -284,4 +284,135 @@ describe('generateSystemInstructions', () => {
     );
     expect(md).not.toContain('## Available Skills');
   });
+
+  describe('network policy instructions', () => {
+    it('restricts network access when policy is enabled without replaceDefaults', () => {
+      const md = generateSystemInstructions(
+        makeProfile({
+          networkPolicy: {
+            enabled: true,
+            mode: 'restricted',
+            allowedHosts: [],
+            replaceDefaults: false,
+          },
+        }),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+      );
+      expect(md).toContain('restricted to package registries');
+      expect(md).toContain('action tools');
+    });
+
+    it('dynamically describes GitHub coverage when GitHub action groups are enabled', () => {
+      const md = generateSystemInstructions(
+        makeProfile({
+          networkPolicy: {
+            enabled: true,
+            mode: 'restricted',
+            allowedHosts: [],
+            replaceDefaults: false,
+          },
+        }),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          availableActions: [
+            {
+              name: 'read_issue',
+              description: 'Read a GitHub issue',
+              group: 'github-issues',
+              params: { repo: { type: 'string', required: true, description: 'repo' } },
+            },
+            {
+              name: 'read_pr',
+              description: 'Read a GitHub PR',
+              group: 'github-prs',
+              params: { repo: { type: 'string', required: true, description: 'repo' } },
+            },
+          ],
+        },
+      );
+      expect(md).toContain('GitHub issues, PRs');
+      expect(md).toContain('MUST use these MCP action tools');
+      expect(md).toContain('Do not use WebFetch, curl, gh CLI');
+    });
+
+    it('lists action tools in the MCP server section', () => {
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          availableActions: [
+            {
+              name: 'read_issue',
+              description: 'Read a GitHub issue',
+              group: 'github-issues',
+              params: { repo: { type: 'string', required: true, description: 'repo' } },
+            },
+          ],
+        },
+      );
+      expect(md).toContain('Action tools');
+      expect(md).toContain('ToolSearch to load them');
+      expect(md).toContain('read_issue(repo)');
+    });
+
+    it('dynamically describes ADO coverage when ado-workitems group is enabled', () => {
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          availableActions: [
+            {
+              name: 'read_workitem',
+              description: 'Read an ADO work item',
+              group: 'ado-workitems',
+              params: { id: { type: 'number', required: true, description: 'Work item ID' } },
+            },
+          ],
+        },
+      );
+      expect(md).toContain('ADO work items');
+      expect(md).toContain('MUST use these MCP action tools');
+    });
+
+    it('uses generic phrasing for custom action groups', () => {
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          availableActions: [
+            {
+              name: 'my_tool',
+              description: 'Custom tool',
+              group: 'custom',
+              params: { q: { type: 'string', required: true, description: 'query' } },
+            },
+          ],
+        },
+      );
+      expect(md).toContain('Action tools are available on the Escalation MCP server');
+      expect(md).not.toContain('MUST use these MCP action tools for these domains');
+    });
+
+    it('mentions WebFetch constraint for research pods with explicit allowed hosts', () => {
+      const md = generateSystemInstructions(
+        makeProfile({
+          networkPolicy: {
+            enabled: true,
+            mode: 'restricted',
+            allowedHosts: ['docs.example.com'],
+            replaceDefaults: true,
+          },
+        }),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+      );
+      expect(md).toContain('Only WebFetch/curl to the allowed domains');
+      expect(md).toContain('docs.example.com');
+    });
+  });
 });

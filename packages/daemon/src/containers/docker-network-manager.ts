@@ -27,9 +27,10 @@ export const DEFAULT_ALLOWED_HOSTS = [
   // blob storage redirects and NuGet CDN endpoints with unpredictable subdomains
   '*.blob.core.windows.net',
   '*.vo.msecnd.net',
-  'github.com',
-  'objects.githubusercontent.com',
-  'raw.githubusercontent.com',
+  // NOTE: github.com, objects.githubusercontent.com, and raw.githubusercontent.com are
+  // intentionally excluded. Pods commit locally and don't push; npm uses registry.npmjs.org.
+  // Including github.com lets agents bypass ACP action tools via WebFetch/curl to GitHub
+  // web pages. Profiles that need GitHub for "github:org/repo" npm deps can add it explicitly.
   // Azure DevOps package feeds (npm / NuGet)
   'pkgs.dev.azure.com',
   // Required for MAX/PRO OAuth token refresh (Claude Code refreshes internally)

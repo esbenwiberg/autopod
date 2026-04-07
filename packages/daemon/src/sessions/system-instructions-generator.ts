@@ -75,6 +75,19 @@ export function generateSystemInstructions(
   );
   lines.push('  - check_messages — poll for human nudge messages (non-blocking)');
   lines.push('  - validate_in_browser — open a browser to verify your work (localhost URLs only)');
+
+  // List action tools on the same MCP server so the agent knows they're callable
+  const availableActions = options?.availableActions ?? [];
+  if (availableActions.length > 0) {
+    lines.push('');
+    lines.push('  **Action tools** (also on this MCP server — use ToolSearch to load them):');
+    for (const action of availableActions) {
+      const paramList = Object.entries(action.params)
+        .map(([name, def]) => (def.required ? name : `${name}?`))
+        .join(', ');
+      lines.push(`  - ${action.name}(${paramList}) — ${action.description}`);
+    }
+  }
   lines.push('');
 
   const injectedMcpServers = options?.injectedMcpServers ?? [];
@@ -320,33 +333,53 @@ function generateOperatingEnvironment(
       // Research pod style — limited internet
       lines.push('- You have LIMITED internet access for research purposes.');
       lines.push(`- Allowed domains: ${profile.networkPolicy.allowedHosts.join(', ')}`);
+      lines.push('- Only WebFetch/curl to the allowed domains above will work. All other external URLs are blocked.');
       lines.push('- Blocked: cloud metadata endpoints, internal services.');
     } else {
       lines.push(
-        '- Direct internet access is BLOCKED. Do not attempt curl/fetch/wget to external URLs.',
+        '- Outbound network access is restricted to package registries and essential services.',
       );
-      lines.push('- All external data access goes through the MCP action tools listed below.');
+      lines.push('- Use the action tools below for all external data access.');
     }
   } else {
     lines.push('- Network policy is not enforced. You may have internet access.');
   }
   lines.push('');
 
-  // Available Actions section
+  // Available Actions section — reference the MCP tools listed above
   if (availableActions.length > 0) {
-    lines.push('### Available Actions');
-    lines.push(
-      'These MCP tools let you access external context. All responses are PII-sanitized. ' +
-        'When you need external data (issues, PRs, code, work items), **always prefer these ' +
-        'action tools** over WebFetch, curl, gh, or other HTTP methods. Actions handle ' +
-        'authentication, rate limiting, PII redaction, and audit logging automatically. ' +
-        'Direct API access may be blocked by network policy.',
-    );
-    for (const action of availableActions) {
-      const paramList = Object.entries(action.params)
-        .map(([name, def]) => (def.required ? name : `${name}?`))
-        .join(', ');
-      lines.push(`- ${action.name}(${paramList}) — ${action.description}`);
+    lines.push('### External Data Access');
+
+    // Describe which domains are covered by enabled action groups
+    const groups = new Set(availableActions.map((a) => a.group));
+    const coveredDomains: string[] = [];
+    if (groups.has('github-issues') || groups.has('github-prs') || groups.has('github-code')) {
+      const parts: string[] = [];
+      if (groups.has('github-issues')) parts.push('issues');
+      if (groups.has('github-prs')) parts.push('PRs');
+      if (groups.has('github-code')) parts.push('code');
+      coveredDomains.push(`GitHub ${parts.join(', ')}`);
+    }
+    if (groups.has('ado-workitems')) {
+      coveredDomains.push('ADO work items');
+    }
+    if (groups.has('azure-logs')) {
+      coveredDomains.push('Azure logs');
+    }
+
+    if (coveredDomains.length > 0) {
+      lines.push(
+        `${coveredDomains.join('; ')} — accessible via the action tools on the Escalation MCP server (see MCP Servers section). ` +
+          'You MUST use these MCP action tools for these domains. ' +
+          'Do not use WebFetch, curl, gh CLI, or direct API calls as substitutes — ' +
+          'actions handle authentication, PII redaction, and audit logging automatically.',
+      );
+    } else {
+      lines.push(
+        'Action tools are available on the Escalation MCP server (see MCP Servers section). ' +
+          'Use these instead of WebFetch, curl, or direct API calls — ' +
+          'actions handle authentication, PII redaction, and audit logging automatically.',
+      );
     }
     lines.push('');
   }
