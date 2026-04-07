@@ -147,36 +147,32 @@ public struct LogStreamView: View {
     // MARK: - Log content
 
     private var logContent: some View {
-        GeometryReader { geometry in
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(filteredEvents) { event in
-                                LogEventRow(
-                                    event: event,
-                                    isExpanded: expandedEventId == event.id,
-                                    onTap: {
-                                        withAnimation(.easeOut(duration: 0.15)) {
-                                            expandedEventId = expandedEventId == event.id ? nil : event.id
-                                        }
-                                    }
-                                )
-                                .id(event.id)
-
-                                if event.id != filteredEvents.last?.id {
-                                    Divider().padding(.leading, 80)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(filteredEvents) { event in
+                        LogEventRow(
+                            event: event,
+                            isExpanded: expandedEventId == event.id,
+                            onTap: {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    expandedEventId = expandedEventId == event.id ? nil : event.id
                                 }
                             }
+                        )
+                        .id(event.id)
+
+                        if event.id != filteredEvents.last?.id {
+                            Divider().padding(.leading, 80)
                         }
-                        .frame(minWidth: geometry.size.width)
-                        .padding(.vertical, 4)
                     }
                 }
-                .onChange(of: events.count) {
-                    if pinnedToBottom, let last = filteredEvents.last {
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+            }
+            .onChange(of: events.count) {
+                if pinnedToBottom, let last = filteredEvents.last {
+                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
         }
@@ -191,47 +187,51 @@ struct LogEventRow: View {
     let onTap: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            // Timestamp
-            Text(event.timeString)
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .frame(width: 55, alignment: .trailing)
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 8) {
+                // Timestamp
+                Text(event.timeString)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 55, alignment: .trailing)
 
-            // Type indicator
-            Image(systemName: event.type.icon)
-                .font(.system(size: 10))
-                .foregroundStyle(event.type.color)
-                .frame(width: 16)
+                // Type indicator
+                Image(systemName: event.type.icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(event.type.color)
+                    .frame(width: 16)
 
-            // Content
-            VStack(alignment: .leading, spacing: 3) {
-                Text(event.summary)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(event.type == .error ? .red : .primary)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Content
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(event.summary)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(event.type == .error ? .red : .primary)
+                        .lineLimit(isExpanded ? nil : 1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: isExpanded)
 
-                if isExpanded, let detail = event.detail {
-                    Text(detail)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .padding(6)
-                        .background(Color(nsColor: .controlBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    if isExpanded, let detail = event.detail {
+                        Text(detail)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .padding(6)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(
+                isExpanded
+                    ? event.type.color.opacity(0.04)
+                    : (event.type == .error ? Color.red.opacity(0.04) : Color.clear)
+            )
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
-        .background(
-            isExpanded
-                ? event.type.color.opacity(0.04)
-                : (event.type == .error ? Color.red.opacity(0.04) : Color.clear)
-        )
-        .onTapGesture(perform: onTap)
+        .buttonStyle(.plain)
     }
 }
 
