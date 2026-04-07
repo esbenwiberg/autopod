@@ -1022,6 +1022,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             if (session.status === 'running') {
               emitActivityStatus(sessionId, `Agent failed: ${event.message}`);
               transition(session, 'failed', { completedAt: new Date().toISOString() });
+              try {
+                const profile = profileStore.get(session.profileName);
+                if (profile.fallbackModel) {
+                  emitActivityStatus(
+                    sessionId,
+                    `Fallback model available: ${profile.fallbackModel}. Retry this session to use the fallback model.`,
+                  );
+                }
+              } catch {
+                /* best effort — don't mask the original failure */
+              }
             }
             break;
           } else if (event.type === 'tool_use' || event.type === 'file_change') {

@@ -91,6 +91,14 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     errors.push('defaultModel must not be empty');
   }
 
+  // Fallback model — optional; surfaced in failure metadata when primary model fails
+  const fallbackModel = input.fallbackModel;
+  if (fallbackModel !== undefined && fallbackModel !== null && typeof fallbackModel !== 'string') {
+    errors.push('fallbackModel must be a string or null');
+  } else if (typeof fallbackModel === 'string' && fallbackModel.trim().length === 0) {
+    errors.push('fallbackModel must not be empty');
+  }
+
   // Default runtime
   const defaultRuntime = input.defaultRuntime;
   if (defaultRuntime !== undefined && !KNOWN_RUNTIMES.includes(defaultRuntime as string)) {

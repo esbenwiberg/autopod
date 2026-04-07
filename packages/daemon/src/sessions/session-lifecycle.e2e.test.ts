@@ -534,6 +534,111 @@ describe('Session Lifecycle E2E', () => {
       expect(result.status).toBe('killed');
     });
 
+    it('transitions to failed on fatal agent error', async () => {
+      const ctx = createTestContext();
+      const runtime = createMockRuntime({
+        spawn: async function* () {
+          yield {
+            type: 'error' as const,
+            timestamp: new Date().toISOString(),
+            message: 'rate limit exceeded',
+            fatal: true,
+          };
+        },
+      });
+      ctx.deps.runtimeRegistry = { get: vi.fn(() => runtime) };
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Task', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processSession(session.id);
+
+      expect(manager.getSession(session.id).status).toBe('failed');
+    });
+
+    it('emits fallback model activity event on fatal agent error when fallbackModel is set', async () => {
+      const runtime = createMockRuntime({
+        spawn: async function* () {
+          yield {
+            type: 'error' as const,
+            timestamp: new Date().toISOString(),
+            message: 'model overloaded',
+            fatal: true,
+          };
+        },
+      });
+      const ctx = createTestContext({ runtime });
+
+      // Override profile store to return a profile with fallbackModel set
+      (ctx.deps.profileStore.get as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        name: 'test-profile',
+        repoUrl: 'https://github.com/org/repo',
+        defaultBranch: 'main',
+        template: 'node22',
+        buildCommand: 'npm run build',
+        startCommand: 'npm start',
+        healthPath: '/health',
+        healthTimeout: 120,
+        smokePages: [],
+        maxValidationAttempts: 3,
+        defaultModel: 'opus',
+        defaultRuntime: 'claude',
+        customInstructions: null,
+        escalation: {
+          askHuman: true,
+          askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+          autoPauseAfter: 3,
+          humanResponseTimeout: 3600,
+        },
+        executionTarget: 'local',
+        extends: null,
+        warmImageTag: null,
+        warmImageBuiltAt: null,
+        mcpServers: [],
+        claudeMdSections: [],
+        skills: [],
+        networkPolicy: null,
+        actionPolicy: null,
+        outputMode: 'pr',
+        modelProvider: 'anthropic',
+        providerCredentials: null,
+        fallbackModel: 'claude-sonnet-4-6',
+        testCommand: null,
+        prProvider: 'github',
+        adoPat: null,
+        githubPat: null,
+        privateRegistries: [],
+        registryPat: null,
+        containerMemoryGb: null,
+        buildTimeout: 300,
+        testTimeout: 600,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+
+      const activityMessages: string[] = [];
+      ctx.eventBus.subscribe((e) => {
+        if (e.type === 'session.agent_activity' && (e as any).event?.type === 'status') {
+          activityMessages.push((e as any).event.message);
+        }
+      });
+
+      const manager = createSessionManager(ctx.deps);
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Task', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processSession(session.id);
+
+      expect(manager.getSession(session.id).status).toBe('failed');
+      expect(activityMessages.some((m) => m.includes('claude-sonnet-4-6'))).toBe(true);
+      expect(activityMessages.some((m) => m.toLowerCase().includes('fallback'))).toBe(true);
+    });
+
     it('transitions to failed when validation engine throws', async () => {
       const ctx = createTestContext();
       (ctx.validationEngine.validate as ReturnType<typeof vi.fn>).mockRejectedValue(

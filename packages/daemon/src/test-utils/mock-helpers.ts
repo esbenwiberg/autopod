@@ -68,7 +68,7 @@ export function createTestDb(): Database.Database {
 
 export function insertTestProfile(
   db: Database.Database,
-  overrides: { name?: string; maxValidationAttempts?: number } = {},
+  overrides: { name?: string; maxValidationAttempts?: number; fallbackModel?: string | null } = {},
 ) {
   const name = overrides.name ?? 'test-profile';
   const maxValidationAttempts = overrides.maxValidationAttempts ?? 3;
@@ -77,11 +77,11 @@ export function insertTestProfile(
     INSERT INTO profiles (
       name, repo_url, default_branch, template, build_command, start_command,
       health_path, health_timeout, validation_pages, max_validation_attempts,
-      default_model, default_runtime, escalation_config
+      default_model, default_runtime, escalation_config, fallback_model
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
-      @defaultModel, @defaultRuntime, @escalationConfig
+      @defaultModel, @defaultRuntime, @escalationConfig, @fallbackModel
     )
   `).run({
     name,
@@ -102,6 +102,7 @@ export function insertTestProfile(
       autoPauseAfter: 3,
       humanResponseTimeout: 3600,
     }),
+    fallbackModel: overrides.fallbackModel ?? null,
   });
 }
 
@@ -241,6 +242,7 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         providerCredentials: row.provider_credentials
           ? JSON.parse(row.provider_credentials as string)
           : null,
+        fallbackModel: (row.fallback_model as string | null) ?? null,
         testCommand: (row.test_command as string) ?? null,
         prProvider: (row.pr_provider as 'github' | 'ado') ?? 'github',
         adoPat: (row.ado_pat as string) ?? null,

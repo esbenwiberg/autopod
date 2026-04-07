@@ -134,6 +134,7 @@ export const createProfileSchema = z.object({
   outputMode: outputModeSchema.default('pr'),
   modelProvider: modelProviderSchema.default('anthropic'),
   providerCredentials: providerCredentialsSchema.nullable().default(null),
+  fallbackModel: z.string().min(1).nullable().default(null),
   testCommand: z.string().nullable().optional().default(null),
   buildTimeout: z.number().int().min(30).max(1800).default(300),
   testTimeout: z.number().int().min(30).max(3600).default(600),

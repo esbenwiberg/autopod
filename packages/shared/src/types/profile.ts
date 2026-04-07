@@ -48,6 +48,8 @@ export interface Profile {
   modelProvider: ModelProvider;
   /** Provider-specific credentials (OAuth tokens for MAX, endpoint config for Foundry, etc.) */
   providerCredentials: ProviderCredentials | null;
+  /** Fallback model to surface in failure metadata when the primary model fails with a non-retryable error */
+  fallbackModel: string | null;
   /** Optional test command to run after build (e.g. 'pnpm test') */
   testCommand?: string | null;
   /** Build phase timeout in seconds. Default 300 (5 min). */

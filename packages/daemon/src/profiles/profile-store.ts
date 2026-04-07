@@ -74,6 +74,7 @@ export function rowToProfile(
     outputMode: (row.output_mode as Profile['outputMode']) ?? 'pr',
     modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
     providerCredentials: decryptCreds(row.provider_credentials),
+    fallbackModel: (row.fallback_model as string | null) ?? null,
     testCommand: (row.test_command as string) ?? null,
     prProvider: (row.pr_provider as Profile['prProvider']) ?? 'github',
     adoPat: decryptPat(row.ado_pat),
@@ -187,7 +188,7 @@ export function createProfileStore(
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
-          model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
+          model_provider, provider_credentials, fallback_model, test_command, pr_provider, ado_pat, github_pat,
           private_registries, registry_pat, container_memory_gb,
           build_timeout, test_timeout,
           created_at, updated_at
@@ -196,7 +197,7 @@ export function createProfileStore(
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
-          @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
+          @modelProvider, @providerCredentials, @fallbackModel, @testCommand, @prProvider, @adoPat, @githubPat,
           @privateRegistries, @registryPat, @containerMemoryGb,
           @buildTimeout, @testTimeout,
           @createdAt, @updatedAt
@@ -226,6 +227,7 @@ export function createProfileStore(
         outputMode: parsed.outputMode,
         modelProvider: parsed.modelProvider,
         providerCredentials: encryptCreds(parsed.providerCredentials),
+        fallbackModel: parsed.fallbackModel ?? null,
         testCommand: parsed.testCommand ?? null,
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
@@ -377,6 +379,10 @@ export function createProfileStore(
       if (parsed.providerCredentials !== undefined) {
         setClauses.push('provider_credentials = @providerCredentials');
         fieldMap.providerCredentials = encryptCreds(parsed.providerCredentials);
+      }
+      if (parsed.fallbackModel !== undefined) {
+        setClauses.push('fallback_model = @fallbackModel');
+        fieldMap.fallbackModel = parsed.fallbackModel ?? null;
       }
       if (parsed.testCommand !== undefined) {
         setClauses.push('test_command = @testCommand');

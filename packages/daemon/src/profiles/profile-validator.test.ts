@@ -145,6 +145,33 @@ describe('ProfileValidator', () => {
     expect(result.errors[0]).toContain('template');
   });
 
+  it('should accept a valid fallbackModel string', () => {
+    const result = validateProfile({ ...validInput, fallbackModel: 'claude-sonnet-4-6' });
+    expect(result.valid).toBe(true);
+  });
+
+  it('should accept null fallbackModel', () => {
+    const result = validateProfile({ ...validInput, fallbackModel: null });
+    expect(result.valid).toBe(true);
+  });
+
+  it('should accept undefined fallbackModel (omitted)', () => {
+    const result = validateProfile({ ...validInput });
+    expect(result.valid).toBe(true);
+  });
+
+  it('should reject empty fallbackModel string', () => {
+    const result = validateProfile({ ...validInput, fallbackModel: '' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('fallbackModel');
+  });
+
+  it('should reject non-string fallbackModel', () => {
+    const result = validateProfile({ ...validInput, fallbackModel: 42 });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('fallbackModel');
+  });
+
   it('should return all errors at once', () => {
     const result = validateProfile({
       name: 'INVALID NAME!',
