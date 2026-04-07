@@ -1,5 +1,5 @@
-import type Database from 'better-sqlite3';
 import { generateSessionId } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 
 export interface ProgressEventRecord {
   id: string;
@@ -33,7 +33,9 @@ export function createProgressEventRepository(db: Database.Database): ProgressEv
 
     listBySession(sessionId): ProgressEventRecord[] {
       const rows = db
-        .prepare('SELECT * FROM session_progress_events WHERE session_id = ? ORDER BY created_at ASC')
+        .prepare(
+          'SELECT * FROM session_progress_events WHERE session_id = ? ORDER BY created_at ASC',
+        )
         .all(sessionId) as Record<string, unknown>[];
       return rows.map((row) => ({
         id: row.id as string,

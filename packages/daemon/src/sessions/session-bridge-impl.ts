@@ -153,7 +153,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     ): void {
       sessionManager.touchHeartbeat(sessionId);
       logger.info(
-        { sessionId, deviationCount: deviations.length, actualSummary: actualSummary.slice(0, 100) },
+        {
+          sessionId,
+          deviationCount: deviations.length,
+          actualSummary: actualSummary.slice(0, 100),
+        },
         'Agent reported task summary',
       );
       // Persisted via AgentTaskSummaryEvent flowing through consumeAgentEvents

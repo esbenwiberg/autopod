@@ -48,7 +48,8 @@ export function createLocalValidationEngine(
           : { status: 'skip' as const, duration: 0 };
 
       // ── Phase 3: Health check ───────────────────────────────────────
-      if (buildResult.status === 'pass' && config.startCommand) onProgress?.('Running health check…');
+      if (buildResult.status === 'pass' && config.startCommand)
+        onProgress?.('Running health check…');
       const healthResult =
         buildResult.status === 'pass'
           ? await runHealthCheck(containerManager, config, log)
@@ -142,7 +143,7 @@ async function runBuild(
     );
   } catch (err) {
     const duration = Date.now() - buildStart;
-    const partial = (err as any)?.partialOutput ?? '';
+    const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
     log?.warn({ duration }, `build timed out: ${message}`);
     return {
@@ -193,7 +194,7 @@ async function runTests(
     );
   } catch (err) {
     const duration = Date.now() - testStart;
-    const partial = (err as any)?.partialOutput ?? '';
+    const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
     log?.warn({ duration }, `tests timed out: ${message}`);
     return {
@@ -696,24 +697,22 @@ async function runTaskReview(
       ? config.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n')
       : null;
 
-  const planSection =
-    config.plan
-      ? `\n## ORIGINAL PLAN\n\nSummary: ${config.plan.summary}\n\nSteps:\n${config.plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n`
-      : '';
+  const planSection = config.plan
+    ? `\n## ORIGINAL PLAN\n\nSummary: ${config.plan.summary}\n\nSteps:\n${config.plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n`
+    : '';
 
-  const taskSummarySection =
-    config.taskSummary
-      ? `\n## AGENT TASK SUMMARY\n\nWhat was actually done: ${config.taskSummary.actualSummary}\n${
-          config.taskSummary.deviations.length > 0
-            ? `\nReported deviations from plan:\n${config.taskSummary.deviations
-                .map(
-                  (d) =>
-                    `- **${d.step}**: planned "${d.planned}" → actual "${d.actual}" (reason: ${d.reason})`,
-                )
-                .join('\n')}`
-            : '\nNo deviations from plan reported.'
-        }\n`
-      : '';
+  const taskSummarySection = config.taskSummary
+    ? `\n## AGENT TASK SUMMARY\n\nWhat was actually done: ${config.taskSummary.actualSummary}\n${
+        config.taskSummary.deviations.length > 0
+          ? `\nReported deviations from plan:\n${config.taskSummary.deviations
+              .map(
+                (d) =>
+                  `- **${d.step}**: planned "${d.planned}" → actual "${d.actual}" (reason: ${d.reason})`,
+              )
+              .join('\n')}`
+          : '\nNo deviations from plan reported.'
+      }\n`
+    : '';
 
   const repoRulesSection = config.codeReviewSkill
     ? `\n## REPO-SPECIFIC REVIEW RULES (these take precedence over standard rules)\n\n${config.codeReviewSkill}\n`

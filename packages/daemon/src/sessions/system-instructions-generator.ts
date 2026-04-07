@@ -70,7 +70,9 @@ export function generateSystemInstructions(
   lines.push('  - report_blocker — report a blocking issue');
   lines.push('  - report_plan — declare your implementation plan (fire-and-forget)');
   lines.push('  - report_progress — report phase transitions (fire-and-forget)');
-  lines.push('  - report_task_summary — report what you actually did and any deviations from your plan (call as your final step)');
+  lines.push(
+    '  - report_task_summary — report what you actually did and any deviations from your plan (call as your final step)',
+  );
   lines.push('  - check_messages — poll for human nudge messages (non-blocking)');
   lines.push('  - validate_in_browser — open a browser to verify your work (localhost URLs only)');
   lines.push('');

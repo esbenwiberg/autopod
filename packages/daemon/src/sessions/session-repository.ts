@@ -1,4 +1,10 @@
-import type { ExecutionTarget, OutputMode, Session, SessionStatus, TaskSummary } from '@autopod/shared';
+import type {
+  ExecutionTarget,
+  OutputMode,
+  Session,
+  SessionStatus,
+  TaskSummary,
+} from '@autopod/shared';
 import { SessionNotFoundError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
@@ -293,7 +299,8 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       }
       if (changes.taskSummary !== undefined) {
         setClauses.push('task_summary = @taskSummary');
-        params.taskSummary = changes.taskSummary !== null ? JSON.stringify(changes.taskSummary) : null;
+        params.taskSummary =
+          changes.taskSummary !== null ? JSON.stringify(changes.taskSummary) : null;
       }
 
       if (setClauses.length === 0) return;

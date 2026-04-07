@@ -44,6 +44,7 @@ import type { EventBus } from './event-bus.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import type { ProgressEventRepository } from './progress-event-repository.js';
 import {
   buildContinuationPrompt,
   buildRecoveryTask,
@@ -56,7 +57,6 @@ import {
   validateRegistryFiles,
 } from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
-import type { ProgressEventRepository } from './progress-event-repository.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -1250,7 +1250,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Container is stopped post-validation — restart it before resuming the agent
         const cm = containerManagerFactory.get(session.executionTarget);
         await cm.start(session.containerId);
-        logger.info({ sessionId, containerId: session.containerId }, 'Container restarted for rejection retry');
+        logger.info(
+          { sessionId, containerId: session.containerId },
+          'Container restarted for rejection retry',
+        );
 
         // Resume agent with rejection feedback
         const resumeEnv = await getResumeEnv(session);

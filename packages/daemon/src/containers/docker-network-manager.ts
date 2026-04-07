@@ -178,7 +178,7 @@ export class DockerNetworkManager {
       // so we must resolve it via getent inside the container.
       lines.push('# Allow daemon gateway (MCP escalation endpoint)');
       lines.push(
-        'for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk \'{print $1}\' | sort -u); do',
+        "for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
       );
       lines.push('  iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
       lines.push('done');
@@ -265,7 +265,7 @@ export class DockerNetworkManager {
     // Resolve it via getent inside the container and add the IP directly to the ipset.
     lines.push('  # Ensure daemon gateway (host.docker.internal) is reachable for MCP');
     lines.push(
-      '  for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk \'{print $1}\' | sort -u); do',
+      "  for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
     );
     lines.push('    ipset add allowed_ips "$_gw_ip" 2>/dev/null || true');
     lines.push('  done');
@@ -388,7 +388,11 @@ export class DockerNetworkManager {
     await this.ensureNetwork();
 
     const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp);
-    const firewallScript = await this.generateFirewallScript(allowlist, policy.mode, daemonGatewayIp);
+    const firewallScript = await this.generateFirewallScript(
+      allowlist,
+      policy.mode,
+      daemonGatewayIp,
+    );
 
     return {
       networkName: NETWORK_NAME,

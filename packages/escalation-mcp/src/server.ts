@@ -111,9 +111,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'report_task_summary',
     'Report what you actually did and any deviations from your original plan. Call this as your final step before finishing. Fire-and-forget — does not block.',
     {
-      actualSummary: z
-        .string()
-        .describe('A concise description of what was actually accomplished'),
+      actualSummary: z.string().describe('A concise description of what was actually accomplished'),
       deviations: z
         .array(
           z.object({
@@ -123,7 +121,9 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
             reason: z.string().describe('Why the deviation was necessary'),
           }),
         )
-        .describe('Deviations from the original plan. Use an empty array if you followed the plan exactly.'),
+        .describe(
+          'Deviations from the original plan. Use an empty array if you followed the plan exactly.',
+        ),
     },
     async (input) => {
       const response = await reportTaskSummary(sessionId, input, bridge);
