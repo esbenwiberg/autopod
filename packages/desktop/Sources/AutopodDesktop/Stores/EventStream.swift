@@ -267,7 +267,7 @@ public final class EventStream {
       case "tool_use":
         guard let tool = response.tool else { return "Tool use" }
         let detail = EventStream.toolSummary(tool: tool, input: response.input)
-        return detail.map { "\(tool) \(EventStream.truncate($0, max: 100))" } ?? tool
+        return detail.map { "\(tool) \($0)" } ?? tool
       case "file_change":
         let action = response.action ?? "changed"
         let path = response.path.map { EventStream.shortenPath($0) } ?? "file"
@@ -314,6 +314,8 @@ public final class EventStream {
       return pattern.map { "\"\($0)\"" }
     case "Glob":
       return input["pattern"]?.stringValue
+    case "ToolSearch":
+      return input["query"]?.stringValue
     case "TodoWrite":
       return input["todos"]?.stringValue
     default:
