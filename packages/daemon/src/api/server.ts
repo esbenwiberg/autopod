@@ -69,7 +69,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
 
   // Routes
   healthRoutes(app, deps.onShutdown);
-  sessionRoutes(app, deps.sessionManager, deps.sessionTokenIssuer);
+  sessionRoutes(app, deps.sessionManager, deps.sessionTokenIssuer, deps.eventRepo);
   profileRoutes(
     app,
     deps.profileStore,

@@ -65,6 +65,9 @@ public struct AppRootView: View {
         if let id = sessionId {
           eventStream?.subscribeToSession(id)
           Task { await sessionStore.loadDiff(id) }
+          if let api = connectionManager.api {
+            eventStream?.loadHistoricalEvents(sessionId: id, api: api)
+          }
         }
       },
       onRefreshDiff: { sessionId in

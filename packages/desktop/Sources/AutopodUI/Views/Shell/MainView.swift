@@ -341,16 +341,7 @@ public struct MainView: View {
     // MARK: - Events for session
 
     private func eventsForSession(_ session: Session) -> [AgentEvent] {
-        if let real = sessionEvents[session.id], !real.isEmpty {
-            return real
-        }
-        // Fallback to mock data for previews
-        switch session.status {
-        case .running, .validated, .validating:  return MockEvents.running
-        case .failed:                            return MockEvents.failed
-        case .awaitingInput:                     return MockEvents.awaitingInput
-        default:                                 return MockEvents.awaitingInput
-        }
+        return sessionEvents[session.id] ?? []
     }
 }
 

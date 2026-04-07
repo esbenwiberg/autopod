@@ -6,6 +6,7 @@ import {
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { SessionTokenIssuer } from '../../crypto/session-tokens.js';
+import type { EventRepository } from '../../sessions/event-repository.js';
 import type { SessionManager } from '../../sessions/index.js';
 import { generateValidationReport } from '../../validation/report-generator.js';
 
@@ -13,6 +14,7 @@ export function sessionRoutes(
   app: FastifyInstance,
   sessionManager: SessionManager,
   sessionTokenIssuer?: SessionTokenIssuer,
+  eventRepo?: EventRepository,
 ): void {
   // POST /sessions — create a new session
   app.post('/sessions', async (request, reply) => {
@@ -76,6 +78,18 @@ export function sessionRoutes(
   app.get('/sessions/:sessionId/validations', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
     return sessionManager.getValidationHistory(sessionId);
+  });
+
+  // GET /sessions/:sessionId/events — agent activity events for log replay
+  app.get('/sessions/:sessionId/events', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    // Verify session exists (throws 404 if not found)
+    sessionManager.getSession(sessionId);
+    if (!eventRepo) return [];
+    const stored = eventRepo.getForSession(sessionId);
+    return stored
+      .filter((e) => e.type === 'session.agent_activity')
+      .map((e) => (e.payload as { event: unknown }).event);
   });
 
   // GET /sessions/:sessionId/report — HTML validation report (session-token auth)

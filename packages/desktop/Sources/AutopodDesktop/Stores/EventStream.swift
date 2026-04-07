@@ -77,6 +77,23 @@ public final class EventStream {
     }
   }
 
+  /// Load historical agent events for a session from the daemon REST API.
+  /// No-ops if events are already present (avoids duplication on reconnect).
+  public func loadHistoricalEvents(sessionId: String, api: DaemonAPI) {
+    guard sessionEvents[sessionId] == nil || sessionEvents[sessionId]!.isEmpty else { return }
+    Task {
+      guard let events = try? await api.getSessionEvents(sessionId), !events.isEmpty else { return }
+      let mapped = events.enumerated().map { (i, e) in
+        // Use negative IDs so they never collide with the live eventIdCounter (which starts at 1)
+        mapAgentEvent(e, id: -(events.count - i))
+      }
+      // Only set if still empty — a live event may have raced us
+      if sessionEvents[sessionId]?.isEmpty ?? true {
+        sessionEvents[sessionId] = mapped
+      }
+    }
+  }
+
   // MARK: - Event dispatch
 
   private func handleRawEvent(_ raw: RawSystemEvent) {

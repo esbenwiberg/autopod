@@ -122,6 +122,10 @@ public actor DaemonAPI {
     try await request("GET", "/sessions/\(id)/validations")
   }
 
+  public func getSessionEvents(_ id: String) async throws -> [AgentEventResponse] {
+    try await request("GET", "/sessions/\(id)/events")
+  }
+
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
     try await request("GET", "/sessions/\(id)/diff")
   }
