@@ -125,7 +125,11 @@ public final class EventStream {
 
     case .escalationCreated(let sessionId, let escalation):
       let question = escalation.payload.question ?? escalation.payload.description ?? "Input needed"
-      sessionStore.setEscalation(sessionId, question: question)
+      let options: [String]? = {
+        guard let opts = escalation.payload.options, !opts.isEmpty else { return nil }
+        return opts
+      }()
+      sessionStore.setEscalation(sessionId, question: question, options: options)
       sessionStore.updateStatus(sessionId, to: .awaitingInput)
       // Notification
       if let session = sessionStore.sessions.first(where: { $0.id == sessionId }) {

@@ -38,6 +38,11 @@ public enum SessionMapper {
       }
       return esc.payload.question ?? esc.payload.description
     }()
+    let escalationOptions: [String]? = {
+      guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
+      guard let opts = esc.payload.options, !opts.isEmpty else { return nil }
+      return opts
+    }()
     let escalationType: String? = {
       guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
       return esc.type
@@ -155,6 +160,7 @@ public enum SessionMapper {
       acceptanceCriteria: response.acceptanceCriteria,
       diffStats: diffStats,
       escalationQuestion: escalationQuestion,
+      escalationOptions: escalationOptions,
       escalationType: escalationType,
       validationChecks: validationChecks,
       prUrl: response.prUrl.flatMap { URL(string: $0) },
