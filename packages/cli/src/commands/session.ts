@@ -6,7 +6,7 @@ import { formatDurationFromDates, formatStatus } from '../output/colors.js';
 import { withJsonOutput } from '../output/json.js';
 import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
-import { formatToolUse } from '../tui/utils/formatToolUse.js';
+import { formatToolUse } from '../utils/formatToolUse.js';
 import { resolveSessionId } from '../utils/id-resolver.js';
 
 const sessionColumns: ColumnDef<Session>[] = [

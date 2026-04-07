@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { truncate } from '../utils/truncate.js';
+import { truncate } from './truncate.js';
 
 describe('truncate', () => {
   it('returns original text when shorter than maxLength', () => {
