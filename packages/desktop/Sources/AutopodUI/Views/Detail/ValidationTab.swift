@@ -179,6 +179,7 @@ public struct ValidationTab: View {
                         }
                       }
                     }
+                    screenshotImage(page.screenshotBase64)
                   }
                   .padding(8)
                   .background(Color.red.opacity(0.05))
@@ -252,6 +253,7 @@ public struct ValidationTab: View {
                       Text(check.reasoning)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                      screenshotImage(check.screenshot)
                     }
                   }
                 }
@@ -323,6 +325,17 @@ public struct ValidationTab: View {
                 }
               }
             }
+            if let screenshots = checks.taskReviewScreenshots {
+              VStack(alignment: .leading, spacing: 6) {
+                Text("Review Screenshots")
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.secondary)
+                  .padding(.top, 4)
+                ForEach(Array(screenshots.enumerated()), id: \.offset) { _, ss in
+                  screenshotImage(ss)
+                }
+              }
+            }
           }
 
         } else {
@@ -370,6 +383,18 @@ public struct ValidationTab: View {
       Text(label)
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+  }
+
+  @ViewBuilder
+  private func screenshotImage(_ base64: String?) -> some View {
+    if let base64, let data = Data(base64Encoded: base64), let nsImage = NSImage(data: data) {
+      Image(nsImage: nsImage)
+        .resizable()
+        .aspectRatio(contentMode: .fit)
+        .frame(maxHeight: 300)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3), lineWidth: 1))
     }
   }
 
