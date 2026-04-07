@@ -336,7 +336,27 @@ function generateOperatingEnvironment(
       lines.push('- Use the action tools below for all external data access.');
     }
   } else {
-    lines.push('- Network policy is not enforced. You may have internet access.');
+    lines.push('- Network policy is not enforced. You may have general internet access.');
+    // Even without a network policy, action-tool domains are served via the control plane
+    // and are NOT directly reachable from the container (no credentials, no token).
+    const groups = new Set(availableActions.map((a) => a.group));
+    const blockedDomains: string[] = [];
+    if (groups.has('github-issues') || groups.has('github-prs') || groups.has('github-code')) {
+      blockedDomains.push('github.com / api.github.com');
+    }
+    if (groups.has('ado-workitems')) {
+      blockedDomains.push('dev.azure.com');
+    }
+    if (groups.has('azure-logs')) {
+      blockedDomains.push('management.azure.com');
+    }
+    if (blockedDomains.length > 0) {
+      lines.push(
+        `- **These domains are NOT directly accessible** (no credentials in container): ${blockedDomains.join(', ')}. ` +
+          'Do NOT attempt gh CLI, curl, or WebFetch to these domains — they will fail. ' +
+          'Use the action tools on the Escalation MCP server instead (see MCP Servers section).',
+      );
+    }
   }
   lines.push('');
 
