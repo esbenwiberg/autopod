@@ -115,6 +115,12 @@ public enum SessionMapper {
       )
     }()
 
+    // Map plan
+    let plan: SessionPlan? = {
+      guard let p = response.plan else { return nil }
+      return SessionPlan(summary: p.summary, steps: p.steps)
+    }()
+
     // Map phase progress
     let phase: PhaseProgress? = {
       guard let p = response.progress else { return nil }
@@ -171,6 +177,7 @@ public enum SessionMapper {
       validationChecks: validationChecks,
       prUrl: response.prUrl.flatMap { URL(string: $0) },
       containerUrl: response.previewUrl.flatMap { URL(string: $0) },
+      plan: plan,
       phase: phase,
       latestActivity: response.plan?.summary,
       errorSummary: errorSummary,

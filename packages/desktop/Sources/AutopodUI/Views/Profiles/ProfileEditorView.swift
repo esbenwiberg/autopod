@@ -746,13 +746,23 @@ public struct ProfileEditorView: View {
 
             if profile.actionQuarantineEnabled {
                 HStack(spacing: 24) {
-                    fieldRow("Warn Threshold", help: "PII score at which a warning is logged.") {
-                        Stepper("\(profile.actionQuarantineThreshold)", value: $profile.actionQuarantineThreshold, in: 1...10)
-                            .frame(width: 110)
+                    fieldRow("Warn Threshold", help: "PII score (0–1) at which a warning is logged.") {
+                        HStack(spacing: 6) {
+                            Slider(value: $profile.actionQuarantineThreshold, in: 0...1, step: 0.05)
+                                .frame(width: 100)
+                            Text(String(format: "%.2f", profile.actionQuarantineThreshold))
+                                .monospacedDigit()
+                                .frame(width: 36)
+                        }
                     }
-                    fieldRow("Block Threshold", help: "PII score at which the response is blocked entirely.") {
-                        Stepper("\(profile.actionQuarantineBlockThreshold)", value: $profile.actionQuarantineBlockThreshold, in: 1...20)
-                            .frame(width: 110)
+                    fieldRow("Block Threshold", help: "PII score (0–1) at which the response is blocked entirely.") {
+                        HStack(spacing: 6) {
+                            Slider(value: $profile.actionQuarantineBlockThreshold, in: 0...1, step: 0.05)
+                                .frame(width: 100)
+                            Text(String(format: "%.2f", profile.actionQuarantineBlockThreshold))
+                                .monospacedDigit()
+                                .frame(width: 36)
+                        }
                     }
                     fieldRow("On Block", help: "What happens when a response is blocked — skip silently or escalate to human.") {
                         Picker("", selection: $profile.actionQuarantineOnBlock) {

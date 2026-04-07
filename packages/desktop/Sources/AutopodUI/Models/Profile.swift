@@ -70,8 +70,8 @@ public struct Profile: Identifiable, Sendable {
     public var actionSanitizationPreset: SanitizationPreset
     public var actionSanitizationAllowedDomains: [String]
     public var actionQuarantineEnabled: Bool
-    public var actionQuarantineThreshold: Int
-    public var actionQuarantineBlockThreshold: Int
+    public var actionQuarantineThreshold: Double
+    public var actionQuarantineBlockThreshold: Double
     public var actionQuarantineOnBlock: QuarantineOnBlock
 
     // Provider credentials (read-only indicator)
@@ -116,8 +116,8 @@ public struct Profile: Identifiable, Sendable {
         actionSanitizationPreset: SanitizationPreset = .standard,
         actionSanitizationAllowedDomains: [String] = [],
         actionQuarantineEnabled: Bool = false,
-        actionQuarantineThreshold: Int = 3,
-        actionQuarantineBlockThreshold: Int = 5,
+        actionQuarantineThreshold: Double = 0.5,
+        actionQuarantineBlockThreshold: Double = 0.8,
         actionQuarantineOnBlock: QuarantineOnBlock = .askHuman,
         providerCredentialsType: String? = nil,
         createdAt: Date = Date(), updatedAt: Date = Date()

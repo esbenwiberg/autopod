@@ -20,9 +20,14 @@ struct OverviewTab: View {
                     }
                 }
 
-                // Progress / plan
+                // Plan
+                if let plan = session.plan {
+                    planCard(plan)
+                }
+
+                // Progress
                 if let phase = session.phase {
-                    planSection(phase)
+                    progressSection(phase)
                 }
 
                 // Session prompt
@@ -177,9 +182,47 @@ struct OverviewTab: View {
         )
     }
 
-    // MARK: - Plan / progress
+    // MARK: - Plan
 
-    private func planSection(_ phase: PhaseProgress) -> some View {
+    private func planCard(_ plan: SessionPlan) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "list.bullet.clipboard")
+                    .foregroundStyle(.blue)
+                Text("Plan")
+                    .font(.system(.subheadline).weight(.semibold))
+            }
+
+            Text(plan.summary)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !plan.steps.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(plan.steps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(index + 1).")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20, alignment: .trailing)
+                            Text(step)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Progress
+
+    private func progressSection(_ phase: PhaseProgress) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Progress")

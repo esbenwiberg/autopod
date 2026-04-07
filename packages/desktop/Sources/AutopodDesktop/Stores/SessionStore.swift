@@ -129,6 +129,11 @@ public final class SessionStore {
     sessions[index].diffStats = DiffStats(added: added, removed: removed, files: files)
   }
 
+  public func updatePlan(_ sessionId: String, plan: SessionPlan) {
+    guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+    sessions[index].plan = plan
+  }
+
   public func updatePhase(_ sessionId: String, phase: PhaseProgress) {
     guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
     sessions[index].phase = phase

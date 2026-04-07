@@ -208,15 +208,15 @@ public struct DataSanitizationResponse: Codable, Sendable {
 
 public struct QuarantineResponse: Codable, Sendable {
   public var enabled: Bool
-  public var threshold: Int
-  public var blockThreshold: Int
+  public var threshold: Double
+  public var blockThreshold: Double
   public var onBlock: String
 
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     enabled = try decodeBoolOrInt(c, key: .enabled)
-    threshold = try c.decode(Int.self, forKey: .threshold)
-    blockThreshold = try c.decode(Int.self, forKey: .blockThreshold)
+    threshold = try c.decode(Double.self, forKey: .threshold)
+    blockThreshold = try c.decode(Double.self, forKey: .blockThreshold)
     onBlock = try c.decode(String.self, forKey: .onBlock)
   }
 }

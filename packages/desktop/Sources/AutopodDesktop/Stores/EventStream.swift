@@ -192,6 +192,14 @@ public final class EventStream {
         sessionStore.updateActivity(sessionId, activity: "\(action) \(path)")
       }
 
+    case "plan":
+      if let summary = event.summary {
+        sessionStore.updatePlan(
+          sessionId,
+          plan: SessionPlan(summary: summary, steps: event.steps ?? [])
+        )
+      }
+
     case "progress":
       if let current = event.currentPhase, let total = event.totalPhases,
          let desc = event.description {

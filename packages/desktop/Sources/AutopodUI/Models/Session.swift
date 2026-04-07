@@ -175,6 +175,14 @@ public struct ValidationChecks: Sendable {
     public var allPassed: Bool { smoke && (tests ?? true) && (review ?? true) && (acValidation ?? true) }
 }
 
+public struct SessionPlan: Sendable {
+    public let summary: String
+    public let steps: [String]
+    public init(summary: String, steps: [String]) {
+        self.summary = summary; self.steps = steps
+    }
+}
+
 public struct PhaseProgress: Sendable {
     public let current: Int
     public let total: Int
@@ -218,6 +226,7 @@ public struct Session: Identifiable, Sendable {
     public var validationChecks: ValidationChecks?
     public var prUrl: URL?
     public var containerUrl: URL?
+    public var plan: SessionPlan?
     public var phase: PhaseProgress?
     public var latestActivity: String?
     public var errorSummary: String?
@@ -264,10 +273,12 @@ public struct Session: Identifiable, Sendable {
         acceptanceCriteria: [String]? = nil,
         diffStats: DiffStats? = nil,
         escalationQuestion: String? = nil,
+        escalationOptions: [String]? = nil,
         escalationType: String? = nil,
         validationChecks: ValidationChecks? = nil,
         prUrl: URL? = nil,
         containerUrl: URL? = nil,
+        plan: SessionPlan? = nil,
         phase: PhaseProgress? = nil,
         latestActivity: String? = nil,
         errorSummary: String? = nil,
@@ -284,9 +295,9 @@ public struct Session: Identifiable, Sendable {
         self.model = model; self.startedAt = startedAt; self.baseBranch = baseBranch
         self.acFrom = acFrom; self.acceptanceCriteria = acceptanceCriteria
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
-        self.escalationType = escalationType
+        self.escalationOptions = escalationOptions; self.escalationType = escalationType
         self.validationChecks = validationChecks; self.prUrl = prUrl
-        self.containerUrl = containerUrl; self.phase = phase
+        self.containerUrl = containerUrl; self.plan = plan; self.phase = phase
         self.latestActivity = latestActivity; self.errorSummary = errorSummary
         self.attempts = attempts; self.queuePosition = queuePosition
         self.inputTokens = inputTokens; self.outputTokens = outputTokens

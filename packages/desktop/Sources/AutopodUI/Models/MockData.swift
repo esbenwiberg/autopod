@@ -78,6 +78,16 @@ public enum MockData: Sendable {
         status: .running, branch: "refactor/api", profileName: "backend", model: "claude-opus",
         startedAt: .minutesAgo(8),
         diffStats: DiffStats(added: 89, removed: 12, files: 5),
+        plan: SessionPlan(
+            summary: "Refactor API routes to use express-style middleware chain",
+            steps: [
+                "Extract auth middleware from inline handlers",
+                "Create shared validation middleware",
+                "Migrate user routes to new pattern",
+                "Migrate admin routes to new pattern",
+                "Add integration tests for middleware chain",
+            ]
+        ),
         phase: PhaseProgress(current: 8, total: 10, description: "Writing API tests"),
         latestActivity: "Modified routes/users.ts"
     )
