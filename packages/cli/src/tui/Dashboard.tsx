@@ -10,6 +10,7 @@ import { DiffView } from './components/DiffView.js';
 import { Header } from './components/Header.js';
 import { HotkeyBar } from './components/HotkeyBar.js';
 import { InlineInput } from './components/InlineInput.js';
+import { ListPicker } from './components/ListPicker.js';
 import { SessionTable } from './components/SessionTable.js';
 import { Toast } from './components/Toast.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
@@ -23,6 +24,7 @@ import { calculateColumns } from './utils/layout.js';
 type UIMode =
   | { type: 'normal' }
   | { type: 'tell_input' }
+  | { type: 'option_picker'; options: string[] }
   | { type: 'reject_input' }
   | { type: 'confirm_approve' }
   | { type: 'confirm_kill' }
@@ -282,7 +284,19 @@ export function Dashboard({
           currentSession?.status === 'awaiting_input' ||
           currentSession?.status === 'paused'
         ) {
-          setMode({ type: 'tell_input' });
+          const escalation = selectedSession?.pendingEscalation;
+          const options =
+            escalation?.type === 'ask_human' &&
+            'options' in escalation.payload &&
+            escalation.payload.options &&
+            escalation.payload.options.length > 0
+              ? escalation.payload.options
+              : null;
+          if (options) {
+            setMode({ type: 'option_picker', options });
+          } else {
+            setMode({ type: 'tell_input' });
+          }
         }
       },
       p: () => {
@@ -536,6 +550,16 @@ export function Dashboard({
           prompt="Send message to agent:"
           onSubmit={(msg) => void handleTell(msg)}
           onCancel={() => setMode({ type: 'normal' })}
+        />
+      )}
+
+      {mode.type === 'option_picker' && (
+        <ListPicker
+          title="Choose an option (↑↓ navigate, Enter to select, Esc to type freely)"
+          items={mode.options}
+          renderItem={(opt, selected) => <Text color={selected ? 'cyan' : undefined}>{opt}</Text>}
+          onSelect={(opt) => void handleTell(opt)}
+          onCancel={() => setMode({ type: 'tell_input' })}
         />
       )}
 
