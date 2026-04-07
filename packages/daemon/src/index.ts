@@ -352,6 +352,9 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
 // Session bridge for MCP escalation
 const sessionBridge = createSessionBridge({
   sessionManager,
+  sessionRepo,
+  eventBus,
+  progressEventRepo,
   escalationRepo,
   nudgeRepo,
   profileStore,

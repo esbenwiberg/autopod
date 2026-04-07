@@ -11,11 +11,17 @@ import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { EscalationRepository } from './escalation-repository.js';
+import type { EventBus } from './event-bus.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import type { ProgressEventRepository } from './progress-event-repository.js';
 import type { ContainerManagerFactory, SessionManager } from './session-manager.js';
+import type { SessionRepository } from './session-repository.js';
 
 export interface SessionBridgeDependencies {
   sessionManager: SessionManager;
+  sessionRepo: SessionRepository;
+  eventBus: EventBus;
+  progressEventRepo?: ProgressEventRepository;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
@@ -28,6 +34,9 @@ export interface SessionBridgeDependencies {
 export function createSessionBridge(deps: SessionBridgeDependencies): SessionBridge {
   const {
     sessionManager,
+    sessionRepo,
+    eventBus,
+    progressEventRepo,
     escalationRepo,
     nudgeRepo,
     profileStore,
@@ -129,9 +138,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     reportPlan(sessionId: string, summary: string, steps: string[]): void {
       sessionManager.touchHeartbeat(sessionId);
       logger.info({ sessionId, summary, stepCount: steps.length }, 'Agent reported plan');
-      // Plan is persisted via the AgentPlanEvent flowing through consumeAgentEvents
-      // but we also emit it as an agent activity event from the MCP bridge
-      // The event bus handles this — the MCP tool response triggers an event in the stream
+      sessionRepo.update(sessionId, { plan: { summary, steps } });
+      eventBus.emit({
+        type: 'session.agent_activity',
+        timestamp: new Date().toISOString(),
+        sessionId,
+        event: { type: 'plan', summary, steps, timestamp: new Date().toISOString() },
+      });
     },
 
     reportProgress(
@@ -143,7 +156,23 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     ): void {
       sessionManager.touchHeartbeat(sessionId);
       logger.info({ sessionId, phase, currentPhase, totalPhases }, 'Agent reported progress');
-      // Progress is persisted via the AgentProgressEvent flowing through consumeAgentEvents
+      sessionRepo.update(sessionId, {
+        progress: { phase, description, currentPhase, totalPhases },
+      });
+      progressEventRepo?.insert(sessionId, phase, description, currentPhase, totalPhases);
+      eventBus.emit({
+        type: 'session.agent_activity',
+        timestamp: new Date().toISOString(),
+        sessionId,
+        event: {
+          type: 'progress',
+          phase,
+          description,
+          currentPhase,
+          totalPhases,
+          timestamp: new Date().toISOString(),
+        },
+      });
     },
 
     reportTaskSummary(
