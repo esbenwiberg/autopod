@@ -1,5 +1,4 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 
 import type {
   AcCheckResult,
@@ -15,7 +14,82 @@ import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
 
-const execFileAsync = promisify(execFile);
+/**
+ * Runs the Claude CLI in print mode, piping `input` via stdin.
+ *
+ * Uses `spawn` instead of `execFile` so that stdin data is written immediately
+ * after the process is created. This avoids the Claude CLI's 3-second stdin
+ * timeout that `execFile` can miss when its internal setup delays the write.
+ */
+function runClaudeCli(opts: {
+  model: string;
+  input: string;
+  timeout: number;
+  maxBuffer?: number;
+}): Promise<{ stdout: string }> {
+  const maxBuf = opts.maxBuffer ?? 2 * 1024 * 1024;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (!settled) {
+        settled = true;
+        fn();
+      }
+    };
+
+    const child = spawn('claude', ['-p', '--model', opts.model, '--output-format', 'text']);
+
+    // Write stdin immediately so data is queued before the CLI's 3 s timeout.
+    child.stdin.write(opts.input);
+    child.stdin.end();
+    // Suppress EPIPE if the process exits before stdin is fully flushed.
+    child.stdin.on('error', () => {});
+
+    let stdout = '';
+    let stderr = '';
+    let stdoutLen = 0;
+
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      settle(() => reject(new Error(`Command timed out after ${opts.timeout}ms`)));
+    }, opts.timeout);
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutLen += chunk.length;
+      if (stdoutLen > maxBuf) {
+        child.kill('SIGTERM');
+        settle(() => reject(new Error(`stdout exceeded maxBuffer (${maxBuf} bytes)`)));
+        return;
+      }
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        settle(() =>
+          reject(
+            new Error(
+              `Command failed: claude -p --model ${opts.model} --output-format text\n${stderr}`,
+            ),
+          ),
+        );
+      } else {
+        settle(() => resolve({ stdout }));
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      settle(() => reject(err));
+    });
+  });
+}
 
 /**
  * Local validation engine with build, health check, and AI task review.
@@ -477,11 +551,11 @@ Respond ONLY with the JSON array, no markdown fences or extra text.`;
 
   try {
     const reviewTimeout = config.reviewTimeout ?? 300_000;
-    const { stdout } = await execFileAsync(
-      'claude',
-      ['-p', '--model', config.reviewerModel ?? 'sonnet', '--output-format', 'text'],
-      { input: prompt, timeout: reviewTimeout, maxBuffer: 2 * 1024 * 1024 },
-    );
+    const { stdout } = await runClaudeCli({
+      model: config.reviewerModel ?? 'sonnet',
+      input: prompt,
+      timeout: reviewTimeout,
+    });
 
     return parseAcInstructionsJson(stdout.trim());
   } catch (err) {
@@ -530,11 +604,11 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
 
   try {
     const reviewTimeout = config.reviewTimeout ?? 300_000;
-    const { stdout: scriptCode } = await execFileAsync(
-      'claude',
-      ['-p', '--model', config.reviewerModel ?? 'sonnet', '--output-format', 'text'],
-      { input: prompt, timeout: reviewTimeout, maxBuffer: 2 * 1024 * 1024 },
-    );
+    const { stdout: scriptCode } = await runClaudeCli({
+      model: config.reviewerModel ?? 'sonnet',
+      input: prompt,
+      timeout: reviewTimeout,
+    });
 
     // Strip any markdown fences the LLM might add
     const cleanScript = stripMarkdownFences(scriptCode.trim());
@@ -832,15 +906,11 @@ Status rules:
 
   try {
     const reviewTimeout = config.reviewTimeout ?? 300_000;
-    const { stdout } = await execFileAsync(
-      'claude',
-      ['-p', '--model', config.reviewerModel, '--output-format', 'text'],
-      {
-        input: prompt,
-        timeout: reviewTimeout,
-        maxBuffer: 2 * 1024 * 1024,
-      },
-    );
+    const { stdout } = await runClaudeCli({
+      model: config.reviewerModel,
+      input: prompt,
+      timeout: reviewTimeout,
+    });
 
     const parsed = parseReviewJson(stdout.trim());
     if (!parsed) {
