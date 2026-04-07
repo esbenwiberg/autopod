@@ -20,6 +20,8 @@ export class ClaudeRuntime implements Runtime {
   private handles = new Map<string, StreamingExecResult>();
   /** Maps autopod sessionId → Claude CLI session_id for resume support. */
   private claudeSessionIds = new Map<string, string>();
+  /** Maps autopod sessionId → MCP servers so resume() can re-write the config into the new container. */
+  private mcpServersBySession = new Map<string, SpawnConfig['mcpServers']>();
   private logger: Logger;
   private containerManager: ContainerManager;
 
@@ -32,7 +34,8 @@ export class ClaudeRuntime implements Runtime {
     // Write MCP config to a file inside the container so Claude CLI can read it
     // via --mcp-config <path>. Passing inline JSON breaks due to shell escaping
     // inside containerManager.execStreaming().
-    await this.writeMcpConfig(config);
+    await this.writeMcpConfig(config.containerId, config.mcpServers);
+    this.mcpServersBySession.set(config.sessionId, config.mcpServers);
 
     const args = this.buildSpawnArgs(config);
 
@@ -112,7 +115,12 @@ export class ClaudeRuntime implements Runtime {
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
     const claudeSessionId = this.claudeSessionIds.get(sessionId);
-    const args = this.buildResumeArgs(message, claudeSessionId);
+    // Re-write the MCP config into the (potentially new) container before launching Claude.
+    // Without this, recovery spawns a fresh container that never has the config file, causing
+    // Claude to error immediately and exit — which then breaks smoke-test execs with 409.
+    const mcpServers = this.mcpServersBySession.get(sessionId);
+    await this.writeMcpConfig(containerId, mcpServers);
+    const args = this.buildResumeArgs(message, claudeSessionId, mcpServers);
 
     this.logger.info({
       component: 'claude-runtime',
@@ -177,6 +185,7 @@ export class ClaudeRuntime implements Runtime {
     await handle.kill();
     this.handles.delete(sessionId);
     this.claudeSessionIds.delete(sessionId);
+    this.mcpServersBySession.delete(sessionId);
   }
 
   async suspend(sessionId: string): Promise<void> {
@@ -211,12 +220,15 @@ export class ClaudeRuntime implements Runtime {
   }
 
   /** Write MCP server config to a JSON file inside the container. */
-  private async writeMcpConfig(config: SpawnConfig): Promise<void> {
-    if (!config.mcpServers || config.mcpServers.length === 0) return;
+  private async writeMcpConfig(
+    containerId: string,
+    mcpServers: SpawnConfig['mcpServers'],
+  ): Promise<void> {
+    if (!mcpServers || mcpServers.length === 0) return;
 
     const servers: Record<string, { type: string; url: string; headers?: Record<string, string> }> =
       {};
-    for (const server of config.mcpServers) {
+    for (const server of mcpServers) {
       servers[server.name] = {
         type: 'http',
         url: server.url,
@@ -225,7 +237,7 @@ export class ClaudeRuntime implements Runtime {
     }
 
     await this.containerManager.writeFile(
-      config.containerId,
+      containerId,
       MCP_CONFIG_PATH,
       JSON.stringify({ mcpServers: servers }, null, 2),
     );
@@ -272,7 +284,11 @@ export class ClaudeRuntime implements Runtime {
     return args;
   }
 
-  private buildResumeArgs(message: string, claudeSessionId?: string): string[] {
+  private buildResumeArgs(
+    message: string,
+    claudeSessionId?: string,
+    mcpServers?: SpawnConfig['mcpServers'],
+  ): string[] {
     const args = [
       '-p',
       message,
@@ -292,7 +308,10 @@ export class ClaudeRuntime implements Runtime {
 
     // MCP config must be re-passed on resume — Claude Code doesn't persist it from the
     // initial spawn, so without this the escalation tools vanish after an ask_human round-trip.
-    args.push('--mcp-config', MCP_CONFIG_PATH);
+    // The file is pre-written by writeMcpConfig() before this method is called.
+    if (mcpServers && mcpServers.length > 0) {
+      args.push('--mcp-config', MCP_CONFIG_PATH);
+    }
 
     if (claudeSessionId) {
       args.push('--resume', claudeSessionId);
