@@ -9,6 +9,8 @@ export interface ValidationResult {
   test?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
   acValidation?: AcValidationResult | null;
   taskReview: TaskReviewResult | null;
+  /** Human-readable reason when taskReview is null (e.g. "No code changes detected") */
+  reviewSkipReason?: string;
   overall: 'pass' | 'fail';
   duration: number;
 }

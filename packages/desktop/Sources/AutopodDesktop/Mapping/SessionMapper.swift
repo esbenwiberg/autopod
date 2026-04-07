@@ -95,6 +95,7 @@ public enum SessionMapper {
         testOutput: testOutput,
         reviewIssues: v.taskReview?.issues,
         reviewReasoning: v.taskReview?.reasoning,
+        reviewSkipReason: v.reviewSkipReason,
         healthCheck: healthCheck,
         pages: pages,
         acValidation: acValidation,

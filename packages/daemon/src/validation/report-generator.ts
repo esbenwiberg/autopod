@@ -236,7 +236,7 @@ function renderAttempt(v: StoredValidation, _index: number, _total: number): str
       ${renderHealthPhase(r.smoke.health)}
       ${renderSmokePages(r.smoke.pages)}
       ${r.acValidation ? renderAcValidation(r.acValidation) : ''}
-      ${r.taskReview ? renderTaskReview(r.taskReview) : ''}
+      ${r.taskReview ? renderTaskReview(r.taskReview) : r.reviewSkipReason ? renderPhaseCard('AI Task Review', 'skip', `<p>${escapeHtml(r.reviewSkipReason)}</p>`) : ''}
     </div>`;
 }
 

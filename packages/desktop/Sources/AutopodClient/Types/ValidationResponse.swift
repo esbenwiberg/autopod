@@ -10,6 +10,7 @@ public struct ValidationResponse: Codable, Sendable {
   public let test: TestResultResponse?
   public let acValidation: AcValidationResponse?
   public let taskReview: TaskReviewResponse?
+  public let reviewSkipReason: String?
   public let overall: String  // "pass" | "fail"
   public let duration: Int
 }

@@ -78,7 +78,7 @@ export function createLocalValidationEngine(
 
       // ── Phase 6: AI Task Review ─────────────────────────────────────
       onProgress?.('Running AI task review…');
-      const taskReview = await runTaskReview(config, log);
+      const { result: taskReview, skipReason: reviewSkipReason } = await runTaskReview(config, log);
 
       // ── Phase 7: Overall result ─────────────────────────────────────
       const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
@@ -112,6 +112,7 @@ export function createLocalValidationEngine(
         test: testResult,
         acValidation,
         taskReview,
+        reviewSkipReason,
         overall,
         duration,
       };
@@ -684,10 +685,15 @@ export function stripMarkdownFences(text: string): string {
 async function runTaskReview(
   config: ValidationEngineConfig,
   log?: Logger,
-): Promise<TaskReviewResult | null> {
+): Promise<{ result: TaskReviewResult | null; skipReason?: string }> {
   if (!config.reviewerModel || !config.diff || !config.task) {
-    log?.info('skipping task review (missing reviewerModel, diff, or task)');
-    return null;
+    const reason = !config.diff
+      ? 'No code changes detected'
+      : !config.task
+        ? 'No task description available'
+        : 'No reviewer model configured';
+    log?.info({ reason }, 'skipping task review');
+    return { result: null, skipReason: reason };
   }
 
   log?.info({ model: config.reviewerModel }, 'running AI task review');
@@ -852,18 +858,21 @@ Status rules:
     );
 
     return {
-      status: parsed.status,
-      reasoning: parsed.reasoning,
-      issues: parsed.issues,
-      model: config.reviewerModel,
-      screenshots: [],
-      diff: config.diff,
-      requirementsCheck: parsed.requirementsCheck,
-      deviationsAssessment: parsed.deviationsAssessment,
+      result: {
+        status: parsed.status,
+        reasoning: parsed.reasoning,
+        issues: parsed.issues,
+        model: config.reviewerModel,
+        screenshots: [],
+        diff: config.diff,
+        requirementsCheck: parsed.requirementsCheck,
+        deviationsAssessment: parsed.deviationsAssessment,
+      },
     };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     log?.warn({ err }, 'task review failed, continuing without review');
-    return null;
+    return { result: null, skipReason: `Review failed: ${message}` };
   }
 }
 

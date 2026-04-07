@@ -277,6 +277,11 @@ public struct ValidationTab: View {
               Text("Review skipped")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+              if let reason = checks.reviewSkipReason {
+                Text(reason)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
             }
             if let reasoning = checks.reviewReasoning {
               Text(reasoning)
