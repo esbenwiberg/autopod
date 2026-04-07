@@ -11,5 +11,7 @@ export default defineConfig({
   onSuccess: async () => {
     mkdirSync('dist/db/migrations', { recursive: true });
     cpSync('src/db/migrations', 'dist/db/migrations', { recursive: true });
+    mkdirSync('dist/actions/defaults', { recursive: true });
+    cpSync('src/actions/defaults', 'dist/actions/defaults', { recursive: true });
   },
 });
