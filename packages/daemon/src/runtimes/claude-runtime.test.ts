@@ -234,23 +234,15 @@ describe('ClaudeRuntime', () => {
 
       await (
         runtime as unknown as {
-          writeMcpConfig: (config: SpawnConfig) => Promise<void>;
+          writeMcpConfig: (containerId: string, mcpServers: SpawnConfig['mcpServers']) => Promise<void>;
         }
-      ).writeMcpConfig({
-        sessionId: 'abc',
-        task: 'task',
-        model: 'opus',
-        workDir: '/workspace',
-        containerId: 'c1',
-        env: {},
-        mcpServers: [
-          {
-            name: 'escalation',
-            url: 'http://host.docker.internal:3100/mcp/abc',
-            headers: { Authorization: 'Bearer tok123' },
-          },
-        ],
-      });
+      ).writeMcpConfig('c1', [
+        {
+          name: 'escalation',
+          url: 'http://host.docker.internal:3100/mcp/abc',
+          headers: { Authorization: 'Bearer tok123' },
+        },
+      ]);
 
       expect(cm.writeFile).toHaveBeenCalledWith(
         'c1',
