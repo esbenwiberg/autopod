@@ -200,24 +200,20 @@ struct LogEventRow: View {
                 .frame(width: 16)
 
             // Content
-            ScrollView(.horizontal, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(event.summary)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(event.type == .error ? .red : .primary)
-                        .lineLimit(isExpanded ? nil : 1)
-                        .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(event.summary)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(event.type == .error ? .red : .primary)
+                    .lineLimit(isExpanded ? nil : 1)
 
-                    if isExpanded, let detail = event.detail {
-                        Text(detail)
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .textSelection(.enabled)
-                            .padding(6)
-                            .background(Color(nsColor: .controlBackgroundColor))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
+                if isExpanded, let detail = event.detail {
+                    Text(detail)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .padding(6)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
 
