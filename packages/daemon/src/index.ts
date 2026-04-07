@@ -323,6 +323,7 @@ sessionManager = createSessionManager({
   validationEngine,
   networkManager,
   prManagerFactory,
+  actionEngine: actionRegistry,
   enqueueSession: (id) => sessionQueue.enqueue(id),
   mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? 'host.docker.internal'}:${PORT}`,
   daemonConfig: {
