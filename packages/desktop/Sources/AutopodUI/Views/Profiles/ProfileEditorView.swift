@@ -686,6 +686,73 @@ public struct ProfileEditorView: View {
 
             Divider().padding(.vertical, 4)
 
+            HStack {
+                Text("Action Overrides")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                HelpBadge(text: "Per-action restrictions. Limit an action to specific repos (exact or wildcard, e.g. myorg/*) and optionally require a human to approve before it runs.")
+                Spacer()
+                Button {
+                    profile.actionOverrides.append(ActionOverride())
+                } label: {
+                    Label("Add Override", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if profile.actionOverrides.isEmpty {
+                Text("No overrides — all enabled actions run without restrictions.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach($profile.actionOverrides) { $override in
+                        HStack(alignment: .center, spacing: 8) {
+                            TextField("action name", text: $override.action)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(width: 160)
+
+                            TextField("repos (myorg/*, myorg/repo)", text: Binding(
+                                get: { override.allowedResources.joined(separator: ", ") },
+                                set: { raw in
+                                    override.allowedResources = raw
+                                        .split(separator: ",")
+                                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                                        .filter { !$0.isEmpty }
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(minWidth: 180)
+                            .help("Comma-separated repo patterns. Supports wildcards: myorg/* allows all repos in the org.")
+
+                            Toggle("Approval", isOn: $override.requiresApproval)
+                                .toggleStyle(.checkbox)
+                                .help("Require a human to approve this action before it runs")
+                                .frame(width: 80)
+
+                            Toggle("Disabled", isOn: $override.disabled)
+                                .toggleStyle(.checkbox)
+                                .help("Completely disable this action for sessions using this profile")
+                                .frame(width: 70)
+
+                            Button {
+                                profile.actionOverrides.removeAll { $0.id == override.id }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red.opacity(0.6))
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                .padding(.leading, 4)
+            }
+
+            Divider().padding(.vertical, 4)
+
             Text("Data Sanitization")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)

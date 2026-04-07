@@ -83,7 +83,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
             quarantined: false,
           };
         }
-        if (!override.allowedResources.includes(resource)) {
+        if (!matchesResource(resource, override.allowedResources)) {
           return {
             success: false,
             error: `Action '${actionName}' not allowed for resource '${resource}'`,
@@ -225,6 +225,21 @@ function sanitizeParamsForAudit(params: Record<string, unknown>): Record<string,
     }
   }
   return sanitized;
+}
+
+/**
+ * Check whether a resource (e.g. "org/repo") matches any pattern in the allowlist.
+ * Supported pattern syntax:
+ *   '*'        — allow any resource
+ *   'org/*'    — allow all repos within the org (prefix match on "org/")
+ *   'org/repo' — exact match
+ */
+function matchesResource(resource: string, patterns: string[]): boolean {
+  return patterns.some((p) => {
+    if (p === '*') return true;
+    if (p.endsWith('/*')) return resource.startsWith(p.slice(0, -1));
+    return p === resource;
+  });
 }
 
 function summarizeResponse(data: unknown): string {

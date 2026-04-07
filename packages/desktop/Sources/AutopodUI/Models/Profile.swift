@@ -67,6 +67,7 @@ public struct Profile: Identifiable, Sendable {
     // Action policy
     public var actionPolicyEnabled: Bool
     public var actionEnabledGroups: Set<ActionGroup>
+    public var actionOverrides: [ActionOverride]
     public var actionSanitizationPreset: SanitizationPreset
     public var actionSanitizationAllowedDomains: [String]
     public var actionQuarantineEnabled: Bool
@@ -113,6 +114,7 @@ public struct Profile: Identifiable, Sendable {
         warmImageTag: String? = nil, warmImageBuiltAt: String? = nil,
         actionPolicyEnabled: Bool = false,
         actionEnabledGroups: Set<ActionGroup> = [],
+        actionOverrides: [ActionOverride] = [],
         actionSanitizationPreset: SanitizationPreset = .standard,
         actionSanitizationAllowedDomains: [String] = [],
         actionQuarantineEnabled: Bool = false,
@@ -150,6 +152,7 @@ public struct Profile: Identifiable, Sendable {
         self.warmImageTag = warmImageTag; self.warmImageBuiltAt = warmImageBuiltAt
         self.actionPolicyEnabled = actionPolicyEnabled
         self.actionEnabledGroups = actionEnabledGroups
+        self.actionOverrides = actionOverrides
         self.actionSanitizationPreset = actionSanitizationPreset
         self.actionSanitizationAllowedDomains = actionSanitizationAllowedDomains
         self.actionQuarantineEnabled = actionQuarantineEnabled
@@ -249,6 +252,26 @@ public enum QuarantineOnBlock: String, CaseIterable, Sendable {
     }
 }
 
+public struct ActionOverride: Identifiable, Hashable, Sendable {
+    public var id: UUID = UUID()
+    public var action: String
+    public var allowedResources: [String]
+    public var requiresApproval: Bool
+    public var disabled: Bool
+
+    public init(
+        action: String = "",
+        allowedResources: [String] = [],
+        requiresApproval: Bool = false,
+        disabled: Bool = false
+    ) {
+        self.action = action
+        self.allowedResources = allowedResources
+        self.requiresApproval = requiresApproval
+        self.disabled = disabled
+    }
+}
+
 public enum NetworkPolicyMode: String, CaseIterable, Sendable {
     case allowAll = "allow-all"
     case denyAll = "deny-all"
@@ -340,6 +363,10 @@ public enum MockProfiles: Sendable {
         escalationAutoPauseAfter: 2, escalationHumanResponseTimeout: 7200,
         actionPolicyEnabled: true,
         actionEnabledGroups: [.githubIssues, .githubPrs],
+        actionOverrides: [
+            ActionOverride(action: "read_issue", allowedResources: ["org/*"], requiresApproval: false),
+            ActionOverride(action: "read_pr", allowedResources: ["org/my-app"], requiresApproval: true),
+        ],
         actionSanitizationPreset: .standard,
         actionQuarantineEnabled: true
     )

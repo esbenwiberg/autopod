@@ -20,6 +20,14 @@ public enum ProfileMapper {
     let enabledGroups: Set<ActionGroup> = Set(
       (ap?.enabledGroups ?? []).compactMap { ActionGroup(rawValue: $0) }
     )
+    let actionOverrides: [ActionOverride] = (ap?.actionOverrides ?? []).map {
+      ActionOverride(
+        action: $0.action,
+        allowedResources: $0.allowedResources ?? [],
+        requiresApproval: $0.requiresApproval ?? false,
+        disabled: $0.disabled ?? false
+      )
+    }
 
     return Profile(
       name: response.name,
@@ -72,6 +80,7 @@ public enum ProfileMapper {
       warmImageBuiltAt: response.warmImageBuiltAt,
       actionPolicyEnabled: ap != nil,
       actionEnabledGroups: enabledGroups,
+      actionOverrides: actionOverrides,
       actionSanitizationPreset: SanitizationPreset(rawValue: ap?.sanitization.preset ?? "standard") ?? .standard,
       actionSanitizationAllowedDomains: ap?.sanitization.allowedDomains ?? [],
       actionQuarantineEnabled: ap?.quarantine?.enabled ?? false,
@@ -159,6 +168,15 @@ public enum ProfileMapper {
           "allowedDomains": profile.actionSanitizationAllowedDomains,
         ] as [String: Any],
       ]
+      if !profile.actionOverrides.isEmpty {
+        ap["actionOverrides"] = profile.actionOverrides.map { o -> [String: Any] in
+          var entry: [String: Any] = ["action": o.action]
+          if !o.allowedResources.isEmpty { entry["allowedResources"] = o.allowedResources }
+          if o.requiresApproval { entry["requiresApproval"] = true }
+          if o.disabled { entry["disabled"] = true }
+          return entry
+        }
+      }
       if profile.actionQuarantineEnabled {
         ap["quarantine"] = [
           "enabled": true,
