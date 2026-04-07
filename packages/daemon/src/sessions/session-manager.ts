@@ -56,6 +56,7 @@ import {
   validateRegistryFiles,
 } from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
+import type { ProgressEventRepository } from './progress-event-repository.js';
 import type { SessionRepository, SessionStats, SessionUpdates } from './session-repository.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -128,6 +129,7 @@ export interface SessionManagerDependencies {
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   validationRepo?: ValidationRepository;
+  progressEventRepo?: ProgressEventRepository;
   profileStore: ProfileStore;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
@@ -212,6 +214,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     daemonConfig,
     logger,
     validationRepo,
+    progressEventRepo,
   } = deps;
 
   /** Active auto-stop timers for preview containers, keyed by sessionId. */
@@ -985,6 +988,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 totalPhases: event.totalPhases,
               },
             });
+            progressEventRepo?.insert(
+              sessionId,
+              event.phase,
+              event.description,
+              event.currentPhase,
+              event.totalPhases,
+            );
+          } else if (event.type === 'task_summary') {
+            sessionRepo.update(sessionId, {
+              taskSummary: {
+                actualSummary: event.actualSummary,
+                deviations: event.deviations,
+              },
+            });
           } else if (
             event.type === 'status' &&
             event.message.includes('Claude session initialized')
@@ -1615,6 +1632,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               acceptanceCriteria: session.acceptanceCriteria ?? undefined,
               codeReviewSkill,
               commitLog: commitLog || undefined,
+              plan: session.plan ?? undefined,
+              taskSummary: session.taskSummary ?? undefined,
             },
             (phase) => emitActivityStatus(sessionId, phase),
           );
@@ -1784,6 +1803,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 linesRemoved: s3.linesRemoved,
                 previewUrl: s2.previewUrl,
                 screenshots: screenshotRefs,
+                taskSummary: s3.taskSummary ?? undefined,
               });
               if (prUrl) {
                 emitActivityStatus(sessionId, `PR created: ${prUrl}`);
@@ -1960,6 +1980,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               acceptanceCriteria: session.acceptanceCriteria ?? undefined,
               codeReviewSkill,
               commitLog: commitLog || undefined,
+              plan: session.plan ?? undefined,
+              taskSummary: session.taskSummary ?? undefined,
             },
             (phase) => emitActivityStatus(sessionId, phase),
           );
@@ -2054,6 +2076,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 linesRemoved: s3.linesRemoved,
                 previewUrl: s2.previewUrl,
                 screenshots: [],
+                taskSummary: s3.taskSummary ?? undefined,
               });
               if (prUrl) emitActivityStatus(sessionId, `PR created: ${prUrl}`);
             } catch (err) {

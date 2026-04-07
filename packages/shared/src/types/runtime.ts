@@ -38,7 +38,8 @@ export type AgentEvent =
   | AgentErrorEvent
   | AgentEscalationEvent
   | AgentPlanEvent
-  | AgentProgressEvent;
+  | AgentProgressEvent
+  | AgentTaskSummaryEvent;
 
 export interface AgentStatusEvent {
   type: 'status';
@@ -99,4 +100,16 @@ export interface AgentProgressEvent {
   description: string;
   currentPhase: number;
   totalPhases: number;
+}
+
+export interface AgentTaskSummaryEvent {
+  type: 'task_summary';
+  timestamp: string;
+  actualSummary: string;
+  deviations: Array<{
+    step: string;
+    planned: string;
+    actual: string;
+    reason: string;
+  }>;
 }

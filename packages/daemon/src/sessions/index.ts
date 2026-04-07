@@ -35,6 +35,11 @@ export {
   type StoredValidation,
 } from './validation-repository.js';
 export {
+  createProgressEventRepository,
+  type ProgressEventRepository,
+  type ProgressEventRecord,
+} from './progress-event-repository.js';
+export {
   validateTransition,
   isTerminalState,
   canReceiveMessage,

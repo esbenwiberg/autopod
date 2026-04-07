@@ -114,6 +114,7 @@ export class AdoPrManager implements PrManager {
       linesRemoved: config.linesRemoved,
       previewUrl: config.previewUrl,
       screenshots: config.screenshots,
+      taskSummary: config.taskSummary,
     });
 
     this.logger.info(

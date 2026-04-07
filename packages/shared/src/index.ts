@@ -65,6 +65,7 @@ export type {
   AgentEscalationEvent,
   AgentPlanEvent,
   AgentProgressEvent,
+  AgentTaskSummaryEvent,
 } from './types/runtime.js';
 
 export type {
@@ -79,6 +80,8 @@ export type {
   AcValidationResult,
   AcCheckResult,
 } from './types/validation.js';
+
+export type { DeviationItem, TaskSummary, DeviationsAssessment } from './types/task-summary.js';
 
 export type {
   EscalationType,

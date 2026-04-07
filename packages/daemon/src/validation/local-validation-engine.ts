@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import type {
   AcCheckResult,
   AcValidationResult,
+  DeviationsAssessment,
   PageResult,
   TaskReviewResult,
   ValidationResult,
@@ -695,6 +696,25 @@ async function runTaskReview(
       ? config.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n')
       : null;
 
+  const planSection =
+    config.plan
+      ? `\n## ORIGINAL PLAN\n\nSummary: ${config.plan.summary}\n\nSteps:\n${config.plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n`
+      : '';
+
+  const taskSummarySection =
+    config.taskSummary
+      ? `\n## AGENT TASK SUMMARY\n\nWhat was actually done: ${config.taskSummary.actualSummary}\n${
+          config.taskSummary.deviations.length > 0
+            ? `\nReported deviations from plan:\n${config.taskSummary.deviations
+                .map(
+                  (d) =>
+                    `- **${d.step}**: planned "${d.planned}" → actual "${d.actual}" (reason: ${d.reason})`,
+                )
+                .join('\n')}`
+            : '\nNo deviations from plan reported.'
+        }\n`
+      : '';
+
   const repoRulesSection = config.codeReviewSkill
     ? `\n## REPO-SPECIFIC REVIEW RULES (these take precedence over standard rules)\n\n${config.codeReviewSkill}\n`
     : '';
@@ -719,7 +739,7 @@ ${repoRulesSection}
 ## TASK
 
 ${config.task}
-${acSection}
+${acSection}${planSection}${taskSummarySection}
 ${commitLogSection}## DIFF
 
 ${config.diff}
@@ -737,7 +757,27 @@ For each acceptance criterion above, determine whether the diff addresses it:
 
 `
     : ''
-}### ${acList ? 'Step 2' : 'Step 1'}: Code review
+}${
+  taskSummarySection
+    ? `### ${acList ? 'Step 2' : 'Step 1'}: Deviation assessment
+
+Compare the ORIGINAL PLAN (if provided) with the AGENT TASK SUMMARY and the DIFF:
+
+1. For each deviation the agent reported: assess whether the reasoning is justified given the diff.
+   - "justified": the diff confirms the deviation was necessary or beneficial
+   - "questionable": the reasoning is unclear or the diff doesn't confirm it
+   - "unjustified": the deviation appears to have degraded quality without good reason
+
+2. Look for undisclosed deviations: things in the diff that diverge from the plan but were NOT reported.
+   - Only flag meaningful gaps (e.g., a planned step that was entirely skipped, or a wholly different approach taken)
+   - Do NOT flag minor implementation details that naturally evolve during development
+
+Transparency is rewarded: a disclosed deviation with sound reasoning should not negatively affect the status.
+An undisclosed deviation that the diff reveals IS a negative signal.
+
+`
+    : ''
+}### ${acList ? (taskSummarySection ? 'Step 3' : 'Step 2') : taskSummarySection ? 'Step 2' : 'Step 1'}: Code review
 
 Review ONLY the changed code across these dimensions. Only raise medium or high severity issues:
 
@@ -777,12 +817,12 @@ Respond ONLY with a JSON object — no markdown fences, no extra text:
 {
   "status": "pass" | "fail" | "uncertain",
   "reasoning": "one or two sentence summary of the overall assessment",
-  ${acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}"issues": ["specific medium/high severity issues only"]
+  ${acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["specific medium/high severity issues only"]
 }
 
 Status rules:
-- "pass": requirements met (if any) and no significant issues found
-- "fail": one or more requirements unmet, OR critical/high severity issues found
+- "pass": requirements met (if any), no significant issues, and no unjustified undisclosed deviations
+- "fail": one or more requirements unmet, OR critical/high severity issues, OR undisclosed deviations that compromised scope
 - "uncertain": task is clear but diff is inconclusive without runtime context (use sparingly)`;
 
   try {
@@ -820,6 +860,7 @@ Status rules:
       screenshots: [],
       diff: config.diff,
       requirementsCheck: parsed.requirementsCheck,
+      deviationsAssessment: parsed.deviationsAssessment,
     };
   } catch (err) {
     log?.warn({ err }, 'task review failed, continuing without review');
@@ -836,6 +877,7 @@ function parseReviewJson(raw: string): {
   reasoning: string;
   issues: string[];
   requirementsCheck?: Array<{ criterion: string; met: boolean; note?: string }>;
+  deviationsAssessment?: DeviationsAssessment;
 } | null {
   // Strip markdown code fences if present
   let cleaned = raw
@@ -874,15 +916,48 @@ function parseReviewJson(raw: string): {
           }))
       : undefined;
 
+    const deviationsAssessment = parseDeviationsAssessment(parsed.deviationsAssessment);
+
     return {
       status: parsed.status,
       reasoning: parsed.reasoning,
       issues: parsed.issues.map(String),
       requirementsCheck,
+      deviationsAssessment,
     };
   } catch {
     return null;
   }
+}
+
+function parseDeviationsAssessment(raw: unknown): DeviationsAssessment | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+
+  const disclosedDeviations = Array.isArray(obj.disclosedDeviations)
+    ? obj.disclosedDeviations
+        .filter(
+          (item: unknown): item is Record<string, unknown> =>
+            typeof item === 'object' &&
+            item !== null &&
+            typeof (item as Record<string, unknown>).step === 'string' &&
+            typeof (item as Record<string, unknown>).reasoning === 'string' &&
+            ['justified', 'questionable', 'unjustified'].includes(
+              (item as Record<string, unknown>).verdict as string,
+            ),
+        )
+        .map((item) => ({
+          step: item.step as string,
+          reasoning: item.reasoning as string,
+          verdict: item.verdict as 'justified' | 'questionable' | 'unjustified',
+        }))
+    : [];
+
+  const undisclosedDeviations = Array.isArray(obj.undisclosedDeviations)
+    ? obj.undisclosedDeviations.filter((s): s is string => typeof s === 'string')
+    : [];
+
+  return { disclosedDeviations, undisclosedDeviations };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
