@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2640"
+   LastUpgradeVersion = "1700"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "Autopod"
-               BuildableName = "Autopod"
+               BlueprintIdentifier = "5ADCAA5844CD011B40E9E9A4"
+               BuildableName = "Autopod.app"
                BlueprintName = "Autopod"
-               ReferencedContainer = "container:">
+               ReferencedContainer = "container:Autopod.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -39,16 +39,15 @@
       ignoresPersistentStateOnLaunch = "NO"
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
-      allowLocationSimulation = "YES"
-      queueDebuggingEnableBacktraceRecording = "Yes">
+      allowLocationSimulation = "YES">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "Autopod"
-            BuildableName = "Autopod"
+            BlueprintIdentifier = "5ADCAA5844CD011B40E9E9A4"
+            BuildableName = "Autopod.app"
             BlueprintName = "Autopod"
-            ReferencedContainer = "container:">
+            ReferencedContainer = "container:Autopod.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -62,10 +61,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "Autopod"
-            BuildableName = "Autopod"
+            BlueprintIdentifier = "5ADCAA5844CD011B40E9E9A4"
+            BuildableName = "Autopod.app"
             BlueprintName = "Autopod"
-            ReferencedContainer = "container:">
+            ReferencedContainer = "container:Autopod.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

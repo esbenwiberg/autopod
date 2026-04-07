@@ -86,20 +86,6 @@ public struct SessionCardFinal: View {
         } message: {
             Text("Tell the agent what to fix. Leave blank for a generic rejection.")
         }
-        .alert("Reply to agent", isPresented: $showReplyInput) {
-            TextField("Your reply…", text: $replyInputText)
-            Button("Send") {
-                let message = replyInputText
-                replyInputText = ""
-                Task { await actions.reply(session.id, message) }
-            }
-            .disabled(replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button("Cancel", role: .cancel) {
-                replyInputText = ""
-            }
-        } message: {
-            Text("Respond to the agent's question.")
-        }
         .alert("Nudge agent", isPresented: $showNudgeInput) {
             TextField("Message for the agent…", text: $nudgeInputText)
             Button("Send") {
@@ -433,11 +419,7 @@ public struct SessionCardFinal: View {
                     }
                 }
                 Button {
-                    if let options = session.escalationOptions, !options.isEmpty {
-                        showOptionsPicker = true
-                    } else {
-                        showReplyInput = true
-                    }
+                    showOptionsPicker = true
                 } label: {
                     Label("Reply", systemImage: "arrowshape.turn.up.left")
                         .frame(maxWidth: .infinity)
@@ -445,20 +427,8 @@ public struct SessionCardFinal: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.orange)
-                .confirmationDialog(
-                    session.escalationQuestion ?? "Choose an option",
-                    isPresented: $showOptionsPicker,
-                    titleVisibility: .visible
-                ) {
-                    ForEach(session.escalationOptions ?? [], id: \.self) { option in
-                        Button(option) {
-                            Task { await actions.reply(session.id, option) }
-                        }
-                    }
-                    Button("Custom reply…") {
-                        showReplyInput = true
-                    }
-                    Button("Cancel", role: .cancel) {}
+                .sheet(isPresented: $showOptionsPicker) {
+                    replySheet
                 }
             }
 
@@ -613,7 +583,6 @@ public struct SessionCardFinal: View {
         }
     }
 
-    @State private var showReplyInput = false
     @State private var replyInputText = ""
     @State private var showOptionsPicker = false
     @State private var showNudgeInput = false
@@ -621,6 +590,83 @@ public struct SessionCardFinal: View {
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
+
+    private var replySheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(session.escalationQuestion ?? "Agent needs input")
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let options = session.escalationOptions, !options.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(options, id: \.self) { option in
+                        Button {
+                            showOptionsPicker = false
+                            Task { await actions.reply(session.id, option) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "circle")
+                                    .font(.system(size: 11))
+                                Text(option)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                    }
+                }
+
+                Divider()
+
+                HStack(spacing: 4) {
+                    Image(systemName: "pencil")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Or type a custom reply:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Type your reply…", text: $replyInputText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        guard !replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                        let message = replyInputText
+                        replyInputText = ""
+                        showOptionsPicker = false
+                        Task { await actions.reply(session.id, message) }
+                    }
+
+                Button {
+                    let message = replyInputText
+                    replyInputText = ""
+                    showOptionsPicker = false
+                    Task { await actions.reply(session.id, message) }
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .disabled(replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) {
+                    replyInputText = ""
+                    showOptionsPicker = false
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 400)
+    }
 
     private var deleteButton: some View {
         Button(role: .destructive) {
