@@ -301,4 +301,17 @@ public struct AnyCodable: Codable, Sendable {
     if case .string(let s) = storage { return s }
     return nil
   }
+
+  /// Human-readable display value for any storage type.
+  public var displayValue: String {
+    switch storage {
+    case .null: return "null"
+    case .bool(let v): return String(v)
+    case .int(let v): return String(v)
+    case .double(let v): return String(v)
+    case .string(let v): return v
+    case .array(let v): return v.map(\.displayValue).joined(separator: ", ")
+    case .dict(let v): return v.sorted(by: { $0.key < $1.key }).map { "\($0.key): \($0.value.displayValue)" }.joined(separator: ", ")
+    }
+  }
 }

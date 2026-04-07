@@ -409,26 +409,50 @@ public struct SessionCardFinal: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let q = session.escalationQuestion {
                     HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "quote.opening")
+                        Image(systemName: session.escalationType == "action_approval" ? "shield.checkered" : "quote.opening")
                             .font(.system(size: 10))
-                            .foregroundStyle(.orange.opacity(0.5))
+                            .foregroundStyle(session.escalationType == "action_approval" ? .purple.opacity(0.7) : .orange.opacity(0.5))
                             .padding(.top, 2)
                         Text(q)
                             .font(.callout)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Button {
-                    showOptionsPicker = true
-                } label: {
-                    Label("Reply", systemImage: "arrowshape.turn.up.left")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.orange)
-                .sheet(isPresented: $showOptionsPicker) {
-                    replySheet
+                if session.escalationType == "action_approval" {
+                    HStack(spacing: 6) {
+                        Button {
+                            Task { await actions.reply(session.id, "approved") }
+                        } label: {
+                            Label("Approve", systemImage: "checkmark.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.green)
+
+                        Button {
+                            Task { await actions.reply(session.id, "rejected") }
+                        } label: {
+                            Label("Reject", systemImage: "xmark.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.red)
+                    }
+                } else {
+                    Button {
+                        showOptionsPicker = true
+                    } label: {
+                        Label("Reply", systemImage: "arrowshape.turn.up.left")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.orange)
+                    .sheet(isPresented: $showOptionsPicker) {
+                        replySheet
+                    }
                 }
             }
 

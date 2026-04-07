@@ -34,6 +34,13 @@ public enum SessionMapper {
     let escalationQuestion: String? = {
       guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
       if esc.type == "action_approval", let actionName = esc.payload.actionName {
+        // Include params so the reviewer sees which resource is being accessed
+        if let params = esc.payload.params, !params.isEmpty {
+          let details = params.sorted(by: { $0.key < $1.key })
+            .map { "\($0.key): \($0.value.displayValue)" }
+            .joined(separator: ", ")
+          return "Approve action: \(actionName) (\(details))"
+        }
         return "Approve action: \(actionName)"
       }
       return esc.payload.question ?? esc.payload.description
