@@ -108,9 +108,11 @@ public struct PageDetail: Sendable {
     public let consoleErrors: [String]
     public let assertions: [AssertionDetail]
     public let loadTime: Int
-    public init(path: String, status: String, consoleErrors: [String], assertions: [AssertionDetail], loadTime: Int) {
+    public let screenshotBase64: String?
+    public init(path: String, status: String, consoleErrors: [String], assertions: [AssertionDetail], loadTime: Int, screenshotBase64: String? = nil) {
         self.path = path; self.status = status
         self.consoleErrors = consoleErrors; self.assertions = assertions; self.loadTime = loadTime
+        self.screenshotBase64 = screenshotBase64
     }
 }
 
@@ -118,8 +120,10 @@ public struct AcCheckDetail: Sendable {
     public let criterion: String
     public let passed: Bool
     public let reasoning: String
-    public init(criterion: String, passed: Bool, reasoning: String) {
+    public let screenshot: String?
+    public init(criterion: String, passed: Bool, reasoning: String, screenshot: String? = nil) {
         self.criterion = criterion; self.passed = passed; self.reasoning = reasoning
+        self.screenshot = screenshot
     }
 }
 
@@ -147,6 +151,7 @@ public struct ValidationChecks: Sendable {
     public let acValidation: Bool?
     public let acChecks: [AcCheckDetail]?
     public let requirementsCheck: [RequirementCheckDetail]?
+    public let taskReviewScreenshots: [String]?
     public init(
         smoke: Bool, tests: Bool? = nil, review: Bool? = nil,
         buildOutput: String? = nil, testOutput: String? = nil,
@@ -155,7 +160,8 @@ public struct ValidationChecks: Sendable {
         pages: [PageDetail]? = nil,
         acValidation: Bool? = nil,
         acChecks: [AcCheckDetail]? = nil,
-        requirementsCheck: [RequirementCheckDetail]? = nil
+        requirementsCheck: [RequirementCheckDetail]? = nil,
+        taskReviewScreenshots: [String]? = nil
     ) {
         self.smoke = smoke; self.tests = tests; self.review = review
         self.buildOutput = buildOutput; self.testOutput = testOutput
@@ -163,6 +169,7 @@ public struct ValidationChecks: Sendable {
         self.healthCheck = healthCheck; self.pages = pages
         self.acValidation = acValidation; self.acChecks = acChecks
         self.requirementsCheck = requirementsCheck
+        self.taskReviewScreenshots = taskReviewScreenshots
     }
 
     public var allPassed: Bool { smoke && (tests ?? true) && (review ?? true) && (acValidation ?? true) }

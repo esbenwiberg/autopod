@@ -67,16 +67,21 @@ public enum SessionMapper {
           assertions: p.assertions.map { a in
             AssertionDetail(selector: a.selector, type: a.type, expected: a.expected, actual: a.actual, passed: a.passed)
           },
-          loadTime: p.loadTime
+          loadTime: p.loadTime,
+          screenshotBase64: p.screenshotBase64
         )
       }
       let acValidation: Bool? = v.acValidation.flatMap { $0.status == "skip" ? nil : ($0.status == "pass") }
       let acChecks: [AcCheckDetail]? = v.acValidation?.results.map { r in
-        AcCheckDetail(criterion: r.criterion, passed: r.passed, reasoning: r.reasoning)
+        AcCheckDetail(criterion: r.criterion, passed: r.passed, reasoning: r.reasoning, screenshot: r.screenshot)
       }
       let requirementsCheck: [RequirementCheckDetail]? = v.taskReview?.requirementsCheck?.map { r in
         RequirementCheckDetail(criterion: r.criterion, met: r.met, note: r.note)
       }
+      let taskReviewScreenshots: [String]? = {
+        guard let ss = v.taskReview?.screenshots, !ss.isEmpty else { return nil }
+        return ss
+      }()
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
         tests: mapTriState(v.test?.status),
@@ -89,7 +94,8 @@ public enum SessionMapper {
         pages: pages,
         acValidation: acValidation,
         acChecks: acChecks,
-        requirementsCheck: requirementsCheck
+        requirementsCheck: requirementsCheck,
+        taskReviewScreenshots: taskReviewScreenshots
       )
     }()
 
