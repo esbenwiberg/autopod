@@ -218,7 +218,7 @@ export class ClaudeRuntime implements Runtime {
       {};
     for (const server of config.mcpServers) {
       servers[server.name] = {
-        type: 'streamable-http',
+        type: 'http',
         url: server.url,
         ...(server.headers && { headers: server.headers }),
       };

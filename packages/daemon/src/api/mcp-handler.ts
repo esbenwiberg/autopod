@@ -74,6 +74,9 @@ export function mcpHandler(
     }
 
     try {
+      // Tell Fastify we're handling the response manually via reply.raw
+      // so it doesn't try to send its own response after the transport writes.
+      reply.hijack();
       await transport.handleRequest(request.raw, reply.raw, request.body);
     } catch (err) {
       logger.error({ err, sessionId }, 'MCP handleRequest error');
