@@ -189,7 +189,20 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         },
         'Agent reported task summary',
       );
-      // Persisted via AgentTaskSummaryEvent flowing through consumeAgentEvents
+      sessionRepo.update(sessionId, {
+        taskSummary: { actualSummary, deviations },
+      });
+      eventBus.emit({
+        type: 'session.agent_activity',
+        timestamp: new Date().toISOString(),
+        sessionId,
+        event: {
+          type: 'task_summary',
+          actualSummary,
+          deviations,
+          timestamp: new Date().toISOString(),
+        },
+      });
     },
 
     consumeMessages(sessionId: string): { hasMessage: boolean; message?: string } {
