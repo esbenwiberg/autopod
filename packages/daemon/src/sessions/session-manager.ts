@@ -256,7 +256,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           return;
         }
         // Use startCommitSha if available; fall back to baseBranch for old sessions
-        const exclusionRef = session.startCommitSha ?? (session.baseBranch ?? 'main');
+        const exclusionRef = session.startCommitSha ?? session.baseBranch ?? 'main';
         const cm = containerManagerFactory.get(session.executionTarget);
         const [countResult, timeResult] = await Promise.all([
           cm.execInContainer(

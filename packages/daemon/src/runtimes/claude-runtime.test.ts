@@ -234,7 +234,10 @@ describe('ClaudeRuntime', () => {
 
       await (
         runtime as unknown as {
-          writeMcpConfig: (containerId: string, mcpServers: SpawnConfig['mcpServers']) => Promise<void>;
+          writeMcpConfig: (
+            containerId: string,
+            mcpServers: SpawnConfig['mcpServers'],
+          ) => Promise<void>;
         }
       ).writeMcpConfig('c1', [
         {

@@ -327,7 +327,9 @@ function generateOperatingEnvironment(
       // Research pod style — limited internet
       lines.push('- You have LIMITED internet access for research purposes.');
       lines.push(`- Allowed domains: ${profile.networkPolicy.allowedHosts.join(', ')}`);
-      lines.push('- Only WebFetch/curl to the allowed domains above will work. All other external URLs are blocked.');
+      lines.push(
+        '- Only WebFetch/curl to the allowed domains above will work. All other external URLs are blocked.',
+      );
       lines.push('- Blocked: cloud metadata endpoints, internal services.');
     } else {
       lines.push(

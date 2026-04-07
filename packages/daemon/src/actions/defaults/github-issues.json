@@ -28,7 +28,12 @@
         "enum": ["open", "closed", "all"],
         "default": "open"
       },
-      "max_results": { "type": "number", "required": false, "description": "Maximum results to return", "default": 10 }
+      "max_results": {
+        "type": "number",
+        "required": false,
+        "description": "Maximum results to return",
+        "default": 10
+      }
     },
     "response": {
       "fields": ["number", "title", "state", "labels", "created_at"],
@@ -43,7 +48,12 @@
     "params": {
       "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
       "issue_number": { "type": "number", "required": true, "description": "Issue number" },
-      "max_results": { "type": "number", "required": false, "description": "Maximum results to return", "default": 20 }
+      "max_results": {
+        "type": "number",
+        "required": false,
+        "description": "Maximum results to return",
+        "default": 20
+      }
     },
     "response": {
       "fields": ["body", "created_at", "updated_at"],
