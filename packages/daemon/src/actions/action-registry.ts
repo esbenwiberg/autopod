@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ActionDefinition, ActionPolicy } from '@autopod/shared';
@@ -6,7 +6,15 @@ import { actionDefinitionSchema } from '@autopod/shared';
 import type { Logger } from 'pino';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULTS_DIR = join(__dirname, '..', 'actions', 'defaults');
+// When bundled into dist/index.js, __dirname = dist/ so the naive '../actions/defaults'
+// resolves to <package-root>/actions/defaults (wrong). Try the bundled path first,
+// then fall back to the source path (works when running unbundled in tests).
+const DEFAULTS_DIR =
+  [
+    join(__dirname, 'actions', 'defaults'), // bundled: dist/actions/defaults
+    join(__dirname, '..', 'actions', 'defaults'), // source: src/actions/defaults
+    join(__dirname, '..', 'src', 'actions', 'defaults'), // absolute fallback
+  ].find((d) => existsSync(d)) ?? join(__dirname, '..', 'src', 'actions', 'defaults');
 
 export interface ActionRegistry {
   /** Get all actions available for a given policy (built-in filtered by enabledGroups + custom) */
