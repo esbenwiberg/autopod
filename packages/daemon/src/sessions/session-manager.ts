@@ -228,6 +228,26 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   /** Start polling git commit count inside a running container. */
   function startCommitPolling(sessionId: string): void {
     stopCommitPolling(sessionId);
+
+    /** Capture the starting HEAD SHA so we only count commits the agent makes. */
+    const captureStartSha = async () => {
+      try {
+        const session = sessionRepo.getOrThrow(sessionId);
+        if (session.startCommitSha || !session.containerId) return;
+        const cm = containerManagerFactory.get(session.executionTarget);
+        const shaResult = await cm.execInContainer(
+          session.containerId,
+          ['git', 'rev-parse', 'HEAD'],
+          { cwd: '/workspace', timeout: 5_000 },
+        );
+        if (shaResult.exitCode === 0 && shaResult.stdout.trim()) {
+          sessionRepo.update(sessionId, { startCommitSha: shaResult.stdout.trim() });
+        }
+      } catch {
+        logger.debug({ sessionId }, 'Failed to capture start commit SHA');
+      }
+    };
+
     const poll = async () => {
       try {
         const session = sessionRepo.getOrThrow(sessionId);
@@ -235,12 +255,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           stopCommitPolling(sessionId);
           return;
         }
-        const baseBranch = session.baseBranch ?? 'main';
+        // Use startCommitSha if available; fall back to baseBranch for old sessions
+        const exclusionRef = session.startCommitSha ?? (session.baseBranch ?? 'main');
         const cm = containerManagerFactory.get(session.executionTarget);
         const [countResult, timeResult] = await Promise.all([
           cm.execInContainer(
             session.containerId,
-            ['git', 'rev-list', '--count', 'HEAD', `^${baseBranch}`],
+            ['git', 'rev-list', '--count', 'HEAD', `^${exclusionRef}`],
             { cwd: '/workspace', timeout: 5_000 },
           ),
           cm.execInContainer(session.containerId, ['git', 'log', '-1', '--format=%cI'], {
@@ -256,8 +277,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         logger.debug({ sessionId }, 'Commit polling failed, skipping cycle');
       }
     };
-    // Run first poll immediately, then every interval
-    poll();
+    // Capture starting SHA first, then run first poll immediately
+    captureStartSha().then(() => poll());
     const interval = setInterval(poll, COMMIT_POLL_INTERVAL_MS);
     interval.unref();
     commitPollers.set(sessionId, interval);

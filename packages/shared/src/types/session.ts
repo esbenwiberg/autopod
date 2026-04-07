@@ -67,6 +67,7 @@ export interface Session {
   costUsd: number;
   commitCount: number;
   lastCommitAt: string | null;
+  startCommitSha: string | null;
   linkedSessionId: string | null;
   taskSummary: TaskSummary | null;
 }

@@ -65,6 +65,7 @@ export interface SessionUpdates {
   costUsd?: number;
   commitCount?: number;
   lastCommitAt?: string | null;
+  startCommitSha?: string | null;
   linkedSessionId?: string | null;
   taskSummary?: TaskSummary | null;
 }
@@ -132,6 +133,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     costUsd: (row.cost_usd as number) ?? 0,
     commitCount: (row.commit_count as number) ?? 0,
     lastCommitAt: (row.last_commit_at as string) ?? null,
+    startCommitSha: (row.start_commit_sha as string) ?? null,
     linkedSessionId: (row.linked_session_id as string) ?? null,
     taskSummary: row.task_summary ? JSON.parse(row.task_summary as string) : null,
   };
@@ -292,6 +294,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.lastCommitAt !== undefined) {
         setClauses.push('last_commit_at = @lastCommitAt');
         params.lastCommitAt = changes.lastCommitAt;
+      }
+      if (changes.startCommitSha !== undefined) {
+        setClauses.push('start_commit_sha = @startCommitSha');
+        params.startCommitSha = changes.startCommitSha;
       }
       if (changes.linkedSessionId !== undefined) {
         setClauses.push('linked_session_id = @linkedSessionId');

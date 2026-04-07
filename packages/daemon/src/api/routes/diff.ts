@@ -29,7 +29,7 @@ export function diffRoutes(
     const { sessionId } = request.params as { sessionId: string };
     const session = sessionManager.getSession(sessionId);
 
-    const baseBranch = getBaseBranch(profileStore, session.profileName);
+    const baseBranch = session.baseBranch ?? getBaseBranch(profileStore, session.profileName);
 
     // Strategy 1: Try container-based diff (works when container is running)
     let rawDiff = '';
@@ -74,26 +74,31 @@ async function tryContainerDiff(
   const cm = containerManagerFactory.get(executionTarget);
   const workDir = '/workspace';
 
+  // Use merge-base to find the common ancestor, then diff from there.
+  // No fetch needed — the bare repo (mounted in the container) has the base ref.
   try {
-    await cm.execInContainer(containerId, ['git', 'fetch', 'origin', '--quiet'], {
-      cwd: workDir,
-      timeout: 15_000,
-    });
-
-    const result = await cm.execInContainer(
+    const mergeBaseResult = await cm.execInContainer(
       containerId,
-      ['git', 'diff', `origin/${baseBranch}...HEAD`, '--no-color'],
-      { cwd: workDir, timeout: 30_000 },
+      ['git', 'merge-base', 'HEAD', baseBranch],
+      { cwd: workDir, timeout: 10_000 },
     );
 
-    if (result.exitCode === 0 && result.stdout.trim()) {
-      return result.stdout;
+    if (mergeBaseResult.exitCode === 0 && mergeBaseResult.stdout.trim()) {
+      const mergeBase = mergeBaseResult.stdout.trim();
+      const result = await cm.execInContainer(
+        containerId,
+        ['git', 'diff', mergeBase, 'HEAD', '--no-color'],
+        { cwd: workDir, timeout: 30_000 },
+      );
+      if (result.exitCode === 0 && result.stdout.trim()) {
+        return result.stdout;
+      }
     }
   } catch {
     // Container may be stopped — fall through
   }
 
-  // Fallback: uncommitted or last-commit diff
+  // Fallback: uncommitted changes
   try {
     const result = await cm.execInContainer(containerId, ['git', 'diff', 'HEAD', '--no-color'], {
       cwd: workDir,
@@ -101,15 +106,6 @@ async function tryContainerDiff(
     });
     if (result.exitCode === 0 && result.stdout.trim()) {
       return result.stdout;
-    }
-
-    const committed = await cm.execInContainer(
-      containerId,
-      ['git', 'diff', 'HEAD~1...HEAD', '--no-color'],
-      { cwd: workDir, timeout: 30_000 },
-    );
-    if (committed.exitCode === 0) {
-      return committed.stdout;
     }
   } catch {
     // Container unavailable
@@ -128,34 +124,37 @@ async function tryWorktreeDiff(worktreePath: string, baseBranch: string): Promis
 
   const bufOpts = { cwd: worktreePath, maxBuffer: 2 * 1024 * 1024 };
 
-  // Try merge-base diff first (committed changes since branching)
-  try {
-    const { stdout: mergeBase } = await execFileAsync('git', ['merge-base', 'HEAD', baseBranch], {
-      cwd: worktreePath,
-    });
+  // Try merge-base diff with multiple ref forms (bare repos may store as origin/*)
+  for (const ref of [baseBranch, `origin/${baseBranch}`]) {
+    try {
+      const { stdout: mergeBase } = await execFileAsync('git', ['merge-base', 'HEAD', ref], {
+        cwd: worktreePath,
+      });
 
-    const { stdout: committedDiff } = await execFileAsync(
-      'git',
-      ['diff', mergeBase.trim(), 'HEAD', '--no-color'],
-      bufOpts,
-    );
+      const { stdout: committedDiff } = await execFileAsync(
+        'git',
+        ['diff', mergeBase.trim(), 'HEAD', '--no-color'],
+        bufOpts,
+      );
 
-    // Also grab any uncommitted changes
-    const { stdout: uncommittedDiff } = await execFileAsync(
-      'git',
-      ['diff', 'HEAD', '--no-color'],
-      bufOpts,
-    );
+      // Also grab any uncommitted changes
+      const { stdout: uncommittedDiff } = await execFileAsync(
+        'git',
+        ['diff', 'HEAD', '--no-color'],
+        bufOpts,
+      );
 
-    const combined = uncommittedDiff.trim()
-      ? `${committedDiff}\n${uncommittedDiff}`
-      : committedDiff;
+      const combined = uncommittedDiff.trim()
+        ? `${committedDiff}\n${uncommittedDiff}`
+        : committedDiff;
 
-    if (combined.trim()) {
-      return combined;
+      if (combined.trim()) {
+        return combined;
+      }
+    } catch {
+      // Try next ref form
+      continue;
     }
-  } catch {
-    // merge-base may fail if baseBranch ref doesn't exist locally
   }
 
   // Last resort: diff HEAD~1

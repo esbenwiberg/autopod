@@ -191,6 +191,7 @@ export function useSessionState(options: UseSessionStateOptions): UseSessionStat
               costUsd: 0,
               commitCount: 0,
               lastCommitAt: null,
+              startCommitSha: null,
               linkedSessionId: null,
             },
           ]);
