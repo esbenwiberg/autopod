@@ -34,8 +34,7 @@ export const DEFAULT_ALLOWED_HOSTS = [
   'pkgs.dev.azure.com',
   // Required for MAX/PRO OAuth token refresh (Claude Code refreshes internally)
   'platform.claude.com',
-  // Required for GitHub Copilot CLI
-  'api.github.com',
+  // Required for GitHub Copilot CLI (token exchange + inference)
   'api.enterprise.githubcopilot.com',
   'copilot-proxy.githubusercontent.com',
   'githubcopilot.com',
