@@ -70,6 +70,9 @@ export function generateSystemInstructions(
   lines.push('  - report_blocker — report a blocking issue');
   lines.push('  - report_plan — declare your implementation plan (fire-and-forget)');
   lines.push('  - report_progress — report phase transitions (fire-and-forget)');
+  lines.push(
+    '  - report_task_summary — report what you actually did and any deviations from your plan (call as your final step)',
+  );
   lines.push('  - check_messages — poll for human nudge messages (non-blocking)');
   lines.push('  - validate_in_browser — open a browser to verify your work (localhost URLs only)');
   lines.push('');
@@ -234,7 +237,20 @@ export function generateSystemInstructions(
     '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
   );
   lines.push(
-    '5. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
+    '5. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
+  );
+  lines.push('   - `actualSummary`: a concise description of what was actually accomplished');
+  lines.push(
+    '   - `deviations`: an array of any steps where you deviated from your original plan. ' +
+      'For each deviation include the step name, what was planned, what you did instead, and why. ' +
+      'Use an empty array if you followed the plan exactly.',
+  );
+  lines.push(
+    '   Transparency is rewarded — the independent reviewer will see your deviations and assess ' +
+      'whether they were justified. A well-reasoned deviation is better than silently skipping a step.',
+  );
+  lines.push(
+    '6. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
   );
   lines.push('   - Exploration → Implementation → Testing → Cleanup');
   lines.push('   - Analysis → Design → Build → Verify');

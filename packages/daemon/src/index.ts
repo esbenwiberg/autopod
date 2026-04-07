@@ -38,6 +38,7 @@ import {
   createEventBus,
   createEventRepository,
   createNudgeRepository,
+  createProgressEventRepository,
   createSessionManager,
   createSessionQueue,
   createSessionRepository,
@@ -98,6 +99,7 @@ const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
 const nudgeRepo = createNudgeRepository(db);
 const validationRepo = createValidationRepository(db);
+const progressEventRepo = createProgressEventRepository(db);
 
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);
@@ -312,6 +314,7 @@ sessionManager = createSessionManager({
   escalationRepo,
   nudgeRepo,
   validationRepo,
+  progressEventRepo,
   profileStore,
   eventBus,
   containerManagerFactory,

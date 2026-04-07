@@ -1,4 +1,4 @@
-import type { ValidationResult } from '@autopod/shared';
+import type { TaskSummary, ValidationResult } from '@autopod/shared';
 
 export interface ValidationEngineConfig {
   sessionId: string;
@@ -28,6 +28,10 @@ export interface ValidationEngineConfig {
   commitLog?: string;
   /** AI review phase timeout in ms. Default 300_000 (5 min). */
   reviewTimeout?: number;
+  /** Original plan reported by the agent via report_plan */
+  plan?: { summary: string; steps: string[] };
+  /** Task summary reported by the agent via report_task_summary */
+  taskSummary?: TaskSummary;
 }
 
 export interface ValidationEngine {

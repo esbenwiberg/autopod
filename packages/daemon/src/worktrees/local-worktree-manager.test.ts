@@ -203,7 +203,10 @@ describe('LocalWorktreeManager', () => {
             // First call: committed diff (merge-base..HEAD)
             // Second call: uncommitted diff (HEAD)
             if (callCount === 1) {
-              cb(null, { stdout: ' 3 files changed, 15 insertions(+), 5 deletions(-)', stderr: '' });
+              cb(null, {
+                stdout: ' 3 files changed, 15 insertions(+), 5 deletions(-)',
+                stderr: '',
+              });
             } else {
               cb(null, { stdout: '', stderr: '' });
             }
@@ -230,7 +233,10 @@ describe('LocalWorktreeManager', () => {
             callCount++;
             if (callCount === 1) {
               // Committed: 2 files
-              cb(null, { stdout: ' 2 files changed, 10 insertions(+), 3 deletions(-)', stderr: '' });
+              cb(null, {
+                stdout: ' 2 files changed, 10 insertions(+), 3 deletions(-)',
+                stderr: '',
+              });
             } else {
               // Uncommitted: 1 more file
               cb(null, { stdout: ' 1 file changed, 5 insertions(+), 2 deletions(-)', stderr: '' });

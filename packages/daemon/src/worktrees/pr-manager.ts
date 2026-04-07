@@ -36,6 +36,7 @@ export class GhPrManager implements PrManager {
       linesRemoved: config.linesRemoved,
       previewUrl: config.previewUrl,
       screenshots: config.screenshots,
+      taskSummary: config.taskSummary,
     });
 
     this.logger.info(
@@ -148,6 +149,7 @@ export class GitHubApiPrManager implements PrManager {
       linesRemoved: config.linesRemoved,
       previewUrl: config.previewUrl,
       screenshots: config.screenshots,
+      taskSummary: config.taskSummary,
     });
 
     this.logger.info(

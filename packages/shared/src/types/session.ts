@@ -2,6 +2,7 @@ import type { OutputMode } from './actions.js';
 import type { EscalationRequest } from './escalation.js';
 import type { ExecutionTarget } from './profile.js';
 import type { RuntimeType } from './runtime.js';
+import type { TaskSummary } from './task-summary.js';
 import type { ValidationResult } from './validation.js';
 
 export type SessionStatus =
@@ -67,6 +68,7 @@ export interface Session {
   commitCount: number;
   lastCommitAt: string | null;
   linkedSessionId: string | null;
+  taskSummary: TaskSummary | null;
 }
 
 export interface CreateSessionRequest {

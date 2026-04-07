@@ -146,6 +146,23 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       // Progress is persisted via the AgentProgressEvent flowing through consumeAgentEvents
     },
 
+    reportTaskSummary(
+      sessionId: string,
+      actualSummary: string,
+      deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
+    ): void {
+      sessionManager.touchHeartbeat(sessionId);
+      logger.info(
+        {
+          sessionId,
+          deviationCount: deviations.length,
+          actualSummary: actualSummary.slice(0, 100),
+        },
+        'Agent reported task summary',
+      );
+      // Persisted via AgentTaskSummaryEvent flowing through consumeAgentEvents
+    },
+
     consumeMessages(sessionId: string): { hasMessage: boolean; message?: string } {
       sessionManager.touchHeartbeat(sessionId);
       return nudgeRepo.consumeNext(sessionId);

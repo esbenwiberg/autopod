@@ -10,6 +10,7 @@ import { checkMessages } from './tools/check-messages.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
+import { reportTaskSummary } from './tools/report-task-summary.js';
 import { validateInBrowser } from './tools/validate-in-browser.js';
 
 export interface EscalationMcpDeps {
@@ -102,6 +103,30 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
     async (input) => {
       const response = await reportProgress(sessionId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'report_task_summary',
+    'Report what you actually did and any deviations from your original plan. Call this as your final step before finishing. Fire-and-forget — does not block.',
+    {
+      actualSummary: z.string().describe('A concise description of what was actually accomplished'),
+      deviations: z
+        .array(
+          z.object({
+            step: z.string().describe('Which plan step this deviation relates to (e.g. "Step 2")'),
+            planned: z.string().describe('What was originally planned for this step'),
+            actual: z.string().describe('What was actually done instead'),
+            reason: z.string().describe('Why the deviation was necessary'),
+          }),
+        )
+        .describe(
+          'Deviations from the original plan. Use an empty array if you followed the plan exactly.',
+        ),
+    },
+    async (input) => {
+      const response = await reportTaskSummary(sessionId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );

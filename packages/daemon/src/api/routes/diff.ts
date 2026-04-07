@@ -95,11 +95,10 @@ async function tryContainerDiff(
 
   // Fallback: uncommitted or last-commit diff
   try {
-    const result = await cm.execInContainer(
-      containerId,
-      ['git', 'diff', 'HEAD', '--no-color'],
-      { cwd: workDir, timeout: 30_000 },
-    );
+    const result = await cm.execInContainer(containerId, ['git', 'diff', 'HEAD', '--no-color'], {
+      cwd: workDir,
+      timeout: 30_000,
+    });
     if (result.exitCode === 0 && result.stdout.trim()) {
       return result.stdout;
     }
@@ -131,11 +130,9 @@ async function tryWorktreeDiff(worktreePath: string, baseBranch: string): Promis
 
   // Try merge-base diff first (committed changes since branching)
   try {
-    const { stdout: mergeBase } = await execFileAsync(
-      'git',
-      ['merge-base', 'HEAD', baseBranch],
-      { cwd: worktreePath },
-    );
+    const { stdout: mergeBase } = await execFileAsync('git', ['merge-base', 'HEAD', baseBranch], {
+      cwd: worktreePath,
+    });
 
     const { stdout: committedDiff } = await execFileAsync(
       'git',
@@ -150,8 +147,9 @@ async function tryWorktreeDiff(worktreePath: string, baseBranch: string): Promis
       bufOpts,
     );
 
-    const combined =
-      uncommittedDiff.trim() ? `${committedDiff}\n${uncommittedDiff}` : committedDiff;
+    const combined = uncommittedDiff.trim()
+      ? `${committedDiff}\n${uncommittedDiff}`
+      : committedDiff;
 
     if (combined.trim()) {
       return combined;
@@ -162,11 +160,7 @@ async function tryWorktreeDiff(worktreePath: string, baseBranch: string): Promis
 
   // Last resort: diff HEAD~1
   try {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['diff', 'HEAD~1...HEAD', '--no-color'],
-      bufOpts,
-    );
+    const { stdout } = await execFileAsync('git', ['diff', 'HEAD~1...HEAD', '--no-color'], bufOpts);
     return stdout;
   } catch {
     return '';

@@ -1,4 +1,5 @@
 import type { PageAssertion } from './profile.js';
+import type { DeviationsAssessment } from './task-summary.js';
 
 export interface ValidationResult {
   sessionId: string;
@@ -86,4 +87,6 @@ export interface TaskReviewResult {
   diff: string;
   /** Per-AC requirements coverage check */
   requirementsCheck?: RequirementsCheckItem[];
+  /** Reviewer's assessment of agent-reported and detected deviations */
+  deviationsAssessment?: DeviationsAssessment;
 }

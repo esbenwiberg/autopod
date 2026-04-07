@@ -240,11 +240,9 @@ export class LocalWorktreeManager implements WorktreeManager {
         const committed = this.parseDiffStats(committedStat);
 
         // Uncommitted changes: working tree vs HEAD (staged + unstaged)
-        const { stdout: uncommittedStat } = await execFileAsync(
-          'git',
-          ['diff', '--stat', 'HEAD'],
-          { cwd: worktreePath },
-        );
+        const { stdout: uncommittedStat } = await execFileAsync('git', ['diff', '--stat', 'HEAD'], {
+          cwd: worktreePath,
+        });
         const uncommitted = this.parseDiffStats(uncommittedStat);
 
         return {
@@ -280,16 +278,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       );
 
       // Uncommitted changes: working tree vs HEAD (staged + unstaged)
-      const { stdout: uncommittedDiff } = await execFileAsync(
-        'git',
-        ['diff', 'HEAD'],
-        bufOpts,
-      );
+      const { stdout: uncommittedDiff } = await execFileAsync('git', ['diff', 'HEAD'], bufOpts);
 
       const combined =
-        uncommittedDiff.length > 0
-          ? `${committedDiff}\n${uncommittedDiff}`
-          : committedDiff;
+        uncommittedDiff.length > 0 ? `${committedDiff}\n${uncommittedDiff}` : committedDiff;
 
       return combined.slice(0, maxLength);
     } catch {

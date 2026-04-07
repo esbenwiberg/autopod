@@ -23,6 +23,11 @@ export interface SessionBridge {
     currentPhase: number,
     totalPhases: number,
   ): void;
+  reportTaskSummary(
+    sessionId: string,
+    actualSummary: string,
+    deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
+  ): void;
   consumeMessages(sessionId: string): { hasMessage: boolean; message?: string };
   /** Check if an action requires human approval before execution */
   actionRequiresApproval(sessionId: string, actionName: string): boolean;

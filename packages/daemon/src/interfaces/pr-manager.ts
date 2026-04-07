@@ -1,4 +1,4 @@
-import type { ValidationResult } from '@autopod/shared';
+import type { TaskSummary, ValidationResult } from '@autopod/shared';
 
 export interface CreatePrConfig {
   /** Worktree path to run `gh` from (inherits git remote context) */
@@ -25,6 +25,8 @@ export interface CreatePrConfig {
   previewUrl: string | null;
   /** Screenshot references for PR body */
   screenshots?: Array<{ pagePath: string; imageUrl: string }>;
+  /** Agent-reported task summary (what was done + deviations from plan) */
+  taskSummary?: TaskSummary;
 }
 
 export interface MergePrConfig {

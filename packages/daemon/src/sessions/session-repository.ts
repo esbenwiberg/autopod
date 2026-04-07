@@ -1,4 +1,10 @@
-import type { ExecutionTarget, OutputMode, Session, SessionStatus } from '@autopod/shared';
+import type {
+  ExecutionTarget,
+  OutputMode,
+  Session,
+  SessionStatus,
+  TaskSummary,
+} from '@autopod/shared';
 import { SessionNotFoundError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
@@ -60,6 +66,7 @@ export interface SessionUpdates {
   commitCount?: number;
   lastCommitAt?: string | null;
   linkedSessionId?: string | null;
+  taskSummary?: TaskSummary | null;
 }
 
 export interface SessionStats {
@@ -126,6 +133,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     commitCount: (row.commit_count as number) ?? 0,
     lastCommitAt: (row.last_commit_at as string) ?? null,
     linkedSessionId: (row.linked_session_id as string) ?? null,
+    taskSummary: row.task_summary ? JSON.parse(row.task_summary as string) : null,
   };
 }
 
@@ -288,6 +296,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.linkedSessionId !== undefined) {
         setClauses.push('linked_session_id = @linkedSessionId');
         params.linkedSessionId = changes.linkedSessionId;
+      }
+      if (changes.taskSummary !== undefined) {
+        setClauses.push('task_summary = @taskSummary');
+        params.taskSummary =
+          changes.taskSummary !== null ? JSON.stringify(changes.taskSummary) : null;
       }
 
       if (setClauses.length === 0) return;

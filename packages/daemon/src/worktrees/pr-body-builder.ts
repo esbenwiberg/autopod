@@ -1,4 +1,4 @@
-import type { ValidationResult } from '@autopod/shared';
+import type { TaskSummary, ValidationResult } from '@autopod/shared';
 
 export interface ScreenshotRef {
   /** Page path (e.g. '/', '/about') */
@@ -18,6 +18,8 @@ export interface PrBodyConfig {
   previewUrl: string | null;
   /** Screenshot references for embedding in the PR body */
   screenshots?: ScreenshotRef[];
+  /** Agent-reported task summary (what was done + deviations from plan) */
+  taskSummary?: TaskSummary;
 }
 
 export function buildPrTitle(task: string): string {
@@ -38,12 +40,59 @@ export function buildPrBody(config: PrBodyConfig): string {
     linesAdded,
     linesRemoved,
     previewUrl,
+    taskSummary,
   } = config;
 
   const sections: string[] = [];
 
   // Summary
   sections.push(`## Summary\n\n${task}`);
+
+  // Task Summary (agent-reported: what was done + deviations)
+  if (taskSummary) {
+    const lines: string[] = ['## Task Summary'];
+    lines.push(`\n${taskSummary.actualSummary}`);
+
+    if (taskSummary.deviations.length > 0) {
+      lines.push('\n### Deviations from Plan');
+      lines.push('');
+      for (const d of taskSummary.deviations) {
+        lines.push(`**${d.step}**`);
+        lines.push(`- Planned: ${d.planned}`);
+        lines.push(`- Actual: ${d.actual}`);
+        lines.push(`- Reason: ${d.reason}`);
+        lines.push('');
+      }
+    } else {
+      lines.push('\n_No deviations from plan reported._');
+    }
+
+    // Reviewer's assessment of deviations (if available)
+    const deviationsAssessment = validationResult?.taskReview?.deviationsAssessment;
+    if (deviationsAssessment) {
+      if (
+        deviationsAssessment.disclosedDeviations.length > 0 ||
+        deviationsAssessment.undisclosedDeviations.length > 0
+      ) {
+        lines.push('\n### Deviation Review');
+        lines.push('');
+        for (const d of deviationsAssessment.disclosedDeviations) {
+          const verdictIcon =
+            d.verdict === 'justified' ? '✅' : d.verdict === 'questionable' ? '⚠️' : '❌';
+          lines.push(`> ${verdictIcon} **${d.step}** (${d.verdict}): ${d.reasoning}`);
+        }
+        if (deviationsAssessment.undisclosedDeviations.length > 0) {
+          lines.push('');
+          lines.push('> **Undisclosed deviations detected:**');
+          for (const u of deviationsAssessment.undisclosedDeviations) {
+            lines.push(`> ⚠️ ${u}`);
+          }
+        }
+      }
+    }
+
+    sections.push(lines.join('\n'));
+  }
 
   // Validation results
   if (validationResult) {
