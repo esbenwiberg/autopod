@@ -337,7 +337,7 @@ describe('generateSystemInstructions', () => {
       expect(md).toContain('Do not use WebFetch, curl, gh CLI');
     });
 
-    it('lists action tools in the MCP server section', () => {
+    it('lists action tools in the same Tools bullet list as escalation tools', () => {
       const md = generateSystemInstructions(
         makeProfile(),
         makeSession(),
@@ -353,9 +353,12 @@ describe('generateSystemInstructions', () => {
           ],
         },
       );
-      expect(md).toContain('Action tools');
-      expect(md).toContain('ToolSearch to load them');
-      expect(md).toContain('read_issue(repo)');
+      // Action tools should be in the same bullet list as escalation tools
+      expect(md).toContain('  - read_issue — Read a GitHub issue');
+      // Should appear after the escalation tools
+      expect(md).toContain('  - ask_human');
+      // No separate sub-header
+      expect(md).not.toContain('Action tools');
     });
 
     it('dynamically describes ADO coverage when ado-workitems group is enabled', () => {

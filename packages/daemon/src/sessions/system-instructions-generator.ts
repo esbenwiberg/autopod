@@ -76,17 +76,11 @@ export function generateSystemInstructions(
   lines.push('  - check_messages — poll for human nudge messages (non-blocking)');
   lines.push('  - validate_in_browser — open a browser to verify your work (localhost URLs only)');
 
-  // List action tools on the same MCP server so the agent knows they're callable
+  // Action tools live on the same MCP server — list them in the same bullet list
+  // so the agent includes them in its initial ToolSearch select: call.
   const availableActions = options?.availableActions ?? [];
-  if (availableActions.length > 0) {
-    lines.push('');
-    lines.push('  **Action tools** (also on this MCP server — use ToolSearch to load them):');
-    for (const action of availableActions) {
-      const paramList = Object.entries(action.params)
-        .map(([name, def]) => (def.required ? name : `${name}?`))
-        .join(', ');
-      lines.push(`  - ${action.name}(${paramList}) — ${action.description}`);
-    }
+  for (const action of availableActions) {
+    lines.push(`  - ${action.name} — ${action.description}`);
   }
   lines.push('');
 
