@@ -140,6 +140,17 @@ public enum SessionMapper {
       )
     }()
 
+    // Map task summary
+    let taskSummary: TaskSummary? = {
+      guard let ts = response.taskSummary else { return nil }
+      return TaskSummary(
+        actualSummary: ts.actualSummary,
+        deviations: ts.deviations.map {
+          DeviationItem(step: $0.step, planned: $0.planned, actual: $0.actual, reason: $0.reason)
+        }
+      )
+    }()
+
     // Error summary for failed sessions
     let errorSummary: String? = {
       guard status == .failed || status == .killed else { return nil }
@@ -186,6 +197,7 @@ public enum SessionMapper {
       outputTokens: response.outputTokens,
       costUsd: response.costUsd,
       commitCount: response.commitCount,
+      taskSummary: taskSummary,
       linkedSessionId: response.linkedSessionId
     )
   }

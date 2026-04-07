@@ -200,6 +200,24 @@ public struct AttemptInfo: Sendable {
     }
 }
 
+public struct DeviationItem: Sendable {
+    public let step: String
+    public let planned: String
+    public let actual: String
+    public let reason: String
+    public init(step: String, planned: String, actual: String, reason: String) {
+        self.step = step; self.planned = planned; self.actual = actual; self.reason = reason
+    }
+}
+
+public struct TaskSummary: Sendable {
+    public let actualSummary: String
+    public let deviations: [DeviationItem]
+    public init(actualSummary: String, deviations: [DeviationItem]) {
+        self.actualSummary = actualSummary; self.deviations = deviations
+    }
+}
+
 // MARK: - Session
 
 public struct Session: Identifiable, Sendable {
@@ -238,6 +256,9 @@ public struct Session: Identifiable, Sendable {
     public var outputTokens: Int
     public var costUsd: Double
     public var commitCount: Int
+
+    /// Task summary reported by the agent at completion
+    public var taskSummary: TaskSummary?
 
     /// Linked session ID for session chaining (workspace ↔ worker handoff)
     public var linkedSessionId: String?
@@ -288,6 +309,7 @@ public struct Session: Identifiable, Sendable {
         outputTokens: Int = 0,
         costUsd: Double = 0,
         commitCount: Int = 0,
+        taskSummary: TaskSummary? = nil,
         linkedSessionId: String? = nil
     ) {
         self.id = id; self.status = status; self.outputMode = outputMode
@@ -302,6 +324,6 @@ public struct Session: Identifiable, Sendable {
         self.attempts = attempts; self.queuePosition = queuePosition
         self.inputTokens = inputTokens; self.outputTokens = outputTokens
         self.costUsd = costUsd; self.commitCount = commitCount
-        self.linkedSessionId = linkedSessionId
+        self.taskSummary = taskSummary; self.linkedSessionId = linkedSessionId
     }
 }

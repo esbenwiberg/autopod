@@ -44,6 +44,19 @@ public struct SessionResponse: Codable, Sendable {
   public let commitCount: Int
   public let lastCommitAt: String?
   public let linkedSessionId: String?
+  public let taskSummary: TaskSummaryResponse?
+}
+
+public struct DeviationResponse: Codable, Sendable {
+  public let step: String
+  public let planned: String
+  public let actual: String
+  public let reason: String
+}
+
+public struct TaskSummaryResponse: Codable, Sendable {
+  public let actualSummary: String
+  public let deviations: [DeviationResponse]
 }
 
 // MARK: - Nested types

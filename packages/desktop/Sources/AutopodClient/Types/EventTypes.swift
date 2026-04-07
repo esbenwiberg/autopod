@@ -134,4 +134,8 @@ public struct AgentEventResponse: Codable, Sendable {
   public let description: String?
   public let currentPhase: Int?
   public let totalPhases: Int?
+
+  // task_summary
+  public let actualSummary: String?
+  public let deviations: [DeviationResponse]?
 }

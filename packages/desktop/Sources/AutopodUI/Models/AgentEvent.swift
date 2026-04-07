@@ -12,6 +12,7 @@ public enum AgentEventType: String, Sendable {
     case progress     // AgentProgressEvent — phase progress tracking
     case error        // AgentErrorEvent — errors with fatal flag
     case complete     // AgentCompleteEvent — task completion with token/cost info
+    case taskSummary = "task_summary" // AgentTaskSummaryEvent — final task summary with deviations
     case output       // Agent text output / reasoning
 
     public var label: String {
@@ -24,8 +25,9 @@ public enum AgentEventType: String, Sendable {
         case .plan:       "Plan"
         case .progress:   "Phase"
         case .error:      "Error"
-        case .complete:   "Done"
-        case .output:     "Output"
+        case .complete:    "Done"
+        case .taskSummary: "Summary"
+        case .output:      "Output"
         }
     }
 
@@ -39,8 +41,9 @@ public enum AgentEventType: String, Sendable {
         case .plan:       "list.bullet.clipboard"
         case .progress:   "flag"
         case .error:      "exclamationmark.triangle"
-        case .complete:   "checkmark.circle"
-        case .output:     "text.quote"
+        case .complete:    "checkmark.circle"
+        case .taskSummary: "doc.text.below.ecg"
+        case .output:      "text.quote"
         }
     }
 
@@ -54,8 +57,9 @@ public enum AgentEventType: String, Sendable {
         case .plan:       .blue
         case .progress:   .teal
         case .error:      .red
-        case .complete:   .green
-        case .output:     .secondary
+        case .complete:    .green
+        case .taskSummary: .indigo
+        case .output:      .secondary
         }
     }
 

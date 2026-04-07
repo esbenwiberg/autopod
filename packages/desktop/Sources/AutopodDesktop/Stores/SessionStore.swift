@@ -160,6 +160,11 @@ public final class SessionStore {
     sessions[index].errorSummary = summary
   }
 
+  public func updateTaskSummary(_ sessionId: String, summary: TaskSummary) {
+    guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+    sessions[index].taskSummary = summary
+  }
+
   public func updateTokens(_ sessionId: String, input: Int, output: Int, cost: Double) {
     guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
     sessions[index].inputTokens = input

@@ -10,6 +10,7 @@
 		3E484C58043E8C8A3293021B /* AutopodXcodeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BB9EEED149664897DB6336A /* AutopodXcodeApp.swift */; };
 		90A9E894168A67EAB46A4D19 /* AutopodDesktop in Frameworks */ = {isa = PBXBuildFile; productRef = BDB2D6FDAD7D667CBAE61EF2 /* AutopodDesktop */; };
 		BB87E9C3D740F0D4331818E4 /* AutopodClient in Frameworks */ = {isa = PBXBuildFile; productRef = 0782144CF1A2F315FDDE031D /* AutopodClient */; };
+		BE37EDF069C7B824F80FE42C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 703C905635CD54ECB59A20CF /* Assets.xcassets */; };
 		DE60CEF8820282F0E727278E /* AutopodUI in Frameworks */ = {isa = PBXBuildFile; productRef = A111EB59597890B84446BE35 /* AutopodUI */; };
 /* End PBXBuildFile section */
 
@@ -17,6 +18,7 @@
 		12208E2EED87E3A82F4A092D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		664F30957CDB3B4C6C0C2228 /* desktop */ = {isa = PBXFileReference; lastKnownFileType = folder; name = desktop; path = .; sourceTree = SOURCE_ROOT; };
 		6BB9EEED149664897DB6336A /* AutopodXcodeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopodXcodeApp.swift; sourceTree = "<group>"; };
+		703C905635CD54ECB59A20CF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AE5001939FC64E7ECDF24040 /* Autopod.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Autopod.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEDDBCF3EB87CD0DFECD0063 /* Autopod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Autopod.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -63,6 +65,7 @@
 		C650B9520F2DE52751081DAF /* Autopod */ = {
 			isa = PBXGroup;
 			children = (
+				703C905635CD54ECB59A20CF /* Assets.xcassets */,
 				DEDDBCF3EB87CD0DFECD0063 /* Autopod.entitlements */,
 				6BB9EEED149664897DB6336A /* AutopodXcodeApp.swift */,
 				12208E2EED87E3A82F4A092D /* Info.plist */,
@@ -78,6 +81,7 @@
 			buildConfigurationList = D778BAF9AE0950F6B10C652E /* Build configuration list for PBXNativeTarget "Autopod" */;
 			buildPhases = (
 				325A42A4DFA848A04E451DAA /* Sources */,
+				37794F528BBBBE960F887379 /* Resources */,
 				7CF860B73AB5C71DD8F7C179 /* Frameworks */,
 			);
 			buildRules = (
@@ -129,6 +133,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		37794F528BBBBE960F887379 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BE37EDF069C7B824F80FE42C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		325A42A4DFA848A04E451DAA /* Sources */ = {
@@ -203,11 +218,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Autopod/Autopod.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 6Q7HLX8369;
 				INFOPLIST_FILE = Autopod/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Autopod;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -291,11 +304,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Autopod/Autopod.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 6Q7HLX8369;
 				INFOPLIST_FILE = Autopod/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Autopod;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";

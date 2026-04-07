@@ -30,6 +30,11 @@ struct OverviewTab: View {
                     progressSection(phase)
                 }
 
+                // Task summary (persistent once reported)
+                if let summary = session.taskSummary {
+                    taskSummaryCard(summary)
+                }
+
                 // Session prompt
                 promptSection
 
@@ -255,6 +260,68 @@ struct OverviewTab: View {
             Text(phase.description)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Task summary
+
+    private func taskSummaryCard(_ summary: TaskSummary) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.text.below.ecg")
+                    .foregroundStyle(.indigo)
+                Text("Task Summary")
+                    .font(.system(.subheadline).weight(.semibold))
+            }
+
+            Text(summary.actualSummary)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            if !summary.deviations.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Deviations from Plan")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fontWeight(.semibold)
+
+                    ForEach(Array(summary.deviations.enumerated()), id: \.offset) { _, deviation in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(deviation.step)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            HStack(alignment: .top, spacing: 4) {
+                                Text("Planned:")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(deviation.planned)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            HStack(alignment: .top, spacing: 4) {
+                                Text("Actual:")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(deviation.actual)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("Reason: \(deviation.reason)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .italic()
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            }
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))

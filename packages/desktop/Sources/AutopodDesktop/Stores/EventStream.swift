@@ -214,6 +214,17 @@ public final class EventStream {
         sessionStore.setError(sessionId, summary: msg)
       }
 
+    case "task_summary":
+      if let actualSummary = event.actualSummary {
+        let deviations = (event.deviations ?? []).map {
+          DeviationItem(step: $0.step, planned: $0.planned, actual: $0.actual, reason: $0.reason)
+        }
+        sessionStore.updateTaskSummary(
+          sessionId,
+          summary: TaskSummary(actualSummary: actualSummary, deviations: deviations)
+        )
+      }
+
     case "complete":
       if let input = event.totalInputTokens, let output = event.totalOutputTokens,
          let cost = event.costUsd {
@@ -247,6 +258,7 @@ public final class EventStream {
       case "escalation": return response.payload?.question ?? "Escalation"
       case "plan": return response.summary ?? "Plan created"
       case "progress": return response.description ?? "Phase progress"
+      case "task_summary": return response.actualSummary ?? "Task summary reported"
       case "error": return response.message ?? "Error"
       case "complete": return "Agent finished"
       default: return response.message ?? response.type
