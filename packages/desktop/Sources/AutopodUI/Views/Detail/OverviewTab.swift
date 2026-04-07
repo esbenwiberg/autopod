@@ -73,6 +73,39 @@ struct OverviewTab: View {
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let options = session.escalationOptions, !options.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(options, id: \.self) { option in
+                        Button {
+                            replyText = option
+                            sendReply()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "circle")
+                                    .font(.system(size: 11))
+                                Text(option)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                    }
+                }
+
+                Divider()
+
+                HStack(spacing: 4) {
+                    Image(systemName: "pencil")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Or type a custom reply:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             HStack(spacing: 8) {
                 TextField("Type your reply...", text: $replyText)
                     .textFieldStyle(.plain)

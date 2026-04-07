@@ -213,6 +213,7 @@ public struct Session: Identifiable, Sendable {
 
     public var diffStats: DiffStats?
     public var escalationQuestion: String?
+    public var escalationOptions: [String]?
     public var escalationType: String?
     public var validationChecks: ValidationChecks?
     public var prUrl: URL?

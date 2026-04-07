@@ -433,7 +433,11 @@ public struct SessionCardFinal: View {
                     }
                 }
                 Button {
-                    showReplyInput = true
+                    if let options = session.escalationOptions, !options.isEmpty {
+                        showOptionsPicker = true
+                    } else {
+                        showReplyInput = true
+                    }
                 } label: {
                     Label("Reply", systemImage: "arrowshape.turn.up.left")
                         .frame(maxWidth: .infinity)
@@ -441,6 +445,21 @@ public struct SessionCardFinal: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.orange)
+                .confirmationDialog(
+                    session.escalationQuestion ?? "Choose an option",
+                    isPresented: $showOptionsPicker,
+                    titleVisibility: .visible
+                ) {
+                    ForEach(session.escalationOptions ?? [], id: \.self) { option in
+                        Button(option) {
+                            Task { await actions.reply(session.id, option) }
+                        }
+                    }
+                    Button("Custom reply…") {
+                        showReplyInput = true
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
             }
 
         case .validated:
@@ -596,6 +615,7 @@ public struct SessionCardFinal: View {
 
     @State private var showReplyInput = false
     @State private var replyInputText = ""
+    @State private var showOptionsPicker = false
     @State private var showNudgeInput = false
     @State private var nudgeInputText = ""
     @State private var showRejectFeedback = false

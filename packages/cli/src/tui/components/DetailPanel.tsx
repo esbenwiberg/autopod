@@ -413,7 +413,25 @@ export function DetailPanel({
                 {session.pendingEscalation.payload.context}
               </Text>
             )}
-          <Text dimColor>Press [t] to respond</Text>
+          {'options' in session.pendingEscalation.payload &&
+            session.pendingEscalation.payload.options &&
+            session.pendingEscalation.payload.options.length > 0 && (
+              <Box flexDirection="column" marginTop={1}>
+                {session.pendingEscalation.payload.options.map((opt, i) => (
+                  <Box key={`opt-${i}`} flexDirection="row">
+                    <Text color="yellow">{`  ${i + 1}. `}</Text>
+                    <Text>{opt}</Text>
+                  </Box>
+                ))}
+              </Box>
+            )}
+          <Text dimColor>
+            {'options' in session.pendingEscalation.payload &&
+            session.pendingEscalation.payload.options &&
+            session.pendingEscalation.payload.options.length > 0
+              ? 'Press [t] to pick an option'
+              : 'Press [t] to respond'}
+          </Text>
         </Box>
       )}
 

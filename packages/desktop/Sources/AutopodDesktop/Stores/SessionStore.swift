@@ -134,9 +134,10 @@ public final class SessionStore {
     sessions[index].phase = phase
   }
 
-  public func setEscalation(_ sessionId: String, question: String?) {
+  public func setEscalation(_ sessionId: String, question: String?, options: [String]? = nil) {
     guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
     sessions[index].escalationQuestion = question
+    sessions[index].escalationOptions = options
   }
 
   public func setValidationChecks(_ sessionId: String, checks: ValidationChecks) {
