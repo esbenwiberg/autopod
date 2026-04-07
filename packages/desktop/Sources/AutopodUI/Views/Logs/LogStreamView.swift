@@ -147,31 +147,36 @@ public struct LogStreamView: View {
     // MARK: - Log content
 
     private var logContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(filteredEvents) { event in
-                        LogEventRow(
-                            event: event,
-                            isExpanded: expandedEventId == event.id,
-                            onTap: {
-                                withAnimation(.easeOut(duration: 0.15)) {
-                                    expandedEventId = expandedEventId == event.id ? nil : event.id
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(filteredEvents) { event in
+                                LogEventRow(
+                                    event: event,
+                                    isExpanded: expandedEventId == event.id,
+                                    onTap: {
+                                        withAnimation(.easeOut(duration: 0.15)) {
+                                            expandedEventId = expandedEventId == event.id ? nil : event.id
+                                        }
+                                    }
+                                )
+                                .id(event.id)
+
+                                if event.id != filteredEvents.last?.id {
+                                    Divider().padding(.leading, 80)
                                 }
                             }
-                        )
-                        .id(event.id)
-
-                        if event.id != filteredEvents.last?.id {
-                            Divider().padding(.leading, 80)
                         }
+                        .frame(minWidth: geometry.size.width)
+                        .padding(.vertical, 4)
                     }
                 }
-                .padding(.vertical, 4)
-            }
-            .onChange(of: events.count) {
-                if pinnedToBottom, let last = filteredEvents.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                .onChange(of: events.count) {
+                    if pinnedToBottom, let last = filteredEvents.last {
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
                 }
             }
         }
@@ -204,7 +209,8 @@ struct LogEventRow: View {
                 Text(event.summary)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(event.type == .error ? .red : .primary)
-                    .lineLimit(isExpanded ? nil : 1)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if isExpanded, let detail = event.detail {
                     Text(detail)
@@ -216,8 +222,6 @@ struct LogEventRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
-
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
