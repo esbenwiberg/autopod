@@ -337,9 +337,10 @@ function generateOperatingEnvironment(
     lines.push('### Available Actions');
     lines.push(
       'These MCP tools let you access external context. All responses are PII-sanitized. ' +
-        '**You MUST use these tools** for all external data access — do NOT use `gh`, `curl`, ' +
-        '`wget`, or any CLI/HTTP client to access GitHub, Azure DevOps, or other external APIs. ' +
-        'The action tools handle authentication, rate limiting, PII redaction, and audit logging.',
+        'When you need external data (issues, PRs, code, work items), **always prefer these ' +
+        'action tools** over WebFetch, curl, gh, or other HTTP methods. Actions handle ' +
+        'authentication, rate limiting, PII redaction, and audit logging automatically. ' +
+        'Direct API access may be blocked by network policy.',
     );
     for (const action of availableActions) {
       const paramList = Object.entries(action.params)
@@ -352,16 +353,7 @@ function generateOperatingEnvironment(
 
   // What You Cannot Do
   lines.push('### What You Cannot Do');
-  if (availableActions.length > 0) {
-    lines.push(
-      '- Do NOT use `gh`, `hub`, `curl`, `wget`, or direct HTTP requests to access external APIs.',
-    );
-    lines.push(
-      '  Use the Available Actions listed above instead — they are the ONLY sanctioned way to ' +
-        'access external data.',
-    );
-  }
-  lines.push('- Access APIs directly (no tokens, no credentials are available in the container)');
+  lines.push('- Access APIs directly (no tokens or credentials are available in the container)');
   lines.push('- Read files from repos other than your worktree (use read_file action instead)');
   lines.push('- See real email addresses or usernames (they are masked for privacy)');
   lines.push('');
