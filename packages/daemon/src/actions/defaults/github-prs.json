@@ -31,7 +31,7 @@
     "params": {
       "repo": { "type": "string", "required": true, "description": "Repository (owner/name)" },
       "pr_number": { "type": "number", "required": true, "description": "PR number" },
-      "max_results": { "type": "number", "required": false, "default": 20 }
+      "max_results": { "type": "number", "required": false, "description": "Maximum results to return", "default": 20 }
     },
     "response": {
       "fields": ["body", "path", "position", "created_at"],
