@@ -2,7 +2,7 @@ import { spawn as cpSpawn, execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { Profile } from '@autopod/shared';
+import type { ActionOverride, Profile } from '@autopod/shared';
 import { ProfileNotFoundError, createProfileSchema, updateProfileSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -90,6 +90,21 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
             `${chalk.bold('Warm image:')} ${data.warmImageTag} (${data.warmImageBuiltAt ?? 'unknown'})`,
           );
         }
+        if (data.actionPolicy) {
+          const { enabledGroups, actionOverrides } = data.actionPolicy;
+          console.log(`${chalk.bold('Action groups:')} ${enabledGroups.join(', ')}`);
+          if (actionOverrides && actionOverrides.length > 0) {
+            console.log(chalk.bold('Action overrides:'));
+            for (const o of actionOverrides) {
+              const parts: string[] = [chalk.cyan(o.action)];
+              if (o.disabled) parts.push(chalk.red('disabled'));
+              if (o.requiresApproval) parts.push(chalk.yellow('requires-approval'));
+              if (o.allowedResources && o.allowedResources.length > 0)
+                parts.push(`repos: ${o.allowedResources.join(', ')}`);
+              console.log(`  ${parts.join('  ')}`);
+            }
+          }
+        }
       });
     });
 
@@ -121,6 +136,16 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         mcpServers: [],
         claudeMdSections: [],
         extends: null,
+        actionPolicy: {
+          enabledGroups: ['github-issues', 'github-prs'],
+          // actionOverrides:
+          //   - action: read_issue
+          //     allowedResources:
+          //       - myorg/*          # wildcard: all repos in myorg
+          //       - myorg/backend    # exact repo
+          //     requiresApproval: false
+          //     disabled: false
+        },
       };
 
       const edited = await openInEditor(template);
@@ -180,6 +205,145 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       await withSpinner('Deleting profile...', () => client.deleteProfile(name));
       console.log(chalk.green(`Profile "${name}" deleted.`));
     });
+
+  // ─── action-override subcommands ────────────────────────────────────────────
+
+  const actionOverride = profile
+    .command('action-override')
+    .description('Manage per-action overrides (repo restrictions, approval requirements)');
+
+  actionOverride
+    .command('list <profile>')
+    .description('List all action overrides for a profile')
+    .option('--json', 'Output as JSON')
+    .action(async (profileName: string, opts: { json?: boolean }) => {
+      const client = getClient();
+      const p = await withSpinner('Fetching profile...', () => client.getProfile(profileName));
+      const overrides = p.actionPolicy?.actionOverrides ?? [];
+
+      withJsonOutput(opts, overrides, (data) => {
+        if (data.length === 0) {
+          console.log(chalk.dim('No action overrides configured.'));
+          console.log(
+            chalk.dim(
+              `Use: ap profile action-override set ${profileName} <action> --allow-repo <pattern>`,
+            ),
+          );
+          return;
+        }
+        console.log(chalk.bold.cyan(`Action overrides for profile: ${profileName}`));
+        console.log(chalk.dim('─'.repeat(60)));
+        for (const o of data) {
+          const flags: string[] = [];
+          if (o.disabled) flags.push(chalk.red('disabled'));
+          if (o.requiresApproval) flags.push(chalk.yellow('requires-approval'));
+          const repos =
+            o.allowedResources && o.allowedResources.length > 0
+              ? chalk.dim(`repos: ${o.allowedResources.join(', ')}`)
+              : chalk.dim('repos: (all)');
+          console.log(
+            `  ${chalk.cyan(o.action.padEnd(24))} ${repos}${flags.length > 0 ? `  ${flags.join(', ')}` : ''}`,
+          );
+        }
+      });
+    });
+
+  actionOverride
+    .command('set <profile> <action>')
+    .description('Add or update an action override')
+    .option(
+      '--allow-repo <pattern>',
+      'Allow action only for this repo/pattern (repeatable; use myorg/* for wildcard)',
+      (v: string, acc: string[]) => [...acc, v],
+      [] as string[],
+    )
+    .option('--require-approval', 'Require human approval before the action executes')
+    .option('--no-require-approval', 'Remove human approval requirement')
+    .option('--disable', 'Disable this action entirely')
+    .option('--enable', 'Re-enable a previously disabled action')
+    .action(
+      async (
+        profileName: string,
+        actionName: string,
+        opts: {
+          allowRepo: string[];
+          requireApproval?: boolean;
+          disable?: boolean;
+          enable?: boolean;
+        },
+      ) => {
+        const client = getClient();
+        const p = await withSpinner('Fetching profile...', () => client.getProfile(profileName));
+
+        if (!p.actionPolicy) {
+          console.error(
+            chalk.red(
+              `Profile "${profileName}" has no actionPolicy. Enable action groups first via: ap profile edit ${profileName}`,
+            ),
+          );
+          process.exit(1);
+        }
+
+        const overrides: ActionOverride[] = [...(p.actionPolicy.actionOverrides ?? [])];
+        const existing = overrides.find((o) => o.action === actionName);
+        const override: ActionOverride = existing ?? { action: actionName };
+
+        if (opts.allowRepo.length > 0) override.allowedResources = opts.allowRepo;
+        if (opts.requireApproval === true) override.requiresApproval = true;
+        if (opts.requireApproval === false) override.requiresApproval = false;
+        if (opts.disable) override.disabled = true;
+        if (opts.enable) override.disabled = false;
+
+        if (!existing) {
+          overrides.push(override);
+        } else {
+          const idx = overrides.indexOf(existing);
+          overrides[idx] = override;
+        }
+
+        const currentPolicy = p.actionPolicy;
+        await withSpinner('Saving override...', () =>
+          client.updateProfile(profileName, {
+            actionPolicy: { ...currentPolicy, actionOverrides: overrides },
+          }),
+        );
+
+        console.log(chalk.green(`Override for "${actionName}" saved.`));
+        if (override.allowedResources?.length)
+          console.log(`  Repos: ${override.allowedResources.join(', ')}`);
+        if (override.requiresApproval) console.log('  Requires human approval: yes');
+        if (override.disabled) console.log(`  Status: ${chalk.red('disabled')}`);
+      },
+    );
+
+  actionOverride
+    .command('remove <profile> <action>')
+    .description('Remove an action override entirely')
+    .action(async (profileName: string, actionName: string) => {
+      const client = getClient();
+      const p = await withSpinner('Fetching profile...', () => client.getProfile(profileName));
+
+      if (!p.actionPolicy?.actionOverrides?.length) {
+        console.log(chalk.dim(`No overrides found for profile "${profileName}".`));
+        return;
+      }
+
+      const filtered = p.actionPolicy.actionOverrides.filter((o) => o.action !== actionName);
+      if (filtered.length === p.actionPolicy.actionOverrides.length) {
+        console.log(chalk.dim(`No override found for action "${actionName}".`));
+        return;
+      }
+
+      const policy = p.actionPolicy;
+      await withSpinner('Removing override...', () =>
+        client.updateProfile(profileName, {
+          actionPolicy: { ...policy, actionOverrides: filtered },
+        }),
+      );
+      console.log(chalk.green(`Override for "${actionName}" removed.`));
+    });
+
+  // ────────────────────────────────────────────────────────────────────────────
 
   profile
     .command('auth-copilot <name>')

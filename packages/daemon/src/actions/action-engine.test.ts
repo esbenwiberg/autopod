@@ -155,7 +155,7 @@ describe('ActionEngine', () => {
     expect(result.error).toContain('not allowed for resource');
   });
 
-  it('allows when resource is in allowedResources', async () => {
+  it('allows when resource is an exact match in allowedResources', async () => {
     const policyWithResource: ActionPolicy = {
       ...testPolicy,
       actionOverrides: [{ action: 'read_issue', allowedResources: ['org/allowed-repo'] }],
@@ -171,6 +171,58 @@ describe('ActionEngine', () => {
       policyWithResource,
     );
     // Will fail at the handler level (network), but should NOT fail at resource check
+    expect(result.error).not.toContain('not allowed for resource');
+  });
+
+  it('allows when resource matches an org/* wildcard', async () => {
+    const policyWithWildcard: ActionPolicy = {
+      ...testPolicy,
+      actionOverrides: [{ action: 'read_issue', allowedResources: ['myorg/*'] }],
+    };
+
+    const result = await engine.execute(
+      {
+        sessionId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'myorg/any-repo', issue_number: 1 },
+      },
+      policyWithWildcard,
+    );
+    expect(result.error).not.toContain('not allowed for resource');
+  });
+
+  it('blocks when resource does not match an org/* wildcard', async () => {
+    const policyWithWildcard: ActionPolicy = {
+      ...testPolicy,
+      actionOverrides: [{ action: 'read_issue', allowedResources: ['myorg/*'] }],
+    };
+
+    const result = await engine.execute(
+      {
+        sessionId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'other-org/repo', issue_number: 1 },
+      },
+      policyWithWildcard,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not allowed for resource');
+  });
+
+  it('allows any resource when allowedResources contains *', async () => {
+    const policyWithStar: ActionPolicy = {
+      ...testPolicy,
+      actionOverrides: [{ action: 'read_issue', allowedResources: ['*'] }],
+    };
+
+    const result = await engine.execute(
+      {
+        sessionId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'totally/different', issue_number: 1 },
+      },
+      policyWithStar,
+    );
     expect(result.error).not.toContain('not allowed for resource');
   });
 

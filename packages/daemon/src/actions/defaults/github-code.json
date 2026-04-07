@@ -25,7 +25,12 @@
         "required": true,
         "description": "Search query (code search syntax)"
       },
-      "max_results": { "type": "number", "required": false, "description": "Maximum results to return", "default": 10 }
+      "max_results": {
+        "type": "number",
+        "required": false,
+        "description": "Maximum results to return",
+        "default": 10
+      }
     },
     "response": {
       "fields": ["path", "repository", "text_matches"],

@@ -50,7 +50,12 @@
         "required": false,
         "description": "Filter by work item type (e.g. Bug, Task)"
       },
-      "max_results": { "type": "number", "required": false, "description": "Maximum results to return", "default": 10 }
+      "max_results": {
+        "type": "number",
+        "required": false,
+        "description": "Maximum results to return",
+        "default": 10
+      }
     },
     "response": {
       "fields": ["id", "fields.System.Title", "fields.System.State", "fields.System.WorkItemType"],
