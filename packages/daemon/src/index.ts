@@ -402,6 +402,7 @@ const app = await createServer({
   containerManagerFactory,
   docker,
   imageBuilder,
+  actionRegistry,
   sessionTokenIssuer,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,

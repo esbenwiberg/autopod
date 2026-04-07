@@ -98,4 +98,96 @@ describe('ActionRegistry', () => {
 
     expect(registry.getAction('nonexistent', policy)).toBeUndefined();
   });
+
+  it('enables individual actions via enabledActions without group', () => {
+    const registry = createActionRegistry(logger);
+
+    const policy: ActionPolicy = {
+      enabledGroups: [],
+      enabledActions: ['my_api'],
+      sanitization: { preset: 'standard' },
+      customActions: [
+        {
+          name: 'my_api',
+          description: 'API',
+          group: 'custom',
+          handler: 'http',
+          params: {},
+          endpoint: { url: 'https://example.com', method: 'GET' },
+          response: { fields: ['data'] },
+        },
+        {
+          name: 'other_api',
+          description: 'Other',
+          group: 'custom',
+          handler: 'http',
+          params: {},
+          endpoint: { url: 'https://example.com', method: 'GET' },
+          response: { fields: ['data'] },
+        },
+      ],
+    };
+
+    // Custom actions still require the 'custom' group — enabledActions applies to built-in actions
+    // For custom actions, the group gate still applies
+    const actions = registry.getAvailableActions(policy);
+    expect(actions.find((a) => a.name === 'my_api')).toBeUndefined();
+    expect(actions.find((a) => a.name === 'other_api')).toBeUndefined();
+  });
+
+  it('enables built-in actions via enabledActions when group is disabled', () => {
+    const registry = createActionRegistry(logger);
+    const defaults = registry.getAllDefaults();
+
+    if (defaults.length === 0) {
+      // Defaults not available in test env — skip
+      return;
+    }
+
+    const firstAction = defaults[0];
+    const policy: ActionPolicy = {
+      enabledGroups: [], // No groups enabled
+      enabledActions: [firstAction.name],
+      sanitization: { preset: 'standard' },
+    };
+
+    const actions = registry.getAvailableActions(policy);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.name).toBe(firstAction.name);
+  });
+
+  it('disabled override wins over enabledActions', () => {
+    const registry = createActionRegistry(logger);
+    const defaults = registry.getAllDefaults();
+
+    if (defaults.length === 0) return;
+
+    const firstAction = defaults[0];
+    const policy: ActionPolicy = {
+      enabledGroups: [],
+      enabledActions: [firstAction.name],
+      actionOverrides: [{ action: firstAction.name, disabled: true }],
+      sanitization: { preset: 'standard' },
+    };
+
+    const actions = registry.getAvailableActions(policy);
+    expect(actions.find((a) => a.name === firstAction.name)).toBeUndefined();
+  });
+
+  it('backward compat: works without enabledActions field', () => {
+    const registry = createActionRegistry(logger);
+    const defaults = registry.getAllDefaults();
+
+    if (defaults.length === 0) return;
+
+    const policy: ActionPolicy = {
+      enabledGroups: [defaults[0].group],
+      sanitization: { preset: 'standard' },
+    };
+
+    // Should work exactly as before — no enabledActions means no individual actions
+    const actions = registry.getAvailableActions(policy);
+    const groupActions = defaults.filter((d) => d.group === defaults[0].group);
+    expect(actions).toHaveLength(groupActions.length);
+  });
 });

@@ -132,13 +132,18 @@ export const quarantineConfigSchema = z.object({
 });
 
 // ─── Action Policy ──────────────────────────────────────────────
-export const actionPolicySchema = z.object({
-  enabledGroups: z.array(actionGroupSchema).min(1),
-  actionOverrides: z.array(actionOverrideSchema).optional(),
-  customActions: z.array(actionDefinitionSchema).max(50).optional(),
-  sanitization: dataSanitizationConfigSchema.default({}),
-  quarantine: quarantineConfigSchema.optional(),
-});
+export const actionPolicySchema = z
+  .object({
+    enabledGroups: z.array(actionGroupSchema).default([]),
+    enabledActions: z.array(z.string().min(1).max(64)).default([]).optional(),
+    actionOverrides: z.array(actionOverrideSchema).optional(),
+    customActions: z.array(actionDefinitionSchema).max(50).optional(),
+    sanitization: dataSanitizationConfigSchema.default({}),
+    quarantine: quarantineConfigSchema.optional(),
+  })
+  .refine((d) => d.enabledGroups.length > 0 || (d.enabledActions?.length ?? 0) > 0, {
+    message: 'At least one action group or individual action must be enabled',
+  });
 
 // ─── Output Mode ────────────────────────────────────────────────
 export const outputModeSchema = z.enum(['pr', 'artifact']);

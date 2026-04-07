@@ -175,6 +175,12 @@ public actor DaemonAPI {
     try await request("POST", "/profiles/\(name)/warm", body: try encode(WarmBody(rebuild: rebuild, gitPat: gitPat)))
   }
 
+  // MARK: - Actions
+
+  public func fetchActionCatalog() async throws -> [ActionCatalogEntry] {
+    try await request("GET", "/actions/catalog")
+  }
+
   // MARK: - Internal request helper
 
   private func encode(_ value: some Encodable) throws -> Data {

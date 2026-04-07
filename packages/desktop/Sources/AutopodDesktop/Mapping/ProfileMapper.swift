@@ -20,6 +20,7 @@ public enum ProfileMapper {
     let enabledGroups: Set<ActionGroup> = Set(
       (ap?.enabledGroups ?? []).compactMap { ActionGroup(rawValue: $0) }
     )
+    let enabledActions: Set<String> = Set(ap?.enabledActions ?? [])
     let actionOverrides: [ActionOverride] = (ap?.actionOverrides ?? []).map {
       ActionOverride(
         action: $0.action,
@@ -80,6 +81,7 @@ public enum ProfileMapper {
       warmImageBuiltAt: response.warmImageBuiltAt,
       actionPolicyEnabled: ap != nil,
       actionEnabledGroups: enabledGroups,
+      actionEnabledActions: enabledActions,
       actionOverrides: actionOverrides,
       actionSanitizationPreset: SanitizationPreset(rawValue: ap?.sanitization.preset ?? "standard") ?? .standard,
       actionSanitizationAllowedDomains: ap?.sanitization.allowedDomains ?? [],
@@ -168,6 +170,9 @@ public enum ProfileMapper {
           "allowedDomains": profile.actionSanitizationAllowedDomains,
         ] as [String: Any],
       ]
+      if !profile.actionEnabledActions.isEmpty {
+        ap["enabledActions"] = Array(profile.actionEnabledActions).sorted()
+      }
       if !profile.actionOverrides.isEmpty {
         ap["actionOverrides"] = profile.actionOverrides.map { o -> [String: Any] in
           var entry: [String: Any] = ["action": o.action]

@@ -8,6 +8,7 @@ import AutopodUI
 public final class ProfileStore {
 
   public private(set) var profiles: [Profile] = []
+  public private(set) var actionCatalog: [ActionCatalogItem] = []
   public private(set) var isLoading = false
   public var error: String?
 
@@ -37,6 +38,24 @@ public final class ProfileStore {
       self.error = error.localizedDescription
     }
     isLoading = false
+
+    // Fetch action catalog in the background (non-blocking, best-effort)
+    if actionCatalog.isEmpty {
+      await loadActionCatalog()
+    }
+  }
+
+  public func loadActionCatalog() async {
+    guard let api else { return }
+    do {
+      let entries = try await api.fetchActionCatalog()
+      actionCatalog = entries.map {
+        ActionCatalogItem(name: $0.name, description: $0.description, group: $0.group)
+      }
+    } catch {
+      print("[ProfileStore] Failed to load action catalog: \(error)")
+      // Non-fatal — UI falls back to group checkboxes
+    }
   }
 
   // MARK: - CRUD

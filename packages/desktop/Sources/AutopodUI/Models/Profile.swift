@@ -67,6 +67,7 @@ public struct Profile: Identifiable, Sendable {
     // Action policy
     public var actionPolicyEnabled: Bool
     public var actionEnabledGroups: Set<ActionGroup>
+    public var actionEnabledActions: Set<String>
     public var actionOverrides: [ActionOverride]
     public var actionSanitizationPreset: SanitizationPreset
     public var actionSanitizationAllowedDomains: [String]
@@ -114,6 +115,7 @@ public struct Profile: Identifiable, Sendable {
         warmImageTag: String? = nil, warmImageBuiltAt: String? = nil,
         actionPolicyEnabled: Bool = false,
         actionEnabledGroups: Set<ActionGroup> = [],
+        actionEnabledActions: Set<String> = [],
         actionOverrides: [ActionOverride] = [],
         actionSanitizationPreset: SanitizationPreset = .standard,
         actionSanitizationAllowedDomains: [String] = [],
@@ -152,6 +154,7 @@ public struct Profile: Identifiable, Sendable {
         self.warmImageTag = warmImageTag; self.warmImageBuiltAt = warmImageBuiltAt
         self.actionPolicyEnabled = actionPolicyEnabled
         self.actionEnabledGroups = actionEnabledGroups
+        self.actionEnabledActions = actionEnabledActions
         self.actionOverrides = actionOverrides
         self.actionSanitizationPreset = actionSanitizationPreset
         self.actionSanitizationAllowedDomains = actionSanitizationAllowedDomains
@@ -249,6 +252,20 @@ public enum QuarantineOnBlock: String, CaseIterable, Sendable {
         case .skip:     "Skip (discard)"
         case .askHuman: "Ask Human"
         }
+    }
+}
+
+/// Lightweight catalog entry for the action picker UI.
+public struct ActionCatalogItem: Identifiable, Hashable, Sendable {
+    public var id: String { name }
+    public let name: String
+    public let description: String
+    public let group: String
+
+    public init(name: String, description: String, group: String) {
+        self.name = name
+        self.description = description
+        self.group = group
     }
 }
 

@@ -4,6 +4,7 @@ import websocket from '@fastify/websocket';
 import type Dockerode from 'dockerode';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import type { ActionRegistry } from '../actions/action-registry.js';
 import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
@@ -20,6 +21,7 @@ import { authPlugin } from './plugins/auth.js';
 import { corsPlugin } from './plugins/cors.js';
 import { rateLimitPlugin } from './plugins/rate-limit.js';
 import { requestLoggerPlugin } from './plugins/request-logger.js';
+import { actionRoutes } from './routes/actions.js';
 import { diffRoutes } from './routes/diff.js';
 import { healthRoutes } from './routes/health.js';
 import { profileRoutes } from './routes/profiles.js';
@@ -39,6 +41,7 @@ export interface ServerDependencies {
   containerManagerFactory?: ContainerManagerFactory;
   docker?: Dockerode;
   imageBuilder?: ImageBuilder;
+  actionRegistry?: ActionRegistry;
   sessionTokenIssuer?: SessionTokenIssuer;
   logLevel?: string;
   prettyLog?: boolean;
@@ -76,6 +79,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     (profileName) => deps.sessionManager.refreshNetworkPolicy(profileName),
     deps.imageBuilder,
   );
+
+  // Action catalog
+  if (deps.actionRegistry) {
+    actionRoutes(app, deps.actionRegistry);
+  }
 
   // Diff routes (requires container manager)
   if (deps.containerManagerFactory) {

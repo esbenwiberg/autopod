@@ -83,6 +83,7 @@ export interface QuarantineConfig {
 // ─── Action Policy (on Profile) ─────────────────────────────────
 export interface ActionPolicy {
   enabledGroups: ActionGroup[];
+  enabledActions?: string[];
   actionOverrides?: ActionOverride[];
   customActions?: ActionDefinition[];
   sanitization: DataSanitizationConfig;

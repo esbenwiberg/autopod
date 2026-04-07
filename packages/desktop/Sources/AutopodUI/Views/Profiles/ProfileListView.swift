@@ -3,12 +3,15 @@ import SwiftUI
 /// Profile list — shows all profiles with quick stats, click to edit.
 public struct ProfileListView: View {
     public let profiles: [Profile]
+    public let actionCatalog: [ActionCatalogItem]
     public var onSave: ((Profile) -> Void)?
     public var onCreate: ((Profile) -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
-    public init(profiles: [Profile], onSave: ((Profile) -> Void)? = nil, onCreate: ((Profile) -> Void)? = nil,
+    public init(profiles: [Profile], actionCatalog: [ActionCatalogItem] = [],
+                onSave: ((Profile) -> Void)? = nil, onCreate: ((Profile) -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil) {
-        self.profiles = profiles; self.onSave = onSave; self.onCreate = onCreate
+        self.profiles = profiles; self.actionCatalog = actionCatalog
+        self.onSave = onSave; self.onCreate = onCreate
         self.onAuthenticate = onAuthenticate
     }
 
@@ -53,12 +56,13 @@ public struct ProfileListView: View {
             }
         }
         .sheet(item: $selectedProfile) { profile in
-            ProfileEditorView(profile: profile, isNew: false, onSave: onSave, onAuthenticate: onAuthenticate)
+            ProfileEditorView(profile: profile, isNew: false, actionCatalog: actionCatalog, onSave: onSave, onAuthenticate: onAuthenticate)
         }
         .sheet(isPresented: $showCreateSheet) {
             ProfileEditorView(
                 profile: Profile(name: "", repoUrl: ""),
                 isNew: true,
+                actionCatalog: actionCatalog,
                 onSave: onCreate
             )
         }

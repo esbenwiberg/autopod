@@ -95,6 +95,7 @@ public struct AppRootView: View {
       SettingsView(
         connectionManager: connectionManager,
         profiles: profileStore.profiles,
+        actionCatalog: profileStore.actionCatalog,
         profileError: profileStore.error,
         onSaveProfile: { [profileStore] profile in
           Task {

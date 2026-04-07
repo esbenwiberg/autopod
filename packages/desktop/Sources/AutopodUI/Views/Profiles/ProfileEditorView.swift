@@ -108,13 +108,17 @@ public typealias ProfileAuthHandler = (String, String, @escaping (String?) -> Vo
 public struct ProfileEditorView: View {
     @State public var profile: Profile
     public let isNew: Bool
+    public let actionCatalog: [ActionCatalogItem]
     public var onSave: ((Profile) -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
 
-    public init(profile: Profile, isNew: Bool, onSave: ((Profile) -> Void)? = nil,
+    public init(profile: Profile, isNew: Bool,
+                actionCatalog: [ActionCatalogItem] = [],
+                onSave: ((Profile) -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil) {
         self._profile = State(initialValue: profile)
         self.isNew = isNew
+        self.actionCatalog = actionCatalog
         self.onSave = onSave
         self.onAuthenticate = onAuthenticate
     }
@@ -664,25 +668,11 @@ public struct ProfileEditorView: View {
         if profile.actionPolicyEnabled {
             Divider().padding(.vertical, 4)
 
-            Text("Enabled Action Groups")
+            Text("Enabled Actions")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(ActionGroup.allCases, id: \.self) { group in
-                    Toggle(isOn: Binding(
-                        get: { profile.actionEnabledGroups.contains(group) },
-                        set: { enabled in
-                            if enabled { profile.actionEnabledGroups.insert(group) }
-                            else { profile.actionEnabledGroups.remove(group) }
-                        }
-                    )) {
-                        Text(group.label)
-                            .font(.callout)
-                    }
-                    .toggleStyle(.checkbox)
-                }
-            }
+            actionGroupDisclosures
 
             Divider().padding(.vertical, 4)
 
@@ -709,10 +699,7 @@ public struct ProfileEditorView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach($profile.actionOverrides) { $override in
                         HStack(alignment: .center, spacing: 8) {
-                            TextField("action name", text: $override.action)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(width: 160)
+                            actionNamePicker(selection: $override.action)
 
                             TextField("repos (myorg/*, myorg/repo)", text: Binding(
                                 get: { override.allowedResources.joined(separator: ", ") },
@@ -842,6 +829,167 @@ public struct ProfileEditorView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Action disclosure groups
+
+    private var catalogByGroup: [String: [ActionCatalogItem]] {
+        Dictionary(grouping: actionCatalog, by: \.group)
+    }
+
+    @ViewBuilder
+    private var actionGroupDisclosures: some View {
+        if actionCatalog.isEmpty {
+            // Fallback when catalog is unavailable — show classic group checkboxes
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(ActionGroup.allCases, id: \.self) { group in
+                    Toggle(isOn: Binding(
+                        get: { profile.actionEnabledGroups.contains(group) },
+                        set: { enabled in
+                            if enabled { profile.actionEnabledGroups.insert(group) }
+                            else { profile.actionEnabledGroups.remove(group) }
+                        }
+                    )) {
+                        Text(group.label)
+                            .font(.callout)
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(ActionGroup.allCases, id: \.self) { group in
+                    let items = catalogByGroup[group.rawValue] ?? []
+                    if !items.isEmpty {
+                        actionGroupRow(group: group, items: items)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actionGroupRow(group: ActionGroup, items: [ActionCatalogItem]) -> some View {
+        let groupEnabled = profile.actionEnabledGroups.contains(group)
+        let enabledCount = items.filter { isActionEnabled($0.name, group: group) }.count
+
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(items) { item in
+                    Toggle(isOn: Binding(
+                        get: { isActionEnabled(item.name, group: group) },
+                        set: { enabled in toggleAction(item.name, group: group, enabled: enabled) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.name)
+                                .font(.system(.caption, design: .monospaced))
+                            Text(item.description)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .padding(.leading, 8)
+                }
+            }
+        } label: {
+            Toggle(isOn: Binding(
+                get: { groupEnabled },
+                set: { enabled in toggleGroup(group, items: items, enabled: enabled) }
+            )) {
+                HStack(spacing: 6) {
+                    Text(group.label)
+                        .font(.callout)
+                    if enabledCount > 0 && enabledCount < items.count {
+                        Text("\(enabledCount) of \(items.count)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(.quaternary, in: Capsule())
+                    }
+                }
+            }
+            .toggleStyle(.checkbox)
+        }
+    }
+
+    private func isActionEnabled(_ name: String, group: ActionGroup) -> Bool {
+        let hasDisabledOverride = profile.actionOverrides.contains { $0.action == name && $0.disabled }
+        if hasDisabledOverride { return false }
+        return profile.actionEnabledGroups.contains(group) || profile.actionEnabledActions.contains(name)
+    }
+
+    private func toggleAction(_ name: String, group: ActionGroup, enabled: Bool) {
+        if enabled {
+            if profile.actionEnabledGroups.contains(group) {
+                // Group is on — remove the disabled override
+                profile.actionOverrides.removeAll { $0.action == name && $0.disabled }
+            } else {
+                // Group is off — add to individual enabledActions
+                profile.actionEnabledActions.insert(name)
+            }
+        } else {
+            if profile.actionEnabledGroups.contains(group) {
+                // Group is on — add disabled override to suppress this one
+                if !profile.actionOverrides.contains(where: { $0.action == name }) {
+                    profile.actionOverrides.append(ActionOverride(action: name, disabled: true))
+                } else {
+                    // Update existing override
+                    if let idx = profile.actionOverrides.firstIndex(where: { $0.action == name }) {
+                        profile.actionOverrides[idx].disabled = true
+                    }
+                }
+            } else {
+                // Group is off — remove from individual enabledActions
+                profile.actionEnabledActions.remove(name)
+            }
+        }
+    }
+
+    private func toggleGroup(_ group: ActionGroup, items: [ActionCatalogItem], enabled: Bool) {
+        if enabled {
+            profile.actionEnabledGroups.insert(group)
+            // Clean up: remove individual enabledActions that are now covered by the group
+            for item in items {
+                profile.actionEnabledActions.remove(item.name)
+            }
+            // Clean up: remove disabled overrides for this group's actions
+            profile.actionOverrides.removeAll { o in
+                o.disabled && items.contains { $0.name == o.action }
+            }
+        } else {
+            profile.actionEnabledGroups.remove(group)
+            // Don't auto-add individual actions — clean disable
+        }
+    }
+
+    @ViewBuilder
+    private func actionNamePicker(selection: Binding<String>) -> some View {
+        if actionCatalog.isEmpty {
+            // Fallback to text field when catalog unavailable
+            TextField("action name", text: selection)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.caption, design: .monospaced))
+                .frame(width: 160)
+        } else {
+            Picker("", selection: selection) {
+                Text("Select action...").tag("")
+                ForEach(ActionGroup.allCases, id: \.self) { group in
+                    let items = catalogByGroup[group.rawValue] ?? []
+                    if !items.isEmpty {
+                        Section(group.label) {
+                            ForEach(items) { item in
+                                Text(item.name).tag(item.name)
+                            }
+                        }
+                    }
+                }
+            }
+            .labelsHidden()
+            .frame(width: 160)
         }
     }
 

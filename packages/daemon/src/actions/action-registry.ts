@@ -31,13 +31,14 @@ export function createActionRegistry(logger: Logger): ActionRegistry {
   return {
     getAvailableActions(policy: ActionPolicy): ActionDefinition[] {
       const enabledGroups = new Set(policy.enabledGroups);
+      const enabledActions = new Set(policy.enabledActions ?? []);
       const overrides = new Map((policy.actionOverrides ?? []).map((o) => [o.action, o]));
 
-      // Filter built-in actions by enabled groups + overrides
+      // Filter built-in actions by enabled groups/actions + overrides
       const builtIn = defaults.filter((action) => {
         const override = overrides.get(action.name);
         if (override?.disabled) return false;
-        return enabledGroups.has(action.group);
+        return enabledGroups.has(action.group) || enabledActions.has(action.name);
       });
 
       // Add custom actions (always group: 'custom')

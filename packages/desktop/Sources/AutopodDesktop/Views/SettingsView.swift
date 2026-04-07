@@ -35,18 +35,22 @@ enum SettingsSection: Hashable {
 public struct SettingsView: View {
     public let connectionManager: ConnectionManager
     public let profiles: [Profile]
+    public let actionCatalog: [ActionCatalogItem]
     public let profileError: String?
     public var onSaveProfile: ((Profile) -> Void)?
     public var onCreateProfile: ((Profile) -> Void)?
     public var onAuthenticateProfile: ProfileAuthHandler?
     @Binding public var isPresented: Bool
 
-    public init(connectionManager: ConnectionManager, profiles: [Profile], profileError: String? = nil,
+    public init(connectionManager: ConnectionManager, profiles: [Profile],
+                actionCatalog: [ActionCatalogItem] = [],
+                profileError: String? = nil,
                 onSaveProfile: ((Profile) -> Void)? = nil, onCreateProfile: ((Profile) -> Void)? = nil,
                 onAuthenticateProfile: ProfileAuthHandler? = nil,
                 isPresented: Binding<Bool>) {
         self.connectionManager = connectionManager
         self.profiles = profiles
+        self.actionCatalog = actionCatalog
         self.profileError = profileError
         self.onSaveProfile = onSaveProfile
         self.onCreateProfile = onCreateProfile
@@ -218,7 +222,8 @@ public struct SettingsView: View {
                 .padding(.vertical, 8)
                 .background(Color.red.opacity(0.08))
             }
-            ProfileListView(profiles: profiles, onSave: onSaveProfile, onCreate: onCreateProfile,
+            ProfileListView(profiles: profiles, actionCatalog: actionCatalog,
+                           onSave: onSaveProfile, onCreate: onCreateProfile,
                            onAuthenticate: onAuthenticateProfile)
         }
     }

@@ -173,6 +173,7 @@ public struct WarmResult: Codable, Sendable {
 
 public struct ActionPolicyResponse: Codable, Sendable {
   public var enabledGroups: [String]
+  public var enabledActions: [String]?
   public var actionOverrides: [ActionOverrideResponse]?
   public var customActions: AnyCodable?  // Complex type — pass through
   public var sanitization: DataSanitizationResponse
