@@ -381,6 +381,33 @@ describe('generateSystemInstructions', () => {
       expect(md).toContain('MUST use these MCP action tools');
     });
 
+    it('dynamically describes ADO PR and code coverage when ado-prs and ado-code groups are enabled', () => {
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          availableActions: [
+            {
+              name: 'ado_read_pr',
+              description: 'Read an ADO pull request',
+              group: 'ado-prs',
+              params: { id: { type: 'number', required: true, description: 'PR ID' } },
+            },
+            {
+              name: 'ado_read_file',
+              description: 'Read a file from ADO',
+              group: 'ado-code',
+              params: { path: { type: 'string', required: true, description: 'File path' } },
+            },
+          ],
+        },
+      );
+      expect(md).toContain('ADO PRs, code');
+      expect(md).toContain('MUST use these MCP action tools');
+      expect(md).toContain('dev.azure.com');
+    });
+
     it('uses generic phrasing for custom action groups', () => {
       const md = generateSystemInstructions(
         makeProfile(),

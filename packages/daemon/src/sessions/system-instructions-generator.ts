@@ -346,7 +346,7 @@ function generateOperatingEnvironment(
     if (groups.has('github-issues') || groups.has('github-prs') || groups.has('github-code')) {
       blockedDomains.push('github.com / api.github.com');
     }
-    if (groups.has('ado-workitems')) {
+    if (groups.has('ado-workitems') || groups.has('ado-prs') || groups.has('ado-code')) {
       blockedDomains.push('dev.azure.com');
     }
     if (groups.has('azure-logs')) {
@@ -376,8 +376,12 @@ function generateOperatingEnvironment(
       if (groups.has('github-code')) parts.push('code');
       coveredDomains.push(`GitHub ${parts.join(', ')}`);
     }
-    if (groups.has('ado-workitems')) {
-      coveredDomains.push('ADO work items');
+    if (groups.has('ado-workitems') || groups.has('ado-prs') || groups.has('ado-code')) {
+      const parts: string[] = [];
+      if (groups.has('ado-workitems')) parts.push('work items');
+      if (groups.has('ado-prs')) parts.push('PRs');
+      if (groups.has('ado-code')) parts.push('code');
+      coveredDomains.push(`ADO ${parts.join(', ')}`);
     }
     if (groups.has('azure-logs')) {
       coveredDomains.push('Azure logs');

@@ -111,6 +111,89 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
           return pickFieldsArray(batchResult.value ?? [], action.response.fields);
         }
 
+        // ── PR actions ────────────────────────────────────────────
+
+        case 'ado_read_pr': {
+          const repo = encodeURIComponent(params.repo as string);
+          const prId = params.pull_request_id as number;
+          const data = await adoFetch(
+            `https://dev.azure.com/${org}/${project}/_apis/git/repositories/${repo}/pullrequests/${prId}?api-version=${ADO_API_VERSION}`,
+          );
+          return pickFields(data, action.response.fields);
+        }
+
+        case 'ado_read_pr_threads': {
+          const repo = encodeURIComponent(params.repo as string);
+          const prId = params.pull_request_id as number;
+          const max = (params.max_results as number) ?? 20;
+          const data = (await adoFetch(
+            `https://dev.azure.com/${org}/${project}/_apis/git/repositories/${repo}/pullrequests/${prId}/threads?api-version=${ADO_API_VERSION}`,
+          )) as { value: unknown[] };
+          // Filter to human comment threads only (skip system-generated threads)
+          const threads = (data.value ?? [])
+            .filter(
+              (t: unknown) =>
+                Array.isArray((t as Record<string, unknown>).comments) &&
+                ((t as Record<string, unknown>).comments as Array<Record<string, unknown>>).some(
+                  (c) => c.commentType === 'text',
+                ),
+            )
+            .slice(0, max);
+          return pickFieldsArray(threads, action.response.fields);
+        }
+
+        case 'ado_read_pr_changes': {
+          const repo = encodeURIComponent(params.repo as string);
+          const prId = params.pull_request_id as number;
+          // Fetch iterations, then get changes for the latest one
+          const iterations = (await adoFetch(
+            `https://dev.azure.com/${org}/${project}/_apis/git/repositories/${repo}/pullrequests/${prId}/iterations?api-version=${ADO_API_VERSION}`,
+          )) as { value: Array<{ id: number }> };
+          if (!iterations.value?.length) return [];
+          const lastIterationId = iterations.value[iterations.value.length - 1]?.id;
+          if (lastIterationId == null) return [];
+          const changes = (await adoFetch(
+            `https://dev.azure.com/${org}/${project}/_apis/git/repositories/${repo}/pullrequests/${prId}/iterations/${lastIterationId}/changes?api-version=${ADO_API_VERSION}`,
+          )) as { changeEntries: unknown[] };
+          return pickFieldsArray(changes.changeEntries ?? [], action.response.fields);
+        }
+
+        // ── Code actions ─────────────────────────────────────────
+
+        case 'ado_read_file': {
+          const repo = encodeURIComponent(params.repo as string);
+          const filePath = params.path as string;
+          const version = params.version as string | undefined;
+          let url = `https://dev.azure.com/${org}/${project}/_apis/git/repositories/${repo}/items?path=${encodeURIComponent(filePath)}&includeContent=true&api-version=${ADO_API_VERSION}`;
+          if (version) {
+            url += `&versionDescriptor.version=${encodeURIComponent(version)}`;
+          }
+          const data = await adoFetch(url);
+          return pickFields(data, action.response.fields);
+        }
+
+        case 'ado_search_code': {
+          const query = params.query as string;
+          const repo = params.repo as string | undefined;
+          const max = (params.max_results as number) ?? 10;
+          const searchBody: Record<string, unknown> = {
+            searchText: query,
+            $top: max,
+            filters: {
+              Project: [project],
+            },
+          };
+          if (repo) {
+            (searchBody.filters as Record<string, string[]>).Repository = [repo];
+          }
+          // Code Search uses a different base URL: almsearch.dev.azure.com
+          const data = (await adoPost(
+            `https://almsearch.dev.azure.com/${org}/${project}/_apis/search/codesearchresults?api-version=${ADO_API_VERSION}`,
+            searchBody,
+          )) as { results: unknown[] };
+          return pickFieldsArray(data.results?.slice(0, max) ?? [], action.response.fields);
+        }
+
         default:
           throw new Error(`Unknown ADO action: ${action.name}`);
       }

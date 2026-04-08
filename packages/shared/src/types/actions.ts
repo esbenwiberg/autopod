@@ -4,6 +4,8 @@ export type ActionGroup =
   | 'github-prs'
   | 'github-code'
   | 'ado-workitems'
+  | 'ado-prs'
+  | 'ado-code'
   | 'azure-logs'
   | 'custom';
 
