@@ -23,6 +23,11 @@ export function terminalRoutes(
   authModule: AuthModule,
   docker: Dockerode,
 ): void {
+  // Track active terminal connections per session. Multiple simultaneous tmux
+  // clients cause duplicated/amplified output — "last writer wins" evicts the
+  // old connection when a new one arrives (the new one is the reconnect).
+  const activeTerminals = new Map<string, WebSocket>();
+
   app.get(
     '/sessions/:sessionId/terminal',
     { websocket: true, config: { auth: false } },
@@ -70,6 +75,15 @@ export function terminalRoutes(
 
       const containerId = session.containerId;
       const container = docker.getContainer(containerId);
+
+      // Evict any existing terminal connection for this session — two tmux
+      // clients on the same session cause output duplication / feedback loops.
+      const existing = activeTerminals.get(sessionId);
+      if (existing) {
+        request.log.info({ sessionId }, 'Evicting previous terminal connection');
+        existing.close(4000, 'Superseded by new connection');
+      }
+      activeTerminals.set(sessionId, socket);
 
       // Create exec with TTY
       const startTerminal = async () => {
@@ -156,6 +170,11 @@ export function terminalRoutes(
           });
 
           socket.on('close', () => {
+            // Only remove tracking if WE are still the active connection —
+            // a late close from an evicted socket must not remove the new one.
+            if (activeTerminals.get(sessionId) === socket) {
+              activeTerminals.delete(sessionId);
+            }
             // Client disconnected — kill the exec stream
             try {
               const destroyable = stream as NodeJS.ReadWriteStream & { destroy?: () => void };

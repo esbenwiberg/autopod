@@ -18,6 +18,10 @@ public actor TerminalSocket {
   private var receiveTask: Task<Void, Never>?
   private var reconnectTask: Task<Void, Never>?
   private var state: State = .disconnected
+  /// Monotonic counter incremented on every `doConnect()`. Stale receive loops
+  /// compare their captured generation to the current value — if they differ,
+  /// a newer connection has superseded them and they must not trigger reconnect.
+  private var connectionGeneration: UInt64 = 0
 
   /// Tracks the last connect params so we can auto-reconnect.
   private var lastSessionId: String?
@@ -57,6 +61,18 @@ public actor TerminalSocket {
   }
 
   private func doConnect(sessionId: String, cols: Int, rows: Int) {
+    // Kill previous connection before opening a new one. Critical during
+    // reconnect: scheduleReconnect() calls doConnect() without cancelAll(),
+    // so without this cleanup the old WebSocket and receive loop stay alive,
+    // eventually cascading into multiple parallel connections to tmux.
+    receiveTask?.cancel()
+    receiveTask = nil
+    webSocketTask?.cancel(with: .goingAway, reason: nil)
+    webSocketTask = nil
+
+    connectionGeneration &+= 1
+    let gen = connectionGeneration
+
     setState(.connecting)
 
     var components = URLComponents(
@@ -80,10 +96,10 @@ public actor TerminalSocket {
     webSocketTask = ws
     ws.resume()
 
-    setState(.connected)
-
+    // Don't set .connected here — wait for the first successful receive in
+    // receiveLoop so we know the connection is actually alive.
     receiveTask = Task { [weak self] in
-      await self?.receiveLoop(ws)
+      await self?.receiveLoop(ws, generation: gen)
     }
   }
 
@@ -130,10 +146,15 @@ public actor TerminalSocket {
 
   // MARK: - Internal
 
-  private func receiveLoop(_ ws: URLSessionWebSocketTask) async {
+  private func receiveLoop(_ ws: URLSessionWebSocketTask, generation: UInt64) async {
+    var didConnect = false
     while !Task.isCancelled {
       do {
         let message = try await ws.receive()
+        if !didConnect {
+          didConnect = true
+          setState(.connected)
+        }
         switch message {
         case .data(let data):
           onData(data)
@@ -145,7 +166,9 @@ public actor TerminalSocket {
           break
         }
       } catch {
-        if !Task.isCancelled {
+        // Only trigger reconnect if this is still the active connection.
+        // A stale loop (superseded by a newer doConnect) must exit silently.
+        if !Task.isCancelled && generation == connectionGeneration {
           scheduleReconnect()
         }
         return
@@ -171,10 +194,15 @@ public actor TerminalSocket {
         let cols = await self.lastCols
         let rows = await self.lastRows
         await self.doConnect(sessionId: sessionId, cols: cols, rows: rows)
-        // Give the connection a moment to fail if the server rejects it
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        let currentState = await self.state
-        if case .connected = currentState { return }
+        // Wait up to 3s for the connection to prove itself alive (first
+        // successful receive flips state to .connected).
+        for _ in 0..<6 {
+          try? await Task.sleep(nanoseconds: 500_000_000)
+          guard !Task.isCancelled else { return }
+          let currentState = await self.state
+          if case .connected = currentState { return }
+          if case .error = currentState { break }
+        }
       }
       await self.setState(.error("Connection lost — could not reconnect"))
     }
