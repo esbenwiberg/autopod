@@ -9,16 +9,28 @@ import type { SessionQueue } from '../../sessions/index.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Read version from package.json at module load time (3 dirs up from src/api/routes/)
+// Read version from package.json at module load time.
+// Tries multiple paths because tsup bundles into dist/index.js (1 dir up)
+// while source runs from src/api/routes/ (3 dirs up).
 function readVersion(): string {
-  try {
-    const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../../package.json'), 'utf-8')) as {
-      version?: string;
-    };
-    return pkg.version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
+  const candidates = [
+    resolve(__dirname, '../package.json'), // bundled: dist/ -> daemon/
+    resolve(__dirname, '../../../package.json'), // source: src/api/routes/ -> daemon/
+  ];
+  for (const candidate of candidates) {
+    try {
+      const pkg = JSON.parse(readFileSync(candidate, 'utf-8')) as {
+        name?: string;
+        version?: string;
+      };
+      if (pkg.name === '@autopod/daemon' && pkg.version) {
+        return pkg.version;
+      }
+    } catch {
+      // try next candidate
+    }
   }
+  return '0.0.0';
 }
 
 const VERSION = readVersion();
