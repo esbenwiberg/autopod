@@ -401,6 +401,8 @@ const app = await createServer({
   pendingRequestsBySession,
   containerManagerFactory,
   docker,
+  db,
+  maxConcurrency: MAX_CONCURRENCY,
   imageBuilder,
   actionRegistry,
   sessionTokenIssuer,
