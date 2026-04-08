@@ -218,3 +218,6 @@ export type {
 
 // ID generation utility
 export { generateId, generateSessionId } from './id.js';
+
+// AC list parser
+export { parseAcList } from './parse-ac-list.js';

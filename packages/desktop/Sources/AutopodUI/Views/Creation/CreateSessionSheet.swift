@@ -22,6 +22,8 @@ public struct CreateSessionSheet: View {
     @State private var baseBranch = ""
     @State private var acFromPath = ""
     @State private var criteria: [String] = [""]
+    @State private var showBulkImport = false
+    @State private var bulkText = ""
 
     private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
     private let outputs = [("pr", "Worker (PR)"), ("workspace", "Workspace (Interactive)"), ("artifact", "Artifact")]
@@ -171,38 +173,89 @@ public struct CreateSessionSheet: View {
                     if !isWorkspace && acFromPath.isEmpty {
                     formSection("Acceptance Criteria") {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(criteria.indices, id: \.self) { index in
-                                HStack(spacing: 6) {
-                                    Image(systemName: "checkmark.square")
-                                        .foregroundStyle(.tertiary)
-                                        .font(.system(size: 12))
-                                    TextField("Criterion \(index + 1)", text: $criteria[index])
-                                        .textFieldStyle(.plain)
-                                        .font(.callout)
-                                    if criteria.count > 1 {
-                                        Button {
-                                            criteria.remove(at: index)
-                                        } label: {
-                                            Image(systemName: "minus.circle")
-                                                .foregroundStyle(.red.opacity(0.6))
-                                                .font(.system(size: 12))
+                            if showBulkImport {
+                                TextEditor(text: $bulkText)
+                                    .font(.system(.callout, design: .monospaced))
+                                    .frame(minHeight: 100, maxHeight: 180)
+                                    .padding(6)
+                                    .background(Color(nsColor: .controlBackgroundColor))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                                    )
+                                    .overlay(alignment: .topLeading) {
+                                        if bulkText.isEmpty {
+                                            Text("Paste your list here...\n- Item one\n- Item two")
+                                                .font(.system(.callout, design: .monospaced))
+                                                .foregroundStyle(.tertiary)
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 12)
+                                                .allowsHitTesting(false)
                                         }
-                                        .buttonStyle(.borderless)
                                     }
+                                HStack(spacing: 8) {
+                                    Button("Import") {
+                                        let parsed = Self.parseAcList(bulkText)
+                                        if !parsed.isEmpty {
+                                            criteria = parsed
+                                        }
+                                        bulkText = ""
+                                        showBulkImport = false
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                    .disabled(bulkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                    Button("Cancel") {
+                                        bulkText = ""
+                                        showBulkImport = false
+                                    }
+                                    .controlSize(.small)
                                 }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                                .background(Color(nsColor: .controlBackgroundColor))
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            } else {
+                                ForEach(criteria.indices, id: \.self) { index in
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "checkmark.square")
+                                            .foregroundStyle(.tertiary)
+                                            .font(.system(size: 12))
+                                        TextField("Criterion \(index + 1)", text: $criteria[index])
+                                            .textFieldStyle(.plain)
+                                            .font(.callout)
+                                        if criteria.count > 1 {
+                                            Button {
+                                                criteria.remove(at: index)
+                                            } label: {
+                                                Image(systemName: "minus.circle")
+                                                    .foregroundStyle(.red.opacity(0.6))
+                                                    .font(.system(size: 12))
+                                            }
+                                            .buttonStyle(.borderless)
+                                        }
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(Color(nsColor: .controlBackgroundColor))
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                                HStack(spacing: 12) {
+                                    Button {
+                                        criteria.append("")
+                                    } label: {
+                                        Label("Add criterion", systemImage: "plus")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .foregroundStyle(.blue)
+                                    Button {
+                                        showBulkImport = true
+                                    } label: {
+                                        Label("Paste list", systemImage: "doc.on.clipboard")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .foregroundStyle(.blue)
+                                }
                             }
-                            Button {
-                                criteria.append("")
-                            } label: {
-                                Label("Add criterion", systemImage: "plus")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.blue)
                         }
                     }
 
@@ -240,8 +293,19 @@ public struct CreateSessionSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 480, height: 560)
+        .frame(minWidth: 480, maxWidth: 480, minHeight: 560)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    /// Parse a newline-separated list, stripping common prefixes (`- `, `1. `, `a) `, etc.).
+    static func parseAcList(_ text: String) -> [String] {
+        // Mirrors packages/shared/src/parse-ac-list.ts
+        let prefix = /^(?:[-*]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|[a-zA-Z][.)]\s+)/
+        return text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { $0.replacing(prefix, with: "") }
+            .filter { !$0.isEmpty }
     }
 
     private func formSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

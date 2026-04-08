@@ -1,10 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, parseAcList } from '@autopod/shared';
 
 /**
  * Read acceptance criteria from a file in the worktree.
- * Format: one criterion per line. Optional `- ` or `* ` prefix for markdown list compatibility.
+ * Format: one criterion per line. Common list prefixes are stripped automatically
+ * (`- `, `* `, `1. `, `a) `, `- [ ] `, etc.).
  * Blank lines and lines containing only whitespace are dropped.
  */
 export async function readAcFile(worktreePath: string, relativePath: string): Promise<string[]> {
@@ -21,11 +22,7 @@ export async function readAcFile(worktreePath: string, relativePath: string): Pr
     );
   }
 
-  const criteria = content
-    .split('\n')
-    .map((line) => line.trim())
-    .map((line) => line.replace(/^[-*]\s+/, ''))
-    .filter((line) => line.length > 0);
+  const criteria = parseAcList(content);
 
   if (criteria.length === 0) {
     throw new AutopodError(
