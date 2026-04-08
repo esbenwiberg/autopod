@@ -53,7 +53,7 @@ export function buildRegistryFiles(
   if (nugetRegistries.length > 0) {
     files.push({
       path: NUGET_CONFIG_PATH,
-      content: generateNuGetConfig(nugetRegistries, pat),
+      content: generateNuGetConfig(nugetRegistries),
     });
   }
 
@@ -101,11 +101,11 @@ export function generateNpmrc(registries: PrivateRegistry[], pat: string): strin
  * with any solution-level NuGet.config. No <clear /> is used — existing
  * package sources in the workspace config are preserved.
  *
- * Uses ClearTextPassword with PAT (standard for CI/container use).
- * The `packageSourceCredentials` section key must match the source name
- * exactly — we derive a stable name from the feed URL.
+ * Sources only — no credentials. Authentication is handled by the Azure
+ * Artifacts Credential Provider via the VSS_NUGET_EXTERNAL_FEED_ENDPOINTS
+ * environment variable (set on the container).
  */
-export function generateNuGetConfig(registries: PrivateRegistry[], pat: string): string {
+export function generateNuGetConfig(registries: PrivateRegistry[]): string {
   const lines: string[] = [
     '<?xml version="1.0" encoding="utf-8"?>',
     '<configuration>',
@@ -118,21 +118,38 @@ export function generateNuGetConfig(registries: PrivateRegistry[], pat: string):
   }
 
   lines.push('  </packageSources>');
-  lines.push('  <packageSourceCredentials>');
-
-  for (const reg of registries) {
-    const name = deriveFeedName(reg.url);
-    lines.push(`    <${name}>`);
-    lines.push('      <add key="Username" value="autopod" />');
-    lines.push(`      <add key="ClearTextPassword" value="${escapeXml(pat)}" />`);
-    lines.push(`    </${name}>`);
-  }
-
-  lines.push('  </packageSourceCredentials>');
   lines.push('</configuration>');
   lines.push('');
 
   return lines.join('\n');
+}
+
+/**
+ * Build the VSS_NUGET_EXTERNAL_FEED_ENDPOINTS environment variable value
+ * for the Azure Artifacts Credential Provider.
+ *
+ * The credential provider intercepts NuGet auth challenges at the HTTP layer
+ * and supplies credentials from this env var — no cleartext passwords in
+ * config files.
+ *
+ * Returns an empty object when there are no NuGet registries.
+ */
+export function buildNuGetCredentialEnv(
+  registries: PrivateRegistry[],
+  pat: string | null,
+): Record<string, string> {
+  if (!pat) return {};
+  const nugetRegs = registries.filter((r) => r.type === 'nuget');
+  if (nugetRegs.length === 0) return {};
+
+  const payload = {
+    endpointCredentials: nugetRegs.map((r) => ({
+      endpoint: r.url,
+      password: pat,
+    })),
+  };
+
+  return { VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: JSON.stringify(payload) };
 }
 
 /**
@@ -173,91 +190,6 @@ export async function validateRegistryFiles(
         const output = `${result.stdout}\n${result.stderr}`.trim();
         throw new Error(
           `Registry check failed: ${file.path} is invalid — dotnet nuget list source exited ${result.exitCode}: ${output.slice(0, 500)}`,
-        );
-      }
-    }
-  }
-}
-
-/**
- * Patch workspace NuGet.config files with credentials for ADO feeds.
- *
- * Many repos use `<clear />` in their NuGet.config which wipes user-level configs.
- * This function finds ADO package sources defined in workspace configs and injects
- * credentials via `dotnet nuget update source`, which modifies the config in-place.
- */
-export async function patchWorkspaceNuGetCredentials(
-  containerManager: ContainerManager,
-  containerId: string,
-  pat: string,
-  logger: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void },
-): Promise<void> {
-  // Find NuGet.config files in the workspace (max depth 2 to avoid scanning node_modules etc.)
-  const findResult = await containerManager.execInContainer(
-    containerId,
-    ['find', '/workspace', '-maxdepth', '2', '-iname', 'nuget.config'],
-    { timeout: 10_000 },
-  );
-  const configPaths = findResult.stdout.trim().split('\n').filter(Boolean);
-  if (configPaths.length === 0) return;
-
-  for (const configPath of configPaths) {
-    // List sources defined in this config
-    const listResult = await containerManager.execInContainer(
-      containerId,
-      ['dotnet', 'nuget', 'list', 'source', '--configfile', configPath, '--format', 'short'],
-      { timeout: 15_000 },
-    );
-    if (listResult.exitCode !== 0) continue;
-
-    // Parse source lines: "E https://pkgs.dev.azure.com/..." format
-    // Each line is like "E  https://..." or "  2.  sourcename [Enabled]"
-    // The short format gives: "E https://url"
-    const lines = listResult.stdout.split('\n').filter((l) => l.includes('pkgs.dev.azure.com'));
-    if (lines.length === 0) continue;
-
-    // Read the config file to find source names for ADO feeds
-    const configContent = await containerManager.readFile(containerId, configPath);
-    const sourcePattern =
-      /<add\s+key="([^"]+)"\s+value="(https?:\/\/pkgs\.dev\.azure\.com\/[^"]+)"/g;
-    const adoSources: { name: string; url: string }[] = [];
-
-    for (
-      let match = sourcePattern.exec(configContent);
-      match !== null;
-      match = sourcePattern.exec(configContent)
-    ) {
-      adoSources.push({ name: match[1] ?? '', url: match[2] ?? '' });
-    }
-
-    for (const source of adoSources) {
-      const updateResult = await containerManager.execInContainer(
-        containerId,
-        [
-          'dotnet',
-          'nuget',
-          'update',
-          'source',
-          source.name,
-          '--username',
-          'autopod',
-          '--password',
-          pat,
-          '--store-password-in-clear-text',
-          '--configfile',
-          configPath,
-        ],
-        { timeout: 15_000 },
-      );
-      if (updateResult.exitCode === 0) {
-        logger.info(
-          { configPath, source: source.name },
-          'Patched NuGet.config with ADO feed credentials',
-        );
-      } else {
-        logger.warn(
-          { configPath, source: source.name, stderr: updateResult.stderr.slice(0, 300) },
-          'Failed to patch NuGet.config with credentials',
         );
       }
     }

@@ -215,7 +215,7 @@ describe('ImageBuilder', () => {
     );
   });
 
-  it('does not pass build args when no gitPat', async () => {
+  it('does not pass build args when no gitPat or registryPat', async () => {
     const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
     const builder = new ImageBuilder({
       docker: mockDocker,
@@ -231,5 +231,47 @@ describe('ImageBuilder', () => {
         buildargs: undefined,
       }),
     );
+  });
+
+  it('passes REGISTRY_PAT and VSS_NUGET_EXTERNAL_FEED_ENDPOINTS when registryPat provided', async () => {
+    const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: mockAcr,
+      profileStore: mockProfileStore,
+    });
+
+    const profile = mockProfile({
+      privateRegistries: [
+        {
+          type: 'npm',
+          url: 'https://pkgs.dev.azure.com/org/_packaging/feed/npm/registry/',
+          scope: '@org',
+        },
+        {
+          type: 'nuget',
+          url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json',
+        },
+      ],
+    });
+
+    await builder.buildWarmImage(profile, { registryPat: 'my-pat' });
+
+    expect(mockDocker.buildImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        buildargs: expect.objectContaining({
+          REGISTRY_PAT: 'my-pat',
+          VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: expect.stringContaining('endpointCredentials'),
+        }),
+      }),
+    );
+
+    // Verify the env var contains the correct feed endpoint
+    const args = (mockDocker.buildImage as ReturnType<typeof vi.fn>).mock.calls[0][1].buildargs;
+    const parsed = JSON.parse(args.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS);
+    expect(parsed.endpointCredentials).toHaveLength(1);
+    expect(parsed.endpointCredentials[0].endpoint).toContain('nuget');
+    expect(parsed.endpointCredentials[0].password).toBe('my-pat');
   });
 });

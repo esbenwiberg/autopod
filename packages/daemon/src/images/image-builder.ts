@@ -3,6 +3,7 @@ import type Dockerode from 'dockerode';
 import pino from 'pino';
 import { pack as tarPack } from 'tar-stream';
 import type { ProfileStore } from '../profiles/index.js';
+import { buildNuGetCredentialEnv } from '../sessions/registry-injector.js';
 import type { AcrClient } from './acr-client.js';
 import { generateDockerfile } from './dockerfile-generator.js';
 
@@ -38,7 +39,7 @@ export class ImageBuilder {
   /** Build a warm image for a profile and push it to ACR. */
   async buildWarmImage(
     profile: Profile,
-    options: { rebuild?: boolean; gitPat?: string } = {},
+    options: { rebuild?: boolean; gitPat?: string; registryPat?: string } = {},
   ): Promise<ImageBuildResult> {
     const tag = `autopod/${profile.name}:latest`;
     const timestampTag = `autopod/${profile.name}:${Date.now()}`;
@@ -63,7 +64,16 @@ export class ImageBuilder {
     });
 
     // 2. Build image from Dockerfile
-    await this.buildFromDockerfile(dockerfile, tag, options.gitPat);
+    const buildArgs: Record<string, string> = {};
+    if (options.gitPat) buildArgs.GIT_PAT = options.gitPat;
+    if (options.registryPat) {
+      // npm .npmrc still uses REGISTRY_PAT for _authToken
+      buildArgs.REGISTRY_PAT = options.registryPat;
+      // NuGet uses credential provider via env var
+      const nugetEnv = buildNuGetCredentialEnv(profile.privateRegistries, options.registryPat);
+      Object.assign(buildArgs, nugetEnv);
+    }
+    await this.buildFromDockerfile(dockerfile, tag, buildArgs);
     const buildDuration = (Date.now() - startTime) / 1000;
 
     // 3. Tag with timestamp for rollback
@@ -108,7 +118,7 @@ export class ImageBuilder {
   private async buildFromDockerfile(
     dockerfileContent: string,
     tag: string,
-    gitPat?: string,
+    buildArgs: Record<string, string> = {},
   ): Promise<void> {
     // Create an in-memory tar archive containing just the Dockerfile
     const pack = tarPack();
@@ -117,7 +127,7 @@ export class ImageBuilder {
 
     const buildStream = await this.docker.buildImage(pack as unknown as NodeJS.ReadableStream, {
       t: tag,
-      buildargs: gitPat ? { GIT_PAT: gitPat } : undefined,
+      buildargs: Object.keys(buildArgs).length > 0 ? buildArgs : undefined,
     });
 
     // Wait for build to complete

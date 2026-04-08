@@ -52,8 +52,8 @@ import {
   buildReworkTask,
 } from './recovery-context.js';
 import {
+  buildNuGetCredentialEnv,
   buildRegistryFiles,
-  patchWorkspaceNuGetCredentials,
   validateRegistryFiles,
 } from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
@@ -261,7 +261,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         if (status.merged) {
           emitActivityStatus(sessionId, 'PR merged successfully');
-          transition(session, 'complete', { completedAt: new Date().toISOString(), mergeBlockReason: null });
+          transition(session, 'complete', {
+            completedAt: new Date().toISOString(),
+            mergeBlockReason: null,
+          });
 
           eventBus.emit({
             type: 'session.completed',
@@ -275,21 +278,32 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               status: 'complete',
               model: session.model,
               runtime: session.runtime,
-              duration: session.startedAt ? Date.now() - new Date(session.startedAt).getTime() : null,
+              duration: session.startedAt
+                ? Date.now() - new Date(session.startedAt).getTime()
+                : null,
               filesChanged: session.filesChanged,
               createdAt: session.createdAt,
             },
           });
 
-          logger.info({ sessionId, prUrl: session.prUrl }, 'Merge polling: PR merged — session complete');
+          logger.info(
+            { sessionId, prUrl: session.prUrl },
+            'Merge polling: PR merged — session complete',
+          );
           stopMergePolling(sessionId);
           return;
         }
 
         if (!status.open) {
-          emitActivityStatus(sessionId, `PR closed without merging: ${status.blockReason ?? 'unknown reason'}`);
+          emitActivityStatus(
+            sessionId,
+            `PR closed without merging: ${status.blockReason ?? 'unknown reason'}`,
+          );
           transition(session, 'failed', { mergeBlockReason: status.blockReason });
-          logger.warn({ sessionId, prUrl: session.prUrl, reason: status.blockReason }, 'Merge polling: PR closed — session failed');
+          logger.warn(
+            { sessionId, prUrl: session.prUrl, reason: status.blockReason },
+            'Merge polling: PR closed — session failed',
+          );
           stopMergePolling(sessionId);
           return;
         }
@@ -324,7 +338,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   function resumeMergePolling(): void {
     const pendingSessions = sessionRepo.list({ status: 'merge_pending' as SessionStatus });
     for (const session of pendingSessions) {
-      logger.info({ sessionId: session.id, prUrl: session.prUrl }, 'Resuming merge polling after restart');
+      logger.info(
+        { sessionId: session.id, prUrl: session.prUrl },
+        'Resuming merge polling after restart',
+      );
       startMergePolling(session.id);
     }
   }
@@ -716,6 +733,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // For .NET templates, cap MSBuild node count to half the available CPUs
         // (min 2, max 4) to prevent dozens of MSBuild workers from exhausting memory.
         const isDotnet = profile.template.startsWith('dotnet');
+
+        // Resolve registry PAT early — needed for both container env vars and config files.
+        // Fall back to adoPat when registryPat isn't set — they're usually the same
+        // PAT for ADO-hosted feeds, and requiring both is a footgun.
+        const effectiveRegistryPat = profile.registryPat ?? profile.adoPat ?? null;
+
         const containerEnv: Record<string, string> = {
           SESSION_ID: sessionId,
           PORT: String(CONTAINER_APP_PORT),
@@ -728,6 +751,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 MSBUILDTERMINALLOGGER: 'false',
               }
             : {}),
+          // NuGet credential provider env — auth handled via env var, not config files
+          ...buildNuGetCredentialEnv(profile.privateRegistries, effectiveRegistryPat),
         };
 
         const containerId = await containerManager.spawn({
@@ -786,9 +811,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Write private registry config files (.npmrc / NuGet.config) to user-level
         // paths inside the container. Runs for ALL session types including workspace pods.
-        // Fall back to adoPat when registryPat isn't set — they're usually the same
-        // PAT for ADO-hosted feeds, and requiring both is a footgun.
-        const effectiveRegistryPat = profile.registryPat ?? profile.adoPat ?? null;
+        // NuGet configs are sources-only — auth is via credential provider env var above.
         const registryFiles = buildRegistryFiles(profile.privateRegistries, effectiveRegistryPat);
         for (const file of registryFiles) {
           await containerManager.writeFile(containerId, file.path, file.content);
@@ -796,22 +819,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             { sessionId, path: file.path, bytes: file.content.length },
             'Wrote registry config file to container',
           );
-        }
-
-        // Patch workspace NuGet.config files with ADO credentials — repos that use
-        // <clear /> in their config wipe user-level sources, so we inject credentials
-        // directly into the workspace config for any ADO feeds it defines.
-        if (effectiveRegistryPat && isDotnet) {
-          try {
-            await patchWorkspaceNuGetCredentials(
-              containerManager,
-              containerId,
-              effectiveRegistryPat,
-              logger,
-            );
-          } catch (err) {
-            logger.warn({ err, sessionId }, 'Failed to patch workspace NuGet credentials');
-          }
         }
 
         // Workspace sessions: container stays alive, no agent/validation/PR
@@ -1312,7 +1319,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
             startMergePolling(sessionId);
             logger.info(
-              { sessionId, prUrl: session.prUrl, blockReason, autoMerge: mergeResult.autoMergeScheduled },
+              {
+                sessionId,
+                prUrl: session.prUrl,
+                blockReason,
+                autoMerge: mergeResult.autoMergeScheduled,
+              },
               'Session approved — merge pending',
             );
             return;
@@ -1326,7 +1338,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               worktreePath: session.worktreePath,
             });
             if (fallbackStatus.open && !fallbackStatus.merged) {
-              const blockReason = fallbackStatus.blockReason ?? 'Merge failed — waiting for conditions';
+              const blockReason =
+                fallbackStatus.blockReason ?? 'Merge failed — waiting for conditions';
               emitActivityStatus(sessionId, `Merge pending: ${blockReason}`);
               transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
               startMergePolling(sessionId);
@@ -1337,7 +1350,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               return;
             }
           } catch (statusErr) {
-            logger.warn({ err: statusErr, sessionId }, 'Failed to check PR status after merge failure');
+            logger.warn(
+              { err: statusErr, sessionId },
+              'Failed to check PR status after merge failure',
+            );
           }
           emitActivityStatus(sessionId, 'PR merge failed — session still completing');
         }

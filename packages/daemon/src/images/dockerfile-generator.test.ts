@@ -236,7 +236,7 @@ describe('generateDockerfile', () => {
     expect(df).toContain('rm -f /workspace/.npmrc');
   });
 
-  it('injects NuGet registry config with REGISTRY_PAT build arg', () => {
+  it('injects NuGet registry config via credential provider env var', () => {
     const df = generateDockerfile({
       profile: mockProfile({
         template: 'dotnet10',
@@ -251,12 +251,20 @@ describe('generateDockerfile', () => {
       }),
       gitCredentials: 'none',
     });
-    expect(df).toContain('ARG REGISTRY_PAT');
+    expect(df).toContain('ARG VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
+    expect(df).toContain(
+      'ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS=$VSS_NUGET_EXTERNAL_FEED_ENDPOINTS',
+    );
     expect(df).toContain('packageSources');
     expect(df).toContain('myorg-shared');
-    expect(df).toContain('ClearTextPassword');
-    expect(df).toContain('$REGISTRY_PAT');
-    expect(df).toContain('rm -f /workspace/.npmrc /workspace/NuGet.config');
+    // No cleartext credentials in config files
+    expect(df).not.toContain('ClearTextPassword');
+    expect(df).not.toContain('packageSourceCredentials');
+    // NuGet-only should not declare REGISTRY_PAT (that's for npm)
+    expect(df).not.toContain('ARG REGISTRY_PAT');
+    // Sources-only config cleaned up, env var cleared
+    expect(df).toContain('rm -f /workspace/NuGet.config');
+    expect(df).toContain('ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS=');
   });
 
   it('injects both npm and NuGet registries', () => {
@@ -289,6 +297,7 @@ describe('generateDockerfile', () => {
       gitCredentials: 'none',
     });
     expect(df).not.toContain('REGISTRY_PAT');
+    expect(df).not.toContain('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
     expect(df).not.toContain('.npmrc');
     expect(df).not.toContain('NuGet.config');
   });
@@ -319,22 +328,26 @@ describe('generateDockerfile', () => {
     const lines = df.split('\n');
     const gitCloneIdx = lines.findIndex((l) => l.includes('git clone'));
     const registryArgIdx = lines.findIndex((l) => l.includes('ARG REGISTRY_PAT'));
+    const nugetEnvIdx = lines.findIndex((l) => l.includes('ARG VSS_NUGET_EXTERNAL_FEED_ENDPOINTS'));
     const npmrcIdx = lines.findIndex((l) => l.includes('.npmrc'));
     const nugetIdx = lines.findIndex((l) => l.includes('NuGet.config'));
     const installIdx = lines.findIndex((l) => l.includes('Install dependencies'));
-    const cleanupIdx = lines.findIndex((l) => l.includes('Remove registry credentials'));
+    const cleanupIdx = lines.findIndex((l) => l.includes('Remove registry config'));
     const userIdx = lines.findIndex((l) => l === 'USER autopod');
 
     expect(gitCloneIdx).toBeLessThan(registryArgIdx);
     expect(registryArgIdx).toBeLessThan(npmrcIdx);
-    expect(npmrcIdx).toBeLessThan(nugetIdx);
+    expect(nugetEnvIdx).toBeLessThan(nugetIdx);
     expect(nugetIdx).toBeLessThan(installIdx);
     expect(installIdx).toBeLessThan(cleanupIdx);
     expect(cleanupIdx).toBeLessThan(userIdx);
 
-    // Registry credentials are cleaned up
+    // No cleartext credentials in NuGet config
+    expect(df).not.toContain('ClearTextPassword');
+    // npm credentials cleaned up
     expect(df).toContain('rm -f /workspace/.npmrc /workspace/NuGet.config');
-
+    // NuGet credential provider env cleared
+    expect(df).toContain('ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS=');
     // Git credentials are also cleaned up
     expect(df).toContain('git remote set-url origin');
   });

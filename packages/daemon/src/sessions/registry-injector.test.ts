@@ -4,6 +4,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
   NPM_RC_PATH,
   NUGET_CONFIG_PATH,
+  buildNuGetCredentialEnv,
   buildRegistryFiles,
   generateNpmrc,
   generateNuGetConfig,
@@ -32,14 +33,16 @@ describe('buildRegistryFiles', () => {
     expect(files[0].content).toContain('my-pat');
   });
 
-  it('generates NuGet.config at user-level home path', () => {
+  it('generates NuGet.config at user-level home path (sources only, no credentials)', () => {
     const regs: PrivateRegistry[] = [
       { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
     ];
     const files = buildRegistryFiles(regs, 'my-pat');
     expect(files).toHaveLength(1);
     expect(files[0].path).toBe(NUGET_CONFIG_PATH);
-    expect(files[0].content).toContain('my-pat');
+    expect(files[0].content).toContain('packageSources');
+    expect(files[0].content).not.toContain('ClearTextPassword');
+    expect(files[0].content).not.toContain('my-pat');
   });
 
   it('generates both files when both types present', () => {
@@ -115,14 +118,14 @@ describe('generateNpmrc', () => {
 });
 
 describe('generateNuGetConfig', () => {
-  it('generates valid NuGet.config XML without <clear />', () => {
+  it('generates sources-only NuGet.config XML without credentials', () => {
     const regs: PrivateRegistry[] = [
       {
         type: 'nuget',
         url: 'https://pkgs.dev.azure.com/myorg/_packaging/shared/nuget/v3/index.json',
       },
     ];
-    const content = generateNuGetConfig(regs, 'test-pat');
+    const content = generateNuGetConfig(regs);
     expect(content).toContain('<?xml version="1.0"');
     expect(content).toContain('<configuration>');
     expect(content).toContain('<packageSources>');
@@ -131,9 +134,9 @@ describe('generateNuGetConfig', () => {
     // No hardcoded nuget.org — workspace config handles public sources
     expect(content).not.toContain('nuget.org');
     expect(content).toContain('myorg-shared');
-    expect(content).toContain('<packageSourceCredentials>');
-    expect(content).toContain('ClearTextPassword');
-    expect(content).toContain('test-pat');
+    // No credentials — auth handled by credential provider via env var
+    expect(content).not.toContain('packageSourceCredentials');
+    expect(content).not.toContain('ClearTextPassword');
     expect(content).toContain('</configuration>');
   });
 
@@ -144,7 +147,7 @@ describe('generateNuGetConfig', () => {
         url: 'https://pkgs.dev.azure.com/contoso/_packaging/internal-libs/nuget/v3/index.json',
       },
     ];
-    const content = generateNuGetConfig(regs, 'pat');
+    const content = generateNuGetConfig(regs);
     expect(content).toContain('contoso-internal-libs');
   });
 
@@ -155,7 +158,7 @@ describe('generateNuGetConfig', () => {
         url: 'https://pkgs.dev.azure.com/contoso/MyProject/_packaging/internal-libs/nuget/v3/index.json',
       },
     ];
-    const content = generateNuGetConfig(regs, 'pat');
+    const content = generateNuGetConfig(regs);
     expect(content).toContain('contoso-internal-libs');
   });
 
@@ -170,7 +173,7 @@ describe('generateNuGetConfig', () => {
         url: 'https://pkgs.dev.azure.com/org/_packaging/feed-b/nuget/v3/index.json',
       },
     ];
-    const content = generateNuGetConfig(regs, 'pat');
+    const content = generateNuGetConfig(regs);
     expect(content).toContain('org-feed-a');
     expect(content).toContain('org-feed-b');
   });
@@ -182,48 +185,8 @@ describe('generateNuGetConfig', () => {
         url: 'https://pkgs.dev.azure.com/365projectum/_packaging/shared-libs/nuget/v3/index.json',
       },
     ];
-    const content = generateNuGetConfig(regs, 'pat');
-    // XML element names cannot start with a digit — must be prefixed
+    const content = generateNuGetConfig(regs);
     expect(content).toContain('_365projectum-shared-libs');
-    expect(content).not.toMatch(/<365/);
-  });
-
-  it('escapes XML special characters in PAT', () => {
-    const regs: PrivateRegistry[] = [
-      {
-        type: 'nuget',
-        url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json',
-      },
-    ];
-    const content = generateNuGetConfig(regs, 'pat<with>&"special\'chars');
-    expect(content).toContain('&lt;');
-    expect(content).toContain('&amp;');
-    expect(content).toContain('&quot;');
-    expect(content).toContain('&apos;');
-    // Raw angle brackets should not appear in attribute values
-    expect(content).not.toMatch(/value="[^"]*[<>][^"]*"/);
-  });
-
-  it('sanitizes feed name with special chars instead of XML-escaping element tags', () => {
-    // Feed names derived from URLs should never produce XML entity escapes in tag names.
-    const regs: PrivateRegistry[] = [
-      {
-        type: 'nuget',
-        url: 'https://custom.registry.com/org&co/feed<1>/index.json',
-      },
-    ];
-    const content = generateNuGetConfig(regs, 'pat');
-    // Element tag names in packageSourceCredentials must be clean XML names
-    const credSection = content.split('<packageSourceCredentials>')[1];
-    const tagNames = credSection.match(/<\/?([^>\s/]+)/g) ?? [];
-    for (const tag of tagNames) {
-      const name = tag.replace(/^<\/?/, '');
-      if (name === 'add' || name === 'packageSourceCredentials') continue;
-      // Must be a valid XML element name — no entity refs or special chars
-      expect(name).toMatch(/^[a-zA-Z_][a-zA-Z0-9._-]*$/);
-    }
-    // The generated name should be sanitized to valid XML element chars
-    expect(content).toMatch(/<packageSourceCredentials>\s*\n\s*<[a-zA-Z_][a-zA-Z0-9._-]*>/);
   });
 
   it('produces valid element names for non-ADO URLs with dots', () => {
@@ -233,13 +196,65 @@ describe('generateNuGetConfig', () => {
         url: 'https://nuget.my-company.com/v3/index.json',
       },
     ];
-    const content = generateNuGetConfig(regs, 'pat');
-    // Should sanitize dots in hostname to valid element name
+    const content = generateNuGetConfig(regs);
     expect(content).toContain('nuget.my-company.com-index.json');
-    // Element should be well-formed
-    const tagMatch = content.match(/<packageSourceCredentials>\s*\n\s*<([^>]+)>/);
-    expect(tagMatch).toBeTruthy();
-    expect(tagMatch![1]).toMatch(/^[a-zA-Z_][a-zA-Z0-9._-]*$/);
+  });
+});
+
+describe('buildNuGetCredentialEnv', () => {
+  it('returns empty object when no PAT', () => {
+    const regs: PrivateRegistry[] = [
+      { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
+    ];
+    expect(buildNuGetCredentialEnv(regs, null)).toEqual({});
+  });
+
+  it('returns empty object when no NuGet registries', () => {
+    const regs: PrivateRegistry[] = [
+      { type: 'npm', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/npm/registry/' },
+    ];
+    expect(buildNuGetCredentialEnv(regs, 'my-pat')).toEqual({});
+  });
+
+  it('returns VSS_NUGET_EXTERNAL_FEED_ENDPOINTS for NuGet registries', () => {
+    const regs: PrivateRegistry[] = [
+      { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
+    ];
+    const env = buildNuGetCredentialEnv(regs, 'my-pat');
+    expect(env).toHaveProperty('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
+    const parsed = JSON.parse(env.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS);
+    expect(parsed.endpointCredentials).toHaveLength(1);
+    expect(parsed.endpointCredentials[0].endpoint).toBe(
+      'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json',
+    );
+    expect(parsed.endpointCredentials[0].password).toBe('my-pat');
+  });
+
+  it('includes multiple NuGet feeds in single env var', () => {
+    const regs: PrivateRegistry[] = [
+      {
+        type: 'nuget',
+        url: 'https://pkgs.dev.azure.com/org/_packaging/feed-a/nuget/v3/index.json',
+      },
+      {
+        type: 'nuget',
+        url: 'https://pkgs.dev.azure.com/org/_packaging/feed-b/nuget/v3/index.json',
+      },
+    ];
+    const env = buildNuGetCredentialEnv(regs, 'pat');
+    const parsed = JSON.parse(env.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS);
+    expect(parsed.endpointCredentials).toHaveLength(2);
+  });
+
+  it('ignores npm registries', () => {
+    const regs: PrivateRegistry[] = [
+      { type: 'npm', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/npm/registry/' },
+      { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
+    ];
+    const env = buildNuGetCredentialEnv(regs, 'pat');
+    const parsed = JSON.parse(env.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS);
+    expect(parsed.endpointCredentials).toHaveLength(1);
+    expect(parsed.endpointCredentials[0].endpoint).toContain('nuget');
   });
 });
 

@@ -31,6 +31,10 @@ RUN npm install -g playwright && \
     playwright install --with-deps chromium && \
     chmod -R 755 /opt/pw-browsers
 
+# Azure Artifacts Credential Provider (NuGet auth via env var, no cleartext in config)
+RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash
+ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED=true
+
 # Agent CLIs
 RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
@@ -59,6 +63,9 @@ WORKDIR /workspace
 RUN chown autopod:autopod /workspace
 
 USER autopod
+
+# Install credential provider for the runtime user (root install above covers build-time only)
+RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 # Allow bare imports of globally installed packages (e.g. playwright in validation scripts)

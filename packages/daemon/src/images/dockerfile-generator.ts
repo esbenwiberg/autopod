@@ -36,18 +36,23 @@ export function generateDockerfile(options: DockerfileOptions): string {
     lines.push(`RUN git clone --depth 1 ${profile.repoUrl} .`);
   }
 
-  // Inject private registry config for install step (uses build arg, cleaned up below)
-  const hasRegistries = profile.privateRegistries.length > 0;
-  if (hasRegistries) {
+  // Inject private registry config for install step (uses build args, cleaned up below)
+  const npmRegs = profile.privateRegistries.filter((r) => r.type === 'npm');
+  const nugetRegs = profile.privateRegistries.filter((r) => r.type === 'nuget');
+  const hasRegistries = npmRegs.length > 0 || nugetRegs.length > 0;
+  if (npmRegs.length > 0) {
     lines.push('', 'ARG REGISTRY_PAT');
-    const npmRegs = profile.privateRegistries.filter((r) => r.type === 'npm');
-    const nugetRegs = profile.privateRegistries.filter((r) => r.type === 'nuget');
-    if (npmRegs.length > 0) {
-      lines.push(...generateNpmrcDockerLines(npmRegs));
-    }
-    if (nugetRegs.length > 0) {
-      lines.push(...generateNuGetDockerLines(nugetRegs));
-    }
+    lines.push(...generateNpmrcDockerLines(npmRegs));
+  }
+  if (nugetRegs.length > 0) {
+    // NuGet auth via Azure Artifacts Credential Provider — credentials passed
+    // as env var, never written to config files.
+    lines.push(
+      '',
+      'ARG VSS_NUGET_EXTERNAL_FEED_ENDPOINTS',
+      'ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS=$VSS_NUGET_EXTERNAL_FEED_ENDPOINTS',
+    );
+    lines.push(...generateNuGetDockerLines(nugetRegs));
   }
 
   // Install dependencies
@@ -77,12 +82,22 @@ export function generateDockerfile(options: DockerfileOptions): string {
     );
   }
 
-  // Clean up registry credentials (session provisioning re-injects them at runtime)
-  if (hasRegistries) {
+  // Clean up registry config from image (session provisioning re-injects at runtime)
+  if (npmRegs.length > 0 || nugetRegs.length > 0) {
+    const filesToRemove = [
+      ...(npmRegs.length > 0 ? ['/workspace/.npmrc'] : []),
+      ...(nugetRegs.length > 0 ? ['/workspace/NuGet.config'] : []),
+    ].join(' ');
     lines.push(
       '',
-      '# Remove registry credentials from image (re-injected at session start)',
-      'RUN rm -f /workspace/.npmrc /workspace/NuGet.config',
+      '# Remove registry config from image (re-injected at session start)',
+      `RUN rm -f ${filesToRemove}`,
+    );
+  }
+  if (nugetRegs.length > 0) {
+    lines.push(
+      '# Clear credential provider env (no secrets in final image)',
+      'ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS=',
     );
   }
 
@@ -149,7 +164,9 @@ function generateNpmrcDockerLines(registries: PrivateRegistry[]): string[] {
 }
 
 /**
- * Generate Dockerfile RUN lines that write NuGet.config with $REGISTRY_PAT expansion.
+ * Generate Dockerfile RUN lines that write a sources-only NuGet.config.
+ * No credentials — auth is handled by the Azure Artifacts Credential Provider
+ * via VSS_NUGET_EXTERNAL_FEED_ENDPOINTS (set as a build arg / env var above).
  */
 function generateNuGetDockerLines(registries: PrivateRegistry[]): string[] {
   const parts: string[] = [];
@@ -167,19 +184,6 @@ function generateNuGetDockerLines(registries: PrivateRegistry[]): string[] {
     );
   }
   parts.push('echo "  </packageSources>" >> /workspace/NuGet.config');
-  parts.push('echo "  <packageSourceCredentials>" >> /workspace/NuGet.config');
-  for (const reg of registries) {
-    const name = deriveNuGetFeedName(reg.url);
-    parts.push(`echo "    <${name}>" >> /workspace/NuGet.config`);
-    parts.push(
-      'echo "      <add key=\\"Username\\" value=\\"autopod\\" />" >> /workspace/NuGet.config',
-    );
-    parts.push(
-      `echo "      <add key=\\"ClearTextPassword\\" value=\\"$REGISTRY_PAT\\" />" >> /workspace/NuGet.config`,
-    );
-    parts.push(`echo "    </${name}>" >> /workspace/NuGet.config`);
-  }
-  parts.push('echo "  </packageSourceCredentials>" >> /workspace/NuGet.config');
   parts.push('echo "</configuration>" >> /workspace/NuGet.config');
 
   return [`RUN ${parts.join(' && \\\n    ')}`];

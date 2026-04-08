@@ -822,8 +822,9 @@ describe('SessionManager', () => {
       const content = nugetCall![2] as string;
       expect(content).toContain('<packageSources>');
       expect(content).toContain('myorg-feed');
-      expect(content).toContain('ClearTextPassword');
-      expect(content).toContain('nuget-pat');
+      // No credentials in config — auth handled by credential provider via env var
+      expect(content).not.toContain('ClearTextPassword');
+      expect(content).not.toContain('nuget-pat');
     });
 
     it('writes both .npmrc and NuGet.config when profile has both registry types', async () => {
