@@ -60,10 +60,7 @@
         "comments.commentType",
         "comments.publishedDate"
       ],
-      "redactFields": [
-        "comments.author.displayName",
-        "comments.author.uniqueName"
-      ]
+      "redactFields": ["comments.author.displayName", "comments.author.uniqueName"]
     }
   },
   {

@@ -286,12 +286,16 @@ describe('createAdoHandler', () => {
         {
           id: 1,
           status: 'active',
-          comments: [{ content: 'Please fix this', commentType: 'text', publishedDate: '2025-01-01' }],
+          comments: [
+            { content: 'Please fix this', commentType: 'text', publishedDate: '2025-01-01' },
+          ],
         },
         {
           id: 2,
           status: 'closed',
-          comments: [{ content: 'Build succeeded', commentType: 'system', publishedDate: '2025-01-01' }],
+          comments: [
+            { content: 'Build succeeded', commentType: 'system', publishedDate: '2025-01-01' },
+          ],
         },
         {
           id: 3,
@@ -307,10 +311,13 @@ describe('createAdoHandler', () => {
       getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
     });
 
-    const result = await handler.execute(
-      makeAction('ado_read_pr_threads', ['id', 'status']),
-      { org: 'myorg', project: 'myproject', repo: 'myrepo', pull_request_id: 10, max_results: 1 },
-    );
+    const result = await handler.execute(makeAction('ado_read_pr_threads', ['id', 'status']), {
+      org: 'myorg',
+      project: 'myproject',
+      repo: 'myrepo',
+      pull_request_id: 10,
+      max_results: 1,
+    });
 
     // Should filter out system thread (id: 2) and limit to max_results=1
     expect(Array.isArray(result)).toBe(true);
@@ -388,10 +395,12 @@ describe('createAdoHandler', () => {
       getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
     });
 
-    const result = await handler.execute(
-      makeAction('ado_read_file', ['content', 'path']),
-      { org: 'myorg', project: 'myproject', repo: 'myrepo', path: '/src/index.ts' },
-    );
+    const result = await handler.execute(makeAction('ado_read_file', ['content', 'path']), {
+      org: 'myorg',
+      project: 'myproject',
+      repo: 'myrepo',
+      path: '/src/index.ts',
+    });
 
     const calledUrl = vi.mocked(global.fetch).mock.calls[0][0] as string;
     expect(calledUrl).toContain('includeContent=true');
@@ -424,9 +433,7 @@ describe('createAdoHandler', () => {
 
   it('ado_search_code posts to almsearch.dev.azure.com with correct body', async () => {
     const searchResults = {
-      results: [
-        { fileName: 'index.ts', path: '/src/index.ts', repository: { name: 'myrepo' } },
-      ],
+      results: [{ fileName: 'index.ts', path: '/src/index.ts', repository: { name: 'myrepo' } }],
     };
     vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse(searchResults));
 
@@ -435,10 +442,12 @@ describe('createAdoHandler', () => {
       getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
     });
 
-    const result = await handler.execute(
-      makeAction('ado_search_code', ['fileName', 'path']),
-      { org: 'myorg', project: 'myproject', query: 'TODO', max_results: 5 },
-    );
+    const result = await handler.execute(makeAction('ado_search_code', ['fileName', 'path']), {
+      org: 'myorg',
+      project: 'myproject',
+      query: 'TODO',
+      max_results: 5,
+    });
 
     const calledUrl = vi.mocked(global.fetch).mock.calls[0][0] as string;
     expect(calledUrl).toBe(
