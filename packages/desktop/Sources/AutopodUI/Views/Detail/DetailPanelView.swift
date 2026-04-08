@@ -62,6 +62,7 @@ public struct DetailPanelView: View {
                 case .logs:       LogStreamView(events: events, sessionBranch: session.branch)
                 case .diff:       DiffTab(session: session, diffString: diffString, onRefresh: onRefreshDiff)
                 case .validation: ValidationTab(session: session)
+                case .summary:    SummaryTab(session: session)
                 case .terminal:   EmptyView()
                 }
 
@@ -325,7 +326,7 @@ public struct DetailPanelView: View {
 // MARK: - Tab enum
 
 public enum DetailTab: CaseIterable {
-    case overview, logs, diff, terminal, validation
+    case overview, logs, diff, terminal, validation, summary
 
     var label: String {
         switch self {
@@ -334,6 +335,7 @@ public enum DetailTab: CaseIterable {
         case .diff:        "Diff"
         case .terminal:    "Terminal"
         case .validation:  "Validation"
+        case .summary:     "Summary"
         }
     }
 
@@ -344,6 +346,7 @@ public enum DetailTab: CaseIterable {
         case .diff:        "doc.text.magnifyingglass"
         case .terminal:    "terminal"
         case .validation:  "checkmark.seal"
+        case .summary:     "doc.text.below.ecg"
         }
     }
 }
