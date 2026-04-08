@@ -65,6 +65,11 @@ export async function refreshOAuthToken(
     refreshToken: data.refresh_token,
     expiresAt: new Date(Date.now() + data.expires_in * 1000).toISOString(),
     clientId: credentials.clientId,
+    // Preserve fields the OAuth endpoint doesn't return — Claude CLI 2.1.80+
+    // treats the user as logged-out if scopes/subscriptionType are missing.
+    scopes: credentials.scopes,
+    subscriptionType: credentials.subscriptionType,
+    rateLimitTier: credentials.rateLimitTier,
   };
 
   logger.info({ expiresAt: refreshed.expiresAt }, 'OAuth token refreshed successfully');

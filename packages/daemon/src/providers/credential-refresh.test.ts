@@ -145,4 +145,31 @@ describe('refreshOAuthToken', () => {
     const body = JSON.parse(fetchCall?.[1]?.body as string);
     expect(body.client_id).toBe('custom-client-id');
   });
+
+  it('preserves scopes, subscriptionType, and rateLimitTier through refresh', async () => {
+    const creds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'expired',
+      refreshToken: 'refresh-1',
+      expiresAt: new Date('2026-03-20T11:00:00Z').toISOString(),
+      scopes: ['user:inference', 'user:profile'],
+      subscriptionType: 'pro',
+      rateLimitTier: 'tier4',
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: 'new',
+        refresh_token: 'new-refresh',
+        expires_in: 3600,
+      }),
+    });
+
+    const result = await refreshOAuthToken(creds, logger);
+
+    expect(result.scopes).toEqual(['user:inference', 'user:profile']);
+    expect(result.subscriptionType).toBe('pro');
+    expect(result.rateLimitTier).toBe('tier4');
+  });
 });
