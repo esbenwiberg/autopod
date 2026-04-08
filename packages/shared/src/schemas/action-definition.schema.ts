@@ -148,4 +148,4 @@ export const actionPolicySchema = z
   });
 
 // ─── Output Mode ────────────────────────────────────────────────
-export const outputModeSchema = z.enum(['pr', 'artifact']);
+export const outputModeSchema = z.enum(['pr', 'artifact', 'workspace']);
