@@ -249,7 +249,15 @@ public struct SettingsView: View {
                 Toggle("Session failed", isOn: $notifyFailure)
                 Toggle("Session complete", isOn: $notifyCompletion)
             }
-            .padding(.top, 4)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
 
             Spacer()
 
