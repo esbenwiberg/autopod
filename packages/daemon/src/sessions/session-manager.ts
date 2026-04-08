@@ -1097,6 +1097,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           const stats = await worktreeManager.getDiffStats(
             session.worktreePath,
             profile.defaultBranch,
+            session.startCommitSha ?? undefined,
           );
           sessionRepo.update(sessionId, {
             filesChanged: stats.filesChanged,
@@ -1620,11 +1621,22 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }
 
-        // Get the actual diff and commit log for AI task review
+        // Get the actual diff and commit log for AI task review.
+        // Scope to agent's commits using startCommitSha so prior branch history is excluded.
         const [diff, commitLog] = session.worktreePath
           ? await Promise.all([
-              worktreeManager.getDiff(session.worktreePath, profile.defaultBranch),
-              worktreeManager.getCommitLog(session.worktreePath, profile.defaultBranch),
+              worktreeManager.getDiff(
+                session.worktreePath,
+                profile.defaultBranch,
+                undefined,
+                session.startCommitSha ?? undefined,
+              ),
+              worktreeManager.getCommitLog(
+                session.worktreePath,
+                profile.defaultBranch,
+                undefined,
+                session.startCommitSha ?? undefined,
+              ),
             ])
           : ['', ''];
 
@@ -1788,6 +1800,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
                 profile.defaultBranch,
+                s2.startCommitSha ?? undefined,
               );
               sessionRepo.update(sessionId, {
                 filesChanged: stats.filesChanged,
@@ -1974,8 +1987,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         const [diff, commitLog] = session.worktreePath
           ? await Promise.all([
-              worktreeManager.getDiff(session.worktreePath, profile.defaultBranch),
-              worktreeManager.getCommitLog(session.worktreePath, profile.defaultBranch),
+              worktreeManager.getDiff(
+                session.worktreePath,
+                profile.defaultBranch,
+                undefined,
+                session.startCommitSha ?? undefined,
+              ),
+              worktreeManager.getCommitLog(
+                session.worktreePath,
+                profile.defaultBranch,
+                undefined,
+                session.startCommitSha ?? undefined,
+              ),
             ])
           : ['', ''];
 
@@ -2075,6 +2098,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
                 profile.defaultBranch,
+                s2.startCommitSha ?? undefined,
               );
               sessionRepo.update(sessionId, {
                 filesChanged: stats.filesChanged,

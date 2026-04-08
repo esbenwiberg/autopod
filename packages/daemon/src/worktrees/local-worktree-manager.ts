@@ -220,21 +220,29 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
-  async getDiffStats(worktreePath: string, baseBranch?: string): Promise<DiffStats> {
+  async getDiffStats(
+    worktreePath: string,
+    baseBranch?: string,
+    sinceCommit?: string,
+  ): Promise<DiffStats> {
     try {
-      if (baseBranch) {
-        // Compare committed changes on this branch against the base branch,
-        // PLUS any uncommitted changes the agent left behind without committing.
-        const { stdout: mergeBase } = await execFileAsync(
-          'git',
-          ['merge-base', 'HEAD', baseBranch],
-          { cwd: worktreePath },
-        );
+      if (baseBranch || sinceCommit) {
+        let base: string;
+        if (sinceCommit) {
+          base = sinceCommit;
+        } else {
+          const { stdout: mergeBase } = await execFileAsync(
+            'git',
+            ['merge-base', 'HEAD', baseBranch!],
+            { cwd: worktreePath },
+          );
+          base = mergeBase.trim();
+        }
 
-        // Committed changes: merge-base..HEAD
+        // Committed changes: base..HEAD
         const { stdout: committedStat } = await execFileAsync(
           'git',
-          ['diff', '--stat', mergeBase.trim(), 'HEAD'],
+          ['diff', '--stat', base, 'HEAD'],
           { cwd: worktreePath },
         );
         const committed = this.parseDiffStats(committedStat);
@@ -263,17 +271,31 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
-  async getDiff(worktreePath: string, baseBranch: string, maxLength = 50_000): Promise<string> {
+  async getDiff(
+    worktreePath: string,
+    baseBranch: string,
+    maxLength = 50_000,
+    sinceCommit?: string,
+  ): Promise<string> {
     try {
-      const { stdout: mergeBase } = await execFileAsync('git', ['merge-base', 'HEAD', baseBranch], {
-        cwd: worktreePath,
-      });
+      let base: string;
+      if (sinceCommit) {
+        // Scope to only the agent's commits from this session
+        base = sinceCommit;
+      } else {
+        const { stdout: mergeBase } = await execFileAsync(
+          'git',
+          ['merge-base', 'HEAD', baseBranch],
+          { cwd: worktreePath },
+        );
+        base = mergeBase.trim();
+      }
       const bufOpts = { cwd: worktreePath, maxBuffer: 2 * 1024 * 1024 };
 
-      // Committed changes: merge-base..HEAD
+      // Committed changes: base..HEAD
       const { stdout: committedDiff } = await execFileAsync(
         'git',
-        ['diff', mergeBase.trim(), 'HEAD'],
+        ['diff', base, 'HEAD'],
         bufOpts,
       );
 
@@ -389,11 +411,17 @@ export class LocalWorktreeManager implements WorktreeManager {
     return { newCommits };
   }
 
-  async getCommitLog(worktreePath: string, baseBranch: string, maxCommits = 20): Promise<string> {
+  async getCommitLog(
+    worktreePath: string,
+    baseBranch: string,
+    maxCommits = 20,
+    sinceCommit?: string,
+  ): Promise<string> {
     try {
+      const rangeRef = sinceCommit ? `${sinceCommit}..HEAD` : `origin/${baseBranch}..HEAD`;
       const { stdout } = await execFileAsync(
         'git',
-        ['log', `origin/${baseBranch}..HEAD`, `--max-count=${maxCommits}`, '--format=%h %s%n%b'],
+        ['log', rangeRef, `--max-count=${maxCommits}`, '--format=%h %s%n%b'],
         { cwd: worktreePath },
       );
       return stdout.trim();

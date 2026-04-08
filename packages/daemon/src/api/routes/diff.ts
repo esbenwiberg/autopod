@@ -30,6 +30,7 @@ export function diffRoutes(
     const session = sessionManager.getSession(sessionId);
 
     const baseBranch = session.baseBranch ?? getBaseBranch(profileStore, session.profileName);
+    const sinceCommit = session.startCommitSha ?? undefined;
 
     // Strategy 1: Try container-based diff (works when container is running)
     let rawDiff = '';
@@ -39,12 +40,13 @@ export function diffRoutes(
         session.containerId,
         session.executionTarget,
         baseBranch,
+        sinceCommit,
       );
     }
 
     // Strategy 2: Fall back to host-side worktree diff (works after container stops)
     if (!rawDiff.trim() && session.worktreePath) {
-      rawDiff = await tryWorktreeDiff(session.worktreePath, baseBranch);
+      rawDiff = await tryWorktreeDiff(session.worktreePath, baseBranch, sinceCommit);
     }
 
     if (!rawDiff.trim()) {
@@ -70,24 +72,33 @@ async function tryContainerDiff(
   containerId: string,
   executionTarget: string,
   baseBranch: string,
+  sinceCommit?: string,
 ): Promise<string> {
   const cm = containerManagerFactory.get(executionTarget);
   const workDir = '/workspace';
 
-  // Use merge-base to find the common ancestor, then diff from there.
-  // No fetch needed — the bare repo (mounted in the container) has the base ref.
   try {
-    const mergeBaseResult = await cm.execInContainer(
-      containerId,
-      ['git', 'merge-base', 'HEAD', baseBranch],
-      { cwd: workDir, timeout: 10_000 },
-    );
+    let base: string | undefined;
 
-    if (mergeBaseResult.exitCode === 0 && mergeBaseResult.stdout.trim()) {
-      const mergeBase = mergeBaseResult.stdout.trim();
+    if (sinceCommit) {
+      // Scope to only the agent's commits from this session
+      base = sinceCommit;
+    } else {
+      // Fall back to merge-base for sessions without startCommitSha
+      const mergeBaseResult = await cm.execInContainer(
+        containerId,
+        ['git', 'merge-base', 'HEAD', baseBranch],
+        { cwd: workDir, timeout: 10_000 },
+      );
+      if (mergeBaseResult.exitCode === 0 && mergeBaseResult.stdout.trim()) {
+        base = mergeBaseResult.stdout.trim();
+      }
+    }
+
+    if (base) {
       const result = await cm.execInContainer(
         containerId,
-        ['git', 'diff', mergeBase, 'HEAD', '--no-color'],
+        ['git', 'diff', base, 'HEAD', '--no-color'],
         { cwd: workDir, timeout: 30_000 },
       );
       if (result.exitCode === 0 && result.stdout.trim()) {
@@ -114,7 +125,11 @@ async function tryContainerDiff(
   return '';
 }
 
-async function tryWorktreeDiff(worktreePath: string, baseBranch: string): Promise<string> {
+async function tryWorktreeDiff(
+  worktreePath: string,
+  baseBranch: string,
+  sinceCommit?: string,
+): Promise<string> {
   try {
     // Verify the worktree still exists on disk
     await access(worktreePath);
@@ -123,6 +138,33 @@ async function tryWorktreeDiff(worktreePath: string, baseBranch: string): Promis
   }
 
   const bufOpts = { cwd: worktreePath, maxBuffer: 2 * 1024 * 1024 };
+
+  // If we have a sinceCommit, use it directly — no merge-base guessing needed
+  if (sinceCommit) {
+    try {
+      const { stdout: committedDiff } = await execFileAsync(
+        'git',
+        ['diff', sinceCommit, 'HEAD', '--no-color'],
+        bufOpts,
+      );
+
+      const { stdout: uncommittedDiff } = await execFileAsync(
+        'git',
+        ['diff', 'HEAD', '--no-color'],
+        bufOpts,
+      );
+
+      const combined = uncommittedDiff.trim()
+        ? `${committedDiff}\n${uncommittedDiff}`
+        : committedDiff;
+
+      if (combined.trim()) {
+        return combined;
+      }
+    } catch {
+      // sinceCommit may be invalid — fall through to merge-base
+    }
+  }
 
   // Try merge-base diff with multiple ref forms (bare repos may store as origin/*)
   for (const ref of [baseBranch, `origin/${baseBranch}`]) {
