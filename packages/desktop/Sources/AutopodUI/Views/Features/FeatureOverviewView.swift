@@ -438,7 +438,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             ]
         case .actionControlPlane:
             [
-                "5 built-in action groups: github-prs, github-issues, github-code, ado-workitems, azure-logs",
+                "7 built-in action groups: github-prs, github-issues, github-code, ado-workitems, ado-prs, ado-code, azure-logs",
                 "4 handlers: Azure (ARM), ADO (REST), GitHub (API), generic HTTP (templates)",
                 "Approval gates: per-action requiresApproval flag blocks execution, routes to ask_human",
                 "Resource restrictions: allowedResources limits which repos/resources actions can target",

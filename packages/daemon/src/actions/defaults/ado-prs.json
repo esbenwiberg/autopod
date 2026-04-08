@@ -1,0 +1,88 @@
+[
+  {
+    "name": "ado_read_pr",
+    "description": "Read an Azure DevOps pull request by ID.",
+    "group": "ado-prs",
+    "handler": "ado",
+    "params": {
+      "org": { "type": "string", "required": true, "description": "Azure DevOps organization" },
+      "project": { "type": "string", "required": true, "description": "Project name" },
+      "repo": { "type": "string", "required": true, "description": "Repository name or ID" },
+      "pull_request_id": { "type": "number", "required": true, "description": "Pull request ID" }
+    },
+    "response": {
+      "fields": [
+        "pullRequestId",
+        "title",
+        "description",
+        "status",
+        "sourceRefName",
+        "targetRefName",
+        "mergeStatus",
+        "isDraft",
+        "labels",
+        "creationDate",
+        "closedDate"
+      ],
+      "redactFields": [
+        "createdBy.displayName",
+        "createdBy.uniqueName",
+        "closedBy.displayName",
+        "closedBy.uniqueName",
+        "reviewers.displayName",
+        "reviewers.uniqueName"
+      ]
+    }
+  },
+  {
+    "name": "ado_read_pr_threads",
+    "description": "Read comment threads on an Azure DevOps pull request.",
+    "group": "ado-prs",
+    "handler": "ado",
+    "params": {
+      "org": { "type": "string", "required": true, "description": "Azure DevOps organization" },
+      "project": { "type": "string", "required": true, "description": "Project name" },
+      "repo": { "type": "string", "required": true, "description": "Repository name or ID" },
+      "pull_request_id": { "type": "number", "required": true, "description": "Pull request ID" },
+      "max_results": {
+        "type": "number",
+        "required": false,
+        "description": "Maximum threads to return",
+        "default": 20
+      }
+    },
+    "response": {
+      "fields": [
+        "id",
+        "status",
+        "threadContext",
+        "comments.content",
+        "comments.commentType",
+        "comments.publishedDate"
+      ],
+      "redactFields": [
+        "comments.author.displayName",
+        "comments.author.uniqueName"
+      ]
+    }
+  },
+  {
+    "name": "ado_read_pr_changes",
+    "description": "Read the file changes in an Azure DevOps pull request.",
+    "group": "ado-prs",
+    "handler": "ado",
+    "params": {
+      "org": { "type": "string", "required": true, "description": "Azure DevOps organization" },
+      "project": { "type": "string", "required": true, "description": "Project name" },
+      "repo": { "type": "string", "required": true, "description": "Repository name or ID" },
+      "pull_request_id": { "type": "number", "required": true, "description": "Pull request ID" }
+    },
+    "response": {
+      "fields": [
+        "changeEntries.item.path",
+        "changeEntries.changeType",
+        "changeEntries.item.gitObjectType"
+      ]
+    }
+  }
+]

@@ -217,6 +217,8 @@ public enum ActionGroup: String, CaseIterable, Sendable, Hashable {
     case githubPrs = "github-prs"
     case githubCode = "github-code"
     case adoWorkitems = "ado-workitems"
+    case adoPrs = "ado-prs"
+    case adoCode = "ado-code"
     case azureLogs = "azure-logs"
     case custom
 
@@ -226,6 +228,8 @@ public enum ActionGroup: String, CaseIterable, Sendable, Hashable {
         case .githubPrs:     "GitHub PRs"
         case .githubCode:    "GitHub Code"
         case .adoWorkitems:  "ADO Work Items"
+        case .adoPrs:        "ADO PRs"
+        case .adoCode:       "ADO Code"
         case .azureLogs:     "Azure Logs"
         case .custom:        "Custom"
         }

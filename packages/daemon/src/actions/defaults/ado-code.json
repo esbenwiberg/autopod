@@ -1,0 +1,52 @@
+[
+  {
+    "name": "ado_read_file",
+    "description": "Read a file from an Azure DevOps Git repository.",
+    "group": "ado-code",
+    "handler": "ado",
+    "params": {
+      "org": { "type": "string", "required": true, "description": "Azure DevOps organization" },
+      "project": { "type": "string", "required": true, "description": "Project name" },
+      "repo": { "type": "string", "required": true, "description": "Repository name or ID" },
+      "path": { "type": "string", "required": true, "description": "File path within the repo" },
+      "version": {
+        "type": "string",
+        "required": false,
+        "description": "Git ref (branch, tag, or commit SHA)"
+      }
+    },
+    "response": {
+      "fields": ["content", "path", "objectId", "commitId"]
+    }
+  },
+  {
+    "name": "ado_search_code",
+    "description": "Search code in an Azure DevOps project.",
+    "group": "ado-code",
+    "handler": "ado",
+    "params": {
+      "org": { "type": "string", "required": true, "description": "Azure DevOps organization" },
+      "project": { "type": "string", "required": true, "description": "Project name" },
+      "query": {
+        "type": "string",
+        "required": true,
+        "description": "Search query"
+      },
+      "repo": {
+        "type": "string",
+        "required": false,
+        "description": "Repository name to scope search (optional)"
+      },
+      "max_results": {
+        "type": "number",
+        "required": false,
+        "description": "Maximum results to return",
+        "default": 10
+      }
+    },
+    "response": {
+      "fields": ["fileName", "path", "repository.name", "matches.charOffset", "matches.length"],
+      "redactFields": ["repository.project.name"]
+    }
+  }
+]
