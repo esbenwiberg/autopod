@@ -38,7 +38,24 @@ export interface MergePrConfig {
   squash?: boolean;
 }
 
+export interface MergePrResult {
+  /** Whether the merge completed immediately */
+  merged: boolean;
+  /** If not merged, whether auto-merge was scheduled (GitHub) or auto-complete set (ADO) */
+  autoMergeScheduled: boolean;
+}
+
+export interface PrMergeStatus {
+  /** Whether the PR has been merged */
+  merged: boolean;
+  /** Whether the PR is still open (false = closed/abandoned without merging) */
+  open: boolean;
+  /** Human-readable reason the merge is blocked, if known */
+  blockReason: string | null;
+}
+
 export interface PrManager {
   createPr(config: CreatePrConfig): Promise<string>; // returns PR URL
-  mergePr(config: MergePrConfig): Promise<void>;
+  mergePr(config: MergePrConfig): Promise<MergePrResult>;
+  getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus>;
 }

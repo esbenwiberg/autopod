@@ -163,7 +163,8 @@ function createMockRuntimeRegistry(runtime: Runtime): RuntimeRegistry {
 function createMockPrManager(): PrManager {
   return {
     createPr: vi.fn(async () => 'https://github.com/org/repo/pull/42'),
-    mergePr: vi.fn(async () => {}),
+    mergePr: vi.fn(async () => ({ merged: true, autoMergeScheduled: false })),
+    getPrStatus: vi.fn(async () => ({ merged: true, open: false, blockReason: null })),
   };
 }
 

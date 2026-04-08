@@ -22,13 +22,14 @@ public enum SessionStatus: String, Sendable {
     case queued, provisioning, running
     case awaitingInput = "awaiting_input"
     case validating, validated, failed
-    case approved, merging, complete
+    case approved, merging, mergePending = "merge_pending", complete
     case paused
     case killing, killed
 
     public var label: String {
         switch self {
         case .awaitingInput: "awaiting input"
+        case .mergePending: "merge pending"
         default: rawValue
         }
     }
@@ -44,6 +45,7 @@ public enum SessionStatus: String, Sendable {
         case .failed:        .red
         case .approved:      .secondary
         case .merging:       .blue
+        case .mergePending:  .orange
         case .complete:      .secondary
         case .paused:        .gray
         case .killing:       .red
@@ -60,7 +62,7 @@ public enum SessionStatus: String, Sendable {
 
     public var isActive: Bool {
         switch self {
-        case .provisioning, .running, .validating, .merging, .killing: true
+        case .provisioning, .running, .validating, .merging, .mergePending, .killing: true
         default: false
         }
     }

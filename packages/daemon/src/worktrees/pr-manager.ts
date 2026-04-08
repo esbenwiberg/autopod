@@ -1,7 +1,13 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
-import type { CreatePrConfig, MergePrConfig, PrManager } from '../interfaces/pr-manager.js';
+import type {
+  CreatePrConfig,
+  MergePrConfig,
+  MergePrResult,
+  PrManager,
+  PrMergeStatus,
+} from '../interfaces/pr-manager.js';
 import { buildPrBody, buildPrTitle } from './pr-body-builder.js';
 
 const execFileAsync = promisify(execFile);
@@ -72,7 +78,7 @@ export class GhPrManager implements PrManager {
     }
   }
 
-  async mergePr(config: MergePrConfig): Promise<void> {
+  async mergePr(config: MergePrConfig): Promise<MergePrResult> {
     const args = [
       'pr',
       'merge',
@@ -92,11 +98,83 @@ export class GhPrManager implements PrManager {
         cwd: config.worktreePath,
         timeout: 30_000,
       });
-      this.logger.info({ prUrl: config.prUrl }, 'Pull request merged');
     } catch (err) {
       this.logger.error({ err, prUrl: config.prUrl }, 'Failed to merge pull request');
       throw err;
     }
+
+    // Check if the merge completed immediately or auto-merge was scheduled
+    const status = await this.getPrStatus({ prUrl: config.prUrl, worktreePath: config.worktreePath });
+    if (status.merged) {
+      this.logger.info({ prUrl: config.prUrl }, 'Pull request merged immediately');
+      return { merged: true, autoMergeScheduled: false };
+    }
+
+    this.logger.info(
+      { prUrl: config.prUrl, blockReason: status.blockReason },
+      'Auto-merge scheduled — PR not yet mergeable',
+    );
+    return { merged: false, autoMergeScheduled: true };
+  }
+
+  async getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus> {
+    const args = [
+      'pr',
+      'view',
+      config.prUrl,
+      '--json',
+      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest',
+    ];
+
+    const { stdout } = await execFileAsync('gh', args, {
+      cwd: config.worktreePath,
+      timeout: 15_000,
+    });
+
+    const pr = JSON.parse(stdout) as {
+      state: string;
+      mergedAt: string | null;
+      statusCheckRollup: Array<{ name: string; status: string; conclusion: string }> | null;
+      reviewDecision: string;
+      autoMergeRequest: unknown | null;
+    };
+
+    if (pr.state === 'MERGED') {
+      return { merged: true, open: false, blockReason: null };
+    }
+
+    if (pr.state === 'CLOSED') {
+      return { merged: false, open: false, blockReason: 'PR was closed without merging' };
+    }
+
+    // PR is still open — build a block reason from checks + review status
+    const reasons: string[] = [];
+
+    if (pr.statusCheckRollup?.length) {
+      const pending = pr.statusCheckRollup.filter(
+        (c) => c.conclusion !== 'SUCCESS' && c.conclusion !== 'NEUTRAL' && c.conclusion !== 'SKIPPED',
+      );
+      if (pending.length > 0) {
+        const checkNames = pending.map((c) => `${c.name} (${c.conclusion || c.status})`).join(', ');
+        reasons.push(`Checks: ${checkNames}`);
+      }
+    }
+
+    if (pr.reviewDecision && pr.reviewDecision !== 'APPROVED') {
+      const label =
+        pr.reviewDecision === 'CHANGES_REQUESTED'
+          ? 'Changes requested'
+          : pr.reviewDecision === 'REVIEW_REQUIRED'
+            ? 'Review required'
+            : pr.reviewDecision;
+      reasons.push(label);
+    }
+
+    return {
+      merged: false,
+      open: true,
+      blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
+    };
   }
 }
 
@@ -173,7 +251,7 @@ export class GitHubApiPrManager implements PrManager {
     return data.html_url;
   }
 
-  async mergePr(config: MergePrConfig): Promise<void> {
+  async mergePr(config: MergePrConfig): Promise<MergePrResult> {
     const { owner, repo, number } = parsePrUrl(config.prUrl);
 
     this.logger.info(
@@ -191,7 +269,7 @@ export class GitHubApiPrManager implements PrManager {
       const text = await prResponse.text();
       throw new Error(`GitHub API error fetching PR ${prResponse.status}: ${text}`);
     }
-    const pr = (await prResponse.json()) as { head: { ref: string } };
+    const pr = (await prResponse.json()) as { head: { ref: string }; node_id: string };
     const headBranch = pr.head.ref;
 
     const mergeResponse = await fetch(
@@ -202,6 +280,15 @@ export class GitHubApiPrManager implements PrManager {
         body: JSON.stringify({ merge_method: config.squash ? 'squash' : 'merge' }),
       },
     );
+
+    // 405 = merge blocked (checks pending, reviews required, etc.)
+    if (mergeResponse.status === 405) {
+      this.logger.info(
+        { prUrl: config.prUrl },
+        'PR not mergeable yet — checks or reviews pending',
+      );
+      return { merged: false, autoMergeScheduled: false };
+    }
 
     if (!mergeResponse.ok) {
       const text = await mergeResponse.text();
@@ -221,5 +308,62 @@ export class GitHubApiPrManager implements PrManager {
     }
 
     this.logger.info({ prUrl: config.prUrl }, 'Pull request merged');
+    return { merged: true, autoMergeScheduled: false };
+  }
+
+  async getPrStatus(config: { prUrl: string }): Promise<PrMergeStatus> {
+    const { owner, repo, number } = parsePrUrl(config.prUrl);
+
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,
+      { headers: this.headers },
+    );
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`GitHub API error ${response.status}: ${text}`);
+    }
+
+    const pr = (await response.json()) as {
+      state: string;
+      merged: boolean;
+      head: { sha: string };
+    };
+
+    if (pr.merged) {
+      return { merged: true, open: false, blockReason: null };
+    }
+    if (pr.state === 'closed') {
+      return { merged: false, open: false, blockReason: 'PR was closed without merging' };
+    }
+
+    // Check status of the head commit
+    const statusResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${pr.head.sha}/check-runs`,
+      { headers: this.headers },
+    );
+
+    const reasons: string[] = [];
+    if (statusResponse.ok) {
+      const data = (await statusResponse.json()) as {
+        check_runs: Array<{ name: string; status: string; conclusion: string | null }>;
+      };
+      const pending = data.check_runs.filter(
+        (c) =>
+          c.status !== 'completed' ||
+          (c.conclusion !== 'success' && c.conclusion !== 'neutral' && c.conclusion !== 'skipped'),
+      );
+      if (pending.length > 0) {
+        const checkNames = pending
+          .map((c) => `${c.name} (${c.conclusion ?? c.status})`)
+          .join(', ');
+        reasons.push(`Checks: ${checkNames}`);
+      }
+    }
+
+    return {
+      merged: false,
+      open: true,
+      blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
+    };
   }
 }

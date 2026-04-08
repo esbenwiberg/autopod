@@ -199,7 +199,7 @@ public enum SessionMapper {
       containerUrl: response.previewUrl.flatMap { URL(string: $0) },
       plan: plan,
       phase: phase,
-      latestActivity: response.plan?.summary,
+      latestActivity: response.mergeBlockReason ?? response.plan?.summary,
       errorSummary: errorSummary,
       attempts: attempts,
       inputTokens: response.inputTokens,

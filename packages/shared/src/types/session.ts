@@ -15,6 +15,7 @@ export type SessionStatus =
   | 'failed'
   | 'approved'
   | 'merging'
+  | 'merge_pending'
   | 'complete'
   | 'paused'
   | 'killing'
@@ -48,6 +49,7 @@ export interface Session {
   linesRemoved: number;
   previewUrl: string | null;
   prUrl: string | null;
+  mergeBlockReason: string | null;
   plan: { summary: string; steps: string[] } | null;
   progress: {
     phase: string;

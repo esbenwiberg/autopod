@@ -149,6 +149,9 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
         console.log(
           `${chalk.bold('Changes:')}      ${s.filesChanged} files (+${s.linesAdded} -${s.linesRemoved})`,
         );
+        if (s.mergeBlockReason) {
+          console.log(`${chalk.bold('Merge:')}        ${chalk.yellow(`⏳ ${s.mergeBlockReason}`)}`);
+        }
         if (s.previewUrl) {
           console.log(`${chalk.bold('Preview:')}      ${s.previewUrl}`);
         }

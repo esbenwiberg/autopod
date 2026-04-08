@@ -29,6 +29,7 @@ public struct SessionResponse: Codable, Sendable {
   public let linesRemoved: Int
   public let previewUrl: String?
   public let prUrl: String?
+  public let mergeBlockReason: String?
   public let plan: PlanResponse?
   public let progress: ProgressResponse?
   public let acceptanceCriteria: [String]?

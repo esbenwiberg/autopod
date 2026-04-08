@@ -17,6 +17,7 @@ const STATUS_MAP: Record<SessionStatus, StatusStyle> = {
   failed: { color: chalk.red, symbol: '✗', label: 'Failed' },
   approved: { color: chalk.green.bold, symbol: '✓', label: 'Approved' },
   merging: { color: chalk.green, symbol: '⟳', label: 'Merging' },
+  merge_pending: { color: chalk.yellow, symbol: '⏳', label: 'Merge Pending' },
   complete: { color: chalk.dim.green, symbol: '✓', label: 'Complete' },
   paused: { color: chalk.yellow.bold, symbol: '⏸', label: 'Paused' },
   killing: { color: chalk.dim.red, symbol: '⟳', label: 'Killing' },

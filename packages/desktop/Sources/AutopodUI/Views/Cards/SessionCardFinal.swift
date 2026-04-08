@@ -244,6 +244,13 @@ public struct SessionCardFinal: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        case .mergePending:
+            HStack(spacing: 5) {
+                ProgressView().scaleEffect(0.5)
+                Text("Waiting to merge…")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         case .complete:
             if session.prUrl != nil {
                 Label("Merged", systemImage: "checkmark.circle")
@@ -618,6 +625,25 @@ public struct SessionCardFinal: View {
                         if let url = session.containerUrl { NSWorkspace.shared.open(url) }
                     } label: {
                         Label("Open App", systemImage: "safari")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+        case .mergePending:
+            VStack(alignment: .leading, spacing: 6) {
+                if let activity = session.latestActivity {
+                    Text(activity)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if let url = session.prUrl {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label("View PR", systemImage: "arrow.up.right.square.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)

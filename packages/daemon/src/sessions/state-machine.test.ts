@@ -18,6 +18,10 @@ describe('state-machine', () => {
       expect(() => validateTransition('s1', 'validated', 'approved')).not.toThrow();
       expect(() => validateTransition('s1', 'approved', 'merging')).not.toThrow();
       expect(() => validateTransition('s1', 'merging', 'complete')).not.toThrow();
+      expect(() => validateTransition('s1', 'merging', 'merge_pending')).not.toThrow();
+      expect(() => validateTransition('s1', 'merge_pending', 'complete')).not.toThrow();
+      expect(() => validateTransition('s1', 'merge_pending', 'failed')).not.toThrow();
+      expect(() => validateTransition('s1', 'merge_pending', 'killing')).not.toThrow();
       expect(() => validateTransition('s1', 'killing', 'killed')).not.toThrow();
     });
 
@@ -78,6 +82,7 @@ describe('state-machine', () => {
       expect(isTerminalState('failed')).toBe(false);
       expect(isTerminalState('approved')).toBe(false);
       expect(isTerminalState('merging')).toBe(false);
+      expect(isTerminalState('merge_pending')).toBe(false);
       expect(isTerminalState('killing')).toBe(false);
     });
   });
@@ -106,6 +111,7 @@ describe('state-machine', () => {
       expect(canKill('running')).toBe(true);
       expect(canKill('awaiting_input')).toBe(true);
       expect(canKill('failed')).toBe(true);
+      expect(canKill('merge_pending')).toBe(true);
     });
 
     it('returns false for non-killable states', () => {

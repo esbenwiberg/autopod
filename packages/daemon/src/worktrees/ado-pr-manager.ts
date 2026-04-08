@@ -1,5 +1,11 @@
 import type { Logger } from 'pino';
-import type { CreatePrConfig, MergePrConfig, PrManager } from '../interfaces/pr-manager.js';
+import type {
+  CreatePrConfig,
+  MergePrConfig,
+  MergePrResult,
+  PrManager,
+  PrMergeStatus,
+} from '../interfaces/pr-manager.js';
 import { buildPrBody, buildPrTitle } from './pr-body-builder.js';
 
 export interface AdoPrManagerConfig {
@@ -146,12 +152,16 @@ export class AdoPrManager implements PrManager {
     return prUrl;
   }
 
-  async mergePr(config: MergePrConfig): Promise<void> {
-    // Extract PR ID from URL (last path segment is the numeric ID)
-    const prId = config.prUrl.split('/').at(-1);
+  private extractPrId(prUrl: string): string {
+    const prId = prUrl.split('/').at(-1);
     if (!prId || Number.isNaN(Number(prId))) {
-      throw new Error(`Cannot extract PR ID from URL: ${config.prUrl}`);
+      throw new Error(`Cannot extract PR ID from URL: ${prUrl}`);
     }
+    return prId;
+  }
+
+  async mergePr(config: MergePrConfig): Promise<MergePrResult> {
+    const prId = this.extractPrId(config.prUrl);
 
     this.logger.info(
       { prUrl: config.prUrl, prId, squash: config.squash ?? false },
@@ -172,11 +182,66 @@ export class AdoPrManager implements PrManager {
       },
     };
 
-    await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
+    const result = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
       method: 'PATCH',
       body: JSON.stringify(patchBody),
-    });
+    })) as { status: string; autoCompleteSetBy?: { displayName: string } };
+
+    // If the PR is still active after the PATCH, policies are blocking the merge
+    // and ADO set auto-complete instead
+    if (result.status === 'active') {
+      this.logger.info(
+        { prUrl: config.prUrl, prId, autoCompleteSetBy: result.autoCompleteSetBy?.displayName },
+        'ADO auto-complete set — policies blocking merge',
+      );
+      return { merged: false, autoMergeScheduled: true };
+    }
 
     this.logger.info({ prUrl: config.prUrl, prId }, 'ADO pull request completed');
+    return { merged: true, autoMergeScheduled: false };
+  }
+
+  async getPrStatus(config: { prUrl: string }): Promise<PrMergeStatus> {
+    const prId = this.extractPrId(config.prUrl);
+
+    const pr = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
+      method: 'GET',
+    })) as { status: string; mergeStatus?: string };
+
+    if (pr.status === 'completed') {
+      return { merged: true, open: false, blockReason: null };
+    }
+    if (pr.status === 'abandoned') {
+      return { merged: false, open: false, blockReason: 'PR was abandoned' };
+    }
+
+    // PR is still active — check policy evaluations
+    const reasons: string[] = [];
+    try {
+      const evaluations = (await this.adoFetch(
+        `/pullrequests/${prId}/statuses?api-version=7.1`,
+        { method: 'GET' },
+      )) as { value: Array<{ context: { name: string }; state: string }> };
+
+      const blocking = evaluations.value.filter(
+        (e) => e.state !== 'succeeded' && e.state !== 'notApplicable',
+      );
+      if (blocking.length > 0) {
+        const names = blocking.map((e) => `${e.context.name} (${e.state})`).join(', ');
+        reasons.push(`Policies: ${names}`);
+      }
+    } catch {
+      // Policy status endpoint may not be available — fall through
+    }
+
+    if (pr.mergeStatus === 'conflicts') {
+      reasons.push('Merge conflicts');
+    }
+
+    return {
+      merged: false,
+      open: true,
+      blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for policies to pass',
+    };
   }
 }

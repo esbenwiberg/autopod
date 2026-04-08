@@ -49,6 +49,7 @@ export interface SessionUpdates {
   linesRemoved?: number;
   previewUrl?: string | null;
   prUrl?: string | null;
+  mergeBlockReason?: string | null;
   plan?: { summary: string; steps: string[] } | null;
   progress?: {
     phase: string;
@@ -118,6 +119,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     linesRemoved: row.lines_removed as number,
     previewUrl: (row.preview_url as string) ?? null,
     prUrl: (row.pr_url as string) ?? null,
+    mergeBlockReason: (row.merge_block_reason as string) ?? null,
     plan: row.plan ? JSON.parse(row.plan as string) : null,
     progress: row.progress ? JSON.parse(row.progress as string) : null,
     acceptanceCriteria: row.acceptance_criteria
@@ -252,6 +254,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         setClauses.push('pr_url = @prUrl');
         params.prUrl = changes.prUrl;
       }
+      if (changes.mergeBlockReason !== undefined) {
+        setClauses.push('merge_block_reason = @mergeBlockReason');
+        params.mergeBlockReason = changes.mergeBlockReason;
+      }
       if (changes.plan !== undefined) {
         setClauses.push('plan = @plan');
         params.plan = changes.plan !== null ? JSON.stringify(changes.plan) : null;
@@ -385,6 +391,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         'failed',
         'approved',
         'merging',
+        'merge_pending',
         'complete',
         'paused',
         'killing',

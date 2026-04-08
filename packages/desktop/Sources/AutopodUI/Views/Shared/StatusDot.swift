@@ -27,7 +27,7 @@ public struct StatusDot: View {
                         }
                     }
 
-            case .validating, .merging:
+            case .validating, .merging, .mergePending:
                 Circle()
                     .trim(from: 0.15, to: 1.0)
                     .stroke(status.color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -86,6 +86,7 @@ public struct StatusDot: View {
             .validated,
             .failed,
             .merging,
+            .mergePending,
             .complete,
             .killed,
         ], id: \.rawValue) { status in

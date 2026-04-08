@@ -163,6 +163,14 @@ public enum MockData: Sendable {
         diffStats: DiffStats(added: 210, removed: 44, files: 12)
     )
 
+    public static let mergePending = Session(
+        status: .mergePending, branch: "feat/search", profileName: "backend", model: "claude-opus",
+        startedAt: .minutesAgo(22),
+        diffStats: DiffStats(added: 210, removed: 44, files: 12),
+        prUrl: URL(string: "https://github.com/org/my-app/pull/155"),
+        latestActivity: "Checks: CI build (in_progress); Review required"
+    )
+
     public static let complete = Session(
         status: .complete, branch: "fix/login", profileName: "my-app", model: "claude-opus",
         startedAt: .minutesAgo(45),

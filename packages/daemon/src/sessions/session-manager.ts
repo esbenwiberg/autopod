@@ -225,6 +225,113 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
   const COMMIT_POLL_INTERVAL_MS = 60_000;
 
+  /** Active merge polling intervals, keyed by sessionId. */
+  const mergePollers = new Map<string, ReturnType<typeof setInterval>>();
+
+  const MERGE_POLL_INTERVAL_MS = 60_000;
+
+  /** Start polling PR merge status for a session in merge_pending state. */
+  function startMergePolling(sessionId: string): void {
+    stopMergePolling(sessionId);
+
+    const poll = async () => {
+      try {
+        const session = sessionRepo.getOrThrow(sessionId);
+        if (session.status !== 'merge_pending') {
+          stopMergePolling(sessionId);
+          return;
+        }
+
+        if (!session.prUrl) {
+          stopMergePolling(sessionId);
+          return;
+        }
+
+        const profile = profileStore.get(session.profileName);
+        const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+        if (!prManager) {
+          stopMergePolling(sessionId);
+          return;
+        }
+
+        const status = await prManager.getPrStatus({
+          prUrl: session.prUrl,
+          worktreePath: session.worktreePath ?? undefined,
+        });
+
+        if (status.merged) {
+          emitActivityStatus(sessionId, 'PR merged successfully');
+          transition(session, 'complete', { completedAt: new Date().toISOString(), mergeBlockReason: null });
+
+          eventBus.emit({
+            type: 'session.completed',
+            timestamp: new Date().toISOString(),
+            sessionId,
+            finalStatus: 'complete',
+            summary: {
+              id: sessionId,
+              profileName: session.profileName,
+              task: session.task,
+              status: 'complete',
+              model: session.model,
+              runtime: session.runtime,
+              duration: session.startedAt ? Date.now() - new Date(session.startedAt).getTime() : null,
+              filesChanged: session.filesChanged,
+              createdAt: session.createdAt,
+            },
+          });
+
+          logger.info({ sessionId, prUrl: session.prUrl }, 'Merge polling: PR merged — session complete');
+          stopMergePolling(sessionId);
+          return;
+        }
+
+        if (!status.open) {
+          emitActivityStatus(sessionId, `PR closed without merging: ${status.blockReason ?? 'unknown reason'}`);
+          transition(session, 'failed', { mergeBlockReason: status.blockReason });
+          logger.warn({ sessionId, prUrl: session.prUrl, reason: status.blockReason }, 'Merge polling: PR closed — session failed');
+          stopMergePolling(sessionId);
+          return;
+        }
+
+        // Still pending — update block reason if it changed
+        if (status.blockReason !== session.mergeBlockReason) {
+          sessionRepo.update(sessionId, { mergeBlockReason: status.blockReason });
+          emitActivityStatus(sessionId, `Merge pending: ${status.blockReason}`);
+        }
+      } catch (err) {
+        logger.debug({ err, sessionId }, 'Merge polling failed, skipping cycle');
+      }
+    };
+
+    // Run first poll immediately
+    poll();
+    const interval = setInterval(poll, MERGE_POLL_INTERVAL_MS);
+    interval.unref();
+    mergePollers.set(sessionId, interval);
+  }
+
+  /** Stop merge polling for a session. */
+  function stopMergePolling(sessionId: string): void {
+    const interval = mergePollers.get(sessionId);
+    if (interval) {
+      clearInterval(interval);
+      mergePollers.delete(sessionId);
+    }
+  }
+
+  /** Resume merge polling for any sessions left in merge_pending state (e.g. after daemon restart). */
+  function resumeMergePolling(): void {
+    const pendingSessions = sessionRepo.list({ status: 'merge_pending' as SessionStatus });
+    for (const session of pendingSessions) {
+      logger.info({ sessionId: session.id, prUrl: session.prUrl }, 'Resuming merge polling after restart');
+      startMergePolling(session.id);
+    }
+  }
+
+  // Resume merge polling on startup
+  resumeMergePolling();
+
   /** Start polling git commit count inside a running container. */
   function startCommitPolling(sessionId: string): void {
     stopCommitPolling(sessionId);
@@ -1186,16 +1293,53 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       if (session.prUrl && prManager && session.worktreePath) {
         emitActivityStatus(sessionId, `Merging PR: ${session.prUrl}`);
         try {
-          await prManager.mergePr({
+          const mergeResult = await prManager.mergePr({
             worktreePath: session.worktreePath,
             prUrl: session.prUrl,
             squash: options?.squash,
           });
-          emitActivityStatus(sessionId, 'PR merged successfully');
+
+          if (mergeResult.merged) {
+            emitActivityStatus(sessionId, 'PR merged successfully');
+          } else {
+            // Merge didn't complete immediately — enter merge_pending state
+            const initialStatus = await prManager.getPrStatus({
+              prUrl: session.prUrl,
+              worktreePath: session.worktreePath,
+            });
+            const blockReason = initialStatus.blockReason ?? 'Waiting for merge conditions';
+            emitActivityStatus(sessionId, `Merge pending: ${blockReason}`);
+            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
+            startMergePolling(sessionId);
+            logger.info(
+              { sessionId, prUrl: session.prUrl, blockReason, autoMerge: mergeResult.autoMergeScheduled },
+              'Session approved — merge pending',
+            );
+            return;
+          }
         } catch (err) {
           logger.error({ err, sessionId, prUrl: session.prUrl }, 'Failed to merge PR');
+          // Merge command failed — check if the PR is blocked by checks/reviews
+          try {
+            const fallbackStatus = await prManager.getPrStatus({
+              prUrl: session.prUrl,
+              worktreePath: session.worktreePath,
+            });
+            if (fallbackStatus.open && !fallbackStatus.merged) {
+              const blockReason = fallbackStatus.blockReason ?? 'Merge failed — waiting for conditions';
+              emitActivityStatus(sessionId, `Merge pending: ${blockReason}`);
+              transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
+              startMergePolling(sessionId);
+              logger.info(
+                { sessionId, prUrl: session.prUrl, blockReason },
+                'Merge failed but PR is open — entering merge_pending',
+              );
+              return;
+            }
+          } catch (statusErr) {
+            logger.warn({ err: statusErr, sessionId }, 'Failed to check PR status after merge failure');
+          }
           emitActivityStatus(sessionId, 'PR merge failed — session still completing');
-          // Don't block completion — merge is best-effort
         }
       } else if (session.worktreePath) {
         // Fallback: push branch directly (no PR was created)
@@ -1210,7 +1354,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         } catch (err) {
           logger.error({ err, sessionId }, 'Failed to push branch during approval');
           emitActivityStatus(sessionId, 'Branch push failed — session still completing');
-          // Don't block completion — branch push is best-effort
         }
       }
 
@@ -1340,6 +1483,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     async killSession(sessionId: string): Promise<void> {
       clearPreviewTimer(sessionId);
+      stopMergePolling(sessionId);
       const session = sessionRepo.getOrThrow(sessionId);
       if (!canKill(session.status)) {
         throw new AutopodError(
