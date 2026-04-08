@@ -39,6 +39,7 @@ export interface SessionUpdates {
   worktreePath?: string | null;
   validationAttempts?: number;
   lastValidationResult?: unknown | null;
+  lastCorrectionMessage?: string | null;
   pendingEscalation?: unknown | null;
   escalationCount?: number;
   startedAt?: string | null;
@@ -103,6 +104,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     lastValidationResult: row.last_validation_result
       ? JSON.parse(row.last_validation_result as string)
       : null,
+    lastCorrectionMessage: (row.last_correction_message as string) ?? null,
     pendingEscalation: row.pending_escalation ? JSON.parse(row.pending_escalation as string) : null,
     escalationCount: row.escalation_count as number,
     skipValidation: Boolean(row.skip_validation),
@@ -208,6 +210,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
           changes.lastValidationResult !== null
             ? JSON.stringify(changes.lastValidationResult)
             : null;
+      }
+      if (changes.lastCorrectionMessage !== undefined) {
+        setClauses.push('last_correction_message = @lastCorrectionMessage');
+        params.lastCorrectionMessage = changes.lastCorrectionMessage;
       }
       if (changes.pendingEscalation !== undefined) {
         setClauses.push('pending_escalation = @pendingEscalation');

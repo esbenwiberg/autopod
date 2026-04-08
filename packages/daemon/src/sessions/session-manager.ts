@@ -1838,6 +1838,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             }
           }
 
+          sessionRepo.update(sessionId, { lastCorrectionMessage: null });
           transition(s2, 'validated', { prUrl });
 
           // Stop the container (not remove) so it can be restarted for preview
@@ -1859,6 +1860,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           emitActivityStatus(sessionId, 'Sending validation feedback to agent…');
           const cm = containerManagerFactory.get(s2.executionTarget);
           const correctionMessage = await buildCorrectionMessage(s2, profile, result, cm);
+          sessionRepo.update(sessionId, { lastCorrectionMessage: correctionMessage });
 
           // Transition back to running for retry
           transition(s2, 'running');
