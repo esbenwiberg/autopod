@@ -82,7 +82,7 @@ export function terminalRoutes(
             Cmd: [
               '/bin/sh',
               '-c',
-              'command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s main || exec /bin/bash -l',
+              'command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s main \\; set -g mouse on || exec /bin/bash -l',
             ],
             AttachStdin: true,
             AttachStdout: true,

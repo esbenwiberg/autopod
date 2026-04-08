@@ -2,6 +2,59 @@ import AppKit
 import SwiftTerm
 import SwiftUI
 
+/// Wrapper NSView that intercepts scroll-wheel events and forwards them
+/// as arrow-key sequences when the terminal is in alternate-screen mode
+/// (e.g. Claude Code, tmux, vim). SwiftTerm's built-in `scrollWheel`
+/// only manipulates the scrollback buffer, which doesn't exist on the
+/// alternate screen — so mouse-wheel scrolling silently does nothing.
+public final class TerminalScrollInterceptor: NSView {
+  let terminalView: TerminalView
+
+  init(terminalView: TerminalView) {
+    self.terminalView = terminalView
+    super.init(frame: .zero)
+    addSubview(terminalView)
+    terminalView.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      terminalView.topAnchor.constraint(equalTo: topAnchor),
+      terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
+
+  public override func scrollWheel(with event: NSEvent) {
+    guard event.deltaY != 0 else { return }
+
+    let terminal = terminalView.terminal!
+
+    // If the app requested mouse events (e.g. tmux with `mouse on`),
+    // send proper mouse-wheel button events so the app can scroll.
+    if terminalView.allowMouseReporting && terminal.mouseMode != .off {
+      let lines = Self.scrollVelocity(delta: Int(abs(event.deltaY)))
+      // Xterm mouse wheel: button flag 64 = scroll up, 65 = scroll down
+      let buttonFlags = event.deltaY > 0 ? 64 : 65
+      for _ in 0..<lines {
+        terminal.sendEvent(buttonFlags: buttonFlags, x: 0, y: 0)
+      }
+      return
+    }
+
+    // No mouse reporting — fall through to SwiftTerm's scrollback handling.
+    terminalView.scrollWheel(with: event)
+  }
+
+  private static func scrollVelocity(delta: Int) -> Int {
+    if delta > 9 { return 20 }
+    if delta > 5 { return 10 }
+    if delta > 1 { return 3 }
+    return 1
+  }
+}
+
 /// NSViewRepresentable wrapper around SwiftTerm's `TerminalView`.
 /// Provides a real xterm-compatible terminal emulator with proper ANSI rendering,
 /// text selection, scrollback, colors — the whole deal.
@@ -26,7 +79,7 @@ public struct TerminalEmulatorView: NSViewRepresentable {
     self.onResize = onResize
   }
 
-  public func makeNSView(context: Context) -> TerminalView {
+  public func makeNSView(context: Context) -> TerminalScrollInterceptor {
     let tv = TerminalView(frame: .zero)
     Self.applyTheme(tv)
     tv.terminalDelegate = context.coordinator
@@ -40,7 +93,7 @@ public struct TerminalEmulatorView: NSViewRepresentable {
     // The view isn't laid out yet inside makeNSView, so getDims() returns
     // garbage (e.g. cols=-2). Wait for the first sizeChanged delegate call instead.
 
-    return tv
+    return TerminalScrollInterceptor(terminalView: tv)
   }
 
   // MARK: - Theme
@@ -83,12 +136,12 @@ public struct TerminalEmulatorView: NSViewRepresentable {
     tv.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
   }
 
-  public func updateNSView(_ tv: TerminalView, context: Context) {
+  public func updateNSView(_ wrapper: TerminalScrollInterceptor, context: Context) {
     context.coordinator.onSendData = onSendData
     context.coordinator.onResize = onResize
   }
 
-  public static func dismantleNSView(_ tv: TerminalView, coordinator: Coordinator) {
+  public static func dismantleNSView(_ wrapper: TerminalScrollInterceptor, coordinator: Coordinator) {
     coordinator.dataPipe.clearReceiver()
   }
 
