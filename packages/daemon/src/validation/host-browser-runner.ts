@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -31,10 +32,35 @@ export interface HostBrowserRunner {
   screenshotDir(sessionId: string): string;
 }
 
+/**
+ * Resolve the package directory that contains playwright as a dependency.
+ * Child processes spawned with `cwd` set to this directory can
+ * `import 'playwright'` since ESM resolution walks up from cwd.
+ */
+function resolvePlaywrightCwd(): string | null {
+  try {
+    const require = createRequire(import.meta.url);
+    const pwEntry = require.resolve('playwright');
+    // pwEntry is something like .../packages/daemon/node_modules/playwright/index.js
+    // Walk up to the package directory that has playwright in its node_modules
+    const parts = pwEntry.split('/node_modules/');
+    if (parts.length >= 2) {
+      return parts[0];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
   const log = logger.child({ component: 'host-browser-runner' });
   const baseDir = join(tmpdir(), 'autopod-browser');
   let available: boolean | null = null;
+
+  // Resolve the cwd that has playwright in its node_modules at construction
+  // time. Child processes spawned with this cwd can `import 'playwright'`.
+  const pwCwd = resolvePlaywrightCwd();
 
   function sessionDir(sessionId: string): string {
     return join(baseDir, sessionId);
@@ -44,15 +70,28 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
     return join(sessionDir(sessionId), 'screenshots');
   }
 
+  function childSpawnOpts(): { env: NodeJS.ProcessEnv; cwd?: string } {
+    return {
+      env: { ...process.env },
+      cwd: pwCwd ?? undefined,
+    };
+  }
+
   return {
     async isAvailable(): Promise<boolean> {
       if (available !== null) return available;
 
+      if (!pwCwd) {
+        available = false;
+        log.info('Playwright package not found — browser validation will fall back to container');
+        return false;
+      }
+
       try {
-        // Check if playwright chromium is installed by trying to resolve the executable
+        // Verify chromium binary is actually installed
         const result = await runNode(
-          `const pw = require('playwright'); console.log(pw.chromium.executablePath());`,
-          { timeout: 10_000 },
+          `import { chromium } from 'playwright'; console.log(chromium.executablePath());`,
+          { timeout: 10_000, ...childSpawnOpts() },
         );
         available = result.exitCode === 0 && result.stdout.trim().length > 0;
       } catch {
@@ -86,12 +125,7 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
 
       const result = await runNode(`await import(${JSON.stringify(scriptPath)})`, {
         timeout: opts.timeout,
-        env: {
-          ...process.env,
-          // Ensure playwright finds its browsers
-          PLAYWRIGHT_BROWSERS_PATH:
-            process.env.PLAYWRIGHT_BROWSERS_PATH ?? undefined,
-        },
+        ...childSpawnOpts(),
       });
 
       log.info(
@@ -120,14 +154,12 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
 }
 
 /**
- * Run a snippet of JS via `node -e`. Uses `--input-type=module` so top-level
- * await works, but wraps the snippet in a require-friendly CJS preamble via
- * `createRequire` so that `require('playwright')` resolves from the daemon's
- * node_modules.
+ * Run a snippet of JS via `node -e` in ESM mode (top-level await supported).
+ * NODE_PATH must be set in env for the child to resolve packages like playwright.
  */
 function runNode(
   code: string,
-  opts: { timeout: number; env?: NodeJS.ProcessEnv },
+  opts: { timeout: number; env?: NodeJS.ProcessEnv; cwd?: string },
 ): Promise<BrowserRunResult> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -140,6 +172,7 @@ function runNode(
 
     const child = spawn('node', ['--input-type=module', '-e', code], {
       env: opts.env ?? process.env,
+      cwd: opts.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
