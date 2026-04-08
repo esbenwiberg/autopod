@@ -1,6 +1,7 @@
 import type { SessionBridge } from '@autopod/escalation-mcp';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import websocket from '@fastify/websocket';
+import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
@@ -14,6 +15,7 @@ import type {
   EventBus,
   EventRepository,
   SessionManager,
+  SessionQueue,
 } from '../sessions/index.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
@@ -40,6 +42,9 @@ export interface ServerDependencies {
   pendingRequestsBySession: Map<string, PendingRequests>;
   containerManagerFactory?: ContainerManagerFactory;
   docker?: Dockerode;
+  db?: Database.Database;
+  sessionQueue?: SessionQueue;
+  maxConcurrency?: number;
   imageBuilder?: ImageBuilder;
   actionRegistry?: ActionRegistry;
   sessionTokenIssuer?: SessionTokenIssuer;
@@ -71,7 +76,13 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   await app.register(websocket);
 
   // Routes
-  healthRoutes(app, deps.onShutdown);
+  healthRoutes(app, {
+    onShutdown: deps.onShutdown,
+    docker: deps.docker,
+    db: deps.db,
+    sessionQueue: deps.sessionQueue,
+    maxConcurrency: deps.maxConcurrency,
+  });
   sessionRoutes(app, deps.sessionManager, deps.sessionTokenIssuer, deps.eventRepo);
   profileRoutes(
     app,

@@ -293,11 +293,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       const bufOpts = { cwd: worktreePath, maxBuffer: 2 * 1024 * 1024 };
 
       // Committed changes: base..HEAD
-      const { stdout: committedDiff } = await execFileAsync(
-        'git',
-        ['diff', base, 'HEAD'],
-        bufOpts,
-      );
+      const { stdout: committedDiff } = await execFileAsync('git', ['diff', base, 'HEAD'], bufOpts);
 
       // Uncommitted changes: working tree vs HEAD (staged + unstaged)
       const { stdout: uncommittedDiff } = await execFileAsync('git', ['diff', 'HEAD'], bufOpts);
