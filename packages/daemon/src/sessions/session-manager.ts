@@ -823,6 +823,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Workspace sessions: container stays alive, no agent/validation/PR
         if (session.outputMode === 'workspace') {
+          // Capture starting HEAD so the diff endpoint only shows workspace changes,
+          // not the entire branch history since it diverged from main.
+          try {
+            const shaResult = await containerManager.execInContainer(
+              containerId,
+              ['git', 'rev-parse', 'HEAD'],
+              { cwd: '/workspace', timeout: 5_000 },
+            );
+            if (shaResult.exitCode === 0 && shaResult.stdout.trim()) {
+              sessionRepo.update(sessionId, { startCommitSha: shaResult.stdout.trim() });
+            }
+          } catch {
+            logger.debug({ sessionId }, 'Failed to capture workspace start commit SHA');
+          }
           logger.info({ sessionId }, 'Workspace session running — awaiting manual attach');
           return;
         }

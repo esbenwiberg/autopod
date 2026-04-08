@@ -1556,6 +1556,32 @@ describe('SessionManager', () => {
         expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       });
 
+      it('captures startCommitSha for workspace sessions', async () => {
+        const ctx = createTestContext();
+        const fakeSha = 'abc123def456';
+        ctx.containerManager.execInContainer.mockImplementation(async (_id, cmd) => {
+          if (cmd[0] === 'git' && cmd[1] === 'rev-parse' && cmd[2] === 'HEAD') {
+            return { stdout: `${fakeSha}\n`, stderr: '', exitCode: 0 };
+          }
+          return { stdout: '', stderr: '', exitCode: 0 };
+        });
+        const manager = createSessionManager(ctx.deps);
+
+        const session = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace session',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        await manager.processSession(session.id);
+
+        const updated = manager.getSession(session.id);
+        expect(updated.startCommitSha).toBe(fakeSha);
+      });
+
       it('reads acFrom file and populates acceptanceCriteria', async () => {
         const ctx = createTestContext();
         const manager = createSessionManager(ctx.deps);
