@@ -108,7 +108,8 @@ public enum SessionMapper {
         acValidation: acValidation,
         acChecks: acChecks,
         requirementsCheck: requirementsCheck,
-        taskReviewScreenshots: taskReviewScreenshots
+        taskReviewScreenshots: taskReviewScreenshots,
+        correctionMessage: response.lastCorrectionMessage
       )
     }()
 

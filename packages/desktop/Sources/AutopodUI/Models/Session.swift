@@ -153,6 +153,8 @@ public struct ValidationChecks: Sendable {
     public let acChecks: [AcCheckDetail]?
     public let requirementsCheck: [RequirementCheckDetail]?
     public let taskReviewScreenshots: [String]?
+    /// The formatted markdown feedback that was sent back to the agent after a failed validation attempt.
+    public let correctionMessage: String?
     public init(
         smoke: Bool, tests: Bool? = nil, review: Bool? = nil,
         buildOutput: String? = nil, testOutput: String? = nil,
@@ -163,7 +165,8 @@ public struct ValidationChecks: Sendable {
         acValidation: Bool? = nil,
         acChecks: [AcCheckDetail]? = nil,
         requirementsCheck: [RequirementCheckDetail]? = nil,
-        taskReviewScreenshots: [String]? = nil
+        taskReviewScreenshots: [String]? = nil,
+        correctionMessage: String? = nil
     ) {
         self.smoke = smoke; self.tests = tests; self.review = review
         self.buildOutput = buildOutput; self.testOutput = testOutput
@@ -173,6 +176,7 @@ public struct ValidationChecks: Sendable {
         self.acValidation = acValidation; self.acChecks = acChecks
         self.requirementsCheck = requirementsCheck
         self.taskReviewScreenshots = taskReviewScreenshots
+        self.correctionMessage = correctionMessage
     }
 
     public var allPassed: Bool { smoke && (tests ?? true) && (review ?? true) && (acValidation ?? true) }

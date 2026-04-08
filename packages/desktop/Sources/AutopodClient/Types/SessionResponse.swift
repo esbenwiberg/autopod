@@ -45,6 +45,7 @@ public struct SessionResponse: Codable, Sendable {
   public let lastCommitAt: String?
   public let linkedSessionId: String?
   public let taskSummary: TaskSummaryResponse?
+  public let lastCorrectionMessage: String?
 }
 
 public struct DeviationResponse: Codable, Sendable {

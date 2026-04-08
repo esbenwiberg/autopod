@@ -34,6 +34,7 @@ export interface Session {
   validationAttempts: number;
   maxValidationAttempts: number;
   lastValidationResult: ValidationResult | null;
+  lastCorrectionMessage: string | null;
   pendingEscalation: EscalationRequest | null;
   escalationCount: number;
   skipValidation: boolean;

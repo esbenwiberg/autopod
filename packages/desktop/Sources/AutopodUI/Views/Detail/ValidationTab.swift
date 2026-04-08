@@ -262,6 +262,25 @@ public struct ValidationTab: View {
             }
           }
 
+          // Feedback to Agent
+          if let msg = checks.correctionMessage {
+            detailSection("Feedback Sent to Agent", icon: "arrow.turn.right.up") {
+              Text("This is the exact feedback the agent received after validation failed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              ScrollView {
+                Text(msg)
+                  .font(.system(.caption2, design: .monospaced))
+                  .textSelection(.enabled)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+              }
+              .frame(maxHeight: 400)
+              .padding(8)
+              .background(Color.black.opacity(0.2))
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+          }
+
           // Code Review
           detailSection("Code Review", icon: "eye", expanded: checks.review == false) {
             switch checks.review {
