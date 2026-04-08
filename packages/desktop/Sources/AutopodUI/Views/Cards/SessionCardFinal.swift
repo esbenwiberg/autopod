@@ -112,6 +112,30 @@ public struct SessionCardFinal: View {
         } message: {
             Text("Send a message to resume the agent. Leave blank for a default resume.")
         }
+        .alert("Launch Worker", isPresented: $showLaunchWorker) {
+            TextField("What should the worker do?", text: $launchWorkerTask)
+            Button("Launch") {
+                let task = launchWorkerTask
+                launchWorkerTask = ""
+                Task {
+                    _ = await actions.createSession(
+                        session.profileName,
+                        task,
+                        nil,
+                        "pr",
+                        session.acceptanceCriteria,
+                        session.branch,
+                        session.acFrom
+                    )
+                }
+            }
+            .disabled(launchWorkerTask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {
+                launchWorkerTask = ""
+            }
+        } message: {
+            Text("Describe the task for the worker. It will branch from \(session.branch).")
+        }
     }
 
     // MARK: - Compact (always visible)
@@ -365,6 +389,7 @@ public struct SessionCardFinal: View {
 
                 if session.linkedSessionId == nil {
                     Button {
+                        showLaunchWorker = true
                     } label: {
                         Label("Launch Worker", systemImage: "arrow.right.circle")
                             .frame(maxWidth: .infinity)
@@ -392,6 +417,7 @@ public struct SessionCardFinal: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button {
+                    showLaunchWorker = true
                 } label: {
                     Label("Launch Worker", systemImage: "arrow.right.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -683,6 +709,8 @@ public struct SessionCardFinal: View {
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
+    @State private var showLaunchWorker = false
+    @State private var launchWorkerTask = ""
 
     private var replySheet: some View {
         VStack(alignment: .leading, spacing: 12) {
