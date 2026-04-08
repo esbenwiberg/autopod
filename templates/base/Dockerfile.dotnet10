@@ -5,9 +5,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
+    locales \
     iptables ipset dnsmasq \
     tmux \
+    && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
+    && locale-gen \
     && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8
 
 # Node.js 22 (for npm frontend builds)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \

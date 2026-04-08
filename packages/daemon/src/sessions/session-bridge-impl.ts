@@ -10,6 +10,7 @@ import type {
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { NudgeRepository } from './nudge-repository.js';
@@ -29,6 +30,7 @@ export interface SessionBridgeDependencies {
   containerManagerFactory: ContainerManagerFactory;
   pendingRequestsBySession: Map<string, PendingRequests>;
   logger: Logger;
+  hostBrowserRunner?: HostBrowserRunner;
 }
 
 export function createSessionBridge(deps: SessionBridgeDependencies): SessionBridge {
@@ -44,6 +46,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     containerManagerFactory,
     pendingRequestsBySession: _pendingRequestsBySession,
     logger,
+    hostBrowserRunner,
   } = deps;
 
   return {
@@ -288,6 +291,36 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       }
       const cm = containerManagerFactory.get(session.executionTarget);
       return cm.execInContainer(session.containerId, command, options);
+    },
+
+    getPreviewUrl(sessionId: string): string | null {
+      const session = sessionManager.getSession(sessionId);
+      return session.previewUrl ?? null;
+    },
+
+    async runBrowserOnHost(
+      sessionId: string,
+      script: string,
+      timeout: number,
+    ): Promise<{ stdout: string; stderr: string; exitCode: number } | null> {
+      if (!hostBrowserRunner || !(await hostBrowserRunner.isAvailable())) {
+        return null;
+      }
+      return hostBrowserRunner.runScript(script, { timeout, sessionId });
+    },
+
+    async readHostScreenshot(path: string): Promise<string | null> {
+      if (!hostBrowserRunner) return null;
+      try {
+        return await hostBrowserRunner.readScreenshot(path);
+      } catch {
+        return null;
+      }
+    },
+
+    getHostScreenshotDir(sessionId: string): string | null {
+      if (!hostBrowserRunner) return null;
+      return hostBrowserRunner.screenshotDir(sessionId);
     },
 
     getLinkedSessionId(sessionId: string): string | null {

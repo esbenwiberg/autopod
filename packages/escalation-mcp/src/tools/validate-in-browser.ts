@@ -19,8 +19,8 @@ export interface ValidateInBrowserResult {
 
 const LOCALHOST_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i;
 
-const SCREENSHOT_DIR = '/tmp/autopod-browser-checks';
-const SCRIPT_PATH = '/tmp/autopod-browser-check.mjs';
+const CONTAINER_SCREENSHOT_DIR = '/tmp/autopod-browser-checks';
+const CONTAINER_SCRIPT_PATH = '/tmp/autopod-browser-check.mjs';
 const START_MARKER = '__AUTOPOD_BROWSER_RESULTS_START__';
 const END_MARKER = '__AUTOPOD_BROWSER_RESULTS_END__';
 
@@ -43,29 +43,86 @@ export async function validateInBrowser(
     throw new Error('At least one check is required.');
   }
 
-  // Generate Playwright script via LLM
-  const script = await generateBrowserScript(sessionId, input, bridge);
-
-  // Write script and set up screenshot dir in container
-  await bridge.writeFileInContainer(sessionId, SCRIPT_PATH, script);
-  await bridge.execInContainer(sessionId, ['mkdir', '-p', SCREENSHOT_DIR], { timeout: 5_000 });
-
-  // Execute the script
   const timeout = input.checks.length * 45_000 + 30_000;
-  const execResult = await bridge.execInContainer(sessionId, ['node', SCRIPT_PATH], {
+
+  // Try host-side execution first — this avoids network isolation issues since
+  // the browser runs on the daemon host where external resources (CDN, fonts,
+  // client-side APIs) are reachable.
+  const hostResult = await tryHostExecution(sessionId, input, bridge, timeout);
+  if (hostResult) return hostResult;
+
+  // Fall back to in-container execution
+  return runInContainer(sessionId, input, bridge, timeout);
+}
+
+// ── Host-side execution ────────────────────────────────────────────────────
+
+async function tryHostExecution(
+  sessionId: string,
+  input: ValidateInBrowserInput,
+  bridge: SessionBridge,
+  timeout: number,
+): Promise<string | null> {
+  const previewUrl = bridge.getPreviewUrl(sessionId);
+  const hostScreenshotDir = bridge.getHostScreenshotDir(sessionId);
+  if (!previewUrl || !hostScreenshotDir) return null;
+
+  // Rewrite container-local URL to host-accessible URL
+  const hostUrl = rewriteUrlToHost(input.url, previewUrl);
+
+  const script = await generateBrowserScript(sessionId, { ...input, url: hostUrl }, bridge, hostScreenshotDir);
+
+  const execResult = await bridge.runBrowserOnHost(sessionId, script, timeout);
+  if (!execResult) return null;
+
+  const results = parseResults(execResult.stdout, input.checks);
+
+  // Collect screenshots from host filesystem
+  for (let i = 0; i < results.length; i++) {
+    try {
+      const b64 = await bridge.readHostScreenshot(`${hostScreenshotDir}/check-${i}.png`);
+      const entry = results[i];
+      if (entry && b64) {
+        entry.screenshot = b64;
+      }
+    } catch {
+      // Screenshot may not exist if the check crashed before taking one
+    }
+  }
+
+  const allPassed = results.every((r) => r.passed);
+  const response: ValidateInBrowserResult = { passed: allPassed, results };
+  return JSON.stringify(response, null, 2);
+}
+
+// ── In-container execution (fallback) ──────────────────────────────────────
+
+async function runInContainer(
+  sessionId: string,
+  input: ValidateInBrowserInput,
+  bridge: SessionBridge,
+  timeout: number,
+): Promise<string> {
+  const script = await generateBrowserScript(sessionId, input, bridge, CONTAINER_SCREENSHOT_DIR);
+
+  await bridge.writeFileInContainer(sessionId, CONTAINER_SCRIPT_PATH, script);
+  await bridge.execInContainer(sessionId, ['mkdir', '-p', CONTAINER_SCREENSHOT_DIR], {
+    timeout: 5_000,
+  });
+
+  const execResult = await bridge.execInContainer(sessionId, ['node', CONTAINER_SCRIPT_PATH], {
     cwd: '/workspace',
     timeout,
   });
 
-  // Parse results from stdout
   const results = parseResults(execResult.stdout, input.checks);
 
-  // Collect screenshots
+  // Collect screenshots from container
   for (let i = 0; i < results.length; i++) {
     try {
       const b64 = await bridge.execInContainer(
         sessionId,
-        ['sh', '-c', `base64 -w0 ${SCREENSHOT_DIR}/check-${i}.png 2>/dev/null`],
+        ['sh', '-c', `base64 -w0 ${CONTAINER_SCREENSHOT_DIR}/check-${i}.png 2>/dev/null`],
         { timeout: 10_000 },
       );
       const entry = results[i];
@@ -82,17 +139,20 @@ export async function validateInBrowser(
   return JSON.stringify(response, null, 2);
 }
 
+// ── Script generation ──────────────────────────────────────────────────────
+
 async function generateBrowserScript(
   sessionId: string,
   input: ValidateInBrowserInput,
   bridge: SessionBridge,
+  screenshotDir: string,
 ): Promise<string> {
   const checkList = input.checks.map((check, i) => `Check ${i + 1}: ${check}`).join('\n');
 
   const prompt = `You are a browser automation expert. Generate a Playwright script (ESM) that executes validation checks against a running web application.
 
 Base URL: ${input.url}
-Screenshot directory: ${SCREENSHOT_DIR}
+Screenshot directory: ${screenshotDir}
 
 Checks to perform:
 ${checkList}
@@ -100,8 +160,9 @@ ${checkList}
 Requirements:
 - Use \`import { chromium } from 'playwright';\`
 - Launch with \`{ headless: true, args: ['--no-sandbox'] }\`
+- Create browser context with \`{ locale: 'en-US' }\` to avoid container locale issues
 - For each check: navigate to the appropriate URL, perform the validation, take a screenshot
-- Save screenshots as ${SCREENSHOT_DIR}/check-{index}.png (0-indexed)
+- Save screenshots as ${screenshotDir}/check-{index}.png (0-indexed)
 - After all checks, output JSON between markers:
   ${START_MARKER}
   [{ "check": "...", "passed": true/false, "reasoning": "what you observed" }]
@@ -115,6 +176,28 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
   const rawScript = await bridge.callReviewerModel(sessionId, prompt);
   return stripMarkdownFences(rawScript);
 }
+
+// ── URL rewriting ──────────────────────────────────────────────────────────
+
+/**
+ * Rewrite a container-local URL (e.g. http://localhost:3000/page) to the
+ * host-accessible preview URL (e.g. http://127.0.0.1:45678/page).
+ */
+export function rewriteUrlToHost(containerUrl: string, previewUrl: string): string {
+  try {
+    const parsed = new URL(containerUrl);
+    const preview = new URL(previewUrl);
+    parsed.hostname = preview.hostname;
+    parsed.port = preview.port;
+    parsed.protocol = preview.protocol;
+    return parsed.toString();
+  } catch {
+    // If URL parsing fails, just return the preview URL as-is
+    return previewUrl;
+  }
+}
+
+// ── Result parsing ─────────────────────────────────────────────────────────
 
 /** Parse results from the Playwright script's stdout markers. */
 export function parseResults(stdout: string, checks: string[]): BrowserCheckResult[] {

@@ -13,6 +13,7 @@ import type { Logger } from 'pino';
 
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
+import type { HostBrowserRunner } from './host-browser-runner.js';
 
 /**
  * Runs the Claude CLI in print mode, piping `input` via stdin.
@@ -100,6 +101,7 @@ function runClaudeCli(opts: {
 export function createLocalValidationEngine(
   containerManager: ContainerManager,
   logger?: Logger,
+  hostBrowserRunner?: HostBrowserRunner,
 ): ValidationEngine {
   const log = logger?.child({ component: 'local-validation-engine' });
 
@@ -139,7 +141,7 @@ export function createLocalValidationEngine(
         onProgress?.('Validating pages…');
       const pages: PageResult[] =
         healthResult.status === 'pass' && config.smokePages.length > 0
-          ? await runPageValidation(containerManager, config, log)
+          ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
           : [];
 
       // ── Phase 5: AC Validation ────────────────────────────────────────
@@ -147,7 +149,7 @@ export function createLocalValidationEngine(
         onProgress?.('Checking acceptance criteria…');
       const acValidation =
         healthResult.status === 'pass'
-          ? await runAcValidation(containerManager, config, log)
+          ? await runAcValidation(containerManager, config, log, hostBrowserRunner)
           : null;
 
       // ── Phase 6: AI Task Review ─────────────────────────────────────
@@ -395,9 +397,77 @@ async function runPageValidation(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,
+  hostBrowserRunner?: HostBrowserRunner,
 ): Promise<PageResult[]> {
   log?.info({ pageCount: config.smokePages.length }, 'running page validation');
 
+  // Try host-side execution first — external resources (CDN, fonts, client APIs)
+  // are reachable from the host but may be blocked inside network-restricted containers.
+  if (hostBrowserRunner && (await hostBrowserRunner.isAvailable())) {
+    const hostResult = await runPageValidationOnHost(hostBrowserRunner, config, log);
+    if (hostResult) return hostResult;
+    log?.info('host-side page validation returned null, falling back to container');
+  }
+
+  return runPageValidationInContainer(containerManager, config, log);
+}
+
+async function runPageValidationOnHost(
+  hostBrowserRunner: HostBrowserRunner,
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<PageResult[] | null> {
+  const screenshotDir = hostBrowserRunner.screenshotDir(config.sessionId);
+
+  const script = generateValidationScript({
+    baseUrl: config.previewUrl,
+    pages: config.smokePages,
+    screenshotDir,
+    navigationTimeout: 30_000,
+    maxConsoleErrors: 50,
+  });
+
+  try {
+    const result = await hostBrowserRunner.runScript(script, {
+      timeout: config.smokePages.length * 45_000,
+      sessionId: config.sessionId,
+    });
+
+    const pages = parsePageResults(result.stdout);
+
+    if (pages.length === 0 && result.exitCode !== 0) {
+      log?.warn(
+        { exitCode: result.exitCode, stderr: result.stderr.slice(0, 1000) },
+        'host page validation script crashed',
+      );
+      return [
+        makeSyntheticFailure(
+          '/',
+          `Host script crashed (exit ${result.exitCode}): ${result.stderr.slice(0, 500)}`,
+        ),
+      ];
+    }
+
+    log?.info(
+      {
+        mode: 'host',
+        pageCount: pages.length,
+        passCount: pages.filter((p) => p.status === 'pass').length,
+      },
+      'page validation complete (host-side)',
+    );
+    return pages;
+  } catch (err) {
+    log?.warn({ err }, 'host-side page validation failed, will fall back to container');
+    return null;
+  }
+}
+
+async function runPageValidationInContainer(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<PageResult[]> {
   const script = generateValidationScript({
     baseUrl: config.containerBaseUrl ?? config.previewUrl,
     pages: config.smokePages,
@@ -466,6 +536,7 @@ async function runAcValidation(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,
+  hostBrowserRunner?: HostBrowserRunner,
 ): Promise<AcValidationResult | null> {
   if (!config.acceptanceCriteria || config.acceptanceCriteria.length === 0) {
     log?.info('no acceptance criteria provided, skipping AC validation');
@@ -490,7 +561,7 @@ async function runAcValidation(
   }
 
   // Step 2: Executor translates instructions to Playwright script and executes
-  const results = await executeAcChecks(containerManager, config, instructions, log);
+  const results = await executeAcChecks(containerManager, config, instructions, log, hostBrowserRunner);
 
   const allPassed = results.every((r) => r.passed);
 
@@ -570,26 +641,37 @@ async function executeAcChecks(
   config: ValidationEngineConfig,
   instructions: Array<{ criterion: string; instruction: string }>,
   log?: Logger,
+  hostBrowserRunner?: HostBrowserRunner,
 ): Promise<AcCheckResult[]> {
+  const useHost = hostBrowserRunner && (await hostBrowserRunner.isAvailable());
+  const baseUrl = useHost ? config.previewUrl : (config.containerBaseUrl ?? config.previewUrl);
+  const screenshotDir = useHost
+    ? hostBrowserRunner.screenshotDir(config.sessionId) + '/ac'
+    : '/tmp/autopod-ac-screenshots';
+
   const instructionList = instructions
     .map((inst, i) => `Check ${i + 1}: "${inst.criterion}"\nInstruction: ${inst.instruction}`)
     .join('\n\n');
 
-  const inContainerUrl = config.containerBaseUrl ?? config.previewUrl;
+  // When running on host, use standard ESM import; in container, use createRequire for NODE_PATH
+  const importLine = useHost
+    ? `import { chromium } from 'playwright';`
+    : `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { chromium } = require('playwright');`;
 
   const prompt = `You are a browser automation expert. Generate a Playwright script (ESM, using @playwright/test's chromium) that executes the following validation checks against a running web application.
 
-Base URL: ${inContainerUrl}
-Screenshot directory: /tmp/autopod-ac-screenshots
+Base URL: ${baseUrl}
+Screenshot directory: ${screenshotDir}
 
 Checks to perform:
 ${instructionList}
 
 Requirements:
-- Use \`import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { chromium } = require('playwright');\` (ESM import ignores NODE_PATH, so use createRequire for CJS resolution)
+- Use \`${importLine}\` (${useHost ? 'standard ESM import' : 'ESM import ignores NODE_PATH, so use createRequire for CJS resolution'})
 - Launch chromium with \`{ headless: true, args: ['--no-sandbox'] }\`
+- Create browser context with \`{ locale: 'en-US' }\` to avoid locale issues
 - For each check: navigate to the appropriate URL, perform the validation, take a screenshot
-- Save screenshots as /tmp/autopod-ac-screenshots/check-{index}.png (0-indexed)
+- Save screenshots as ${screenshotDir}/check-{index}.png (0-indexed)
 - After all checks, output a JSON result between markers:
   __AUTOPOD_AC_RESULTS_START__
   [
@@ -610,56 +692,104 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
       timeout: reviewTimeout,
     });
 
-    // Strip any markdown fences the LLM might add
     const cleanScript = stripMarkdownFences(scriptCode.trim());
+    const execTimeout = instructions.length * 45_000 + 30_000;
 
-    // Write script to container
-    const scriptPath = '/tmp/autopod-ac-validation.mjs';
-    await containerManager.writeFile(config.containerId, scriptPath, cleanScript);
-
-    // Ensure screenshot directory exists
-    await containerManager.execInContainer(
-      config.containerId,
-      ['mkdir', '-p', '/tmp/autopod-ac-screenshots'],
-      { cwd: '/workspace' },
-    );
-
-    // Execute the script
-    const result = await containerManager.execInContainer(
-      config.containerId,
-      ['sh', '-c', `NODE_PATH=\${NODE_PATH:-$(npm root -g)} node ${scriptPath}`],
-      { cwd: '/workspace', timeout: instructions.length * 45_000 + 30_000 },
-    );
-
-    // Parse results from stdout markers
-    const parsed = parseAcResults(result.stdout, instructions);
-
-    // Collect screenshots from container (binary files — use base64 exec)
-    for (let i = 0; i < parsed.length; i++) {
-      try {
-        const b64Result = await containerManager.execInContainer(
-          config.containerId,
-          ['sh', '-c', `base64 -w0 /tmp/autopod-ac-screenshots/check-${i}.png 2>/dev/null`],
-          { timeout: 10_000 },
-        );
-        if (b64Result.exitCode === 0 && b64Result.stdout.trim()) {
-          parsed[i].screenshot = b64Result.stdout.trim();
-        }
-      } catch {
-        // Screenshot might not exist if the check crashed
-      }
+    if (useHost) {
+      return await executeAcOnHost(hostBrowserRunner, config, cleanScript, instructions, execTimeout, log);
     }
 
-    return parsed;
+    return await executeAcInContainer(containerManager, config, cleanScript, instructions, execTimeout, log);
   } catch (err) {
     log?.warn({ err }, 'AC check execution failed');
-    // Return failures for all checks
     return instructions.map((inst) => ({
       criterion: inst.criterion,
       passed: false,
       reasoning: `Execution failed: ${err}`,
     }));
   }
+}
+
+async function executeAcOnHost(
+  hostBrowserRunner: HostBrowserRunner,
+  config: ValidationEngineConfig,
+  script: string,
+  instructions: Array<{ criterion: string; instruction: string }>,
+  timeout: number,
+  log?: Logger,
+): Promise<AcCheckResult[]> {
+  const screenshotDir = hostBrowserRunner.screenshotDir(config.sessionId) + '/ac';
+
+  const result = await hostBrowserRunner.runScript(script, {
+    timeout,
+    sessionId: config.sessionId,
+  });
+
+  const parsed = parseAcResults(result.stdout, instructions);
+
+  for (let i = 0; i < parsed.length; i++) {
+    try {
+      const b64 = await hostBrowserRunner.readScreenshot(`${screenshotDir}/check-${i}.png`);
+      parsed[i].screenshot = b64;
+    } catch {
+      // Screenshot might not exist
+    }
+  }
+
+  log?.info(
+    { mode: 'host', checkCount: parsed.length },
+    'AC checks executed on host',
+  );
+
+  return parsed;
+}
+
+async function executeAcInContainer(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  script: string,
+  instructions: Array<{ criterion: string; instruction: string }>,
+  timeout: number,
+  log?: Logger,
+): Promise<AcCheckResult[]> {
+  const scriptPath = '/tmp/autopod-ac-validation.mjs';
+  await containerManager.writeFile(config.containerId, scriptPath, script);
+
+  await containerManager.execInContainer(
+    config.containerId,
+    ['mkdir', '-p', '/tmp/autopod-ac-screenshots'],
+    { cwd: '/workspace' },
+  );
+
+  const result = await containerManager.execInContainer(
+    config.containerId,
+    ['sh', '-c', `NODE_PATH=\${NODE_PATH:-$(npm root -g)} node ${scriptPath}`],
+    { cwd: '/workspace', timeout },
+  );
+
+  const parsed = parseAcResults(result.stdout, instructions);
+
+  for (let i = 0; i < parsed.length; i++) {
+    try {
+      const b64Result = await containerManager.execInContainer(
+        config.containerId,
+        ['sh', '-c', `base64 -w0 /tmp/autopod-ac-screenshots/check-${i}.png 2>/dev/null`],
+        { timeout: 10_000 },
+      );
+      if (b64Result.exitCode === 0 && b64Result.stdout.trim()) {
+        parsed[i].screenshot = b64Result.stdout.trim();
+      }
+    } catch {
+      // Screenshot might not exist if the check crashed
+    }
+  }
+
+  log?.info(
+    { mode: 'container', checkCount: parsed.length },
+    'AC checks executed in container',
+  );
+
+  return parsed;
 }
 
 /** @internal Exported for testing. Parse the reviewer's JSON array of AC instructions. */

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   isLocalhostUrl,
   parseResults,
+  rewriteUrlToHost,
   stripMarkdownFences,
   validateInBrowser,
 } from './validate-in-browser.js';
@@ -46,6 +47,34 @@ describe('isLocalhostUrl', () => {
 
   it('rejects bare localhost without scheme', () => {
     expect(isLocalhostUrl('localhost:3000')).toBe(false);
+  });
+});
+
+// ─── URL rewriting ──────────────────────────────────────────────
+
+describe('rewriteUrlToHost', () => {
+  it('rewrites localhost:3000 to host preview URL', () => {
+    expect(rewriteUrlToHost('http://localhost:3000/', 'http://127.0.0.1:45678')).toBe(
+      'http://127.0.0.1:45678/',
+    );
+  });
+
+  it('preserves path and query from original URL', () => {
+    expect(
+      rewriteUrlToHost('http://localhost:3000/settings?tab=general', 'http://127.0.0.1:45678'),
+    ).toBe('http://127.0.0.1:45678/settings?tab=general');
+  });
+
+  it('rewrites 127.0.0.1:3000 to different host port', () => {
+    expect(rewriteUrlToHost('http://127.0.0.1:3000/api', 'http://127.0.0.1:23456')).toBe(
+      'http://127.0.0.1:23456/api',
+    );
+  });
+
+  it('falls back to preview URL on parse failure', () => {
+    expect(rewriteUrlToHost('not-a-url', 'http://127.0.0.1:45678')).toBe(
+      'http://127.0.0.1:45678',
+    );
   });
 });
 
@@ -176,6 +205,11 @@ describe('validateInBrowser', () => {
         }
         return Promise.resolve({ stdout: '', stderr: '', exitCode: 1 });
       }),
+      // Host browser methods — return null to fall through to container path
+      getPreviewUrl: vi.fn().mockReturnValue(null),
+      runBrowserOnHost: vi.fn().mockResolvedValue(null),
+      readHostScreenshot: vi.fn().mockResolvedValue(null),
+      getHostScreenshotDir: vi.fn().mockReturnValue(null),
     };
   }
 
@@ -260,6 +294,68 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
     expect(bridge.execInContainer).toHaveBeenCalledTimes(3);
   });
 
+  it('uses host-side execution when bridge supports it', async () => {
+    const scriptOutput = `__AUTOPOD_BROWSER_RESULTS_START__
+[{ "check": "x", "passed": true, "reasoning": "ok" }]
+__AUTOPOD_BROWSER_RESULTS_END__`;
+
+    const bridge = {
+      callReviewerModel: vi.fn().mockResolvedValue('console.log("script")'),
+      writeFileInContainer: vi.fn().mockResolvedValue(undefined),
+      execInContainer: vi.fn(),
+      getPreviewUrl: vi.fn().mockReturnValue('http://127.0.0.1:45678'),
+      runBrowserOnHost: vi
+        .fn()
+        .mockResolvedValue({ stdout: scriptOutput, stderr: '', exitCode: 0 }),
+      readHostScreenshot: vi.fn().mockResolvedValue('hostbase64'),
+      getHostScreenshotDir: vi.fn().mockReturnValue('/tmp/autopod-browser/sess-1/screenshots'),
+    };
+
+    const result = await validateInBrowser(
+      'sess-1',
+      { url: 'http://localhost:3000', checks: ['x'] },
+      bridge as never,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.passed).toBe(true);
+    expect(parsed.results[0].screenshot).toBe('hostbase64');
+
+    // Should NOT have written to container or exec'd in container
+    expect(bridge.writeFileInContainer).not.toHaveBeenCalled();
+    expect(bridge.execInContainer).not.toHaveBeenCalled();
+
+    // LLM prompt should use the rewritten host URL
+    expect(bridge.callReviewerModel).toHaveBeenCalledOnce();
+    const prompt = bridge.callReviewerModel.mock.calls[0][1] as string;
+    expect(prompt).toContain('http://127.0.0.1:45678');
+  });
+
+  it('falls back to container when host browser returns null', async () => {
+    const scriptOutput = `__AUTOPOD_BROWSER_RESULTS_START__
+[{ "check": "x", "passed": true, "reasoning": "ok" }]
+__AUTOPOD_BROWSER_RESULTS_END__`;
+
+    const bridge = makeBridge(scriptOutput);
+    // getPreviewUrl returns a URL but runBrowserOnHost returns null (not available)
+    bridge.getPreviewUrl.mockReturnValue('http://127.0.0.1:45678');
+    bridge.getHostScreenshotDir.mockReturnValue('/tmp/screenshots');
+    bridge.runBrowserOnHost.mockResolvedValue(null);
+
+    const result = await validateInBrowser(
+      'sess-1',
+      { url: 'http://localhost:3000', checks: ['x'] },
+      bridge as never,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.passed).toBe(true);
+
+    // Should have fallen back to container execution
+    expect(bridge.writeFileInContainer).toHaveBeenCalled();
+    expect(bridge.execInContainer).toHaveBeenCalled();
+  });
+
   it('handles screenshot collection failure gracefully', async () => {
     const scriptOutput = `__AUTOPOD_BROWSER_RESULTS_START__
 [{ "check": "x", "passed": true, "reasoning": "ok" }]
@@ -278,6 +374,10 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
         // Screenshot fails
         return Promise.reject(new Error('file not found'));
       }),
+      getPreviewUrl: vi.fn().mockReturnValue(null),
+      runBrowserOnHost: vi.fn().mockResolvedValue(null),
+      readHostScreenshot: vi.fn().mockResolvedValue(null),
+      getHostScreenshotDir: vi.fn().mockReturnValue(null),
     };
 
     const result = await validateInBrowser(

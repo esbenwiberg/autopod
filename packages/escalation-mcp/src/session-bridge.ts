@@ -51,6 +51,25 @@ export interface SessionBridge {
     options?: { cwd?: string; timeout?: number },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
+  /** Get the host-accessible URL for the session's app (e.g. http://127.0.0.1:45678). */
+  getPreviewUrl(sessionId: string): string | null;
+
+  /**
+   * Run a Playwright script on the daemon host (not inside the container).
+   * Returns null if host-side Playwright is not available.
+   */
+  runBrowserOnHost(
+    sessionId: string,
+    script: string,
+    timeout: number,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number } | null>;
+
+  /** Read a file from the daemon host filesystem as base64. Returns null if not found. */
+  readHostScreenshot(path: string): Promise<string | null>;
+
+  /** Get the host-side screenshot directory for a session, or null if host browser unavailable. */
+  getHostScreenshotDir(sessionId: string): string | null;
+
   /** Get the linked session ID for a workspace (if any). */
   getLinkedSessionId(sessionId: string): string | null;
 

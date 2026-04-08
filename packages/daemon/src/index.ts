@@ -45,6 +45,7 @@ import {
   createValidationRepository,
 } from './sessions/index.js';
 import { createSessionBridge } from './sessions/session-bridge-impl.js';
+import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
@@ -211,7 +212,8 @@ const runtimeRegistry = createRuntimeRegistry([
   new CodexRuntime(logger, containerManager),
   new CopilotRuntime(logger, containerManager),
 ]);
-const validationEngine = createLocalValidationEngine(containerManager, logger);
+const hostBrowserRunner = createHostBrowserRunner(logger);
+const validationEngine = createLocalValidationEngine(containerManager, logger, hostBrowserRunner);
 
 // Session queue + manager (circular dep resolved via closure)
 // biome-ignore lint/style/useConst: assigned after sessionQueue to break circular dependency
@@ -363,6 +365,7 @@ const sessionBridge = createSessionBridge({
   makeActionEngine,
   pendingRequestsBySession,
   logger,
+  hostBrowserRunner,
 });
 
 // Notifications (opt-in via TEAMS_WEBHOOK_URL)

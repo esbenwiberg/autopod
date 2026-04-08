@@ -5,10 +5,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
+    locales \
     iptables ipset dnsmasq \
     tmux \
     python3 build-essential \
+    && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
+    && locale-gen \
     && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8
 
 # Create non-root user — remove the default node user (uid 1000) first
 RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \

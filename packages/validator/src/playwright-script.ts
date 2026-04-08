@@ -48,7 +48,7 @@ async function run() {
   const results = [];
 
   for (const pageDef of CONFIG.pages) {
-    const context = await browser.newContext();
+    const context = await browser.newContext({ locale: 'en-US' });
     const page = await context.newPage();
 
     const consoleErrors = [];
