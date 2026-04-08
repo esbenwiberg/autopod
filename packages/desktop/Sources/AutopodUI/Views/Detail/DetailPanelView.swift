@@ -116,6 +116,19 @@ public struct DetailPanelView: View {
         } message: {
             Text("Send a message to redirect the agent. Leave blank for a default nudge.")
         }
+        .alert("Resume session", isPresented: $showResumeInput) {
+            TextField("Message for the agent…", text: $resumeInputText)
+            Button("Resume") {
+                let message = resumeInputText.isEmpty ? "Continue where you left off." : resumeInputText
+                resumeInputText = ""
+                Task { await actions.reply(session.id, message) }
+            }
+            Button("Cancel", role: .cancel) {
+                resumeInputText = ""
+            }
+        } message: {
+            Text("Send a message to resume the agent. Leave blank for a default resume.")
+        }
     }
 
     // MARK: - Header
@@ -127,6 +140,7 @@ public struct DetailPanelView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(session.id)
                         .font(.system(.title3, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(session.status == .complete ? .green : session.status == .killed ? .red.opacity(0.6) : .primary)
                     HStack(spacing: 6) {
                         Text(session.profileName)
                         Text("·")
@@ -171,6 +185,32 @@ public struct DetailPanelView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                Button {
+                    Task { await actions.pause(session.id) }
+                } label: {
+                    Label("Pause", systemImage: "pause.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.yellow)
+                Button {
+                    Task { await actions.kill(session.id) }
+                } label: {
+                    Label("Kill", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+
+            case .paused:
+                Button {
+                    showResumeInput = true
+                } label: {
+                    Label("Resume", systemImage: "play.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.green)
                 Button {
                     Task { await actions.kill(session.id) }
                 } label: {
@@ -269,6 +309,8 @@ public struct DetailPanelView: View {
 
     @State private var showNudgeInput = false
     @State private var nudgeInputText = ""
+    @State private var showResumeInput = false
+    @State private var resumeInputText = ""
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false

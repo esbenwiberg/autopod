@@ -99,6 +99,19 @@ public struct SessionCardFinal: View {
         } message: {
             Text("Send a message to redirect the agent. Leave blank for a default nudge.")
         }
+        .alert("Resume session", isPresented: $showResumeInput) {
+            TextField("Message for the agent…", text: $resumeInputText)
+            Button("Resume") {
+                let message = resumeInputText.isEmpty ? "Continue where you left off." : resumeInputText
+                resumeInputText = ""
+                Task { await actions.reply(session.id, message) }
+            }
+            Button("Cancel", role: .cancel) {
+                resumeInputText = ""
+            }
+        } message: {
+            Text("Send a message to resume the agent. Leave blank for a default resume.")
+        }
     }
 
     // MARK: - Compact (always visible)
@@ -110,6 +123,7 @@ public struct SessionCardFinal: View {
                 StatusDot(status: session.status)
                 Text(session.id)
                     .font(.system(.callout, design: .monospaced).weight(.medium))
+                    .foregroundStyle(session.status == .complete ? .green : session.status == .killed ? .red.opacity(0.6) : .primary)
                     .lineLimit(1)
                 Spacer()
                 modeBadge
@@ -403,6 +417,33 @@ public struct SessionCardFinal: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .help("Send a message to the agent to refocus")
+                Button {
+                    Task { await actions.pause(session.id) }
+                } label: {
+                    Label("Pause", systemImage: "pause.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.yellow)
+                .help("Suspend the agent — container stays alive for quick resume")
+            }
+
+        case .paused:
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Session paused — agent suspended, container alive")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                    showResumeInput = true
+                } label: {
+                    Label("Resume", systemImage: "play.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.green)
+                .help("Resume the agent with an optional message")
             }
 
         case .awaitingInput:
@@ -611,6 +652,8 @@ public struct SessionCardFinal: View {
     @State private var showOptionsPicker = false
     @State private var showNudgeInput = false
     @State private var nudgeInputText = ""
+    @State private var showResumeInput = false
+    @State private var resumeInputText = ""
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false

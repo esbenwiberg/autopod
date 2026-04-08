@@ -115,9 +115,11 @@ public final class ActionHandler {
 
   public func pause(_ sessionId: String) async {
     pendingAction = "pause-\(sessionId)"
+    sessionStore.updateStatus(sessionId, to: .paused)
     do {
       try await api.pauseSession(sessionId)
     } catch {
+      sessionStore.updateStatus(sessionId, to: .running)
       lastError = error.localizedDescription
     }
     pendingAction = nil
