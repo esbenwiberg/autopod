@@ -78,6 +78,7 @@ function makeSession(overrides?: Partial<Session>): Session {
     progress: null,
     acceptanceCriteria: null,
     claudeSessionId: null,
+    pimGroups: null,
     ...overrides,
   };
 }
@@ -283,6 +284,49 @@ describe('generateSystemInstructions', () => {
       'http://localhost:8080/mcp/x',
     );
     expect(md).not.toContain('## Available Skills');
+  });
+
+  it('includes PIM groups section when session has pimGroups', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        pimGroups: [
+          {
+            groupId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+            displayName: 'Log Analytics Reader',
+            justification: 'Read production logs',
+          },
+          {
+            groupId: 'ffffffff-1111-2222-3333-444444444444',
+          },
+        ],
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('## Azure PIM Groups');
+    expect(md).toContain('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    expect(md).toContain('Log Analytics Reader');
+    expect(md).toContain('Read production logs');
+    expect(md).toContain('ffffffff-1111-2222-3333-444444444444');
+    expect(md).toContain('not as a workaround');
+  });
+
+  it('omits PIM groups section when pimGroups is null', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ pimGroups: null }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## Azure PIM Groups');
+  });
+
+  it('omits PIM groups section when pimGroups is empty array', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ pimGroups: [] }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## Azure PIM Groups');
   });
 
   describe('network policy instructions', () => {

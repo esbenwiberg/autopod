@@ -1,6 +1,6 @@
 import type { OutputMode } from './actions.js';
 import type { EscalationRequest } from './escalation.js';
-import type { ExecutionTarget } from './profile.js';
+import type { ExecutionTarget, PimGroupConfig } from './profile.js';
 import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
 import type { ValidationOverride, ValidationResult } from './validation.js';
@@ -75,6 +75,7 @@ export interface Session {
   linkedSessionId: string | null;
   taskSummary: TaskSummary | null;
   validationOverrides: ValidationOverride[] | null;
+  pimGroups: PimGroupConfig[] | null;
 }
 
 export interface CreateSessionRequest {
@@ -90,6 +91,8 @@ export interface CreateSessionRequest {
   baseBranch?: string;
   acFrom?: string;
   linkedSessionId?: string;
+  /** PIM groups to activate for the duration of this session */
+  pimGroups?: PimGroupConfig[];
 }
 
 export interface SessionSummary {

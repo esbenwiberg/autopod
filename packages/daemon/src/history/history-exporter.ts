@@ -360,7 +360,8 @@ function generateSummary(sessions: Session[], stats: HistoryExportStats): string
   for (const s of sessions) {
     const p = profiles.get(s.profileName) ?? { total: 0, failed: 0, cost: 0, valAttempts: 0 };
     p.total++;
-    if (s.status === 'failed' || s.status === 'killed' || s.status === 'review_required') p.failed++;
+    if (s.status === 'failed' || s.status === 'killed' || s.status === 'review_required')
+      p.failed++;
     p.cost += s.costUsd;
     p.valAttempts += s.validationAttempts;
     profiles.set(s.profileName, p);

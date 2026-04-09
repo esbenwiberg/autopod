@@ -11,6 +11,7 @@ import type { ActionAuditRepository } from './audit-repository.js';
 import { createGenericHttpHandler } from './generic-http-handler.js';
 import { createAdoHandler } from './handlers/ado-handler.js';
 import { createAzureLogsHandler } from './handlers/azure-logs-handler.js';
+import { createAzurePimHandler } from './handlers/azure-pim-handler.js';
 import { createGitHubHandler } from './handlers/github-handler.js';
 import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
 
@@ -38,6 +39,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
     github: createGitHubHandler(handlerConfig),
     ado: createAdoHandler(handlerConfig),
     'azure-logs': createAzureLogsHandler(handlerConfig),
+    'azure-pim': createAzurePimHandler(handlerConfig),
     http: createGenericHttpHandler(handlerConfig),
   };
 

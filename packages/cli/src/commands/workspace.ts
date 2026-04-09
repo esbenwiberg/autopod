@@ -12,27 +12,56 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
     .command('workspace <profile> [description]')
     .description('Create a workspace pod — an interactive container with no agent')
     .option('-b, --branch <name>', 'Explicit branch name (for handoff to worker)')
-    .action(async (profile: string, description: string | undefined, opts: { branch?: string }) => {
-      const client = getClient();
-      const session = await withSpinner('Creating workspace session...', () =>
-        client.createSession({
-          profileName: profile,
-          task: description ?? 'Workspace session',
-          outputMode: 'workspace',
-          branch: opts.branch,
-        }),
-      );
+    .option(
+      '--pim-group <spec>',
+      'PIM group to activate: <groupId> or <groupId:displayName> (repeatable)',
+      (val: string, acc: string[]) => {
+        acc.push(val);
+        return acc;
+      },
+      [] as string[],
+    )
+    .action(
+      async (
+        profile: string,
+        description: string | undefined,
+        opts: { branch?: string; pimGroup?: string[] },
+      ) => {
+        const client = getClient();
+        const pimGroups = opts.pimGroup?.length
+          ? opts.pimGroup.map((spec) => {
+              const colonIdx = spec.indexOf(':');
+              if (colonIdx === -1) return { groupId: spec };
+              return {
+                groupId: spec.slice(0, colonIdx),
+                displayName: spec.slice(colonIdx + 1),
+              };
+            })
+          : undefined;
 
-      console.log(chalk.green(`Workspace ${chalk.bold(session.id)} created.`));
-      console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
-      console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
-      console.log(`${chalk.bold('Branch:')}   ${session.branch}`);
-      console.log();
-      console.log(chalk.dim(`Enter the container:  ap attach ${session.id.slice(0, 8)}`));
-      console.log(
-        chalk.dim(`Hand off to worker:   ap run ${profile} <task> --base-branch ${session.branch}`),
-      );
-    });
+        const session = await withSpinner('Creating workspace session...', () =>
+          client.createSession({
+            profileName: profile,
+            task: description ?? 'Workspace session',
+            outputMode: 'workspace',
+            branch: opts.branch,
+            pimGroups,
+          }),
+        );
+
+        console.log(chalk.green(`Workspace ${chalk.bold(session.id)} created.`));
+        console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
+        console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
+        console.log(`${chalk.bold('Branch:')}   ${session.branch}`);
+        console.log();
+        console.log(chalk.dim(`Enter the container:  ap attach ${session.id.slice(0, 8)}`));
+        console.log(
+          chalk.dim(
+            `Hand off to worker:   ap run ${profile} <task> --base-branch ${session.branch}`,
+          ),
+        );
+      },
+    );
 
   // ap attach <id>
   program

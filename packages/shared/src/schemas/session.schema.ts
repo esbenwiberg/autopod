@@ -31,6 +31,16 @@ export const createSessionRequestSchema = z
       })
       .optional(),
     linkedSessionId: z.string().min(1).max(16).optional(),
+    pimGroups: z
+      .array(
+        z.object({
+          groupId: z.string().uuid(),
+          displayName: z.string().min(1).max(128).optional(),
+          duration: z.string().min(1).max(32).optional(),
+          justification: z.string().min(1).max(500).optional(),
+        }),
+      )
+      .optional(),
   })
   .refine((data) => data.outputMode === 'workspace' || data.task.length > 0, {
     message: 'task: String must contain at least 1 character(s)',

@@ -233,6 +233,8 @@ export interface SessionManagerDependencies {
   /** Used to generate a session-scoped Bearer token injected into the container so it can
    * authenticate calls to the /mcp/:sessionId endpoint. Optional for backwards compat. */
   sessionTokenIssuer?: SessionTokenIssuer;
+  /** Resolve environment variable or secret by name (e.g. AZURE_GRAPH_TOKEN). */
+  getSecret: (ref: string) => string | undefined;
   logger: Logger;
 }
 
@@ -676,6 +678,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             baseBranch: request.baseBranch ?? null,
             acFrom: request.acFrom ?? null,
             linkedSessionId: request.linkedSessionId ?? null,
+            pimGroups: request.pimGroups ?? null,
           });
           break;
         } catch (err: unknown) {
@@ -980,6 +983,28 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               );
             } catch (err) {
               logger.error({ err, sessionId }, 'Failed to export history data');
+            }
+          }
+
+          // Activate PIM groups for this workspace session
+          if (session.pimGroups?.length && session.userId) {
+            const { createPimClient } = await import('../actions/handlers/azure-pim-handler.js');
+            const pimClient = createPimClient(deps.getSecret, logger);
+            for (const group of session.pimGroups) {
+              try {
+                await pimClient.activate(
+                  group.groupId,
+                  session.userId,
+                  group.duration ?? 'PT8H',
+                  group.justification ?? `Workspace pod ${sessionId}`,
+                );
+                logger.info({ sessionId, groupId: group.groupId }, 'PIM group activated');
+              } catch (err) {
+                logger.warn(
+                  { err, sessionId, groupId: group.groupId },
+                  'PIM activation failed — continuing',
+                );
+              }
             }
           }
 
@@ -1890,6 +1915,27 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
       emitActivityStatus(sessionId, 'Session complete');
       transition(session, 'complete', { completedAt: new Date().toISOString() });
+
+      // Deactivate PIM groups on session completion
+      if (session.pimGroups?.length && session.userId) {
+        try {
+          const { createPimClient } = await import('../actions/handlers/azure-pim-handler.js');
+          const pimClient = createPimClient(deps.getSecret, logger);
+          for (const group of session.pimGroups) {
+            try {
+              await pimClient.deactivate(group.groupId, session.userId);
+              logger.info({ sessionId, groupId: group.groupId }, 'PIM group deactivated');
+            } catch (err) {
+              logger.warn(
+                { err, sessionId, groupId: group.groupId },
+                'PIM deactivation failed — continuing',
+              );
+            }
+          }
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Failed to load PIM client for deactivation');
+        }
+      }
 
       eventBus.emit({
         type: 'session.completed',

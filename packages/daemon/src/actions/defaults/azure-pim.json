@@ -1,0 +1,49 @@
+[
+  {
+    "name": "activate_pim_group",
+    "description": "Activate an Azure PIM group assignment for this session. Only groups pre-configured on the session can be activated.",
+    "group": "azure-pim",
+    "handler": "azure-pim",
+    "params": {
+      "group_id": {
+        "type": "string",
+        "required": true,
+        "description": "Entra group ID (UUID) to activate — must be one of the session's configured PIM groups"
+      },
+      "justification": {
+        "type": "string",
+        "required": false,
+        "description": "Reason for activating this group (defaults to 'Agent session access')"
+      }
+    },
+    "response": {
+      "fields": ["id", "status", "groupId", "scheduleInfo"]
+    }
+  },
+  {
+    "name": "deactivate_pim_group",
+    "description": "Deactivate an Azure PIM group assignment for this session.",
+    "group": "azure-pim",
+    "handler": "azure-pim",
+    "params": {
+      "group_id": {
+        "type": "string",
+        "required": true,
+        "description": "Entra group ID (UUID) to deactivate"
+      }
+    },
+    "response": {
+      "fields": ["id", "status", "groupId"]
+    }
+  },
+  {
+    "name": "list_pim_activations",
+    "description": "List currently active PIM group assignments for this session's user.",
+    "group": "azure-pim",
+    "handler": "azure-pim",
+    "params": {},
+    "response": {
+      "fields": ["activations"]
+    }
+  }
+]

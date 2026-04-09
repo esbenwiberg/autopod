@@ -1,6 +1,7 @@
 import type {
   ExecutionTarget,
   OutputMode,
+  PimGroupConfig,
   Session,
   SessionStatus,
   TaskSummary,
@@ -26,6 +27,7 @@ export interface NewSession {
   baseBranch?: string | null;
   acFrom?: string | null;
   linkedSessionId?: string | null;
+  pimGroups?: PimGroupConfig[] | null;
 }
 
 export interface SessionFilters {
@@ -146,6 +148,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     validationOverrides: row.validation_overrides
       ? JSON.parse(row.validation_overrides as string)
       : null,
+    pimGroups: row.pim_groups ? (JSON.parse(row.pim_groups as string) as PimGroupConfig[]) : null,
   };
 }
 
@@ -156,11 +159,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         INSERT INTO sessions (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
-          output_mode, base_branch, ac_from, linked_session_id
+          output_mode, base_branch, ac_from, linked_session_id, pim_groups
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
-          @outputMode, @baseBranch, @acFrom, @linkedSessionId
+          @outputMode, @baseBranch, @acFrom, @linkedSessionId, @pimGroups
         )
       `).run({
         id: session.id,
@@ -181,6 +184,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         baseBranch: session.baseBranch ?? null,
         acFrom: session.acFrom ?? null,
         linkedSessionId: session.linkedSessionId ?? null,
+        pimGroups: session.pimGroups ? JSON.stringify(session.pimGroups) : null,
       });
     },
 
