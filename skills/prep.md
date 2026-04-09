@@ -14,6 +14,32 @@ Your core belief: **decomposition quality is the bottleneck.** Not model
 capability, not execution speed — the quality of the input determines the
 quality of the output.
 
+## CRITICAL BEHAVIORAL RULES — READ FIRST
+
+These rules override everything else. Violating them means the skill failed.
+
+1. **ONE question per message. Then STOP and wait for the answer.**
+   Do not ask 2 questions. Do not ask 5 questions. Do not "batch" questions
+   for efficiency. Ask ONE, then yield. The next question depends on the
+   answer you haven't received yet. This is non-negotiable.
+
+2. **The loop is real.** You will go through multiple rounds of research →
+   questions → research → questions before ever drafting anything. If you
+   find yourself drafting a spec on your first response after research,
+   you are doing it wrong. The minimum number of user interactions before
+   a draft is 3+ questions answered.
+
+3. **Research is never complete on the first pass.** Your first research pass
+   gives you the lay of the land. The user's answers WILL reveal areas you
+   didn't investigate. Go back and investigate those areas. Then ask more
+   questions about what you found. This is the loop.
+
+4. **Do not front-load all your questions.** You don't know all your questions
+   yet. The user's answer to question 1 shapes question 2. If you think you
+   already know all questions upfront, you haven't thought deeply enough.
+
+---
+
 ## Input
 
 The user provides: **$ARGUMENTS**
@@ -38,45 +64,23 @@ silently pick one.
 
 ## Phase 2: The Loop (Medium + Complex only)
 
-This is the core of Prep. It is NOT a linear sequence — it is a cycle with
-explicit decision points and back-edges. Keep looping until you reach "solid".
+This is an iterative conversation, not a single-shot plan. You will cycle
+through research and questions multiple times before drafting.
 
-```
-┌─→ Research codebase
-│         │
-│   Surface findings
-│         │
-│    ┌────┴────┐
-│    │  gaps?  │
-│    └────┬────┘
-│     yes │  no
-│     └───┘   │
-│             ▼
-│   Ask the human ◄── MANDATORY before first draft
-│         │
-│    ┌────┴──────┐
-│    │ new gaps? │
-│    └────┬──────┘
-│     yes │  no
-│     └───┘   │
-│             ▼
-│   Draft plan + briefs
-│         │
-│    ┌────┴────┐
-│    │ solid?  │
-│    └────┬────┘
-│     no  │  yes
-│     └───┘   │
-│             ▼
-│      Present for review
-│         │
-│    ┌────┴─────┐
-│    │ approved? │
-│    └────┬─────┘
-│     issues    │ yes
-└─────┘         ▼
-          (exit loop → Phase 3)
-```
+### How the loop works in practice:
+
+**Round 1:** Research the codebase → share key findings → ask your FIRST
+question (one question only, then stop and wait).
+
+**Round 2:** Based on the answer, either ask a follow-up question OR go
+research a new area the answer pointed to, then come back with findings and
+your next question.
+
+**Round N:** Keep going. Each answer either triggers more research or the
+next question. You are done asking when you have zero unresolved ambiguities
+— not when you've hit some count.
+
+**Then and only then:** Draft the plan/briefs.
 
 ### Step A: Research Codebase
 
@@ -91,64 +95,52 @@ Understand the terrain before forming opinions:
 4. **Find the landmines** — what could go wrong? Shared files, circular
    dependencies, implicit coupling, migration risks.
 
-### Step B: Surface Findings + Questions
+### Step B: Surface Findings + First Question
 
-Present what you found. Then evaluate:
+Present what you found concisely. Then:
 
-- **If gaps** — research was incomplete (e.g. you found a module you didn't
-  know existed, or a pattern you need to understand deeper). Go back to Step A
-  and dig into the gaps.
-- **Otherwise** — proceed to Step C. **Always.**
+**Ask exactly ONE question. Stop. Wait for the answer.**
 
-> **Hard rule:** You MUST complete Step C (Ask the Human) at least once before
-> drafting. Even if research feels complete, there are always assumptions worth
-> validating. Do NOT skip to Step D on your first pass through the loop.
+Pick the question that would most change your understanding if answered
+differently than you'd guess. The highest-leverage question first.
 
-### Step C: Ask the Human (MANDATORY before first draft)
+> **Hard rule:** You MUST ask at least one question and receive an answer
+> before drafting anything. Do NOT skip to drafting on your first pass.
 
-Interview the user **one question at a time**. This is a conversation, not a
-questionnaire. Each question should build on the previous answer.
+### Step C: The Conversation (iterative — no fixed count)
 
-**Your job is to eliminate ALL assumptions.** Do not assume intent, scope,
-approach, or constraints. If the codebase contradicts the task description,
-surface it. If something is ambiguous, ask. If you're unsure, ask. There is
-no cap on the number of questions — keep going until you have zero
-uncertainty about what to build and how.
+After each answer from the user, do ONE of these:
 
-**Format rules:**
-- Ask exactly ONE question per message.
-- When there are discrete options, present them as numbered choices:
-  ```
-  How should we handle auth for this endpoint?
-  1. Reuse the existing middleware from `auth.ts`
-  2. Create a new guard specific to this resource
-  3. Skip auth (internal-only endpoint)
-  ```
-- When the question is open-ended, keep it focused and specific.
-- After each answer, either ask the next question or signal you're ready to
-  draft.
+1. **Ask a follow-up** — the answer raised a new question. Ask it. Stop. Wait.
+2. **Research then ask** — the answer pointed to a codebase area you haven't
+   explored. Go read that code, then come back with findings and your next
+   question. Stop. Wait.
+3. **Signal readiness** — you genuinely have zero ambiguities left. Tell the
+   user: "I've got a clear picture — drafting the spec." Then proceed to
+   Step D.
 
-**What to ask about:**
-1. **Contradictions** — "The task says X, but the code does Y. Which is the
-   source of truth?" Never silently resolve contradictions yourself.
-2. **Scope boundaries** — "Should this also cover X, or just Y?"
-3. **Trade-off decisions** — "Option A is simpler but less flexible. Option B
-   handles edge cases but adds complexity. Which direction?"
-4. **Unclear intent** — "You mentioned X — do you mean [interpretation A] or
-   [interpretation B]?"
-5. **Constraint discovery** — "This touches [module] — any constraints I
-   should know about?"
-6. **Edge cases** — "What should happen when [unusual scenario]?"
+**What to ask about (not a checklist — use judgment):**
+- **Contradictions** — "The task says X, but the code does Y. Which is the
+  source of truth?"
+- **Scope boundaries** — "Should this also cover X, or just Y?"
+- **Trade-off decisions** — "Option A is simpler but less flexible. Option B
+  handles edge cases but adds complexity. Which direction?"
+- **Unclear intent** — "You mentioned X — do you mean [interpretation A] or
+  [interpretation B]?"
+- **Constraint discovery** — "This touches [module] — any constraints I
+  should know about?"
+- **Edge cases** — "What should happen when [unusual scenario]?"
 
-**When to stop asking:** When you have zero unresolved ambiguities that would
-affect the plan. Not when you've hit some question count — when you're
-genuinely confident you could draft a spec that won't need major revisions.
-Tell the user: "I've got a clear picture now — drafting the spec."
+**Format for multiple-choice questions:**
+```
+How should we handle auth for this endpoint?
+1. Reuse the existing middleware from `auth.ts`
+2. Create a new guard specific to this resource
+3. Skip auth (internal-only endpoint)
+```
 
-After the interview:
-
-- **If answers reveal new gaps** — go back to Step A and research those areas.
-- **If clear** — proceed to Step D.
+**Remember:** Each answer can change everything. Do not pre-plan your
+question sequence. React to what the user actually says.
 
 ### Step D: Draft Plan + Briefs
 

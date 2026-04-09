@@ -3,12 +3,17 @@ import SwiftTerm
 import SwiftUI
 
 /// Wrapper NSView that intercepts scroll-wheel events and forwards them
-/// as arrow-key sequences when the terminal is in alternate-screen mode
-/// (e.g. Claude Code, tmux, vim). SwiftTerm's built-in `scrollWheel`
-/// only manipulates the scrollback buffer, which doesn't exist on the
-/// alternate screen — so mouse-wheel scrolling silently does nothing.
+/// as xterm mouse-wheel sequences when the terminal has mouse reporting
+/// enabled (e.g. tmux with `mouse on`).
+///
+/// AppKit delivers scroll events to the deepest view under the cursor —
+/// that's the child `TerminalView`, not this parent wrapper. So overriding
+/// `scrollWheel(with:)` here never fires. Instead we install a local
+/// event monitor that intercepts scroll events before they reach the
+/// terminal view.
 public final class TerminalScrollInterceptor: NSView {
   let terminalView: TerminalView
+  private nonisolated(unsafe) var scrollMonitor: Any?
 
   init(terminalView: TerminalView) {
     self.terminalView = terminalView
@@ -21,31 +26,45 @@ public final class TerminalScrollInterceptor: NSView {
       terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
       terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
     ])
-  }
 
-  @available(*, unavailable)
-  required init?(coder: NSCoder) { fatalError() }
+    scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+      guard let self = self,
+            event.deltaY != 0 else { return event }
 
-  public override func scrollWheel(with event: NSEvent) {
-    guard event.deltaY != 0 else { return }
+      let terminal = self.terminalView.terminal!
 
-    let terminal = terminalView.terminal!
+      // Only intercept when the running app requested mouse events
+      // (e.g. tmux `set -g mouse on`). We check mouseMode directly
+      // because allowMouseReporting is deliberately disabled on the
+      // TerminalView to preserve native text selection for clicks.
+      guard terminal.mouseMode != .off else {
+        return event
+      }
 
-    // If the app requested mouse events (e.g. tmux with `mouse on`),
-    // send proper mouse-wheel button events so the app can scroll.
-    if terminalView.allowMouseReporting && terminal.mouseMode != .off {
+      // Make sure the scroll is within our terminal view's bounds.
+      let locationInSelf = self.convert(event.locationInWindow, from: nil)
+      guard self.bounds.contains(locationInSelf) else {
+        return event
+      }
+
       let lines = Self.scrollVelocity(delta: Int(abs(event.deltaY)))
       // Xterm mouse wheel: button flag 64 = scroll up, 65 = scroll down
       let buttonFlags = event.deltaY > 0 ? 64 : 65
       for _ in 0..<lines {
         terminal.sendEvent(buttonFlags: buttonFlags, x: 0, y: 0)
       }
-      return
+      return nil // consumed — don't let SwiftTerm also handle it
     }
-
-    // No mouse reporting — fall through to SwiftTerm's scrollback handling.
-    terminalView.scrollWheel(with: event)
   }
+
+  deinit {
+    if let monitor = scrollMonitor {
+      NSEvent.removeMonitor(monitor)
+    }
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
 
   private static func scrollVelocity(delta: Int) -> Int {
     if delta > 9 { return 20 }
@@ -83,6 +102,12 @@ public struct TerminalEmulatorView: NSViewRepresentable {
     let tv = TerminalView(frame: .zero)
     Self.applyTheme(tv)
     tv.terminalDelegate = context.coordinator
+
+    // Disable SwiftTerm's built-in mouse reporting so click/drag events
+    // stay local (native text selection) instead of being sent to the app
+    // (tmux). Our scroll monitor handles mouse-wheel separately by checking
+    // terminal.mouseMode directly.
+    tv.allowMouseReporting = false
 
     // Register to receive data from the pipe
     dataPipe.setReceiver { bytes in
