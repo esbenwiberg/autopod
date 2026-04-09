@@ -1917,6 +1917,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               commitLog: commitLog || undefined,
               plan: session.plan ?? undefined,
               taskSummary: session.taskSummary ?? undefined,
+              worktreePath: session.worktreePath ?? undefined,
+              startCommitSha: session.startCommitSha ?? undefined,
             },
             (phase) => emitActivityStatus(sessionId, phase),
           );
@@ -2278,6 +2280,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               commitLog: commitLog || undefined,
               plan: session.plan ?? undefined,
               taskSummary: session.taskSummary ?? undefined,
+              worktreePath: session.worktreePath ?? undefined,
+              startCommitSha: session.startCommitSha ?? undefined,
             },
             (phase) => emitActivityStatus(sessionId, phase),
           );

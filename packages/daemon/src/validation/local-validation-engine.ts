@@ -14,6 +14,9 @@ import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
+import { runAgenticReview } from './review-agentic-runner.js';
+import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
+import { runToolUseReview } from './review-tool-runner.js';
 
 /**
  * Runs the Claude CLI in print mode, piping `input` via stdin.
@@ -154,7 +157,26 @@ export function createLocalValidationEngine(
 
       // ── Phase 6: AI Task Review ─────────────────────────────────────
       onProgress?.('Running AI task review…');
-      const { result: taskReview, skipReason: reviewSkipReason } = await runTaskReview(config, log);
+
+      // Gather enriched context from the worktree (Tier 0+1)
+      let reviewContext: ReviewContext | undefined;
+      if (config.worktreePath) {
+        try {
+          reviewContext = await gatherReviewContext(
+            config.worktreePath,
+            config.diff,
+            config.startCommitSha,
+          );
+        } catch (err) {
+          log?.warn({ err }, 'Failed to gather review context, proceeding without enrichment');
+        }
+      }
+
+      const { result: taskReview, skipReason: reviewSkipReason } = await runTaskReview(
+        config,
+        log,
+        reviewContext,
+      );
 
       // ── Phase 7: Overall result ─────────────────────────────────────
       const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
@@ -652,7 +674,7 @@ async function executeAcChecks(
   const useHost = hostBrowserRunner && (await hostBrowserRunner.isAvailable());
   const baseUrl = useHost ? config.previewUrl : (config.containerBaseUrl ?? config.previewUrl);
   const screenshotDir = useHost
-    ? hostBrowserRunner.screenshotDir(config.sessionId) + '/ac'
+    ? `${hostBrowserRunner.screenshotDir(config.sessionId)}/ac`
     : '/tmp/autopod-ac-screenshots';
 
   const instructionList = instructions
@@ -738,7 +760,7 @@ async function executeAcOnHost(
   timeout: number,
   log?: Logger,
 ): Promise<AcCheckResult[]> {
-  const screenshotDir = hostBrowserRunner.screenshotDir(config.sessionId) + '/ac';
+  const screenshotDir = `${hostBrowserRunner.screenshotDir(config.sessionId)}/ac`;
 
   const result = await hostBrowserRunner.runScript(script, {
     timeout,
@@ -900,22 +922,11 @@ export function stripMarkdownFences(text: string): string {
 
 // ── AI Task Review phase ────────────────────────────────────────────────────
 
-async function runTaskReview(
-  config: ValidationEngineConfig,
-  log?: Logger,
-): Promise<{ result: TaskReviewResult | null; skipReason?: string }> {
-  if (!config.reviewerModel || !config.diff || !config.task) {
-    const reason = !config.diff
-      ? 'No code changes detected'
-      : !config.task
-        ? 'No task description available'
-        : 'No reviewer model configured';
-    log?.info({ reason }, 'skipping task review');
-    return { result: null, skipReason: reason };
-  }
-
-  log?.info({ model: config.reviewerModel }, 'running AI task review');
-
+/**
+ * Builds the review prompt with all available context.
+ * Extracted so it can be reused across tiers.
+ */
+function buildReviewPrompt(config: ValidationEngineConfig, reviewContext?: ReviewContext): string {
   const acList =
     config.acceptanceCriteria && config.acceptanceCriteria.length > 0
       ? config.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n')
@@ -948,7 +959,10 @@ async function runTaskReview(
     ? `\n## COMMIT HISTORY\n\nCommits on this branch (most recent first — use to understand progression and intent):\n\n${config.commitLog}\n`
     : '';
 
-  const prompt = `You are an expert software engineer performing an independent code review of changes made by an AI agent.
+  // Build the enriched context section (Tier 0+1)
+  const contextSection = reviewContext ? buildContextSection(reviewContext) : '';
+
+  return `You are an expert software engineer performing an independent code review of changes made by an AI agent.
 
 Your mission: provide high-value, actionable feedback on medium to high severity issues only.
 
@@ -958,12 +972,13 @@ Core principles:
 - Don't flag style preferences. Only flag significant inconsistencies with existing patterns.
 - Treat generated code fairly — if it's appropriate and contextually correct, it passes.
 - When uncertain, skip rather than create noise.
+- Use the CODEBASE CONTEXT section (if present) to verify claims made in the diff. Auto-detected warnings are high-confidence signals — investigate them seriously.
 ${repoRulesSection}
 ## TASK
 
 ${config.task}
 ${acSection}${planSection}${taskSummarySection}
-${commitLogSection}## DIFF
+${commitLogSection}${contextSection}## DIFF
 
 ${config.diff}
 
@@ -1047,42 +1062,204 @@ Status rules:
 - "pass": requirements met (if any), no significant issues, and no unjustified undisclosed deviations
 - "fail": one or more requirements unmet, OR critical/high severity issues, OR undisclosed deviations that compromised scope
 - "uncertain": task is clear but diff is inconclusive without runtime context (use sparingly)`;
+}
+
+/**
+ * Builds the CODEBASE CONTEXT section from gathered review context.
+ */
+function buildContextSection(ctx: ReviewContext): string {
+  const parts: string[] = ['## CODEBASE CONTEXT\n'];
+
+  if (ctx.annotations.length > 0) {
+    parts.push('### Warnings (auto-detected)\n');
+    for (const a of ctx.annotations) {
+      parts.push(a);
+    }
+    parts.push('');
+  }
+
+  if (ctx.gitStatusSummary) {
+    parts.push('### Repository Status\n');
+    parts.push(ctx.gitStatusSummary);
+    parts.push('');
+  }
+
+  if (ctx.fileTreeSummary) {
+    parts.push('### File Tree\n');
+    parts.push(ctx.fileTreeSummary);
+    parts.push('');
+  }
+
+  if (ctx.supplementaryFiles.length > 0) {
+    parts.push('### Supplementary Files\n');
+    for (const f of ctx.supplementaryFiles) {
+      parts.push(`#### \`${f.path}\` (${f.reason})\n`);
+      parts.push('```');
+      parts.push(f.content);
+      parts.push('```\n');
+    }
+  }
+
+  return parts.join('\n');
+}
+
+async function runTaskReview(
+  config: ValidationEngineConfig,
+  log?: Logger,
+  reviewContext?: ReviewContext,
+): Promise<{ result: TaskReviewResult | null; skipReason?: string }> {
+  if (!config.reviewerModel || !config.diff || !config.task) {
+    const reason = !config.diff
+      ? 'No code changes detected'
+      : !config.task
+        ? 'No task description available'
+        : 'No reviewer model configured';
+    log?.info({ reason }, 'skipping task review');
+    return { result: null, skipReason: reason };
+  }
+
+  log?.info({ model: config.reviewerModel }, 'running AI task review');
+
+  const prompt = buildReviewPrompt(config, reviewContext);
+  const reviewTimeout = config.reviewTimeout ?? 300_000;
+  const reviewDepth = config.reviewDepth ?? 'auto';
 
   try {
-    const reviewTimeout = config.reviewTimeout ?? 300_000;
+    // ── Tier 1: Single-shot review with enriched context ──────────────
     const { stdout } = await runClaudeCli({
       model: config.reviewerModel,
       input: prompt,
       timeout: reviewTimeout,
     });
 
-    const parsed = parseReviewJson(stdout.trim());
-    if (!parsed) {
+    const tier1Parsed = parseReviewJson(stdout.trim());
+    if (!tier1Parsed) {
       log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
-      return null;
+      return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
     }
 
     log?.info(
       {
-        status: parsed.status,
-        issueCount: parsed.issues.length,
-        requirementsChecked: parsed.requirementsCheck?.length ?? 0,
+        status: tier1Parsed.status,
+        issueCount: tier1Parsed.issues.length,
+        tier: 1,
       },
-      'task review complete',
+      'Tier 1 task review complete',
     );
 
-    return {
-      result: {
-        status: parsed.status,
-        reasoning: parsed.reasoning,
-        issues: parsed.issues,
+    // If Tier 1 is conclusive or depth is standard-only, we're done
+    const shouldEscalate =
+      tier1Parsed.status === 'uncertain' && reviewDepth !== 'standard' && config.worktreePath;
+
+    if (!shouldEscalate) {
+      return {
+        result: {
+          status: tier1Parsed.status,
+          reasoning: tier1Parsed.reasoning,
+          issues: tier1Parsed.issues,
+          model: config.reviewerModel,
+          screenshots: [],
+          diff: config.diff,
+          requirementsCheck: tier1Parsed.requirementsCheck,
+          deviationsAssessment: tier1Parsed.deviationsAssessment,
+        },
+      };
+    }
+
+    // At this point, shouldEscalate guarantees worktreePath is defined
+    const worktreePath = config.worktreePath as string;
+
+    // ── Tier 2: Tool-use review (on uncertain) ───────────────────────
+    log?.info('Tier 1 returned uncertain, escalating to Tier 2 tool-use review');
+
+    try {
+      const tier2Result = await runToolUseReview({
         model: config.reviewerModel,
-        screenshots: [],
-        diff: config.diff,
-        requirementsCheck: parsed.requirementsCheck,
-        deviationsAssessment: parsed.deviationsAssessment,
-      },
-    };
+        prompt,
+        worktreePath,
+        timeout: reviewTimeout,
+      });
+
+      const tier2Parsed = parseReviewJson(tier2Result.stdout.trim());
+      if (tier2Parsed && tier2Parsed.status !== 'uncertain') {
+        log?.info({ status: tier2Parsed.status, tier: 2 }, 'Tier 2 tool-use review resolved');
+        return {
+          result: {
+            status: tier2Parsed.status,
+            reasoning: `[Tier 2 tool-use review] ${tier2Parsed.reasoning}`,
+            issues: tier2Parsed.issues,
+            model: config.reviewerModel,
+            screenshots: [],
+            diff: config.diff,
+            requirementsCheck: tier2Parsed.requirementsCheck,
+            deviationsAssessment: tier2Parsed.deviationsAssessment,
+          },
+        };
+      }
+
+      // ── Tier 3: Agentic review (still uncertain) ────────────────────
+      if (tier2Parsed?.status === 'uncertain') {
+        log?.info('Tier 2 returned uncertain, escalating to Tier 3 agentic review');
+
+        try {
+          const tier3Result = await runAgenticReview({
+            model: config.reviewerModel,
+            prompt,
+            worktreePath,
+            timeout: reviewTimeout,
+          });
+
+          const tier3Parsed = parseReviewJson(tier3Result.stdout.trim());
+          if (tier3Parsed) {
+            log?.info({ status: tier3Parsed.status, tier: 3 }, 'Tier 3 agentic review complete');
+            return {
+              result: {
+                status: tier3Parsed.status,
+                reasoning: `[Tier 3 agentic review] ${tier3Parsed.reasoning}`,
+                issues: tier3Parsed.issues,
+                model: config.reviewerModel,
+                screenshots: [],
+                diff: config.diff,
+                requirementsCheck: tier3Parsed.requirementsCheck,
+                deviationsAssessment: tier3Parsed.deviationsAssessment,
+              },
+            };
+          }
+        } catch (err) {
+          log?.warn({ err }, 'Tier 3 agentic review failed, falling back to Tier 2 result');
+        }
+      }
+
+      // Fall back to best available result
+      const bestParsed = tier2Parsed ?? tier1Parsed;
+      return {
+        result: {
+          status: bestParsed.status,
+          reasoning: bestParsed.reasoning,
+          issues: bestParsed.issues,
+          model: config.reviewerModel,
+          screenshots: [],
+          diff: config.diff,
+          requirementsCheck: bestParsed.requirementsCheck,
+          deviationsAssessment: bestParsed.deviationsAssessment,
+        },
+      };
+    } catch (err) {
+      log?.warn({ err }, 'Tier 2 tool-use review failed, using Tier 1 result');
+      // Fall back to Tier 1 result
+      return {
+        result: {
+          status: tier1Parsed.status,
+          reasoning: tier1Parsed.reasoning,
+          issues: tier1Parsed.issues,
+          model: config.reviewerModel,
+          screenshots: [],
+          diff: config.diff,
+          requirementsCheck: tier1Parsed.requirementsCheck,
+          deviationsAssessment: tier1Parsed.deviationsAssessment,
+        },
+      };
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log?.warn({ err }, 'task review failed, continuing without review');

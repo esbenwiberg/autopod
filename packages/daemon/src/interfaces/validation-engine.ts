@@ -32,6 +32,12 @@ export interface ValidationEngineConfig {
   plan?: { summary: string; steps: string[] };
   /** Task summary reported by the agent via report_task_summary */
   taskSummary?: TaskSummary;
+  /** Host worktree path for enriched review context. Enables Tier 0+1 context gathering and Tier 2/3 escalation. */
+  worktreePath?: string;
+  /** Base commit SHA for scoping diff annotations */
+  startCommitSha?: string;
+  /** Review depth: 'standard' (Tier 0+1 only), 'auto' (escalate on uncertain, default), 'deep' (always Tier 2+) */
+  reviewDepth?: 'standard' | 'auto' | 'deep';
 }
 
 export interface ValidationEngine {
