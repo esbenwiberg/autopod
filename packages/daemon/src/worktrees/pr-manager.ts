@@ -104,7 +104,10 @@ export class GhPrManager implements PrManager {
     }
 
     // Check if the merge completed immediately or auto-merge was scheduled
-    const status = await this.getPrStatus({ prUrl: config.prUrl, worktreePath: config.worktreePath });
+    const status = await this.getPrStatus({
+      prUrl: config.prUrl,
+      worktreePath: config.worktreePath,
+    });
     if (status.merged) {
       this.logger.info({ prUrl: config.prUrl }, 'Pull request merged immediately');
       return { merged: true, autoMergeScheduled: false };
@@ -152,7 +155,8 @@ export class GhPrManager implements PrManager {
 
     if (pr.statusCheckRollup?.length) {
       const pending = pr.statusCheckRollup.filter(
-        (c) => c.conclusion !== 'SUCCESS' && c.conclusion !== 'NEUTRAL' && c.conclusion !== 'SKIPPED',
+        (c) =>
+          c.conclusion !== 'SUCCESS' && c.conclusion !== 'NEUTRAL' && c.conclusion !== 'SKIPPED',
       );
       if (pending.length > 0) {
         const checkNames = pending.map((c) => `${c.name} (${c.conclusion || c.status})`).join(', ');
@@ -283,10 +287,7 @@ export class GitHubApiPrManager implements PrManager {
 
     // 405 = merge blocked (checks pending, reviews required, etc.)
     if (mergeResponse.status === 405) {
-      this.logger.info(
-        { prUrl: config.prUrl },
-        'PR not mergeable yet — checks or reviews pending',
-      );
+      this.logger.info({ prUrl: config.prUrl }, 'PR not mergeable yet — checks or reviews pending');
       return { merged: false, autoMergeScheduled: false };
     }
 
@@ -314,10 +315,9 @@ export class GitHubApiPrManager implements PrManager {
   async getPrStatus(config: { prUrl: string }): Promise<PrMergeStatus> {
     const { owner, repo, number } = parsePrUrl(config.prUrl);
 
-    const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,
-      { headers: this.headers },
-    );
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`, {
+      headers: this.headers,
+    });
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`GitHub API error ${response.status}: ${text}`);
@@ -353,9 +353,7 @@ export class GitHubApiPrManager implements PrManager {
           (c.conclusion !== 'success' && c.conclusion !== 'neutral' && c.conclusion !== 'skipped'),
       );
       if (pending.length > 0) {
-        const checkNames = pending
-          .map((c) => `${c.name} (${c.conclusion ?? c.status})`)
-          .join(', ');
+        const checkNames = pending.map((c) => `${c.name} (${c.conclusion ?? c.status})`).join(', ');
         reasons.push(`Checks: ${checkNames}`);
       }
     }

@@ -41,7 +41,10 @@ public final class ActionHandler {
       approveAll: { [weak self] in await self?.approveAllValidated() },
       killAllFailed: { [weak self] in await self?.killAllFailed() },
       fork: { [weak self] id in await self?.forkSession(id) },
-      delete: { [weak self] id in await self?.deleteSession(id) }
+      delete: { [weak self] id in await self?.deleteSession(id) },
+      createHistoryWorkspace: { [weak self] profile, limit in
+        await self?.createHistoryWorkspace(profileName: profile, limit: limit)
+      }
     )
   }
 
@@ -237,6 +240,22 @@ public final class ActionHandler {
     do {
       try await api.deleteSession(sessionId)
       sessionStore.removeSession(sessionId)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func createHistoryWorkspace(profileName: String?, limit: Int) async {
+    pendingAction = "history-workspace"
+    do {
+      let response = try await api.createHistoryWorkspace(
+        profileName: profileName,
+        limit: limit
+      )
+      let session = SessionMapper.map(response)
+      sessionStore.upsertSession(session)
+      sessionStore.selectedSessionId = session.id
     } catch {
       lastError = error.localizedDescription
     }

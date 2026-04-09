@@ -26,6 +26,7 @@ import { requestLoggerPlugin } from './plugins/request-logger.js';
 import { actionRoutes } from './routes/actions.js';
 import { diffRoutes } from './routes/diff.js';
 import { healthRoutes } from './routes/health.js';
+import { historyRoutes } from './routes/history.js';
 import { profileRoutes } from './routes/profiles.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { terminalRoutes } from './routes/terminal.js';
@@ -84,6 +85,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     maxConcurrency: deps.maxConcurrency,
   });
   sessionRoutes(app, deps.sessionManager, deps.sessionTokenIssuer, deps.eventRepo);
+  historyRoutes(app, deps.sessionManager);
   profileRoutes(
     app,
     deps.profileStore,

@@ -171,4 +171,22 @@ public final class SessionStore {
     sessions[index].outputTokens = output
     sessions[index].costUsd = cost
   }
+
+  // MARK: - History workspace
+
+  public func createHistoryWorkspace(profileName: String?, limit: Int) async {
+    guard let api else { return }
+    do {
+      let response = try await api.createHistoryWorkspace(
+        profileName: profileName,
+        limit: limit
+      )
+      let session = SessionMapper.map(response)
+      upsertSession(session)
+      selectedSessionId = session.id
+    } catch {
+      print("[SessionStore] Failed to create history workspace: \(error)")
+      self.error = error.localizedDescription
+    }
+  }
 }

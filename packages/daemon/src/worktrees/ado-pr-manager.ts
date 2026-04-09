@@ -218,10 +218,9 @@ export class AdoPrManager implements PrManager {
     // PR is still active — check policy evaluations
     const reasons: string[] = [];
     try {
-      const evaluations = (await this.adoFetch(
-        `/pullrequests/${prId}/statuses?api-version=7.1`,
-        { method: 'GET' },
-      )) as { value: Array<{ context: { name: string }; state: string }> };
+      const evaluations = (await this.adoFetch(`/pullrequests/${prId}/statuses?api-version=7.1`, {
+        method: 'GET',
+      })) as { value: Array<{ context: { name: string }; state: string }> };
 
       const blocking = evaluations.value.filter(
         (e) => e.state !== 'succeeded' && e.state !== 'notApplicable',

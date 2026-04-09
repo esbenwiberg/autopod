@@ -9,6 +9,7 @@ import type {
   DaemonConfig,
   EscalationRequest,
   ExecutionTarget,
+  HistoryQuery,
   InjectedMcpServer,
   NetworkPolicy,
   Profile,
@@ -23,7 +24,10 @@ import {
   generateSessionId,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
+import { createHistoryExporter } from '../history/history-exporter.js';
+import { generateHistoryInstructions } from '../history/instructions-generator.js';
 import { getBaseImage } from '../images/dockerfile-generator.js';
 import type {
   ContainerManager,
@@ -41,6 +45,7 @@ import { readAcFile } from './ac-file-parser.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
+import type { EventRepository } from './event-repository.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
@@ -144,6 +149,8 @@ export interface SessionManagerDependencies {
       policy: import('@autopod/shared').ActionPolicy,
     ) => import('@autopod/shared').ActionDefinition[];
   };
+  actionAuditRepo?: ActionAuditRepository;
+  eventRepo?: EventRepository;
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
@@ -177,6 +184,7 @@ export interface SessionManager {
   revalidateSession(sessionId: string): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
   /** Create a linked workspace pod on the same branch as a failed worker session for human fixes. */
   fixManually(sessionId: string, userId: string): Promise<Session>;
+  createHistoryWorkspace(profileName: string, userId: string, historyQuery: HistoryQuery): Session;
   deleteSession(sessionId: string): Promise<void>;
   startPreview(sessionId: string): Promise<{ previewUrl: string }>;
   stopPreview(sessionId: string): Promise<void>;
@@ -631,6 +639,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       return session;
     },
 
+    createHistoryWorkspace(
+      profileName: string,
+      userId: string,
+      historyQuery: HistoryQuery,
+    ): Session {
+      // Encode query params into the task field with a [history] prefix
+      const queryJson = JSON.stringify(historyQuery);
+      const task = `[history] History analysis workspace | ${queryJson}`;
+      return this.createSession(
+        {
+          profileName,
+          task,
+          outputMode: 'workspace',
+          skipValidation: true,
+        },
+        userId,
+      );
+    },
+
     async processSession(sessionId: string): Promise<void> {
       let session = sessionRepo.getOrThrow(sessionId);
       const profile = profileStore.get(session.profileName);
@@ -837,6 +864,51 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           } catch {
             logger.debug({ sessionId }, 'Failed to capture workspace start commit SHA');
           }
+          // History workspace: export session data into the container
+          if (session.task.startsWith('[history]')) {
+            try {
+              emitStatus('Exporting history data…');
+              const queryMatch = session.task.match(/\| (.+)$/);
+              const historyQuery: HistoryQuery = queryMatch
+                ? (JSON.parse(queryMatch[1]) as HistoryQuery)
+                : {};
+
+              const exporter = createHistoryExporter({
+                sessionRepo,
+                validationRepo: validationRepo!,
+                escalationRepo: _escalationRepo,
+                eventRepo: deps.eventRepo!,
+                progressEventRepo: progressEventRepo!,
+                actionAuditRepo: deps.actionAuditRepo,
+              });
+
+              const { dbBuffer, summary, analysisGuide, stats } = exporter.export(historyQuery);
+
+              // Create /history directory
+              await containerManager.execInContainer(containerId, ['mkdir', '-p', '/history'], {
+                timeout: 5_000,
+              });
+
+              await containerManager.writeFile(containerId, '/history/history.db', dbBuffer);
+              await containerManager.writeFile(containerId, '/history/summary.md', summary);
+              await containerManager.writeFile(
+                containerId,
+                '/history/analysis-guide.md',
+                analysisGuide,
+              );
+
+              const instructions = generateHistoryInstructions(stats);
+              await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', instructions);
+
+              logger.info(
+                { sessionId, exportedSessions: stats.totalSessions },
+                'History data exported to workspace container',
+              );
+            } catch (err) {
+              logger.error({ err, sessionId }, 'Failed to export history data');
+            }
+          }
+
           logger.info({ sessionId }, 'Workspace session running — awaiting manual attach');
           return;
         }

@@ -106,6 +106,7 @@ public struct MainView: View {
         case .completed:      sessions.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:            sessions
         case .analytics:        []
+        case .history:          []
         case .featureOverview:  []
         case .salesPitch:       []
         case .profile(let p):   sessions.filter { $0.profileName == p }
@@ -125,6 +126,9 @@ public struct MainView: View {
         } content: {
             if sidebarSelection == .analytics {
                 AnalyticsView(sessions: sessions)
+                    .frame(minWidth: 600)
+            } else if sidebarSelection == .history {
+                HistoryView(sessions: sessions, actions: wiredActions, profileNames: profileNames)
                     .frame(minWidth: 600)
             } else if sidebarSelection == .salesPitch {
                 SalesPitchView()

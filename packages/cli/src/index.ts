@@ -3,6 +3,7 @@ import { AutopodClient } from './api/client.js';
 import { getToken, initMsal } from './auth/token-manager.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerDaemonCommands } from './commands/daemon.js';
+import { registerHistoryCommands } from './commands/history.js';
 import { registerProfileCommands } from './commands/profile.js';
 import { registerSessionCommands } from './commands/session.js';
 import { registerValidateCommands } from './commands/validate.js';
@@ -40,6 +41,7 @@ registerDaemonCommands(program);
 registerProfileCommands(program, getClient);
 registerSessionCommands(program, getClient);
 registerWorkspaceCommands(program, getClient);
+registerHistoryCommands(program, getClient);
 registerValidateCommands(program, getClient);
 
 // Parse and handle errors

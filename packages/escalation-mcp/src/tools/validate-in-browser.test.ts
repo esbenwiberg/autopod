@@ -72,9 +72,7 @@ describe('rewriteUrlToHost', () => {
   });
 
   it('falls back to preview URL on parse failure', () => {
-    expect(rewriteUrlToHost('not-a-url', 'http://127.0.0.1:45678')).toBe(
-      'http://127.0.0.1:45678',
-    );
+    expect(rewriteUrlToHost('not-a-url', 'http://127.0.0.1:45678')).toBe('http://127.0.0.1:45678');
   });
 });
 

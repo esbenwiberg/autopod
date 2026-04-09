@@ -8,6 +8,7 @@ import {
 } from '@autopod/shared';
 import type {
   CreateSessionRequest,
+  HistoryQuery,
   Profile,
   Session,
   SessionStatus,
@@ -102,6 +103,15 @@ export class AutopodClient {
 
   async deleteSession(id: string): Promise<void> {
     await this.request<void>('DELETE', `/sessions/${id}`);
+  }
+
+  async createHistoryWorkspace(params: {
+    profileName: string;
+    since?: string;
+    limit?: number;
+    failuresOnly?: boolean;
+  }): Promise<Session> {
+    return this.request<Session>('POST', '/sessions/history-workspace', params);
   }
 
   async getSessionLogs(id: string, buildLogs?: boolean): Promise<string> {

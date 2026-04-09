@@ -16,6 +16,7 @@ export interface EscalationRepository {
   insert(escalation: EscalationRequest): void;
   getOrThrow(id: string): EscalationRow;
   update(id: string, response: EscalationResponse): void;
+  listBySession(sessionId: string): EscalationRow[];
   countBySessionAndType(sessionId: string, type: EscalationType): number;
 }
 
@@ -68,6 +69,13 @@ export function createEscalationRepository(db: Database.Database): EscalationRep
       if (result.changes === 0) {
         throw new EscalationNotFoundError(id);
       }
+    },
+
+    listBySession(sessionId: string): EscalationRow[] {
+      const rows = db
+        .prepare('SELECT * FROM escalations WHERE session_id = ? ORDER BY created_at ASC')
+        .all(sessionId) as Record<string, unknown>[];
+      return rows.map(rowToEscalation);
     },
 
     countBySessionAndType(sessionId: string, type: EscalationType): number {
