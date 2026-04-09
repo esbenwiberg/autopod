@@ -121,6 +121,8 @@ export type {
   DaemonConnection,
 } from './types/auth.js';
 
+export type { HistoryQuery, HistoryExportStats } from './types/history.js';
+
 // Errors (runtime values, not just types)
 export {
   AutopodError,

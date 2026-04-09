@@ -175,6 +175,27 @@ public actor DaemonAPI {
     try await request("POST", "/profiles/\(name)/warm", body: try encode(WarmBody(rebuild: rebuild, gitPat: gitPat)))
   }
 
+  // MARK: - History
+
+  public func createHistoryWorkspace(
+    profileName: String?,
+    limit: Int? = nil,
+    since: String? = nil,
+    failuresOnly: Bool? = nil
+  ) async throws -> SessionResponse {
+    try await request(
+      "POST", "/sessions/history-workspace",
+      body: try encode(
+        HistoryWorkspaceBody(
+          profileName: profileName,
+          limit: limit,
+          since: since,
+          failuresOnly: failuresOnly
+        )
+      )
+    )
+  }
+
   // MARK: - Actions
 
   public func fetchActionCatalog() async throws -> [ActionCatalogEntry] {
@@ -299,5 +320,12 @@ struct RejectBody: Codable {
 struct WarmBody: Codable {
   let rebuild: Bool?
   let gitPat: String?
+}
+
+struct HistoryWorkspaceBody: Codable {
+  let profileName: String?
+  let limit: Int?
+  let since: String?
+  let failuresOnly: Bool?
 }
 

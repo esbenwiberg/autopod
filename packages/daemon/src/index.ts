@@ -319,6 +319,8 @@ sessionManager = createSessionManager({
   progressEventRepo,
   profileStore,
   eventBus,
+  eventRepo,
+  actionAuditRepo,
   containerManagerFactory,
   worktreeManager,
   runtimeRegistry,

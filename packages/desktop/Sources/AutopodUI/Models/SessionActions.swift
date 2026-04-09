@@ -21,6 +21,7 @@ public struct SessionActions: Sendable {
   public var killAllFailed: @MainActor @Sendable () async -> Void
   public var fork: @MainActor @Sendable (String) async -> String?
   public var delete: @MainActor @Sendable (String) async -> Void
+  public var createHistoryWorkspace: @MainActor @Sendable (String?, Int) async -> Void
 
   public init(
     approve: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -38,7 +39,8 @@ public struct SessionActions: Sendable {
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
     killAllFailed: @escaping @MainActor @Sendable () async -> Void = {},
     fork: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
-    delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in }
+    delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    createHistoryWorkspace: @escaping @MainActor @Sendable (String?, Int) async -> Void = { _, _ in }
   ) {
     self.approve = approve
     self.reject = reject
@@ -56,6 +58,7 @@ public struct SessionActions: Sendable {
     self.killAllFailed = killAllFailed
     self.fork = fork
     self.delete = delete
+    self.createHistoryWorkspace = createHistoryWorkspace
   }
 
   /// No-op instance for previews

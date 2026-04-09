@@ -61,6 +61,7 @@ public struct SidebarView: View {
                     sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
                     sidebarRow(.all, icon: "square.grid.2x2", color: .secondary, badge: sessions.count)
                     sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
+                    sidebarRow(.history, icon: "clock.arrow.circlepath", color: .secondary, badge: 0)
                 }
 
                 Section("Profiles") {
@@ -173,6 +174,7 @@ public enum SidebarItem: Hashable {
     case completed
     case all
     case analytics
+    case history
     case profile(String)
     case featureOverview
     case salesPitch
@@ -186,6 +188,7 @@ public enum SidebarItem: Hashable {
         case .completed: "Completed"
         case .all: "All Sessions"
         case .analytics: "Analytics"
+        case .history: "History"
         case .profile(let name): name
         case .featureOverview: "How it Works"
         case .salesPitch: "Why Autopod"
