@@ -98,8 +98,11 @@ export function generateNpmrc(registries: PrivateRegistry[], pat: string): strin
  * Generate a user-level NuGet.config for Azure DevOps NuGet feeds.
  *
  * Written to ~/.nuget/NuGet/NuGet.Config (user-level), which dotnet merges
- * with any solution-level NuGet.config. No <clear /> is used — existing
- * package sources in the workspace config are preserved.
+ * with any solution-level NuGet.config.
+ *
+ * Uses <clear /> to remove the default nuget.org source so all package
+ * resolution goes through the configured private feeds. ADO feeds should
+ * have nuget.org configured as an upstream source to proxy public packages.
  *
  * Sources only — no credentials. Authentication is handled by the Azure
  * Artifacts Credential Provider via the VSS_NUGET_EXTERNAL_FEED_ENDPOINTS
@@ -110,6 +113,7 @@ export function generateNuGetConfig(registries: PrivateRegistry[]): string {
     '<?xml version="1.0" encoding="utf-8"?>',
     '<configuration>',
     '  <packageSources>',
+    '    <clear />',
   ];
 
   for (const reg of registries) {

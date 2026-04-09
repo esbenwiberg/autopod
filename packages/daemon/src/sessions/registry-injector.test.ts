@@ -129,9 +129,9 @@ describe('generateNuGetConfig', () => {
     expect(content).toContain('<?xml version="1.0"');
     expect(content).toContain('<configuration>');
     expect(content).toContain('<packageSources>');
-    // No <clear /> — user-level config must not wipe existing sources
-    expect(content).not.toContain('<clear />');
-    // No hardcoded nuget.org — workspace config handles public sources
+    // <clear /> removes default nuget.org — all resolution goes through the private feed
+    expect(content).toContain('<clear />');
+    // No hardcoded nuget.org — private feed proxies public packages via upstream sources
     expect(content).not.toContain('nuget.org');
     expect(content).toContain('myorg-shared');
     // No credentials — auth handled by credential provider via env var
