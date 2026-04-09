@@ -1344,27 +1344,32 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       // Sync workspace back to host worktree before any host-side git reads
+      let syncSucceeded = true;
       if (session.containerId && session.worktreePath) {
         try {
           const cm = containerManagerFactory.get(session.executionTarget);
           await syncWorkspaceBack(session.containerId, cm);
         } catch (err) {
+          syncSucceeded = false;
           logger.warn({ err, sessionId }, 'Failed to sync workspace back to host');
         }
       }
 
-      // Auto-commit any uncommitted changes the agent left behind, then get diff stats
+      // Auto-commit any uncommitted changes the agent left behind, then get diff stats.
+      // When sync failed, block all deletions (threshold=0) to prevent committing a
+      // partially-synced worktree that looks like mass file deletions.
       if (session.worktreePath) {
         try {
           const committed = await worktreeManager.commitPendingChanges(
             session.worktreePath,
             'chore: auto-commit uncommitted agent changes',
+            { maxDeletions: syncSucceeded ? 100 : 0 },
           );
           if (committed) {
             logger.info({ sessionId }, 'Auto-committed uncommitted agent changes');
           }
         } catch (err) {
-          logger.warn({ err, sessionId }, 'Failed to auto-commit pending changes');
+          logger.error({ err, sessionId }, 'Auto-commit blocked by deletion safety guard');
         }
 
         try {
@@ -1836,11 +1841,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       // Sync workspace changes back to host worktree before pushing
+      let workspaceSyncOk = true;
       if (session.containerId && session.worktreePath) {
         try {
           const cm = containerManagerFactory.get(session.executionTarget);
           await syncWorkspaceBack(session.containerId, cm);
         } catch (err) {
+          workspaceSyncOk = false;
           logger.warn({ err, sessionId }, 'Failed to sync workspace before push');
         }
       }
@@ -1850,7 +1857,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       let pushError: string | undefined;
       if (session.worktreePath) {
         try {
-          // mergeBranch auto-commits any uncommitted changes before pushing
+          // Pre-commit with tight deletion guard when sync failed, so mergeBranch
+          // doesn't blindly commit a partially-synced worktree.
+          if (!workspaceSyncOk) {
+            await worktreeManager.commitPendingChanges(
+              session.worktreePath,
+              'chore: auto-commit uncommitted changes before merge',
+              { maxDeletions: 0 },
+            );
+          }
+          // mergeBranch auto-commits any remaining uncommitted changes before pushing
           await worktreeManager.mergeBranch({
             worktreePath: session.worktreePath,
             targetBranch: session.branch ?? 'HEAD',

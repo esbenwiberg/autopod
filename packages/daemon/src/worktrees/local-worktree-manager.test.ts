@@ -349,25 +349,32 @@ describe('LocalWorktreeManager', () => {
   // -------------------------------------------------------------------------
 
   describe('commitPendingChanges', () => {
-    it('commits when there are staged changes', async () => {
+    /** Mock that simulates staged changes with a given number of deleted files. */
+    function mockWithDeletions(deletionCount: number) {
+      const deletedFiles = Array.from({ length: deletionCount }, (_, i) => `src/file${i}.ts`);
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
           const cmd = args.join(' ');
           if (cmd.includes('diff --cached --quiet')) {
-            // Exit non-zero → staged changes exist
             cb(new Error('changes exist'), { stdout: '', stderr: '' });
+          } else if (cmd.includes('diff --cached --diff-filter=D --name-only')) {
+            cb(null, { stdout: deletedFiles.join('\n'), stderr: '' });
           } else {
             cb(null, { stdout: '', stderr: '' });
           }
           return {} as ChildProcess;
         },
       );
+    }
+
+    it('commits when there are staged changes with no deletions', async () => {
+      mockWithDeletions(0);
 
       const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
       expect(result).toBe(true);
-      // Verify git add -A, then diff --cached --quiet, then commit were called
-      expect(execFileMock).toHaveBeenCalledTimes(3);
+      // git add -A, diff --cached --quiet, diff --cached --diff-filter=D, commit
+      expect(execFileMock).toHaveBeenCalledTimes(4);
     });
 
     it('returns false when working tree is clean', async () => {
@@ -375,8 +382,52 @@ describe('LocalWorktreeManager', () => {
 
       const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
       expect(result).toBe(false);
-      // Only git add -A and diff --cached --quiet (no commit)
+      // Only git add -A and diff --cached --quiet (no commit, no deletion check)
       expect(execFileMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('allows deletions under the default threshold', async () => {
+      mockWithDeletions(5);
+
+      const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
+      expect(result).toBe(true);
+    });
+
+    it('aborts when deletions exceed the default threshold', async () => {
+      mockWithDeletions(150);
+
+      await expect(
+        manager.commitPendingChanges('/tmp/worktree/sess', 'test commit'),
+      ).rejects.toThrow('150 files staged for deletion exceeds threshold of 100');
+
+      // Verify git reset HEAD was called to unstage
+      const resetCall = execFileMock.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call[1]) && (call[1] as string[]).includes('reset'),
+      );
+      expect(resetCall).toBeDefined();
+    });
+
+    it('respects custom maxDeletions option', async () => {
+      mockWithDeletions(11);
+
+      await expect(
+        manager.commitPendingChanges('/tmp/worktree/sess', 'test commit', { maxDeletions: 10 }),
+      ).rejects.toThrow('11 files staged for deletion exceeds threshold of 10');
+    });
+
+    it('blocks any deletion when maxDeletions is 0', async () => {
+      mockWithDeletions(1);
+
+      await expect(
+        manager.commitPendingChanges('/tmp/worktree/sess', 'test commit', { maxDeletions: 0 }),
+      ).rejects.toThrow('1 files staged for deletion exceeds threshold of 0');
+    });
+
+    it('allows exactly maxDeletions files', async () => {
+      mockWithDeletions(100);
+
+      const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
+      expect(result).toBe(true);
     });
   });
 

@@ -310,19 +310,8 @@ export class LocalWorktreeManager implements WorktreeManager {
   async mergeBranch(config: MergeBranchConfig): Promise<void> {
     const { worktreePath, targetBranch } = config;
 
-    // Commit any uncommitted work
-    try {
-      await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
-      await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: worktreePath });
-      // No staged changes — skip commit
-    } catch {
-      // There are staged changes — commit them
-      await execFileAsync(
-        'git',
-        ['commit', '-m', 'chore: auto-commit uncommitted changes before merge'],
-        { cwd: worktreePath },
-      );
-    }
+    // Commit any uncommitted work (with deletion guard)
+    await this.commitPendingChanges(worktreePath, 'chore: auto-commit uncommitted changes before merge');
 
     // Push using auth URL so the PAT is never stored in git config.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
@@ -357,18 +346,44 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
-  async commitPendingChanges(worktreePath: string, message: string): Promise<boolean> {
+  async commitPendingChanges(
+    worktreePath: string,
+    message: string,
+    options?: { maxDeletions?: number },
+  ): Promise<boolean> {
+    const maxDeletions = options?.maxDeletions ?? 100;
+
     await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
     try {
       await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: worktreePath });
       // Exit 0 → nothing staged
       return false;
     } catch {
-      // Exit non-zero → staged changes exist
+      // Staged changes exist — check deletion count before committing
+      const deletionCount = await this.getStagedDeletionCount(worktreePath);
+      if (deletionCount > maxDeletions) {
+        await execFileAsync('git', ['reset', 'HEAD'], { cwd: worktreePath });
+        this.logger.error(
+          { worktreePath, deletionCount, maxDeletions },
+          'Auto-commit aborted: staged deletions exceed safety threshold',
+        );
+        throw new Error(
+          `Auto-commit aborted: ${deletionCount} files staged for deletion exceeds threshold of ${maxDeletions}`,
+        );
+      }
       await execFileAsync('git', ['commit', '-m', message], { cwd: worktreePath });
-      this.logger.info({ worktreePath }, 'Auto-committed pending changes');
+      this.logger.info({ worktreePath, deletionCount }, 'Auto-committed pending changes');
       return true;
     }
+  }
+
+  private async getStagedDeletionCount(worktreePath: string): Promise<number> {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff', '--cached', '--diff-filter=D', '--name-only'],
+      { cwd: worktreePath },
+    );
+    return stdout.trim().split('\n').filter(Boolean).length;
   }
 
   async pushBranch(worktreePath: string): Promise<void> {
