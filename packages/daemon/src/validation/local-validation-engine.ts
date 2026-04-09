@@ -446,7 +446,7 @@ async function runPageValidationOnHost(
     baseUrl: config.previewUrl,
     pages: config.smokePages,
     screenshotDir,
-    navigationTimeout: 30_000,
+    navigationTimeout: config.navigationTimeout ?? 60_000,
     maxConsoleErrors: 50,
   });
 
@@ -495,7 +495,7 @@ async function runPageValidationInContainer(
     baseUrl: config.containerBaseUrl ?? config.previewUrl,
     pages: config.smokePages,
     screenshotDir: '/workspace/.autopod/screenshots',
-    navigationTimeout: 30_000,
+    navigationTimeout: config.navigationTimeout ?? 60_000,
     maxConsoleErrors: 50,
   });
 
@@ -699,7 +699,7 @@ Requirements:
 - Use \`${importLine}\` (${useHost ? 'standard ESM import' : 'ESM import ignores NODE_PATH, so use createRequire for CJS resolution'})
 - Launch chromium with \`{ headless: true, args: ['--no-sandbox'] }\`
 - Create browser context with \`{ locale: 'en-US' }\` to avoid locale issues
-- For each check: navigate to the appropriate URL, perform the validation, take a screenshot
+- For each check: navigate to the appropriate URL with \`{ waitUntil: 'domcontentloaded' }\`, then \`await page.waitForTimeout(2000)\` for JS rendering, perform the validation, take a screenshot
 - Save screenshots as ${screenshotDir}/check-{index}.png (0-indexed)
 - After all checks, output a JSON result between markers:
   __AUTOPOD_AC_RESULTS_START__

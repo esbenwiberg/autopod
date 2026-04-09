@@ -26,6 +26,8 @@ export interface ValidationEngineConfig {
   codeReviewSkill?: string;
   /** Git commit log between base branch and HEAD (one-line format) */
   commitLog?: string;
+  /** Playwright navigation timeout in ms per page. Default 60_000 (1 min). */
+  navigationTimeout?: number;
   /** AI review phase timeout in ms. Default 300_000 (5 min). */
   reviewTimeout?: number;
   /** Original plan reported by the agent via report_plan */

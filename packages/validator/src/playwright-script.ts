@@ -10,7 +10,7 @@ export interface PlaywrightScriptConfig {
 
 const DEFAULT_CONFIG: Partial<PlaywrightScriptConfig> = {
   screenshotDir: '/workspace/.autopod/screenshots',
-  navigationTimeout: 30_000,
+  navigationTimeout: 60_000,
   maxConsoleErrors: 50,
 };
 
@@ -56,9 +56,14 @@ async function run() {
     let totalErrorBytes = 0;
     const MAX_ERROR_BYTES = 10240;
 
+    // DNS failures are expected in network-restricted containers — don't
+    // count them as application errors.
+    const DNS_NOISE = /net::ERR_NAME_NOT_RESOLVED/;
+
     page.on('console', (msg) => {
       if (msg.type() === 'error' && consoleErrors.length < MAX_ERRORS && totalErrorBytes < MAX_ERROR_BYTES) {
         const text = msg.text().slice(0, 500);
+        if (DNS_NOISE.test(text)) return;
         consoleErrors.push(text);
         totalErrorBytes += text.length;
       }
@@ -79,7 +84,12 @@ async function run() {
     let screenshotPath = '';
 
     try {
-      await page.goto(url, { timeout: CONFIG.navigationTimeout, waitUntil: 'networkidle' });
+      await page.goto(url, { timeout: CONFIG.navigationTimeout, waitUntil: 'domcontentloaded' });
+
+      // Allow JS frameworks to render after DOM is ready. networkidle is too
+      // fragile — external resources that fail DNS (e.g. in network-restricted
+      // containers) prevent it from ever firing.
+      await page.waitForTimeout(2000);
       const loadTime = Date.now() - startTime;
 
       // Screenshot
