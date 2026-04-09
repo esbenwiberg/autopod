@@ -660,7 +660,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       let id: string;
       for (let attempt = 0; attempt < 10; attempt++) {
         id = generateSessionId();
-        const branch = request.branch ?? `autopod/${id}`;
+        const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
+        const branch = request.branch ?? `${prefix}${id}`;
         try {
           sessionRepo.insert({
             id,

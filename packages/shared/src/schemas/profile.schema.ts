@@ -143,6 +143,12 @@ export const createProfileSchema = z.object({
   githubPat: z.string().min(1).nullable().default(null),
   privateRegistries: z.array(privateRegistrySchema).default([]),
   registryPat: z.string().min(1).nullable().default(null),
+  branchPrefix: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch prefix contains invalid characters')
+    .default('autopod/'),
   containerMemoryGb: z.number().min(0.5).max(64).nullable().default(null),
 });
 

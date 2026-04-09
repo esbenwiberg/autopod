@@ -81,6 +81,7 @@ export function rowToProfile(
     githubPat: decryptPat(row.github_pat),
     privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
     registryPat: decryptPat(row.registry_pat),
+    branchPrefix: (row.branch_prefix as string) ?? 'autopod/',
     containerMemoryGb: (row.container_memory_gb as number | null) ?? null,
     buildTimeout: (row.build_timeout as number | null) ?? 300,
     testTimeout: (row.test_timeout as number | null) ?? 600,
@@ -189,7 +190,7 @@ export function createProfileStore(
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
-          private_registries, registry_pat, container_memory_gb,
+          private_registries, registry_pat, branch_prefix, container_memory_gb,
           build_timeout, test_timeout,
           created_at, updated_at
         ) VALUES (
@@ -198,7 +199,7 @@ export function createProfileStore(
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
-          @privateRegistries, @registryPat, @containerMemoryGb,
+          @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout,
           @createdAt, @updatedAt
         )
@@ -234,6 +235,7 @@ export function createProfileStore(
         githubPat: encryptPat(parsed.githubPat),
         privateRegistries: JSON.stringify(parsed.privateRegistries),
         registryPat: encryptPat(parsed.registryPat),
+        branchPrefix: parsed.branchPrefix,
         containerMemoryGb: parsed.containerMemoryGb ?? null,
         buildTimeout: parsed.buildTimeout,
         testTimeout: parsed.testTimeout,
@@ -407,6 +409,10 @@ export function createProfileStore(
       if (parsed.registryPat !== undefined) {
         setClauses.push('registry_pat = @registryPat');
         fieldMap.registryPat = encryptPat(parsed.registryPat);
+      }
+      if (parsed.branchPrefix !== undefined) {
+        setClauses.push('branch_prefix = @branchPrefix');
+        fieldMap.branchPrefix = parsed.branchPrefix;
       }
       if (parsed.containerMemoryGb !== undefined) {
         setClauses.push('container_memory_gb = @containerMemoryGb');

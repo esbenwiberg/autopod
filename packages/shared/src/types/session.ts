@@ -85,6 +85,8 @@ export interface CreateSessionRequest {
   runtime?: RuntimeType;
   executionTarget?: ExecutionTarget;
   branch?: string;
+  /** Override the profile's branch prefix for this session (e.g. 'hotfix/'). Ignored when branch is set. */
+  branchPrefix?: string;
   skipValidation?: boolean;
   acceptanceCriteria?: string[];
   outputMode?: OutputMode;

@@ -35,6 +35,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
     .option('-m, --model <model>', 'AI model to use')
     .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
     .option('-b, --branch <branch>', 'Target branch name')
+    .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
     .option('--ac-from <path>', 'Load acceptance criteria from a file in the repo')
     .option('--skip-validation', 'Skip validation phase')
@@ -46,6 +47,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
           model?: string;
           runtime?: string;
           branch?: string;
+          branchPrefix?: string;
           baseBranch?: string;
           acFrom?: string;
           skipValidation?: boolean;
@@ -59,6 +61,7 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
             model: opts.model,
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
             branch: opts.branch,
+            branchPrefix: opts.branchPrefix,
             baseBranch: opts.baseBranch,
             acFrom: opts.acFrom,
             skipValidation: opts.skipValidation,

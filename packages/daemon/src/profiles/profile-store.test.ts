@@ -68,6 +68,7 @@ describe('ProfileStore', () => {
       expect(profile.defaultRuntime).toBe('claude');
       expect(profile.customInstructions).toBeNull();
       expect(profile.extends).toBeNull();
+      expect(profile.branchPrefix).toBe('autopod/');
       expect(profile.smokePages).toEqual([]);
       expect(profile.escalation).toEqual({
         askHuman: true,
@@ -81,6 +82,7 @@ describe('ProfileStore', () => {
       const profile = store.create({
         ...validInput,
         defaultBranch: 'develop',
+        branchPrefix: 'feature/',
         template: 'node22-pw',
         healthPath: '/health',
         healthTimeout: 60,
@@ -97,6 +99,7 @@ describe('ProfileStore', () => {
         },
       });
       expect(profile.defaultBranch).toBe('develop');
+      expect(profile.branchPrefix).toBe('feature/');
       expect(profile.template).toBe('node22-pw');
       expect(profile.healthPath).toBe('/health');
       expect(profile.healthTimeout).toBe(60);

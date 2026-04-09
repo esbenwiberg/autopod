@@ -13,6 +13,12 @@ export const createSessionRequestSchema = z
       .max(128)
       .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch name contains invalid characters')
       .optional(),
+    branchPrefix: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch prefix contains invalid characters')
+      .optional(),
     skipValidation: z.boolean().optional(),
     acceptanceCriteria: z.array(z.string().min(1).max(2_000)).optional(),
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),

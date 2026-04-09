@@ -66,6 +66,8 @@ export interface Profile {
   privateRegistries: PrivateRegistry[];
   /** PAT for authenticating against private registries (encrypted at rest) */
   registryPat: string | null;
+  /** Branch name prefix for auto-generated session branches. Defaults to 'autopod/'. */
+  branchPrefix: string;
   /** Container memory limit in GB. null = no limit (Docker default). */
   containerMemoryGb: number | null;
   createdAt: string;

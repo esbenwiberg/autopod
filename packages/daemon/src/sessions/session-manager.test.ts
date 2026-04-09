@@ -71,6 +71,7 @@ interface TestProfileOverrides {
   name?: string;
   privateRegistries?: string;
   registryPat?: string;
+  branchPrefix?: string;
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -83,12 +84,12 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       name, repo_url, default_branch, template, build_command, start_command,
       health_path, health_timeout, validation_pages, max_validation_attempts,
       default_model, default_runtime, escalation_config,
-      private_registries, registry_pat
+      private_registries, registry_pat, branch_prefix
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
       @defaultModel, @defaultRuntime, @escalationConfig,
-      @privateRegistries, @registryPat
+      @privateRegistries, @registryPat, @branchPrefix
     )
   `).run({
     name,
@@ -111,6 +112,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     }),
     privateRegistries: opts.privateRegistries ?? '[]',
     registryPat: opts.registryPat ?? null,
+    branchPrefix: opts.branchPrefix ?? 'autopod/',
   });
 }
 
@@ -263,6 +265,7 @@ function createTestContext(
         skills: JSON.parse((row.skills as string) ?? '[]'),
         privateRegistries: JSON.parse((row.private_registries as string) ?? '[]'),
         registryPat: (row.registry_pat as string) ?? null,
+        branchPrefix: (row.branch_prefix as string) ?? 'autopod/',
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -359,6 +362,43 @@ describe('SessionManager', () => {
       );
 
       expect(ctx.enqueuedSessions).toContain(session.id);
+    });
+
+    it('uses profile branchPrefix for auto-generated branch names', () => {
+      const ctx = createTestContext(undefined, { branchPrefix: 'feature/' });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+
+      expect(session.branch).toMatch(/^feature\//);
+      expect(session.branch).not.toContain('autopod/');
+    });
+
+    it('uses request branchPrefix over profile branchPrefix', () => {
+      const ctx = createTestContext(undefined, { branchPrefix: 'feature/' });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Hotfix', branchPrefix: 'hotfix/' },
+        'user-1',
+      );
+
+      expect(session.branch).toMatch(/^hotfix\//);
+    });
+
+    it('ignores branchPrefix when explicit branch is provided', () => {
+      const ctx = createTestContext(undefined, { branchPrefix: 'feature/' });
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix', branch: 'my-custom-branch', branchPrefix: 'hotfix/' },
+        'user-1',
+      );
+
+      expect(session.branch).toBe('my-custom-branch');
     });
 
     it('emits session.created event', () => {
