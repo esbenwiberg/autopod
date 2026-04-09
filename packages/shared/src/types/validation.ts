@@ -92,3 +92,27 @@ export interface TaskReviewResult {
   /** Reviewer's assessment of agent-reported and detected deviations */
   deviationsAssessment?: DeviationsAssessment;
 }
+
+/** A single failed finding extracted from a ValidationResult for recurring-detection. */
+export interface ValidationFinding {
+  /** Stable ID: 'ac:<hash>' | 'review:<hash>' | 'req:<hash>' */
+  id: string;
+  source: 'ac_validation' | 'task_review' | 'requirements_check';
+  /** Human-readable description of the finding */
+  description: string;
+  /** Reviewer reasoning (for AC checks) */
+  reasoning?: string;
+}
+
+/** A human decision to dismiss or provide guidance for a recurring validation finding. */
+export interface ValidationOverride {
+  findingId: string;
+  /** Original finding description (for display + reviewer prompt context) */
+  description: string;
+  action: 'dismiss' | 'guidance';
+  /** Human's reason for dismissal */
+  reason?: string;
+  /** Human's guidance for the agent on how to fix this */
+  guidance?: string;
+  createdAt: string;
+}

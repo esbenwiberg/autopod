@@ -79,6 +79,8 @@ export type {
   RequirementsCheckItem,
   AcValidationResult,
   AcCheckResult,
+  ValidationFinding,
+  ValidationOverride,
 } from './types/validation.js';
 
 export type { DeviationItem, TaskSummary, DeviationsAssessment } from './types/task-summary.js';
@@ -90,6 +92,7 @@ export type {
   AskAiPayload,
   ReportBlockerPayload,
   ActionApprovalPayload,
+  ValidationOverridePayload,
   EscalationResponse,
 } from './types/escalation.js';
 

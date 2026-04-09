@@ -16,12 +16,16 @@ import type {
   Profile,
   Session,
   SessionStatus,
+  ValidationFinding,
+  ValidationOverride,
+  ValidationOverridePayload,
 } from '@autopod/shared';
 import {
   AUTOPOD_INSTRUCTIONS_PATH,
   AutopodError,
   CONTAINER_HOME_DIR,
   DEFAULT_CONTAINER_MEMORY_GB,
+  generateId,
   generateSessionId,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -41,6 +45,8 @@ import type { ProfileStore } from '../profiles/index.js';
 import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
 import type { ProviderEnvResult } from '../providers/index.js';
 import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
+import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
+import { applyOverrides } from '../validation/override-applicator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
 import { readAcFile } from './ac-file-parser.js';
 import { buildCorrectionMessage } from './correction-context.js';
@@ -115,6 +121,72 @@ async function deriveBareRepoPath(worktreePath: string): Promise<string> {
     cwd: worktreePath,
   });
   return path.resolve(worktreePath, stdout.trim());
+}
+
+/**
+ * Parses a human's response to a validation_override escalation.
+ * Supports:
+ *   - "dismiss" / "dismiss all" → dismiss all findings
+ *   - "dismiss 1,3" → dismiss specific findings by 1-based index
+ *   - Any other text → treat as guidance for all findings
+ */
+function parseValidationOverrideResponse(
+  message: string,
+  findings: ValidationFinding[],
+): ValidationOverride[] {
+  const trimmed = message.trim().toLowerCase();
+  const now = new Date().toISOString();
+
+  // "dismiss" or "dismiss all" → dismiss everything
+  if (trimmed === 'dismiss' || trimmed === 'dismiss all') {
+    return findings.map((f) => ({
+      findingId: f.id,
+      description: f.description,
+      action: 'dismiss' as const,
+      reason: message.trim(),
+      createdAt: now,
+    }));
+  }
+
+  // "dismiss 1,2,3" → dismiss specific indices
+  const dismissMatch = trimmed.match(/^dismiss\s+([\d,\s]+)$/);
+  if (dismissMatch) {
+    const indices = dismissMatch[1]!
+      .split(/[,\s]+/)
+      .map((s) => Number.parseInt(s, 10) - 1) // 1-based → 0-based
+      .filter((i) => i >= 0 && i < findings.length);
+
+    const indexSet = new Set(indices);
+    return findings
+      .filter((_, i) => indexSet.has(i))
+      .map((f) => ({
+        findingId: f.id,
+        description: f.description,
+        action: 'dismiss' as const,
+        reason: message.trim(),
+        createdAt: now,
+      }));
+  }
+
+  // Anything else → guidance for all findings
+  return findings.map((f) => ({
+    findingId: f.id,
+    description: f.description,
+    action: 'guidance' as const,
+    guidance: message.trim(),
+    createdAt: now,
+  }));
+}
+
+/** Merge new overrides into existing ones, deduplicating by findingId (latest wins). */
+function mergeOverrides(
+  existing: ValidationOverride[],
+  incoming: ValidationOverride[],
+): ValidationOverride[] {
+  const map = new Map<string, ValidationOverride>();
+  for (const o of existing) map.set(o.findingId, o);
+  for (const o of incoming) map.set(o.findingId, o);
+  return [...map.values()];
 }
 
 export interface ContainerManagerFactory {
@@ -1338,6 +1410,83 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
 
+      // ── Validation override responses ─────────────────────────────────
+      if (session.pendingEscalation?.type === 'validation_override') {
+        const payload = session.pendingEscalation.payload as ValidationOverridePayload;
+        const overrides = parseValidationOverrideResponse(message, payload.findings);
+
+        // Resolve the escalation in the DB
+        escalationRepo.update(session.pendingEscalation.id, {
+          respondedAt: new Date().toISOString(),
+          respondedBy: 'human',
+          response: message,
+        });
+
+        // Merge new overrides into existing session overrides
+        const existingOverrides = session.validationOverrides ?? [];
+        const mergedOverrides = mergeOverrides(existingOverrides, overrides);
+        sessionRepo.update(sessionId, {
+          validationOverrides: mergedOverrides,
+          pendingEscalation: null,
+        });
+
+        const hasGuidance = overrides.some((o) => o.action === 'guidance');
+
+        if (!hasGuidance) {
+          // All dismissed — re-run validation with overrides (doesn't burn an attempt)
+          emitActivityStatus(sessionId, 'Overrides stored — re-running validation…');
+          transition(session, 'running');
+          await this.triggerValidation(sessionId);
+        } else {
+          // Guidance provided — resume agent with human's instructions
+          const guidanceText = overrides
+            .filter((o) => o.action === 'guidance' && o.guidance)
+            .map((o) => `- ${o.description}: ${o.guidance}`)
+            .join('\n');
+
+          const correctionMessage = [
+            '## Human Reviewer Guidance',
+            '',
+            'The human reviewer provided the following instructions for recurring findings:',
+            '',
+            guidanceText,
+            '',
+            'Please address these items and try again.',
+          ].join('\n');
+
+          emitActivityStatus(sessionId, 'Resuming agent with human guidance…');
+          transition(session, 'running');
+
+          try {
+            const resumeEnv = await getResumeEnv(session);
+            const runtime = runtimeRegistry.get(session.runtime);
+            if (!session.containerId) throw new Error(`Session ${sessionId} has no container`);
+            const events = runtime.resume(
+              sessionId,
+              correctionMessage,
+              session.containerId,
+              resumeEnv,
+            );
+            await this.consumeAgentEvents(sessionId, events);
+            await this.handleCompletion(sessionId);
+          } catch (err) {
+            logger.error({ err, sessionId }, 'Failed to resume agent after override guidance');
+            const s = sessionRepo.getOrThrow(sessionId);
+            if (!isTerminalState(s.status)) {
+              transition(s, 'failed');
+            }
+            throw err;
+          }
+        }
+
+        logger.info(
+          { sessionId, overrideCount: overrides.length, hasGuidance },
+          'Validation override response processed',
+        );
+        return;
+      }
+
+      // ── Normal escalation responses ───────────────────────────────────
       emitActivityStatus(sessionId, 'Human replied — resuming agent…');
       transition(session, 'running', { pendingEscalation: null });
 
@@ -1892,35 +2041,37 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           ? await loadCodeReviewSkill(session.worktreePath, logger)
           : undefined;
 
+        const validationConfig = {
+          sessionId,
+          containerId: session.containerId,
+          previewUrl: session.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+          containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+          buildCommand: profile.buildCommand,
+          startCommand: profile.startCommand,
+          healthPath: profile.healthPath,
+          healthTimeout: profile.healthTimeout,
+          smokePages: profile.smokePages,
+          attempt,
+          task: session.task,
+          diff,
+          testCommand: profile.testCommand,
+          buildTimeout: profile.buildTimeout * 1_000,
+          testTimeout: profile.testTimeout * 1_000,
+          reviewerModel: profile.escalation.askAi.model || profile.defaultModel || 'sonnet',
+          acceptanceCriteria: session.acceptanceCriteria ?? undefined,
+          codeReviewSkill,
+          commitLog: commitLog || undefined,
+          plan: session.plan ?? undefined,
+          taskSummary: session.taskSummary ?? undefined,
+          worktreePath: session.worktreePath ?? undefined,
+          startCommitSha: session.startCommitSha ?? undefined,
+          overrides: session.validationOverrides ?? undefined,
+        };
+
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         try {
-          result = await validationEngine.validate(
-            {
-              sessionId,
-              containerId: session.containerId,
-              previewUrl: session.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-              containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-              buildCommand: profile.buildCommand,
-              startCommand: profile.startCommand,
-              healthPath: profile.healthPath,
-              healthTimeout: profile.healthTimeout,
-              smokePages: profile.smokePages,
-              attempt,
-              task: session.task,
-              diff,
-              testCommand: profile.testCommand,
-              buildTimeout: profile.buildTimeout * 1_000,
-              testTimeout: profile.testTimeout * 1_000,
-              reviewerModel: profile.escalation.askAi.model || profile.defaultModel || 'sonnet',
-              acceptanceCriteria: session.acceptanceCriteria ?? undefined,
-              codeReviewSkill,
-              commitLog: commitLog || undefined,
-              plan: session.plan ?? undefined,
-              taskSummary: session.taskSummary ?? undefined,
-              worktreePath: session.worktreePath ?? undefined,
-              startCommitSha: session.startCommitSha ?? undefined,
-            },
-            (phase) => emitActivityStatus(sessionId, phase),
+          result = await validationEngine.validate(validationConfig, (phase) =>
+            emitActivityStatus(sessionId, phase),
           );
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies
@@ -2017,7 +2168,117 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }
 
-        if (result.overall === 'pass') {
+        // ── Validation overrides: apply existing dismissals, detect recurring findings ──
+        let effectiveResult = result;
+        if (s2.validationOverrides && s2.validationOverrides.length > 0) {
+          effectiveResult = applyOverrides(result, s2.validationOverrides);
+          if (effectiveResult.overall !== result.overall) {
+            logger.info(
+              {
+                sessionId,
+                originalOverall: result.overall,
+                patchedOverall: effectiveResult.overall,
+              },
+              'Validation overrides changed overall result',
+            );
+            emitActivityStatus(sessionId, 'Human overrides applied — re-evaluated result');
+          }
+        }
+
+        // Detect recurring findings and auto-hoist / escalate to human
+        if (effectiveResult.overall === 'fail' && attempt >= 2) {
+          const previousValidations = validationRepo?.getForSession(sessionId);
+          const previousResult = previousValidations
+            ?.filter((v) => v.attempt < attempt)
+            ?.sort((a, b) => b.attempt - a.attempt)?.[0]?.result;
+
+          if (previousResult) {
+            const currentFindings = extractFindings(effectiveResult);
+            const previousFindings = extractFindings(previousResult);
+            const recurring = detectRecurringFindings(currentFindings, previousFindings);
+
+            if (recurring.length > 0) {
+              logger.info(
+                { sessionId, recurringCount: recurring.length, attempt },
+                'Recurring validation findings detected',
+              );
+              emitActivityStatus(
+                sessionId,
+                `${recurring.length} recurring finding(s) detected — auto-hoisting to deeper review tier`,
+              );
+
+              // Auto-hoist: re-run task review at Tier 2+ (deep) to get a second opinion.
+              // Only re-runs the AI review, not build/health/smoke (those are objective).
+              let hoistedResult: typeof effectiveResult | null = null;
+              try {
+                hoistedResult = await validationEngine.validate(
+                  { ...validationConfig, reviewDepth: 'deep' },
+                  (phase) => emitActivityStatus(sessionId, phase),
+                );
+                if (s2.validationOverrides && s2.validationOverrides.length > 0) {
+                  hoistedResult = applyOverrides(hoistedResult, s2.validationOverrides);
+                }
+              } catch (err) {
+                logger.warn({ err, sessionId }, 'Auto-hoist deeper review failed');
+              }
+
+              if (hoistedResult && hoistedResult.overall === 'pass') {
+                // Deeper review resolved the false positives — use the hoisted result
+                effectiveResult = hoistedResult;
+                emitActivityStatus(
+                  sessionId,
+                  'Deeper review tier passed — overriding Tier 1 result',
+                );
+                logger.info({ sessionId }, 'Auto-hoist resolved recurring findings');
+                // Update stored result with the hoisted one
+                sessionRepo.update(sessionId, { lastValidationResult: hoistedResult });
+                validationRepo?.insert(sessionId, attempt, hoistedResult);
+              } else {
+                // Deeper review still flags same findings — escalate to human
+                const hoistedFindings = hoistedResult
+                  ? extractFindings(hoistedResult)
+                  : currentFindings;
+                const stillRecurring = detectRecurringFindings(hoistedFindings, previousFindings);
+
+                if (stillRecurring.length > 0) {
+                  emitActivityStatus(
+                    sessionId,
+                    `Deeper review still flagged ${stillRecurring.length} recurring finding(s) — escalating to human`,
+                  );
+
+                  const escalation: EscalationRequest = {
+                    id: generateId(12),
+                    sessionId,
+                    type: 'validation_override',
+                    timestamp: new Date().toISOString(),
+                    payload: {
+                      findings: stillRecurring,
+                      attempt,
+                      maxAttempts: profile.maxValidationAttempts,
+                    },
+                    response: null,
+                  };
+
+                  escalationRepo.insert(escalation);
+                  sessionRepo.update(sessionId, {
+                    pendingEscalation: escalation,
+                    escalationCount: s2.escalationCount + 1,
+                  });
+                  transition(s2, 'awaiting_input');
+
+                  logger.info(
+                    { sessionId, escalationId: escalation.id, findingCount: stillRecurring.length },
+                    'Validation override escalation created — waiting for human',
+                  );
+                  return; // Wait for human response via sendMessage()
+                }
+                // No recurring after hoist — fall through to normal retry/fail path
+              }
+            }
+          }
+        }
+
+        if (effectiveResult.overall === 'pass') {
           emitActivityStatus(sessionId, `Validation passed (attempt ${attempt})`);
           // Push branch and create PR before transitioning to validated
           let prUrl: string | null = null;

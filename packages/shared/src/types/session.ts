@@ -3,7 +3,7 @@ import type { EscalationRequest } from './escalation.js';
 import type { ExecutionTarget } from './profile.js';
 import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
-import type { ValidationResult } from './validation.js';
+import type { ValidationOverride, ValidationResult } from './validation.js';
 
 export type SessionStatus =
   | 'queued'
@@ -13,6 +13,7 @@ export type SessionStatus =
   | 'validating'
   | 'validated'
   | 'failed'
+  | 'review_required'
   | 'approved'
   | 'merging'
   | 'merge_pending'
@@ -73,6 +74,7 @@ export interface Session {
   startCommitSha: string | null;
   linkedSessionId: string | null;
   taskSummary: TaskSummary | null;
+  validationOverrides: ValidationOverride[] | null;
 }
 
 export interface CreateSessionRequest {

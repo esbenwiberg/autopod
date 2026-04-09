@@ -4,6 +4,7 @@ import type {
   Session,
   SessionStatus,
   TaskSummary,
+  ValidationOverride,
 } from '@autopod/shared';
 import { SessionNotFoundError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -70,6 +71,7 @@ export interface SessionUpdates {
   startCommitSha?: string | null;
   linkedSessionId?: string | null;
   taskSummary?: TaskSummary | null;
+  validationOverrides?: ValidationOverride[] | null;
 }
 
 export interface SessionStats {
@@ -140,6 +142,9 @@ function rowToSession(row: Record<string, unknown>): Session {
     startCommitSha: (row.start_commit_sha as string) ?? null,
     linkedSessionId: (row.linked_session_id as string) ?? null,
     taskSummary: row.task_summary ? JSON.parse(row.task_summary as string) : null,
+    validationOverrides: row.validation_overrides
+      ? JSON.parse(row.validation_overrides as string)
+      : null,
   };
 }
 
@@ -319,6 +324,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         setClauses.push('task_summary = @taskSummary');
         params.taskSummary =
           changes.taskSummary !== null ? JSON.stringify(changes.taskSummary) : null;
+      }
+      if (changes.validationOverrides !== undefined) {
+        setClauses.push('validation_overrides = @validationOverrides');
+        params.validationOverrides =
+          changes.validationOverrides !== null ? JSON.stringify(changes.validationOverrides) : null;
       }
 
       if (setClauses.length === 0) return;

@@ -171,12 +171,43 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
           console.log(`${chalk.bold('Phase:')}        ${chalk.dim(s.progress.description)}`);
         }
         if (s.pendingEscalation) {
-          console.log(chalk.yellow.bold('\nPending escalation:'));
-          console.log(`  Type: ${s.pendingEscalation.type}`);
-          const p = s.pendingEscalation.payload;
-          console.log(
-            `  Message: ${'question' in p ? p.question : 'description' in p ? p.description : ''}`,
-          );
+          if (s.pendingEscalation.type === 'validation_override') {
+            const p = s.pendingEscalation.payload as {
+              findings: Array<{
+                id: string;
+                source: string;
+                description: string;
+                reasoning?: string;
+              }>;
+              attempt: number;
+              maxAttempts: number;
+            };
+            console.log(
+              chalk.yellow.bold(
+                `\nRecurring validation findings need review (attempt ${p.attempt}/${p.maxAttempts}):`,
+              ),
+            );
+            console.log(chalk.dim('  (Auto-hoisted to deeper review tier — still flagged)\n'));
+            for (const [i, f] of p.findings.entries()) {
+              const sourceLabel =
+                f.source === 'ac_validation' ? 'AC' : f.source === 'task_review' ? 'Review' : 'Req';
+              console.log(`  ${chalk.bold(`[${i + 1}]`)} ${sourceLabel}: "${f.description}"`);
+              if (f.reasoning) {
+                console.log(`      ${chalk.dim(`→ ${f.reasoning}`)}`);
+              }
+            }
+            console.log('');
+            console.log(chalk.dim(`  ap tell ${s.id} dismiss       — dismiss all`));
+            console.log(chalk.dim(`  ap tell ${s.id} dismiss 1     — dismiss finding #1`));
+            console.log(chalk.dim(`  ap tell ${s.id} "fix: ..."    — provide guidance`));
+          } else {
+            console.log(chalk.yellow.bold('\nPending escalation:'));
+            console.log(`  Type: ${s.pendingEscalation.type}`);
+            const p = s.pendingEscalation.payload;
+            console.log(
+              `  Message: ${'question' in p ? p.question : 'description' in p ? p.description : ''}`,
+            );
+          }
         }
         if (s.lastValidationResult) {
           const vr = s.lastValidationResult;

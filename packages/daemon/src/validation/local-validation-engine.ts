@@ -6,6 +6,7 @@ import type {
   DeviationsAssessment,
   PageResult,
   TaskReviewResult,
+  ValidationOverride,
   ValidationResult,
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
@@ -962,6 +963,9 @@ function buildReviewPrompt(config: ValidationEngineConfig, reviewContext?: Revie
   // Build the enriched context section (Tier 0+1)
   const contextSection = reviewContext ? buildContextSection(reviewContext) : '';
 
+  // Human-dismissed findings that must be skipped
+  const overridesSection = buildOverridesSection(config.overrides);
+
   return `You are an expert software engineer performing an independent code review of changes made by an AI agent.
 
 Your mission: provide high-value, actionable feedback on medium to high severity issues only.
@@ -981,7 +985,7 @@ ${acSection}${planSection}${taskSummarySection}
 ${commitLogSection}${contextSection}## DIFF
 
 ${config.diff}
-
+${overridesSection}
 ## INSTRUCTIONS
 
 ${
@@ -1062,6 +1066,33 @@ Status rules:
 - "pass": requirements met (if any), no significant issues, and no unjustified undisclosed deviations
 - "fail": one or more requirements unmet, OR critical/high severity issues, OR undisclosed deviations that compromised scope
 - "uncertain": task is clear but diff is inconclusive without runtime context (use sparingly)`;
+}
+
+/**
+ * Builds the OVERRIDDEN FINDINGS section from human-dismissed overrides.
+ * When present, instructs the reviewer to skip these findings entirely.
+ */
+function buildOverridesSection(overrides?: ValidationOverride[]): string {
+  if (!overrides || overrides.length === 0) return '';
+
+  const dismissed = overrides.filter((o) => o.action === 'dismiss');
+  if (dismissed.length === 0) return '';
+
+  const lines: string[] = [
+    '\n## OVERRIDDEN FINDINGS (DO NOT FLAG)',
+    '',
+    'The following findings have been reviewed and dismissed by the project owner.',
+    'These are FINAL decisions. You MUST NOT raise these as issues. Skip them entirely:',
+    '',
+  ];
+
+  for (const o of dismissed) {
+    const reason = o.reason ? ` — Reason: ${o.reason}` : '';
+    lines.push(`- "${o.description}"${reason}`);
+  }
+
+  lines.push('');
+  return lines.join('\n');
 }
 
 /**
@@ -1147,9 +1178,11 @@ async function runTaskReview(
       'Tier 1 task review complete',
     );
 
-    // If Tier 1 is conclusive or depth is standard-only, we're done
+    // If Tier 1 is conclusive or depth is standard-only, we're done.
+    // 'deep' forces Tier 2+ regardless of Tier 1 status (e.g. for auto-hoist on recurring findings).
     const shouldEscalate =
-      tier1Parsed.status === 'uncertain' && reviewDepth !== 'standard' && config.worktreePath;
+      (reviewDepth === 'deep' && !!config.worktreePath) ||
+      (tier1Parsed.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
 
     if (!shouldEscalate) {
       return {

@@ -1,4 +1,4 @@
-import type { TaskSummary, ValidationResult } from '@autopod/shared';
+import type { TaskSummary, ValidationOverride, ValidationResult } from '@autopod/shared';
 
 export interface ValidationEngineConfig {
   sessionId: string;
@@ -38,6 +38,8 @@ export interface ValidationEngineConfig {
   startCommitSha?: string;
   /** Review depth: 'standard' (Tier 0+1 only), 'auto' (escalate on uncertain, default), 'deep' (always Tier 2+) */
   reviewDepth?: 'standard' | 'auto' | 'deep';
+  /** Findings dismissed by human reviewer — exclude from review prompt */
+  overrides?: ValidationOverride[];
 }
 
 export interface ValidationEngine {
