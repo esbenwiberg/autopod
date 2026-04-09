@@ -111,6 +111,14 @@ export interface PrivateRegistry {
   scope?: string;
 }
 
+export interface PimGroupConfig {
+  groupId: string;
+  displayName?: string;
+  /** ISO 8601 duration (e.g. "PT4H"). Defaults to "PT8H". */
+  duration?: string;
+  justification?: string;
+}
+
 export interface EscalationConfig {
   askHuman: boolean;
   askAi: {

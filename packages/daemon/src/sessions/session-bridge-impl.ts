@@ -250,11 +250,49 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         };
       }
 
+      // PIM actions: enforce that agents can only use groups pre-configured on the session.
+      // principal_id is always session.userId — agents cannot supply or override it.
+      let resolvedParams = params;
+      if (actionName === 'activate_pim_group' || actionName === 'deactivate_pim_group') {
+        const groupId = params.group_id as string | undefined;
+        if (!groupId) {
+          return {
+            success: false,
+            error: 'Missing required parameter: group_id',
+            sanitized: false,
+            quarantined: false,
+          };
+        }
+        const allowed = session.pimGroups ?? [];
+        const match = allowed.find((g) => g.groupId === groupId);
+        if (!match) {
+          return {
+            success: false,
+            error: `PIM group '${groupId}' is not configured for this session. Configured groups: ${allowed.map((g) => g.displayName ?? g.groupId).join(', ') || 'none'}`,
+            sanitized: false,
+            quarantined: false,
+          };
+        }
+        resolvedParams = {
+          ...params,
+          principal_id: session.userId,
+          duration: match.duration ?? 'PT8H',
+        };
+      }
+      if (actionName === 'list_pim_activations') {
+        resolvedParams = { ...params, principal_id: session.userId };
+      }
+
       const actionEngine = makeActionEngine(profile);
       logger.info({ sessionId, actionName }, 'Executing action via bridge');
       sessionManager.touchHeartbeat(sessionId);
       return actionEngine.execute(
-        { sessionId, actionName, params, skipApprovalCheck: options?.skipApprovalCheck },
+        {
+          sessionId,
+          actionName,
+          params: resolvedParams,
+          skipApprovalCheck: options?.skipApprovalCheck,
+        },
         profile.actionPolicy,
       );
     },

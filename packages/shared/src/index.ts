@@ -14,6 +14,7 @@ export type {
   PageAssertion,
   EscalationConfig,
   NetworkPolicy,
+  PimGroupConfig,
   PrivateRegistry,
   RegistryType,
 } from './types/profile.js';

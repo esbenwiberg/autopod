@@ -7,9 +7,10 @@ export type ActionGroup =
   | 'ado-prs'
   | 'ado-code'
   | 'azure-logs'
+  | 'azure-pim'
   | 'custom';
 
-export type ActionHandler = 'github' | 'ado' | 'azure-logs' | 'http';
+export type ActionHandler = 'github' | 'ado' | 'azure-logs' | 'azure-pim' | 'http';
 
 // ─── Auth Config ────────────────────────────────────────────────
 export type AuthConfig =

@@ -336,6 +336,7 @@ sessionManager = createSessionManager({
   },
   pendingRequestsBySession,
   sessionTokenIssuer,
+  getSecret: (ref: string) => process.env[ref],
   logger,
 });
 

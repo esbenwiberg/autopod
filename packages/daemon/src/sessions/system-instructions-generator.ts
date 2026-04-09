@@ -50,6 +50,24 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
+  // PIM groups available for this session
+  if (session.pimGroups?.length) {
+    lines.push('## Azure PIM Groups');
+    lines.push('');
+    lines.push(
+      'The following PIM groups are pre-approved for this session. ' +
+        'Use `activate_pim_group` only when you specifically need the access described ' +
+        '— not as a workaround for unrelated issues:',
+    );
+    lines.push('');
+    for (const group of session.pimGroups) {
+      const name = group.displayName ?? group.groupId;
+      const desc = group.justification ? ` — ${group.justification}` : '';
+      lines.push(`- \`${group.groupId}\` (${name})${desc}`);
+    }
+    lines.push('');
+  }
+
   // Operating Environment section (adapts to profile config)
   generateOperatingEnvironment(lines, profile, options?.availableActions ?? []);
 

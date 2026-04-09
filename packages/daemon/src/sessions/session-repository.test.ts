@@ -117,6 +117,28 @@ describe('SessionRepository', () => {
         repo.insert({ ...validSession, id: 'sess-bad', profileName: 'nonexistent' }),
       ).toThrow();
     });
+
+    it('should store and retrieve pimGroups as JSON', () => {
+      repo.insert({
+        ...validSession,
+        id: 'sess-pim',
+        pimGroups: [
+          { groupId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', displayName: 'Log Reader' },
+          { groupId: 'ffffffff-1111-2222-3333-444444444444', duration: 'PT4H' },
+        ],
+      });
+      const session = repo.getOrThrow('sess-pim');
+      expect(session.pimGroups).toEqual([
+        { groupId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', displayName: 'Log Reader' },
+        { groupId: 'ffffffff-1111-2222-3333-444444444444', duration: 'PT4H' },
+      ]);
+    });
+
+    it('should default pimGroups to null when not provided', () => {
+      repo.insert(validSession);
+      const session = repo.getOrThrow('sess-001');
+      expect(session.pimGroups).toBeNull();
+    });
   });
 
   describe('getOrThrow', () => {
