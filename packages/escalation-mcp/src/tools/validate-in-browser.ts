@@ -70,7 +70,12 @@ async function tryHostExecution(
   // Rewrite container-local URL to host-accessible URL
   const hostUrl = rewriteUrlToHost(input.url, previewUrl);
 
-  const script = await generateBrowserScript(sessionId, { ...input, url: hostUrl }, bridge, hostScreenshotDir);
+  const script = await generateBrowserScript(
+    sessionId,
+    { ...input, url: hostUrl },
+    bridge,
+    hostScreenshotDir,
+  );
 
   const execResult = await bridge.runBrowserOnHost(sessionId, script, timeout);
   if (!execResult) return null;

@@ -86,9 +86,7 @@ describe('GhPrManager', () => {
       stdout: JSON.stringify({
         state: 'OPEN',
         mergedAt: null,
-        statusCheckRollup: [
-          { name: 'CI Build', status: 'IN_PROGRESS', conclusion: '' },
-        ],
+        statusCheckRollup: [{ name: 'CI Build', status: 'IN_PROGRESS', conclusion: '' }],
         reviewDecision: 'REVIEW_REQUIRED',
         autoMergeRequest: { enabledAt: '2026-01-01T00:00:00Z' },
       }),
@@ -169,6 +167,10 @@ describe('GhPrManager', () => {
       prUrl: 'https://github.com/org/repo/pull/42',
     });
 
-    expect(status).toEqual({ merged: false, open: false, blockReason: 'PR was closed without merging' });
+    expect(status).toEqual({
+      merged: false,
+      open: false,
+      blockReason: 'PR was closed without merging',
+    });
   });
 });

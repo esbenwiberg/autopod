@@ -1,8 +1,8 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import pino from 'pino';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHostBrowserRunner } from './host-browser-runner.js';
 
 const logger = pino({ level: 'silent' });

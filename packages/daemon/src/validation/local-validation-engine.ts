@@ -561,7 +561,13 @@ async function runAcValidation(
   }
 
   // Step 2: Executor translates instructions to Playwright script and executes
-  const results = await executeAcChecks(containerManager, config, instructions, log, hostBrowserRunner);
+  const results = await executeAcChecks(
+    containerManager,
+    config,
+    instructions,
+    log,
+    hostBrowserRunner,
+  );
 
   const allPassed = results.every((r) => r.passed);
 
@@ -696,10 +702,24 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
     const execTimeout = instructions.length * 45_000 + 30_000;
 
     if (useHost) {
-      return await executeAcOnHost(hostBrowserRunner, config, cleanScript, instructions, execTimeout, log);
+      return await executeAcOnHost(
+        hostBrowserRunner,
+        config,
+        cleanScript,
+        instructions,
+        execTimeout,
+        log,
+      );
     }
 
-    return await executeAcInContainer(containerManager, config, cleanScript, instructions, execTimeout, log);
+    return await executeAcInContainer(
+      containerManager,
+      config,
+      cleanScript,
+      instructions,
+      execTimeout,
+      log,
+    );
   } catch (err) {
     log?.warn({ err }, 'AC check execution failed');
     return instructions.map((inst) => ({
@@ -736,10 +756,7 @@ async function executeAcOnHost(
     }
   }
 
-  log?.info(
-    { mode: 'host', checkCount: parsed.length },
-    'AC checks executed on host',
-  );
+  log?.info({ mode: 'host', checkCount: parsed.length }, 'AC checks executed on host');
 
   return parsed;
 }
@@ -784,10 +801,7 @@ async function executeAcInContainer(
     }
   }
 
-  log?.info(
-    { mode: 'container', checkCount: parsed.length },
-    'AC checks executed in container',
-  );
+  log?.info({ mode: 'container', checkCount: parsed.length }, 'AC checks executed in container');
 
   return parsed;
 }

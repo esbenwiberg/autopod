@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
-import { readFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 
 export interface BrowserRunResult {
@@ -181,9 +181,7 @@ function runNode(
 
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
-      settle(() =>
-        reject(new Error(`Host browser script timed out after ${opts.timeout}ms`)),
-      );
+      settle(() => reject(new Error(`Host browser script timed out after ${opts.timeout}ms`)));
     }, opts.timeout);
 
     child.stdout.on('data', (chunk: Buffer) => {
