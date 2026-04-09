@@ -195,7 +195,6 @@ async function tryWorktreeDiff(
       }
     } catch {
       // Try next ref form
-      continue;
     }
   }
 
