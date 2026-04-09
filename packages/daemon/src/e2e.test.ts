@@ -290,11 +290,11 @@ describe('E2E: escalation flow', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Max retries exhausted -- validation fails 3 times, session fails
+// 4. Max retries exhausted -- validation fails 3 times, session needs review
 // ---------------------------------------------------------------------------
 
 describe('E2E: max retries exhausted', () => {
-  it('fails the session after maxValidationAttempts (3) consecutive failures', async () => {
+  it('transitions to review_required after maxValidationAttempts exhausted', async () => {
     const runtime = createMockRuntime({
       spawn: vi.fn(async function* (): AsyncIterable<AgentEvent> {
         yield completeEvent('Initial attempt');
@@ -327,18 +327,18 @@ describe('E2E: max retries exhausted', () => {
     await manager.processSession(session.id);
 
     const final = manager.getSession(session.id);
-    expect(final.status).toBe('failed');
+    expect(final.status).toBe('review_required');
     expect(final.validationAttempts).toBe(3);
 
     // Agent was resumed twice (after attempt 1 and attempt 2), not after
-    // the final attempt (#3) since that one transitions directly to failed.
+    // the final attempt (#3) since that one transitions directly to review_required.
     expect(runtime.resume).toHaveBeenCalledTimes(2);
 
     // Validation was called 3 times total
     expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
   });
 
-  it('does not resume the agent on the final failed attempt', async () => {
+  it('does not resume the agent on the final exhausted attempt', async () => {
     const runtime = createMockRuntime({
       spawn: vi.fn(async function* (): AsyncIterable<AgentEvent> {
         yield completeEvent('Done');
@@ -366,12 +366,63 @@ describe('E2E: max retries exhausted', () => {
     await manager.processSession(session.id);
 
     const final = manager.getSession(session.id);
-    expect(final.status).toBe('failed');
+    expect(final.status).toBe('review_required');
     expect(final.validationAttempts).toBe(1);
 
-    // No resume at all -- the single attempt failed and there are no retries
+    // No resume at all -- the single attempt exhausted and there are no retries
     expect(runtime.resume).not.toHaveBeenCalled();
     expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+  });
+
+  it('extends attempts on review_required session and retries', async () => {
+    const runtime = createMockRuntime({
+      spawn: vi.fn(async function* (): AsyncIterable<AgentEvent> {
+        yield completeEvent('Initial attempt');
+      }),
+      resume: vi.fn(async function* (): AsyncIterable<AgentEvent> {
+        yield completeEvent('Retry after extend');
+      }),
+    });
+
+    let callCount = 0;
+    const validationResultFactory = (config: {
+      sessionId: string;
+      attempt: number;
+    }): ValidationResult => {
+      callCount++;
+      // First call fails, second passes
+      if (callCount <= 1) {
+        return createFailingValidationResult(config.sessionId, config.attempt);
+      }
+      return createPassingValidationResult(config.sessionId, config.attempt);
+    };
+
+    const ctx = createTestContext({
+      runtime,
+      validationResultFactory,
+      maxValidationAttempts: 1, // exhaust after 1
+    });
+    const manager = createSessionManager(ctx.deps);
+
+    const session = manager.createSession(
+      { profileName: 'test-profile', task: 'Extend me' },
+      'user-1',
+    );
+
+    await manager.processSession(session.id);
+
+    // Should be in review_required after 1 failed attempt
+    const mid = manager.getSession(session.id);
+    expect(mid.status).toBe('review_required');
+    expect(mid.maxValidationAttempts).toBe(1);
+
+    // Extend attempts and retry
+    await manager.extendAttempts(session.id, 2);
+
+    const final = manager.getSession(session.id);
+    expect(final.maxValidationAttempts).toBe(3);
+    // Session should have progressed past review_required (validation re-triggered)
+    expect(final.status).not.toBe('review_required');
   });
 });
 

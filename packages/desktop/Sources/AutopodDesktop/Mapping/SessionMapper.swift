@@ -162,7 +162,7 @@ public enum SessionMapper {
 
     // Error summary for failed sessions
     let errorSummary: String? = {
-      guard status == .failed || status == .killed else { return nil }
+      guard status == .failed || status == .killed || status == .reviewRequired else { return nil }
       // Try to extract from last validation
       if let issues = response.lastValidationResult?.taskReview?.issues, !issues.isEmpty {
         return issues.first

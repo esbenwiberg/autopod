@@ -104,6 +104,13 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/sessions/\(id)/pause")
   }
 
+  public func extendAttempts(_ id: String, additionalAttempts: Int) async throws {
+    let _: OkResponse = try await request(
+      "POST", "/sessions/\(id)/extend-attempts",
+      body: try encode(ExtendAttemptsBody(additionalAttempts: additionalAttempts))
+    )
+  }
+
   public func deleteSession(_ id: String) async throws {
     let _: EmptyResponse = try await request("DELETE", "/sessions/\(id)")
   }
@@ -320,6 +327,10 @@ struct RejectBody: Codable {
 struct WarmBody: Codable {
   let rebuild: Bool?
   let gitPat: String?
+}
+
+struct ExtendAttemptsBody: Codable {
+  let additionalAttempts: Int
 }
 
 struct HistoryWorkspaceBody: Codable {

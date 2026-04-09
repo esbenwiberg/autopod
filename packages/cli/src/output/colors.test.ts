@@ -10,6 +10,7 @@ const ALL_STATUSES: SessionStatus[] = [
   'validating',
   'validated',
   'failed',
+  'review_required',
   'approved',
   'merging',
   'complete',

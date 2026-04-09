@@ -19,6 +19,7 @@ public struct SessionActions: Sendable {
   public var attachTerminal: @MainActor @Sendable (String) -> Void
   public var approveAll: @MainActor @Sendable () async -> Void
   public var killAllFailed: @MainActor @Sendable () async -> Void
+  public var extendAttempts: @MainActor @Sendable (String, Int) async -> Void
   public var fork: @MainActor @Sendable (String) async -> String?
   public var delete: @MainActor @Sendable (String) async -> Void
   public var createHistoryWorkspace: @MainActor @Sendable (String?, Int) async -> Void
@@ -40,6 +41,7 @@ public struct SessionActions: Sendable {
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
     killAllFailed: @escaping @MainActor @Sendable () async -> Void = {},
+    extendAttempts: @escaping @MainActor @Sendable (String, Int) async -> Void = { _, _ in },
     fork: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     createHistoryWorkspace: @escaping @MainActor @Sendable (String?, Int) async -> Void = { _, _ in },
@@ -59,6 +61,7 @@ public struct SessionActions: Sendable {
     self.attachTerminal = attachTerminal
     self.approveAll = approveAll
     self.killAllFailed = killAllFailed
+    self.extendAttempts = extendAttempts
     self.fork = fork
     self.delete = delete
     self.createHistoryWorkspace = createHistoryWorkspace

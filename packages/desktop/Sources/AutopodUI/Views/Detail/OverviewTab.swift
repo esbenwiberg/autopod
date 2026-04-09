@@ -38,8 +38,8 @@ struct OverviewTab: View {
                     validationSummary(checks)
                 }
 
-                // Error (if failed)
-                if session.status == .failed {
+                // Error / review required
+                if session.status == .failed || session.status == .reviewRequired {
                     errorSection
                 }
 
@@ -378,17 +378,24 @@ struct OverviewTab: View {
     // MARK: - Error
 
     private var errorSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let isReview = session.status == .reviewRequired
+        let accentColor: Color = isReview ? .orange : .red
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                Text("Error")
+                    .foregroundStyle(accentColor)
+                Text(isReview ? "Review Required" : "Error")
                     .font(.system(.subheadline).weight(.semibold))
+            }
+            if isReview {
+                Text("Validation attempts exhausted — a human should decide whether to extend or fix manually.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             if let err = session.errorSummary {
                 Text(err)
                     .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(accentColor)
             }
             if let a = session.attempts {
                 Text("Attempt \(a.current) of \(a.max)")
@@ -397,11 +404,11 @@ struct OverviewTab: View {
             }
         }
         .padding(14)
-        .background(Color.red.opacity(0.05))
+        .background(accentColor.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.red.opacity(0.15), lineWidth: 1)
+                .stroke(accentColor.opacity(0.15), lineWidth: 1)
         )
     }
 
@@ -522,7 +529,8 @@ struct OverviewTab: View {
     // MARK: - Activity feed
 
     private var activityFeed: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let overviewEvents = Array(events.filter { $0.type.isOverviewWorthy }.suffix(6))
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Recent Activity")
                     .font(.system(.subheadline).weight(.semibold))
@@ -533,7 +541,7 @@ struct OverviewTab: View {
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(events.suffix(6)) { event in
+                ForEach(overviewEvents) { event in
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: event.type.icon)
                             .font(.system(size: 9))
@@ -551,7 +559,7 @@ struct OverviewTab: View {
                     }
                     .padding(.vertical, 5)
                     .padding(.horizontal, 8)
-                    if event.id != events.suffix(6).last?.id {
+                    if event.id != overviewEvents.last?.id {
                         Divider().padding(.leading, 28)
                     }
                 }

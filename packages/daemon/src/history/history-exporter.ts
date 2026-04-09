@@ -154,18 +154,21 @@ export function createHistoryExporter(deps: ExporterDeps) {
         sessions = sessions.filter((s) => new Date(s.createdAt).getTime() >= sinceDate);
       }
 
-      // Also include killed sessions when filtering failures
+      // Also include killed and review_required sessions when filtering failures
       if (query.failuresOnly) {
-        const killedSessions = deps.sessionRepo
-          .list({
-            profileName: query.profileName,
-            status: 'killed' as SessionStatus,
-          })
-          .filter(
-            (s) =>
-              !query.since || new Date(s.createdAt).getTime() >= new Date(query.since).getTime(),
-          );
-        sessions = [...sessions, ...killedSessions];
+        const additionalStatuses: SessionStatus[] = ['killed', 'review_required'];
+        for (const status of additionalStatuses) {
+          const extra = deps.sessionRepo
+            .list({
+              profileName: query.profileName,
+              status,
+            })
+            .filter(
+              (s) =>
+                !query.since || new Date(s.createdAt).getTime() >= new Date(query.since).getTime(),
+            );
+          sessions = [...sessions, ...extra];
+        }
       }
 
       // Apply limit
@@ -357,7 +360,7 @@ function generateSummary(sessions: Session[], stats: HistoryExportStats): string
   for (const s of sessions) {
     const p = profiles.get(s.profileName) ?? { total: 0, failed: 0, cost: 0, valAttempts: 0 };
     p.total++;
-    if (s.status === 'failed' || s.status === 'killed') p.failed++;
+    if (s.status === 'failed' || s.status === 'killed' || s.status === 'review_required') p.failed++;
     p.cost += s.costUsd;
     p.valAttempts += s.validationAttempts;
     profiles.set(s.profileName, p);
@@ -477,8 +480,8 @@ Agent-reported phase transitions.
 -- Failure rate by profile
 SELECT profile_name,
   COUNT(*) as total,
-  SUM(CASE WHEN status IN ('failed', 'killed') THEN 1 ELSE 0 END) as failures,
-  ROUND(SUM(CASE WHEN status IN ('failed', 'killed') THEN 1.0 ELSE 0.0 END) / COUNT(*) * 100, 1) as failure_pct
+  SUM(CASE WHEN status IN ('failed', 'killed', 'review_required') THEN 1 ELSE 0 END) as failures,
+  ROUND(SUM(CASE WHEN status IN ('failed', 'killed', 'review_required') THEN 1.0 ELSE 0.0 END) / COUNT(*) * 100, 1) as failure_pct
 FROM sessions
 GROUP BY profile_name
 ORDER BY failure_pct DESC;
@@ -494,7 +497,7 @@ LIMIT 10;
 -- Sessions that exhausted all validation attempts
 SELECT s.id, s.profile_name, s.task, s.validation_attempts, s.rework_reason
 FROM sessions s
-WHERE s.validation_attempts >= s.max_validation_attempts AND s.status = 'failed';
+WHERE s.validation_attempts >= s.max_validation_attempts AND s.status IN ('failed', 'review_required');
 
 -- Most common failed phases
 SELECT failed_phases, COUNT(*) as occurrences

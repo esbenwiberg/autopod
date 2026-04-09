@@ -267,6 +267,32 @@ public struct DetailPanelView: View {
                     .controlSize(.small)
                 }
 
+            case .reviewRequired:
+                Button {
+                    Task { await actions.extendAttempts(session.id, 2) }
+                } label: {
+                    Label("Extend Attempts", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.orange)
+                Button {
+                    Task { await actions.fixManually(session.id) }
+                } label: {
+                    Label("Fix Manually", systemImage: "wrench.and.screwdriver")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                forkButton
+                Button {
+                    Task { await actions.kill(session.id) }
+                } label: {
+                    Label("Kill", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+
             case .failed:
                 Button {
                     Task { await actions.rework(session.id) }

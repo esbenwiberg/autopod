@@ -237,6 +237,10 @@ public struct SessionCardFinal: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+        case .reviewRequired:
+            Label("Needs human review", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
         case .failed:
             if let err = session.errorSummary {
                 Text(err)
@@ -596,6 +600,50 @@ public struct SessionCardFinal: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+            }
+
+        case .reviewRequired:
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.system(size: 11))
+                    Text("Validation attempts exhausted — human review needed")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if let a = session.attempts {
+                    Text("Attempt \(a.current) of \(a.max)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    Button {
+                        Task { await actions.extendAttempts(session.id, 2) }
+                    } label: {
+                        Label("Extend Attempts", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.orange)
+                    Button {
+                        Task { await actions.fixManually(session.id) }
+                    } label: {
+                        Label("Fix", systemImage: "wrench.and.screwdriver")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                Button {
+                    Task { await actions.kill(session.id) }
+                } label: {
+                    Label("Kill", systemImage: "xmark.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
             }
 
         case .failed:

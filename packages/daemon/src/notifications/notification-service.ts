@@ -179,7 +179,7 @@ export function createNotificationService(deps: {
   }
 
   async function handleStatusChanged(event: SessionStatusChangedEvent): Promise<void> {
-    if (event.newStatus !== 'failed') return;
+    if (event.newStatus !== 'failed' && event.newStatus !== 'review_required') return;
 
     const session = getSessionSafe(event.sessionId);
     if (!session) return;

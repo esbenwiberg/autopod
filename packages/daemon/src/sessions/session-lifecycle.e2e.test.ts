@@ -161,7 +161,7 @@ describe('Session Lifecycle E2E', () => {
       expect(prManager.createPr).toHaveBeenCalled();
     });
 
-    it('exhausts all validation attempts and transitions to failed', async () => {
+    it('exhausts all validation attempts and transitions to review_required', async () => {
       const ctx = createTestContext({
         validationResultFactory: (config) =>
           createFailingValidationResult(config.sessionId, config.attempt),
@@ -176,10 +176,10 @@ describe('Session Lifecycle E2E', () => {
       await manager.processSession(session.id);
 
       const result = manager.getSession(session.id);
-      expect(result.status).toBe('failed');
+      expect(result.status).toBe('review_required');
       expect(result.validationAttempts).toBe(3); // max attempts
 
-      // Agent was resumed twice (attempts 1 and 2 trigger retry, attempt 3 is final failure)
+      // Agent was resumed twice (attempts 1 and 2 trigger retry, attempt 3 is final exhaustion)
       expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
     });
   });
@@ -535,7 +535,7 @@ describe('Session Lifecycle E2E', () => {
       expect(result.status).toBe('killed');
     });
 
-    it('transitions to failed when validation engine throws', async () => {
+    it('transitions to review_required when validation engine throws (treated as failed validation)', async () => {
       const ctx = createTestContext();
       (ctx.validationEngine.validate as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Playwright crashed'),
@@ -554,8 +554,10 @@ describe('Session Lifecycle E2E', () => {
 
       await manager.triggerValidation(session.id);
 
+      // Validation engine throws are treated as failed validation results,
+      // so after exhausting maxValidationAttempts the session lands in review_required
       const result = manager.getSession(session.id);
-      expect(result.status).toBe('failed');
+      expect(result.status).toBe('review_required');
     });
   });
 

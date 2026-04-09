@@ -135,6 +135,16 @@ export function sessionRoutes(
     return result;
   });
 
+  // POST /sessions/:sessionId/extend-attempts — add more validation attempts to a review_required session
+  app.post('/sessions/:sessionId/extend-attempts', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const body = (request.body ?? {}) as { additionalAttempts?: number };
+    const additionalAttempts = body.additionalAttempts ?? 3;
+    await sessionManager.extendAttempts(sessionId, additionalAttempts);
+    const session = sessionManager.getSession(sessionId);
+    return { ok: true, maxValidationAttempts: session.maxValidationAttempts };
+  });
+
   // POST /sessions/:sessionId/fix-manually — create linked workspace for human fixes
   app.post('/sessions/:sessionId/fix-manually', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };

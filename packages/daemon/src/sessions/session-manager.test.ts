@@ -1272,7 +1272,7 @@ describe('SessionManager', () => {
       expect(result.prUrl).toBeNull();
     });
 
-    it('transitions to failed after max validation attempts', async () => {
+    it('transitions to review_required after max validation attempts', async () => {
       const ctx = createTestContext({ overall: 'fail' });
       const manager = createSessionManager(ctx.deps);
 
@@ -1290,7 +1290,7 @@ describe('SessionManager', () => {
       await manager.triggerValidation(session.id);
 
       const result = manager.getSession(session.id);
-      expect(result.status).toBe('failed');
+      expect(result.status).toBe('review_required');
     });
 
     it('retries with correction feedback until max attempts exhausted', async () => {
@@ -1314,11 +1314,11 @@ describe('SessionManager', () => {
       const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
       expect(resumeCalls.length).toBe(2);
       expect(resumeCalls[0]?.[1]).toContain('Validation Failed');
-      // 2 retries before exhaustion (attempt 1 → retry, attempt 2 → retry, attempt 3 → failed)
+      // 2 retries before exhaustion (attempt 1 → retry, attempt 2 → retry, attempt 3 → review_required)
       expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
 
       const result = manager.getSession(session.id);
-      expect(result.status).toBe('failed');
+      expect(result.status).toBe('review_required');
       expect(result.validationAttempts).toBe(3);
     });
 
@@ -1340,7 +1340,7 @@ describe('SessionManager', () => {
 
       // No resume — max retries exhausted on this attempt
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
-      expect(manager.getSession(session.id).status).toBe('failed');
+      expect(manager.getSession(session.id).status).toBe('review_required');
     });
   });
 

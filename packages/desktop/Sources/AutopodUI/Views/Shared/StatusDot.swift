@@ -54,7 +54,7 @@ public struct StatusDot: View {
                     .foregroundStyle(status.color)
                     .font(.system(size: 11))
 
-            case .awaitingInput:
+            case .awaitingInput, .reviewRequired:
                 Circle()
                     .fill(status.color)
                     .frame(width: 10, height: 10)
@@ -85,6 +85,7 @@ public struct StatusDot: View {
             .validating,
             .validated,
             .failed,
+            .reviewRequired,
             .merging,
             .mergePending,
             .complete,

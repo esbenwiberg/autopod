@@ -248,6 +248,7 @@ export interface SessionManager {
   rejectSession(sessionId: string, reason?: string): Promise<void>;
   approveAllValidated(): Promise<{ approved: string[] }>;
   killAllFailed(): Promise<{ killed: string[] }>;
+  extendAttempts(sessionId: string, additionalAttempts: number): Promise<void>;
   pauseSession(sessionId: string): Promise<void>;
   nudgeSession(sessionId: string, message: string): void;
   killSession(sessionId: string): Promise<void>;
@@ -1336,7 +1337,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         session.status === 'killing' ||
         session.status === 'validating' ||
         session.status === 'validated' ||
-        session.status === 'failed'
+        session.status === 'failed' ||
+        session.status === 'review_required'
       ) {
         return;
       }
@@ -1635,7 +1637,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     async rejectSession(sessionId: string, reason?: string): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
-      const previousStatus = session.status as 'validated' | 'failed';
+      const previousStatus = session.status as 'validated' | 'failed' | 'review_required';
 
       emitActivityStatus(
         sessionId,
@@ -1895,7 +1897,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       if (session.linkedSessionId && !pushError) {
         try {
           const linked = sessionRepo.getOrThrow(session.linkedSessionId);
-          if (linked.status === 'failed') {
+          if (linked.status === 'failed' || linked.status === 'review_required') {
             logger.info(
               { workspaceId: sessionId, workerId: session.linkedSessionId },
               'Workspace completed — auto-revalidating linked worker',
@@ -1933,6 +1935,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // mounts can break after long idle periods, making the old container unreachable.
       const fromTerminal =
         session.status === 'failed' ||
+        session.status === 'review_required' ||
         session.status === 'killed' ||
         session.status === 'validated';
       if (force && fromTerminal && session.worktreePath) {
@@ -1955,9 +1958,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const reworkReason =
           session.status === 'failed'
             ? 'Your previous attempt failed. Review what went wrong and try again.'
-            : session.status === 'killed'
-              ? 'Your previous session was killed. Start the task fresh.'
-              : 'Your previous work needs revision. Review and improve it.';
+            : session.status === 'review_required'
+              ? 'Your previous attempt exhausted its validation attempts. Review what went wrong and try again with extended attempts.'
+              : session.status === 'killed'
+                ? 'Your previous session was killed. Start the task fresh.'
+                : 'Your previous work needs revision. Review and improve it.';
         sessionRepo.update(sessionId, {
           validationAttempts: 0,
           lastValidationResult: null,
@@ -2254,7 +2259,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                     payload: {
                       findings: stillRecurring,
                       attempt,
-                      maxAttempts: profile.maxValidationAttempts,
+                      maxAttempts: s2.maxValidationAttempts,
                     },
                     response: null,
                   };
@@ -2374,10 +2379,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               logger.warn({ err, sessionId }, 'Failed to stop container post-validation');
             }
           }
-        } else if (force || attempt < profile.maxValidationAttempts) {
+        } else if (force || attempt < s2.maxValidationAttempts) {
           emitActivityStatus(
             sessionId,
-            `Validation failed (attempt ${attempt}/${profile.maxValidationAttempts}) — retrying`,
+            `Validation failed (attempt ${attempt}/${s2.maxValidationAttempts}) — retrying`,
           );
           // Build correction message with structured feedback for the agent
           emitActivityStatus(sessionId, 'Sending validation feedback to agent…');
@@ -2402,16 +2407,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             {
               sessionId,
               attempt,
-              maxAttempts: profile.maxValidationAttempts,
+              maxAttempts: s2.maxValidationAttempts,
             },
             'Retrying after validation failure',
           );
         } else {
           emitActivityStatus(
             sessionId,
-            `Validation failed — max attempts (${profile.maxValidationAttempts}) exhausted`,
+            `Validation failed — max attempts (${s2.maxValidationAttempts}) exhausted, needs review`,
           );
-          transition(s2, 'failed');
+          transition(s2, 'review_required');
 
           // Stop the container (not remove) so it can be restarted for preview
           if (s2.containerId) {
@@ -2445,9 +2450,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       sessionId: string,
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       const session = sessionRepo.getOrThrow(sessionId);
-      if (session.status !== 'failed') {
+      if (session.status !== 'failed' && session.status !== 'review_required') {
         throw new AutopodError(
-          `Cannot revalidate session ${sessionId} in status ${session.status} — only failed sessions can be revalidated`,
+          `Cannot revalidate session ${sessionId} in status ${session.status} — only failed or review_required sessions can be revalidated`,
           'INVALID_STATE',
           409,
         );
@@ -2702,9 +2707,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     fixManually(sessionId: string, userId: string): Promise<Session> {
       const worker = sessionRepo.getOrThrow(sessionId);
-      if (worker.status !== 'failed' && worker.status !== 'validated') {
+      if (
+        worker.status !== 'failed' &&
+        worker.status !== 'review_required' &&
+        worker.status !== 'validated'
+      ) {
         throw new AutopodError(
-          `Cannot fix session ${sessionId} in status ${worker.status} — only failed or validated sessions`,
+          `Cannot fix session ${sessionId} in status ${worker.status} — only failed, review_required, or validated sessions`,
           'INVALID_STATE',
           409,
         );
@@ -2750,6 +2759,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const deletable =
         isTerminalState(session.status) ||
         session.status === 'failed' ||
+        session.status === 'review_required' ||
         session.status === 'killing';
       if (!deletable) {
         throw new AutopodError(
@@ -2920,6 +2930,35 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
       }
       return { killed };
+    },
+
+    async extendAttempts(sessionId: string, additionalAttempts: number): Promise<void> {
+      const session = sessionRepo.getOrThrow(sessionId);
+      if (session.status !== 'review_required') {
+        throw new AutopodError(
+          `Cannot extend attempts for session ${sessionId} in status ${session.status} — only review_required sessions`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      const newMax = session.maxValidationAttempts + additionalAttempts;
+      if (newMax > 10) {
+        throw new AutopodError(
+          `Cannot exceed 10 total validation attempts (current: ${session.maxValidationAttempts}, requested: +${additionalAttempts})`,
+          'VALIDATION_ERROR',
+          400,
+        );
+      }
+      sessionRepo.update(sessionId, { maxValidationAttempts: newMax });
+      logger.info(
+        { sessionId, oldMax: session.maxValidationAttempts, newMax, additionalAttempts },
+        'Extended validation attempts',
+      );
+      emitActivityStatus(
+        sessionId,
+        `Validation attempts extended to ${newMax} — resuming validation`,
+      );
+      await this.triggerValidation(sessionId);
     },
 
     async refreshNetworkPolicy(profileName: string): Promise<void> {

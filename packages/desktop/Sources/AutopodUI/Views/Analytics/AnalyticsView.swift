@@ -39,7 +39,7 @@ public struct AnalyticsView: View {
 
     private var statusCounts: [StatusCount] {
         let relevantStatuses: [SessionStatus] = [
-            .complete, .failed, .running, .validated,
+            .complete, .failed, .reviewRequired, .running, .validated,
             .validating, .awaitingInput, .killed, .queued, .provisioning,
         ]
         return relevantStatuses.compactMap { status in

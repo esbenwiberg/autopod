@@ -21,14 +21,14 @@ public struct HistoryView: View {
     private var workerSessions: [Session] { sessions.filter { !$0.isWorkspace } }
 
     private var failedSessions: [Session] {
-        workerSessions.filter { [.failed, .killed].contains($0.status) }
+        workerSessions.filter { [.failed, .killed, .reviewRequired].contains($0.status) }
     }
 
     private var profileHistoryStats: [ProfileHistoryStat] {
         let profiles = Array(Set(workerSessions.map(\.profileName))).sorted()
         return profiles.map { profile in
             let s = workerSessions.filter { $0.profileName == profile }
-            let failed = s.filter { [.failed, .killed].contains($0.status) }.count
+            let failed = s.filter { [.failed, .killed, .reviewRequired].contains($0.status) }.count
             let completed = s.filter { $0.status == .complete }.count
             let total = s.count
             let totalCost = s.reduce(0.0) { $0 + $1.costUsd }
@@ -232,7 +232,7 @@ public struct HistoryView: View {
             ForEach(recentFailures) { session in
                 HStack(spacing: 10) {
                     Circle()
-                        .fill(session.status == .failed ? Color.red : Color.gray)
+                        .fill(session.status == .failed ? Color.red : session.status == .reviewRequired ? Color.orange : Color.gray)
                         .frame(width: 7, height: 7)
 
                     VStack(alignment: .leading, spacing: 2) {

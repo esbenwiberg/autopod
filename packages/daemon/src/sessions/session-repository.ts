@@ -39,6 +39,7 @@ export interface SessionUpdates {
   containerId?: string | null;
   worktreePath?: string | null;
   validationAttempts?: number;
+  maxValidationAttempts?: number;
   lastValidationResult?: unknown | null;
   lastCorrectionMessage?: string | null;
   pendingEscalation?: unknown | null;
@@ -210,6 +211,10 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.validationAttempts !== undefined) {
         setClauses.push('validation_attempts = @validationAttempts');
         params.validationAttempts = changes.validationAttempts;
+      }
+      if (changes.maxValidationAttempts !== undefined) {
+        setClauses.push('max_validation_attempts = @maxValidationAttempts');
+        params.maxValidationAttempts = changes.maxValidationAttempts;
       }
       if (changes.lastValidationResult !== undefined) {
         setClauses.push('last_validation_result = @lastValidationResult');

@@ -41,6 +41,25 @@ describe('state-machine', () => {
       expect(() => validateTransition('s1', 'killed', 'validating')).not.toThrow();
     });
 
+    it('allows transitions from review_required', () => {
+      expect(() => validateTransition('s1', 'review_required', 'running')).not.toThrow();
+      expect(() => validateTransition('s1', 'review_required', 'validating')).not.toThrow();
+      expect(() => validateTransition('s1', 'review_required', 'killing')).not.toThrow();
+    });
+
+    it('allows validating to review_required', () => {
+      expect(() => validateTransition('s1', 'validating', 'review_required')).not.toThrow();
+    });
+
+    it('rejects invalid transitions from review_required', () => {
+      expect(() => validateTransition('s1', 'review_required', 'queued')).toThrow(
+        InvalidStateTransitionError,
+      );
+      expect(() => validateTransition('s1', 'review_required', 'complete')).toThrow(
+        InvalidStateTransitionError,
+      );
+    });
+
     it('throws InvalidStateTransitionError for invalid transitions', () => {
       expect(() => validateTransition('s1', 'queued', 'running')).toThrow(
         InvalidStateTransitionError,
@@ -80,6 +99,7 @@ describe('state-machine', () => {
       expect(isTerminalState('validating')).toBe(false);
       expect(isTerminalState('validated')).toBe(false);
       expect(isTerminalState('failed')).toBe(false);
+      expect(isTerminalState('review_required')).toBe(false);
       expect(isTerminalState('approved')).toBe(false);
       expect(isTerminalState('merging')).toBe(false);
       expect(isTerminalState('merge_pending')).toBe(false);

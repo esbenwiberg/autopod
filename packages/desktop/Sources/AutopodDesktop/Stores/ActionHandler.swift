@@ -42,6 +42,7 @@ public final class ActionHandler {
       },
       approveAll: { [weak self] in await self?.approveAllValidated() },
       killAllFailed: { [weak self] in await self?.killAllFailed() },
+      extendAttempts: { [weak self] id, count in await self?.extendAttempts(id, additionalAttempts: count) },
       fork: { [weak self] id in await self?.forkSession(id) },
       delete: { [weak self] id in await self?.deleteSession(id) },
       createHistoryWorkspace: { [weak self] profile, limit in
@@ -163,6 +164,17 @@ public final class ActionHandler {
     do {
       _ = try await api.revalidateSession(sessionId)
       // Status will be updated via WebSocket event
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func extendAttempts(_ sessionId: String, additionalAttempts: Int) async {
+    pendingAction = "extend-\(sessionId)"
+    do {
+      try await api.extendAttempts(sessionId, additionalAttempts: additionalAttempts)
+      // Status will be updated via WebSocket event (back to running/validating)
     } catch {
       lastError = error.localizedDescription
     }
