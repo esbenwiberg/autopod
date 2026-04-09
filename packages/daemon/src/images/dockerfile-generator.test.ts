@@ -262,6 +262,8 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('packageSourceCredentials');
     // NuGet-only should not declare REGISTRY_PAT (that's for npm)
     expect(df).not.toContain('ARG REGISTRY_PAT');
+    // packageSourceMapping included so private feeds work with strict source mapping
+    expect(df).toContain('packageSourceMapping');
     // Sources-only config cleaned up, env var cleared
     expect(df).toContain('rm -f /workspace/NuGet.config');
     expect(df).toContain('ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS=');

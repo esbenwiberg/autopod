@@ -104,6 +104,12 @@ export function generateNpmrc(registries: PrivateRegistry[], pat: string): strin
  * resolution goes through the configured private feeds. ADO feeds should
  * have nuget.org configured as an upstream source to proxy public packages.
  *
+ * Includes <packageSourceMapping> entries so private feed sources are used
+ * for package resolution even when the workspace NuGet.config has strict
+ * source mapping (e.g. mapping "*" to nuget.org only). Without this, NuGet
+ * ignores our injected sources and agents may resort to writing cleartext
+ * credentials into the workspace config.
+ *
  * Sources only — no credentials. Authentication is handled by the Azure
  * Artifacts Credential Provider via the VSS_NUGET_EXTERNAL_FEED_ENDPOINTS
  * environment variable (set on the container).
@@ -122,6 +128,19 @@ export function generateNuGetConfig(registries: PrivateRegistry[]): string {
   }
 
   lines.push('  </packageSources>');
+
+  // Map all packages to each private feed so NuGet uses them even when the
+  // workspace config has its own packageSourceMapping that doesn't include
+  // our injected source names.
+  lines.push('  <packageSourceMapping>');
+  for (const reg of registries) {
+    const name = deriveFeedName(reg.url);
+    lines.push(`    <packageSource key="${escapeXml(name)}">`);
+    lines.push('      <package pattern="*" />');
+    lines.push('    </packageSource>');
+  }
+  lines.push('  </packageSourceMapping>');
+
   lines.push('</configuration>');
   lines.push('');
 
@@ -155,6 +174,35 @@ export function buildNuGetCredentialEnv(
 
   return { VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: JSON.stringify(payload) };
 }
+
+/**
+ * Git pre-commit hook script that blocks commits containing hardcoded credentials.
+ *
+ * Catches ClearTextPassword, _authToken=<value>, and common PAT prefixes in
+ * staged files. Designed to be written to /workspace/.git/hooks/pre-commit
+ * inside containers as a last line of defense against credential leaks.
+ */
+export const CREDENTIAL_GUARD_HOOK = `#!/bin/sh
+# Autopod credential guard — blocks commits with hardcoded secrets
+# Patterns: NuGet ClearTextPassword, npm _authToken, Azure DevOps PATs
+
+BLOCKED_PATTERNS='ClearTextPassword|_authToken=.{10,}|_password=.{10,}'
+
+# Only scan staged changes (not the entire working tree)
+MATCHES=$(git diff --cached --diff-filter=ACMR -U0 -- . | grep -iE "^\\\\+.*($BLOCKED_PATTERNS)" || true)
+
+if [ -n "$MATCHES" ]; then
+  echo ""
+  echo "ERROR: Commit blocked — hardcoded credentials detected in staged changes:"
+  echo ""
+  echo "$MATCHES" | head -5
+  echo ""
+  echo "Package authentication is pre-configured via environment variables."
+  echo "Do NOT add credentials to config files. If auth fails, use report_blocker."
+  echo ""
+  exit 1
+fi
+`;
 
 /**
  * Validate that registry config files written to the container are functional.

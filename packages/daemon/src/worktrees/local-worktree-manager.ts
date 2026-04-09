@@ -311,7 +311,10 @@ export class LocalWorktreeManager implements WorktreeManager {
     const { worktreePath, targetBranch } = config;
 
     // Commit any uncommitted work (with deletion guard)
-    await this.commitPendingChanges(worktreePath, 'chore: auto-commit uncommitted changes before merge');
+    await this.commitPendingChanges(
+      worktreePath,
+      'chore: auto-commit uncommitted changes before merge',
+    );
 
     // Push using auth URL so the PAT is never stored in git config.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');

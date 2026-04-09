@@ -55,7 +55,7 @@ describe('E2E: happy path lifecycle', () => {
     // Verify infrastructure was wired up
     expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(1);
     expect(ctx.worktreeManager.create).toHaveBeenCalledTimes(1);
-    expect(ctx.containerManager.writeFile).toHaveBeenCalledTimes(3); // system-instructions.md + .claude.json + settings.json
+    expect(ctx.containerManager.writeFile).toHaveBeenCalledTimes(4); // system-instructions.md + .claude.json + settings.json + credential guard hook
     expect(runtime.spawn).toHaveBeenCalledTimes(1);
     expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
 

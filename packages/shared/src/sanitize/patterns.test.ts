@@ -246,14 +246,87 @@ describe('PII_PATTERNS', () => {
       }
     });
 
-    it('relaxed preset only includes api-key, aws-access-key, azure-connection-string', () => {
+    it('relaxed preset includes all credential patterns', () => {
       const relaxed = PII_PATTERNS.filter((p) => p.presets.includes('relaxed')).map((p) => p.name);
       expect(relaxed).toEqual(
-        expect.arrayContaining(['api-key', 'aws-access-key', 'azure-connection-string']),
+        expect.arrayContaining([
+          'api-key',
+          'aws-access-key',
+          'azure-connection-string',
+          'nuget-cleartext-password',
+          'npm-auth-token',
+          'ado-pat',
+        ]),
       );
       expect(relaxed).not.toContain('email');
       expect(relaxed).not.toContain('phone');
       expect(relaxed).not.toContain('ipv4');
+    });
+  });
+
+  describe('nuget-cleartext-password', () => {
+    const { regex, presets } = pii('nuget-cleartext-password');
+
+    it('matches ClearTextPassword in NuGet XML config', () => {
+      expect(
+        matches(regex, '<add key="ClearTextPassword" value="4vkfKBKeL0mkymqEcti5Eu45MBI" />'),
+      ).toBe(true);
+    });
+
+    it('matches case-insensitive', () => {
+      expect(matches(regex, '<add key="cleartextpassword" value="someSecretToken123" />')).toBe(
+        true,
+      );
+    });
+
+    it('does not match short values', () => {
+      expect(matches(regex, 'ClearTextPassword" value="short"')).toBe(false);
+    });
+
+    it('is in all three presets', () => {
+      expect(presets).toEqual(expect.arrayContaining(['strict', 'standard', 'relaxed']));
+    });
+  });
+
+  describe('npm-auth-token', () => {
+    const { regex, presets } = pii('npm-auth-token');
+
+    it('matches _authToken in .npmrc', () => {
+      expect(matches(regex, '_authToken=dGhpc2lzYXRva2VuMTIzNDU2')).toBe(true);
+    });
+
+    it('does not match env var reference', () => {
+      expect(matches(regex, '_authToken=${NPM_TOKEN}')).toBe(false);
+    });
+
+    it('does not match short values', () => {
+      expect(matches(regex, '_authToken=short')).toBe(false);
+    });
+
+    it('is in all three presets', () => {
+      expect(presets).toEqual(expect.arrayContaining(['strict', 'standard', 'relaxed']));
+    });
+  });
+
+  describe('ado-pat', () => {
+    const { regex, presets } = pii('ado-pat');
+
+    it('matches password in JSON with long base64 value', () => {
+      const pat = `password":"${'a'.repeat(52)}"`;
+      expect(matches(regex, pat)).toBe(true);
+    });
+
+    it('matches password= style assignment', () => {
+      const pat = `password=${'ABCDEFabcdef0123456789+/='.repeat(3)}`;
+      expect(matches(regex, pat)).toBe(true);
+    });
+
+    it('does not match short password values', () => {
+      expect(matches(regex, 'password=short')).toBe(false);
+    });
+
+    it('is in all three presets', () => {
+      expect(presets).toEqual(expect.arrayContaining(['strict', 'standard', 'relaxed']));
     });
   });
 });

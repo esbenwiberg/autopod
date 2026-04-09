@@ -303,7 +303,7 @@ export function generateSystemInstructions(
     '- **Native module errors** (e.g. `better-sqlite3`, `sharp`, `bcrypt`): ' +
       'Re-run the build command once. If native binding errors persist after one retry, ' +
       'call `report_blocker` immediately — this is an infrastructure issue you CANNOT fix. ' +
-      'Do NOT run node-gyp directly, install Node headers, modify .npmrc, or change compiler flags.',
+      'Do NOT run node-gyp directly, install Node headers, modify .npmrc, modify NuGet.config credentials, or change compiler flags.',
   );
   lines.push(
     '- **MCP tool failures**: If an MCP tool call fails, check your input format. ' +
@@ -318,6 +318,14 @@ export function generateSystemInstructions(
   lines.push(
     '- **Do not retry identical failing commands more than twice.** ' +
       'Diagnose the root cause or try a different approach.',
+  );
+  lines.push(
+    '- **NEVER write credentials into config files.** ' +
+      'Do NOT add `ClearTextPassword`, `_authToken`, passwords, PATs, or API keys to ' +
+      'NuGet.config, .npmrc, appsettings.json, or any other file in the workspace. ' +
+      'Package authentication is pre-configured via environment variables. ' +
+      'If `dotnet restore` or `npm install` fails with 401/403 auth errors, ' +
+      'call `report_blocker` — do NOT attempt to fix authentication yourself.',
   );
   lines.push('');
 
@@ -424,9 +432,14 @@ function generateOperatingEnvironment(
 
   // What You Cannot Do
   lines.push('### What You Cannot Do');
-  lines.push('- Access APIs directly (no tokens or credentials are available in the container)');
+  lines.push('- Access external APIs directly (use the action tools on the Escalation MCP server)');
   lines.push('- Read files from repos other than your worktree (use read_file action instead)');
   lines.push('- See real email addresses or usernames (they are masked for privacy)');
+  lines.push(
+    '- Extract, copy, or embed credentials from environment variables into any file. ' +
+      'Package auth is handled automatically — never read `VSS_NUGET_EXTERNAL_FEED_ENDPOINTS`, ' +
+      '`.npmrc` tokens, or similar env vars to write into workspace files.',
+  );
   lines.push('');
 
   // Git Operations

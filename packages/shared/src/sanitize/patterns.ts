@@ -32,6 +32,27 @@ export const PII_PATTERNS: PiiPattern[] = [
     presets: ['strict', 'standard', 'relaxed'],
   },
   {
+    name: 'nuget-cleartext-password',
+    // NuGet ClearTextPassword in XML config files — catches the full value attribute
+    regex: /ClearTextPassword["']?\s*(?:value=["']|>)[^"'<]{8,}/gi,
+    replacement: 'ClearTextPassword" value="[REDACTED]',
+    presets: ['strict', 'standard', 'relaxed'],
+  },
+  {
+    name: 'npm-auth-token',
+    // npm _authToken in .npmrc files (not the env var reference ${NPM_TOKEN})
+    regex: /_authToken=[a-zA-Z0-9+/=_-]{10,}/g,
+    replacement: '_authToken=[REDACTED]',
+    presets: ['strict', 'standard', 'relaxed'],
+  },
+  {
+    name: 'ado-pat',
+    // Azure DevOps PATs are base64 strings, typically 52+ chars starting with common prefixes
+    regex: /\bpassword["']?\s*[:=]\s*["']?[a-zA-Z0-9+/=]{40,}["']?/gi,
+    replacement: 'password=[REDACTED]',
+    presets: ['strict', 'standard', 'relaxed'],
+  },
+  {
     name: 'email',
     regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
     replacement: '[EMAIL_REDACTED]',

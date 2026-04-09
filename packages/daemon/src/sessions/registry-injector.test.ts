@@ -2,6 +2,7 @@ import type { PrivateRegistry } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
+  CREDENTIAL_GUARD_HOOK,
   NPM_RC_PATH,
   NUGET_CONFIG_PATH,
   buildNuGetCredentialEnv,
@@ -138,6 +139,36 @@ describe('generateNuGetConfig', () => {
     expect(content).not.toContain('packageSourceCredentials');
     expect(content).not.toContain('ClearTextPassword');
     expect(content).toContain('</configuration>');
+  });
+
+  it('includes packageSourceMapping for each private feed', () => {
+    const regs: PrivateRegistry[] = [
+      {
+        type: 'nuget',
+        url: 'https://pkgs.dev.azure.com/myorg/_packaging/shared/nuget/v3/index.json',
+      },
+    ];
+    const content = generateNuGetConfig(regs);
+    expect(content).toContain('<packageSourceMapping>');
+    expect(content).toContain('<packageSource key="myorg-shared">');
+    expect(content).toContain('<package pattern="*" />');
+    expect(content).toContain('</packageSourceMapping>');
+  });
+
+  it('includes packageSourceMapping for multiple feeds', () => {
+    const regs: PrivateRegistry[] = [
+      {
+        type: 'nuget',
+        url: 'https://pkgs.dev.azure.com/org/_packaging/feed-a/nuget/v3/index.json',
+      },
+      {
+        type: 'nuget',
+        url: 'https://pkgs.dev.azure.com/org/_packaging/feed-b/nuget/v3/index.json',
+      },
+    ];
+    const content = generateNuGetConfig(regs);
+    expect(content).toContain('<packageSource key="org-feed-a">');
+    expect(content).toContain('<packageSource key="org-feed-b">');
   });
 
   it('derives feed name from Azure DevOps URL', () => {
@@ -314,5 +345,23 @@ describe('validateRegistryFiles', () => {
     ];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.toBeUndefined();
     expect(cm.execInContainer).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('CREDENTIAL_GUARD_HOOK', () => {
+  it('is a valid shell script', () => {
+    expect(CREDENTIAL_GUARD_HOOK).toMatch(/^#!\/bin\/sh/);
+  });
+
+  it('detects ClearTextPassword pattern', () => {
+    expect(CREDENTIAL_GUARD_HOOK).toContain('ClearTextPassword');
+  });
+
+  it('detects _authToken pattern', () => {
+    expect(CREDENTIAL_GUARD_HOOK).toContain('_authToken');
+  });
+
+  it('exits with non-zero when credentials are found', () => {
+    expect(CREDENTIAL_GUARD_HOOK).toContain('exit 1');
   });
 });

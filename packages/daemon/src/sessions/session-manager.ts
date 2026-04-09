@@ -64,6 +64,7 @@ import {
   buildReworkTask,
 } from './recovery-context.js';
 import {
+  CREDENTIAL_GUARD_HOOK,
   buildNuGetCredentialEnv,
   buildRegistryFiles,
   validateRegistryFiles,
@@ -924,6 +925,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             'Wrote registry config file to container',
           );
         }
+
+        // Install a git pre-commit hook that blocks commits containing hardcoded
+        // credentials (ClearTextPassword, _authToken, etc.). Defense-in-depth:
+        // even if system instructions are ignored, the commit will be rejected.
+        await containerManager.writeFile(
+          containerId,
+          '/workspace/.git/hooks/pre-commit',
+          CREDENTIAL_GUARD_HOOK,
+        );
+        await containerManager.execInContainer(
+          containerId,
+          ['chmod', '+x', '/workspace/.git/hooks/pre-commit'],
+          { timeout: 5_000 },
+        );
 
         // Workspace sessions: container stays alive, no agent/validation/PR
         if (session.outputMode === 'workspace') {

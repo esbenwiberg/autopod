@@ -167,6 +167,9 @@ function generateNpmrcDockerLines(registries: PrivateRegistry[]): string[] {
  * Generate Dockerfile RUN lines that write a sources-only NuGet.config.
  * No credentials — auth is handled by the Azure Artifacts Credential Provider
  * via VSS_NUGET_EXTERNAL_FEED_ENDPOINTS (set as a build arg / env var above).
+ *
+ * Includes packageSourceMapping so private feeds are used for package resolution
+ * even when the workspace has strict source mapping.
  */
 function generateNuGetDockerLines(registries: PrivateRegistry[]): string[] {
   const parts: string[] = [];
@@ -184,6 +187,17 @@ function generateNuGetDockerLines(registries: PrivateRegistry[]): string[] {
     );
   }
   parts.push('echo "  </packageSources>" >> /workspace/NuGet.config');
+  parts.push('echo "  <packageSourceMapping>" >> /workspace/NuGet.config');
+  parts.push('echo "    <packageSource key=\\"nuget.org\\">" >> /workspace/NuGet.config');
+  parts.push('echo "      <package pattern=\\"*\\" />" >> /workspace/NuGet.config');
+  parts.push('echo "    </packageSource>" >> /workspace/NuGet.config');
+  for (const reg of registries) {
+    const name = deriveNuGetFeedName(reg.url);
+    parts.push(`echo "    <packageSource key=\\"${name}\\">" >> /workspace/NuGet.config`);
+    parts.push('echo "      <package pattern=\\"*\\" />" >> /workspace/NuGet.config');
+    parts.push('echo "    </packageSource>" >> /workspace/NuGet.config');
+  }
+  parts.push('echo "  </packageSourceMapping>" >> /workspace/NuGet.config');
   parts.push('echo "</configuration>" >> /workspace/NuGet.config');
 
   return [`RUN ${parts.join(' && \\\n    ')}`];
