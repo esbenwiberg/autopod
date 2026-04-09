@@ -1,4 +1,4 @@
-import type { InjectedMcpServer, NetworkPolicy } from '@autopod/shared';
+import type { InjectedMcpServer, NetworkPolicy, PrivateRegistry } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_ALLOWED_HOSTS, DockerNetworkManager } from './docker-network-manager.js';
@@ -32,6 +32,10 @@ function makePolicy(overrides: Partial<NetworkPolicy> = {}): NetworkPolicy {
 
 function makeMcpServer(url: string, name = 'test'): InjectedMcpServer {
   return { name, url };
+}
+
+function makeRegistry(url: string, type: 'npm' | 'nuget' = 'nuget'): PrivateRegistry {
+  return { type, url };
 }
 
 describe('DockerNetworkManager', () => {
@@ -115,6 +119,21 @@ describe('DockerNetworkManager', () => {
     it('always includes host.docker.internal', () => {
       const result = manager.computeAllowlist(makePolicy({ replaceDefaults: true }), [], GATEWAY);
       expect(result).toContain('host.docker.internal');
+    });
+
+    it('extracts hostnames from private registries', () => {
+      const registries = [
+        makeRegistry('https://pkgs.dev.azure.com/myorg/_packaging/myfeed/nuget/v3/index.json'),
+        makeRegistry('https://npm.pkg.github.com/', 'npm'),
+      ];
+      const result = manager.computeAllowlist(makePolicy(), [], GATEWAY, registries);
+      expect(result).toContain('pkgs.dev.azure.com');
+      expect(result).toContain('npm.pkg.github.com');
+    });
+
+    it('skips malformed registry URLs without throwing', () => {
+      const registries = [makeRegistry('not-a-url')];
+      expect(() => manager.computeAllowlist(makePolicy(), [], GATEWAY, registries)).not.toThrow();
     });
 
     it('deduplicates hosts', () => {

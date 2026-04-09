@@ -12,6 +12,7 @@ import type {
   HistoryQuery,
   InjectedMcpServer,
   NetworkPolicy,
+  PrivateRegistry,
   Profile,
   Session,
   SessionStatus,
@@ -125,6 +126,7 @@ export interface NetworkManager {
     policy: NetworkPolicy | null,
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
+    registries?: PrivateRegistry[],
   ): Promise<{ networkName: string; firewallScript: string } | null>;
   getGatewayIp(): Promise<string>;
 }
@@ -729,8 +731,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         const containerManager = containerManagerFactory.get(session.executionTarget);
 
         // Compute network isolation config (Docker only, opt-in via profile)
-        // Domain-based filtering via dnsmasq+ipset handles CDN wildcards natively —
-        // no need for NuGet backend host discovery.
         let networkName: string | undefined;
         let firewallScript: string | undefined;
         if (
@@ -744,6 +744,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             profile.networkPolicy,
             mergedServers,
             gatewayIp,
+            profile.privateRegistries,
           );
           if (netConfig) {
             networkName = netConfig.networkName;
@@ -2677,6 +2678,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         profile.networkPolicy,
         mergedServers,
         gatewayIp,
+        profile.privateRegistries,
       );
       if (!netConfig) return;
 

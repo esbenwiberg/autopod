@@ -1,4 +1,9 @@
-import type { InjectedMcpServer, NetworkPolicy, NetworkPolicyMode } from '@autopod/shared';
+import type {
+  InjectedMcpServer,
+  NetworkPolicy,
+  NetworkPolicyMode,
+  PrivateRegistry,
+} from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 
@@ -95,6 +100,7 @@ export class DockerNetworkManager {
     policy: NetworkPolicy,
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
+    registries: PrivateRegistry[] = [],
   ): string[] {
     const hosts = new Set<string>();
 
@@ -119,6 +125,16 @@ export class DockerNetworkManager {
     for (const server of mcpServers) {
       try {
         const url = new URL(server.url);
+        hosts.add(url.hostname);
+      } catch {
+        // Malformed URL — skip
+      }
+    }
+
+    // Extract hostnames from private package registries (npm/NuGet feeds)
+    for (const reg of registries) {
+      try {
+        const url = new URL(reg.url);
         hosts.add(url.hostname);
       } catch {
         // Malformed URL — skip
@@ -243,8 +259,12 @@ export class DockerNetworkManager {
     lines.push('# Attempt dnsmasq+ipset mode (domain-based filtering)');
     lines.push('if command -v dnsmasq >/dev/null 2>&1 && command -v ipset >/dev/null 2>&1; then');
     lines.push('');
-    lines.push('  # Stop any running dnsmasq');
-    lines.push('  killall dnsmasq 2>/dev/null || true');
+    lines.push('  # Stop any running dnsmasq (SIGKILL via PID file, then killall as fallback)');
+    lines.push(
+      '  if [ -f /tmp/dnsmasq.pid ]; then kill -9 "$(cat /tmp/dnsmasq.pid)" 2>/dev/null; rm -f /tmp/dnsmasq.pid; fi',
+    );
+    lines.push('  killall -9 dnsmasq 2>/dev/null || true');
+    lines.push('  sleep 0.2  # let kernel release the listen socket');
     lines.push('');
     lines.push('  # Create ipset for allowed IPs');
     lines.push('  ipset destroy allowed_ips 2>/dev/null || true');
@@ -382,12 +402,13 @@ export class DockerNetworkManager {
     policy: NetworkPolicy | null,
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
+    registries: PrivateRegistry[] = [],
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
     await this.ensureNetwork();
 
-    const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp);
+    const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp, registries);
     const firewallScript = await this.generateFirewallScript(
       allowlist,
       policy.mode,
