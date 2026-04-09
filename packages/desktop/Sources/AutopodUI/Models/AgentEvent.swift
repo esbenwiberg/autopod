@@ -67,6 +67,16 @@ public enum AgentEventType: String, Sendable {
     public var isNoise: Bool {
         self == .toolResult
     }
+
+    /// High-level events worth showing in the overview activity feed
+    public var isOverviewWorthy: Bool {
+        switch self {
+        case .status, .fileChange, .escalation, .plan, .progress, .error, .complete, .taskSummary:
+            return true
+        case .toolUse, .toolResult, .output:
+            return false
+        }
+    }
 }
 
 // MARK: - Event
