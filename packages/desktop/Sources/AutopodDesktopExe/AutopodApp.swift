@@ -72,7 +72,7 @@ struct AutopodApp: App {
 
     sessionStore.configure(api: api)
     profileStore.configure(api: api)
-    actionHandler = ActionHandler(api: api, sessionStore: sessionStore)
+    actionHandler = ActionHandler(api: api, sessionStore: sessionStore, profileStore: profileStore)
 
     let connToken = connectionManager.activeToken ?? ""
     terminalManager = TerminalManager(baseURL: conn.url, token: connToken)

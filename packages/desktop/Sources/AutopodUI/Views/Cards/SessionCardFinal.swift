@@ -116,10 +116,11 @@ public struct SessionCardFinal: View {
             TextField("What should the worker do?", text: $launchWorkerTask)
             Button("Launch") {
                 let task = launchWorkerTask
+                let workerProfile = actions.workerProfileForProfile(session.profileName) ?? session.profileName
                 launchWorkerTask = ""
                 Task {
                     _ = await actions.createSession(
-                        session.profileName,
+                        workerProfile,
                         task,
                         nil,
                         "pr",

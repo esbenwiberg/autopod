@@ -77,6 +77,7 @@ public enum ProfileMapper {
       escalationHumanResponseTimeout: response.escalation.humanResponseTimeout,
       outputMode: OutputMode(rawValue: response.outputMode) ?? .pr,
       extendsProfile: response.extends,
+      workerProfile: response.workerProfile,
       warmImageTag: response.warmImageTag,
       warmImageBuiltAt: response.warmImageBuiltAt,
       actionPolicyEnabled: ap != nil,
@@ -137,6 +138,7 @@ public enum ProfileMapper {
     if let v = profile.adoPat { d["adoPat"] = v }
     if let v = profile.registryPat { d["registryPat"] = v }
     if let v = profile.extendsProfile { d["extends"] = v }
+    if let v = profile.workerProfile { d["workerProfile"] = v }
 
     // Escalation
     d["escalation"] = [

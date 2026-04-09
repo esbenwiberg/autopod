@@ -326,6 +326,15 @@ public struct ProfileEditorView: View {
             .textFieldStyle(.roundedBorder)
             .frame(width: 280)
         }
+
+        fieldRow("Worker Profile", help: "Profile to use when launching worker sessions from a workspace pod using this profile.") {
+            TextField("Worker profile name (optional)", text: Binding(
+                get: { profile.workerProfile ?? "" },
+                set: { profile.workerProfile = $0.isEmpty ? nil : $0 }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 280)
+        }
     }
 
     // MARK: - Build & Run

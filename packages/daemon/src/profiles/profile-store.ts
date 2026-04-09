@@ -58,6 +58,7 @@ export function rowToProfile(
     customInstructions: (row.custom_instructions as string) ?? null,
     escalation: JSON.parse(row.escalation_config as string) as EscalationConfig,
     extends: (row.extends as string) ?? null,
+    workerProfile: (row.worker_profile as string) ?? null,
     warmImageTag: (row.warm_image_tag as string) ?? null,
     warmImageBuiltAt: (row.warm_image_built_at as string) ?? null,
     mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]') as InjectedMcpServer[],
@@ -186,7 +187,7 @@ export function createProfileStore(
           name, repo_url, default_branch, template, build_command, start_command,
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
-          extends, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
+          extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
           private_registries, registry_pat, container_memory_gb,
           build_timeout, test_timeout,
@@ -195,7 +196,7 @@ export function createProfileStore(
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
-          @extends, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
+          @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
           @privateRegistries, @registryPat, @containerMemoryGb,
           @buildTimeout, @testTimeout,
@@ -218,6 +219,7 @@ export function createProfileStore(
         customInstructions: parsed.customInstructions,
         escalationConfig: JSON.stringify(parsed.escalation),
         extends: parsed.extends,
+        workerProfile: parsed.workerProfile ?? null,
         mcpServers: JSON.stringify(parsed.mcpServers),
         claudeMdSections: JSON.stringify(parsed.claudeMdSections),
         skills: JSON.stringify(parsed.skills),
@@ -345,6 +347,10 @@ export function createProfileStore(
       if (parsed.extends !== undefined) {
         setClauses.push('extends = @extends');
         fieldMap.extends = parsed.extends;
+      }
+      if (parsed.workerProfile !== undefined) {
+        setClauses.push('worker_profile = @workerProfile');
+        fieldMap.workerProfile = parsed.workerProfile;
       }
       if (parsed.mcpServers !== undefined) {
         setClauses.push('mcp_servers = @mcpServers');

@@ -12,10 +12,12 @@ public final class ActionHandler {
 
   private let api: DaemonAPI
   private let sessionStore: SessionStore
+  private let profileStore: ProfileStore
 
-  public init(api: DaemonAPI, sessionStore: SessionStore) {
+  public init(api: DaemonAPI, sessionStore: SessionStore, profileStore: ProfileStore) {
     self.api = api
     self.sessionStore = sessionStore
+    self.profileStore = profileStore
   }
 
   /// Build a SessionActions struct wired to this handler.
@@ -44,6 +46,9 @@ public final class ActionHandler {
       delete: { [weak self] id in await self?.deleteSession(id) },
       createHistoryWorkspace: { [weak self] profile, limit in
         await self?.createHistoryWorkspace(profileName: profile, limit: limit)
+      },
+      workerProfileForProfile: { [weak self] name in
+        self?.profileStore.profiles.first(where: { $0.name == name })?.workerProfile
       }
     )
   }

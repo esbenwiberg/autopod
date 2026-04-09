@@ -126,6 +126,7 @@ export const createProfileSchema = z.object({
   customInstructions: z.string().max(50_000).nullable().default(null),
   escalation: escalationConfigSchema.default({}),
   extends: z.string().nullable().default(null),
+  workerProfile: z.string().nullable().default(null),
   mcpServers: z.array(injectedMcpServerSchema).default([]),
   claudeMdSections: z.array(injectedClaudeMdSectionSchema).default([]),
   skills: z.array(injectedSkillSchema).default([]),

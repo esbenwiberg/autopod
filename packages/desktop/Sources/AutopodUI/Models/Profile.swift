@@ -59,6 +59,8 @@ public struct Profile: Identifiable, Sendable {
     // Output & inheritance
     public var outputMode: OutputMode
     public var extendsProfile: String?
+    /// Profile to use when spawning worker sessions from a workspace using this profile
+    public var workerProfile: String?
 
     // Warm image (read-only, set by daemon)
     public var warmImageTag: String?
@@ -112,6 +114,7 @@ public struct Profile: Identifiable, Sendable {
         escalationAskAiMaxCalls: Int = 3,
         escalationAutoPauseAfter: Int = 1, escalationHumanResponseTimeout: Int = 3600,
         outputMode: OutputMode = .pr, extendsProfile: String? = nil,
+        workerProfile: String? = nil,
         warmImageTag: String? = nil, warmImageBuiltAt: String? = nil,
         actionPolicyEnabled: Bool = false,
         actionEnabledGroups: Set<ActionGroup> = [],
@@ -151,6 +154,7 @@ public struct Profile: Identifiable, Sendable {
         self.escalationAutoPauseAfter = escalationAutoPauseAfter
         self.escalationHumanResponseTimeout = escalationHumanResponseTimeout
         self.outputMode = outputMode; self.extendsProfile = extendsProfile
+        self.workerProfile = workerProfile
         self.warmImageTag = warmImageTag; self.warmImageBuiltAt = warmImageBuiltAt
         self.actionPolicyEnabled = actionPolicyEnabled
         self.actionEnabledGroups = actionEnabledGroups

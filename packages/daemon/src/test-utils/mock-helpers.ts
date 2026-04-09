@@ -229,6 +229,7 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         escalation: JSON.parse(row.escalation_config as string),
         executionTarget: 'local' as const,
         extends: null,
+        workerProfile: (row.worker_profile as string) ?? null,
         warmImageTag: null,
         warmImageBuiltAt: null,
         mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]'),

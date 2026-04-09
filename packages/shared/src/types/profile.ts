@@ -30,6 +30,8 @@ export interface Profile {
   customInstructions: string | null;
   escalation: EscalationConfig;
   extends: string | null;
+  /** Profile to use when spawning worker sessions from a workspace pod using this profile */
+  workerProfile: string | null;
   warmImageTag: string | null;
   warmImageBuiltAt: string | null;
   /** Additional MCP servers for sessions using this profile */

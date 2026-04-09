@@ -19,6 +19,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var customInstructions: String?
   public var escalation: EscalationConfigResponse
   public var extends: String?
+  public var workerProfile: String?
   public var warmImageTag: String?
   public var warmImageBuiltAt: String?
   public var mcpServers: [InjectedMcpServerResponse]
