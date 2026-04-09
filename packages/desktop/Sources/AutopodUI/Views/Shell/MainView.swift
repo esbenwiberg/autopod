@@ -9,7 +9,7 @@ public struct MainView: View {
     public var isLoading: Bool
     public var actions: SessionActions
     public var profileNames: [String]
-    public var sessionEvents: [String: [AgentEvent]]
+    public var selectedSessionEvents: [AgentEvent]
     public var sessionDiffs: [String: String]
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
@@ -33,7 +33,7 @@ public struct MainView: View {
         isLoading: Bool = false,
         actions: SessionActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
-        sessionEvents: [String: [AgentEvent]] = [:],
+        selectedSessionEvents: [AgentEvent] = [],
         sessionDiffs: [String: String] = [:],
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
@@ -54,7 +54,7 @@ public struct MainView: View {
         self.isLoading = isLoading
         self.actions = actions
         self.profileNames = profileNames
-        self.sessionEvents = sessionEvents
+        self.selectedSessionEvents = selectedSessionEvents
         self.sessionDiffs = sessionDiffs
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
@@ -180,7 +180,7 @@ public struct MainView: View {
             } else if let session = selectedSession {
                 DetailPanelView(
                     session: session,
-                    events: eventsForSession(session),
+                    events: selectedSessionEvents,
                     actions: wiredActions,
                     diffString: sessionDiffs[session.id],
                     terminalState: terminalState,
@@ -342,11 +342,6 @@ public struct MainView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Events for session
-
-    private func eventsForSession(_ session: Session) -> [AgentEvent] {
-        return sessionEvents[session.id] ?? []
-    }
 }
 
 // MARK: - View mode

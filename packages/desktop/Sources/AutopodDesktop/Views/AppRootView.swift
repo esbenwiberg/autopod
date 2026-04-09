@@ -33,6 +33,13 @@ public struct AppRootView: View {
   @State private var showError = false
   @State private var showSettings = false
 
+  /// Only read events for the selected session — avoids observing the entire dictionary
+  /// and triggering full view recomputation on every agent event.
+  private var selectedSessionEvents: [AgentEvent] {
+    guard let id = sessionStore.selectedSessionId else { return [] }
+    return eventStream?.sessionEvents[id] ?? []
+  }
+
   public var body: some View {
     MainView(
       sessions: sessionStore.sessions,
@@ -46,7 +53,7 @@ public struct AppRootView: View {
       isLoading: sessionStore.isLoading,
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
-      sessionEvents: eventStream?.sessionEvents ?? [:],
+      selectedSessionEvents: selectedSessionEvents,
       sessionDiffs: sessionStore.sessionDiffs,
       terminalState: terminalManager?.state ?? "disconnected",
       terminalDataPipe: terminalManager?.dataPipe,
@@ -82,8 +89,8 @@ public struct AppRootView: View {
     } message: {
       Text(actionHandler?.lastError ?? "Unknown error")
     }
-    .onChange(of: actionHandler?.lastError) { _, err in
-      if err != nil { showError = true }
+    .onChange(of: actionHandler?.lastError) { old, new in
+      if new != nil, new != old { showError = true }
     }
     .sheet(isPresented: $showSetup) {
       SetupSheet(

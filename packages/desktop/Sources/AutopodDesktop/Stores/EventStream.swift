@@ -23,6 +23,11 @@ public final class EventStream {
   private static let globalEventCap = 500
   private static let sessionEventCap = 1000
 
+  // Throttle: batch event mutations to avoid flooding SwiftUI's AttributeGraph
+  private var pendingGlobalEvents: [AgentEvent] = []
+  private var pendingSessionEvents: [(String, AgentEvent)] = []
+  private var flushTask: Task<Void, Never>?
+
   // MARK: - Init
 
   public init(sessionStore: SessionStore) {
@@ -60,6 +65,9 @@ public final class EventStream {
       await eventSocket?.disconnect()
     }
     eventSocket = nil
+    flushTask?.cancel()
+    flushTask = nil
+    flushPendingEvents()
     connectionState = "Disconnected"
   }
 
@@ -178,19 +186,10 @@ public final class EventStream {
     eventIdCounter += 1
     let uiEvent = mapAgentEvent(event, id: eventIdCounter)
 
-    // Add to global recent events
-    recentEvents.append(uiEvent)
-    if recentEvents.count > Self.globalEventCap {
-      recentEvents.removeFirst(recentEvents.count - Self.globalEventCap)
-    }
-
-    // Add to per-session buffer
-    var buffer = sessionEvents[sessionId, default: []]
-    buffer.append(uiEvent)
-    if buffer.count > Self.sessionEventCap {
-      buffer.removeFirst(buffer.count - Self.sessionEventCap)
-    }
-    sessionEvents[sessionId] = buffer
+    // Buffer events for throttled flush (avoids per-event @Observable mutations)
+    pendingGlobalEvents.append(uiEvent)
+    pendingSessionEvents.append((sessionId, uiEvent))
+    scheduleFlush()
 
     // Update session fields based on event type
     switch event.type {
@@ -252,6 +251,40 @@ public final class EventStream {
     default:
       break
     }
+  }
+
+  // MARK: - Throttled flush
+
+  private func scheduleFlush() {
+    guard flushTask == nil else { return }
+    flushTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .milliseconds(100))
+      self?.flushPendingEvents()
+      self?.flushTask = nil
+    }
+  }
+
+  private func flushPendingEvents() {
+    guard !pendingGlobalEvents.isEmpty else { return }
+
+    // Batch-apply global events
+    recentEvents.append(contentsOf: pendingGlobalEvents)
+    if recentEvents.count > Self.globalEventCap {
+      recentEvents.removeFirst(recentEvents.count - Self.globalEventCap)
+    }
+
+    // Batch-apply per-session events
+    for (sessionId, event) in pendingSessionEvents {
+      var buffer = sessionEvents[sessionId, default: []]
+      buffer.append(event)
+      if buffer.count > Self.sessionEventCap {
+        buffer.removeFirst(buffer.count - Self.sessionEventCap)
+      }
+      sessionEvents[sessionId] = buffer
+    }
+
+    pendingGlobalEvents.removeAll()
+    pendingSessionEvents.removeAll()
   }
 
   private func mapAgentEvent(_ response: AgentEventResponse, id: Int) -> AgentEvent {
