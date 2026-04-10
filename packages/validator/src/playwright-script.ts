@@ -60,10 +60,16 @@ async function run() {
     // count them as application errors.
     const DNS_NOISE = /net::ERR_NAME_NOT_RESOLVED/;
 
+    // React dev-mode emits informational warnings via console.error with a
+    // "Warning: " prefix. These are not runtime failures — filter them out
+    // so smoke checks don't fail on pre-existing React housekeeping noise.
+    const REACT_DEV_WARNING = /^Warning: /;
+
     page.on('console', (msg) => {
       if (msg.type() === 'error' && consoleErrors.length < MAX_ERRORS && totalErrorBytes < MAX_ERROR_BYTES) {
         const text = msg.text().slice(0, 500);
         if (DNS_NOISE.test(text)) return;
+        if (REACT_DEV_WARNING.test(text)) return;
         consoleErrors.push(text);
         totalErrorBytes += text.length;
       }
