@@ -67,6 +67,7 @@ import {
   CREDENTIAL_GUARD_HOOK,
   buildNuGetCredentialEnv,
   buildRegistryFiles,
+  ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
@@ -1128,6 +1129,26 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             { sessionId, stdout: verifyResult.stdout.trim(), stderr: verifyResult.stderr.trim() },
             'Credential file verification',
           );
+        }
+
+        // Ensure NuGet credential provider is installed (base image install can fail silently)
+        const hasNugetRegistries = registryFiles.some((f) =>
+          f.path.toLowerCase().endsWith('nuget.config'),
+        );
+        if (hasNugetRegistries) {
+          try {
+            await ensureNuGetCredentialProvider(containerManager, containerId);
+            logger.info({ sessionId }, 'NuGet credential provider verified');
+          } catch (cpErr) {
+            logger.error(
+              { sessionId, err: cpErr },
+              'Failed to ensure NuGet credential provider',
+            );
+            emitActivityStatus(
+              sessionId,
+              `⚠ Credential provider install failed: ${(cpErr as Error).message}`,
+            );
+          }
         }
 
         // Early validation: verify registry configs are parseable before agent starts

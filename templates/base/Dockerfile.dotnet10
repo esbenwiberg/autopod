@@ -32,7 +32,10 @@ RUN npm install -g playwright && \
     chmod -R 755 /opt/pw-browsers
 
 # Azure Artifacts Credential Provider (NuGet auth via env var, no cleartext in config)
-RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash
+# Verify installation succeeded — the curl|bash can fail silently (GitHub rate limits, etc.)
+RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash \
+    && test -d /root/.nuget/plugins/netcore/CredentialProvider.Microsoft \
+    || (echo "ERROR: Credential provider installation failed" && exit 1)
 ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED=true
 
 # Agent CLIs
@@ -65,7 +68,9 @@ RUN chown autopod:autopod /workspace
 USER autopod
 
 # Install credential provider for the runtime user (root install above covers build-time only)
-RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash
+RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash \
+    && test -d /home/autopod/.nuget/plugins/netcore/CredentialProvider.Microsoft \
+    || (echo "ERROR: Credential provider installation failed for autopod user" && exit 1)
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 # Allow bare imports of globally installed packages (e.g. playwright in validation scripts)

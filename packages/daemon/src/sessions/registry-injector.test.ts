@@ -7,6 +7,7 @@ import {
   NUGET_CONFIG_PATH,
   buildNuGetCredentialEnv,
   buildRegistryFiles,
+  ensureNuGetCredentialProvider,
   generateNpmrc,
   generateNuGetConfig,
   validateRegistryFiles,
@@ -364,6 +365,44 @@ describe('validateRegistryFiles', () => {
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.toBeUndefined();
     // npm config + dotnet nuget list + dotnet nuget search = 3 calls
     expect(cm.execInContainer).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('ensureNuGetCredentialProvider', () => {
+  it('skips install when plugin already exists', async () => {
+    const cm = {
+      execInContainer: vi.fn().mockResolvedValue({
+        stdout: 'CredentialProvider.Microsoft.dll',
+        stderr: '',
+        exitCode: 0,
+      }),
+    } as unknown as ContainerManager;
+    await ensureNuGetCredentialProvider(cm, 'ctr-1');
+    expect(cm.execInContainer).toHaveBeenCalledTimes(1);
+    expect((cm.execInContainer as ReturnType<typeof vi.fn>).mock.calls[0][1].join(' ')).toContain('ls');
+  });
+
+  it('installs when plugin is missing', async () => {
+    const cm = {
+      execInContainer: vi
+        .fn()
+        .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 2 }) // ls fails
+        .mockResolvedValueOnce({ stdout: 'Installation completed', stderr: '', exitCode: 0 }),
+    } as unknown as ContainerManager;
+    await ensureNuGetCredentialProvider(cm, 'ctr-1');
+    expect(cm.execInContainer).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws when install fails', async () => {
+    const cm = {
+      execInContainer: vi
+        .fn()
+        .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 2 }) // ls fails
+        .mockResolvedValueOnce({ stdout: '', stderr: 'curl: network error', exitCode: 1 }),
+    } as unknown as ContainerManager;
+    await expect(ensureNuGetCredentialProvider(cm, 'ctr-1')).rejects.toThrow(
+      /Failed to install.*Credential Provider/,
+    );
   });
 });
 

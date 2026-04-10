@@ -206,6 +206,38 @@ fi
 `;
 
 /**
+ * Ensure the Azure Artifacts Credential Provider is installed for NuGet auth.
+ *
+ * The base Docker images install it at build time, but the install can fail
+ * silently (GitHub rate limits, network issues during image build). This
+ * runtime check detects the gap and re-installs, so sessions don't fail
+ * hours later during validation with a cryptic 401.
+ */
+export async function ensureNuGetCredentialProvider(
+  containerManager: ContainerManager,
+  containerId: string,
+): Promise<void> {
+  const check = await containerManager.execInContainer(
+    containerId,
+    ['sh', '-c', 'ls /home/autopod/.nuget/plugins/netcore/CredentialProvider.Microsoft/ 2>/dev/null'],
+    { timeout: 5_000 },
+  );
+  if (check.exitCode === 0 && check.stdout.trim().length > 0) return;
+
+  // Credential provider missing — install it now
+  const install = await containerManager.execInContainer(
+    containerId,
+    ['sh', '-c', 'curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash 2>&1'],
+    { timeout: 60_000 },
+  );
+  if (install.exitCode !== 0) {
+    throw new Error(
+      `Failed to install Azure Artifacts Credential Provider: ${install.stderr.slice(0, 500)}`,
+    );
+  }
+}
+
+/**
  * Validate that registry config files written to the container are functional.
  * Runs early — right after writing — so we fail fast instead of discovering
  * broken configs hours later during validation.
