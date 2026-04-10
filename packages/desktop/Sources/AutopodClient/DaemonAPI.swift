@@ -92,6 +92,11 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/sessions/\(id)/validate")
   }
 
+  public func startPreview(_ id: String) async throws -> String {
+    let res: PreviewResponse = try await request("POST", "/sessions/\(id)/preview")
+    return res.previewUrl
+  }
+
   public func revalidateSession(_ id: String) async throws -> RevalidateResponse {
     try await request("POST", "/sessions/\(id)/revalidate")
   }
@@ -331,6 +336,10 @@ struct WarmBody: Codable {
 
 struct ExtendAttemptsBody: Codable {
   let additionalAttempts: Int
+}
+
+struct PreviewResponse: Codable {
+  let previewUrl: String
 }
 
 struct HistoryWorkspaceBody: Codable {

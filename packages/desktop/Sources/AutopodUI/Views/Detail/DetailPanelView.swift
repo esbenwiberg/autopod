@@ -61,7 +61,7 @@ public struct DetailPanelView: View {
                 case .overview:   OverviewTab(session: session, events: events, actions: actions)
                 case .logs:       LogStreamView(events: events, sessionBranch: session.branch)
                 case .diff:       DiffTab(session: session, diffString: diffString, onRefresh: onRefreshDiff)
-                case .validation: ValidationTab(session: session)
+                case .validation: ValidationTab(session: session, actions: actions)
                 case .summary:    SummaryTab(session: session)
                 case .terminal:   EmptyView()
                 }

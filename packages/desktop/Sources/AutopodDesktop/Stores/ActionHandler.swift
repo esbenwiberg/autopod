@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import AutopodClient
 import AutopodUI
 
@@ -48,6 +49,7 @@ public final class ActionHandler {
       createHistoryWorkspace: { [weak self] profile, limit in
         await self?.createHistoryWorkspace(profileName: profile, limit: limit)
       },
+      openLiveApp: { [weak self] id in await self?.openLiveApp(id) },
       workerProfileForProfile: { [weak self] name in
         self?.profileStore.profiles.first(where: { $0.name == name })?.workerProfile
       }
@@ -277,6 +279,16 @@ public final class ActionHandler {
       lastError = error.localizedDescription
     }
     pendingAction = nil
+  }
+
+  public func openLiveApp(_ sessionId: String) async {
+    do {
+      let previewUrl = try await api.startPreview(sessionId)
+      guard let url = URL(string: previewUrl) else { return }
+      NSWorkspace.shared.open(url)
+    } catch {
+      lastError = error.localizedDescription
+    }
   }
 
   public func clearError() {

@@ -4,12 +4,15 @@ import SwiftUI
 public struct ValidationTab: View {
   public let session: Session
   public let checks: ValidationChecks?
+  public var actions: SessionActions
   @State private var expandedBuildOutput = false
   @State private var expandedTestOutput = false
+  @State private var isOpeningApp = false
 
-  public init(session: Session, checks: ValidationChecks? = nil) {
+  public init(session: Session, checks: ValidationChecks? = nil, actions: SessionActions = .preview) {
     self.session = session
     self.checks = checks ?? session.validationChecks
+    self.actions = actions
   }
 
   public var body: some View {
@@ -41,15 +44,28 @@ public struct ValidationTab: View {
           }
 
           // Open Live App
-          if let url = session.containerUrl, session.status == .validated || session.status == .validating {
+          if session.containerUrl != nil, session.status == .validated || session.status == .validating {
             Button {
-              NSWorkspace.shared.open(url)
+              isOpeningApp = true
+              Task {
+                await actions.openLiveApp(session.id)
+                isOpeningApp = false
+              }
             } label: {
-              Label("Open Live App", systemImage: "safari")
+              if isOpeningApp {
+                HStack(spacing: 6) {
+                  ProgressView().controlSize(.small)
+                  Text("Starting app…")
+                }
                 .frame(maxWidth: .infinity)
+              } else {
+                Label("Open Live App", systemImage: "safari")
+                  .frame(maxWidth: .infinity)
+              }
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
+            .disabled(isOpeningApp)
           }
 
           // Acceptance criteria (full list)
@@ -184,6 +200,33 @@ public struct ValidationTab: View {
                   .padding(8)
                   .background(Color.red.opacity(0.05))
                   .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+              }
+              .padding(.top, 4)
+            }
+            // Screenshots for all pages (pass and fail)
+            if let pages = checks.pages, pages.contains(where: { $0.screenshotBase64 != nil }) {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("Page Screenshots")
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.secondary)
+                ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
+                  if page.screenshotBase64 != nil {
+                    VStack(alignment: .leading, spacing: 4) {
+                      HStack(spacing: 6) {
+                        Image(systemName: page.status == "pass" ? "checkmark.circle.fill" : "xmark.circle.fill")
+                          .font(.system(size: 10))
+                          .foregroundStyle(page.status == "pass" ? Color.green : Color.red)
+                        Text(page.path)
+                          .font(.system(.caption, design: .monospaced).weight(.medium))
+                        Spacer()
+                        Text("\(page.loadTime)ms")
+                          .font(.caption2)
+                          .foregroundStyle(.tertiary)
+                      }
+                      screenshotImage(page.screenshotBase64)
+                    }
+                  }
                 }
               }
               .padding(.top, 4)
