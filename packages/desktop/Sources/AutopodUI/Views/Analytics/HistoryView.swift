@@ -289,7 +289,7 @@ public struct HistoryView: View {
 
                 HStack(spacing: 12) {
                     Picker("Profile", selection: $selectedProfile) {
-                        Text("All profiles").tag(nil as String?)
+                        Text("Select a profile…").tag(nil as String?)
                         ForEach(profileNames, id: \.self) { name in
                             Text(name).tag(name as String?)
                         }
@@ -319,7 +319,7 @@ public struct HistoryView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isCreatingWorkspace)
+                    .disabled(isCreatingWorkspace || selectedProfile == nil)
                 }
             }
             .padding(16)
