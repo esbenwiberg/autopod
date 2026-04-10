@@ -227,16 +227,11 @@ export class LocalWorktreeManager implements WorktreeManager {
   ): Promise<DiffStats> {
     try {
       if (baseBranch || sinceCommit) {
-        let base: string;
-        if (sinceCommit) {
-          base = sinceCommit;
-        } else {
-          const { stdout: mergeBase } = await execFileAsync(
-            'git',
-            ['merge-base', 'HEAD', baseBranch!],
-            { cwd: worktreePath },
-          );
-          base = mergeBase.trim();
+        const base = sinceCommit ?? await this.resolveMergeBase(worktreePath, baseBranch!);
+
+        if (!base) {
+          this.logger.warn({ worktreePath, baseBranch }, 'getDiffStats: could not resolve base ref — returning zeros');
+          return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
         }
 
         // Committed changes: base..HEAD
@@ -278,19 +273,14 @@ export class LocalWorktreeManager implements WorktreeManager {
     maxLength = 50_000,
     sinceCommit?: string,
   ): Promise<string> {
+    const base = sinceCommit ?? await this.resolveMergeBase(worktreePath, baseBranch);
+
+    if (!base) {
+      this.logger.warn({ worktreePath, baseBranch }, 'getDiff: could not resolve base ref — returning empty diff');
+      return '';
+    }
+
     try {
-      let base: string;
-      if (sinceCommit) {
-        // Scope to only the agent's commits from this session
-        base = sinceCommit;
-      } else {
-        const { stdout: mergeBase } = await execFileAsync(
-          'git',
-          ['merge-base', 'HEAD', baseBranch],
-          { cwd: worktreePath },
-        );
-        base = mergeBase.trim();
-      }
       const bufOpts = { cwd: worktreePath, maxBuffer: 2 * 1024 * 1024 };
 
       // Committed changes: base..HEAD
@@ -303,7 +293,8 @@ export class LocalWorktreeManager implements WorktreeManager {
         uncommittedDiff.length > 0 ? `${committedDiff}\n${uncommittedDiff}` : committedDiff;
 
       return combined.slice(0, maxLength);
-    } catch {
+    } catch (err) {
+      this.logger.warn({ err: sanitizeGitError(err), worktreePath }, 'getDiff: git diff failed');
       return '';
     }
   }
@@ -432,17 +423,26 @@ export class LocalWorktreeManager implements WorktreeManager {
     maxCommits = 20,
     sinceCommit?: string,
   ): Promise<string> {
-    try {
-      const rangeRef = sinceCommit ? `${sinceCommit}..HEAD` : `origin/${baseBranch}..HEAD`;
-      const { stdout } = await execFileAsync(
-        'git',
-        ['log', rangeRef, `--max-count=${maxCommits}`, '--format=%h %s%n%b'],
-        { cwd: worktreePath },
-      );
-      return stdout.trim();
-    } catch {
-      return '';
+    // Try sinceCommit first, then origin/baseBranch, then bare baseBranch
+    const rangeRefs = sinceCommit
+      ? [`${sinceCommit}..HEAD`]
+      : [`origin/${baseBranch}..HEAD`, `${baseBranch}..HEAD`];
+
+    for (const rangeRef of rangeRefs) {
+      try {
+        const { stdout } = await execFileAsync(
+          'git',
+          ['log', rangeRef, `--max-count=${maxCommits}`, '--format=%h %s%n%b'],
+          { cwd: worktreePath },
+        );
+        return stdout.trim();
+      } catch {
+        // ref not available — try next
+      }
     }
+
+    this.logger.warn({ worktreePath, baseBranch }, 'getCommitLog: could not resolve any range ref — returning empty');
+    return '';
   }
 
   // --- Private helpers ---
@@ -453,6 +453,28 @@ export class LocalWorktreeManager implements WorktreeManager {
    * the cached PAT. If no PAT is cached (e.g. public repo), returns the clean URL.
    * The credential is never stored in git config — only used per-command.
    */
+  /**
+   * Try merge-base with baseBranch, then origin/baseBranch.
+   * Returns the resolved SHA or undefined if neither ref is available.
+   */
+  private async resolveMergeBase(worktreePath: string, baseBranch: string): Promise<string | undefined> {
+    for (const ref of [baseBranch, `origin/${baseBranch}`]) {
+      try {
+        const { stdout } = await execFileAsync(
+          'git',
+          ['merge-base', 'HEAD', ref],
+          { cwd: worktreePath },
+        );
+        if (stdout.trim()) {
+          return stdout.trim();
+        }
+      } catch {
+        // ref not available in worktree — try next
+      }
+    }
+    return undefined;
+  }
+
   private async getAuthUrl(worktreePath: string): Promise<string> {
     const { stdout: commonDir } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
       cwd: worktreePath,
