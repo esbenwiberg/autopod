@@ -1421,10 +1421,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         try {
           const profile = profileStore.get(session.profileName);
+          // For linked sessions, diff against baseBranch (not startCommitSha) so the
+          // parent session's changes are included in the stats.
+          const sinceCommit = session.linkedSessionId
+            ? undefined
+            : (session.startCommitSha ?? undefined);
           const stats = await worktreeManager.getDiffStats(
             session.worktreePath,
             profile.defaultBranch,
-            session.startCommitSha ?? undefined,
+            sinceCommit,
           );
           sessionRepo.update(sessionId, {
             filesChanged: stats.filesChanged,
@@ -1436,10 +1441,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
       }
 
-      // Skip validation if requested or if agent made no changes
+      // Skip validation if requested or if agent made no changes.
+      // Linked sessions (forks) always validate — the parent's changes need validation
+      // even when the agent in the forked session adds nothing new.
       const refreshed = sessionRepo.getOrThrow(sessionId);
       const noChanges = Boolean(session.worktreePath) && refreshed.filesChanged === 0;
-      if (refreshed.skipValidation || noChanges) {
+      const isLinked = Boolean(refreshed.linkedSessionId);
+      if (refreshed.skipValidation || (noChanges && !isLinked)) {
         if (noChanges) {
           logger.info({ sessionId }, 'Skipping validation — no files changed');
           emitActivityStatus(sessionId, 'No files changed — skipping validation');
@@ -2108,19 +2116,23 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Get the actual diff and commit log for AI task review.
         // Scope to agent's commits using startCommitSha so prior branch history is excluded.
+        // For linked sessions, diff against baseBranch to include the parent's changes.
+        const diffSinceCommit = session.linkedSessionId
+          ? undefined
+          : (session.startCommitSha ?? undefined);
         const [diff, commitLog] = session.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(
                 session.worktreePath,
                 profile.defaultBranch,
                 undefined,
-                session.startCommitSha ?? undefined,
+                diffSinceCommit,
               ),
               worktreeManager.getCommitLog(
                 session.worktreePath,
                 profile.defaultBranch,
                 undefined,
-                session.startCommitSha ?? undefined,
+                diffSinceCommit,
               ),
             ])
           : ['', ''];
@@ -2394,12 +2406,16 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               logger.warn({ err, sessionId }, 'Failed to push branch for PR');
             }
 
-            // Re-compute diff stats now that auto-commit has run
+            // Re-compute diff stats now that auto-commit has run.
+            // For linked sessions, diff against baseBranch to include the parent's changes.
             try {
+              const prSinceCommit = s2.linkedSessionId
+                ? undefined
+                : (s2.startCommitSha ?? undefined);
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
                 profile.defaultBranch,
-                s2.startCommitSha ?? undefined,
+                prSinceCommit,
               );
               sessionRepo.update(sessionId, {
                 filesChanged: stats.filesChanged,
@@ -2696,10 +2712,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             }
 
             try {
+              const failSinceCommit = s2.linkedSessionId
+                ? undefined
+                : (s2.startCommitSha ?? undefined);
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
                 profile.defaultBranch,
-                s2.startCommitSha ?? undefined,
+                failSinceCommit,
               );
               sessionRepo.update(sessionId, {
                 filesChanged: stats.filesChanged,
