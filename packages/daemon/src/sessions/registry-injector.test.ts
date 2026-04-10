@@ -258,6 +258,7 @@ describe('buildNuGetCredentialEnv', () => {
     expect(parsed.endpointCredentials[0].endpoint).toBe(
       'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json',
     );
+    expect(parsed.endpointCredentials[0].username).toBe('VssSessionToken');
     expect(parsed.endpointCredentials[0].password).toBe('my-pat');
   });
 
@@ -302,9 +303,10 @@ describe('validateRegistryFiles', () => {
     } as unknown as ContainerManager;
   }
 
-  it('passes when nuget config is valid', async () => {
+  it('passes when nuget config is valid and auth succeeds', async () => {
     const cm = mockCm({
-      'dotnet nuget': { stdout: 'Registered Sources:\n  1. nuget.org', stderr: '', exitCode: 0 },
+      'dotnet nuget list': { stdout: 'Registered Sources:\n  1. nuget.org', stderr: '', exitCode: 0 },
+      'dotnet nuget search': { stdout: 'No results found.', stderr: '', exitCode: 0 },
     });
     const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.toBeUndefined();
@@ -312,7 +314,7 @@ describe('validateRegistryFiles', () => {
 
   it('throws when nuget config is invalid', async () => {
     const cm = mockCm({
-      'dotnet nuget': {
+      'dotnet nuget list': {
         stdout: 'NuGet.Config is not valid XML',
         stderr: '',
         exitCode: 1,
@@ -321,6 +323,21 @@ describe('validateRegistryFiles', () => {
     const files = [{ path: NUGET_CONFIG_PATH, content: 'garbage' }];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).rejects.toThrow(
       /Registry check failed.*NuGet\.Config is invalid/,
+    );
+  });
+
+  it('throws when nuget auth fails with NU1301', async () => {
+    const cm = mockCm({
+      'dotnet nuget list': { stdout: 'Registered Sources:\n  1. private-feed', stderr: '', exitCode: 0 },
+      'dotnet nuget search': {
+        stdout: 'error NU1301: Unable to load the service index for source https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json. Response status code does not indicate success: 401 (Unauthorized).',
+        stderr: '',
+        exitCode: 1,
+      },
+    });
+    const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
+    await expect(validateRegistryFiles(cm, 'ctr-1', files)).rejects.toThrow(
+      /Registry auth failed.*PAT.*Packaging/,
     );
   });
 
@@ -337,14 +354,16 @@ describe('validateRegistryFiles', () => {
   it('validates both files when both present', async () => {
     const cm = mockCm({
       'npm config': { stdout: '', stderr: '', exitCode: 0 },
-      'dotnet nuget': { stdout: 'Sources', stderr: '', exitCode: 0 },
+      'dotnet nuget list': { stdout: 'Sources', stderr: '', exitCode: 0 },
+      'dotnet nuget search': { stdout: 'No results found.', stderr: '', exitCode: 0 },
     });
     const files = [
       { path: NPM_RC_PATH, content: 'ok' },
       { path: NUGET_CONFIG_PATH, content: 'ok' },
     ];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).resolves.toBeUndefined();
-    expect(cm.execInContainer).toHaveBeenCalledTimes(2);
+    // npm config + dotnet nuget list + dotnet nuget search = 3 calls
+    expect(cm.execInContainer).toHaveBeenCalledTimes(3);
   });
 });
 

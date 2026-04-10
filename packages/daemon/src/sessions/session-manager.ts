@@ -2120,13 +2120,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         // Get the actual diff and commit log for AI task review.
-        // Scope to agent's commits using startCommitSha so prior branch history is excluded.
-        // For forked sessions (linked or branched off non-default), include the parent's changes.
-        const isForkForDiff = Boolean(session.linkedSessionId) ||
-          (session.baseBranch != null && session.baseBranch !== profile.defaultBranch);
-        const diffSinceCommit = isForkForDiff
-          ? undefined
-          : (session.startCommitSha ?? undefined);
+        // Always scope to the agent's own commits via startCommitSha. The reviewer
+        // should only evaluate what this agent changed — pre-existing code on a
+        // parent branch is not the agent's responsibility. Stats/file counts still
+        // use the full branch diff (computed earlier) for accurate PR sizing.
+        const diffSinceCommit = session.startCommitSha ?? undefined;
         const [diff, commitLog] = session.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(

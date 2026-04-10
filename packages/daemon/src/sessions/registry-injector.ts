@@ -168,6 +168,7 @@ export function buildNuGetCredentialEnv(
   const payload = {
     endpointCredentials: nugetRegs.map((r) => ({
       endpoint: r.url,
+      username: 'VssSessionToken',
       password: pat,
     })),
   };
@@ -242,6 +243,32 @@ export async function validateRegistryFiles(
         const output = `${result.stdout}\n${result.stderr}`.trim();
         throw new Error(
           `Registry check failed: ${file.path} is invalid — dotnet nuget list source exited ${result.exitCode}: ${output.slice(0, 500)}`,
+        );
+      }
+
+      // Check 2: Credential provider can authenticate against each NuGet feed.
+      // Runs `dotnet nuget list source --format short` to get source URLs, then
+      // hits the service index of each private feed. Catches stale PATs, missing
+      // credential provider, and endpoint URL mismatches early.
+      const authCheck = await containerManager.execInContainer(
+        containerId,
+        [
+          'sh',
+          '-c',
+          // curl the NuGet v3 service index — 200 means auth is good, 401/403 means bad creds.
+          // Use --fail so non-2xx exits with code 22. The credential provider injects auth via
+          // the env var, but curl won't use it — so we call `dotnet nuget list package` with a
+          // dummy package name. If the source is reachable and auth works, exit code is 0 (no match)
+          // or 0 (empty result). If auth fails, dotnet prints NU1301 and exits non-zero.
+          `dotnet nuget search "__autopod_auth_probe__" --configfile ${file.path} --take 1 2>&1`,
+        ],
+        { cwd: '/workspace', timeout: 60_000 },
+      );
+      // NU1301 = "Unable to load the service index" (auth failure or unreachable)
+      if (authCheck.stdout.includes('NU1301') || authCheck.stderr.includes('NU1301')) {
+        const output = `${authCheck.stdout}\n${authCheck.stderr}`.trim();
+        throw new Error(
+          `Registry auth failed: NuGet feed returned 401/403. Check that the PAT is valid and has Packaging (Read) scope. Output: ${output.slice(0, 800)}`,
         );
       }
     }
