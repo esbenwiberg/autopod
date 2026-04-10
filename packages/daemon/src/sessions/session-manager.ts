@@ -1421,9 +1421,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         try {
           const profile = profileStore.get(session.profileName);
-          // For linked sessions, diff against baseBranch (not startCommitSha) so the
-          // parent session's changes are included in the stats.
-          const sinceCommit = session.linkedSessionId
+          // Forked sessions (linkedSessionId set, or baseBranch differs from defaultBranch)
+          // inherit changes from a parent branch. Diff against defaultBranch (not startCommitSha)
+          // so the parent's changes are included in the stats.
+          const isFork = Boolean(session.linkedSessionId) ||
+            (session.baseBranch && session.baseBranch !== profile.defaultBranch);
+          const sinceCommit = isFork
             ? undefined
             : (session.startCommitSha ?? undefined);
           const stats = await worktreeManager.getDiffStats(
@@ -1442,12 +1445,14 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       // Skip validation if requested or if agent made no changes.
-      // Linked sessions (forks) always validate — the parent's changes need validation
-      // even when the agent in the forked session adds nothing new.
+      // Forked sessions (linked or branched off a non-default branch) always validate —
+      // the parent branch's changes need validation even when the forked agent adds nothing.
       const refreshed = sessionRepo.getOrThrow(sessionId);
+      const profile2 = profileStore.get(refreshed.profileName);
       const noChanges = Boolean(session.worktreePath) && refreshed.filesChanged === 0;
-      const isLinked = Boolean(refreshed.linkedSessionId);
-      if (refreshed.skipValidation || (noChanges && !isLinked)) {
+      const isForkSession = Boolean(refreshed.linkedSessionId) ||
+        (refreshed.baseBranch != null && refreshed.baseBranch !== profile2.defaultBranch);
+      if (refreshed.skipValidation || (noChanges && !isForkSession)) {
         if (noChanges) {
           logger.info({ sessionId }, 'Skipping validation — no files changed');
           emitActivityStatus(sessionId, 'No files changed — skipping validation');
@@ -2116,8 +2121,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Get the actual diff and commit log for AI task review.
         // Scope to agent's commits using startCommitSha so prior branch history is excluded.
-        // For linked sessions, diff against baseBranch to include the parent's changes.
-        const diffSinceCommit = session.linkedSessionId
+        // For forked sessions (linked or branched off non-default), include the parent's changes.
+        const isForkForDiff = Boolean(session.linkedSessionId) ||
+          (session.baseBranch != null && session.baseBranch !== profile.defaultBranch);
+        const diffSinceCommit = isForkForDiff
           ? undefined
           : (session.startCommitSha ?? undefined);
         const [diff, commitLog] = session.worktreePath
@@ -2407,9 +2414,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             }
 
             // Re-compute diff stats now that auto-commit has run.
-            // For linked sessions, diff against baseBranch to include the parent's changes.
+            // For forked sessions, diff against baseBranch to include the parent's changes.
             try {
-              const prSinceCommit = s2.linkedSessionId
+              const prSinceCommit = (s2.linkedSessionId || (s2.baseBranch && s2.baseBranch !== profile.defaultBranch))
                 ? undefined
                 : (s2.startCommitSha ?? undefined);
               const stats = await worktreeManager.getDiffStats(
@@ -2712,7 +2719,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             }
 
             try {
-              const failSinceCommit = s2.linkedSessionId
+              const failSinceCommit = (s2.linkedSessionId || (s2.baseBranch && s2.baseBranch !== profile.defaultBranch))
                 ? undefined
                 : (s2.startCommitSha ?? undefined);
               const stats = await worktreeManager.getDiffStats(
