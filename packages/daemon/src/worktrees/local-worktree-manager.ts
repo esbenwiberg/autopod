@@ -266,7 +266,8 @@ export class LocalWorktreeManager implements WorktreeManager {
       });
 
       return this.parseDiffStats(stdout);
-    } catch {
+    } catch (err) {
+      this.logger.error({ err, worktreePath }, 'getDiffStats failed — returning zeros');
       return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
     }
   }

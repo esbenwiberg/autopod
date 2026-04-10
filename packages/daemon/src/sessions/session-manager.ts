@@ -930,14 +930,20 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Install a git pre-commit hook that blocks commits containing hardcoded
         // credentials (ClearTextPassword, _authToken, etc.). Defense-in-depth:
         // even if system instructions are ignored, the commit will be rejected.
-        await containerManager.writeFile(
-          containerId,
-          '/workspace/.git/hooks/pre-commit',
-          CREDENTIAL_GUARD_HOOK,
-        );
+        //
+        // IMPORTANT: In a git worktree, .git is a gitlink FILE (not a directory)
+        // pointing to the bare repo's worktree metadata. Using writeFile() would
+        // create a .git DIRECTORY via tar extraction, destroying the gitlink and
+        // breaking all git operations inside the container. We stage the hook in
+        // /tmp, then use `git rev-parse --git-dir` to install it at the real path.
+        await containerManager.writeFile(containerId, '/tmp/pre-commit', CREDENTIAL_GUARD_HOOK);
         await containerManager.execInContainer(
           containerId,
-          ['chmod', '+x', '/workspace/.git/hooks/pre-commit'],
+          [
+            'sh',
+            '-c',
+            'GIT_DIR=$(git -C /workspace rev-parse --git-dir) && mkdir -p "$GIT_DIR/hooks" && mv /tmp/pre-commit "$GIT_DIR/hooks/pre-commit" && chmod +x "$GIT_DIR/hooks/pre-commit"',
+          ],
           { timeout: 5_000 },
         );
 
