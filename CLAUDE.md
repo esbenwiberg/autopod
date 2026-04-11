@@ -115,7 +115,9 @@ The backend server (~176 TS/SQL files). All heavy lifting lives here.
 **Database** (`src/db/`):
 - `connection.ts` — SQLite connection (better-sqlite3)
 - `migrate.ts` — Migration runner (applies all pending `.sql` files in order)
-- `migrations/` — 21 migration files (`001_initial.sql` through progressive additions for injection, execution_target, network_policy, actions, model_provider, workspace_pod, token_usage, commit_tracking, etc.)
+- `migrations/` — 35+ migration files (`001_initial.sql` through progressive additions for injection, execution_target, network_policy, actions, model_provider, workspace_pod, token_usage, commit_tracking, etc.)
+
+**CRITICAL — migration numbering**: The runner uses the numeric prefix as the schema version. **Two files sharing the same prefix is a silent bug** — the runner applies the first one alphabetically and skips the second forever (same version number). Always check the highest existing prefix before creating a new migration: `ls packages/daemon/src/db/migrations/ | tail -5`. Never reuse a number.
 
 **Profiles** (`src/profiles/`):
 - `profile-store.ts` — Profile CRUD with credential encryption
