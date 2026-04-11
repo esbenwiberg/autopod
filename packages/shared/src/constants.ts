@@ -14,6 +14,12 @@ export const EVENT_LOG_RETENTION_DAYS = 30;
 export const DEFAULT_CONTAINER_MEMORY_GB = 10;
 
 /**
+ * Maximum number of memory entries to include in the system instructions index.
+ * Only paths and IDs are rendered — agents use `memory_read` for full content.
+ */
+export const MAX_MEMORY_INDEX_ENTRIES = 100;
+
+/**
  * Container user identity — all agent containers run as this non-root user.
  * Dockerfiles create this user at uid/gid 1000.
  */

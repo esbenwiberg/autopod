@@ -6,6 +6,7 @@ import type {
   Profile,
   Session,
 } from '@autopod/shared';
+import { MAX_MEMORY_INDEX_ENTRIES } from '@autopod/shared';
 import type { ResolvedSection } from './section-resolver.js';
 
 export interface SystemInstructionsOptions {
@@ -223,46 +224,29 @@ export function generateSystemInstructions(
   }
 
   if (options?.memories?.length) {
-    lines.push('## Persistent Memory');
+    // Inject a lightweight index instead of full content to avoid context bloat.
+    // Agents use `memory_read` to pull full content for entries relevant to their task.
+    const sorted = sortMemoriesForIndex(options.memories);
+    const shown = sorted.slice(0, MAX_MEMORY_INDEX_ENTRIES);
+    const omitted = sorted.length - shown.length;
+
+    lines.push('## Available Memory');
     lines.push('');
     lines.push(
-      'The following knowledge has been approved and persists across sessions. ' +
-        'Follow these conventions and patterns. ' +
-        'To suggest new memories use the `memory_suggest` tool — a human will review before it becomes active.',
+      'The following knowledge entries are available. ' +
+        'Review the list and use `memory_read` with the entry ID to retrieve full content for entries relevant to your task. ' +
+        'Use `memory_search` to find entries by keyword. ' +
+        'To suggest new memories use `memory_suggest` — a human will review before it becomes active.',
     );
     lines.push('');
-
-    const globalMems = options.memories.filter((m) => m.scope === 'global');
-    const profileMems = options.memories.filter((m) => m.scope === 'profile');
-    const sessionMems = options.memories.filter((m) => m.scope === 'session');
-
-    if (globalMems.length > 0) {
-      lines.push('### Global');
-      for (const m of globalMems) {
-        lines.push(`#### ${m.path}`);
-        lines.push('');
-        lines.push(m.content);
-        lines.push('');
-      }
+    for (const m of shown) {
+      lines.push(`- ${m.path} (${m.scope}, id: ${m.id})`);
     }
-    if (profileMems.length > 0) {
-      lines.push('### Profile');
-      for (const m of profileMems) {
-        lines.push(`#### ${m.path}`);
-        lines.push('');
-        lines.push(m.content);
-        lines.push('');
-      }
+    if (omitted > 0) {
+      lines.push('');
+      lines.push(`(${omitted} more available — use \`memory_search\` to find others)`);
     }
-    if (sessionMems.length > 0) {
-      lines.push('### Session');
-      for (const m of sessionMems) {
-        lines.push(`#### ${m.path}`);
-        lines.push('');
-        lines.push(m.content);
-        lines.push('');
-      }
-    }
+    lines.push('');
   }
 
   lines.push('## When to call ask_human');
@@ -498,4 +482,17 @@ function generateOperatingEnvironment(
     lines.push('- Do NOT run `git push` — the system pushes and creates PRs on your behalf');
   }
   lines.push('');
+}
+
+/**
+ * Sort memories for the index: session first, then profile, then global.
+ * Within each scope, most recently updated entries come first.
+ */
+export function sortMemoriesForIndex(memories: MemoryEntry[]): MemoryEntry[] {
+  const scopeOrder: Record<string, number> = { session: 0, profile: 1, global: 2 };
+  return [...memories].sort((a, b) => {
+    const scopeDiff = (scopeOrder[a.scope] ?? 2) - (scopeOrder[b.scope] ?? 2);
+    if (scopeDiff !== 0) return scopeDiff;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
 }
