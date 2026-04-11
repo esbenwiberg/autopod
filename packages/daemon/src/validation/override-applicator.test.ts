@@ -80,8 +80,11 @@ describe('applyOverrides', () => {
     const overrides = [makeDismiss('ac_validation', 'Button disables on submit')];
     const patched = applyOverrides(result, overrides);
 
+    // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
     expect(patched.acValidation!.results[0]!.passed).toBe(true);
+    // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
     expect(patched.acValidation!.results[0]!.reasoning).toContain('[DISMISSED BY HUMAN]');
+    // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
     expect(patched.acValidation!.status).toBe('pass');
     expect(patched.overall).toBe('pass');
   });
@@ -196,7 +199,9 @@ describe('applyOverrides', () => {
     const overrides = [makeDismiss('task_review', 'Missing tests')];
     applyOverrides(result, overrides);
 
+    // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
     expect(result.taskReview!.issues).toEqual(['Missing tests']);
+    // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
     expect(result.taskReview!.status).toBe('fail');
     expect(result.overall).toBe('fail');
   });

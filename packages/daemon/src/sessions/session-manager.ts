@@ -153,6 +153,7 @@ function parseValidationOverrideResponse(
   // "dismiss 1,2,3" → dismiss specific indices
   const dismissMatch = trimmed.match(/^dismiss\s+([\d,\s]+)$/);
   if (dismissMatch) {
+    // biome-ignore lint/style/noNonNullAssertion: dismissMatch[1] is guaranteed by regex capture group
     const indices = dismissMatch[1]!
       .split(/[,\s]+/)
       .map((s) => Number.parseInt(s, 10) - 1) // 1-based → 0-based
@@ -702,6 +703,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           throw err;
         }
       }
+      // biome-ignore lint/style/noNonNullAssertion: id is guaranteed non-null after the retry loop above
       id = id!;
 
       const session = sessionRepo.getOrThrow(id);
@@ -985,9 +987,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
               const exporter = createHistoryExporter({
                 sessionRepo,
+                // biome-ignore lint/style/noNonNullAssertion: validationRepo is required for history export
                 validationRepo: validationRepo!,
                 escalationRepo: _escalationRepo,
+                // biome-ignore lint/style/noNonNullAssertion: eventRepo is required for history export
                 eventRepo: deps.eventRepo!,
+                // biome-ignore lint/style/noNonNullAssertion: progressEventRepo is required for history export
                 progressEventRepo: progressEventRepo!,
                 actionAuditRepo: deps.actionAuditRepo,
               });
@@ -1218,6 +1223,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           // claudeSessionId was already cleared by triggerValidation so we never
           // resume a stale/broken session context.
           emitStatus('Reworking session…');
+          // biome-ignore lint/style/noNonNullAssertion: reworkReason is always set when isRework=true
           const reworkTask = await buildReworkTask(session, worktreePath, session.reworkReason!);
           events = runtime.spawn({
             sessionId,
@@ -3162,6 +3168,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       await Promise.all(
         runningSessions.map(async (session) => {
           try {
+            // biome-ignore lint/style/noNonNullAssertion: runningSessions always have a containerId
             await cm.refreshFirewall(session.containerId!, netConfig.firewallScript);
             logger.info(
               { sessionId: session.id, profileName },

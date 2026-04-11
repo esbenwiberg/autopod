@@ -55,12 +55,15 @@ function collectEvents(ctx: TestContext): SystemEvent[] {
 }
 
 function statusTransitions(events: SystemEvent[]): Array<{ from: string; to: string }> {
-  return events
-    .filter(
-      (e): e is SystemEvent & { type: 'session.status_changed' } =>
-        e.type === 'session.status_changed',
-    )
-    .map((e) => ({ from: (e as any).previousStatus, to: (e as any).newStatus }));
+  return (
+    events
+      .filter(
+        (e): e is SystemEvent & { type: 'session.status_changed' } =>
+          e.type === 'session.status_changed',
+      )
+      // biome-ignore lint/suspicious/noExplicitAny: accessing typed event fields via discriminated union cast
+      .map((e) => ({ from: (e as any).previousStatus, to: (e as any).newStatus }))
+  );
 }
 
 // ─── Tests ───────────────────────────────────────────────────────
@@ -120,6 +123,7 @@ describe('Session Lifecycle E2E', () => {
       expect(statusChain).toContain('complete');
 
       // 6. Verify completion event
+      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       const completionEvent = events.find((e) => e.type === 'session.completed') as any;
       expect(completionEvent).toBeDefined();
       expect(completionEvent.finalStatus).toBe('complete');
@@ -350,7 +354,9 @@ describe('Session Lifecycle E2E', () => {
 
       // Verify kill event
       const killEvent = events.find(
+        // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
         (e) => e.type === 'session.completed' && (e as any).sessionId === session2.id,
+        // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       ) as any;
       expect(killEvent).toBeDefined();
       expect(killEvent.finalStatus).toBe('killed');

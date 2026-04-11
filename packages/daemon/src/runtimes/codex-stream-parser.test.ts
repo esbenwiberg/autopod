@@ -53,6 +53,7 @@ describe('CodexStreamParser', () => {
         'test-id',
       );
       expect(event?.type).toBe('file_change');
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((event as any).action).toBe('create');
     });
 
@@ -89,6 +90,7 @@ describe('CodexStreamParser', () => {
         'test-id',
       );
       expect(event?.type).toBe('tool_use');
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((event as any).output.length).toBeLessThanOrEqual(500);
     });
 
@@ -124,6 +126,7 @@ describe('CodexStreamParser', () => {
         { type: 'command_output', command: 'ls', output: 'y'.repeat(5_000) },
         'test-id',
       );
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((event as any).output.length).toBeLessThanOrEqual(2000);
     });
 
@@ -169,6 +172,7 @@ describe('CodexStreamParser', () => {
         { type: 'error', message: 'Transient issue' },
         'test-id',
       );
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((event as any).fatal).toBe(false);
     });
 

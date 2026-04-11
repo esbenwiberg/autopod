@@ -426,9 +426,7 @@ function generateOperatingEnvironment(
     }
     if (blockedDomains.length > 0) {
       lines.push(
-        `- **These domains are NOT directly accessible** (no credentials in container): ${blockedDomains.join(', ')}. ` +
-          'Do NOT attempt gh CLI, curl, or WebFetch to these domains — they will fail. ' +
-          'Use the action tools on the Escalation MCP server instead (see MCP Servers section).',
+        `- **These domains are NOT directly accessible** (no credentials in container): ${blockedDomains.join(', ')}. Do NOT attempt gh CLI, curl, or WebFetch to these domains — they will fail. Use the action tools on the Escalation MCP server instead (see MCP Servers section).`,
       );
     }
   }
@@ -461,10 +459,7 @@ function generateOperatingEnvironment(
 
     if (coveredDomains.length > 0) {
       lines.push(
-        `${coveredDomains.join('; ')} — accessible via the action tools on the Escalation MCP server (see MCP Servers section). ` +
-          'You MUST use these MCP action tools for these domains. ' +
-          'Do not use WebFetch, curl, gh CLI, or direct API calls as substitutes — ' +
-          'actions handle authentication, PII redaction, and audit logging automatically.',
+        `${coveredDomains.join('; ')} — accessible via the action tools on the Escalation MCP server (see MCP Servers section). You MUST use these MCP action tools for these domains. Do not use WebFetch, curl, gh CLI, or direct API calls as substitutes — actions handle authentication, PII redaction, and audit logging automatically.`,
       );
     } else {
       lines.push(

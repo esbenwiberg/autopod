@@ -39,7 +39,7 @@ describe('HostBrowserRunner', () => {
     });
 
     it('returns non-zero exit code on script error', async () => {
-      const script = `process.exit(1);`;
+      const script = 'process.exit(1);';
       const result = await runner.runScript(script, {
         timeout: 10_000,
         sessionId: testSessionId,
@@ -49,7 +49,7 @@ describe('HostBrowserRunner', () => {
     });
 
     it('rejects on timeout', async () => {
-      const script = `await new Promise(r => setTimeout(r, 30000));`;
+      const script = 'await new Promise(r => setTimeout(r, 30000));';
       await expect(
         runner.runScript(script, { timeout: 500, sessionId: testSessionId }),
       ).rejects.toThrow('timed out');

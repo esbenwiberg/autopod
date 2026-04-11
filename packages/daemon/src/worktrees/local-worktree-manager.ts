@@ -227,6 +227,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   ): Promise<DiffStats> {
     try {
       if (baseBranch || sinceCommit) {
+        // biome-ignore lint/style/noNonNullAssertion: guarded by `if (baseBranch || sinceCommit)` — baseBranch is non-null when sinceCommit is absent
         const base = sinceCommit ?? (await this.resolveMergeBase(worktreePath, baseBranch!));
 
         if (!base) {

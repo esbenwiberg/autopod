@@ -55,6 +55,7 @@ describe('CodexRuntime', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new CodexRuntime(logger, cm);
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private method in test
       const args = (runtime as any).buildSpawnArgs({
         sessionId: 'abc123',
         task: 'Fix the bug',
@@ -76,6 +77,7 @@ describe('CodexRuntime', () => {
       setTimeout(() => {
         (handle.stdout as PassThrough).write('{"type":"task_start","message":"Starting"}\n');
         (handle.stdout as PassThrough).write('{"type":"task_complete","result":"Done"}\n');
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
         (handle as any).finish(0);
       }, 10);
 
@@ -108,6 +110,7 @@ describe('CodexRuntime', () => {
       const runtime = new CodexRuntime(logger, cm);
 
       setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
         (handle as any).finish(1);
       }, 10);
 
@@ -125,7 +128,9 @@ describe('CodexRuntime', () => {
 
       const errorEvent = events.find((e) => e.type === 'error');
       expect(errorEvent).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((errorEvent as any).message).toContain('exited with code 1');
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((errorEvent as any).fatal).toBe(true);
     });
 
@@ -135,6 +140,7 @@ describe('CodexRuntime', () => {
       const runtime = new CodexRuntime(logger, cm);
 
       setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
         (handle as any).finish(0);
       }, 10);
 
@@ -149,6 +155,7 @@ describe('CodexRuntime', () => {
         /* consume */
       }
 
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
       expect((runtime as any).handles.has('track-test')).toBe(false);
     });
   });
@@ -163,6 +170,7 @@ describe('CodexRuntime', () => {
         (handle.stdout as PassThrough).write('{"type":"task_complete","result":"Fixed"}\n');
         (handle.stdout as PassThrough).push(null);
         // Resolve exitCode after stdout ends
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
         (handle as any).finish(0);
       }, 10);
 
@@ -190,11 +198,13 @@ describe('CodexRuntime', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new CodexRuntime(logger, cm);
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
       (runtime as any).handles.set('sess-1', handle);
 
       await runtime.abort('sess-1');
 
       expect(handle.kill).toHaveBeenCalled();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
       expect((runtime as any).handles.has('sess-1')).toBe(false);
     });
 
