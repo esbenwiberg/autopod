@@ -1,3 +1,4 @@
+import AutopodClient
 import SwiftUI
 
 /// Root view — three-column layout: Sidebar | Fleet/List | Detail
@@ -22,6 +23,15 @@ public struct MainView: View {
     public var onRefreshDiff: ((String) -> Void)?
     public var onShowSettings: (() -> Void)?
 
+    // Memory
+    public var memoryEntries: [MemoryEntry]
+    public var pendingMemoryCount: Int
+    public var onApproveMemory: (String) -> Void
+    public var onRejectMemory: (String) -> Void
+    public var onDeleteMemory: (String) -> Void
+    public var onCreateMemory: ((MemoryScope, String?, String, String) -> Void)?
+    public var onLoadMemories: (() async -> Void)?
+
     @Binding public var selectedSessionId: String?
 
     public init(
@@ -44,7 +54,14 @@ public struct MainView: View {
         onRefresh: (() async -> Void)? = nil,
         onSelectSession: ((String?) -> Void)? = nil,
         onRefreshDiff: ((String) -> Void)? = nil,
-        onShowSettings: (() -> Void)? = nil
+        onShowSettings: (() -> Void)? = nil,
+        memoryEntries: [MemoryEntry] = [],
+        pendingMemoryCount: Int = 0,
+        onApproveMemory: @escaping (String) -> Void = { _ in },
+        onRejectMemory: @escaping (String) -> Void = { _ in },
+        onDeleteMemory: @escaping (String) -> Void = { _ in },
+        onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
+        onLoadMemories: (() async -> Void)? = nil
     ) {
         self.sessions = sessions
         self._selectedSessionId = selectedSessionId
@@ -66,6 +83,13 @@ public struct MainView: View {
         self.onSelectSession = onSelectSession
         self.onRefreshDiff = onRefreshDiff
         self.onShowSettings = onShowSettings
+        self.memoryEntries = memoryEntries
+        self.pendingMemoryCount = pendingMemoryCount
+        self.onApproveMemory = onApproveMemory
+        self.onRejectMemory = onRejectMemory
+        self.onDeleteMemory = onDeleteMemory
+        self.onCreateMemory = onCreateMemory
+        self.onLoadMemories = onLoadMemories
     }
 
     @State private var sidebarSelection: SidebarItem = .attention
@@ -107,6 +131,7 @@ public struct MainView: View {
         case .all:            sessions
         case .analytics:        []
         case .history:          []
+        case .memory:           []
         case .featureOverview:  []
         case .salesPitch:       []
         case .profile(let p):   sessions.filter { $0.profileName == p }
@@ -121,6 +146,7 @@ public struct MainView: View {
                 showCreateSheet: $showCreateSheet,
                 isConnected: isConnected,
                 connectionLabel: connectionLabel,
+                pendingMemoryCount: pendingMemoryCount,
                 onShowSettings: onShowSettings
             )
         } content: {
@@ -130,6 +156,17 @@ public struct MainView: View {
             } else if sidebarSelection == .history {
                 HistoryView(sessions: sessions, actions: wiredActions, profileNames: profileNames)
                     .frame(minWidth: 600)
+            } else if sidebarSelection == .memory {
+                MemoryManagementView(
+                    entries: memoryEntries,
+                    scopeFilter: nil,
+                    onApprove: onApproveMemory,
+                    onReject: onRejectMemory,
+                    onDelete: onDeleteMemory,
+                    onCreateMemory: onCreateMemory
+                )
+                .frame(minWidth: 600)
+                .task { await onLoadMemories?() }
             } else if sidebarSelection == .salesPitch {
                 SalesPitchView()
                     .frame(minWidth: 600)

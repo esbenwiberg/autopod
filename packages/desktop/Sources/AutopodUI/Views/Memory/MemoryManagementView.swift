@@ -8,6 +8,7 @@ public struct MemoryManagementView: View {
     public var onApprove: (String) -> Void
     public var onReject: (String) -> Void
     public var onDelete: (String) -> Void
+    public var onCreateMemory: ((MemoryScope, String?, String, String) -> Void)?
 
     @State private var selectedScope: MemoryScope = .global
     @State private var showingCreate = false
@@ -17,13 +18,15 @@ public struct MemoryManagementView: View {
         scopeFilter: MemoryScope? = nil,
         onApprove: @escaping (String) -> Void = { _ in },
         onReject: @escaping (String) -> Void = { _ in },
-        onDelete: @escaping (String) -> Void = { _ in }
+        onDelete: @escaping (String) -> Void = { _ in },
+        onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil
     ) {
         self.entries = entries
         self.scopeFilter = scopeFilter
         self.onApprove = onApprove
         self.onReject = onReject
         self.onDelete = onDelete
+        self.onCreateMemory = onCreateMemory
     }
 
     private var displayedScope: MemoryScope {
@@ -40,9 +43,39 @@ public struct MemoryManagementView: View {
     public var body: some View {
         VStack(spacing: 0) {
             if scopeFilter == nil {
-                scopePicker
-                Divider()
+                HStack(spacing: 0) {
+                    scopePicker
+                    Spacer()
+                    if onCreateMemory != nil {
+                        Button {
+                            showingCreate = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("New memory")
+                        .padding(.trailing, 12)
+                    }
+                }
+            } else if onCreateMemory != nil {
+                HStack {
+                    Spacer()
+                    Button {
+                        showingCreate = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help("New memory")
+                    .padding(.trailing, 12)
+                    .padding(.top, 8)
+                }
             }
+            Divider()
             if filteredEntries.isEmpty {
                 emptyState
             } else {
@@ -58,6 +91,17 @@ public struct MemoryManagementView: View {
                     .padding(16)
                 }
             }
+        }
+        .sheet(isPresented: $showingCreate) {
+            CreateMemorySheet(
+                defaultScope: scopeFilter ?? selectedScope,
+                scopeLocked: scopeFilter != nil,
+                onCreate: { scope, scopeId, path, content in
+                    onCreateMemory?(scope, scopeId, path, content)
+                    showingCreate = false
+                },
+                onCancel: { showingCreate = false }
+            )
         }
     }
 
@@ -217,5 +261,125 @@ public struct MemoryManagementView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
+    }
+}
+
+// MARK: - Create memory sheet
+
+struct CreateMemorySheet: View {
+    let defaultScope: MemoryScope
+    let scopeLocked: Bool
+    let onCreate: (MemoryScope, String?, String, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var scope: MemoryScope
+    @State private var scopeId: String = ""
+    @State private var path: String = ""
+    @State private var content: String = ""
+
+    init(
+        defaultScope: MemoryScope,
+        scopeLocked: Bool,
+        onCreate: @escaping (MemoryScope, String?, String, String) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.defaultScope = defaultScope
+        self.scopeLocked = scopeLocked
+        self.onCreate = onCreate
+        self.onCancel = onCancel
+        self._scope = State(initialValue: defaultScope)
+    }
+
+    private var isValid: Bool { !path.trimmingCharacters(in: .whitespaces).isEmpty && !content.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var resolvedScopeId: String? { scope == .global ? nil : scopeId.isEmpty ? nil : scopeId }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "brain")
+                    .foregroundStyle(.purple)
+                Text("New Memory")
+                    .font(.headline)
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                Button("Save") {
+                    onCreate(scope, resolvedScopeId, path.trimmingCharacters(in: .whitespaces), content)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!isValid)
+            }
+            .padding(16)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Scope
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Scope")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        if scopeLocked {
+                            Text(scope.label)
+                                .font(.caption)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                        } else {
+                            Picker("", selection: $scope) {
+                                ForEach(MemoryScope.allCases, id: \.self) { s in
+                                    Text(s.label).tag(s)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                    }
+
+                    // Scope ID (hidden for global)
+                    if scope != .global {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(scope == .profile ? "Profile name" : "Session ID")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField(scope == .profile ? "my-app" : "abc12345", text: $scopeId)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                        }
+                    }
+
+                    // Path
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Path")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("/conventions/commits.md", text: $path)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.caption, design: .monospaced))
+                        Text("Use a path-like key to organize memories, e.g. /conventions/commits.md")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    // Content
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Content")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $content)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(minHeight: 120)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                            )
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .frame(width: 480)
     }
 }

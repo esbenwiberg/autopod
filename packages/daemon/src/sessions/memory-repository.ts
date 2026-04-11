@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 
 export interface MemoryRepository {
   list(scope: MemoryScope, scopeId: string | null, approvedOnly?: boolean): MemoryEntry[];
+  listByScope(scope: MemoryScope, approvedOnly?: boolean): MemoryEntry[];
   getOrThrow(id: string): MemoryEntry;
   insert(
     entry: Omit<MemoryEntry, 'version' | 'contentSha256' | 'createdAt' | 'updatedAt'>,
@@ -47,6 +48,18 @@ export function createMemoryRepository(db: Database.Database): MemoryRepository 
            ORDER BY path ASC`,
         )
         .all(params) as Record<string, unknown>[];
+      return rows.map(rowToMemoryEntry);
+    },
+
+    listByScope(scope: MemoryScope, approvedOnly = false): MemoryEntry[] {
+      const approvedClause = approvedOnly ? 'AND approved = 1' : '';
+      const rows = db
+        .prepare(
+          `SELECT * FROM memory_entries
+           WHERE scope = @scope ${approvedClause}
+           ORDER BY path ASC`,
+        )
+        .all({ scope }) as Record<string, unknown>[];
       return rows.map(rowToMemoryEntry);
     },
 

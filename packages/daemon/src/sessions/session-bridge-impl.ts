@@ -406,22 +406,27 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       const scopeId =
         scope === 'global' ? null : scope === 'profile' ? session.profileName : sessionId;
       const id = generateId(8);
+      // Session-scoped memories are ephemeral working notes — auto-approve to avoid
+      // interrupting users for things that only affect a single session run.
+      const approved = scope === 'session';
       const entry = memoryRepo.insert({
         id,
         scope,
         scopeId,
         path,
         content,
-        approved: false,
+        approved,
         createdBySessionId: sessionId,
       });
-      eventBus.emit({
-        type: 'memory.suggestion_created',
-        sessionId,
-        memoryEntry: entry,
-        timestamp: new Date().toISOString(),
-      });
-      logger.info({ sessionId, memoryId: entry.id, scope, path }, 'Memory suggestion created');
+      if (!approved) {
+        eventBus.emit({
+          type: 'memory.suggestion_created',
+          sessionId,
+          memoryEntry: entry,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      logger.info({ sessionId, memoryId: entry.id, scope, path, approved }, 'Memory suggestion created');
       return entry.id;
     },
   };

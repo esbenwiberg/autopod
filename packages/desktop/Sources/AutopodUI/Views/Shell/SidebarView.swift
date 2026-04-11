@@ -7,6 +7,7 @@ public struct SidebarView: View {
     @Binding public var showCreateSheet: Bool
     public var isConnected: Bool
     public var connectionLabel: String
+    public var pendingMemoryCount: Int
     public var onShowSettings: (() -> Void)?
 
     public init(
@@ -15,6 +16,7 @@ public struct SidebarView: View {
         showCreateSheet: Binding<Bool>,
         isConnected: Bool = true,
         connectionLabel: String = "localhost:3000",
+        pendingMemoryCount: Int = 0,
         onShowSettings: (() -> Void)? = nil
     ) {
         self.sessions = sessions
@@ -22,6 +24,7 @@ public struct SidebarView: View {
         self._showCreateSheet = showCreateSheet
         self.isConnected = isConnected
         self.connectionLabel = connectionLabel
+        self.pendingMemoryCount = pendingMemoryCount
         self.onShowSettings = onShowSettings
     }
 
@@ -62,6 +65,7 @@ public struct SidebarView: View {
                     sidebarRow(.all, icon: "square.grid.2x2", color: .secondary, badge: sessions.count)
                     sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
                     sidebarRow(.history, icon: "clock.arrow.circlepath", color: .secondary, badge: 0)
+                    sidebarRow(.memory, icon: "brain", color: .purple, badge: pendingMemoryCount)
                 }
 
                 Section("Profiles") {
@@ -197,6 +201,7 @@ public enum SidebarItem: Hashable {
     case all
     case analytics
     case history
+    case memory
     case profile(String)
     case featureOverview
     case salesPitch
@@ -211,6 +216,7 @@ public enum SidebarItem: Hashable {
         case .all: "All Sessions"
         case .analytics: "Analytics"
         case .history: "History"
+        case .memory: "Memory"
         case .profile(let name): name
         case .featureOverview: "How it Works"
         case .salesPitch: "Why Autopod"

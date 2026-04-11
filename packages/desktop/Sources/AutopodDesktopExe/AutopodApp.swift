@@ -9,6 +9,7 @@ struct AutopodApp: App {
   @State private var connectionManager = ConnectionManager()
   @State private var sessionStore = SessionStore()
   @State private var profileStore = ProfileStore()
+  @State private var memoryStore = MemoryStore()
   @State private var actionHandler: ActionHandler?
   @State private var eventStream: EventStream?
   @State private var terminalManager: TerminalManager?
@@ -20,6 +21,7 @@ struct AutopodApp: App {
         connectionManager: connectionManager,
         sessionStore: sessionStore,
         profileStore: profileStore,
+        memoryStore: memoryStore,
         actionHandler: actionHandler,
         eventStream: eventStream,
         terminalManager: terminalManager,
@@ -72,12 +74,13 @@ struct AutopodApp: App {
 
     sessionStore.configure(api: api)
     profileStore.configure(api: api)
+    memoryStore.configure(api: api)
     actionHandler = ActionHandler(api: api, sessionStore: sessionStore, profileStore: profileStore)
 
     let connToken = connectionManager.activeToken ?? ""
     terminalManager = TerminalManager(baseURL: conn.url, token: connToken)
 
-    let stream = EventStream(sessionStore: sessionStore)
+    let stream = EventStream(sessionStore: sessionStore, memoryStore: memoryStore)
     stream.connect(baseURL: conn.url, token: connToken)
     eventStream = stream
 

@@ -11,6 +11,8 @@ export function memoryRoutes(app: FastifyInstance, deps: MemoryDeps): void {
   const { memoryRepo } = deps;
 
   // GET /memory?scope=&scopeId=&approved=
+  // When scopeId is omitted, returns ALL entries for that scope (no scope_id filter).
+  // When scopeId is present (even empty string), filters to that specific scope_id.
   app.get('/memory', async (request, reply) => {
     const q = request.query as {
       scope?: string;
@@ -18,9 +20,11 @@ export function memoryRoutes(app: FastifyInstance, deps: MemoryDeps): void {
       approved?: string;
     };
     const scope = (q.scope ?? 'global') as MemoryScope;
-    const scopeId = q.scopeId ?? null;
     const approvedOnly = q.approved !== 'false';
-    const entries = memoryRepo.list(scope, scopeId, approvedOnly);
+    const entries =
+      q.scopeId === undefined
+        ? memoryRepo.listByScope(scope, approvedOnly)
+        : memoryRepo.list(scope, q.scopeId || null, approvedOnly);
     return reply.send(entries);
   });
 

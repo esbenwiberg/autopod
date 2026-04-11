@@ -7,6 +7,7 @@ public struct AppRootView: View {
   public let connectionManager: ConnectionManager
   public let sessionStore: SessionStore
   public let profileStore: ProfileStore
+  public let memoryStore: MemoryStore
   public let actionHandler: ActionHandler?
   public let eventStream: EventStream?
   public let terminalManager: TerminalManager?
@@ -16,6 +17,7 @@ public struct AppRootView: View {
     connectionManager: ConnectionManager,
     sessionStore: SessionStore,
     profileStore: ProfileStore,
+    memoryStore: MemoryStore,
     actionHandler: ActionHandler?,
     eventStream: EventStream?,
     terminalManager: TerminalManager?,
@@ -24,6 +26,7 @@ public struct AppRootView: View {
     self.connectionManager = connectionManager
     self.sessionStore = sessionStore
     self.profileStore = profileStore
+    self.memoryStore = memoryStore
     self.actionHandler = actionHandler
     self.eventStream = eventStream
     self.terminalManager = terminalManager
@@ -82,7 +85,16 @@ public struct AppRootView: View {
       },
       onShowSettings: {
         showSettings = true
-      }
+      },
+      memoryEntries: memoryStore.entries,
+      pendingMemoryCount: memoryStore.pendingCount,
+      onApproveMemory: { id in Task { await memoryStore.approve(id) } },
+      onRejectMemory: { id in Task { await memoryStore.reject(id) } },
+      onDeleteMemory: { id in Task { await memoryStore.delete(id) } },
+      onCreateMemory: { scope, scopeId, path, content in
+        Task { await memoryStore.create(scope: scope, scopeId: scopeId, path: path, content: content) }
+      },
+      onLoadMemories: { await memoryStore.loadMemories() }
     )
     .alert("Error", isPresented: $showError) {
       Button("OK") { actionHandler?.clearError() }

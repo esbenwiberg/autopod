@@ -159,6 +159,8 @@ public struct FeatureDetailPanelView: View {
             diagramCard("Streaming Protocol") { runtimeStreamDiagram }
         case .realTimeMonitoring:
             diagramCard("Event Flow") { monitoringEventDiagram }
+        case .memoryStore:
+            diagramCard("Scope Hierarchy") { memoryStoreDiagram }
         }
     }
 
@@ -499,6 +501,42 @@ public struct FeatureDetailPanelView: View {
                 }
             }
             Text("30-day retention · event replay · PII sanitized before broadcast")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+        }
+    }
+
+    // MARK: - Memory store diagram
+
+    private var memoryStoreDiagram: some View {
+        VStack(spacing: 6) {
+            let scopes: [(String, String, String, Color)] = [
+                ("globe", "Global", "user.md · persists across all sessions", .mint),
+                ("person.fill", "Profile", "profile.md · shared across profile sessions", .teal),
+                ("doc.fill", "Session", "session.md · ephemeral, injected at start", .cyan),
+            ]
+            ForEach(scopes, id: \.1) { icon, scope, detail, color in
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 9))
+                        .foregroundStyle(color)
+                        .frame(width: 14)
+                    Text(scope)
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(color)
+                        .frame(width: 48, alignment: .leading)
+                    Text(detail)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(color.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            Text("suggest → approve → inject into CLAUDE.md")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 2)

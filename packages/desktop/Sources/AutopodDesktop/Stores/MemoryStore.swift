@@ -29,6 +29,8 @@ public final class MemoryStore {
         entries.filter { $0.approved }
     }
 
+    public var pendingCount: Int { pendingSuggestions.count }
+
     // MARK: - Load
 
     public func loadMemories(scope: MemoryScope? = nil, scopeId: String? = nil) async {
