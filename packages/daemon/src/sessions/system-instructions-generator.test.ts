@@ -1,6 +1,9 @@
-import type { Profile, Session } from '@autopod/shared';
+import type { MemoryEntry, Profile, Session } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { generateSystemInstructions } from './system-instructions-generator.js';
+import {
+  generateSystemInstructions,
+  sortMemoriesForIndex,
+} from './system-instructions-generator.js';
 
 function makeProfile(overrides?: Partial<Profile>): Profile {
   return {
@@ -487,6 +490,167 @@ describe('generateSystemInstructions', () => {
       );
       expect(md).toContain('Only WebFetch/curl to the allowed domains');
       expect(md).toContain('docs.example.com');
+    });
+  });
+
+  describe('memory index', () => {
+    function makeMemory(overrides: Partial<MemoryEntry>): MemoryEntry {
+      return {
+        id: 'mem1',
+        scope: 'global',
+        scopeId: null,
+        path: '/conventions/test.md',
+        content: 'Full content that should not appear in the index.',
+        contentSha256: 'abc123',
+        version: 1,
+        approved: true,
+        createdBySessionId: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        ...overrides,
+      };
+    }
+
+    it('omits memory section when no memories provided', () => {
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+      );
+      expect(md).not.toContain('## Available Memory');
+    });
+
+    it('omits memory section when memories is empty array', () => {
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        { memories: [] },
+      );
+      expect(md).not.toContain('## Available Memory');
+    });
+
+    it('renders index with path, scope, and id — not full content', () => {
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          memories: [
+            makeMemory({
+              id: 'mem-abc',
+              scope: 'global',
+              path: '/conventions/commits.md',
+              content: 'This is the full content of the commits convention.',
+            }),
+            makeMemory({
+              id: 'mem-def',
+              scope: 'profile',
+              scopeId: 'test-profile',
+              path: '/patterns/auth-flow.md',
+              content: 'Detailed auth flow documentation here.',
+            }),
+          ],
+        },
+      );
+
+      expect(md).toContain('## Available Memory');
+      expect(md).toContain('- /conventions/commits.md (global, id: mem-abc)');
+      expect(md).toContain('- /patterns/auth-flow.md (profile, id: mem-def)');
+      expect(md).toContain('memory_read');
+      expect(md).toContain('memory_search');
+      // Full content should NOT appear
+      expect(md).not.toContain('This is the full content of the commits convention.');
+      expect(md).not.toContain('Detailed auth flow documentation here.');
+    });
+
+    it('shows omitted count when memories exceed MAX_MEMORY_INDEX_ENTRIES', () => {
+      const memories: MemoryEntry[] = Array.from({ length: 105 }, (_, i) =>
+        makeMemory({
+          id: `mem-${i}`,
+          path: `/entry-${i}.md`,
+          updatedAt: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+        }),
+      );
+
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        { memories },
+      );
+
+      expect(md).toContain('## Available Memory');
+      expect(md).toContain('5 more available');
+      expect(md).toContain('memory_search');
+      // Should not contain all 105 entries
+      const entryLines = md.split('\n').filter((l) => l.startsWith('- /entry-'));
+      expect(entryLines).toHaveLength(100);
+    });
+
+    it('does not show omitted note when memories fit within limit', () => {
+      const md = generateSystemInstructions(
+        makeProfile(),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          memories: [makeMemory({ id: 'mem1', path: '/one.md' })],
+        },
+      );
+
+      expect(md).toContain('## Available Memory');
+      expect(md).not.toContain('more available');
+    });
+  });
+
+  describe('sortMemoriesForIndex', () => {
+    function makeMemory(overrides: Partial<MemoryEntry>): MemoryEntry {
+      return {
+        id: 'mem1',
+        scope: 'global',
+        scopeId: null,
+        path: '/test.md',
+        content: '',
+        contentSha256: '',
+        version: 1,
+        approved: true,
+        createdBySessionId: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        ...overrides,
+      };
+    }
+
+    it('orders session before profile before global', () => {
+      const memories = [
+        makeMemory({ id: 'g', scope: 'global', updatedAt: '2026-03-01T00:00:00Z' }),
+        makeMemory({ id: 'p', scope: 'profile', updatedAt: '2026-01-01T00:00:00Z' }),
+        makeMemory({ id: 's', scope: 'session', updatedAt: '2026-01-01T00:00:00Z' }),
+      ];
+
+      const sorted = sortMemoriesForIndex(memories);
+      expect(sorted.map((m) => m.id)).toEqual(['s', 'p', 'g']);
+    });
+
+    it('sorts by updatedAt descending within same scope', () => {
+      const memories = [
+        makeMemory({ id: 'old', scope: 'profile', updatedAt: '2026-01-01T00:00:00Z' }),
+        makeMemory({ id: 'new', scope: 'profile', updatedAt: '2026-06-01T00:00:00Z' }),
+        makeMemory({ id: 'mid', scope: 'profile', updatedAt: '2026-03-01T00:00:00Z' }),
+      ];
+
+      const sorted = sortMemoriesForIndex(memories);
+      expect(sorted.map((m) => m.id)).toEqual(['new', 'mid', 'old']);
+    });
+
+    it('does not mutate the original array', () => {
+      const memories = [
+        makeMemory({ id: 'g', scope: 'global' }),
+        makeMemory({ id: 's', scope: 'session' }),
+      ];
+
+      sortMemoriesForIndex(memories);
+      expect(memories[0].id).toBe('g');
     });
   });
 });
