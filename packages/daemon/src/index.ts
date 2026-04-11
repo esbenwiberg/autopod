@@ -461,6 +461,7 @@ if (aciContainerManager) {
     eventBus,
     containerManager,
     enqueueSession: (id) => sessionQueue.enqueue(id),
+    validationRepo,
     logger,
   })
     .then((result) => {

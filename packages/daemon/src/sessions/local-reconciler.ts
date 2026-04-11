@@ -4,12 +4,14 @@ import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { EventBus } from './event-bus.js';
 import type { SessionRepository } from './session-repository.js';
+import type { ValidationRepository } from './validation-repository.js';
 
 export interface LocalReconcilerDependencies {
   sessionRepo: SessionRepository;
   eventBus: EventBus;
   containerManager: ContainerManager;
   enqueueSession: (sessionId: string) => void;
+  validationRepo: ValidationRepository;
   logger: Logger;
 }
 
@@ -110,6 +112,31 @@ async function recoverSession(
   result: ReconcileResult,
 ): Promise<void> {
   const { sessionRepo, eventBus, containerManager, enqueueSession, logger } = deps;
+
+  // If the session was mid-validation when the daemon crashed and validation had already
+  // passed (result persisted in DB) + the PR was already created, recover directly to
+  // `validated` — no need to re-run the agent or re-run validation.
+  if (session.status === 'validating' && session.prUrl) {
+    const stored = deps.validationRepo.getForSession(session.id);
+    const lastResult = stored[stored.length - 1];
+    if (lastResult?.result.overall === 'pass') {
+      if (session.containerId) {
+        try {
+          await containerManager.kill(session.containerId);
+        } catch {
+          // Container already gone — expected after a crash/restart
+        }
+      }
+      sessionRepo.update(session.id, { status: 'validated', containerId: null });
+      emitStatusChanged(session.id, 'validating', 'validated', eventBus);
+      logger.info(
+        { sessionId: session.id, prUrl: session.prUrl },
+        'Session recovered — validation already passed, skipping re-validation',
+      );
+      result.recovered.push(session.id);
+      return;
+    }
+  }
 
   // Kill the old container (best-effort — it may already be gone after daemon restart)
   if (session.containerId) {

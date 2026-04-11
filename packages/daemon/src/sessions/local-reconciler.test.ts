@@ -1,4 +1,4 @@
-import type { Session, SessionStatus } from '@autopod/shared';
+import type { Session, SessionStatus, ValidationResult } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
@@ -13,6 +13,7 @@ import {
   reconcileLocalSessions,
 } from './local-reconciler.js';
 import type { SessionRepository } from './session-repository.js';
+import { createValidationRepository } from './validation-repository.js';
 
 // Mock fs/promises to control worktree existence checks
 vi.mock('node:fs/promises', () => ({
@@ -69,16 +70,19 @@ function createReconcilerDeps(overrides?: {
   eventBus: EventBus;
   containerManager: ContainerManager;
   enqueuedSessions: string[];
+  validationRepo: ReturnType<typeof createValidationRepository>;
 } {
   const ctx = createTestContext();
   const containerManager = overrides?.containerManager ?? createMockContainerManager();
   const enqueuedSessions: string[] = [];
+  const validationRepo = createValidationRepository(ctx.db);
 
   const deps: LocalReconcilerDependencies = {
     sessionRepo: ctx.sessionRepo,
     eventBus: ctx.eventBus,
     containerManager,
     enqueueSession: (id) => enqueuedSessions.push(id),
+    validationRepo,
     logger,
   };
 
@@ -88,6 +92,41 @@ function createReconcilerDeps(overrides?: {
     eventBus: ctx.eventBus,
     containerManager,
     enqueuedSessions,
+    validationRepo,
+  };
+}
+
+function makePassingValidationResult(sessionId: string, attempt = 1): ValidationResult {
+  return {
+    sessionId,
+    attempt,
+    timestamp: new Date().toISOString(),
+    overall: 'pass',
+    duration: 1000,
+    smoke: {
+      status: 'pass',
+      build: { status: 'pass', output: '', duration: 100 },
+      health: { status: 'pass', url: 'http://localhost', responseCode: 200, duration: 50 },
+      pages: [],
+    },
+    taskReview: null,
+  };
+}
+
+function makeFailingValidationResult(sessionId: string, attempt = 1): ValidationResult {
+  return {
+    sessionId,
+    attempt,
+    timestamp: new Date().toISOString(),
+    overall: 'fail',
+    duration: 1000,
+    smoke: {
+      status: 'fail',
+      build: { status: 'fail', output: 'error', duration: 100 },
+      health: { status: 'fail', url: 'http://localhost', responseCode: null, duration: 50 },
+      pages: [],
+    },
+    taskReview: null,
   };
 }
 
@@ -362,6 +401,165 @@ describe('reconcileLocalSessions', () => {
     expect(result.recovered).toContain('mix-1');
     expect(result.killed).toContain('mix-2');
     expect(result.killed).toContain('mix-3');
+  });
+
+  it('recovers validating session directly to validated when validation passed and PR exists', async () => {
+    const { deps, sessionRepo, enqueuedSessions, containerManager, validationRepo } =
+      createReconcilerDeps();
+
+    sessionRepo.insert({
+      id: 'val-1',
+      profileName: 'test-profile',
+      task: 'Fix task',
+      status: 'validating',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/val-1',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    sessionRepo.update('val-1', {
+      containerId: 'ctr-old',
+      worktreePath: '/tmp/worktree/val-1',
+      prUrl: 'https://example.com/pr/42',
+    });
+    validationRepo.insert('val-1', 1, makePassingValidationResult('val-1', 1));
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    const result = await reconcileLocalSessions(deps);
+
+    expect(result.recovered).toContain('val-1');
+    expect(result.killed).not.toContain('val-1');
+
+    // Should be validated, NOT re-queued
+    const session = sessionRepo.getOrThrow('val-1');
+    expect(session.status).toBe('validated');
+    expect(session.containerId).toBeNull();
+
+    // Old container should have been killed
+    expect(containerManager.kill).toHaveBeenCalledWith('ctr-old');
+
+    // Must NOT be enqueued — goes straight to validated
+    expect(enqueuedSessions).not.toContain('val-1');
+  });
+
+  it('re-queues validating session when validation passed but PR not yet created', async () => {
+    const { deps, sessionRepo, enqueuedSessions, validationRepo } = createReconcilerDeps();
+
+    sessionRepo.insert({
+      id: 'val-2',
+      profileName: 'test-profile',
+      task: 'Fix task',
+      status: 'validating',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/val-2',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    sessionRepo.update('val-2', {
+      containerId: 'ctr-old',
+      worktreePath: '/tmp/worktree/val-2',
+      prUrl: null, // no PR yet — crash happened between validation-pass and PR creation
+    });
+    validationRepo.insert('val-2', 1, makePassingValidationResult('val-2', 1));
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    const result = await reconcileLocalSessions(deps);
+
+    // Falls through to normal re-queue path
+    expect(result.recovered).toContain('val-2');
+    const session = sessionRepo.getOrThrow('val-2');
+    expect(session.status).toBe('queued');
+    expect(enqueuedSessions).toContain('val-2');
+  });
+
+  it('re-queues validating session when no validation results exist', async () => {
+    const { deps, sessionRepo, enqueuedSessions } = createReconcilerDeps();
+
+    sessionRepo.insert({
+      id: 'val-3',
+      profileName: 'test-profile',
+      task: 'Fix task',
+      status: 'validating',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/val-3',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    sessionRepo.update('val-3', {
+      containerId: 'ctr-old',
+      worktreePath: '/tmp/worktree/val-3',
+      prUrl: 'https://example.com/pr/43',
+    });
+    // No validation results inserted — crash happened before validation finished
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    const result = await reconcileLocalSessions(deps);
+
+    expect(result.recovered).toContain('val-3');
+    const session = sessionRepo.getOrThrow('val-3');
+    expect(session.status).toBe('queued');
+    expect(enqueuedSessions).toContain('val-3');
+  });
+
+  it('re-queues validating session when last validation result failed', async () => {
+    const { deps, sessionRepo, enqueuedSessions, validationRepo } = createReconcilerDeps();
+
+    sessionRepo.insert({
+      id: 'val-4',
+      profileName: 'test-profile',
+      task: 'Fix task',
+      status: 'validating',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/val-4',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    sessionRepo.update('val-4', {
+      containerId: 'ctr-old',
+      worktreePath: '/tmp/worktree/val-4',
+      prUrl: 'https://example.com/pr/44',
+    });
+    validationRepo.insert('val-4', 1, makeFailingValidationResult('val-4', 1));
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    const result = await reconcileLocalSessions(deps);
+
+    expect(result.recovered).toContain('val-4');
+    const session = sessionRepo.getOrThrow('val-4');
+    expect(session.status).toBe('queued');
+    expect(enqueuedSessions).toContain('val-4');
   });
 
   it('returns empty result when no orphaned sessions exist', async () => {
