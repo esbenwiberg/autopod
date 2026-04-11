@@ -8,6 +8,11 @@ public struct ValidationTab: View {
   @State private var expandedBuildOutput = false
   @State private var expandedTestOutput = false
   @State private var isOpeningApp = false
+  @State private var isInterrupting = false
+  @State private var overridePopoverFindingId: String? = nil
+  @State private var overrideAction: String = "dismiss"
+  @State private var overrideReason: String = ""
+  @State private var overrideGuidance: String = ""
 
   public init(session: Session, checks: ValidationChecks? = nil, actions: SessionActions = .preview) {
     self.session = session
@@ -27,6 +32,30 @@ public struct ValidationTab: View {
               validationBadge("AC", status: acPassed, icon: "checklist.checked")
             }
             validationBadge("Review", status: checks.review, icon: "eye")
+            Spacer()
+            // Interrupt button shown while validation is in progress
+            if session.status == .validating {
+              Button {
+                isInterrupting = true
+                Task {
+                  await actions.interruptValidation(session.id)
+                  isInterrupting = false
+                }
+              } label: {
+                if isInterrupting {
+                  HStack(spacing: 4) {
+                    ProgressView().controlSize(.mini)
+                    Text("Stopping…")
+                  }
+                } else {
+                  Label("Interrupt", systemImage: "stop.fill")
+                }
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .tint(.orange)
+              .disabled(isInterrupting)
+            }
           }
           .padding(16)
           .frame(maxWidth: .infinity)
@@ -353,7 +382,8 @@ public struct ValidationTab: View {
             }
             if let issues = checks.reviewIssues, !issues.isEmpty {
               VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
+                ForEach(Array(issues.enumerated()), id: \.offset) { idx, issue in
+                  let findingId = "review-issue-\(idx)"
                   HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle")
                       .font(.system(size: 9))
@@ -361,6 +391,22 @@ public struct ValidationTab: View {
                       .padding(.top, 2)
                     Text(issue)
                       .font(.caption)
+                    Spacer()
+                    Button("Override") {
+                      overrideAction = "dismiss"
+                      overrideReason = ""
+                      overrideGuidance = ""
+                      overridePopoverFindingId = findingId
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .popover(isPresented: Binding(
+                      get: { overridePopoverFindingId == findingId },
+                      set: { if !$0 { overridePopoverFindingId = nil } }
+                    )) {
+                      overridePopover(findingId: findingId, description: issue)
+                    }
                   }
                 }
               }
@@ -425,6 +471,51 @@ public struct ValidationTab: View {
       }
       .padding(20)
     }
+  }
+
+  @ViewBuilder
+  private func overridePopover(findingId: String, description: String) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Override Finding")
+        .font(.headline)
+      Picker("Action", selection: $overrideAction) {
+        Text("Dismiss").tag("dismiss")
+        Text("Guidance").tag("guidance")
+      }
+      .pickerStyle(.segmented)
+      if overrideAction == "dismiss" {
+        TextField("Reason (optional)", text: $overrideReason)
+          .textFieldStyle(.roundedBorder)
+      } else {
+        TextField("Guidance for the agent", text: $overrideGuidance, axis: .vertical)
+          .textFieldStyle(.roundedBorder)
+          .lineLimit(3...6)
+      }
+      HStack {
+        Button("Cancel") {
+          overridePopoverFindingId = nil
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        Spacer()
+        Button("Queue Override") {
+          let fid = findingId
+          let desc = description
+          let action = overrideAction
+          let reason = overrideReason.isEmpty ? nil : overrideReason
+          let guidance = overrideGuidance.isEmpty ? nil : overrideGuidance
+          overridePopoverFindingId = nil
+          Task {
+            await actions.addValidationOverride(session.id, fid, desc, action, reason, guidance)
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .disabled(overrideAction == "guidance" && overrideGuidance.isEmpty)
+      }
+    }
+    .padding(16)
+    .frame(width: 280)
   }
 
   private func validationBadge(_ label: String, status: Bool?, icon: String) -> some View {

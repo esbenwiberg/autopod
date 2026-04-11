@@ -275,6 +275,9 @@ public struct Session: Identifiable, Sendable {
     /// Linked session ID for session chaining (workspace ↔ worker handoff)
     public var linkedSessionId: String?
 
+    /// Snapshot of the resolved profile config at session creation time
+    public var profileSnapshot: Profile?
+
     public var isWorkspace: Bool { outputMode == .workspace }
 
     /// Whether this session is in a terminal state and can be deleted.
@@ -322,7 +325,8 @@ public struct Session: Identifiable, Sendable {
         costUsd: Double = 0,
         commitCount: Int = 0,
         taskSummary: TaskSummary? = nil,
-        linkedSessionId: String? = nil
+        linkedSessionId: String? = nil,
+        profileSnapshot: Profile? = nil
     ) {
         self.id = id; self.status = status; self.outputMode = outputMode
         self.branch = branch; self.profileName = profileName; self.task = task
@@ -337,5 +341,6 @@ public struct Session: Identifiable, Sendable {
         self.inputTokens = inputTokens; self.outputTokens = outputTokens
         self.costUsd = costUsd; self.commitCount = commitCount
         self.taskSummary = taskSummary; self.linkedSessionId = linkedSessionId
+        self.profileSnapshot = profileSnapshot
     }
 }

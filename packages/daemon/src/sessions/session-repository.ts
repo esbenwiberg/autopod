@@ -2,6 +2,7 @@ import type {
   ExecutionTarget,
   OutputMode,
   PimGroupConfig,
+  Profile,
   Session,
   SessionStatus,
   TaskSummary,
@@ -75,6 +76,7 @@ export interface SessionUpdates {
   linkedSessionId?: string | null;
   taskSummary?: TaskSummary | null;
   validationOverrides?: ValidationOverride[] | null;
+  profileSnapshot?: Profile | null;
 }
 
 export interface SessionStats {
@@ -149,6 +151,9 @@ function rowToSession(row: Record<string, unknown>): Session {
       ? JSON.parse(row.validation_overrides as string)
       : null,
     pimGroups: row.pim_groups ? (JSON.parse(row.pim_groups as string) as PimGroupConfig[]) : null,
+    profileSnapshot: row.profile_snapshot
+      ? (JSON.parse(row.profile_snapshot as string) as Profile)
+      : null,
   };
 }
 
@@ -338,6 +343,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         setClauses.push('validation_overrides = @validationOverrides');
         params.validationOverrides =
           changes.validationOverrides !== null ? JSON.stringify(changes.validationOverrides) : null;
+      }
+      if (changes.profileSnapshot !== undefined) {
+        setClauses.push('profile_snapshot = @profileSnapshot');
+        params.profileSnapshot =
+          changes.profileSnapshot !== null ? JSON.stringify(changes.profileSnapshot) : null;
       }
 
       if (setClauses.length === 0) return;

@@ -3,6 +3,8 @@ import type {
   ActionResponse,
   EscalationRequest,
   EscalationResponse,
+  MemoryEntry,
+  MemoryScope,
 } from '@autopod/shared';
 
 export interface SessionBridge {
@@ -72,6 +74,21 @@ export interface SessionBridge {
 
   /** Get the linked session ID for a workspace (if any). */
   getLinkedSessionId(sessionId: string): string | null;
+
+  /** List approved memories for the given scope. */
+  listMemories(sessionId: string, scope: MemoryScope): MemoryEntry[];
+
+  /** Read a single memory entry by ID. */
+  readMemory(sessionId: string, id: string): MemoryEntry;
+
+  /** Search memories by text within the given scope. */
+  searchMemories(sessionId: string, scope: MemoryScope, query: string): MemoryEntry[];
+
+  /**
+   * Suggest a new memory (pending human approval).
+   * Returns the new entry ID.
+   */
+  suggestMemory(sessionId: string, scope: MemoryScope, path: string, content: string): string;
 
   /** Trigger revalidation on a linked failed worker session (pull + validate, no agent). */
   revalidateLinkedSession(

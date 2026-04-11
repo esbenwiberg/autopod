@@ -214,6 +214,72 @@ public actor DaemonAPI {
     try await request("GET", "/actions/catalog")
   }
 
+  // MARK: - Memory
+
+  public func listMemories(
+    scope: String,
+    scopeId: String? = nil,
+    approvedOnly: Bool = true
+  ) async throws -> [MemoryEntry] {
+    var query: [String: String] = ["scope": scope, "approved": approvedOnly ? "true" : "false"]
+    if let s = scopeId { query["scopeId"] = s }
+    return try await request("GET", "/memory", query: query)
+  }
+
+  public func createMemory(scope: String, scopeId: String?, path: String, content: String) async throws -> MemoryEntry {
+    let body = try JSONSerialization.data(withJSONObject: [
+      "scope": scope,
+      "scopeId": scopeId as Any,
+      "path": path,
+      "content": content,
+    ])
+    return try await request("POST", "/memory", body: body)
+  }
+
+  public func approveMemory(_ id: String) async throws {
+    let body = try JSONSerialization.data(withJSONObject: ["action": "approve"])
+    let _: EmptyResponse = try await request("PATCH", "/memory/\(id)", body: body)
+  }
+
+  public func rejectMemory(_ id: String) async throws {
+    let body = try JSONSerialization.data(withJSONObject: ["action": "reject"])
+    let _: EmptyResponse = try await request("PATCH", "/memory/\(id)", body: body)
+  }
+
+  public func updateMemory(_ id: String, content: String) async throws {
+    let body = try JSONSerialization.data(withJSONObject: ["action": "update", "content": content])
+    let _: EmptyResponse = try await request("PATCH", "/memory/\(id)", body: body)
+  }
+
+  public func deleteMemory(_ id: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/memory/\(id)")
+  }
+
+  // MARK: - Validation
+
+  public func interruptValidation(sessionId: String) async throws {
+    let _: EmptyResponse = try await request("POST", "/sessions/\(sessionId)/interrupt-validation")
+  }
+
+  public func addValidationOverride(
+    sessionId: String,
+    findingId: String,
+    description: String,
+    action: String,
+    reason: String? = nil,
+    guidance: String? = nil
+  ) async throws {
+    var dict: [String: Any] = [
+      "findingId": findingId,
+      "description": description,
+      "action": action,
+    ]
+    if let reason = reason { dict["reason"] = reason }
+    if let guidance = guidance { dict["guidance"] = guidance }
+    let body = try JSONSerialization.data(withJSONObject: dict)
+    let _: EmptyResponse = try await request("POST", "/sessions/\(sessionId)/validation-overrides", body: body)
+  }
+
   // MARK: - Internal request helper
 
   private func encode(_ value: some Encodable) throws -> Data {

@@ -141,6 +141,30 @@ export class DockerNetworkManager {
       }
     }
 
+    // Auto-allow common package manager registries when the flag is set
+    if (policy.allowPackageManagers) {
+      const PACKAGE_MANAGER_HOSTS = [
+        'registry.npmjs.org',
+        'registry.yarnpkg.com',
+        'dl.yarnpkg.com',
+        'pypi.org',
+        'files.pythonhosted.org',
+        'crates.io',
+        'static.crates.io',
+        'deb.debian.org',
+        'security.debian.org',
+        'nuget.org',
+        'api.nuget.org',
+        'proxy.golang.org',
+        'sum.golang.org',
+        'rubygems.org',
+        'api.rubygems.org',
+      ];
+      for (const h of PACKAGE_MANAGER_HOSTS) {
+        hosts.add(h);
+      }
+    }
+
     return [...hosts];
   }
 

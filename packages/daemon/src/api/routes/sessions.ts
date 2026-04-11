@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import type { SessionTokenIssuer } from '../../crypto/session-tokens.js';
 import type { EventRepository } from '../../sessions/event-repository.js';
 import type { SessionManager } from '../../sessions/index.js';
+import type { PendingOverrideRepository } from '../../sessions/pending-override-repository.js';
 import { generateValidationReport } from '../../validation/report-generator.js';
 
 export function sessionRoutes(
@@ -15,6 +16,7 @@ export function sessionRoutes(
   sessionManager: SessionManager,
   sessionTokenIssuer?: SessionTokenIssuer,
   eventRepo?: EventRepository,
+  pendingOverrideRepo?: PendingOverrideRepository,
 ): void {
   // POST /sessions — create a new session
   app.post('/sessions', async (request, reply) => {
@@ -233,6 +235,40 @@ export function sessionRoutes(
   app.delete('/sessions/:sessionId', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
     await sessionManager.deleteSession(sessionId);
+    reply.status(204);
+  });
+
+  // POST /sessions/:sessionId/interrupt-validation — abort a running validation
+  app.post('/sessions/:sessionId/interrupt-validation', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    sessionManager.interruptValidation(sessionId);
+    reply.status(204);
+  });
+
+  // POST /sessions/:sessionId/validation-overrides — enqueue a finding override
+  app.post('/sessions/:sessionId/validation-overrides', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const body = request.body as {
+      findingId: string;
+      description: string;
+      action: 'dismiss' | 'guidance';
+      reason?: string;
+      guidance?: string;
+    };
+
+    if (!pendingOverrideRepo) {
+      reply.status(503);
+      return { error: 'Override queue not available' };
+    }
+
+    pendingOverrideRepo.enqueue(sessionId, {
+      findingId: body.findingId,
+      description: body.description,
+      action: body.action,
+      reason: body.reason,
+      guidance: body.guidance,
+    });
+
     reply.status(204);
   });
 }

@@ -5,6 +5,9 @@ struct OverviewTab: View {
     let session: Session
     let events: [AgentEvent]
     var actions: SessionActions = .preview
+    var pendingMemories: [MemoryEntry] = []
+    var onApproveMemory: (String) -> Void = { _ in }
+    var onRejectMemory: (String) -> Void = { _ in }
 
     @State private var replyText = ""
 
@@ -24,6 +27,14 @@ struct OverviewTab: View {
                 if let phase = session.phase {
                     progressSection(phase)
                 }
+
+                // Pending memory suggestions
+                if !pendingMemories.isEmpty {
+                    memorySuggestionsSection
+                }
+
+                // Profile metadata row
+                profileMetadataRow
 
                 // Metrics row
                 metricsRow
@@ -213,6 +224,100 @@ struct OverviewTab: View {
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Memory suggestions
+
+    private var memorySuggestionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "brain")
+                    .foregroundStyle(.purple)
+                Text("Memory Suggestions")
+                    .font(.system(.subheadline).weight(.semibold))
+                Text("\(pendingMemories.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.purple)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.purple.opacity(0.1), in: Capsule())
+            }
+            ForEach(pendingMemories) { entry in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 4) {
+                        Text(entry.path)
+                            .font(.system(.caption, design: .monospaced).weight(.medium))
+                        Spacer()
+                        Text(entry.scope.label)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.quaternary, in: Capsule())
+                    }
+                    Text(entry.content.prefix(120) + (entry.content.count > 120 ? "…" : ""))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                    HStack(spacing: 8) {
+                        Button { onApproveMemory(entry.id) } label: {
+                            Label("Approve", systemImage: "checkmark")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.mini)
+                        .tint(.green)
+                        Button { onRejectMemory(entry.id) } label: {
+                            Label("Reject", systemImage: "xmark")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .tint(.red)
+                    }
+                }
+                .padding(10)
+                .background(Color.purple.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.purple.opacity(0.1), lineWidth: 1))
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Profile metadata
+
+    private var profileMetadataRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "person.text.rectangle")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Text(session.profileName)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+            if let version = session.profileSnapshot?.version {
+                Text("v\(version)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+            }
+            Spacer()
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Text(session.branch)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Metrics

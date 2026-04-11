@@ -227,6 +227,8 @@ export interface SessionManagerDependencies {
   };
   actionAuditRepo?: ActionAuditRepository;
   eventRepo?: EventRepository;
+  memoryRepo?: import('./memory-repository.js').MemoryRepository;
+  pendingOverrideRepo?: import('./pending-override-repository.js').PendingOverrideRepository;
   enqueueSession: (sessionId: string) => void;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections'>;
@@ -281,6 +283,8 @@ export interface SessionManager {
    * Fire-and-forget safe — errors are logged but do not propagate.
    */
   refreshNetworkPolicy(profileName: string): Promise<void>;
+  /** Abort a currently running validation for the given session. No-op if not validating. */
+  interruptValidation(sessionId: string): void;
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
@@ -316,6 +320,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   const mergePollers = new Map<string, ReturnType<typeof setInterval>>();
 
   const MERGE_POLL_INTERVAL_MS = 60_000;
+
+  /** Active AbortControllers for in-progress validation runs, keyed by sessionId. */
+  const validationAbortControllers = new Map<string, AbortController>();
 
   /** Start polling PR merge status for a session in merge_pending state. */
   function startMergePolling(sessionId: string): void {
@@ -755,6 +762,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Transition to provisioning
         session = transition(session, 'provisioning', { startedAt: new Date().toISOString() });
 
+        // Snapshot the resolved profile at session start time for auditability
+        sessionRepo.update(sessionId, { profileSnapshot: profile });
+
         // Recovery mode: reuse existing worktree instead of creating new one
         let worktreePath: string;
         let bareRepoPath: string;
@@ -1065,11 +1075,21 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Generate system instructions and deliver based on runtime
         const mcpUrl = `${mcpBaseUrl}/mcp/${sessionId}`;
 
+        // Load approved memories for this session
+        const sessionMemories = deps.memoryRepo
+          ? [
+              ...deps.memoryRepo.list('global', null, true),
+              ...deps.memoryRepo.list('profile', session.profileName, true),
+              ...deps.memoryRepo.list('session', session.id, true),
+            ]
+          : [];
+
         const systemInstructions = generateSystemInstructions(profile, session, mcpUrl, {
           injectedSections: resolvedSections,
           injectedMcpServers: proxiedMcpServers,
           availableActions,
           injectedSkills: mergedSkills.filter((s) => resolvedSkillNames.includes(s.name)),
+          memories: sessionMemories.length > 0 ? sessionMemories : undefined,
         });
 
         // Write system instructions to a path outside /workspace so the repo's own
@@ -1140,10 +1160,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             await ensureNuGetCredentialProvider(containerManager, containerId);
             logger.info({ sessionId }, 'NuGet credential provider verified');
           } catch (cpErr) {
-            logger.error(
-              { sessionId, err: cpErr },
-              'Failed to ensure NuGet credential provider',
-            );
+            logger.error({ sessionId, err: cpErr }, 'Failed to ensure NuGet credential provider');
             emitActivityStatus(
               sessionId,
               `⚠ Credential provider install failed: ${(cpErr as Error).message}`,
@@ -1445,11 +1462,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           // Forked sessions (linkedSessionId set, or baseBranch differs from defaultBranch)
           // inherit changes from a parent branch. Diff against defaultBranch (not startCommitSha)
           // so the parent's changes are included in the stats.
-          const isFork = Boolean(session.linkedSessionId) ||
+          const isFork =
+            Boolean(session.linkedSessionId) ||
             (session.baseBranch && session.baseBranch !== profile.defaultBranch);
-          const sinceCommit = isFork
-            ? undefined
-            : (session.startCommitSha ?? undefined);
+          const sinceCommit = isFork ? undefined : (session.startCommitSha ?? undefined);
           const stats = await worktreeManager.getDiffStats(
             session.worktreePath,
             profile.defaultBranch,
@@ -1471,7 +1487,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const refreshed = sessionRepo.getOrThrow(sessionId);
       const profile2 = profileStore.get(refreshed.profileName);
       const noChanges = Boolean(session.worktreePath) && refreshed.filesChanged === 0;
-      const isForkSession = Boolean(refreshed.linkedSessionId) ||
+      const isForkSession =
+        Boolean(refreshed.linkedSessionId) ||
         (refreshed.baseBranch != null && refreshed.baseBranch !== profile2.defaultBranch);
       if (refreshed.skipValidation || (noChanges && !isForkSession)) {
         if (noChanges) {
@@ -2168,6 +2185,14 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           ? await loadCodeReviewSkill(session.worktreePath, logger)
           : undefined;
 
+        // Flush any pending overrides enqueued via API and merge into session overrides
+        const pendingOverrides = deps.pendingOverrideRepo?.flush(sessionId) ?? [];
+        let currentOverrides = session.validationOverrides ?? [];
+        if (pendingOverrides.length > 0) {
+          currentOverrides = mergeOverrides(currentOverrides, pendingOverrides);
+          sessionRepo.update(sessionId, { validationOverrides: currentOverrides });
+        }
+
         const validationConfig = {
           sessionId,
           containerId: session.containerId,
@@ -2192,13 +2217,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           taskSummary: session.taskSummary ?? undefined,
           worktreePath: session.worktreePath ?? undefined,
           startCommitSha: session.startCommitSha ?? undefined,
-          overrides: session.validationOverrides ?? undefined,
+          overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
+        const validationController = new AbortController();
+        validationAbortControllers.set(sessionId, validationController);
         try {
-          result = await validationEngine.validate(validationConfig, (phase) =>
-            emitActivityStatus(sessionId, phase),
+          result = await validationEngine.validate(
+            validationConfig,
+            (phase) => emitActivityStatus(sessionId, phase),
+            validationController.signal,
           );
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies
@@ -2220,6 +2249,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             taskReview: null,
             duration: 0,
           };
+        } finally {
+          validationAbortControllers.delete(sessionId);
         }
 
         // Sync workspace after validation — screenshots and build artifacts are now in /workspace
@@ -2341,6 +2372,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 hoistedResult = await validationEngine.validate(
                   { ...validationConfig, reviewDepth: 'deep' },
                   (phase) => emitActivityStatus(sessionId, phase),
+                  validationController.signal,
                 );
                 if (s2.validationOverrides && s2.validationOverrides.length > 0) {
                   hoistedResult = applyOverrides(hoistedResult, s2.validationOverrides);
@@ -2435,9 +2467,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             // Re-compute diff stats now that auto-commit has run.
             // For forked sessions, diff against baseBranch to include the parent's changes.
             try {
-              const prSinceCommit = (s2.linkedSessionId || (s2.baseBranch && s2.baseBranch !== profile.defaultBranch))
-                ? undefined
-                : (s2.startCommitSha ?? undefined);
+              const prSinceCommit =
+                s2.linkedSessionId || (s2.baseBranch && s2.baseBranch !== profile.defaultBranch)
+                  ? undefined
+                  : (s2.startCommitSha ?? undefined);
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
                 profile.defaultBranch,
@@ -2648,6 +2681,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           : undefined;
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
+        const revalidateController = new AbortController();
+        validationAbortControllers.set(sessionId, revalidateController);
         try {
           result = await validationEngine.validate(
             {
@@ -2676,6 +2711,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               startCommitSha: session.startCommitSha ?? undefined,
             },
             (phase) => emitActivityStatus(sessionId, phase),
+            revalidateController.signal,
           );
         } catch (validateErr) {
           logger.error({ err: validateErr, sessionId }, 'Revalidation engine threw unexpectedly');
@@ -2693,6 +2729,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             taskReview: null,
             duration: 0,
           };
+        } finally {
+          validationAbortControllers.delete(sessionId);
         }
 
         sessionRepo.update(sessionId, { lastValidationResult: result });
@@ -2738,9 +2776,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             }
 
             try {
-              const failSinceCommit = (s2.linkedSessionId || (s2.baseBranch && s2.baseBranch !== profile.defaultBranch))
-                ? undefined
-                : (s2.startCommitSha ?? undefined);
+              const failSinceCommit =
+                s2.linkedSessionId || (s2.baseBranch && s2.baseBranch !== profile.defaultBranch)
+                  ? undefined
+                  : (s2.startCommitSha ?? undefined);
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
                 profile.defaultBranch,
@@ -3088,6 +3127,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         `Validation attempts extended to ${newMax} — resuming validation`,
       );
       await this.triggerValidation(sessionId);
+    },
+
+    interruptValidation(sessionId: string): void {
+      validationAbortControllers.get(sessionId)?.abort();
     },
 
     async refreshNetworkPolicy(profileName: string): Promise<void> {

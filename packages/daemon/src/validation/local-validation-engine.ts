@@ -102,6 +102,13 @@ function runClaudeCli(opts: {
  * Page validation is intentionally skipped — it requires a browser (Playwright),
  * which is not available in this sandbox environment.
  */
+export class ValidationInterruptedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationInterruptedError';
+  }
+}
+
 export function createLocalValidationEngine(
   containerManager: ContainerManager,
   logger?: Logger,
@@ -113,109 +120,157 @@ export function createLocalValidationEngine(
     async validate(
       config: ValidationEngineConfig,
       onProgress?: (message: string) => void,
+      signal?: AbortSignal,
     ): Promise<ValidationResult> {
       const startTime = Date.now();
 
-      // ── Phase 1: Build ──────────────────────────────────────────────
-      if (config.buildCommand) onProgress?.('Running build…');
-      const buildResult = await runBuild(containerManager, config, log);
-
-      // ── Phase 2: Test ───────────────────────────────────────────────
-      if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
-      const testResult =
-        buildResult.status === 'pass'
-          ? await runTests(containerManager, config, log)
-          : { status: 'skip' as const, duration: 0 };
-
-      // ── Phase 3: Health check ───────────────────────────────────────
-      if (buildResult.status === 'pass' && config.startCommand)
-        onProgress?.('Running health check…');
-      const healthResult =
-        buildResult.status === 'pass'
-          ? await runHealthCheck(containerManager, config, log)
-          : {
-              status: 'fail' as const,
-              url: config.previewUrl + config.healthPath,
-              responseCode: null,
-              duration: 0,
-            };
-
-      // ── Phase 4: Page validation ─────────────────────────────────────
-      if (healthResult.status === 'pass' && config.smokePages.length > 0)
-        onProgress?.('Validating pages…');
-      const pages: PageResult[] =
-        healthResult.status === 'pass' && config.smokePages.length > 0
-          ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
-          : [];
-
-      // ── Phase 5: AC Validation ────────────────────────────────────────
-      if (healthResult.status === 'pass' && config.acceptanceCriteria?.length)
-        onProgress?.('Checking acceptance criteria…');
-      const acValidation =
-        healthResult.status === 'pass'
-          ? await runAcValidation(containerManager, config, log, hostBrowserRunner)
-          : null;
-
-      // ── Phase 6: AI Task Review ─────────────────────────────────────
-      onProgress?.('Running AI task review…');
-
-      // Gather enriched context from the worktree (Tier 0+1)
-      let reviewContext: ReviewContext | undefined;
-      if (config.worktreePath) {
-        try {
-          reviewContext = await gatherReviewContext(
-            config.worktreePath,
-            config.diff,
-            config.startCommitSha,
-          );
-        } catch (err) {
-          log?.warn({ err }, 'Failed to gather review context, proceeding without enrichment');
-        }
+      function checkAbort(): void {
+        if (signal?.aborted) throw new ValidationInterruptedError('Validation interrupted by user');
       }
 
-      const { result: taskReview, skipReason: reviewSkipReason } = await runTaskReview(
-        config,
-        log,
-        reviewContext,
-      );
+      try {
+        // ── Phase 1: Build ──────────────────────────────────────────────
+        checkAbort();
+        if (config.buildCommand) onProgress?.('Running build…');
+        const buildResult = await runBuild(containerManager, config, log);
 
-      // ── Phase 7: Overall result ─────────────────────────────────────
-      const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
-      const smokeStatus =
-        buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass
-          ? ('pass' as const)
-          : ('fail' as const);
+        // ── Phase 2: Test ───────────────────────────────────────────────
+        checkAbort();
+        if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
+        const testResult =
+          buildResult.status === 'pass'
+            ? await runTests(containerManager, config, log)
+            : { status: 'skip' as const, duration: 0 };
 
-      const testFailed = testResult.status === 'fail';
-      const acFailed = acValidation !== null && acValidation.status === 'fail';
-      const overall =
-        smokeStatus === 'pass' &&
-        !testFailed &&
-        !acFailed &&
-        (taskReview === null || taskReview.status === 'pass')
-          ? ('pass' as const)
-          : ('fail' as const);
+        // ── Phase 3: Health check ───────────────────────────────────────
+        checkAbort();
+        if (buildResult.status === 'pass' && config.startCommand)
+          onProgress?.('Running health check…');
+        const healthResult =
+          buildResult.status === 'pass'
+            ? await runHealthCheck(containerManager, config, log)
+            : {
+                status: 'fail' as const,
+                url: config.previewUrl + config.healthPath,
+                responseCode: null,
+                duration: 0,
+              };
 
-      const duration = Date.now() - startTime;
+        // ── Phase 4: Page validation ─────────────────────────────────────
+        checkAbort();
+        if (healthResult.status === 'pass' && config.smokePages.length > 0)
+          onProgress?.('Validating pages…');
+        const pages: PageResult[] =
+          healthResult.status === 'pass' && config.smokePages.length > 0
+            ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
+            : [];
 
-      return {
-        sessionId: config.sessionId,
-        attempt: config.attempt,
-        timestamp: new Date().toISOString(),
-        smoke: {
-          status: smokeStatus,
-          build: buildResult,
-          health: healthResult,
-          pages,
-        },
-        test: testResult,
-        acValidation,
-        taskReview,
-        reviewSkipReason,
-        overall,
-        duration,
-      };
+        // ── Phase 5: AC Validation ────────────────────────────────────────
+        checkAbort();
+        if (healthResult.status === 'pass' && config.acceptanceCriteria?.length)
+          onProgress?.('Checking acceptance criteria…');
+        const acValidation =
+          healthResult.status === 'pass'
+            ? await runAcValidation(containerManager, config, log, hostBrowserRunner)
+            : null;
+
+        // ── Phase 6: AI Task Review ─────────────────────────────────────
+        checkAbort();
+        onProgress?.('Running AI task review…');
+
+        // Gather enriched context from the worktree (Tier 0+1)
+        let reviewContext: ReviewContext | undefined;
+        if (config.worktreePath) {
+          try {
+            reviewContext = await gatherReviewContext(
+              config.worktreePath,
+              config.diff,
+              config.startCommitSha,
+            );
+          } catch (err) {
+            log?.warn({ err }, 'Failed to gather review context, proceeding without enrichment');
+          }
+        }
+
+        const { result: taskReview, skipReason: reviewSkipReason } = await runTaskReview(
+          config,
+          log,
+          reviewContext,
+        );
+
+        // ── Phase 7: Overall result ─────────────────────────────────────
+        const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
+        const smokeStatus =
+          buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass
+            ? ('pass' as const)
+            : ('fail' as const);
+
+        const testFailed = testResult.status === 'fail';
+        const acFailed = acValidation !== null && acValidation.status === 'fail';
+        const overall =
+          smokeStatus === 'pass' &&
+          !testFailed &&
+          !acFailed &&
+          (taskReview === null || taskReview.status === 'pass')
+            ? ('pass' as const)
+            : ('fail' as const);
+
+        const duration = Date.now() - startTime;
+
+        return {
+          sessionId: config.sessionId,
+          attempt: config.attempt,
+          timestamp: new Date().toISOString(),
+          smoke: {
+            status: smokeStatus,
+            build: buildResult,
+            health: healthResult,
+            pages,
+          },
+          test: testResult,
+          acValidation,
+          taskReview,
+          reviewSkipReason,
+          overall,
+          duration,
+        };
+      } catch (err) {
+        if (err instanceof ValidationInterruptedError) {
+          log?.info({ sessionId: config.sessionId }, 'Validation interrupted by user');
+          return makeInterruptedResult(config, startTime);
+        }
+        throw err;
+      }
     },
+  };
+}
+
+/** Return a partial interrupted ValidationResult (phase-complete data preserved) */
+function makeInterruptedResult(
+  config: ValidationEngineConfig,
+  startTime: number,
+): ValidationResult {
+  return {
+    sessionId: config.sessionId,
+    attempt: config.attempt,
+    timestamp: new Date().toISOString(),
+    smoke: {
+      status: 'fail',
+      build: { status: 'skip', output: '', duration: 0 },
+      health: {
+        status: 'fail',
+        url: config.previewUrl + config.healthPath,
+        responseCode: null,
+        duration: 0,
+      },
+      pages: [],
+    },
+    test: { status: 'skip', duration: 0 },
+    acValidation: null,
+    taskReview: null,
+    reviewSkipReason: 'Validation interrupted by user',
+    overall: 'fail',
+    duration: Date.now() - startTime,
   };
 }
 

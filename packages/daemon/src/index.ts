@@ -37,7 +37,9 @@ import {
   createEscalationRepository,
   createEventBus,
   createEventRepository,
+  createMemoryRepository,
   createNudgeRepository,
+  createPendingOverrideRepository,
   createProgressEventRepository,
   createSessionManager,
   createSessionQueue,
@@ -101,6 +103,8 @@ const escalationRepo = createEscalationRepository(db);
 const nudgeRepo = createNudgeRepository(db);
 const validationRepo = createValidationRepository(db);
 const progressEventRepo = createProgressEventRepository(db);
+const memoryRepo = createMemoryRepository(db);
+const pendingOverrideRepo = createPendingOverrideRepository(db);
 
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);
@@ -336,6 +340,8 @@ sessionManager = createSessionManager({
   },
   pendingRequestsBySession,
   sessionTokenIssuer,
+  memoryRepo,
+  pendingOverrideRepo,
   getSecret: (ref: string) => process.env[ref],
   logger,
 });
@@ -364,6 +370,7 @@ const sessionBridge = createSessionBridge({
   escalationRepo,
   nudgeRepo,
   profileStore,
+  memoryRepo,
   containerManagerFactory,
   makeActionEngine,
   pendingRequestsBySession,
@@ -413,6 +420,8 @@ const app = await createServer({
   imageBuilder,
   actionRegistry,
   sessionTokenIssuer,
+  memoryRepo,
+  pendingOverrideRepo,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),

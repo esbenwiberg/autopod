@@ -52,6 +52,10 @@ public final class ActionHandler {
       openLiveApp: { [weak self] id in await self?.openLiveApp(id) },
       workerProfileForProfile: { [weak self] name in
         self?.profileStore.profiles.first(where: { $0.name == name })?.workerProfile
+      },
+      interruptValidation: { [weak self] id in await self?.interruptValidation(id) },
+      addValidationOverride: { [weak self] id, fid, desc, action, reason, guidance in
+        await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
       }
     )
   }
@@ -286,6 +290,36 @@ public final class ActionHandler {
       let previewUrl = try await api.startPreview(sessionId)
       guard let url = URL(string: previewUrl) else { return }
       NSWorkspace.shared.open(url)
+    } catch {
+      lastError = error.localizedDescription
+    }
+  }
+
+  public func interruptValidation(_ sessionId: String) async {
+    do {
+      try await api.interruptValidation(sessionId: sessionId)
+    } catch {
+      lastError = error.localizedDescription
+    }
+  }
+
+  public func addValidationOverride(
+    _ sessionId: String,
+    findingId: String,
+    description: String,
+    action: String,
+    reason: String?,
+    guidance: String?
+  ) async {
+    do {
+      try await api.addValidationOverride(
+        sessionId: sessionId,
+        findingId: findingId,
+        description: description,
+        action: action,
+        reason: reason,
+        guidance: guidance
+      )
     } catch {
       lastError = error.localizedDescription
     }

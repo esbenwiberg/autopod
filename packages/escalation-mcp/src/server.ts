@@ -7,6 +7,10 @@ import { executeAction } from './tools/actions.js';
 import { askAi } from './tools/ask-ai.js';
 import { askHuman } from './tools/ask-human.js';
 import { checkMessages } from './tools/check-messages.js';
+import { memoryList } from './tools/memory-list.js';
+import { memoryRead } from './tools/memory-read.js';
+import { memorySearch } from './tools/memory-search.js';
+import { memorySuggest } from './tools/memory-suggest.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
@@ -159,6 +163,66 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
     async (input) => {
       const response = await validateInBrowser(sessionId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  // ─── Memory tools ────────────────────────────────────────────────────────────
+  server.tool(
+    'memory_list',
+    'List approved memories for a scope. Use this to check existing knowledge before starting work.',
+    {
+      scope: z
+        .enum(['global', 'profile', 'session'])
+        .describe('global = cross-project, profile = this repo, session = this session only'),
+    },
+    async (input) => {
+      const response = await memoryList(sessionId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'memory_read',
+    'Read the full content of a memory entry by ID.',
+    {
+      id: z.string().describe('Memory entry ID from memory_list or memory_search'),
+    },
+    async (input) => {
+      const response = await memoryRead(sessionId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'memory_search',
+    'Search memories by keyword within a scope.',
+    {
+      query: z.string().describe('Search text to match against path or content'),
+      scope: z.enum(['global', 'profile', 'session']).describe('Scope to search within'),
+    },
+    async (input) => {
+      const response = await memorySearch(sessionId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'memory_suggest',
+    'Suggest a new memory for human approval. Use to capture conventions, patterns, or session notes that should persist. A human will review and approve before it becomes active.',
+    {
+      scope: z
+        .enum(['global', 'profile', 'session'])
+        .describe('global = applies everywhere, profile = this repo, session = this session only'),
+      path: z
+        .string()
+        .describe(
+          'Path-like key for the memory, e.g. "/conventions/commits.md" or "/patterns/error-handling.md"',
+        ),
+      content: z.string().describe('The memory content (markdown supported)'),
+    },
+    async (input) => {
+      const response = await memorySuggest(sessionId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );

@@ -207,7 +207,8 @@ public enum SessionMapper {
       costUsd: response.costUsd,
       commitCount: response.commitCount,
       taskSummary: taskSummary,
-      linkedSessionId: response.linkedSessionId
+      linkedSessionId: response.linkedSessionId,
+      profileSnapshot: response.profileSnapshot.map { ProfileMapper.map($0) }
     )
   }
 

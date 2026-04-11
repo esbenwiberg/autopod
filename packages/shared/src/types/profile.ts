@@ -70,6 +70,8 @@ export interface Profile {
   branchPrefix: string;
   /** Container memory limit in GB. null = no limit (Docker default). */
   containerMemoryGb: number | null;
+  /** Auto-incremented on every profile update. Useful for auditing which config a session ran under. */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -100,6 +102,8 @@ export interface NetworkPolicy {
   allowedHosts: string[];
   /** If true, replace the default allowlist entirely (advanced) */
   replaceDefaults?: boolean;
+  /** When true and mode='restricted', auto-allow all common package manager registry hosts */
+  allowPackageManagers?: boolean;
 }
 
 export type RegistryType = 'npm' | 'nuget';

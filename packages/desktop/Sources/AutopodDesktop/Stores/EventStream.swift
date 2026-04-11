@@ -18,6 +18,7 @@ public final class EventStream {
 
   private var eventSocket: EventSocket?
   private let sessionStore: SessionStore
+  private weak var memoryStore: MemoryStore?
   private var eventIdCounter = 0
 
   private static let globalEventCap = 500
@@ -30,8 +31,9 @@ public final class EventStream {
 
   // MARK: - Init
 
-  public init(sessionStore: SessionStore) {
+  public init(sessionStore: SessionStore, memoryStore: MemoryStore? = nil) {
     self.sessionStore = sessionStore
+    self.memoryStore = memoryStore
   }
 
   // MARK: - Lifecycle
@@ -177,6 +179,13 @@ public final class EventStream {
         }
       }
       // Full refresh for final state
+      Task { await sessionStore.refreshSession(sessionId) }
+
+    case .memorySuggestionCreated(_, let entry):
+      memoryStore?.handleSuggestionCreated(entry)
+
+    case .validationOverrideQueued(let sessionId, _):
+      // Refresh session so pending overrides count updates in the UI
       Task { await sessionStore.refreshSession(sessionId) }
     }
   }

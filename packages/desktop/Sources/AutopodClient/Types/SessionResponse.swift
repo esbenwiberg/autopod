@@ -47,6 +47,7 @@ public struct SessionResponse: Codable, Sendable {
   public let linkedSessionId: String?
   public let taskSummary: TaskSummaryResponse?
   public let lastCorrectionMessage: String?
+  public let profileSnapshot: ProfileResponse?
 }
 
 public struct DeviationResponse: Codable, Sendable {

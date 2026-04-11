@@ -1,7 +1,8 @@
 import type { EscalationRequest, EscalationResponse } from './escalation.js';
+import type { MemoryEntry } from './memory.js';
 import type { AgentEvent } from './runtime.js';
 import type { SessionStatus, SessionSummary } from './session.js';
-import type { ValidationResult } from './validation.js';
+import type { ValidationOverride, ValidationResult } from './validation.js';
 
 export type SystemEvent =
   | SessionCreatedEvent
@@ -11,7 +12,9 @@ export type SystemEvent =
   | ValidationCompletedEvent
   | EscalationCreatedEvent
   | EscalationResolvedEvent
-  | SessionCompletedEvent;
+  | SessionCompletedEvent
+  | MemorySuggestionCreatedEvent
+  | ValidationOverrideQueuedEvent;
 
 export interface SessionCreatedEvent {
   type: 'session.created';
@@ -69,4 +72,18 @@ export interface SessionCompletedEvent {
   sessionId: string;
   finalStatus: 'complete' | 'killed';
   summary: SessionSummary;
+}
+
+export interface MemorySuggestionCreatedEvent {
+  type: 'memory.suggestion_created';
+  timestamp: string;
+  sessionId: string;
+  memoryEntry: MemoryEntry;
+}
+
+export interface ValidationOverrideQueuedEvent {
+  type: 'validation.override_queued';
+  timestamp: string;
+  sessionId: string;
+  override: ValidationOverride;
 }
