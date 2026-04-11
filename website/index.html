@@ -71,7 +71,6 @@ code:not([class]){font-family:monospace;font-size:.8rem;background:rgba(99,102,2
     <a class="nav-link nav-child" href="#cli-profiles">Profiles</a>
     <a class="nav-link nav-child" href="#cli-workspace">Workspace &amp; History</a>
     <a class="nav-link nav-child" href="#cli-memory">Memory</a>
-    <a class="nav-link nav-child" href="#cli-dashboard">Dashboard</a>
     <a class="nav-link" href="#profile-config">Profile Config</a>
     <a class="nav-link nav-child" href="#profile-templates">Templates</a>
     <a class="nav-link nav-child" href="#profile-network">Network Policy</a>
@@ -341,30 +340,6 @@ ap memory reject &lt;id&gt;
 ap memory delete &lt;id&gt;</code></pre>
   </section>
 
-  <section id="cli-dashboard">
-  <h3>TUI Dashboard</h3>
-  <pre><code class="language-bash">ap watch                                    # Launch real-time TUI dashboard</code></pre>
-  <table class="mt-3">
-    <thead><tr><th>Key</th><th>Action</th></tr></thead>
-    <tbody>
-      <tr><td><code>↑ ↓</code></td><td>Navigate sessions</td></tr>
-      <tr><td><code>t</code></td><td>Tell / resume (send message)</td></tr>
-      <tr><td><code>p</code></td><td>Pause running session</td></tr>
-      <tr><td><code>u</code></td><td>Nudge (async message)</td></tr>
-      <tr><td><code>a</code></td><td>Approve</td></tr>
-      <tr><td><code>r</code></td><td>Reject with feedback</td></tr>
-      <tr><td><code>d</code></td><td>View diff</td></tr>
-      <tr><td><code>l</code></td><td>View logs</td></tr>
-      <tr><td><code>w</code></td><td>Open validation report</td></tr>
-      <tr><td><code>o</code></td><td>Launch preview / open PR</td></tr>
-      <tr><td><code>v</code></td><td>Trigger validation</td></tr>
-      <tr><td><code>x</code></td><td>Kill session</td></tr>
-      <tr><td><code>n</code></td><td>New session</td></tr>
-      <tr><td><code>/</code></td><td>Filter sessions</td></tr>
-      <tr><td><code>q</code></td><td>Quit</td></tr>
-    </tbody>
-  </table>
-  </section>
 </section>
 
 <!-- PROFILE CONFIG -->

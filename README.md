@@ -124,7 +124,7 @@ Validation is a multi-phase pipeline with two loops — each phase must pass bef
 
 If any phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, AC failures, reviewer notes) and retries automatically. The AI reviewer receives tiered context: the diff, original task, and findings from prior attempts.
 
-Every validation attempt is stored with full results and screenshots. View the **validation report** (`GET /sessions/:id/report`) for a visual timeline of all attempts, or browse it from the TUI with `[w]`.
+Every validation attempt is stored with full results and screenshots. View the **validation report** (`GET /sessions/:id/report`) for a visual timeline of all attempts.
 
 After validation, the container is **stopped** (not removed). Launch an on-demand **preview** to interact with the agent's work in a real browser before approving.
 
@@ -164,7 +164,6 @@ ap override <id> <finding-id> --guidance "Use our custom date helper instead"
 <tr><td>🛡️</td><td><b>Action control plane</b></td><td>Read GitHub issues, ADO work items, and app logs — with PII stripping and prompt-injection quarantine</td></tr>
 <tr><td>📦</td><td><b>Profile system</b></td><td>Pre-configured templates per repo with inheritance</td></tr>
 <tr><td>🐳</td><td><b>Image warming</b></td><td>Pre-bake dependencies into Docker images for fast spin-up</td></tr>
-<tr><td>📊</td><td><b>Real-time TUI</b></td><td><code>ap watch</code> — progress bars, plan panel, metrics, keyboard-driven control</td></tr>
 <tr><td>💬</td><td><b>Teams notifications</b></td><td>Rich Adaptive Cards with inline screenshots</td></tr>
 <tr><td>🔄</td><td><b>Correction loops</b></td><td>Reject with feedback, agent retries from where it left off</td></tr>
 <tr><td>🌐</td><td><b>On-demand previews</b></td><td><code>ap open &lt;id&gt;</code> spins up a live preview of any session's work</td></tr>
@@ -175,7 +174,7 @@ ap override <id> <finding-id> --guidance "Use our custom date helper instead"
 <tr><td>⚡</td><td><b>Skills injection</b></td><td>Custom slash commands from local files or GitHub repos, injected into agent containers</td></tr>
 <tr><td>🖥️</td><td><b>macOS desktop app</b></td><td>Native SwiftUI app for session monitoring — three-column layout, live terminal, diff viewer, live preview screenshots</td></tr>
 <tr><td>♻️</td><td><b>Session recovery</b></td><td>Daemon auto-recovers in-flight sessions on restart — no lost work on redeploy</td></tr>
-<tr><td>💡</td><td><b>Liveness heartbeat</b></td><td>Green/yellow/red dot per session — spot stalled agents at a glance in TUI and desktop</td></tr>
+<tr><td>💡</td><td><b>Liveness heartbeat</b></td><td>Green/yellow/red dot per session — spot stalled agents at a glance in desktop</td></tr>
 <tr><td>🧠</td><td><b>Memory stores</b></td><td>Agents suggest persistent knowledge (global/profile/session scoped) — humans approve, approved content injected into future sessions</td></tr>
 <tr><td>🔁</td><td><b>Validation interrupt & overrides</b></td><td>Interrupt in-flight validation, dismiss recurring false-positive findings, queue per-finding guidance</td></tr>
 <tr><td>⚡</td><td><b>Azure PIM activation</b></td><td>Workspace pods can activate Azure PIM groups for elevated access — auto-deactivated on session end</td></tr>
@@ -440,33 +439,6 @@ ap memory approve <id>                      # Approve a suggested memory
 ap memory reject <id>                       # Reject a suggestion
 ap memory delete <id>                       # Delete an approved memory
 ```
-
-### Dashboard
-
-```bash
-ap watch                     # Launch TUI dashboard
-```
-
-Real-time session overview via WebSocket. Progress bars with phase-aware coloring, plan panel showing the agent's declared implementation steps, a metrics bar tracking tool calls, file edits, lines changed, and elapsed time, and a per-session liveness dot (green = active, yellow = slow, red = stalled).
-
-| Key | Action |
-|-----|--------|
-| `↑` `↓` | Navigate sessions |
-| `t` | Tell / resume (send message to agent) |
-| `p` | Pause running session |
-| `u` | Nudge (send async message) |
-| `a` | Approve session |
-| `r` | Reject with feedback |
-| `d` | View diff |
-| `l` | View logs |
-| `w` | Open validation report in browser |
-| `o` | Launch preview / open preview URL / open PR (context-aware) |
-| `<` `>` | Navigate validation attempts |
-| `x` | Kill session |
-| `v` | Trigger validation |
-| `n` | Create new session |
-| `/` | Filter sessions |
-| `q` | Quit |
 
 ---
 
@@ -992,7 +964,7 @@ autopod/
       src/runtimes/    #   Runtime adapters (Claude, Codex, Copilot)
       src/validation/  #   Multi-phase validation pipeline (smoke, AC, AI review, reports)
       src/worktrees/   #   Git worktree + PR management (GitHub, ADO)
-    cli/               # Commander CLI + Ink TUI dashboard
+    cli/               # Commander CLI
     escalation-mcp/    # MCP server injected into agent containers (escalation, actions, browser validation)
     validator/         # Playwright smoke tests + AI task review
     desktop/           # macOS native app (SwiftUI + AppKit)
@@ -1040,7 +1012,6 @@ The app connects to the same daemon via HTTP/WebSocket. Features: three-column s
 | **TypeScript 5.7** | Type safety from CLI to daemon to container |
 | **Fastify 5** | Fast, schema-validated HTTP + WebSocket |
 | **SQLite** (better-sqlite3) | Zero-config embedded state, ACID transactions |
-| **Ink** (React for terminals) | Rich TUI dashboard |
 | **Commander** | CLI argument parsing |
 | **Playwright** | Real browser validation with screenshots |
 | **MSAL** | Entra ID device code + PKCE auth flows |
