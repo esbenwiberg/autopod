@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="#getting-started">Getting Started</a> · <a href="#how-it-works">How It Works</a> · <a href="#cli-reference">CLI Reference</a> · <a href="#profile-deep-dive">Profile Config</a> · <a href="#deployment-azure">Deploy</a>
+  <a href="#getting-started">Getting Started</a> · <a href="#how-it-works">How It Works</a> · <a href="#cli-reference">CLI Reference</a> · <a href="#profile-deep-dive">Profile Config</a> · <a href="#deployment-azure">Deploy</a> · <a href="https://esbenwiberg.github.io/autopod">Docs ↗</a>
 </p>
 
 ---
@@ -88,15 +88,21 @@ If it doesn't pass, the agent gets structured feedback and tries again. If it do
 Every task follows a state machine:
 
 ```
-queued → provisioning → running → validating → validated → approved → merging → complete
+queued → provisioning → running → validating → validated → approved → merge_pending → merging → complete
                            │            │
                            │            └─→ failed (retry with feedback, up to N attempts)
+                           │                    │
+                           │                    └─→ review_required (attempts exhausted — human decides)
+                           │                           ├─→ running (extend attempts, agent retries)
+                           │                           └─→ running (fix-manually: linked workspace → worker)
                            │
                            ├─→ paused (operator paused via ap pause / p key)
                            │      │
                            │      └─→ running (resumed via ap tell / nudge)
                            │
                            └─→ awaiting_input (agent escalated — needs help)
+
+Any non-terminal state → killing → killed
 ```
 
 ### Validation Pipeline
@@ -116,11 +122,32 @@ Validation is a multi-phase pipeline with two loops — each phase must pass bef
 | **5. AC validation** | Reviewer generates browser checks from acceptance criteria, executed via Playwright | `session.acceptanceCriteria` |
 | **6. AI task review** | A separate model reviews the diff against the original task | `profile.escalation.askAi.model` |
 
-If any phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, AC failures, reviewer notes) and retries automatically.
+If any phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, AC failures, reviewer notes) and retries automatically. The AI reviewer receives tiered context: the diff, original task, and findings from prior attempts.
 
 Every validation attempt is stored with full results and screenshots. View the **validation report** (`GET /sessions/:id/report`) for a visual timeline of all attempts, or browse it from the TUI with `[w]`.
 
 After validation, the container is **stopped** (not removed). Launch an on-demand **preview** to interact with the agent's work in a real browser before approving.
+
+**When retries are exhausted** (`maxValidationAttempts` reached), the session moves to `review_required` instead of just failing. From there you can:
+
+```bash
+ap extend-attempts <id>      # Grant more attempts — agent retries with accumulated feedback
+ap fix-manually <id>         # Create a linked workspace pod for human edits, then re-validate
+ap reject <id> "<feedback>"  # Reject and restart fresh with your notes
+```
+
+**Interrupt in-flight validation:**
+
+```bash
+ap interrupt <id>            # Stop a running validation immediately (returns partial results)
+```
+
+**Per-finding overrides** — dismiss individual AI reviewer findings that are recurring false positives without blocking the overall review:
+
+```bash
+ap override <id> <finding-id> --dismiss    # Mark finding as accepted
+ap override <id> <finding-id> --guidance "Use our custom date helper instead"
+```
 
 ---
 
@@ -146,9 +173,15 @@ After validation, the container is **stopped** (not removed). Launch an on-deman
 <tr><td>🧪</td><td><b>Workspace pods</b></td><td>Interactive containers for manual prep, then hand off to automated agents</td></tr>
 <tr><td>🔐</td><td><b>Private registries</b></td><td>npm and NuGet feeds from Azure DevOps — credentials injected automatically</td></tr>
 <tr><td>⚡</td><td><b>Skills injection</b></td><td>Custom slash commands from local files or GitHub repos, injected into agent containers</td></tr>
-<tr><td>🖥️</td><td><b>macOS desktop app</b></td><td>Native SwiftUI app for session monitoring — three-column layout, live terminal, diff viewer</td></tr>
+<tr><td>🖥️</td><td><b>macOS desktop app</b></td><td>Native SwiftUI app for session monitoring — three-column layout, live terminal, diff viewer, live preview screenshots</td></tr>
 <tr><td>♻️</td><td><b>Session recovery</b></td><td>Daemon auto-recovers in-flight sessions on restart — no lost work on redeploy</td></tr>
 <tr><td>💡</td><td><b>Liveness heartbeat</b></td><td>Green/yellow/red dot per session — spot stalled agents at a glance in TUI and desktop</td></tr>
+<tr><td>🧠</td><td><b>Memory stores</b></td><td>Agents suggest persistent knowledge (global/profile/session scoped) — humans approve, approved content injected into future sessions</td></tr>
+<tr><td>🔁</td><td><b>Validation interrupt & overrides</b></td><td>Interrupt in-flight validation, dismiss recurring false-positive findings, queue per-finding guidance</td></tr>
+<tr><td>⚡</td><td><b>Azure PIM activation</b></td><td>Workspace pods can activate Azure PIM groups for elevated access — auto-deactivated on session end</td></tr>
+<tr><td>📜</td><td><b>History analysis workspace</b></td><td><code>ap history</code> creates a workspace pre-loaded with session history data for pattern analysis</td></tr>
+<tr><td>📌</td><td><b>Profile versioning</b></td><td>Every profile update auto-increments a version counter; sessions snapshot the exact profile used at creation</td></tr>
+<tr><td>☁️</td><td><b>Local or cloud containers</b></td><td>Run agent pods on local Docker or Azure Container Instances — swap with <code>executionTarget</code> on the profile</td></tr>
 </table>
 
 ---
@@ -310,6 +343,11 @@ ap profile edit <name>       # Open in $EDITOR
 ap profile delete <name>     # Delete a profile
 ap profile warm <name>       # Pre-bake deps into Docker image (faster spin-up)
 ap profile auth-copilot <n>  # Interactive Copilot OAuth setup
+
+# Per-action approval overrides (fine-tune which actions require human sign-off)
+ap profile action-override list <name>
+ap profile action-override set <name> <action> --approval
+ap profile action-override remove <name> <action>
 ```
 
 ### Sessions
@@ -343,11 +381,20 @@ ap nudge <id> "<message>"                   # Send nudge (agent picks up async)
 
 # Validate & Preview
 ap validate <id>                            # Trigger validation manually
+ap revalidate <id>                          # Pull latest + re-validate only (no agent rework)
+ap interrupt <id>                           # Stop in-flight validation, return partial results
 ap open <id>                                # Spin up live preview (restarts stopped container)
 ap report <id>                              # Open validation report in browser
-ap screenshots <id>                         # Show screenshot URLs
 ap diff <id>                                # Show git diff
 ap diff <id> --stat                         # Diff summary only
+
+# Validation overrides (dismiss recurring false-positive findings)
+ap override <id> <finding-id> --dismiss
+ap override <id> <finding-id> --guidance "<note>"
+
+# review_required resolution
+ap extend-attempts <id>                     # Grant more validation attempts
+ap fix-manually <id>                        # Create linked workspace for human edits
 
 # Complete
 ap approve <id>                             # Create PR and merge
@@ -358,6 +405,9 @@ ap kill <id>                                # Kill session, discard work
 # Bulk operations
 ap approve --all-validated                  # Approve everything that passed
 ap kill --all-failed                        # Clean up all failures
+
+# Stats
+ap stats                                    # Aggregate counts by status, avg duration, total cost
 ```
 
 ### Workspace Pods
@@ -365,7 +415,30 @@ ap kill --all-failed                        # Clean up all failures
 ```bash
 ap workspace <profile> [description]        # Spin up an interactive container (no agent)
 ap workspace <profile> -b feat/plan-auth    # With explicit branch name
+ap workspace <profile> --pim-group <spec>   # Activate PIM group on session start
 ap attach <id>                              # Shell into a workspace pod (auto-pushes on exit)
+```
+
+### History Analysis
+
+```bash
+ap history <profile>              # Create a workspace pre-loaded with session history data
+ap history <profile> --since 7d   # Filter by recency (e.g. 7d, 30d, 2w)
+ap history <profile> --failures   # Only include failed/review_required sessions
+ap history <profile> --limit 50   # Max sessions to load (default: 100)
+```
+
+The history workspace gets a SQLite database of past sessions — events, validation results, escalations, costs — mounted at `/workspace/history.db`. Use it with an AI agent to analyse patterns: recurring failures, common blockers, token waste.
+
+### Memories
+
+```bash
+ap memory list                              # List approved memories
+ap memory list --scope profile              # Filter by scope (global | profile | session)
+ap memory show <id>                         # Show memory content
+ap memory approve <id>                      # Approve a suggested memory
+ap memory reject <id>                       # Reject a suggestion
+ap memory delete <id>                       # Delete an approved memory
 ```
 
 ### Dashboard
@@ -424,6 +497,9 @@ ap profile create my-app \
 # containerMemoryGb: 4        # Container memory limit (default: no limit)
 # buildTimeout: 300           # Build phase timeout in seconds (default: 300)
 # testTimeout: 600            # Test phase timeout in seconds (default: 600)
+# branchPrefix: "autopod"     # Prefix for auto-generated branch names (default: "autopod")
+# executionTarget: local      # "local" (Docker) or "aci" (Azure Container Instances)
+# workerProfile: "my-app"     # For workspace pods: which profile to use for the follow-up worker session
 ```
 
 ### PR providers
@@ -531,6 +607,10 @@ networkPolicy:
   # Replace the built-in defaults (Anthropic, npm, GitHub, etc.) entirely.
   # Use this when you need a strict allowlist with no implicit hosts.
   replaceDefaults: false
+
+  # Shorthand: automatically add all common package manager hosts to the allowlist.
+  # Covers npm, yarn, pypi, crates.io, nuget (pkgs.dev.azure.com), golang, rubygems, debian apt, etc.
+  allow_package_managers: true
 ```
 
 **Built-in default hosts** (always allowed unless `replaceDefaults: true`):
@@ -728,10 +808,13 @@ Agent calls MCP tool (e.g. read_issue)
 | Group | Actions |
 |-------|---------|
 | **GitHub Issues** | `read_issue`, `search_issues`, `read_issue_comments` |
-| **GitHub PRs** | `read_pr`, `search_prs`, `read_pr_comments` |
-| **GitHub Code** | `search_code`, `read_file` |
-| **Azure DevOps** | `query_work_items`, `read_work_item` |
+| **GitHub PRs** | `read_pr`, `read_pr_comments`, `read_pr_diff` |
+| **GitHub Code** | `read_file`, `search_code` |
+| **Azure DevOps Work Items** | `read_workitem`, `search_workitems` |
+| **Azure DevOps PRs** | `ado_read_pr`, `ado_read_pr_threads`, `ado_read_pr_changes` |
+| **Azure DevOps Code** | `ado_read_file`, `ado_search_code` |
 | **Azure Logs** | `query_logs`, `read_app_insights`, `read_container_logs` |
+| **Azure PIM** | `activate_pim_group`, `deactivate_pim_group`, `list_pim_activations` |
 
 #### Configuration
 
@@ -755,6 +838,72 @@ actionPolicy:
 ```
 
 Injected MCP servers are automatically proxied through the daemon. Auth headers are injected server-side, and responses pass through the same PII sanitization pipeline. Agents never see raw credentials or unsanitized data.
+
+### Azure PIM Groups
+
+For workspace pods that need elevated Azure access, configure PIM groups directly on the profile or pass them at session creation:
+
+```yaml
+pimGroups:
+  - groupId: "00000000-0000-0000-0000-000000000000"
+    displayName: "Contributor on prod-rg"
+    duration: 60          # minutes (default: 60)
+    justification: "Autopod workspace session"
+```
+
+```bash
+ap workspace my-app --pim-group "Contributor on prod-rg:60m"
+```
+
+PIM groups are activated automatically when the workspace starts and deactivated when it ends. Only groups pre-configured on the session can be activated — agents cannot escalate beyond what was declared.
+
+### Execution Targets
+
+```yaml
+executionTarget: local   # Run containers on the local Docker socket (default)
+# or
+executionTarget: aci     # Run containers in Azure Container Instances
+```
+
+| | Local | ACI |
+|--|--|--|
+| Setup | Docker socket | Azure subscription + ACR |
+| Cost | Host resources | Pay-per-second |
+| Isolation | Docker bridge per session | Per ACI container group |
+| Scale | Host CPU/memory | Azure quota |
+| Cold start | Fast (cached image) | ~30s (pull from ACR) |
+
+For ACI, set `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `ACR_USERNAME`, `ACR_PASSWORD` and run `ap profile warm <name>` to push the image to ACR before your first session.
+
+### Profile Versioning
+
+Every `ap profile edit` or API update auto-increments `profile.version`. When a session is created, autopod snapshots the full resolved profile (including inherited values) and stores it with the session. You can always audit exactly which config produced a given session's output — even after the profile has changed.
+
+```bash
+ap profile show my-app    # Shows current version number
+ap status <session-id>    # Shows "profile: my-app v3 · branch: autopod/abc123ef"
+```
+
+### Memory Stores
+
+Agents can suggest persistent knowledge that carries across sessions. Humans approve suggestions before they're used.
+
+```yaml
+# Memory is scoped — available only to matching sessions
+# global  → all sessions on this daemon
+# profile → all sessions using this profile
+# session → this session only (auto-scoped by the agent)
+```
+
+The daemon injects approved memories into each session's CLAUDE.md at provisioning time. This lets agents accumulate institutional knowledge — common patterns, known gotchas, team conventions — without baking it into profile config.
+
+```bash
+ap memory list                     # List all approved memories
+ap memory list --scope profile     # Filter by scope
+ap memory approve <id>             # Approve a suggestion from an agent
+ap memory reject <id>              # Reject
+ap memory delete <id>              # Remove an approved memory
+```
 
 ---
 
@@ -808,6 +957,25 @@ az deployment sub create \
 
 CI/CD runs via GitHub Actions — see `.github/workflows/deploy.yml`.
 
+### Health endpoint
+
+```bash
+# Basic (used by load balancer / Docker HEALTHCHECK)
+GET /health
+# → { "status": "ok", "version": "1.0.0" }
+
+# Full diagnostics (ops/monitoring)
+GET /health?detail=full
+# → {
+#     "status": "ok",
+#     "version": "1.0.0",
+#     "uptime_seconds": 3600,
+#     "docker": { "connected": true, "containers_running": 4 },
+#     "database": { "connected": true, "migrations_applied": 35 },
+#     "queue": { "active_sessions": 2, "queued_sessions": 1, "max_concurrency": 3 }
+#   }
+```
+
 ---
 
 ## Development
@@ -832,6 +1000,7 @@ autopod/
   infra/               # Azure Bicep IaC
   templates/           # Base Dockerfiles per stack
   docs/                # Architecture docs and implementation plans
+  website/             # Interactive documentation site (deployed to GitHub Pages)
 ```
 
 ### Commands

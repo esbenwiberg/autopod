@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>autopod — Documentation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script>tailwind.config={darkMode:'class'}</script>
+<style>
+:root{--sidebar-w:260px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+#sidebar{width:var(--sidebar-w);min-height:100vh;overflow-y:auto}
+#content{margin-left:var(--sidebar-w)}
+.nav-link{display:block;padding:.25rem .75rem;border-radius:.375rem;font-size:.8125rem;transition:background .12s,color .12s;cursor:pointer}
+.nav-link:hover{background:rgba(99,102,241,.12);color:#818cf8}
+.nav-link.active{background:rgba(99,102,241,.18);color:#818cf8;font-weight:500}
+.nav-child{padding-left:1.25rem;font-size:.75rem;color:#94a3b8}
+.nav-child.active{color:#818cf8}
+section{scroll-margin-top:1.5rem}
+pre[class*=language-]{border-radius:.5rem;font-size:.8125rem;margin:.75rem 0;position:relative}
+.copy-btn{position:absolute;top:.5rem;right:.5rem;padding:.2rem .5rem;font-size:.7rem;border-radius:.25rem;background:rgba(255,255,255,.1);color:#cbd5e1;cursor:pointer;opacity:0;transition:opacity .15s}
+pre:hover .copy-btn{opacity:1}
+.copy-btn:active{background:rgba(99,102,241,.3)}
+.badge{display:inline-block;padding:.1rem .45rem;border-radius:.25rem;font-size:.7rem;font-weight:600;margin:.1rem}
+table{width:100%;border-collapse:collapse;font-size:.8125rem}
+th,td{padding:.45rem .75rem;border-bottom:1px solid rgba(255,255,255,.06);text-align:left}
+th{font-weight:600;background:rgba(255,255,255,.04);color:#94a3b8;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
+tr:hover td{background:rgba(255,255,255,.02)}
+details summary{cursor:pointer;user-select:none}
+details summary:hover{color:#818cf8}
+.state-box{display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .55rem;border-radius:.3rem;font-size:.75rem;font-family:monospace;font-weight:500}
+h2{font-size:1.5rem;font-weight:700;margin-bottom:.75rem;padding-bottom:.5rem;border-bottom:1px solid rgba(255,255,255,.07)}
+h3{font-size:1.05rem;font-weight:600;margin-top:1.5rem;margin-bottom:.5rem;color:#e2e8f0}
+h4{font-size:.9rem;font-weight:600;margin-top:1.1rem;margin-bottom:.35rem;color:#cbd5e1}
+p{line-height:1.7;color:#94a3b8;margin-bottom:.75rem}
+ul,ol{padding-left:1.2rem;color:#94a3b8;font-size:.875rem;line-height:1.8}
+li{margin-bottom:.15rem}
+code:not([class]){font-family:monospace;font-size:.8rem;background:rgba(99,102,241,.12);color:#a5b4fc;padding:.1rem .3rem;border-radius:.25rem}
+.callout{padding:.85rem 1rem;border-radius:.5rem;border-left:3px solid;margin:.75rem 0;font-size:.85rem;line-height:1.6}
+.callout-blue{background:rgba(59,130,246,.07);border-color:#3b82f6;color:#93c5fd}
+.callout-yellow{background:rgba(234,179,8,.07);border-color:#eab308;color:#fde047}
+.callout-green{background:rgba(34,197,94,.07);border-color:#22c55e;color:#86efac}
+.pipeline-step{display:flex;flex-direction:column;align-items:center;gap:.3rem;min-width:80px}
+.pipeline-arrow{color:#475569;font-size:.8rem;padding:0 .3rem;margin-top:1rem}
+#search-input::placeholder{color:#475569}
+</style>
+</head>
+<body class="bg-gray-950 text-gray-100">
+
+<!-- Sidebar -->
+<nav id="sidebar" class="fixed top-0 left-0 bg-gray-900 border-r border-white/[0.06] flex flex-col">
+  <div class="p-4 border-b border-white/[0.06]">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="text-indigo-400 text-xl">⚡</span>
+      <span class="font-bold text-white">autopod</span>
+      <span class="text-xs text-gray-500 ml-auto">docs</span>
+    </div>
+    <input id="search-input" type="text" placeholder="Search…" class="w-full bg-gray-800 border border-white/[0.08] rounded-md px-3 py-1.5 text-sm text-gray-300 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30">
+  </div>
+  <div id="nav-links" class="flex-1 p-3 space-y-0.5 overflow-y-auto text-gray-400">
+    <a class="nav-link" href="#overview">Overview</a>
+    <a class="nav-link" href="#how-it-works">How It Works</a>
+    <a class="nav-link" href="#getting-started">Getting Started</a>
+    <a class="nav-link" href="#cli-reference">CLI Reference</a>
+    <a class="nav-link nav-child" href="#cli-sessions">Sessions</a>
+    <a class="nav-link nav-child" href="#cli-profiles">Profiles</a>
+    <a class="nav-link nav-child" href="#cli-workspace">Workspace &amp; History</a>
+    <a class="nav-link nav-child" href="#cli-memory">Memory</a>
+    <a class="nav-link nav-child" href="#cli-dashboard">Dashboard</a>
+    <a class="nav-link" href="#profile-config">Profile Config</a>
+    <a class="nav-link nav-child" href="#profile-templates">Templates</a>
+    <a class="nav-link nav-child" href="#profile-network">Network Policy</a>
+    <a class="nav-link nav-child" href="#profile-escalation">Escalation</a>
+    <a class="nav-link nav-child" href="#profile-providers">Model Providers</a>
+    <a class="nav-link nav-child" href="#profile-registries">Private Registries</a>
+    <a class="nav-link nav-child" href="#profile-injection">MCP &amp; Skills</a>
+    <a class="nav-link" href="#session-lifecycle">Session Lifecycle</a>
+    <a class="nav-link" href="#validation-pipeline">Validation Pipeline</a>
+    <a class="nav-link" href="#escalation-system">Escalation System</a>
+    <a class="nav-link" href="#memory-stores">Memory Stores</a>
+    <a class="nav-link" href="#action-control-plane">Action Control Plane</a>
+    <a class="nav-link" href="#workspace-pods">Workspace Pods</a>
+    <a class="nav-link" href="#network-isolation">Network Isolation</a>
+    <a class="nav-link" href="#auth-setup">Auth Setup</a>
+    <a class="nav-link" href="#execution-targets">Execution Targets</a>
+    <a class="nav-link" href="#deployment">Deployment</a>
+    <a class="nav-link" href="#faq">FAQ</a>
+  </div>
+  <div class="p-3 border-t border-white/[0.06] flex items-center justify-between">
+    <a href="https://github.com/esbenwiberg/autopod" class="text-xs text-gray-500 hover:text-indigo-400 transition-colors">GitHub ↗</a>
+    <button id="theme-toggle" class="text-xs text-gray-500 hover:text-indigo-400 transition-colors px-2 py-1 rounded border border-white/[0.08]">☀ Light</button>
+  </div>
+</nav>
+
+<!-- Main content -->
+<main id="content" class="px-8 py-10 max-w-4xl">
+
+<!-- OVERVIEW -->
+<section id="overview" class="mb-16">
+  <div class="flex items-center gap-3 mb-6">
+    <span class="text-4xl">⚡</span>
+    <div>
+      <h1 class="text-3xl font-bold text-white">autopod</h1>
+      <p class="text-gray-400 text-sm mt-0.5">Autonomous AI agent orchestration. Containerized. Validated. Human-approved.</p>
+    </div>
+  </div>
+  <p class="text-lg text-gray-300 leading-relaxed mb-4">You describe a task. autopod spins up an isolated container, lets an AI agent work, validates the output in a real browser, and only bothers you when there's something worth reviewing. Run dozens of agents in parallel — across repos, models, and runtimes — without babysitting a single one.</p>
+  <pre><code class="language-bash">$ ap run my-app "Add a dark mode toggle to the settings page" --model opus
+
+  Session a1b2c3d4 created  (profile: my-app · model: claude-opus)
+  Provisioning container...
+  Agent running...
+
+  # Go grab coffee. Come back to a Teams notification with screenshots.</code></pre>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
+    <div class="bg-gray-900 border border-white/[0.06] rounded-lg p-4 text-center">
+      <div class="text-2xl font-bold text-blue-400">15</div>
+      <div class="text-xs text-gray-500 mt-1">Session states</div>
+    </div>
+    <div class="bg-gray-900 border border-white/[0.06] rounded-lg p-4 text-center">
+      <div class="text-2xl font-bold text-green-400">7</div>
+      <div class="text-xs text-gray-500 mt-1">Validation phases</div>
+    </div>
+    <div class="bg-gray-900 border border-white/[0.06] rounded-lg p-4 text-center">
+      <div class="text-2xl font-bold text-cyan-400">13+</div>
+      <div class="text-xs text-gray-500 mt-1">MCP tools</div>
+    </div>
+    <div class="bg-gray-900 border border-white/[0.06] rounded-lg p-4 text-center">
+      <div class="text-2xl font-bold text-red-400">5</div>
+      <div class="text-xs text-gray-500 mt-1">Security layers</div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section id="how-it-works" class="mb-16">
+  <h2>How It Works</h2>
+  <p>autopod wraps autonomous coding agents in a control plane that provisions isolated containers, runs validation, and manages the full lifecycle from task to merged PR.</p>
+  <div class="bg-gray-900 border border-white/[0.06] rounded-lg p-5 my-4">
+    <div class="text-xs text-gray-500 mb-4 font-mono uppercase tracking-wider">Architecture</div>
+    <div class="flex items-start gap-4 flex-wrap">
+      <div class="flex flex-col items-center gap-1"><div class="w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center text-blue-400 text-lg">💻</div><span class="text-xs text-gray-400 text-center">Desktop / CLI</span><span class="text-xs text-gray-600 text-center">Monitor &amp; control</span></div>
+      <div class="text-gray-700 mt-4">→</div>
+      <div class="flex flex-col items-center gap-1"><div class="w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center text-purple-400 text-lg">🖥</div><span class="text-xs text-gray-400 text-center">Daemon</span><span class="text-xs text-gray-600 text-center">Orchestration &amp; API</span></div>
+      <div class="text-gray-700 mt-4">→</div>
+      <div class="flex flex-col items-center gap-1"><div class="w-10 h-10 bg-green-500/10 rounded-lg flex items-center justify-center text-green-400 text-lg">📦</div><span class="text-xs text-gray-400 text-center">Containers</span><span class="text-xs text-gray-600 text-center">Local Docker or ACI</span></div>
+      <div class="text-gray-700 mt-4">→</div>
+      <div class="flex flex-col items-center gap-1"><div class="w-10 h-10 bg-cyan-500/10 rounded-lg flex items-center justify-center text-cyan-400 text-lg">✅</div><span class="text-xs text-gray-400 text-center">Validation</span><span class="text-xs text-gray-600 text-center">7-phase pipeline</span></div>
+      <div class="text-gray-700 mt-4">→</div>
+      <div class="flex flex-col items-center gap-1"><div class="w-10 h-10 bg-orange-500/10 rounded-lg flex items-center justify-center text-orange-400 text-lg">👤</div><span class="text-xs text-gray-400 text-center">Human Review</span><span class="text-xs text-gray-600 text-center">Approve to merge</span></div>
+    </div>
+  </div>
+  <h3>Session Lifecycle (15 states)</h3>
+  <pre><code class="language-bash">queued → provisioning → running → validating → validated → approved → merge_pending → merging → complete
+                            │            │
+                            │            └─→ failed (retry with feedback, up to N attempts)
+                            │                    │
+                            │                    └─→ review_required (exhausted — human decides)
+                            │
+                            ├─→ paused          (ap pause)
+                            └─→ awaiting_input  (agent escalated via ask_human)
+
+Any non-terminal state → killing → killed</code></pre>
+</section>
+
+<!-- GETTING STARTED -->
+<section id="getting-started" class="mb-16">
+  <h2>Getting Started</h2>
+  <h3>Prerequisites</h3>
+  <ul>
+    <li><strong class="text-gray-200">Node.js 22+</strong></li>
+    <li><strong class="text-gray-200">pnpm</strong> (or use <code>npx pnpm</code> everywhere)</li>
+    <li><strong class="text-gray-200">Docker</strong> (for local execution target)</li>
+    <li><strong class="text-gray-200">Azure Entra ID app registration</strong> (for auth)</li>
+  </ul>
+  <h3>1. Clone &amp; install</h3>
+  <pre><code class="language-bash">git clone https://github.com/esbenwiberg/autopod.git
+cd autopod
+npx pnpm install
+npx pnpm run build</code></pre>
+  <h3>2. Configure environment</h3>
+  <pre><code class="language-bash">cp .env.example .env</code></pre>
+  <pre><code class="language-bash"># Required — from your Entra ID app registration
+ENTRA_CLIENT_ID=&lt;application-client-id&gt;
+ENTRA_TENANT_ID=&lt;directory-tenant-id&gt;
+
+# AI provider (direct Anthropic API)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# For private repos
+GITHUB_PAT=ghp_...
+
+# Optional — Teams notifications
+TEAMS_WEBHOOK_URL=https://...</code></pre>
+  <h3>3. Start the daemon</h3>
+  <pre><code class="language-bash"># Recommended — Docker Compose with hot-reload
+docker compose up -d
+
+# Or run directly
+npx pnpm --filter @autopod/daemon run dev</code></pre>
+  <h3>4. Connect the CLI</h3>
+  <pre><code class="language-bash">ap connect http://localhost:3100
+ap login</code></pre>
+  <h3>5. Create your first profile</h3>
+  <pre><code class="language-bash">ap profile create my-app \
+  --repo owner/my-app \
+  --template node22-pw \
+  --build "npm ci && npm run build" \
+  --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
+  --health "/" \
+  --test "npm test" \
+  --model opus</code></pre>
+  <h3>6. Run your first session</h3>
+  <pre><code class="language-bash">ap run my-app "Add a contact form to the about page"
+
+# Check status
+ap ls
+
+# See what the agent did
+ap diff a1b2c3d4
+
+# Approve and merge
+ap approve a1b2c3d4
+
+# Or reject with feedback
+ap reject a1b2c3d4 "Needs client-side validation"</code></pre>
+</section>
+
+<!-- CLI REFERENCE -->
+<section id="cli-reference" class="mb-16">
+  <h2>CLI Reference</h2>
+  <h3>Authentication</h3>
+  <pre><code class="language-bash">ap login                    # Interactive login (Entra ID PKCE)
+ap login --device           # Device code flow (headless/SSH)
+ap logout
+ap whoami</code></pre>
+  <h3>Daemon</h3>
+  <pre><code class="language-bash">ap connect &lt;url&gt;            # Point CLI at a daemon
+ap disconnect
+ap daemon start --local
+ap daemon stop</code></pre>
+
+  <section id="cli-sessions">
+  <h3>Sessions</h3>
+  <pre><code class="language-bash"># Create
+ap run &lt;profile&gt; "&lt;task&gt;"                   # Start a session
+ap run &lt;profile&gt; "&lt;task&gt;" --model opus      # Override model
+ap run &lt;profile&gt; "&lt;task&gt;" --runtime codex   # Codex runtime
+ap run &lt;profile&gt; "&lt;task&gt;" --runtime copilot # Copilot runtime
+ap run &lt;profile&gt; "&lt;task&gt;" --branch feat/x   # Custom branch
+ap run &lt;profile&gt; "&lt;task&gt;" --no-validate     # Skip auto-validation
+ap run &lt;profile&gt; "&lt;task&gt;" --ac "criterion"  # Acceptance criteria (repeatable)
+ap run &lt;profile&gt; "&lt;task&gt;" --base-branch feat/plan  # Branch from workspace output
+ap run &lt;profile&gt; "&lt;task&gt;" --ac-from specs/ac.md    # ACs from file
+
+# Monitor
+ap ls                                       # List sessions
+ap ls --status running
+ap ls --json
+ap status &lt;id&gt;                              # Full session details
+ap logs &lt;id&gt;                                # Stream agent activity
+
+# Interact
+ap tell &lt;id&gt; "&lt;message&gt;"                    # Send message / resume paused session
+ap pause &lt;id&gt;
+ap nudge &lt;id&gt; "&lt;message&gt;"                   # Async message (agent picks up mid-task)
+
+# Validate &amp; Preview
+ap validate &lt;id&gt;                            # Trigger validation
+ap revalidate &lt;id&gt;                          # Pull latest + re-validate (no agent rework)
+ap interrupt &lt;id&gt;                           # Stop in-flight validation, get partial result
+ap open &lt;id&gt;                                # Spin up live preview (real browser)
+ap report &lt;id&gt;                              # Open HTML validation report
+ap diff &lt;id&gt;
+
+# Validation overrides (dismiss recurring false-positive findings)
+ap override &lt;id&gt; &lt;finding-id&gt; --dismiss
+ap override &lt;id&gt; &lt;finding-id&gt; --guidance "&lt;note&gt;"
+
+# review_required resolution
+ap extend-attempts &lt;id&gt;                     # Grant more validation attempts
+ap fix-manually &lt;id&gt;                        # Create linked workspace for human edits
+
+# Complete
+ap approve &lt;id&gt;
+ap approve &lt;id&gt; --squash
+ap reject &lt;id&gt; "&lt;feedback&gt;"
+ap kill &lt;id&gt;
+
+# Bulk
+ap approve --all-validated
+ap kill --all-failed
+
+# Stats
+ap stats                                    # Aggregate counts, avg duration, total cost</code></pre>
+  </section>
+
+  <section id="cli-profiles">
+  <h3>Profiles</h3>
+  <pre><code class="language-bash">ap profile create &lt;name&gt;
+ap profile ls
+ap profile show &lt;name&gt;
+ap profile edit &lt;name&gt;                      # Open in $EDITOR
+ap profile delete &lt;name&gt;
+ap profile warm &lt;name&gt;                      # Pre-bake deps into Docker image
+ap profile auth-copilot &lt;name&gt;             # Interactive Copilot OAuth setup
+
+# Per-action approval overrides
+ap profile action-override list &lt;name&gt;
+ap profile action-override set &lt;name&gt; &lt;action&gt; --approval
+ap profile action-override remove &lt;name&gt; &lt;action&gt;</code></pre>
+  </section>
+
+  <section id="cli-workspace">
+  <h3>Workspace &amp; History</h3>
+  <pre><code class="language-bash"># Interactive workspace pod (no agent)
+ap workspace &lt;profile&gt; [description]
+ap workspace &lt;profile&gt; -b feat/my-branch
+ap workspace &lt;profile&gt; --pim-group "Contributor on prod-rg:60m"
+ap attach &lt;id&gt;                              # Shell in (auto-pushes on exit)
+
+# History analysis workspace
+ap history &lt;profile&gt;                        # Load last 30d of sessions
+ap history &lt;profile&gt; --since 7d
+ap history &lt;profile&gt; --failures            # Only failed/review_required
+ap history &lt;profile&gt; --limit 50</code></pre>
+  </section>
+
+  <section id="cli-memory">
+  <h3>Memory</h3>
+  <pre><code class="language-bash">ap memory list                              # List approved memories
+ap memory list --scope profile              # Filter: global | profile | session
+ap memory show &lt;id&gt;
+ap memory approve &lt;id&gt;
+ap memory reject &lt;id&gt;
+ap memory delete &lt;id&gt;</code></pre>
+  </section>
+
+  <section id="cli-dashboard">
+  <h3>TUI Dashboard</h3>
+  <pre><code class="language-bash">ap watch                                    # Launch real-time TUI dashboard</code></pre>
+  <table class="mt-3">
+    <thead><tr><th>Key</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><code>↑ ↓</code></td><td>Navigate sessions</td></tr>
+      <tr><td><code>t</code></td><td>Tell / resume (send message)</td></tr>
+      <tr><td><code>p</code></td><td>Pause running session</td></tr>
+      <tr><td><code>u</code></td><td>Nudge (async message)</td></tr>
+      <tr><td><code>a</code></td><td>Approve</td></tr>
+      <tr><td><code>r</code></td><td>Reject with feedback</td></tr>
+      <tr><td><code>d</code></td><td>View diff</td></tr>
+      <tr><td><code>l</code></td><td>View logs</td></tr>
+      <tr><td><code>w</code></td><td>Open validation report</td></tr>
+      <tr><td><code>o</code></td><td>Launch preview / open PR</td></tr>
+      <tr><td><code>v</code></td><td>Trigger validation</td></tr>
+      <tr><td><code>x</code></td><td>Kill session</td></tr>
+      <tr><td><code>n</code></td><td>New session</td></tr>
+      <tr><td><code>/</code></td><td>Filter sessions</td></tr>
+      <tr><td><code>q</code></td><td>Quit</td></tr>
+    </tbody>
+  </table>
+  </section>
+</section>
+
+<!-- PROFILE CONFIG -->
+<section id="profile-config" class="mb-16">
+  <h2>Profile Configuration</h2>
+  <p>Profiles define everything autopod needs to run, validate, and merge a session for a specific repo. They support <strong class="text-gray-200">inheritance</strong> — define a base profile and extend it per-app.</p>
+  <pre><code class="language-bash">ap profile create my-app \
+  --repo owner/my-app \
+  --branch main \
+  --template node22-pw \
+  --build "npm ci && npm run build" \
+  --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
+  --test "npm test" \
+  --health "/" \
+  --health-timeout 30000 \
+  --model opus \
+  --runtime claude \
+  --pr-provider github \
+  --max-validation-attempts 3 \
+  --instructions "Use TypeScript. Prefer Tailwind CSS." \
+  --extends frontend-base</code></pre>
+  <p>Additional YAML-only fields:</p>
+  <pre><code class="language-yaml">containerMemoryGb: 4
+buildTimeout: 300        # seconds
+testTimeout: 600
+branchPrefix: "feat"     # branch names become feat/&lt;sessionId&gt;
+executionTarget: local   # "local" (Docker) or "aci" (Azure Container Instances)
+workerProfile: "my-app"  # for workspace pods: which profile runs the follow-up agent</code></pre>
+
+  <h3>PR providers</h3>
+  <pre><code class="language-yaml">prProvider: github   # or "ado"
+
+# Azure DevOps
+prProvider: ado
+adoPat: &lt;your-ado-pat&gt;   # encrypted at rest</code></pre>
+
+  <section id="profile-templates">
+  <h3>Stack Templates</h3>
+  <table>
+    <thead><tr><th>Template</th><th>Stack</th><th>Includes</th></tr></thead>
+    <tbody>
+      <tr><td><code>node22</code></td><td>Node.js 22</td><td>npm / pnpm / yarn</td></tr>
+      <tr><td><code>node22-pw</code></td><td>Node.js 22 + Playwright</td><td>Chromium for browser validation</td></tr>
+      <tr><td><code>dotnet9</code></td><td>.NET 9 SDK</td><td>dotnet CLI</td></tr>
+      <tr><td><code>dotnet10</code></td><td>.NET 10 + Node.js 22</td><td>Mixed stack</td></tr>
+      <tr><td><code>python312</code></td><td>Python 3.12</td><td>pip / poetry</td></tr>
+      <tr><td><code>custom</code></td><td>Bring your own</td><td>Custom Dockerfile</td></tr>
+    </tbody>
+  </table>
+  </section>
+
+  <h3>Smoke Pages &amp; Acceptance Criteria</h3>
+  <pre><code class="language-yaml">smokePages:
+  - path: "/"
+    assertions:
+      - selector: ".dark-mode-toggle"
+        type: exists
+      - selector: "h1"
+        type: text_contains
+        value: "Welcome"
+  - path: "/about"
+    assertions:
+      - selector: ".contact-form"
+        type: visible   # exists | visible | text_contains | count</code></pre>
+  <pre><code class="language-bash">ap run my-app "Add dark mode" \
+  --ac "Settings page has a dark mode toggle" \
+  --ac "Toggle persists after page refresh" \
+  --ac-from specs/acceptance.md   # one criterion per line</code></pre>
+
+  <section id="profile-network">
+  <h3>Network Policy</h3>
+  <pre><code class="language-yaml">networkPolicy:
+  enabled: true
+  mode: restricted       # restricted | deny-all | allow-all
+  allowedHosts:
+    - "api.stripe.com"
+    - "*.my-company.com"
+  replaceDefaults: false # set true to replace built-in default allowlist
+  allow_package_managers: true  # auto-adds npm, pypi, crates.io, nuget, golang, rubygems, debian…</code></pre>
+  <div class="callout callout-blue">Built-in default hosts (always allowed unless <code>replaceDefaults: true</code>): <code>api.anthropic.com</code>, <code>api.openai.com</code>, <code>registry.npmjs.org</code>, <code>pypi.org</code>, <code>github.com</code>, <code>pkgs.dev.azure.com</code>, GitHub Copilot endpoints.</div>
+  </section>
+
+  <section id="profile-escalation">
+  <h3>Escalation Settings</h3>
+  <pre><code class="language-yaml">escalation:
+  askHuman: true
+  askAi:
+    enabled: true
+    model: sonnet           # also used as the AI task reviewer model
+    maxCalls: 5
+  autoPauseAfter: 3         # auto-escalate after N consecutive failures
+  humanResponseTimeout: 3600000  # 1 hour</code></pre>
+  </section>
+
+  <section id="profile-providers">
+  <h3>Model Providers</h3>
+  <table>
+    <thead><tr><th>Provider</th><th>Auth method</th><th>Use case</th></tr></thead>
+    <tbody>
+      <tr><td><code>anthropic</code></td><td>API key (<code>ANTHROPIC_API_KEY</code>)</td><td>Default — direct Anthropic API</td></tr>
+      <tr><td><code>max</code></td><td>OAuth (access + refresh tokens)</td><td>Claude MAX/PRO consumer subscriptions</td></tr>
+      <tr><td><code>foundry</code></td><td>Managed identity + project config</td><td>Azure-hosted Foundry deployments</td></tr>
+      <tr><td><code>copilot</code></td><td>GitHub token (OAuth / fine-grained PAT)</td><td>GitHub Copilot runtime</td></tr>
+    </tbody>
+  </table>
+  <pre><code class="language-yaml">modelProvider: max   # anthropic | max | foundry | copilot
+
+# Foundry-specific
+foundryConfig:
+  baseUrl: "https://your-foundry.azure.com"
+  project: "my-project"</code></pre>
+  </section>
+
+  <section id="profile-registries">
+  <h3>Private Registries</h3>
+  <pre><code class="language-yaml">privateRegistries:
+  - type: npm
+    url: "https://pkgs.dev.azure.com/{org}/_packaging/{feed}/npm/registry/"
+    scope: "@myorg"        # optional scoped packages
+  - type: nuget
+    url: "https://pkgs.dev.azure.com/{org}/_packaging/{feed}/nuget/v3/index.json"
+registryPat: "&lt;ado-pat&gt;"   # encrypted at rest, injected into .npmrc / NuGet.Config</code></pre>
+  </section>
+
+  <section id="profile-injection">
+  <h3>MCP Servers &amp; Skills</h3>
+  <pre><code class="language-yaml">mcpServers:
+  - name: prism
+    url: "https://prism.internal/mcp"
+    headers:
+      Authorization: "Bearer ${PRISM_API_KEY}"
+    description: "Codebase context powered by Prism."
+    toolHints:
+      - "Call get_file_context before modifying any file"
+
+skills:
+  - name: security-check
+    description: "OWASP-aware security review"
+    source:
+      type: github
+      repo: myorg/claude-skills
+      path: security-check.md
+      ref: main
+      token: "${GITHUB_TOKEN}"
+
+claudeMdSections:
+  - heading: "Coding Standards"
+    priority: 20
+    content: "Always use TypeScript strict mode. Never use any."
+  - heading: "Codebase Architecture"
+    priority: 10
+    maxTokens: 4000
+    fetch:
+      url: "https://prism.internal/api/context"
+      authorization: "Bearer token"
+      timeoutMs: 10000</code></pre>
+  </section>
+
+  <h3>Profile Versioning</h3>
+  <p>Every profile update auto-increments <code>profile.version</code>. Sessions snapshot the full resolved profile at creation — you can always audit exactly which config produced a given session's output.</p>
+  <pre><code class="language-bash">ap profile show my-app   # Shows: version: 7, last updated: ...
+ap status a1b2c3d4       # Shows: profile: my-app v7 · branch: autopod/a1b2c3d4</code></pre>
+
+  <h3>Profile Inheritance</h3>
+  <pre><code class="language-yaml"># base.yaml
+name: frontend-base
+template: node22-pw
+build: "npm ci && npm run build"
+escalation:
+  askHuman: true
+
+# my-app.yaml
+name: my-app
+extends: frontend-base
+repo: owner/my-app
+model: opus
+# All frontend-base fields are inherited; arrays merge by name</code></pre>
+</section>
+
+<!-- SESSION LIFECYCLE -->
+<section id="session-lifecycle" class="mb-16">
+  <h2>Session Lifecycle</h2>
+  <p>Every session follows a strict 15-state machine. Invalid transitions are rejected by the daemon.</p>
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-2 my-4 text-xs font-mono">
+    <div class="bg-gray-800 rounded p-2"><span class="text-gray-400">queued</span> — waiting in queue</div>
+    <div class="bg-gray-800 rounded p-2"><span class="text-blue-400">provisioning</span> — container spinning up</div>
+    <div class="bg-blue-900/40 rounded p-2"><span class="text-blue-400">running</span> — agent working</div>
+    <div class="bg-gray-800 rounded p-2"><span class="text-orange-400">awaiting_input</span> — agent escalated</div>
+    <div class="bg-gray-800 rounded p-2"><span class="text-yellow-400">paused</span> — operator paused</div>
+    <div class="bg-cyan-900/40 rounded p-2"><span class="text-cyan-400">validating</span> — 7-phase pipeline</div>
+    <div class="bg-green-900/40 rounded p-2"><span class="text-green-400">validated</span> — all phases passed</div>
+    <div class="bg-green-900/40 rounded p-2"><span class="text-green-400">approved</span> — human approved</div>
+    <div class="bg-indigo-900/40 rounded p-2"><span class="text-indigo-400">merge_pending</span> — awaiting PR merge</div>
+    <div class="bg-indigo-900/40 rounded p-2"><span class="text-indigo-400">merging</span> — PR merging</div>
+    <div class="bg-green-900/60 rounded p-2"><span class="text-green-300">complete</span> — done ✓</div>
+    <div class="bg-red-900/40 rounded p-2"><span class="text-red-400">failed</span> — retrying</div>
+    <div class="bg-red-900/60 rounded p-2"><span class="text-red-300">review_required</span> — retries exhausted</div>
+    <div class="bg-gray-800 rounded p-2"><span class="text-gray-400">killing</span> — shutting down</div>
+    <div class="bg-gray-800 rounded p-2"><span class="text-gray-400">killed</span> — terminated</div>
+  </div>
+  <h3>review_required</h3>
+  <p>When <code>maxValidationAttempts</code> is exhausted, the session moves to <code>review_required</code> instead of hard-failing. From here:</p>
+  <pre><code class="language-bash">ap extend-attempts &lt;id&gt;    # Grant N more attempts — agent retries with all accumulated feedback
+ap fix-manually &lt;id&gt;      # Create a linked workspace pod for human edits, then re-validate
+ap reject &lt;id&gt; "&lt;note&gt;"   # Restart fresh from scratch</code></pre>
+  <h3>Token &amp; Cost Tracking</h3>
+  <p>Each session tracks <code>inputTokens</code>, <code>outputTokens</code>, and <code>costUsd</code> captured from the runtime's completion events. View with <code>ap status &lt;id&gt;</code> or <code>ap stats</code> for aggregate totals.</p>
+</section>
+
+<!-- VALIDATION PIPELINE -->
+<section id="validation-pipeline" class="mb-16">
+  <h2>Validation Pipeline</h2>
+  <p>Validation is a 7-phase pipeline. Each phase gates the next. Failed validation feeds structured feedback to the agent for retry.</p>
+  <div class="flex gap-1 overflow-x-auto pb-2 my-4 flex-wrap">
+    <div class="pipeline-step"><div class="w-9 h-9 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-400 font-bold text-sm">1</div><span class="text-xs text-gray-400">Build</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step"><div class="w-9 h-9 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-400 font-bold text-sm">2</div><span class="text-xs text-gray-400">Test</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step"><div class="w-9 h-9 bg-cyan-500/10 rounded-full flex items-center justify-center text-cyan-400 font-bold text-sm">3</div><span class="text-xs text-gray-400">Health</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step"><div class="w-9 h-9 bg-teal-500/10 rounded-full flex items-center justify-center text-teal-400 font-bold text-sm">4</div><span class="text-xs text-gray-400">Smoke</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step"><div class="w-9 h-9 bg-green-500/10 rounded-full flex items-center justify-center text-green-400 font-bold text-sm">5</div><span class="text-xs text-gray-400">AC Check</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step"><div class="w-9 h-9 bg-purple-500/10 rounded-full flex items-center justify-center text-purple-400 font-bold text-sm">6</div><span class="text-xs text-gray-400">AI Review</span></div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step"><div class="w-9 h-9 bg-orange-500/10 rounded-full flex items-center justify-center text-orange-400 font-bold text-sm">7</div><span class="text-xs text-gray-400">Overall</span></div>
+  </div>
+  <table>
+    <thead><tr><th>Phase</th><th>What happens</th><th>Config</th></tr></thead>
+    <tbody>
+      <tr><td>1. Build</td><td>Runs your build command inside the container</td><td><code>profile.build</code></td></tr>
+      <tr><td>2. Test</td><td>Runs test suite (skipped if not configured)</td><td><code>profile.testCommand</code></td></tr>
+      <tr><td>3. Health check</td><td>Polls URL until HTTP 200</td><td><code>profile.health</code></td></tr>
+      <tr><td>4. Smoke pages</td><td>Playwright visits pages, checks assertions. Runs on daemon host.</td><td><code>profile.smokePages</code></td></tr>
+      <tr><td>5. AC validation</td><td>LLM evaluates each acceptance criterion in a real browser</td><td><code>session.acceptanceCriteria</code></td></tr>
+      <tr><td>6. AI task review</td><td>Separate model reviews diff against original task + prior findings (tiered context)</td><td><code>escalation.askAi.model</code></td></tr>
+      <tr><td>7. Overall</td><td>Pass only if all required phases pass</td><td>—</td></tr>
+    </tbody>
+  </table>
+  <h3>Agent Self-Validation</h3>
+  <p>During development, agents call the <code>validate_in_browser</code> MCP tool. An LLM generates a Playwright script, it executes on the daemon host, screenshots are captured, and results feed back to the agent — all before the independent reviewer runs.</p>
+  <h3>Interrupt &amp; Per-Finding Overrides</h3>
+  <pre><code class="language-bash"># Stop a running validation immediately
+ap interrupt &lt;id&gt;   # Returns partial results, session returns to previous state
+
+# Dismiss a recurring false-positive finding (persists across retries)
+ap override &lt;id&gt; &lt;finding-id&gt; --dismiss
+ap override &lt;id&gt; &lt;finding-id&gt; --guidance "Use our date-fns helper instead"</code></pre>
+  <div class="callout callout-yellow">Overrides are queued in <code>PendingOverrideRepository</code> and flushed into each validation pass before the AI reviewer runs. They don't disable checks — they annotate findings so the reviewer can make an informed decision.</div>
+</section>
+
+<!-- ESCALATION SYSTEM -->
+<section id="escalation-system" class="mb-16">
+  <h2>Escalation System</h2>
+  <p>An MCP server is injected into every agent container at provisioning time. It provides 13+ tools for structured communication between agents and humans.</p>
+  <table>
+    <thead><tr><th>Tool</th><th>Blocking</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>ask_human</code></td><td>✅ Yes</td><td>Pause agent, send question to human, wait for response</td></tr>
+      <tr><td><code>ask_ai</code></td><td>✅ Yes</td><td>Consult reviewer model (rate-limited, max N per session)</td></tr>
+      <tr><td><code>report_blocker</code></td><td>Conditional</td><td>Report a hard stop; auto-pauses after threshold</td></tr>
+      <tr><td><code>report_plan</code></td><td>❌ No</td><td>Declare implementation plan + steps before starting</td></tr>
+      <tr><td><code>report_progress</code></td><td>❌ No</td><td>Report phase transitions (currentPhase / totalPhases)</td></tr>
+      <tr><td><code>report_task_summary</code></td><td>❌ No</td><td>Capture actual work vs plan — deviation tracking</td></tr>
+      <tr><td><code>check_messages</code></td><td>❌ No</td><td>Poll for queued nudge/tell messages from operators</td></tr>
+      <tr><td><code>validate_in_browser</code></td><td>✅ Yes</td><td>LLM generates Playwright script → runs on host → screenshots</td></tr>
+      <tr><td><code>trigger_revalidation</code></td><td>❌ No</td><td>Workspace pods: re-run validation on linked worker</td></tr>
+      <tr><td><code>memory_suggest</code></td><td>❌ No</td><td>Propose a memory for human approval (global/profile/session)</td></tr>
+      <tr><td><code>memory_list</code></td><td>❌ No</td><td>List approved memories available to this session</td></tr>
+      <tr><td><code>memory_read</code></td><td>❌ No</td><td>Get full content of a specific memory</td></tr>
+      <tr><td><code>memory_search</code></td><td>❌ No</td><td>Keyword/semantic search across available memories</td></tr>
+      <tr><td><em>action tools</em></td><td>Optional</td><td>One tool per action definition from the profile's action policy</td></tr>
+    </tbody>
+  </table>
+  <h3>How Blocking Works</h3>
+  <p>Blocking tools use <code>PendingRequests</code> — a Promise-based map keyed by escalation ID. The agent awaits resolution; the daemon resolves it when a human responds via API, CLI, or desktop.</p>
+  <div class="callout callout-blue">The <code>validate_in_browser</code> tool runs Playwright on the <strong>daemon host</strong> (not inside the container), so it works regardless of container network policy. Screenshots are returned as base64 PNGs embedded in the tool result.</div>
+</section>
+
+<!-- MEMORY STORES -->
+<section id="memory-stores" class="mb-16">
+  <h2>Memory Stores</h2>
+  <p>Agents lose context between sessions. Memory stores let agents accumulate institutional knowledge — team conventions, known gotchas, recurring patterns — that persists and gets injected into future sessions.</p>
+  <h3>Scopes</h3>
+  <table>
+    <thead><tr><th>Scope</th><th>Available to</th><th>Use case</th></tr></thead>
+    <tbody>
+      <tr><td><code>global</code></td><td>All sessions on this daemon</td><td>Company-wide conventions, tooling rules</td></tr>
+      <tr><td><code>profile</code></td><td>Sessions using the same profile</td><td>Repo-specific patterns, known bugs</td></tr>
+      <tr><td><code>session</code></td><td>This session only</td><td>Agent's own mid-task notes</td></tr>
+    </tbody>
+  </table>
+  <h3>Workflow</h3>
+  <pre><code class="language-bash"># Agent suggests a memory during a session (via MCP tool)
+# → memory.suggestion_created event fires
+# → OverviewTab shows a suggestion card in the desktop app
+
+# Human reviews and approves
+ap memory approve &lt;id&gt;
+
+# Future sessions automatically get the memory injected into CLAUDE.md
+# under a "Team Knowledge" section at provisioning time</code></pre>
+  <h3>REST API</h3>
+  <pre><code class="language-bash">GET    /memory                  # List memories (filter: ?scope=profile&amp;profileName=my-app)
+POST   /memory                  # Create memory directly (skips suggest-approve flow)
+PATCH  /memory/:id              # Approve, reject, or update content
+DELETE /memory/:id</code></pre>
+  <div class="callout callout-green">Memory content is SHA-256 hashed for deduplication — suggesting the same content twice produces one record. Approved memories are never modified by agents; only humans can edit or delete them.</div>
+</section>
+
+<!-- ACTION CONTROL PLANE -->
+<section id="action-control-plane" class="mb-16">
+  <h2>Action Control Plane</h2>
+  <p>Agents can read from external systems (GitHub, ADO, Azure) through a gated, audited pipeline. Every response is scanned for prompt injection and PII before reaching the agent.</p>
+  <pre><code class="language-bash">Agent calls MCP tool (e.g. read_issue)
+  → Daemon validates against action policy + resource restrictions
+  → Handler executes (GitHub API / ADO REST / Azure / HTTP)
+  → Response pipeline:
+      1. Prompt injection quarantine (7 patterns, compound scoring)
+         → &lt;0.5: pass  |  0.5–0.8: wrap with warning  |  &gt;0.8: block
+      2. PII sanitization (API keys, AWS keys, Azure connections, emails)
+      3. Field whitelist (only configured fields pass through)
+  → Clean result returned to agent + audit record written</code></pre>
+  <h3>Built-in Action Groups (8 groups, 22 actions)</h3>
+  <table>
+    <thead><tr><th>Group</th><th>Actions</th></tr></thead>
+    <tbody>
+      <tr><td><code>github-issues</code></td><td><code>read_issue</code>, <code>search_issues</code>, <code>read_issue_comments</code></td></tr>
+      <tr><td><code>github-prs</code></td><td><code>read_pr</code>, <code>read_pr_comments</code>, <code>read_pr_diff</code></td></tr>
+      <tr><td><code>github-code</code></td><td><code>read_file</code>, <code>search_code</code></td></tr>
+      <tr><td><code>ado-workitems</code></td><td><code>read_workitem</code>, <code>search_workitems</code></td></tr>
+      <tr><td><code>ado-prs</code></td><td><code>ado_read_pr</code>, <code>ado_read_pr_threads</code>, <code>ado_read_pr_changes</code></td></tr>
+      <tr><td><code>ado-code</code></td><td><code>ado_read_file</code>, <code>ado_search_code</code></td></tr>
+      <tr><td><code>azure-logs</code></td><td><code>query_logs</code>, <code>read_app_insights</code>, <code>read_container_logs</code></td></tr>
+      <tr><td><code>azure-pim</code></td><td><code>activate_pim_group</code>, <code>deactivate_pim_group</code>, <code>list_pim_activations</code></td></tr>
+    </tbody>
+  </table>
+  <h3>Configuration</h3>
+  <pre><code class="language-yaml">actionPolicy:
+  enabledGroups:
+    - github-issues
+    - github-prs
+    - ado-workitems
+    - azure-pim
+  sanitization:
+    preset: standard          # standard | strict | relaxed
+  quarantine:
+    enabled: true
+    threshold: 0.5
+  actionOverrides:
+    - action: read_issue
+      requiresApproval: false
+      allowedResources:
+        - "owner/repo1"</code></pre>
+  <h3>Azure PIM</h3>
+  <p>For workspace pods that need elevated Azure access, configure PIM groups on the profile. They are activated at session start and deactivated when the session ends. Agents can only activate groups that were pre-configured — no escalation beyond declared scope.</p>
+  <pre><code class="language-yaml">pimGroups:
+  - groupId: "00000000-0000-0000-0000-000000000000"
+    displayName: "Contributor on prod-rg"
+    duration: 60              # minutes
+    justification: "autopod workspace session"</code></pre>
+  <pre><code class="language-bash">ap workspace my-app --pim-group "Contributor on prod-rg:60m"</code></pre>
+</section>
+
+<!-- WORKSPACE PODS -->
+<section id="workspace-pods" class="mb-16">
+  <h2>Workspace Pods</h2>
+  <p>Workspace pods are interactive containers — same image, network, and credentials as agent pods, but you drive. Use them to explore, prototype, or write specs before handing off to an automated agent.</p>
+  <pre><code class="language-bash"># 1. Spin up a workspace
+ap workspace my-app "Plan auth rewrite" -b feat/plan-auth
+
+# 2. Shell in and do your work
+ap attach &lt;id&gt;
+# ... edit files, write specs, prototype ...
+# Exit the shell — branch auto-pushes to origin
+
+# 3. Hand off to an agent branching from your work
+ap run my-app "Implement auth rewrite per spec" \
+  --base-branch feat/plan-auth \
+  --ac-from specs/acceptance-criteria.md</code></pre>
+  <h3>workerProfile</h3>
+  <p>Set <code>workerProfile</code> on a workspace profile to name the profile that should handle the follow-up agent session. The desktop app can then offer a one-click "Hand off to agent" button.</p>
+  <pre><code class="language-yaml">name: my-app-workspace
+extends: my-app
+outputMode: workspace
+workerProfile: my-app        # profile to use for the follow-up worker</code></pre>
+  <h3>History Analysis</h3>
+  <p>The history workspace creates an isolated container pre-loaded with a SQLite database of past sessions — events, validation results, escalations, token costs. Use it with an AI agent to identify patterns: recurring failures, common blockers, expensive prompts.</p>
+  <pre><code class="language-bash">ap history my-app --since 30d --failures
+
+# Inside the workspace, the agent gets:
+# /workspace/history.db  — SQLite with all session data
+# /workspace/README.md   — Analysis guide with example queries</code></pre>
+</section>
+
+<!-- NETWORK ISOLATION -->
+<section id="network-isolation" class="mb-16">
+  <h2>Network Isolation</h2>
+  <p>Every agent container gets its own Docker bridge network with per-container iptables OUTPUT chain rules. Networks are cleaned up in the session's <code>finally</code> block.</p>
+  <table>
+    <thead><tr><th>Mode</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td><code>allow-all</code></td><td>Loopback + established/related only; no DROP. For trusted environments.</td></tr>
+      <tr><td><code>deny-all</code></td><td>DNS (UDP/TCP 53) only. Everything else DROPped.</td></tr>
+      <tr><td><code>restricted</code></td><td>Per-host allowlist + final DROP. Default when <code>enabled: true</code>.</td></tr>
+    </tbody>
+  </table>
+  <h3>allow_package_managers</h3>
+  <p>In <code>restricted</code> mode, set <code>allow_package_managers: true</code> to automatically expand the allowlist with 15 common package manager hosts:</p>
+  <p class="text-sm text-gray-500">npm · yarn · pypi · crates.io · pkgs.dev.azure.com (NuGet) · proxy.golang.org · rubygems.org · deb.debian.org · archive.ubuntu.com · dl.google.com · storage.googleapis.com · and more</p>
+  <h3>Security Notes</h3>
+  <ul>
+    <li>All hostnames are validated with <code>SAFE_HOST_REGEX</code> before iptables injection to prevent shell injection</li>
+    <li>MCP server hosts are always allowed regardless of mode — injected automatically</li>
+    <li>Private registry hosts are always allowed when <code>privateRegistries</code> is configured</li>
+    <li>Live updates — patching <code>networkPolicy</code> via API immediately re-applies rules to all running containers using that profile (no restart)</li>
+  </ul>
+</section>
+
+<!-- AUTH SETUP -->
+<section id="auth-setup" class="mb-16">
+  <h2>Auth Setup</h2>
+  <p>autopod uses Azure Entra ID for operator authentication.</p>
+  <ol>
+    <li>Go to Azure Portal → Entra ID → App registrations</li>
+    <li>Create a new registration</li>
+    <li>Set redirect URI to <code>http://localhost</code> (PKCE flow)</li>
+    <li>Enable "Allow public client flows" (for device code on headless machines)</li>
+    <li>Note the Application (client) ID and Directory (tenant) ID</li>
+  </ol>
+  <pre><code class="language-bash">ENTRA_CLIENT_ID=&lt;application-client-id&gt;
+ENTRA_TENANT_ID=&lt;directory-tenant-id&gt;</code></pre>
+  <div class="callout callout-blue">In <code>NODE_ENV=development</code>, auth is stubbed — all tokens are accepted. Set <code>NODE_ENV=production</code> to enforce Entra ID.</div>
+</section>
+
+<!-- EXECUTION TARGETS -->
+<section id="execution-targets" class="mb-16">
+  <h2>Execution Targets</h2>
+  <p>autopod runs agent containers either on local Docker or Azure Container Instances (ACI). Configure per profile:</p>
+  <pre><code class="language-yaml">executionTarget: local   # Docker socket on daemon host (default)
+# or
+executionTarget: aci     # Azure Container Instances</code></pre>
+  <table>
+    <thead><tr><th></th><th>Local</th><th>ACI</th></tr></thead>
+    <tbody>
+      <tr><td>Setup</td><td>Docker socket</td><td>Azure subscription + ACR</td></tr>
+      <tr><td>Cost</td><td>Host CPU/memory</td><td>Pay-per-second</td></tr>
+      <tr><td>Isolation</td><td>Docker bridge per session</td><td>Per ACI container group</td></tr>
+      <tr><td>Scale</td><td>Host limits</td><td>Azure quota</td></tr>
+      <tr><td>Cold start</td><td>Fast (cached image)</td><td>~30s (pull from ACR)</td></tr>
+    </tbody>
+  </table>
+  <h3>ACI Setup</h3>
+  <pre><code class="language-bash">AZURE_SUBSCRIPTION_ID=...
+AZURE_RESOURCE_GROUP=...
+AZURE_LOCATION=westeurope
+ACR_USERNAME=...
+ACR_PASSWORD=...
+
+# Push your profile image to ACR first
+ap profile warm my-app</code></pre>
+</section>
+
+<!-- DEPLOYMENT -->
+<section id="deployment" class="mb-16">
+  <h2>Deployment</h2>
+  <h3>Docker Compose (local)</h3>
+  <pre><code class="language-bash">docker compose up -d
+# Daemon at http://localhost:3100 with hot-reload</code></pre>
+  <h3>Azure (production)</h3>
+  <pre><code class="language-bash">az deployment sub create \
+  --location westeurope \
+  --template-file infra/main.bicep \
+  --parameters infra/parameters/prod.bicepparam</code></pre>
+  <table>
+    <thead><tr><th>Resource</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Container Apps Environment</td><td>Runs daemon + agent pods</td></tr>
+      <tr><td>Container Registry (ACR)</td><td>Stores Docker images</td></tr>
+      <tr><td>Key Vault</td><td>API keys, PATs, webhook URLs</td></tr>
+      <tr><td>Log Analytics</td><td>Centralized structured logging</td></tr>
+      <tr><td>Managed Identity</td><td>No credentials in code, ever</td></tr>
+    </tbody>
+  </table>
+  <h3>Health Endpoint</h3>
+  <pre><code class="language-bash"># Basic (load balancer / HEALTHCHECK)
+GET /health
+→ { "status": "ok", "version": "1.0.0" }
+
+# Full diagnostics (ops / monitoring)
+GET /health?detail=full
+→ {
+    "status": "ok", "version": "1.0.0",
+    "uptime_seconds": 3600,
+    "docker": { "connected": true, "containers_running": 4 },
+    "database": { "connected": true, "migrations_applied": 35 },
+    "queue": { "active_sessions": 2, "queued_sessions": 1, "max_concurrency": 3 }
+  }</code></pre>
+  <h3>Environment Variables</h3>
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>PORT</code></td><td>3100</td><td>HTTP bind port</td></tr>
+      <tr><td><code>DB_PATH</code></td><td>./autopod.db</td><td>SQLite file location</td></tr>
+      <tr><td><code>LOG_LEVEL</code></td><td>info</td><td>pino log level</td></tr>
+      <tr><td><code>NODE_ENV</code></td><td>—</td><td>Set to <code>production</code> to enforce auth</td></tr>
+      <tr><td><code>ENTRA_CLIENT_ID</code></td><td>—</td><td>Azure AD app ID</td></tr>
+      <tr><td><code>ENTRA_TENANT_ID</code></td><td>—</td><td>Azure AD tenant ID</td></tr>
+      <tr><td><code>MAX_CONCURRENCY</code></td><td>3</td><td>Session queue concurrency</td></tr>
+      <tr><td><code>ANTHROPIC_API_KEY</code></td><td>—</td><td>Default AI API key</td></tr>
+      <tr><td><code>TEAMS_WEBHOOK_URL</code></td><td>—</td><td>MS Teams notifications</td></tr>
+      <tr><td><code>ACR_REGISTRY_URL</code></td><td>—</td><td>Azure Container Registry</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- FAQ -->
+<section id="faq" class="mb-16">
+  <h2>FAQ</h2>
+  <div class="space-y-3">
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">Can I use models other than Claude?</summary><p class="mt-3">Yes. Set <code>--runtime codex</code> for OpenAI Codex, <code>--runtime copilot</code> for GitHub Copilot. The runtime interface is pluggable — same orchestration, same validation.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">Do I need Azure?</summary><p class="mt-3">For production deployment, yes — autopod is built around Azure Container Apps, ACR, and Key Vault. For local development, Docker Compose is all you need.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">What happens if the agent gets stuck?</summary><p class="mt-3">It can escalate: <code>ask_human</code> pauses and notifies you, <code>ask_ai</code> gets a second opinion, <code>report_blocker</code> declares a hard stop. You can also <code>ap pause</code> and <code>ap nudge</code> without killing work. After <code>autoPauseAfter</code> consecutive failures the session auto-pauses.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">Can I review before anything gets merged?</summary><p class="mt-3">Always. Nothing merges without explicit <code>ap approve</code>. The <code>validated</code> state means autopod thinks it's good — you always have the final say. The container is preserved after validation so you can open a live preview.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">What is review_required?</summary><p class="mt-3">When <code>maxValidationAttempts</code> retries are exhausted, the session enters <code>review_required</code> instead of hard-failing. You can extend the attempt count, create a linked workspace for manual fixes, or reject and restart fresh.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">What are workspace pods for?</summary><p class="mt-3">Workspace pods give you an interactive container (same image as agent pods) without an AI agent. Use them to explore, prototype, or write acceptance criteria manually, then hand off to an automated agent with <code>--base-branch</code>.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">What are memory stores for?</summary><p class="mt-3">Agents lose context between sessions. Memory stores let them suggest persistent knowledge (team conventions, known patterns) that humans approve. Approved memories are injected into future sessions' CLAUDE.md automatically.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">Can agents access external data?</summary><p class="mt-3">Yes — the action control plane gives agents read access to GitHub issues/PRs/code, Azure DevOps work items/PRs/code, Azure Logs, and Azure PIM. All responses are PII-stripped and scanned for prompt injection before reaching the agent.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">Do I need an Anthropic API key?</summary><p class="mt-3">Not necessarily. autopod supports four model providers: Anthropic API key, Claude MAX/PRO OAuth, Azure Foundry, and GitHub Copilot. Set <code>modelProvider</code> on your profile.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">What happens if the daemon restarts mid-session?</summary><p class="mt-3">autopod recovers. On startup it scans for sessions that were <code>provisioning</code> or <code>running</code> at shutdown and re-attaches to their containers. Work in progress is not lost.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">Is there a macOS desktop app?</summary><p class="mt-3">Yes — <code>packages/desktop</code> is a native SwiftUI + AppKit app. Three-column session browser, live terminal (SwiftTerm), diff viewer, validation report with screenshots, and a live preview panel. Build with Xcode and connect it to the same daemon as the CLI.</p></details>
+    <details class="bg-gray-900 border border-white/[0.06] rounded-lg p-4"><summary class="font-medium text-gray-200">Can I use Azure DevOps instead of GitHub for PRs?</summary><p class="mt-3">Yes. Set <code>prProvider: ado</code> on your profile and provide an ADO personal access token. Both <code>dev.azure.com</code> and <code>visualstudio.com</code> URL formats are supported.</p></details>
+  </div>
+</section>
+
+</main><!-- end #content -->
+
+<script>
+// Sidebar search
+const searchInput = document.getElementById('search-input');
+const navLinks = document.querySelectorAll('#nav-links .nav-link');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.toLowerCase();
+  navLinks.forEach(a => {
+    const match = a.textContent.toLowerCase().includes(q);
+    a.style.display = match ? '' : 'none';
+  });
+});
+
+// Active section highlighting (Intersection Observer)
+const sections = document.querySelectorAll('section[id]');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      navLinks.forEach(a => a.classList.remove('active'));
+      const id = entry.target.id;
+      const active = document.querySelector(`#nav-links a[href="#${id}"]`);
+      if (active) active.classList.add('active');
+    }
+  });
+}, { threshold: 0.15, rootMargin: '-60px 0px -70% 0px' });
+sections.forEach(s => observer.observe(s));
+
+// Smooth scroll
+navLinks.forEach(a => {
+  a.addEventListener('click', e => {
+    const href = a.getAttribute('href');
+    if (href && href.startsWith('#')) {
+      e.preventDefault();
+      const target = document.querySelector(href);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+});
+
+// Copy buttons for code blocks
+document.querySelectorAll('pre').forEach(pre => {
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn';
+  btn.textContent = 'Copy';
+  pre.style.position = 'relative';
+  pre.appendChild(btn);
+  btn.addEventListener('click', () => {
+    const code = pre.querySelector('code');
+    navigator.clipboard.writeText(code ? code.innerText : pre.innerText).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    });
+  });
+});
+
+// Dark/light toggle
+const toggle = document.getElementById('theme-toggle');
+toggle.addEventListener('click', () => {
+  const html = document.documentElement;
+  const isDark = html.classList.contains('dark');
+  html.classList.toggle('dark', !isDark);
+  html.classList.toggle('light', isDark);
+  toggle.textContent = isDark ? '🌙 Dark' : '☀ Light';
+  localStorage.setItem('theme', isDark ? 'light' : 'dark');
+  // Update body background for light mode
+  document.body.classList.toggle('bg-gray-950', !isDark);
+  document.body.classList.toggle('bg-white', isDark);
+});
+
+// Restore theme
+const saved = localStorage.getItem('theme');
+if (saved === 'light') {
+  document.documentElement.classList.remove('dark');
+  document.body.classList.remove('bg-gray-950');
+  document.body.classList.add('bg-white');
+  toggle.textContent = '🌙 Dark';
+}
+</script>
+</body>
+</html>

@@ -49,9 +49,9 @@ public struct SalesPitchView: View {
 
     private var statsRow: some View {
         HStack(spacing: 14) {
-            statCard(number: "13", label: "States in the\nsession lifecycle", color: .blue)
+            statCard(number: "15", label: "States in the\nsession lifecycle", color: .blue)
             statCard(number: "7", label: "Validation phases\nbefore merge", color: .green)
-            statCard(number: "3", label: "AI runtimes\nplug & play", color: .cyan)
+            statCard(number: "13+", label: "MCP tools for\nagent escalation", color: .cyan)
             statCard(number: "5", label: "Security layers\nper container", color: .red)
         }
     }
@@ -320,8 +320,8 @@ public struct SalesPitchView: View {
                 icon: "checkmark.shield.fill",
                 color: .green,
                 title: "Trust Nothing, Verify Everything",
-                body: "7-phase validation pipeline: build, test, health check, Playwright smoke, acceptance criteria, AI review — then human approval gates the merge.",
-                tags: ["Playwright", "LLM Review", "Auto-Retry"]
+                body: "7-phase validation pipeline: build, test, health check, Playwright smoke, acceptance criteria, AI review — then human approval gates the merge. Interrupt in-flight validation, dismiss recurring false positives, or grant more attempts.",
+                tags: ["Playwright", "LLM Review", "Human Override", "Auto-Retry"]
             ),
             SellingPoint(
                 icon: "eye.fill",
@@ -341,8 +341,8 @@ public struct SalesPitchView: View {
                 icon: "bubble.left.and.exclamationmark.bubble.right",
                 color: .orange,
                 title: "Humans Stay in the Loop",
-                body: "Agents ask when stuck. Report plans before coding. Escalate blockers. Auto-pause when confused. You approve before anything merges.",
-                tags: ["ask_human", "MCP Tools", "Auto-pause"]
+                body: "Agents ask when stuck. Report plans before coding. Escalate blockers. 13+ MCP tools for structured communication. You approve before anything merges.",
+                tags: ["ask_human", "MCP Tools", "Memory", "Auto-pause"]
             ),
             SellingPoint(
                 icon: "bolt.shield.fill",
@@ -350,6 +350,13 @@ public struct SalesPitchView: View {
                 title: "Defense in Depth",
                 body: "PII scanning on all output. Prompt injection detection with threat scoring. AES-256 credential encryption. Full audit trail on every action.",
                 tags: ["PII Scan", "Injection Detect", "AES-256", "Audit"]
+            ),
+            SellingPoint(
+                icon: "brain",
+                color: .mint,
+                title: "Agents That Learn",
+                body: "Agents suggest persistent knowledge — team conventions, known gotchas, recurring patterns — scoped globally, per-profile, or per-session. Humans approve. Approved memories are injected into future sessions automatically.",
+                tags: ["Global Memory", "Profile Memory", "Session"]
             ),
         ]
     }

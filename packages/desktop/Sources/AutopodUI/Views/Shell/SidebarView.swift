@@ -79,6 +79,28 @@ public struct SidebarView: View {
             VStack(spacing: 2) {
                 exploreButton(.salesPitch, icon: "bolt.fill", label: "Why Autopod")
                 exploreButton(.featureOverview, icon: "sparkles", label: "How it Works")
+                Button {
+                    NSWorkspace.shared.open(URL(string: "https://esbenwiberg.github.io/autopod")!)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "book.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18)
+                        Text("Documentation")
+                            .font(.system(.caption).weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
