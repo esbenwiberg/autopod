@@ -121,6 +121,7 @@ public struct ProfileEditorView: View {
     public var onApproveMemory: (String) -> Void = { _ in }
     public var onRejectMemory: (String) -> Void = { _ in }
     public var onDeleteMemory: (String) -> Void = { _ in }
+    public var onEditMemory: ((String, String) -> Void)?
 
     public init(profile: Profile, isNew: Bool,
                 actionCatalog: [ActionCatalogItem] = [],
@@ -129,7 +130,8 @@ public struct ProfileEditorView: View {
                 memoryEntries: [MemoryEntry] = [],
                 onApproveMemory: @escaping (String) -> Void = { _ in },
                 onRejectMemory: @escaping (String) -> Void = { _ in },
-                onDeleteMemory: @escaping (String) -> Void = { _ in }) {
+                onDeleteMemory: @escaping (String) -> Void = { _ in },
+                onEditMemory: ((String, String) -> Void)? = nil) {
         self._profile = State(initialValue: profile)
         self.isNew = isNew
         self.actionCatalog = actionCatalog
@@ -139,6 +141,7 @@ public struct ProfileEditorView: View {
         self.onApproveMemory = onApproveMemory
         self.onRejectMemory = onRejectMemory
         self.onDeleteMemory = onDeleteMemory
+        self.onEditMemory = onEditMemory
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -1215,7 +1218,8 @@ public struct ProfileEditorView: View {
             scopeFilter: .profile,
             onApprove: onApproveMemory,
             onReject: onRejectMemory,
-            onDelete: onDeleteMemory
+            onDelete: onDeleteMemory,
+            onEdit: onEditMemory
         )
     }
 

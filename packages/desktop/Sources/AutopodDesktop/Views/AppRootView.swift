@@ -91,6 +91,7 @@ public struct AppRootView: View {
       onApproveMemory: { id in Task { await memoryStore.approve(id) } },
       onRejectMemory: { id in Task { await memoryStore.reject(id) } },
       onDeleteMemory: { id in Task { await memoryStore.delete(id) } },
+      onEditMemory: { id, content in Task { await memoryStore.update(id, content: content) } },
       onCreateMemory: { scope, scopeId, path, content in
         Task { await memoryStore.create(scope: scope, scopeId: scopeId, path: path, content: content) }
       },

@@ -8,10 +8,12 @@ public struct MemoryManagementView: View {
     public var onApprove: (String) -> Void
     public var onReject: (String) -> Void
     public var onDelete: (String) -> Void
+    public var onEdit: ((String, String) -> Void)?
     public var onCreateMemory: ((MemoryScope, String?, String, String) -> Void)?
 
     @State private var selectedScope: MemoryScope = .global
     @State private var showingCreate = false
+    @State private var editingEntry: MemoryEntry?
 
     public init(
         entries: [MemoryEntry],
@@ -19,6 +21,7 @@ public struct MemoryManagementView: View {
         onApprove: @escaping (String) -> Void = { _ in },
         onReject: @escaping (String) -> Void = { _ in },
         onDelete: @escaping (String) -> Void = { _ in },
+        onEdit: ((String, String) -> Void)? = nil,
         onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil
     ) {
         self.entries = entries
@@ -26,6 +29,7 @@ public struct MemoryManagementView: View {
         self.onApprove = onApprove
         self.onReject = onReject
         self.onDelete = onDelete
+        self.onEdit = onEdit
         self.onCreateMemory = onCreateMemory
     }
 
@@ -101,6 +105,16 @@ public struct MemoryManagementView: View {
                     showingCreate = false
                 },
                 onCancel: { showingCreate = false }
+            )
+        }
+        .sheet(item: $editingEntry) { entry in
+            EditMemorySheet(
+                entry: entry,
+                onSave: { id, content in
+                    onEdit?(id, content)
+                    editingEntry = nil
+                },
+                onCancel: { editingEntry = nil }
             )
         }
     }
@@ -224,6 +238,16 @@ public struct MemoryManagementView: View {
             } else {
                 HStack {
                     Spacer()
+                    if onEdit != nil {
+                        Button {
+                            editingEntry = entry
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.tertiary)
+                    }
                     Button(role: .destructive) {
                         onDelete(entry.id)
                     } label: {
@@ -371,6 +395,74 @@ struct CreateMemorySheet: View {
                         TextEditor(text: $content)
                             .font(.system(.caption, design: .monospaced))
                             .frame(minHeight: 120)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                            )
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .frame(width: 480)
+    }
+}
+
+// MARK: - Edit memory sheet
+
+struct EditMemorySheet: View {
+    let entry: MemoryEntry
+    let onSave: (String, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var content: String
+
+    init(entry: MemoryEntry, onSave: @escaping (String, String) -> Void, onCancel: @escaping () -> Void) {
+        self.entry = entry
+        self.onSave = onSave
+        self.onCancel = onCancel
+        self._content = State(initialValue: entry.content)
+    }
+
+    private var hasChanges: Bool { content != entry.content }
+    private var isValid: Bool { !content.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "pencil")
+                    .foregroundStyle(.purple)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Edit Memory")
+                        .font(.headline)
+                    Text(entry.path)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                Button("Save") {
+                    onSave(entry.id, content)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!isValid || !hasChanges)
+            }
+            .padding(16)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Content")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $content)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(minHeight: 200)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6)
                                     .stroke(Color(nsColor: .separatorColor), lineWidth: 1)

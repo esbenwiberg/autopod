@@ -88,6 +88,26 @@ public final class MemoryStore {
         }
     }
 
+    public func update(_ id: String, content: String) async {
+        guard let api else { return }
+        do {
+            try await api.updateMemory(id, content: content)
+            if let idx = entries.firstIndex(where: { $0.id == id }) {
+                let e = entries[idx]
+                entries[idx] = MemoryEntry(
+                    id: e.id, scope: e.scope, scopeId: e.scopeId,
+                    path: e.path, content: content, contentSha256: e.contentSha256,
+                    version: e.version + 1, approved: e.approved,
+                    createdBySessionId: e.createdBySessionId,
+                    createdAt: e.createdAt, updatedAt: e.updatedAt
+                )
+            }
+        } catch {
+            print("[MemoryStore] Failed to update memory \(id): \(error)")
+            self.error = error.localizedDescription
+        }
+    }
+
     public func delete(_ id: String) async {
         guard let api else { return }
         do {

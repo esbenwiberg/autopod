@@ -29,6 +29,7 @@ public struct MainView: View {
     public var onApproveMemory: (String) -> Void
     public var onRejectMemory: (String) -> Void
     public var onDeleteMemory: (String) -> Void
+    public var onEditMemory: ((String, String) -> Void)?
     public var onCreateMemory: ((MemoryScope, String?, String, String) -> Void)?
     public var onLoadMemories: (() async -> Void)?
 
@@ -60,6 +61,7 @@ public struct MainView: View {
         onApproveMemory: @escaping (String) -> Void = { _ in },
         onRejectMemory: @escaping (String) -> Void = { _ in },
         onDeleteMemory: @escaping (String) -> Void = { _ in },
+        onEditMemory: ((String, String) -> Void)? = nil,
         onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
         onLoadMemories: (() async -> Void)? = nil
     ) {
@@ -88,6 +90,7 @@ public struct MainView: View {
         self.onApproveMemory = onApproveMemory
         self.onRejectMemory = onRejectMemory
         self.onDeleteMemory = onDeleteMemory
+        self.onEditMemory = onEditMemory
         self.onCreateMemory = onCreateMemory
         self.onLoadMemories = onLoadMemories
     }
@@ -163,6 +166,7 @@ public struct MainView: View {
                     onApprove: onApproveMemory,
                     onReject: onRejectMemory,
                     onDelete: onDeleteMemory,
+                    onEdit: onEditMemory,
                     onCreateMemory: onCreateMemory
                 )
                 .frame(minWidth: 600)
