@@ -40,7 +40,7 @@ daemon ← validator, escalation-mcp
 |---------|---------|
 | `shared` | Types, errors, constants, sanitization. Zero heavy deps. |
 | `daemon` | Fastify server, session orchestration, SQLite, Docker/ACI container management |
-| `cli` | Commander CLI + Ink TUI dashboard |
+| `cli` | Commander CLI |
 | `validator` | Playwright smoke test script generation + result parsing (types only — execution lives in daemon) |
 | `escalation-mcp` | MCP server injected into agent containers for escalation, actions, and browser self-validation |
 | `desktop` | macOS native app (Swift/Xcode) for session monitoring and management |
@@ -148,25 +148,15 @@ The backend server (~176 TS/SQL files). All heavy lifting lives here.
 
 ### @autopod/cli
 
-Commander-based CLI with Ink TUI for interactive session monitoring.
+Commander-based CLI.
 
 **Commands** (`src/commands/`):
 - `auth.ts` — Login/logout via MSAL (Azure AD)
 - `session.ts` — Create, list, inspect, kill sessions
 - `profile.ts` — Profile CRUD
 - `daemon.ts` — Health check + version
-- `watch.ts` — Live session monitoring (TUI)
 - `workspace.ts` — Workspace pod operations
 - `validate.ts` — Trigger smoke test validation
-
-**TUI** (`src/tui/`):
-- React/Ink components
-- `hooks/useSessionState.ts` — Session state management over WebSocket
-- `hooks/useWebSocket.ts` — WebSocket connection lifecycle
-- `hooks/useKeyboard.ts` — Keyboard shortcuts
-- `hooks/useTerminalSize.ts` — Responsive layout
-- `utils/layout.ts` — Layout rendering helpers
-- `utils/formatToolUse.ts` — Tool use event formatting
 
 **Auth** (`src/auth/`):
 - `msal-client.ts` — Azure AD MSAL integration
