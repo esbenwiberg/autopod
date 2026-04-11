@@ -8,7 +8,7 @@ import type {
   TaskSummary,
   ValidationOverride,
 } from '@autopod/shared';
-import { SessionNotFoundError } from '@autopod/shared';
+import { DEFAULT_MAX_PR_FIX_ATTEMPTS, SessionNotFoundError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 export interface NewSession {
@@ -29,6 +29,8 @@ export interface NewSession {
   acFrom?: string | null;
   linkedSessionId?: string | null;
   pimGroups?: PimGroupConfig[] | null;
+  /** Existing PR URL (set at creation for fix sessions to skip PR creation) */
+  prUrl?: string | null;
 }
 
 export interface SessionFilters {
@@ -77,6 +79,9 @@ export interface SessionUpdates {
   taskSummary?: TaskSummary | null;
   validationOverrides?: ValidationOverride[] | null;
   profileSnapshot?: Profile | null;
+  prFixAttempts?: number;
+  maxPrFixAttempts?: number;
+  fixSessionId?: string | null;
 }
 
 export interface SessionStats {
@@ -154,6 +159,9 @@ function rowToSession(row: Record<string, unknown>): Session {
     profileSnapshot: row.profile_snapshot
       ? (JSON.parse(row.profile_snapshot as string) as Profile)
       : null,
+    prFixAttempts: (row.pr_fix_attempts as number) ?? 0,
+    maxPrFixAttempts: (row.max_pr_fix_attempts as number) ?? DEFAULT_MAX_PR_FIX_ATTEMPTS,
+    fixSessionId: (row.fix_session_id as string) ?? null,
   };
 }
 
@@ -164,11 +172,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         INSERT INTO sessions (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
-          output_mode, base_branch, ac_from, linked_session_id, pim_groups
+          output_mode, base_branch, ac_from, linked_session_id, pim_groups, pr_url
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
-          @outputMode, @baseBranch, @acFrom, @linkedSessionId, @pimGroups
+          @outputMode, @baseBranch, @acFrom, @linkedSessionId, @pimGroups, @prUrl
         )
       `).run({
         id: session.id,
@@ -190,6 +198,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         acFrom: session.acFrom ?? null,
         linkedSessionId: session.linkedSessionId ?? null,
         pimGroups: session.pimGroups ? JSON.stringify(session.pimGroups) : null,
+        prUrl: session.prUrl ?? null,
       });
     },
 
@@ -348,6 +357,18 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         setClauses.push('profile_snapshot = @profileSnapshot');
         params.profileSnapshot =
           changes.profileSnapshot !== null ? JSON.stringify(changes.profileSnapshot) : null;
+      }
+      if (changes.prFixAttempts !== undefined) {
+        setClauses.push('pr_fix_attempts = @prFixAttempts');
+        params.prFixAttempts = changes.prFixAttempts;
+      }
+      if (changes.maxPrFixAttempts !== undefined) {
+        setClauses.push('max_pr_fix_attempts = @maxPrFixAttempts');
+        params.maxPrFixAttempts = changes.maxPrFixAttempts;
+      }
+      if (changes.fixSessionId !== undefined) {
+        setClauses.push('fix_session_id = @fixSessionId');
+        params.fixSessionId = changes.fixSessionId;
       }
 
       if (setClauses.length === 0) return;

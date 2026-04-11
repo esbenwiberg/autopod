@@ -45,6 +45,26 @@ export interface MergePrResult {
   autoMergeScheduled: boolean;
 }
 
+export interface CiFailureDetail {
+  /** Check run name (e.g. "test / unit-tests") */
+  name: string;
+  /** Conclusion: "failure" | "timed_out" | "action_required" etc. */
+  conclusion: string;
+  /** Link to the CI run for context */
+  detailsUrl: string | null;
+  /** Inline failure annotations (up to 10) */
+  annotations: Array<{ path: string; message: string; annotationLevel: string }>;
+}
+
+export interface ReviewCommentDetail {
+  /** Display name of the reviewer */
+  author: string;
+  /** Comment body text */
+  body: string;
+  /** File path for inline comments, null for PR-level review comments */
+  path: string | null;
+}
+
 export interface PrMergeStatus {
   /** Whether the PR has been merged */
   merged: boolean;
@@ -52,6 +72,10 @@ export interface PrMergeStatus {
   open: boolean;
   /** Human-readable reason the merge is blocked, if known */
   blockReason: string | null;
+  /** Failed CI checks with detail — populated only when there are actionable failures */
+  ciFailures: CiFailureDetail[];
+  /** Review comments from CHANGES_REQUESTED reviews — populated only when actionable */
+  reviewComments: ReviewCommentDetail[];
 }
 
 export interface PrManager {

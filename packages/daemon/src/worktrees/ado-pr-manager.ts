@@ -1,10 +1,12 @@
 import type { Logger } from 'pino';
 import type {
+  CiFailureDetail,
   CreatePrConfig,
   MergePrConfig,
   MergePrResult,
   PrManager,
   PrMergeStatus,
+  ReviewCommentDetail,
 } from '../interfaces/pr-manager.js';
 import { buildPrBody, buildPrTitle } from './pr-body-builder.js';
 
@@ -209,14 +211,21 @@ export class AdoPrManager implements PrManager {
     })) as { status: string; mergeStatus?: string };
 
     if (pr.status === 'completed') {
-      return { merged: true, open: false, blockReason: null };
+      return { merged: true, open: false, blockReason: null, ciFailures: [], reviewComments: [] };
     }
     if (pr.status === 'abandoned') {
-      return { merged: false, open: false, blockReason: 'PR was abandoned' };
+      return {
+        merged: false,
+        open: false,
+        blockReason: 'PR was abandoned',
+        ciFailures: [],
+        reviewComments: [],
+      };
     }
 
     // PR is still active — check policy evaluations
     const reasons: string[] = [];
+    const ciFailures: CiFailureDetail[] = [];
     try {
       const evaluations = (await this.adoFetch(`/pullrequests/${prId}/statuses?api-version=7.1`, {
         method: 'GET',
@@ -228,6 +237,9 @@ export class AdoPrManager implements PrManager {
       if (blocking.length > 0) {
         const names = blocking.map((e) => `${e.context.name} (${e.state})`).join(', ');
         reasons.push(`Policies: ${names}`);
+        for (const e of blocking) {
+          ciFailures.push({ name: e.context.name, conclusion: e.state, detailsUrl: null, annotations: [] });
+        }
       }
     } catch {
       // Policy status endpoint may not be available — fall through
@@ -237,10 +249,37 @@ export class AdoPrManager implements PrManager {
       reasons.push('Merge conflicts');
     }
 
+    // Collect active reviewer thread comments
+    const reviewComments: ReviewCommentDetail[] = [];
+    try {
+      const threads = (await this.adoFetch(`/pullrequests/${prId}/threads?api-version=7.1`, {
+        method: 'GET',
+      })) as {
+        value: Array<{
+          status: string;
+          comments: Array<{ author: { displayName: string }; content: string }>;
+        }>;
+      };
+      for (const thread of threads.value) {
+        if (thread.status === 'active' && thread.comments?.[0]) {
+          const first = thread.comments[0];
+          reviewComments.push({
+            author: first.author.displayName,
+            body: first.content,
+            path: null,
+          });
+        }
+      }
+    } catch {
+      // Non-fatal — reviewComments stays empty
+    }
+
     return {
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for policies to pass',
+      ciFailures,
+      reviewComments,
     };
   }
 }

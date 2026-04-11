@@ -78,6 +78,9 @@ export interface Session {
   pimGroups: PimGroupConfig[] | null;
   /** Snapshot of the resolved profile config at session creation time (after inheritance). */
   profileSnapshot: Profile | null;
+  prFixAttempts: number;
+  maxPrFixAttempts: number;
+  fixSessionId: string | null;
 }
 
 export interface CreateSessionRequest {
@@ -97,6 +100,8 @@ export interface CreateSessionRequest {
   linkedSessionId?: string;
   /** PIM groups to activate for the duration of this session */
   pimGroups?: PimGroupConfig[];
+  /** Existing PR URL to carry forward (used for fix sessions — skips PR creation) */
+  prUrl?: string | null;
 }
 
 export interface SessionSummary {

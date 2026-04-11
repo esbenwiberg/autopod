@@ -25,6 +25,7 @@ import {
   AutopodError,
   CONTAINER_HOME_DIR,
   DEFAULT_CONTAINER_MEMORY_GB,
+  DEFAULT_MAX_PR_FIX_ATTEMPTS,
   generateId,
   generateSessionId,
 } from '@autopod/shared';
@@ -37,6 +38,7 @@ import { getBaseImage } from '../images/dockerfile-generator.js';
 import type {
   ContainerManager,
   PrManager,
+  PrMergeStatus,
   RuntimeRegistry,
   ValidationEngine,
   WorktreeManager,
@@ -92,6 +94,50 @@ function allocateHostPort(): number {
 
 /** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
 const CONTAINER_APP_PORT = 3000;
+
+/**
+ * Build the task string for a PR fix session, injecting CI failure details and
+ * review comments so the agent knows exactly what to fix.
+ */
+function buildPrFixTask(session: Session, status: PrMergeStatus): string {
+  const attempt = (session.prFixAttempts ?? 0) + 1;
+  const sections: string[] = [
+    `[PR FIX] The pull request at ${session.prUrl} needs fixes (attempt ${attempt}).`,
+    '',
+    `Original task: ${session.task}`,
+    '',
+    'Your job is to fix the failures listed below by pushing commits to the existing branch.',
+    'Do NOT create a new PR — one already exists.',
+    '',
+  ];
+
+  if (status.ciFailures.length > 0) {
+    sections.push('## CI Check Failures\n');
+    for (const ci of status.ciFailures) {
+      sections.push(`### ${ci.name} (${ci.conclusion})`);
+      if (ci.detailsUrl) sections.push(`Details: ${ci.detailsUrl}`);
+      if (ci.annotations.length > 0) {
+        sections.push('Annotations:');
+        for (const ann of ci.annotations) {
+          sections.push(`  - ${ann.path}: ${ann.message} [${ann.annotationLevel}]`);
+        }
+      }
+      sections.push('');
+    }
+  }
+
+  if (status.reviewComments.length > 0) {
+    sections.push('## Reviewer Comments\n');
+    for (const rc of status.reviewComments) {
+      const location = rc.path ? ` (on \`${rc.path}\`)` : '';
+      sections.push(`**${rc.author}**${location}: ${rc.body}`);
+      sections.push('');
+    }
+  }
+
+  sections.push('After pushing your fixes, the PR will be re-evaluated automatically.');
+  return sections.join('\n');
+}
 
 /** Auto-stop preview containers after this duration (default 10 minutes). */
 const PREVIEW_AUTO_STOP_MS = 10 * 60 * 1000;
@@ -408,9 +454,140 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           sessionRepo.update(sessionId, { mergeBlockReason: status.blockReason });
           emitActivityStatus(sessionId, `Merge pending: ${status.blockReason}`);
         }
+
+        // Detect actionable failures and potentially spawn a fix session
+        const hasActionableFailures =
+          status.ciFailures.length > 0 || status.reviewComments.length > 0;
+        if (hasActionableFailures) {
+          await maybeSpawnFixSession(sessionId, status);
+        }
       } catch (err) {
         logger.debug({ err, sessionId }, 'Merge polling failed, skipping cycle');
       }
+    };
+
+    /**
+     * Spawns a new child fix session on the same branch when the PR has actionable
+     * failures (CI check failures or CHANGES_REQUESTED review comments).
+     * Guards against double-spawning and enforces maxPrFixAttempts.
+     */
+    const maybeSpawnFixSession = async (
+      parentSessionId: string,
+      status: PrMergeStatus,
+    ): Promise<void> => {
+      // Re-read from DB to avoid stale closure state across 60s intervals
+      const parent = sessionRepo.getOrThrow(parentSessionId);
+
+      // Guard: a fix session is already alive
+      if (parent.fixSessionId) {
+        try {
+          const fix = sessionRepo.getOrThrow(parent.fixSessionId);
+          const fixIsLive = fix.status !== 'complete' && fix.status !== 'killed' && fix.status !== 'failed';
+          if (fixIsLive) {
+            logger.debug(
+              { sessionId: parentSessionId, fixSessionId: parent.fixSessionId },
+              'Fix session already active — skipping spawn',
+            );
+            return;
+          }
+        } catch {
+          // Fix session not found — treat as terminal, fall through
+        }
+        // Clear stale fixSessionId so we can potentially spawn a new one
+        sessionRepo.update(parentSessionId, { fixSessionId: null });
+      }
+
+      // Guard: max retries exhausted
+      const maxAttempts = parent.maxPrFixAttempts ?? DEFAULT_MAX_PR_FIX_ATTEMPTS;
+      if ((parent.prFixAttempts ?? 0) >= maxAttempts) {
+        emitActivityStatus(
+          parentSessionId,
+          `Max PR fix attempts (${maxAttempts}) exhausted — session failed`,
+        );
+        transition(parent, 'failed', {
+          mergeBlockReason: `Max PR fix attempts (${maxAttempts}) exhausted`,
+        });
+        stopMergePolling(parentSessionId);
+        logger.warn(
+          { sessionId: parentSessionId, attempts: parent.prFixAttempts },
+          'Merge polling: max fix attempts exhausted — session failed',
+        );
+        return;
+      }
+
+      // Build fix task and create child session directly using closure deps
+      const newAttempt = (parent.prFixAttempts ?? 0) + 1;
+      const fixTask = buildPrFixTask(parent, status);
+      const profile = profileStore.get(parent.profileName);
+
+      let fixId: string;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        fixId = generateSessionId();
+        try {
+          sessionRepo.insert({
+            id: fixId,
+            profileName: parent.profileName,
+            task: fixTask,
+            status: 'queued',
+            model: parent.model,
+            runtime: parent.runtime,
+            executionTarget: parent.executionTarget,
+            branch: parent.branch,
+            userId: parent.userId,
+            maxValidationAttempts: profile.maxValidationAttempts,
+            skipValidation: false,
+            outputMode: parent.outputMode,
+            baseBranch: parent.baseBranch ?? null,
+            linkedSessionId: parent.id,
+            pimGroups: parent.pimGroups ?? null,
+            prUrl: parent.prUrl ?? null,
+          });
+          break;
+        } catch (err: unknown) {
+          if (
+            err instanceof Error &&
+            err.message.includes('UNIQUE constraint failed') &&
+            attempt < 9
+          ) {
+            continue;
+          }
+          throw err;
+        }
+      }
+      fixId = fixId!;
+
+      enqueueSession(fixId);
+      eventBus.emit({
+        type: 'session.created',
+        timestamp: new Date().toISOString(),
+        session: {
+          id: fixId,
+          profileName: parent.profileName,
+          task: fixTask,
+          status: 'queued',
+          model: parent.model,
+          runtime: parent.runtime,
+          duration: null,
+          filesChanged: 0,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      // Record fix session on parent
+      sessionRepo.update(parentSessionId, {
+        prFixAttempts: newAttempt,
+        fixSessionId: fixId,
+        mergeBlockReason: `Fix attempt ${newAttempt}/${maxAttempts} in progress (session ${fixId})`,
+      });
+
+      emitActivityStatus(
+        parentSessionId,
+        `Spawned fix session ${fixId} (attempt ${newAttempt}/${maxAttempts})`,
+      );
+      logger.info(
+        { sessionId: parentSessionId, fixSessionId: fixId, attempt: newAttempt },
+        'Merge polling: spawned fix session for actionable failures',
+      );
     };
 
     // Run first poll immediately
@@ -690,6 +867,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             acFrom: request.acFrom ?? null,
             linkedSessionId: request.linkedSessionId ?? null,
             pimGroups: request.pimGroups ?? null,
+            prUrl: request.prUrl ?? null,
           });
           break;
         } catch (err: unknown) {
@@ -2445,8 +2623,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         if (effectiveResult.overall === 'pass') {
           emitActivityStatus(sessionId, `Validation passed (attempt ${attempt})`);
-          // Push branch and create PR before transitioning to validated
-          let prUrl: string | null = null;
+          // Push branch and create PR before transitioning to validated.
+          // Fix sessions already have prUrl set — carry it forward and skip PR creation.
+          let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
           if (prManager && s2.worktreePath) {
             // Commit screenshots to the branch so they're visible in the PR
@@ -2503,31 +2682,35 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 ),
               }));
 
-            try {
-              emitActivityStatus(sessionId, 'Creating PR…');
-              const s3 = sessionRepo.getOrThrow(sessionId);
-              prUrl = await prManager.createPr({
-                worktreePath: s2.worktreePath,
-                repoUrl: profile.repoUrl,
-                branch: s2.branch,
-                baseBranch: profile.defaultBranch,
-                sessionId,
-                task: s2.task,
-                profileName: s2.profileName,
-                validationResult: result,
-                filesChanged: s3.filesChanged,
-                linesAdded: s3.linesAdded,
-                linesRemoved: s3.linesRemoved,
-                previewUrl: s2.previewUrl,
-                screenshots: screenshotRefs,
-                taskSummary: s3.taskSummary ?? undefined,
-              });
-              if (prUrl) {
-                emitActivityStatus(sessionId, `PR created: ${prUrl}`);
+            if (!prUrl) {
+              try {
+                emitActivityStatus(sessionId, 'Creating PR…');
+                const s3 = sessionRepo.getOrThrow(sessionId);
+                prUrl = await prManager.createPr({
+                  worktreePath: s2.worktreePath,
+                  repoUrl: profile.repoUrl,
+                  branch: s2.branch,
+                  baseBranch: profile.defaultBranch,
+                  sessionId,
+                  task: s2.task,
+                  profileName: s2.profileName,
+                  validationResult: result,
+                  filesChanged: s3.filesChanged,
+                  linesAdded: s3.linesAdded,
+                  linesRemoved: s3.linesRemoved,
+                  previewUrl: s2.previewUrl,
+                  screenshots: screenshotRefs,
+                  taskSummary: s3.taskSummary ?? undefined,
+                });
+                if (prUrl) {
+                  emitActivityStatus(sessionId, `PR created: ${prUrl}`);
+                }
+              } catch (err) {
+                logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');
+                emitActivityStatus(sessionId, 'PR creation failed — session still validated');
               }
-            } catch (err) {
-              logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');
-              emitActivityStatus(sessionId, 'PR creation failed — session still validated');
+            } else {
+              emitActivityStatus(sessionId, `Carrying forward existing PR: ${prUrl}`);
             }
           }
 
@@ -2758,8 +2941,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         if (result.overall === 'pass') {
           emitActivityStatus(sessionId, 'Revalidation passed — human fix worked!');
 
-          // Push branch and create PR (same as triggerValidation pass path)
-          let prUrl: string | null = null;
+          // Push branch and create PR (same as triggerValidation pass path).
+          // Fix sessions already have prUrl set — carry it forward and skip PR creation.
+          let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
           if (prManager && s2.worktreePath) {
             try {
@@ -2800,29 +2984,33 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               logger.warn({ err, sessionId }, 'Failed to recompute diff stats');
             }
 
-            try {
-              emitActivityStatus(sessionId, 'Creating PR…');
-              const s3 = sessionRepo.getOrThrow(sessionId);
-              prUrl = await prManager.createPr({
-                worktreePath: s2.worktreePath,
-                repoUrl: profile.repoUrl,
-                branch: s2.branch,
-                baseBranch: profile.defaultBranch,
-                sessionId,
-                task: s2.task,
-                profileName: s2.profileName,
-                validationResult: result,
-                filesChanged: s3.filesChanged,
-                linesAdded: s3.linesAdded,
-                linesRemoved: s3.linesRemoved,
-                previewUrl: s2.previewUrl,
-                screenshots: [],
-                taskSummary: s3.taskSummary ?? undefined,
-              });
-              if (prUrl) emitActivityStatus(sessionId, `PR created: ${prUrl}`);
-            } catch (err) {
-              logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');
-              emitActivityStatus(sessionId, 'PR creation failed — session still validated');
+            if (!prUrl) {
+              try {
+                emitActivityStatus(sessionId, 'Creating PR…');
+                const s3 = sessionRepo.getOrThrow(sessionId);
+                prUrl = await prManager.createPr({
+                  worktreePath: s2.worktreePath,
+                  repoUrl: profile.repoUrl,
+                  branch: s2.branch,
+                  baseBranch: profile.defaultBranch,
+                  sessionId,
+                  task: s2.task,
+                  profileName: s2.profileName,
+                  validationResult: result,
+                  filesChanged: s3.filesChanged,
+                  linesAdded: s3.linesAdded,
+                  linesRemoved: s3.linesRemoved,
+                  previewUrl: s2.previewUrl,
+                  screenshots: [],
+                  taskSummary: s3.taskSummary ?? undefined,
+                });
+                if (prUrl) emitActivityStatus(sessionId, `PR created: ${prUrl}`);
+              } catch (err) {
+                logger.warn({ err, sessionId }, 'Failed to create PR — session still validated');
+                emitActivityStatus(sessionId, 'PR creation failed — session still validated');
+              }
+            } else {
+              emitActivityStatus(sessionId, `Carrying forward existing PR: ${prUrl}`);
             }
           }
 

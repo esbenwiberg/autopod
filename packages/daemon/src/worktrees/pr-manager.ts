@@ -2,11 +2,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
 import type {
+  CiFailureDetail,
   CreatePrConfig,
   MergePrConfig,
   MergePrResult,
   PrManager,
   PrMergeStatus,
+  ReviewCommentDetail,
 } from '../interfaces/pr-manager.js';
 import { buildPrBody, buildPrTitle } from './pr-body-builder.js';
 
@@ -143,15 +145,22 @@ export class GhPrManager implements PrManager {
     };
 
     if (pr.state === 'MERGED') {
-      return { merged: true, open: false, blockReason: null };
+      return { merged: true, open: false, blockReason: null, ciFailures: [], reviewComments: [] };
     }
 
     if (pr.state === 'CLOSED') {
-      return { merged: false, open: false, blockReason: 'PR was closed without merging' };
+      return {
+        merged: false,
+        open: false,
+        blockReason: 'PR was closed without merging',
+        ciFailures: [],
+        reviewComments: [],
+      };
     }
 
     // PR is still open — build a block reason from checks + review status
     const reasons: string[] = [];
+    const ciFailures: CiFailureDetail[] = [];
 
     if (pr.statusCheckRollup?.length) {
       const pending = pr.statusCheckRollup.filter(
@@ -161,16 +170,38 @@ export class GhPrManager implements PrManager {
       if (pending.length > 0) {
         const checkNames = pending.map((c) => `${c.name} (${c.conclusion || c.status})`).join(', ');
         reasons.push(`Checks: ${checkNames}`);
+        for (const c of pending) {
+          if (c.conclusion === 'FAILURE' || c.conclusion === 'TIMED_OUT' || c.conclusion === 'ACTION_REQUIRED') {
+            ciFailures.push({ name: c.name, conclusion: c.conclusion, detailsUrl: null, annotations: [] });
+          }
+        }
       }
     }
 
-    if (pr.reviewDecision && pr.reviewDecision !== 'APPROVED') {
+    // Collect review comments for CHANGES_REQUESTED decisions
+    const reviewComments: ReviewCommentDetail[] = [];
+    if (pr.reviewDecision === 'CHANGES_REQUESTED') {
+      reasons.push('Changes requested');
+      try {
+        const { stdout: reviewOut } = await execFileAsync(
+          'gh',
+          ['pr', 'view', config.prUrl, '--json', 'reviews'],
+          { cwd: config.worktreePath, timeout: 15_000 },
+        );
+        const reviewData = JSON.parse(reviewOut) as {
+          reviews: Array<{ author: { login: string }; state: string; body: string }>;
+        };
+        for (const review of reviewData.reviews) {
+          if (review.state === 'CHANGES_REQUESTED' && review.body) {
+            reviewComments.push({ author: review.author.login, body: review.body, path: null });
+          }
+        }
+      } catch {
+        // Non-fatal — reviewComments stays empty
+      }
+    } else if (pr.reviewDecision && pr.reviewDecision !== 'APPROVED') {
       const label =
-        pr.reviewDecision === 'CHANGES_REQUESTED'
-          ? 'Changes requested'
-          : pr.reviewDecision === 'REVIEW_REQUIRED'
-            ? 'Review required'
-            : pr.reviewDecision;
+        pr.reviewDecision === 'REVIEW_REQUIRED' ? 'Review required' : pr.reviewDecision;
       reasons.push(label);
     }
 
@@ -178,6 +209,8 @@ export class GhPrManager implements PrManager {
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
+      ciFailures,
+      reviewComments,
     };
   }
 }
@@ -330,10 +363,16 @@ export class GitHubApiPrManager implements PrManager {
     };
 
     if (pr.merged) {
-      return { merged: true, open: false, blockReason: null };
+      return { merged: true, open: false, blockReason: null, ciFailures: [], reviewComments: [] };
     }
     if (pr.state === 'closed') {
-      return { merged: false, open: false, blockReason: 'PR was closed without merging' };
+      return {
+        merged: false,
+        open: false,
+        blockReason: 'PR was closed without merging',
+        ciFailures: [],
+        reviewComments: [],
+      };
     }
 
     // Check status of the head commit
@@ -343,9 +382,16 @@ export class GitHubApiPrManager implements PrManager {
     );
 
     const reasons: string[] = [];
+    const ciFailures: CiFailureDetail[] = [];
     if (statusResponse.ok) {
       const data = (await statusResponse.json()) as {
-        check_runs: Array<{ name: string; status: string; conclusion: string | null }>;
+        check_runs: Array<{
+          id: number;
+          name: string;
+          status: string;
+          conclusion: string | null;
+          details_url: string | null;
+        }>;
       };
       const pending = data.check_runs.filter(
         (c) =>
@@ -356,12 +402,75 @@ export class GitHubApiPrManager implements PrManager {
         const checkNames = pending.map((c) => `${c.name} (${c.conclusion ?? c.status})`).join(', ');
         reasons.push(`Checks: ${checkNames}`);
       }
+      // Collect CI failure details with annotations for actionable fix context
+      const failed = data.check_runs.filter(
+        (c) => c.conclusion === 'failure' || c.conclusion === 'timed_out' || c.conclusion === 'action_required',
+      );
+      for (const run of failed) {
+        const annotations: CiFailureDetail['annotations'] = [];
+        try {
+          const annResp = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/check-runs/${run.id}/annotations`,
+            { headers: this.headers },
+          );
+          if (annResp.ok) {
+            const annData = (await annResp.json()) as Array<{
+              path: string;
+              message: string;
+              annotation_level: string;
+            }>;
+            annotations.push(
+              ...annData.slice(0, 10).map((a) => ({
+                path: a.path,
+                message: a.message,
+                annotationLevel: a.annotation_level,
+              })),
+            );
+          }
+        } catch {
+          // Best-effort — leave annotations empty
+        }
+        ciFailures.push({
+          name: run.name,
+          conclusion: run.conclusion ?? 'failure',
+          detailsUrl: run.details_url,
+          annotations,
+        });
+      }
+    }
+
+    // Collect review comments for CHANGES_REQUESTED decisions
+    const reviewComments: ReviewCommentDetail[] = [];
+    try {
+      const reviewsResp = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/reviews`,
+        { headers: this.headers },
+      );
+      if (reviewsResp.ok) {
+        const reviews = (await reviewsResp.json()) as Array<{
+          state: string;
+          user: { login: string };
+          body: string;
+        }>;
+        for (const r of reviews) {
+          if (r.state === 'CHANGES_REQUESTED' && r.body) {
+            reviewComments.push({ author: r.user.login, body: r.body, path: null });
+          }
+        }
+        if (reviewComments.length > 0) {
+          reasons.push('Changes requested');
+        }
+      }
+    } catch {
+      // Best-effort — leave reviewComments empty
     }
 
     return {
       merged: false,
       open: true,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
+      ciFailures,
+      reviewComments,
     };
   }
 }

@@ -119,7 +119,7 @@ describe('GhPrManager', () => {
       prUrl: 'https://github.com/org/repo/pull/42',
     });
 
-    expect(status).toEqual({ merged: true, open: false, blockReason: null });
+    expect(status).toEqual({ merged: true, open: false, blockReason: null, ciFailures: [], reviewComments: [] });
   });
 
   it('getPrStatus returns blockReason with pending checks', async () => {
@@ -171,6 +171,8 @@ describe('GhPrManager', () => {
       merged: false,
       open: false,
       blockReason: 'PR was closed without merging',
+      ciFailures: [],
+      reviewComments: [],
     });
   });
 });
