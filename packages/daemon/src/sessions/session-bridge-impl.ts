@@ -426,7 +426,10 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
           timestamp: new Date().toISOString(),
         });
       }
-      logger.info({ sessionId, memoryId: entry.id, scope, path, approved }, 'Memory suggestion created');
+      logger.info(
+        { sessionId, memoryId: entry.id, scope, path, approved },
+        'Memory suggestion created',
+      );
       return entry.id;
     },
   };

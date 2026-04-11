@@ -107,9 +107,9 @@ describe('applyOverrides', () => {
     ];
     const patched = applyOverrides(result, overrides);
 
-    expect(patched.taskReview!.issues).toEqual([]);
-    expect(patched.taskReview!.status).toBe('pass');
-    expect(patched.taskReview!.reasoning).toContain('[OVERRIDES APPLIED]');
+    expect(patched.taskReview?.issues).toEqual([]);
+    expect(patched.taskReview?.status).toBe('pass');
+    expect(patched.taskReview?.reasoning).toContain('[OVERRIDES APPLIED]');
     expect(patched.overall).toBe('pass');
   });
 
@@ -128,8 +128,8 @@ describe('applyOverrides', () => {
     const overrides = [makeDismiss('task_review', 'Missing error handling')];
     const patched = applyOverrides(result, overrides);
 
-    expect(patched.taskReview!.issues).toEqual(['SQL injection vulnerability']);
-    expect(patched.taskReview!.status).toBe('fail');
+    expect(patched.taskReview?.issues).toEqual(['SQL injection vulnerability']);
+    expect(patched.taskReview?.status).toBe('fail');
     expect(patched.overall).toBe('fail');
   });
 
@@ -152,9 +152,9 @@ describe('applyOverrides', () => {
     const overrides = [makeDismiss('requirements_check', 'Adds logout button')];
     const patched = applyOverrides(result, overrides);
 
-    expect(patched.taskReview!.requirementsCheck![1]!.met).toBe(true);
-    expect(patched.taskReview!.requirementsCheck![1]!.note).toContain('[DISMISSED BY HUMAN]');
-    expect(patched.taskReview!.status).toBe('pass');
+    expect(patched.taskReview?.requirementsCheck?.[1]?.met).toBe(true);
+    expect(patched.taskReview?.requirementsCheck?.[1]?.note).toContain('[DISMISSED BY HUMAN]');
+    expect(patched.taskReview?.status).toBe('pass');
     expect(patched.overall).toBe('pass');
   });
 
@@ -180,7 +180,7 @@ describe('applyOverrides', () => {
     const overrides = [makeDismiss('task_review', 'Missing tests')];
     const patched = applyOverrides(result, overrides);
 
-    expect(patched.taskReview!.status).toBe('pass');
+    expect(patched.taskReview?.status).toBe('pass');
     expect(patched.overall).toBe('fail'); // build failure keeps it failed
   });
 
@@ -229,8 +229,8 @@ describe('applyOverrides', () => {
     ];
     const patched = applyOverrides(result, overrides);
 
-    expect(patched.acValidation!.status).toBe('pass');
-    expect(patched.taskReview!.status).toBe('pass');
+    expect(patched.acValidation?.status).toBe('pass');
+    expect(patched.taskReview?.status).toBe('pass');
     expect(patched.overall).toBe('pass');
   });
 });

@@ -482,7 +482,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       if (parent.fixSessionId) {
         try {
           const fix = sessionRepo.getOrThrow(parent.fixSessionId);
-          const fixIsLive = fix.status !== 'complete' && fix.status !== 'killed' && fix.status !== 'failed';
+          const fixIsLive =
+            fix.status !== 'complete' && fix.status !== 'killed' && fix.status !== 'failed';
           if (fixIsLive) {
             logger.debug(
               { sessionId: parentSessionId, fixSessionId: parent.fixSessionId },
@@ -520,7 +521,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const fixTask = buildPrFixTask(parent, status);
       const profile = profileStore.get(parent.profileName);
 
-      let fixId: string;
+      let fixId = '';
       for (let attempt = 0; attempt < 10; attempt++) {
         fixId = generateSessionId();
         try {
@@ -554,7 +555,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           throw err;
         }
       }
-      fixId = fixId!;
 
       enqueueSession(fixId);
       eventBus.emit({
@@ -1588,10 +1588,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           } else if (event.type === 'complete') {
             // Accumulate token counts and cost cumulatively across all runs in this session
             const currentSession = sessionRepo.getOrThrow(sessionId);
-            const newInputTokens =
-              currentSession.inputTokens + (event.totalInputTokens ?? 0);
-            const newOutputTokens =
-              currentSession.outputTokens + (event.totalOutputTokens ?? 0);
+            const newInputTokens = currentSession.inputTokens + (event.totalInputTokens ?? 0);
+            const newOutputTokens = currentSession.outputTokens + (event.totalOutputTokens ?? 0);
             const tokenUpdates: SessionUpdates = {};
             if (event.totalInputTokens !== undefined || event.totalOutputTokens !== undefined) {
               tokenUpdates.inputTokens = newInputTokens;
@@ -1611,7 +1609,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               const profile = profileStore.get(currentSession.profileName);
               const warnAt = profile.tokenBudgetWarnAt ?? 0.8;
 
-              if (totalUsed >= Math.floor(effectiveBudget * warnAt) && totalUsed < effectiveBudget) {
+              if (
+                totalUsed >= Math.floor(effectiveBudget * warnAt) &&
+                totalUsed < effectiveBudget
+              ) {
                 eventBus.emit({
                   type: 'session.token_budget_warning',
                   timestamp: new Date().toISOString(),
@@ -1643,7 +1644,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 });
 
                 if (policy === 'hard' || !canExtend) {
-                  emitActivityStatus(sessionId, 'Token budget hard limit reached — failing session');
+                  emitActivityStatus(
+                    sessionId,
+                    'Token budget hard limit reached — failing session',
+                  );
                   const s = sessionRepo.getOrThrow(sessionId);
                   if (s.status === 'running') {
                     transition(s, 'failed', { completedAt: new Date().toISOString() });
@@ -1653,7 +1657,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                   const s = sessionRepo.getOrThrow(sessionId);
                   if (s.status === 'running') {
                     transition(s, 'paused', { pauseReason: 'budget' });
-                    logger.info({ sessionId, totalUsed, effectiveBudget }, 'Session paused: token budget exceeded');
+                    logger.info(
+                      { sessionId, totalUsed, effectiveBudget },
+                      'Session paused: token budget exceeded',
+                    );
                   }
                 }
                 break;

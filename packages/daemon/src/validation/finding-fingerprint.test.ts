@@ -107,10 +107,10 @@ describe('extractFindings', () => {
 
     const findings = extractFindings(result);
     expect(findings).toHaveLength(1);
-    expect(findings[0]!.source).toBe('ac_validation');
-    expect(findings[0]!.description).toBe('Email validates format');
-    expect(findings[0]!.reasoning).toBe('No validation visible');
-    expect(findings[0]!.id).toMatch(/^ac:/);
+    expect(findings[0]?.source).toBe('ac_validation');
+    expect(findings[0]?.description).toBe('Email validates format');
+    expect(findings[0]?.reasoning).toBe('No validation visible');
+    expect(findings[0]?.id).toMatch(/^ac:/);
   });
 
   it('extracts failed task review issues', () => {
@@ -127,9 +127,9 @@ describe('extractFindings', () => {
 
     const findings = extractFindings(result);
     expect(findings).toHaveLength(2);
-    expect(findings[0]!.source).toBe('task_review');
-    expect(findings[0]!.description).toBe('Missing error handling in API route');
-    expect(findings[1]!.description).toBe('No tests for new function');
+    expect(findings[0]?.source).toBe('task_review');
+    expect(findings[0]?.description).toBe('Missing error handling in API route');
+    expect(findings[1]?.description).toBe('No tests for new function');
   });
 
   it('skips task review issues when status is not fail', () => {
@@ -165,9 +165,9 @@ describe('extractFindings', () => {
 
     const findings = extractFindings(result);
     expect(findings).toHaveLength(1);
-    expect(findings[0]!.source).toBe('requirements_check');
-    expect(findings[0]!.description).toBe('Adds logout button');
-    expect(findings[0]!.reasoning).toBe('Not found in diff');
+    expect(findings[0]?.source).toBe('requirements_check');
+    expect(findings[0]?.description).toBe('Adds logout button');
+    expect(findings[0]?.reasoning).toBe('Not found in diff');
   });
 
   it('extracts from all sources when all have failures', () => {
@@ -218,9 +218,9 @@ describe('detectRecurringFindings', () => {
     ];
     const recurring = detectRecurringFindings(current, previous);
     expect(recurring).toHaveLength(1);
-    expect(recurring[0]!.id).toBe('review:aaa');
+    expect(recurring[0]?.id).toBe('review:aaa');
     // Should return the current version's data
-    expect(recurring[0]!.description).toBe('A');
+    expect(recurring[0]?.description).toBe('A');
   });
 
   it('handles cross-source matches (same text, different prefix)', () => {
@@ -259,6 +259,6 @@ describe('detectRecurringFindings', () => {
     const recurring = detectRecurringFindings(curr, prev);
 
     expect(recurring).toHaveLength(1);
-    expect(recurring[0]!.description).toBe('Missing error handling in auth route');
+    expect(recurring[0]?.description).toBe('Missing error handling in auth route');
   });
 });

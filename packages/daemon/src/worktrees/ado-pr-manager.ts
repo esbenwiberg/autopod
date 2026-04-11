@@ -238,7 +238,12 @@ export class AdoPrManager implements PrManager {
         const names = blocking.map((e) => `${e.context.name} (${e.state})`).join(', ');
         reasons.push(`Policies: ${names}`);
         for (const e of blocking) {
-          ciFailures.push({ name: e.context.name, conclusion: e.state, detailsUrl: null, annotations: [] });
+          ciFailures.push({
+            name: e.context.name,
+            conclusion: e.state,
+            detailsUrl: null,
+            annotations: [],
+          });
         }
       }
     } catch {

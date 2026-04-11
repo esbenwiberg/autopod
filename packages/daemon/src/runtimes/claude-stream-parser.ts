@@ -175,8 +175,7 @@ export class ClaudeStreamParser {
       case 'result': {
         const resultText =
           (typeof event.result === 'string' ? event.result : null) ?? 'Claude agent completed';
-        const costUsd =
-          typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined;
+        const costUsd = typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined;
         const totalInputTokens =
           typeof event.input_tokens === 'number' ? event.input_tokens : undefined;
         const totalOutputTokens =
@@ -211,4 +210,3 @@ export class ClaudeStreamParser {
     }
   }
 }
-

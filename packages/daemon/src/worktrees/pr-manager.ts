@@ -171,8 +171,17 @@ export class GhPrManager implements PrManager {
         const checkNames = pending.map((c) => `${c.name} (${c.conclusion || c.status})`).join(', ');
         reasons.push(`Checks: ${checkNames}`);
         for (const c of pending) {
-          if (c.conclusion === 'FAILURE' || c.conclusion === 'TIMED_OUT' || c.conclusion === 'ACTION_REQUIRED') {
-            ciFailures.push({ name: c.name, conclusion: c.conclusion, detailsUrl: null, annotations: [] });
+          if (
+            c.conclusion === 'FAILURE' ||
+            c.conclusion === 'TIMED_OUT' ||
+            c.conclusion === 'ACTION_REQUIRED'
+          ) {
+            ciFailures.push({
+              name: c.name,
+              conclusion: c.conclusion,
+              detailsUrl: null,
+              annotations: [],
+            });
           }
         }
       }
@@ -200,8 +209,7 @@ export class GhPrManager implements PrManager {
         // Non-fatal — reviewComments stays empty
       }
     } else if (pr.reviewDecision && pr.reviewDecision !== 'APPROVED') {
-      const label =
-        pr.reviewDecision === 'REVIEW_REQUIRED' ? 'Review required' : pr.reviewDecision;
+      const label = pr.reviewDecision === 'REVIEW_REQUIRED' ? 'Review required' : pr.reviewDecision;
       reasons.push(label);
     }
 
@@ -404,7 +412,10 @@ export class GitHubApiPrManager implements PrManager {
       }
       // Collect CI failure details with annotations for actionable fix context
       const failed = data.check_runs.filter(
-        (c) => c.conclusion === 'failure' || c.conclusion === 'timed_out' || c.conclusion === 'action_required',
+        (c) =>
+          c.conclusion === 'failure' ||
+          c.conclusion === 'timed_out' ||
+          c.conclusion === 'action_required',
       );
       for (const run of failed) {
         const annotations: CiFailureDetail['annotations'] = [];

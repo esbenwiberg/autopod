@@ -39,7 +39,8 @@
       "**/.turbo/**",
       "**/.pnpm-store/**",
       "**/pnpm-lock.yaml",
-      "packages/desktop/.build/**"
+      "packages/desktop/.build/**",
+      "packages/desktop/build/**"
     ]
   }
 }

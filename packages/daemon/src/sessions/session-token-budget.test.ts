@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSessionManager } from './session-manager.js';
 import {
   completeWithTokensEvent,
   createTestContext,
   statusEvent,
 } from '../test-utils/mock-helpers.js';
+import { createSessionManager } from './session-manager.js';
 
 // Stubs for child_process (needed by session-manager imports)
 vi.mock('node:child_process', () => ({
@@ -142,7 +142,9 @@ describe('Token budget — consumeAgentEvents', () => {
     insertBudgetProfile(ctx.db, { tokenBudget: 10_000, tokenBudgetWarnAt: 0.8 });
 
     const emitted: string[] = [];
-    ctx.eventBus.subscribe((evt) => { emitted.push(evt.type); });
+    ctx.eventBus.subscribe((evt) => {
+      emitted.push(evt.type);
+    });
 
     const manager = createSessionManager(ctx.deps);
     const session = manager.createSession(
@@ -168,7 +170,9 @@ describe('Token budget — consumeAgentEvents', () => {
     insertBudgetProfile(ctx.db, { tokenBudget: 5_000, tokenBudgetPolicy: 'soft' });
 
     const emitted: string[] = [];
-    ctx.eventBus.subscribe((evt) => { emitted.push(evt.type); });
+    ctx.eventBus.subscribe((evt) => {
+      emitted.push(evt.type);
+    });
 
     const manager = createSessionManager(ctx.deps);
     const session = manager.createSession(
