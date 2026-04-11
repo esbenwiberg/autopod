@@ -1,3 +1,4 @@
+import AutopodClient
 import SwiftUI
 
 /// Overview tab — session metadata, escalation, plan progress, activity feed.

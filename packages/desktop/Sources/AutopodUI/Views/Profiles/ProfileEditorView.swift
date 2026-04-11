@@ -1,3 +1,4 @@
+import AutopodClient
 import SwiftUI
 
 // MARK: - Profile section navigation

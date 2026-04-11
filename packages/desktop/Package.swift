@@ -16,6 +16,7 @@ let package = Package(
         .target(
             name: "AutopodUI",
             dependencies: [
+                "AutopodClient",
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
             ],
             path: "Sources/AutopodUI"
