@@ -1140,6 +1140,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Workspace sessions: container stays alive, no agent/validation/PR
         if (session.outputMode === 'workspace') {
+          // Write provider credential files + Claude config (disclaimer ack, folder trust) so
+          // interactive Claude Code in the terminal doesn't show onboarding/disclaimer/trust prompts.
+          const wsProviderResult = await buildProviderEnv(profile, sessionId, logger);
+          for (const file of wsProviderResult.containerFiles) {
+            await containerManager.writeFile(containerId, file.path, file.content);
+          }
           // Capture starting HEAD so the diff endpoint only shows workspace changes,
           // not the entire branch history since it diverged from main.
           try {
