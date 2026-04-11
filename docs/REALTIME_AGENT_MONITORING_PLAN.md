@@ -2,6 +2,8 @@
 
 > **Goal**: Enable spinning up many isolated agents with real-time progress visibility, plan reporting, and the ability to pause/redirect running agents mid-flight.
 
+**Status**: Phases 1, 2, and 4 are complete. Phase 3 (TUI visual components: progress bar, plan panel, metrics bar) is the remaining work.
+
 ## Design Principles
 
 - **Model-provider agnostic** — all agent communication via MCP (no Anthropic SDK). Any agent runtime that speaks MCP can participate.
@@ -10,7 +12,7 @@
 
 ---
 
-## Phase 1: MCP Progress & Plan Tools
+## Phase 1: MCP Progress & Plan Tools ✅ Done
 
 **New MCP tools added to the escalation server** (injected into every agent container):
 
@@ -77,7 +79,7 @@ interface AgentProgressEvent {
 
 ---
 
-## Phase 2: Pause & Redirect
+## Phase 2: Pause & Redirect ✅ Done
 
 ### New state: `paused`
 
@@ -129,7 +131,7 @@ Currently only works on `awaiting_input`. Extend to also work on `paused`:
 
 ---
 
-## Phase 3: TUI Upgrades
+## Phase 3: TUI Upgrades 🚧 Partial
 
 ### Progress bar component
 - Segmented bar below each session in the table (or in detail panel)
@@ -165,7 +167,7 @@ Currently only works on `awaiting_input`. Extend to also work on `paused`:
 
 ---
 
-## Phase 4: CLAUDE.md Template Updates
+## Phase 4: CLAUDE.md Template Updates ✅ Done
 
 Update the instruction template injected into every agent container:
 
