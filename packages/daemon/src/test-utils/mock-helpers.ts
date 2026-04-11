@@ -245,8 +245,19 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         testCommand: (row.test_command as string) ?? null,
         prProvider: (row.pr_provider as 'github' | 'ado') ?? 'github',
         adoPat: (row.ado_pat as string) ?? null,
+        githubPat: (row.github_pat as string) ?? null,
         privateRegistries: JSON.parse((row.private_registries as string) ?? '[]'),
         registryPat: (row.registry_pat as string) ?? null,
+        branchPrefix: (row.branch_prefix as string) ?? 'autopod/',
+        containerMemoryGb: (row.container_memory_gb as number | null) ?? null,
+        buildTimeout: (row.build_timeout as number | null) ?? 300,
+        testTimeout: (row.test_timeout as number | null) ?? 600,
+        version: (row.version as number | null) ?? 1,
+        workerProfile: (row.worker_profile as string) ?? null,
+        tokenBudget: (row.token_budget as number | null) ?? null,
+        tokenBudgetWarnAt: (row.token_budget_warn_at as number | null) ?? 0.8,
+        tokenBudgetPolicy: (row.token_budget_policy as 'soft' | 'hard' | null) ?? 'soft',
+        maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -269,6 +280,20 @@ export function statusEvent(message: string): AgentEvent {
 
 export function completeEvent(result = 'Done'): AgentEvent {
   return { type: 'complete', timestamp: new Date().toISOString(), result };
+}
+
+export function completeWithTokensEvent(
+  inputTokens: number,
+  outputTokens: number,
+  result = 'Done',
+): AgentEvent {
+  return {
+    type: 'complete',
+    timestamp: new Date().toISOString(),
+    result,
+    totalInputTokens: inputTokens,
+    totalOutputTokens: outputTokens,
+  };
 }
 
 export function escalationEvent(

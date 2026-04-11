@@ -31,6 +31,8 @@ export interface NewSession {
   pimGroups?: PimGroupConfig[] | null;
   /** Existing PR URL (set at creation for fix sessions to skip PR creation) */
   prUrl?: string | null;
+  /** Token budget override for this session. null = inherit from profile. */
+  tokenBudget?: number | null;
 }
 
 export interface SessionFilters {
@@ -82,6 +84,9 @@ export interface SessionUpdates {
   prFixAttempts?: number;
   maxPrFixAttempts?: number;
   fixSessionId?: string | null;
+  tokenBudget?: number | null;
+  budgetExtensionsUsed?: number;
+  pauseReason?: 'budget' | 'manual' | null;
 }
 
 export interface SessionStats {
@@ -162,6 +167,9 @@ function rowToSession(row: Record<string, unknown>): Session {
     prFixAttempts: (row.pr_fix_attempts as number) ?? 0,
     maxPrFixAttempts: (row.max_pr_fix_attempts as number) ?? DEFAULT_MAX_PR_FIX_ATTEMPTS,
     fixSessionId: (row.fix_session_id as string) ?? null,
+    tokenBudget: (row.token_budget as number | null) ?? null,
+    budgetExtensionsUsed: (row.budget_extensions_used as number) ?? 0,
+    pauseReason: (row.pause_reason as 'budget' | 'manual' | null) ?? null,
   };
 }
 
@@ -172,11 +180,13 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         INSERT INTO sessions (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
-          output_mode, base_branch, ac_from, linked_session_id, pim_groups, pr_url
+          output_mode, base_branch, ac_from, linked_session_id, pim_groups, pr_url,
+          token_budget
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
-          @outputMode, @baseBranch, @acFrom, @linkedSessionId, @pimGroups, @prUrl
+          @outputMode, @baseBranch, @acFrom, @linkedSessionId, @pimGroups, @prUrl,
+          @tokenBudget
         )
       `).run({
         id: session.id,
@@ -199,6 +209,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         linkedSessionId: session.linkedSessionId ?? null,
         pimGroups: session.pimGroups ? JSON.stringify(session.pimGroups) : null,
         prUrl: session.prUrl ?? null,
+        tokenBudget: session.tokenBudget ?? null,
       });
     },
 
@@ -369,6 +380,18 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.fixSessionId !== undefined) {
         setClauses.push('fix_session_id = @fixSessionId');
         params.fixSessionId = changes.fixSessionId;
+      }
+      if (changes.tokenBudget !== undefined) {
+        setClauses.push('token_budget = @tokenBudget');
+        params.tokenBudget = changes.tokenBudget ?? null;
+      }
+      if (changes.budgetExtensionsUsed !== undefined) {
+        setClauses.push('budget_extensions_used = @budgetExtensionsUsed');
+        params.budgetExtensionsUsed = changes.budgetExtensionsUsed;
+      }
+      if (changes.pauseReason !== undefined) {
+        setClauses.push('pause_reason = @pauseReason');
+        params.pauseReason = changes.pauseReason ?? null;
       }
 
       if (setClauses.length === 0) return;

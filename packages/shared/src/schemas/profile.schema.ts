@@ -150,6 +150,10 @@ export const createProfileSchema = z.object({
     .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch prefix contains invalid characters')
     .default('autopod/'),
   containerMemoryGb: z.number().min(0.5).max(64).nullable().default(null),
+  tokenBudget: z.number().int().min(1000).nullable().default(null),
+  tokenBudgetWarnAt: z.number().min(0.1).max(0.99).default(0.8),
+  tokenBudgetPolicy: z.enum(['soft', 'hard']).default('soft'),
+  maxBudgetExtensions: z.number().int().min(0).nullable().default(null),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });

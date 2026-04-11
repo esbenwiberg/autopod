@@ -72,6 +72,14 @@ export interface Profile {
   containerMemoryGb: number | null;
   /** Auto-incremented on every profile update. Useful for auditing which config a session ran under. */
   version: number;
+  /** Maximum total tokens (input + output) allowed per session. null = unlimited. */
+  tokenBudget: number | null;
+  /** Fraction of tokenBudget at which a warning event is emitted. E.g. 0.8 = warn at 80%. */
+  tokenBudgetWarnAt: number;
+  /** What to do when the budget is exceeded: 'soft' = pause for user approval, 'hard' = fail immediately. */
+  tokenBudgetPolicy: 'soft' | 'hard';
+  /** How many times a user may approve budget extensions per session. null = unlimited. */
+  maxBudgetExtensions: number | null;
   createdAt: string;
   updatedAt: string;
 }

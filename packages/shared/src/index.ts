@@ -109,6 +109,8 @@ export type {
   SessionCompletedEvent,
   MemorySuggestionCreatedEvent,
   ValidationOverrideQueuedEvent,
+  TokenBudgetWarningEvent,
+  TokenBudgetExceededEvent,
 } from './types/events.js';
 
 export type {

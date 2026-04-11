@@ -86,6 +86,10 @@ export function rowToProfile(
     buildTimeout: (row.build_timeout as number | null) ?? 300,
     testTimeout: (row.test_timeout as number | null) ?? 600,
     version: (row.version as number | null) ?? 1,
+    tokenBudget: (row.token_budget as number | null) ?? null,
+    tokenBudgetWarnAt: (row.token_budget_warn_at as number | null) ?? 0.8,
+    tokenBudgetPolicy: (row.token_budget_policy as 'soft' | 'hard' | null) ?? 'soft',
+    maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -193,6 +197,7 @@ export function createProfileStore(
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
           private_registries, registry_pat, branch_prefix, container_memory_gb,
           build_timeout, test_timeout,
+          token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
@@ -202,6 +207,7 @@ export function createProfileStore(
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
           @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout,
+          @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
           @createdAt, @updatedAt
         )
       `).run({
@@ -240,6 +246,10 @@ export function createProfileStore(
         containerMemoryGb: parsed.containerMemoryGb ?? null,
         buildTimeout: parsed.buildTimeout,
         testTimeout: parsed.testTimeout,
+        tokenBudget: parsed.tokenBudget ?? null,
+        tokenBudgetWarnAt: parsed.tokenBudgetWarnAt,
+        tokenBudgetPolicy: parsed.tokenBudgetPolicy,
+        maxBudgetExtensions: parsed.maxBudgetExtensions ?? null,
         createdAt: now,
         updatedAt: now,
       });
@@ -426,6 +436,22 @@ export function createProfileStore(
       if (parsed.testTimeout !== undefined) {
         setClauses.push('test_timeout = @testTimeout');
         fieldMap.testTimeout = parsed.testTimeout;
+      }
+      if (parsed.tokenBudget !== undefined) {
+        setClauses.push('token_budget = @tokenBudget');
+        fieldMap.tokenBudget = parsed.tokenBudget ?? null;
+      }
+      if (parsed.tokenBudgetWarnAt !== undefined) {
+        setClauses.push('token_budget_warn_at = @tokenBudgetWarnAt');
+        fieldMap.tokenBudgetWarnAt = parsed.tokenBudgetWarnAt;
+      }
+      if (parsed.tokenBudgetPolicy !== undefined) {
+        setClauses.push('token_budget_policy = @tokenBudgetPolicy');
+        fieldMap.tokenBudgetPolicy = parsed.tokenBudgetPolicy;
+      }
+      if (parsed.maxBudgetExtensions !== undefined) {
+        setClauses.push('max_budget_extensions = @maxBudgetExtensions');
+        fieldMap.maxBudgetExtensions = parsed.maxBudgetExtensions ?? null;
       }
 
       if (setClauses.length === 0) {
