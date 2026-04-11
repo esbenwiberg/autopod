@@ -35,6 +35,12 @@ public struct RawSystemEvent: Codable, Sendable {
   // session.completed
   public let finalStatus: String?
   public let summary: SessionSummaryResponse?
+
+  // memory.suggestion_created
+  public let memoryEntry: MemoryEntry?
+
+  // validation.override_queued
+  public let override: ValidationOverrideEntry?
 }
 
 // MARK: - Typed event enum (parsed from RawSystemEvent)
@@ -48,6 +54,8 @@ public enum SystemEvent: Sendable {
   case escalationCreated(sessionId: String, escalation: EscalationResponse)
   case escalationResolved(sessionId: String, escalationId: String)
   case sessionCompleted(sessionId: String, finalStatus: String, summary: SessionSummaryResponse)
+  case memorySuggestionCreated(sessionId: String, entry: MemoryEntry)
+  case validationOverrideQueued(sessionId: String, override: ValidationOverrideEntry)
 
   public var eventId: Int? { nil }  // Set externally from _eventId
 
@@ -87,10 +95,29 @@ public enum SystemEvent: Sendable {
       else { return nil }
       return .sessionCompleted(sessionId: id, finalStatus: status, summary: summary)
 
+    case "memory.suggestion_created":
+      guard let id = raw.sessionId, let entry = raw.memoryEntry else { return nil }
+      return .memorySuggestionCreated(sessionId: id, entry: entry)
+
+    case "validation.override_queued":
+      guard let id = raw.sessionId, let ov = raw.override else { return nil }
+      return .validationOverrideQueued(sessionId: id, override: ov)
+
     default:
       return nil
     }
   }
+}
+
+// MARK: - ValidationOverrideEntry
+
+public struct ValidationOverrideEntry: Codable, Sendable {
+  public let findingId: String
+  public let description: String
+  public let action: String
+  public let reason: String?
+  public let guidance: String?
+  public let createdAt: String
 }
 
 // MARK: - Agent event (mirrors packages/shared/src/types/runtime.ts AgentEvent)

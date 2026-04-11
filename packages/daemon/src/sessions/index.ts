@@ -53,3 +53,11 @@ export {
 } from './system-instructions-generator.js';
 export { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
 export { resolveSections, type ResolvedSection } from './section-resolver.js';
+export {
+  createMemoryRepository,
+  type MemoryRepository,
+} from './memory-repository.js';
+export {
+  createPendingOverrideRepository,
+  type PendingOverrideRepository,
+} from './pending-override-repository.js';

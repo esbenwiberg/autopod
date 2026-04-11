@@ -85,6 +85,7 @@ export function rowToProfile(
     containerMemoryGb: (row.container_memory_gb as number | null) ?? null,
     buildTimeout: (row.build_timeout as number | null) ?? 300,
     testTimeout: (row.test_timeout as number | null) ?? 600,
+    version: (row.version as number | null) ?? 1,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -431,7 +432,8 @@ export function createProfileStore(
         return this.get(name);
       }
 
-      // Always update timestamp
+      // Always bump version and update timestamp
+      setClauses.push('version = version + 1');
       setClauses.push('updated_at = @updatedAt');
       fieldMap.updatedAt = new Date().toISOString();
       fieldMap.name = name;

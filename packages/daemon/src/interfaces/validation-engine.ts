@@ -48,5 +48,6 @@ export interface ValidationEngine {
   validate(
     config: ValidationEngineConfig,
     onProgress?: (message: string) => void,
+    signal?: AbortSignal,
   ): Promise<ValidationResult>;
 }

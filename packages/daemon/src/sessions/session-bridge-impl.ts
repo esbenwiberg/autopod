@@ -5,14 +5,18 @@ import type {
   ActionResponse,
   EscalationRequest,
   EscalationResponse,
+  MemoryEntry,
+  MemoryScope,
   Profile,
 } from '@autopod/shared';
+import { generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
+import type { MemoryRepository } from './memory-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import type { ContainerManagerFactory, SessionManager } from './session-manager.js';
@@ -26,6 +30,7 @@ export interface SessionBridgeDependencies {
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
+  memoryRepo?: MemoryRepository;
   makeActionEngine?: (profile: Profile) => ActionEngine;
   containerManagerFactory: ContainerManagerFactory;
   pendingRequestsBySession: Map<string, PendingRequests>;
@@ -42,6 +47,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     escalationRepo,
     nudgeRepo,
     profileStore,
+    memoryRepo,
     makeActionEngine,
     containerManagerFactory,
     pendingRequestsBySession: _pendingRequestsBySession,
@@ -371,6 +377,52 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       logger.info({ linkedSessionId }, 'Triggering revalidation of linked worker session');
       return sessionManager.revalidateSession(linkedSessionId);
+    },
+
+    listMemories(sessionId: string, scope: MemoryScope): MemoryEntry[] {
+      if (!memoryRepo) return [];
+      const session = sessionManager.getSession(sessionId);
+      const scopeId =
+        scope === 'global' ? null : scope === 'profile' ? session.profileName : sessionId;
+      return memoryRepo.list(scope, scopeId, true);
+    },
+
+    readMemory(_sessionId: string, id: string): MemoryEntry {
+      if (!memoryRepo) throw new Error('Memory store not available');
+      return memoryRepo.getOrThrow(id);
+    },
+
+    searchMemories(sessionId: string, scope: MemoryScope, query: string): MemoryEntry[] {
+      if (!memoryRepo) return [];
+      const session = sessionManager.getSession(sessionId);
+      const scopeId =
+        scope === 'global' ? null : scope === 'profile' ? session.profileName : sessionId;
+      return memoryRepo.search(query, scope, scopeId);
+    },
+
+    suggestMemory(sessionId: string, scope: MemoryScope, path: string, content: string): string {
+      if (!memoryRepo) throw new Error('Memory store not available');
+      const session = sessionManager.getSession(sessionId);
+      const scopeId =
+        scope === 'global' ? null : scope === 'profile' ? session.profileName : sessionId;
+      const id = generateId(8);
+      const entry = memoryRepo.insert({
+        id,
+        scope,
+        scopeId,
+        path,
+        content,
+        approved: false,
+        createdBySessionId: sessionId,
+      });
+      eventBus.emit({
+        type: 'memory.suggestion_created',
+        sessionId,
+        memoryEntry: entry,
+        timestamp: new Date().toISOString(),
+      });
+      logger.info({ sessionId, memoryId: entry.id, scope, path }, 'Memory suggestion created');
+      return entry.id;
     },
   };
 }

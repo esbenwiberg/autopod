@@ -1,6 +1,6 @@
 import type { OutputMode } from './actions.js';
 import type { EscalationRequest } from './escalation.js';
-import type { ExecutionTarget, PimGroupConfig } from './profile.js';
+import type { ExecutionTarget, PimGroupConfig, Profile } from './profile.js';
 import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
 import type { ValidationOverride, ValidationResult } from './validation.js';
@@ -76,6 +76,8 @@ export interface Session {
   taskSummary: TaskSummary | null;
   validationOverrides: ValidationOverride[] | null;
   pimGroups: PimGroupConfig[] | null;
+  /** Snapshot of the resolved profile config at session creation time (after inheritance). */
+  profileSnapshot: Profile | null;
 }
 
 export interface CreateSessionRequest {

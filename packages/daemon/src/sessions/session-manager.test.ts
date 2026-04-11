@@ -394,7 +394,12 @@ describe('SessionManager', () => {
       const manager = createSessionManager(ctx.deps);
 
       const session = manager.createSession(
-        { profileName: 'test-profile', task: 'Fix', branch: 'my-custom-branch', branchPrefix: 'hotfix/' },
+        {
+          profileName: 'test-profile',
+          task: 'Fix',
+          branch: 'my-custom-branch',
+          branchPrefix: 'hotfix/',
+        },
         'user-1',
       );
 
@@ -410,6 +415,7 @@ describe('SessionManager', () => {
 
       manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
 
+      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       const createdEvent = events.find((e: any) => e.type === 'session.created');
       expect(createdEvent).toBeDefined();
     });
@@ -494,6 +500,7 @@ describe('SessionManager', () => {
 
       await manager.killSession(session.id);
 
+      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       const completedEvent = events.find((e: any) => e.type === 'session.completed') as any;
       expect(completedEvent).toBeDefined();
       expect(completedEvent.finalStatus).toBe('killed');
@@ -571,6 +578,7 @@ describe('SessionManager', () => {
 
       await manager.approveSession(session.id);
 
+      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       const completedEvent = events.find((e: any) => e.type === 'session.completed') as any;
       expect(completedEvent).toBeDefined();
       expect(completedEvent.finalStatus).toBe('complete');
@@ -736,6 +744,7 @@ describe('SessionManager', () => {
 
       const statusEvents: unknown[] = [];
       ctx.eventBus.subscribe((e) => {
+        // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
         if ((e as any).type === 'session.status_changed') statusEvents.push(e);
       });
 
@@ -743,9 +752,13 @@ describe('SessionManager', () => {
       await manager.killSession(session.id);
 
       expect(statusEvents).toHaveLength(2);
+      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       expect((statusEvents[0] as any).previousStatus).toBe('queued');
+      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       expect((statusEvents[0] as any).newStatus).toBe('killing');
+      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       expect((statusEvents[1] as any).previousStatus).toBe('killing');
+      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       expect((statusEvents[1] as any).newStatus).toBe('killed');
     });
   });
@@ -828,6 +841,7 @@ describe('SessionManager', () => {
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
       const npmrcCall = writeCalls.find(([, path]) => path.endsWith('.npmrc'));
       expect(npmrcCall).toBeDefined();
+      // biome-ignore lint/style/noNonNullAssertion: guarded by preceding expect
       const content = npmrcCall![2] as string;
       expect(content).toContain(
         '@myorg:registry=https://pkgs.dev.azure.com/myorg/_packaging/feed/npm/registry/',
@@ -859,6 +873,7 @@ describe('SessionManager', () => {
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
       const nugetCall = writeCalls.find(([, path]) => path.toLowerCase().endsWith('nuget.config'));
       expect(nugetCall).toBeDefined();
+      // biome-ignore lint/style/noNonNullAssertion: guarded by preceding expect
       const content = nugetCall![2] as string;
       expect(content).toContain('<packageSources>');
       expect(content).toContain('myorg-feed');
@@ -1710,6 +1725,7 @@ describe('SessionManager', () => {
 
         await manager.completeSession(session.id);
 
+        // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
         const completedEvent = events.find((e: any) => e.type === 'session.completed') as any;
         expect(completedEvent).toBeDefined();
         expect(completedEvent.finalStatus).toBe('complete');

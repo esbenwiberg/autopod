@@ -2,6 +2,7 @@ import type {
   ActionDefinition,
   InjectedMcpServer,
   InjectedSkill,
+  MemoryEntry,
   Profile,
   Session,
 } from '@autopod/shared';
@@ -16,6 +17,8 @@ export interface SystemInstructionsOptions {
   availableActions?: ActionDefinition[];
   /** Skills (slash commands) injected into this session */
   injectedSkills?: InjectedSkill[];
+  /** Approved memory entries (global + profile + session) */
+  memories?: MemoryEntry[];
 }
 
 export function generateSystemInstructions(
@@ -219,6 +222,49 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
+  if (options?.memories?.length) {
+    lines.push('## Persistent Memory');
+    lines.push('');
+    lines.push(
+      'The following knowledge has been approved and persists across sessions. ' +
+        'Follow these conventions and patterns. ' +
+        'To suggest new memories use the `memory_suggest` tool — a human will review before it becomes active.',
+    );
+    lines.push('');
+
+    const globalMems = options.memories.filter((m) => m.scope === 'global');
+    const profileMems = options.memories.filter((m) => m.scope === 'profile');
+    const sessionMems = options.memories.filter((m) => m.scope === 'session');
+
+    if (globalMems.length > 0) {
+      lines.push('### Global');
+      for (const m of globalMems) {
+        lines.push(`#### ${m.path}`);
+        lines.push('');
+        lines.push(m.content);
+        lines.push('');
+      }
+    }
+    if (profileMems.length > 0) {
+      lines.push('### Profile');
+      for (const m of profileMems) {
+        lines.push(`#### ${m.path}`);
+        lines.push('');
+        lines.push(m.content);
+        lines.push('');
+      }
+    }
+    if (sessionMems.length > 0) {
+      lines.push('### Session');
+      for (const m of sessionMems) {
+        lines.push(`#### ${m.path}`);
+        lines.push('');
+        lines.push(m.content);
+        lines.push('');
+      }
+    }
+  }
+
   lines.push('## When to call ask_human');
   lines.push('');
   lines.push(
@@ -380,9 +426,7 @@ function generateOperatingEnvironment(
     }
     if (blockedDomains.length > 0) {
       lines.push(
-        `- **These domains are NOT directly accessible** (no credentials in container): ${blockedDomains.join(', ')}. ` +
-          'Do NOT attempt gh CLI, curl, or WebFetch to these domains — they will fail. ' +
-          'Use the action tools on the Escalation MCP server instead (see MCP Servers section).',
+        `- **These domains are NOT directly accessible** (no credentials in container): ${blockedDomains.join(', ')}. Do NOT attempt gh CLI, curl, or WebFetch to these domains — they will fail. Use the action tools on the Escalation MCP server instead (see MCP Servers section).`,
       );
     }
   }
@@ -415,10 +459,7 @@ function generateOperatingEnvironment(
 
     if (coveredDomains.length > 0) {
       lines.push(
-        `${coveredDomains.join('; ')} — accessible via the action tools on the Escalation MCP server (see MCP Servers section). ` +
-          'You MUST use these MCP action tools for these domains. ' +
-          'Do not use WebFetch, curl, gh CLI, or direct API calls as substitutes — ' +
-          'actions handle authentication, PII redaction, and audit logging automatically.',
+        `${coveredDomains.join('; ')} — accessible via the action tools on the Escalation MCP server (see MCP Servers section). You MUST use these MCP action tools for these domains. Do not use WebFetch, curl, gh CLI, or direct API calls as substitutes — actions handle authentication, PII redaction, and audit logging automatically.`,
       );
     } else {
       lines.push(

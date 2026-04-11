@@ -56,6 +56,7 @@ public enum ProfileMapper {
       networkEnabled: response.networkPolicy?.enabled ?? false,
       networkMode: networkMode,
       allowedHosts: response.networkPolicy?.allowedHosts ?? [],
+      allowPackageManagers: response.networkPolicy?.allowPackageManagers ?? false,
       privateRegistries: response.privateRegistries.map {
         PrivateRegistry(type: RegistryType(rawValue: $0.type) ?? .npm, url: $0.url, scope: $0.scope)
       },
@@ -91,6 +92,7 @@ public enum ProfileMapper {
       actionQuarantineBlockThreshold: ap?.quarantine?.blockThreshold ?? 0.8,
       actionQuarantineOnBlock: QuarantineOnBlock(rawValue: ap?.quarantine?.onBlock ?? "ask_human") ?? .askHuman,
       providerCredentialsType: response.providerCredentials?.provider,
+      version: response.version,
       createdAt: SessionMapper.parseDate(response.createdAt),
       updatedAt: SessionMapper.parseDate(response.updatedAt)
     )
@@ -154,11 +156,15 @@ public enum ProfileMapper {
 
     // Network policy
     if profile.networkEnabled {
-      d["networkPolicy"] = [
+      var np: [String: Any] = [
         "enabled": true,
         "mode": profile.networkMode.rawValue,
         "allowedHosts": profile.allowedHosts,
-      ] as [String: Any]
+      ]
+      if profile.allowPackageManagers {
+        np["allowPackageManagers"] = true
+      }
+      d["networkPolicy"] = np
     } else {
       d["networkPolicy"] = ["enabled": false, "mode": "restricted", "allowedHosts": []] as [String: Any]
     }

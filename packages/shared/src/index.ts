@@ -107,6 +107,8 @@ export type {
   EscalationCreatedEvent,
   EscalationResolvedEvent,
   SessionCompletedEvent,
+  MemorySuggestionCreatedEvent,
+  ValidationOverrideQueuedEvent,
 } from './types/events.js';
 
 export type {
@@ -126,6 +128,8 @@ export type {
 } from './types/auth.js';
 
 export type { HistoryQuery, HistoryExportStats } from './types/history.js';
+
+export type { MemoryScope, MemoryEntry } from './types/memory.js';
 
 // Errors (runtime values, not just types)
 export {

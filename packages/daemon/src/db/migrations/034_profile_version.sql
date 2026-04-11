@@ -1,0 +1,2 @@
+ALTER TABLE profiles ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE sessions ADD COLUMN profile_snapshot TEXT;

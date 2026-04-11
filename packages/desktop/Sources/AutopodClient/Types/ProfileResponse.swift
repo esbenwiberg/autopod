@@ -39,6 +39,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var privateRegistries: [PrivateRegistryResponse]
   public var registryPat: String?
   public var containerMemoryGb: Double?
+  public var version: Int
   public var createdAt: String
   public var updatedAt: String
 
@@ -51,7 +52,7 @@ public struct ProfileResponse: Codable, Sendable {
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
     outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300
     testTimeout = 600; prProvider = "github"; privateRegistries = []
-    createdAt = ""; updatedAt = ""
+    version = 1; createdAt = ""; updatedAt = ""
   }
 }
 
@@ -110,10 +111,11 @@ public struct NetworkPolicyResponse: Codable, Sendable {
   public var mode: String?
   public var allowedHosts: [String]
   public var replaceDefaults: Bool?
+  public var allowPackageManagers: Bool?
 
-  public init(enabled: Bool, mode: String?, allowedHosts: [String], replaceDefaults: Bool?) {
+  public init(enabled: Bool, mode: String?, allowedHosts: [String], replaceDefaults: Bool?, allowPackageManagers: Bool? = nil) {
     self.enabled = enabled; self.mode = mode; self.allowedHosts = allowedHosts
-    self.replaceDefaults = replaceDefaults
+    self.replaceDefaults = replaceDefaults; self.allowPackageManagers = allowPackageManagers
   }
 
   public init(from decoder: any Decoder) throws {
@@ -122,6 +124,7 @@ public struct NetworkPolicyResponse: Codable, Sendable {
     mode = try c.decodeIfPresent(String.self, forKey: .mode)
     allowedHosts = try c.decode([String].self, forKey: .allowedHosts)
     replaceDefaults = try decodeBoolOrIntIfPresent(c, key: .replaceDefaults)
+    allowPackageManagers = try decodeBoolOrIntIfPresent(c, key: .allowPackageManagers)
   }
 }
 

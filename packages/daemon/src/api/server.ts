@@ -14,6 +14,8 @@ import type {
   ContainerManagerFactory,
   EventBus,
   EventRepository,
+  MemoryRepository,
+  PendingOverrideRepository,
   SessionManager,
   SessionQueue,
 } from '../sessions/index.js';
@@ -27,6 +29,7 @@ import { actionRoutes } from './routes/actions.js';
 import { diffRoutes } from './routes/diff.js';
 import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
+import { memoryRoutes } from './routes/memory.js';
 import { profileRoutes } from './routes/profiles.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { terminalRoutes } from './routes/terminal.js';
@@ -49,6 +52,8 @@ export interface ServerDependencies {
   imageBuilder?: ImageBuilder;
   actionRegistry?: ActionRegistry;
   sessionTokenIssuer?: SessionTokenIssuer;
+  memoryRepo?: MemoryRepository;
+  pendingOverrideRepo?: PendingOverrideRepository;
   logLevel?: string;
   prettyLog?: boolean;
   onShutdown?: () => void;
@@ -84,7 +89,13 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     sessionQueue: deps.sessionQueue,
     maxConcurrency: deps.maxConcurrency,
   });
-  sessionRoutes(app, deps.sessionManager, deps.sessionTokenIssuer, deps.eventRepo);
+  sessionRoutes(
+    app,
+    deps.sessionManager,
+    deps.sessionTokenIssuer,
+    deps.eventRepo,
+    deps.pendingOverrideRepo,
+  );
   historyRoutes(app, deps.sessionManager);
   profileRoutes(
     app,
@@ -92,6 +103,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     (profileName) => deps.sessionManager.refreshNetworkPolicy(profileName),
     deps.imageBuilder,
   );
+
+  // Memory store routes
+  if (deps.memoryRepo) {
+    memoryRoutes(app, { memoryRepo: deps.memoryRepo });
+  }
 
   // Action catalog
   if (deps.actionRegistry) {

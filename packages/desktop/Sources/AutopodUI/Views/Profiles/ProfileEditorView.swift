@@ -13,6 +13,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
     case validation
     case credentials
     case injections
+    case memory
 
     var id: String { rawValue }
 
@@ -28,6 +29,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .validation:     "Validation"
         case .credentials:    "Credentials"
         case .injections:     "Injections"
+        case .memory:         "Memory"
         }
     }
 
@@ -43,6 +45,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .validation:     "globe"
         case .credentials:    "key"
         case .injections:     "syringe"
+        case .memory:         "brain"
         }
     }
 
@@ -68,6 +71,8 @@ enum ProfileSection: String, CaseIterable, Identifiable {
             "Authentication tokens for Git providers and package registries. Encrypted at rest."
         case .injections:
             "Additional tools, documentation, and commands injected into agent containers."
+        case .memory:
+            "Persistent memory entries injected into agent sessions for this profile. Agents can suggest new memories via memory_suggest."
         }
     }
 }
@@ -111,16 +116,28 @@ public struct ProfileEditorView: View {
     public let actionCatalog: [ActionCatalogItem]
     public var onSave: ((Profile) -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
+    public var memoryEntries: [MemoryEntry] = []
+    public var onApproveMemory: (String) -> Void = { _ in }
+    public var onRejectMemory: (String) -> Void = { _ in }
+    public var onDeleteMemory: (String) -> Void = { _ in }
 
     public init(profile: Profile, isNew: Bool,
                 actionCatalog: [ActionCatalogItem] = [],
                 onSave: ((Profile) -> Void)? = nil,
-                onAuthenticate: ProfileAuthHandler? = nil) {
+                onAuthenticate: ProfileAuthHandler? = nil,
+                memoryEntries: [MemoryEntry] = [],
+                onApproveMemory: @escaping (String) -> Void = { _ in },
+                onRejectMemory: @escaping (String) -> Void = { _ in },
+                onDeleteMemory: @escaping (String) -> Void = { _ in }) {
         self._profile = State(initialValue: profile)
         self.isNew = isNew
         self.actionCatalog = actionCatalog
         self.onSave = onSave
         self.onAuthenticate = onAuthenticate
+        self.memoryEntries = memoryEntries
+        self.onApproveMemory = onApproveMemory
+        self.onRejectMemory = onRejectMemory
+        self.onDeleteMemory = onDeleteMemory
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -159,6 +176,12 @@ public struct ProfileEditorView: View {
                 Text(profile.name)
                     .font(.system(.subheadline, design: .monospaced))
                     .foregroundStyle(.secondary)
+                Text("v\(profile.version)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
             }
             Spacer()
             Button { dismiss() } label: {
@@ -228,6 +251,7 @@ public struct ProfileEditorView: View {
                 case .validation:     validationFields
                 case .credentials:    credentialFields
                 case .injections:     injectionFields
+                case .memory:         memorySection
                 }
             }
             .padding(24)
@@ -633,6 +657,13 @@ public struct ProfileEditorView: View {
 
             if profile.networkMode == .restricted {
                 Divider().padding(.vertical, 4)
+
+                Toggle(isOn: $profile.allowPackageManagers) {
+                    HStack(spacing: 4) {
+                        Text("Allow Package Managers")
+                        HelpBadge(text: "Auto-allow common package registry hosts: npm, pip, cargo, apt, NuGet, Go modules, and RubyGems.")
+                    }
+                }
 
                 fieldRow("Allowed Hosts", help: "Hostnames the container can reach in restricted mode. One per row.") {
                     VStack(alignment: .leading, spacing: 6) {
@@ -1173,6 +1204,18 @@ public struct ProfileEditorView: View {
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .padding(.top, 4)
+    }
+
+    // MARK: - Memory
+
+    private var memorySection: some View {
+        MemoryManagementView(
+            entries: memoryEntries.filter { $0.scope == .profile },
+            scopeFilter: .profile,
+            onApprove: onApproveMemory,
+            onReject: onRejectMemory,
+            onDelete: onDeleteMemory
+        )
     }
 
     // MARK: - Injections

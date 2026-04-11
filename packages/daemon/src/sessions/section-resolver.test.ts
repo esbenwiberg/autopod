@@ -9,6 +9,7 @@ describe('resolveSections', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    // biome-ignore lint/suspicious/noExplicitAny: vi.spyOn return type requires any cast
     fetchSpy = vi.spyOn(globalThis, 'fetch') as any;
   });
 

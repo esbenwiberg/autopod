@@ -36,6 +36,7 @@ public struct Profile: Identifiable, Sendable {
     public var networkEnabled: Bool
     public var networkMode: NetworkPolicyMode
     public var allowedHosts: [String]
+    public var allowPackageManagers: Bool
 
     // Private registries
     public var privateRegistries: [PrivateRegistry]
@@ -86,6 +87,7 @@ public struct Profile: Identifiable, Sendable {
     public var claudeMdSectionCount: Int { claudeMdSections.count }
     public var skillCount: Int { skills.count }
 
+    public var version: Int
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -104,7 +106,7 @@ public struct Profile: Identifiable, Sendable {
         hasGithubPat: Bool = false, hasAdoPat: Bool = false, hasRegistryPat: Bool = false,
         githubPat: String? = nil, adoPat: String? = nil, registryPat: String? = nil,
         networkEnabled: Bool = false, networkMode: NetworkPolicyMode = .restricted,
-        allowedHosts: [String] = [],
+        allowedHosts: [String] = [], allowPackageManagers: Bool = false,
         privateRegistries: [PrivateRegistry] = [], smokePages: [SmokePage] = [],
         mcpServers: [InjectedMcpServer] = [],
         claudeMdSections: [InjectedClaudeMdSection] = [],
@@ -127,6 +129,7 @@ public struct Profile: Identifiable, Sendable {
         actionQuarantineBlockThreshold: Double = 0.8,
         actionQuarantineOnBlock: QuarantineOnBlock = .askHuman,
         providerCredentialsType: String? = nil,
+        version: Int = 1,
         createdAt: Date = Date(), updatedAt: Date = Date()
     ) {
         self.name = name; self.repoUrl = repoUrl; self.defaultBranch = defaultBranch
@@ -143,7 +146,8 @@ public struct Profile: Identifiable, Sendable {
         self.hasRegistryPat = hasRegistryPat
         self.githubPat = githubPat; self.adoPat = adoPat; self.registryPat = registryPat
         self.networkEnabled = networkEnabled; self.networkMode = networkMode
-        self.allowedHosts = allowedHosts; self.privateRegistries = privateRegistries
+        self.allowedHosts = allowedHosts; self.allowPackageManagers = allowPackageManagers
+        self.privateRegistries = privateRegistries
         self.smokePages = smokePages
         self.mcpServers = mcpServers; self.claudeMdSections = claudeMdSections
         self.skills = skills
@@ -167,6 +171,7 @@ public struct Profile: Identifiable, Sendable {
         self.actionQuarantineBlockThreshold = actionQuarantineBlockThreshold
         self.actionQuarantineOnBlock = actionQuarantineOnBlock
         self.providerCredentialsType = providerCredentialsType
+        self.version = version
         self.createdAt = createdAt; self.updatedAt = updatedAt
     }
 }
