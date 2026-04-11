@@ -88,13 +88,13 @@ If it doesn't pass, the agent gets structured feedback and tries again. If it do
 Every task follows a state machine:
 
 ```
-queued → provisioning → running → validating → validated → approved → merge_pending → merging → complete
-                           │            │
-                           │            └─→ failed (retry with feedback, up to N attempts)
-                           │                    │
-                           │                    └─→ review_required (attempts exhausted — human decides)
-                           │                           ├─→ running (extend attempts, agent retries)
-                           │                           └─→ running (fix-manually: linked workspace → worker)
+queued → provisioning → running → validating → validated → approved → merging → complete
+                           │            │                                  ↓
+                           │            └─→ failed (retry with feedback)  merge_pending
+                           │                    │                              ↓
+                           │                    └─→ review_required    fix session spawned
+                           │                           ├─→ running      (CI fail / review comments)
+                           │                           └─→ running      up to N attempts, then failed
                            │
                            ├─→ paused (operator paused via ap pause / p key)
                            │      │

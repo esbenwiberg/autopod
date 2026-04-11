@@ -220,8 +220,12 @@ macOS native app (Swift/Xcode) for session monitoring and management. Not part o
 
 ```
 queued → provisioning → running → validating → validated → approved → merging → complete
-                                     ↓                        ↓
-                                   failed ←──── retry ────── rejected
+                                     ↓                        ↓             ↓
+                                   failed ←──── retry ────── rejected  merge_pending
+                                                                             ↓
+                                                                   fix session spawned on CI failure
+                                                                   or CHANGES_REQUESTED review comments
+                                                                   (up to maxPrFixAttempts, default 3)
 
 Any non-terminal state can → killing → killed
 ```
@@ -233,6 +237,7 @@ queued → provisioning → running (interactive — no agent) → complete (aut
 
 Key code paths:
 - `packages/daemon/src/sessions/session-manager.ts:processSession()` — main orchestration loop
+- `packages/daemon/src/sessions/session-manager.ts:startMergePolling()` — polls PR status every 60s; spawns fix sessions on actionable failures via `maybeSpawnFixSession()`
 - `packages/daemon/src/containers/docker-container-manager.ts` — Docker operations
 - `packages/daemon/src/containers/docker-network-manager.ts` — network isolation + iptables
 - `packages/daemon/src/sessions/state-machine.ts` — transition validation
