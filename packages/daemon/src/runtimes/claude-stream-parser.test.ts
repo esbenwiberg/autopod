@@ -165,6 +165,33 @@ describe('ClaudeStreamParser.mapEvent', () => {
     expect((result as { costUsd?: number }).costUsd).toBeUndefined();
   });
 
+  it('extracts input_tokens and output_tokens from result event', () => {
+    const event = {
+      type: 'result',
+      subtype: 'success',
+      result: 'Done!',
+      total_cost_usd: 0.05,
+      input_tokens: 1234,
+      output_tokens: 567,
+    };
+    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    expect(result).toMatchObject({
+      type: 'complete',
+      costUsd: 0.05,
+      totalInputTokens: 1234,
+      totalOutputTokens: 567,
+    });
+  });
+
+  it('leaves totalInputTokens and totalOutputTokens undefined when absent from result event', () => {
+    const event = { type: 'result', subtype: 'success', result: 'Done!', total_cost_usd: 0.01 };
+    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    expect(result).toMatchObject({ type: 'complete', costUsd: 0.01 });
+    type CompleteEvent = { totalInputTokens?: number; totalOutputTokens?: number };
+    expect((result as CompleteEvent).totalInputTokens).toBeUndefined();
+    expect((result as CompleteEvent).totalOutputTokens).toBeUndefined();
+  });
+
   it('maps error event to fatal error', () => {
     const event = { type: 'error', error: { message: 'rate limit' } };
     const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());

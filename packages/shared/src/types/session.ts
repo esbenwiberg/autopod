@@ -81,6 +81,12 @@ export interface Session {
   prFixAttempts: number;
   maxPrFixAttempts: number;
   fixSessionId: string | null;
+  /** Token budget for this session (input + output). null = no budget. Inherited from profile at creation. */
+  tokenBudget: number | null;
+  /** Number of times the user has approved a budget extension for this session. */
+  budgetExtensionsUsed: number;
+  /** Why the session is paused. 'budget' = waiting for budget approval, 'manual' = user-paused mid-run. */
+  pauseReason: 'budget' | 'manual' | null;
 }
 
 export interface CreateSessionRequest {
@@ -102,6 +108,8 @@ export interface CreateSessionRequest {
   pimGroups?: PimGroupConfig[];
   /** Existing PR URL to carry forward (used for fix sessions — skips PR creation) */
   prUrl?: string | null;
+  /** Override the profile's token budget for this session. null = inherit from profile. */
+  tokenBudget?: number | null;
 }
 
 export interface SessionSummary {

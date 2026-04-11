@@ -14,7 +14,9 @@ export type SystemEvent =
   | EscalationResolvedEvent
   | SessionCompletedEvent
   | MemorySuggestionCreatedEvent
-  | ValidationOverrideQueuedEvent;
+  | ValidationOverrideQueuedEvent
+  | TokenBudgetWarningEvent
+  | TokenBudgetExceededEvent;
 
 export interface SessionCreatedEvent {
   type: 'session.created';
@@ -86,4 +88,23 @@ export interface ValidationOverrideQueuedEvent {
   timestamp: string;
   sessionId: string;
   override: ValidationOverride;
+}
+
+export interface TokenBudgetWarningEvent {
+  type: 'session.token_budget_warning';
+  timestamp: string;
+  sessionId: string;
+  tokensUsed: number;
+  tokenBudget: number;
+  percentUsed: number;
+}
+
+export interface TokenBudgetExceededEvent {
+  type: 'session.token_budget_exceeded';
+  timestamp: string;
+  sessionId: string;
+  tokensUsed: number;
+  tokenBudget: number;
+  budgetExtensionsUsed: number;
+  maxBudgetExtensions: number | null;
 }

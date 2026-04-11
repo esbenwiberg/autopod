@@ -109,5 +109,37 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
+  // Token budget
+  const tokenBudget = input.tokenBudget;
+  if (tokenBudget !== undefined && tokenBudget !== null) {
+    if (typeof tokenBudget !== 'number' || !Number.isInteger(tokenBudget) || tokenBudget < 1000) {
+      errors.push('tokenBudget must be a positive integer >= 1000, or null');
+    }
+  }
+
+  // Token budget warn threshold
+  const tokenBudgetWarnAt = input.tokenBudgetWarnAt;
+  if (tokenBudgetWarnAt !== undefined) {
+    if (
+      typeof tokenBudgetWarnAt !== 'number' ||
+      tokenBudgetWarnAt < 0.1 ||
+      tokenBudgetWarnAt >= 1
+    ) {
+      errors.push('tokenBudgetWarnAt must be a number between 0.1 and 0.99');
+    }
+  }
+
+  // Max budget extensions
+  const maxBudgetExtensions = input.maxBudgetExtensions;
+  if (maxBudgetExtensions !== undefined && maxBudgetExtensions !== null) {
+    if (
+      typeof maxBudgetExtensions !== 'number' ||
+      !Number.isInteger(maxBudgetExtensions) ||
+      maxBudgetExtensions < 0
+    ) {
+      errors.push('maxBudgetExtensions must be a non-negative integer, or null');
+    }
+  }
+
   return { valid: errors.length === 0, errors };
 }

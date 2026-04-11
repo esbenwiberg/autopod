@@ -868,6 +868,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             linkedSessionId: request.linkedSessionId ?? null,
             pimGroups: request.pimGroups ?? null,
             prUrl: request.prUrl ?? null,
+            tokenBudget:
+              request.tokenBudget !== undefined
+                ? request.tokenBudget
+                : (profile.tokenBudget ?? null),
           });
           break;
         } catch (err: unknown) {
@@ -1575,10 +1579,85 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             if (match?.[1]) {
               sessionRepo.update(sessionId, { claudeSessionId: match[1] });
             }
-          } else if (event.type === 'complete' && event.costUsd !== undefined) {
-            sessionRepo.update(sessionId, {
-              costUsd: event.costUsd,
-            });
+          } else if (event.type === 'complete') {
+            // Accumulate token counts and cost cumulatively across all runs in this session
+            const currentSession = sessionRepo.getOrThrow(sessionId);
+            const newInputTokens =
+              currentSession.inputTokens + (event.totalInputTokens ?? 0);
+            const newOutputTokens =
+              currentSession.outputTokens + (event.totalOutputTokens ?? 0);
+            const tokenUpdates: SessionUpdates = {};
+            if (event.totalInputTokens !== undefined || event.totalOutputTokens !== undefined) {
+              tokenUpdates.inputTokens = newInputTokens;
+              tokenUpdates.outputTokens = newOutputTokens;
+            }
+            if (event.costUsd !== undefined) {
+              tokenUpdates.costUsd = event.costUsd;
+            }
+            if (Object.keys(tokenUpdates).length > 0) {
+              sessionRepo.update(sessionId, tokenUpdates);
+            }
+
+            // Token budget enforcement — only when token data is available
+            const effectiveBudget = currentSession.tokenBudget;
+            const totalUsed = newInputTokens + newOutputTokens;
+            if (effectiveBudget !== null && effectiveBudget > 0 && totalUsed > 0) {
+              const profile = profileStore.get(currentSession.profileName);
+              const warnAt = profile.tokenBudgetWarnAt ?? 0.8;
+
+              if (totalUsed >= Math.floor(effectiveBudget * warnAt) && totalUsed < effectiveBudget) {
+                eventBus.emit({
+                  type: 'session.token_budget_warning',
+                  timestamp: new Date().toISOString(),
+                  sessionId,
+                  tokensUsed: totalUsed,
+                  tokenBudget: effectiveBudget,
+                  percentUsed: totalUsed / effectiveBudget,
+                });
+              }
+
+              if (totalUsed >= effectiveBudget) {
+                const maxExtensions = profile.maxBudgetExtensions;
+                const extensionsUsed = currentSession.budgetExtensionsUsed;
+                const canExtend = maxExtensions === null || extensionsUsed < maxExtensions;
+                const policy = profile.tokenBudgetPolicy ?? 'soft';
+
+                emitActivityStatus(
+                  sessionId,
+                  `Token budget exceeded (${totalUsed}/${effectiveBudget} tokens used).${canExtend && policy === 'soft' ? ' Waiting for user approval to continue.' : ' Session will be stopped.'}`,
+                );
+                eventBus.emit({
+                  type: 'session.token_budget_exceeded',
+                  timestamp: new Date().toISOString(),
+                  sessionId,
+                  tokensUsed: totalUsed,
+                  tokenBudget: effectiveBudget,
+                  budgetExtensionsUsed: extensionsUsed,
+                  maxBudgetExtensions: maxExtensions,
+                });
+
+                if (policy === 'hard' || !canExtend) {
+                  emitActivityStatus(sessionId, 'Token budget hard limit reached — failing session');
+                  const s = sessionRepo.getOrThrow(sessionId);
+                  if (s.status === 'running') {
+                    transition(s, 'failed', { completedAt: new Date().toISOString() });
+                  }
+                } else {
+                  // Soft policy: pause and await user approval
+                  const s = sessionRepo.getOrThrow(sessionId);
+                  if (s.status === 'running') {
+                    transition(s, 'paused', { pauseReason: 'budget' });
+                    logger.info({ sessionId, totalUsed, effectiveBudget }, 'Session paused: token budget exceeded');
+                  }
+                }
+                break;
+              }
+            } else if (effectiveBudget !== null && effectiveBudget > 0 && totalUsed === 0) {
+              logger.warn(
+                { sessionId, runtime: currentSession.runtime },
+                'Token budget set but runtime emits no token data — budget not enforced',
+              );
+            }
           } else if (event.type === 'error' && event.fatal) {
             const session = sessionRepo.getOrThrow(sessionId);
             if (session.status === 'running') {
@@ -1602,6 +1681,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       if (
         isTerminalState(session.status) ||
         session.status === 'killing' ||
+        session.status === 'paused' ||
         session.status === 'validating' ||
         session.status === 'validated' ||
         session.status === 'failed' ||
@@ -1695,6 +1775,45 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           'INVALID_STATE',
           409,
         );
+      }
+
+      // ── Budget pause approval ──────────────────────────────────────────
+      if (session.pauseReason === 'budget') {
+        const profile = profileStore.get(session.profileName);
+        const maxExtensions = profile.maxBudgetExtensions;
+        const newExtensionsUsed = session.budgetExtensionsUsed + 1;
+
+        if (maxExtensions !== null && newExtensionsUsed > maxExtensions) {
+          throw new AutopodError(
+            `Session ${sessionId} has reached the maximum budget extensions (${maxExtensions})`,
+            'BUDGET_EXHAUSTED',
+            409,
+          );
+        }
+
+        emitActivityStatus(
+          sessionId,
+          `Budget extension approved (${newExtensionsUsed}). Proceeding to validation…`,
+        );
+        sessionRepo.update(sessionId, {
+          budgetExtensionsUsed: newExtensionsUsed,
+          pauseReason: null,
+        });
+
+        const refreshed = sessionRepo.getOrThrow(sessionId);
+        transition(refreshed, 'running');
+
+        try {
+          await this.handleCompletion(sessionId);
+        } catch (err) {
+          logger.error({ err, sessionId }, 'Failed to handle completion after budget approval');
+          const s = sessionRepo.getOrThrow(sessionId);
+          if (!isTerminalState(s.status)) {
+            transition(s, 'failed');
+          }
+          throw err;
+        }
+        return;
       }
 
       // ── Validation override responses ─────────────────────────────────
@@ -2000,7 +2119,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const runtime = runtimeRegistry.get(session.runtime);
       await runtime.suspend(sessionId);
 
-      transition(session, 'paused');
+      transition(session, 'paused', { pauseReason: 'manual' });
       emitActivityStatus(sessionId, 'Session paused — use [t] tell or [u] nudge to resume');
       logger.info({ sessionId }, 'Session paused');
     },
