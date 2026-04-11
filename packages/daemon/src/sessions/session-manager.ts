@@ -1575,11 +1575,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             if (match?.[1]) {
               sessionRepo.update(sessionId, { claudeSessionId: match[1] });
             }
-          } else if (event.type === 'complete' && event.totalInputTokens) {
+          } else if (event.type === 'complete' && event.costUsd !== undefined) {
             sessionRepo.update(sessionId, {
-              inputTokens: event.totalInputTokens,
-              outputTokens: event.totalOutputTokens ?? 0,
-              costUsd: event.costUsd ?? 0,
+              costUsd: event.costUsd,
             });
           } else if (event.type === 'error' && event.fatal) {
             const session = sessionRepo.getOrThrow(sessionId);

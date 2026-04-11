@@ -152,6 +152,19 @@ describe('ClaudeStreamParser.mapEvent', () => {
     expect(result).toMatchObject({ type: 'complete', result: 'Done!' });
   });
 
+  it('extracts costUsd from total_cost_usd in result event', () => {
+    const event = { type: 'result', subtype: 'success', result: 'Done!', total_cost_usd: 0.0234 };
+    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    expect(result).toMatchObject({ type: 'complete', result: 'Done!', costUsd: 0.0234 });
+  });
+
+  it('leaves costUsd undefined when total_cost_usd is absent', () => {
+    const event = { type: 'result', subtype: 'success', result: 'Done!' };
+    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    expect(result).toMatchObject({ type: 'complete' });
+    expect((result as { costUsd?: number }).costUsd).toBeUndefined();
+  });
+
   it('maps error event to fatal error', () => {
     const event = { type: 'error', error: { message: 'rate limit' } };
     const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
