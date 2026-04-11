@@ -394,7 +394,12 @@ describe('SessionManager', () => {
       const manager = createSessionManager(ctx.deps);
 
       const session = manager.createSession(
-        { profileName: 'test-profile', task: 'Fix', branch: 'my-custom-branch', branchPrefix: 'hotfix/' },
+        {
+          profileName: 'test-profile',
+          task: 'Fix',
+          branch: 'my-custom-branch',
+          branchPrefix: 'hotfix/',
+        },
         'user-1',
       );
 

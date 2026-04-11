@@ -219,7 +219,11 @@ export async function ensureNuGetCredentialProvider(
 ): Promise<void> {
   const check = await containerManager.execInContainer(
     containerId,
-    ['sh', '-c', 'ls /home/autopod/.nuget/plugins/netcore/CredentialProvider.Microsoft/ 2>/dev/null'],
+    [
+      'sh',
+      '-c',
+      'ls /home/autopod/.nuget/plugins/netcore/CredentialProvider.Microsoft/ 2>/dev/null',
+    ],
     { timeout: 5_000 },
   );
   if (check.exitCode === 0 && check.stdout.trim().length > 0) return;

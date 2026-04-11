@@ -306,7 +306,11 @@ describe('validateRegistryFiles', () => {
 
   it('passes when nuget config is valid and auth succeeds', async () => {
     const cm = mockCm({
-      'dotnet nuget list': { stdout: 'Registered Sources:\n  1. nuget.org', stderr: '', exitCode: 0 },
+      'dotnet nuget list': {
+        stdout: 'Registered Sources:\n  1. nuget.org',
+        stderr: '',
+        exitCode: 0,
+      },
       'dotnet nuget search': { stdout: 'No results found.', stderr: '', exitCode: 0 },
     });
     const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
@@ -329,9 +333,14 @@ describe('validateRegistryFiles', () => {
 
   it('throws when nuget auth fails with NU1301', async () => {
     const cm = mockCm({
-      'dotnet nuget list': { stdout: 'Registered Sources:\n  1. private-feed', stderr: '', exitCode: 0 },
+      'dotnet nuget list': {
+        stdout: 'Registered Sources:\n  1. private-feed',
+        stderr: '',
+        exitCode: 0,
+      },
       'dotnet nuget search': {
-        stdout: 'error NU1301: Unable to load the service index for source https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json. Response status code does not indicate success: 401 (Unauthorized).',
+        stdout:
+          'error NU1301: Unable to load the service index for source https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json. Response status code does not indicate success: 401 (Unauthorized).',
         stderr: '',
         exitCode: 1,
       },
@@ -379,7 +388,9 @@ describe('ensureNuGetCredentialProvider', () => {
     } as unknown as ContainerManager;
     await ensureNuGetCredentialProvider(cm, 'ctr-1');
     expect(cm.execInContainer).toHaveBeenCalledTimes(1);
-    expect((cm.execInContainer as ReturnType<typeof vi.fn>).mock.calls[0][1].join(' ')).toContain('ls');
+    expect((cm.execInContainer as ReturnType<typeof vi.fn>).mock.calls[0][1].join(' ')).toContain(
+      'ls',
+    );
   });
 
   it('installs when plugin is missing', async () => {

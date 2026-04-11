@@ -227,10 +227,13 @@ export class LocalWorktreeManager implements WorktreeManager {
   ): Promise<DiffStats> {
     try {
       if (baseBranch || sinceCommit) {
-        const base = sinceCommit ?? await this.resolveMergeBase(worktreePath, baseBranch!);
+        const base = sinceCommit ?? (await this.resolveMergeBase(worktreePath, baseBranch!));
 
         if (!base) {
-          this.logger.warn({ worktreePath, baseBranch }, 'getDiffStats: could not resolve base ref — returning zeros');
+          this.logger.warn(
+            { worktreePath, baseBranch },
+            'getDiffStats: could not resolve base ref — returning zeros',
+          );
           return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
         }
 
@@ -273,10 +276,13 @@ export class LocalWorktreeManager implements WorktreeManager {
     maxLength = 50_000,
     sinceCommit?: string,
   ): Promise<string> {
-    const base = sinceCommit ?? await this.resolveMergeBase(worktreePath, baseBranch);
+    const base = sinceCommit ?? (await this.resolveMergeBase(worktreePath, baseBranch));
 
     if (!base) {
-      this.logger.warn({ worktreePath, baseBranch }, 'getDiff: could not resolve base ref — returning empty diff');
+      this.logger.warn(
+        { worktreePath, baseBranch },
+        'getDiff: could not resolve base ref — returning empty diff',
+      );
       return '';
     }
 
@@ -441,7 +447,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       }
     }
 
-    this.logger.warn({ worktreePath, baseBranch }, 'getCommitLog: could not resolve any range ref — returning empty');
+    this.logger.warn(
+      { worktreePath, baseBranch },
+      'getCommitLog: could not resolve any range ref — returning empty',
+    );
     return '';
   }
 
@@ -457,14 +466,15 @@ export class LocalWorktreeManager implements WorktreeManager {
    * Try merge-base with baseBranch, then origin/baseBranch.
    * Returns the resolved SHA or undefined if neither ref is available.
    */
-  private async resolveMergeBase(worktreePath: string, baseBranch: string): Promise<string | undefined> {
+  private async resolveMergeBase(
+    worktreePath: string,
+    baseBranch: string,
+  ): Promise<string | undefined> {
     for (const ref of [baseBranch, `origin/${baseBranch}`]) {
       try {
-        const { stdout } = await execFileAsync(
-          'git',
-          ['merge-base', 'HEAD', ref],
-          { cwd: worktreePath },
-        );
+        const { stdout } = await execFileAsync('git', ['merge-base', 'HEAD', ref], {
+          cwd: worktreePath,
+        });
         if (stdout.trim()) {
           return stdout.trim();
         }
