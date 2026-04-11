@@ -155,11 +155,13 @@ code:not([class]){font-family:monospace;font-size:.8rem;background:rgba(99,102,2
     </div>
   </div>
   <h3>Session Lifecycle (15 states)</h3>
-  <pre><code class="language-bash">queued → provisioning → running → validating → validated → approved → merge_pending → merging → complete
-                            │            │
-                            │            └─→ failed (retry with feedback, up to N attempts)
-                            │                    │
-                            │                    └─→ review_required (exhausted — human decides)
+  <pre><code class="language-bash">queued → provisioning → running → validating → validated → approved → merging → complete
+                            │            │                                  ↓
+                            │            └─→ failed (retry with feedback)  merge_pending
+                            │                    │                              ↓
+                            │                    └─→ review_required    fix session spawned
+                            │                           ├─→ running      on CI failure or review comments
+                            │                           └─→ running      (up to maxPrFixAttempts, default 3)
                             │
                             ├─→ paused          (ap pause)
                             └─→ awaiting_input  (agent escalated via ask_human)
@@ -532,7 +534,7 @@ model: opus
     <div class="bg-cyan-900/40 rounded p-2"><span class="text-cyan-400">validating</span> — 7-phase pipeline</div>
     <div class="bg-green-900/40 rounded p-2"><span class="text-green-400">validated</span> — all phases passed</div>
     <div class="bg-green-900/40 rounded p-2"><span class="text-green-400">approved</span> — human approved</div>
-    <div class="bg-indigo-900/40 rounded p-2"><span class="text-indigo-400">merge_pending</span> — awaiting PR merge</div>
+    <div class="bg-indigo-900/40 rounded p-2"><span class="text-indigo-400">merge_pending</span> — awaiting PR merge; spawns fix sessions on CI failure or review comments</div>
     <div class="bg-indigo-900/40 rounded p-2"><span class="text-indigo-400">merging</span> — PR merging</div>
     <div class="bg-green-900/60 rounded p-2"><span class="text-green-300">complete</span> — done ✓</div>
     <div class="bg-red-900/40 rounded p-2"><span class="text-red-400">failed</span> — retrying</div>
