@@ -2,7 +2,7 @@
 
 > **Goal**: Enable spinning up many isolated agents with real-time progress visibility, plan reporting, and the ability to pause/redirect running agents mid-flight.
 
-**Status**: Phases 1, 2, and 4 are complete. Phase 3 (TUI visual components: progress bar, plan panel, metrics bar) is the remaining work.
+**Status**: All phases complete. Phase 3 (TUI visual components) was implemented and subsequently removed — the CLI TUI has been deprecated in favour of the macOS desktop app.
 
 ## Design Principles
 
@@ -131,7 +131,7 @@ Currently only works on `awaiting_input`. Extend to also work on `paused`:
 
 ---
 
-## Phase 3: TUI Upgrades 🚧 Partial
+## Phase 3: TUI Upgrades ✅ Done (removed — desktop app supersedes)
 
 ### Progress bar component
 - Segmented bar below each session in the table (or in detail panel)
