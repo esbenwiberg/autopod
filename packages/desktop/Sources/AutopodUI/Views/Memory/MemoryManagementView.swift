@@ -209,6 +209,11 @@ public struct MemoryManagementView: View {
                         .truncationMode(.tail)
                 }
                 Spacer()
+                Text(shortId(entry.id))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+                    .help(entry.id)
                 Text("v\(entry.version)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -297,6 +302,10 @@ public struct MemoryManagementView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
+    }
+
+    private func shortId(_ id: String) -> String {
+        id.count > 8 ? String(id.prefix(8)) : id
     }
 }
 
