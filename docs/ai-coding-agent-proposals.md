@@ -59,110 +59,120 @@ Key Stripe finding: deterministic gates between agentic steps are the **single b
 
 ### Proposed Design
 
-A blueprint is a profile-level configuration defining a sequence of steps:
+Many autopod repos are multi-stack (e.g., dotnet + node in one repo), so a blueprint that hardcodes `npm run lint` is useless. The design splits concerns into two profile fields:
+
+1. **`stacks`** -- declared explicitly on the profile. Each entry names a kind, a working directory, and the canonical commands for that stack's `lint` / `build` / `test` / `typecheck`.
+2. **`blueprint`** -- a stack-agnostic sequence of steps. Deterministic steps reference a typed check (`check: lint`) which the harness fans out across every declared stack.
 
 ```yaml
-# Each step is either deterministic (harness runs it) or agentic (agent runs it)
+# Profile-level stack declaration
+stacks:
+  - kind: node
+    cwd: packages/web
+    commands:
+      lint: "npm run lint"
+      typecheck: "npm run typecheck"
+      build: "npm run build"
+      test: "npm test"
+  - kind: dotnet
+    cwd: src/Api
+    commands:
+      lint: "dotnet format --verify-no-changes"
+      build: "dotnet build --no-restore"
+      test: "dotnet test --no-build"
+
+# Profile-level blueprint (stack-agnostic)
 blueprint:
   steps:
     - type: agentic
       prompt: "Implement the feature described in the task"
-    - type: deterministic
-      command: "{profile.buildCommand}"
-      name: "Build"
-    - type: deterministic
-      command: "npm run lint"
-      name: "Lint"
+    - type: check
+      check: lint
     - type: agentic
-      prompt: "Fix any build or lint errors from the previous steps"
-      condition: "previous_failed"
-    - type: deterministic
-      command: "{profile.testCommand}"
-      name: "Tests"
+      prompt: "Fix lint errors"
+      condition: previous_failed
+    - type: check
+      check: build
+    - type: agentic
+      prompt: "Fix build errors"
+      condition: previous_failed
+    - type: check
+      check: test
     - type: agentic
       prompt: "Fix failing tests"
-      condition: "previous_failed"
+      condition: previous_failed
 ```
 
 **Step types**:
-- `deterministic` -- daemon runs `execInContainer(command)` directly. Captures stdout/stderr. Success = exit code 0.
-- `agentic` -- daemon starts/resumes the agent runtime with the given prompt. Agent runs until completion signal.
-- `condition: "previous_failed"` -- step only runs if the previous deterministic step failed. Allows "fix loop" patterns.
+- `check` -- typed check (`lint` / `build` / `test` / `typecheck`). Harness fans out to every declared stack. Each fanout uses the stack's `cwd` and `commands.<check>`.
+- `deterministic` -- literal command escape hatch. Harness runs `execInContainer(command)` directly. Use only when `check` can't express what's needed.
+- `parallel` -- block containing explicit sub-steps that run concurrently. Escape hatch for cross-stack coordination the `check` abstraction doesn't cover.
+- `agentic` -- daemon starts/resumes the agent runtime with the given prompt.
+- `condition: previous_failed` -- step only runs if the previous check/deterministic step failed.
 
-**Example blueprints for different use cases**:
+**Fanout semantics**: `check` runs **all stacks in parallel, no short-circuiting**. The agent sees the complete failure surface in one round-trip rather than fixing node lint, re-running, then discovering dotnet lint also fails. Failures are reported per-stack so error messages stay attributable (e.g., `dotnet lint failed at src/Api/Foo.cs:42`).
+
+**Changed-files gating (v1)**: Before a `check` step executes, the walker diffs the session's branch against its base. If no files under a stack's `cwd` changed, that stack is skipped. Motivation: when the agent only touched TypeScript, re-running dotnet lint/build/test is pure latency. The walker logs skipped stacks so the agent can see what was bypassed.
+
+**Blueprint inheritance**: Profiles already support `extends`. Blueprints and stacks compose the same way -- a child profile inherits the parent's stack list and blueprint, and can override individual entries by key. A child profile that only needs to swap a lint command doesn't copy-paste the whole blueprint.
+
+**Mid-step escalations**: If the agent escalates (`ask_human`, `report_blocker`, etc.) during an agentic step, the walker pauses on that step -- same behavior as today. When the escalation resolves, the agentic step resumes and the walker continues.
+
+**Example blueprints**:
 
 ```yaml
-# Default (matches today's behavior -- backward compatible)
+# Default (matches today's single-agent-phase behavior)
 blueprint:
   steps:
     - type: agentic
       prompt: "Implement the task"
 
-# Frontend with incremental checks
-blueprint:
-  steps:
-    - type: agentic
-      prompt: "Implement the feature"
-    - type: deterministic
-      command: "npm run lint"
-    - type: agentic
-      prompt: "Fix lint errors"
-      condition: "previous_failed"
-    - type: deterministic
-      command: "npm run build"
-    - type: agentic
-      prompt: "Fix build errors"
-      condition: "previous_failed"
-    - type: deterministic
-      command: "npm test"
-    - type: agentic
-      prompt: "Fix failing tests"
-      condition: "previous_failed"
-
 # Database migration
 blueprint:
   steps:
     - type: agentic
-      prompt: "Write the database migration SQL and update the schema types"
+      prompt: "Write the migration SQL and update schema types"
     - type: deterministic
       command: "npm run migrate"
     - type: agentic
       prompt: "Write integration tests for the migration"
-    - type: deterministic
-      command: "npm test -- --grep migration"
+    - type: check
+      check: test
 
 # Security audit (read-only, no coding)
 blueprint:
   steps:
     - type: agentic
-      prompt: "Review the codebase for OWASP top 10 vulnerabilities. Produce a detailed report."
+      prompt: "Review the codebase for OWASP top 10 vulnerabilities. Produce a report."
 
-# Code review
+# Code review (diff-only)
 blueprint:
   steps:
     - type: agentic
-      prompt: "Review the diff on this branch. Check for bugs, security issues, and code quality."
+      prompt: "Review the diff on this branch. Flag bugs, security issues, and code quality."
 ```
 
 ### Implementation Phases
 
 **Phase 1 -- Refactor (no new features)**:
-Extract `processSession()` phases into named step functions. Each phase becomes a function: `runProvisionStep()`, `runAgentStep()`, `runValidationStep()`, `runMergeStep()`. The main loop calls them in sequence. This is a pure refactor -- behavior doesn't change.
+Extract `processSession()` phases into named step functions (`runProvisionStep()`, `runAgentStep()`, `runValidationStep()`, `runMergeStep()`). Pure refactor -- behavior unchanged.
 
-**Phase 2 -- Blueprint type**:
-Add `blueprint` to Profile type in `packages/shared/src/types/profile.ts`. Add DB migration for the new field. When no blueprint is specified, use the default (matching today's behavior).
+**Phase 2 -- Types + migration**:
+Add `stacks` and `blueprint` to the Profile type in `packages/shared/src/types/profile.ts`. DB migration for new columns. Since we're dropping `buildCommand` / `testCommand` entirely (no backward compat needed), the migration can just remove them.
 
 **Phase 3 -- Blueprint walker**:
-Replace the `processSession()` main loop with a step walker that reads the blueprint and executes steps in sequence. Deterministic steps use `execInContainer()`. Agentic steps use the existing runtime spawn/resume. Step results are stored and the condition system controls flow.
+Replace the `processSession()` main loop with a step walker that reads the blueprint. `check` steps resolve against the stack list and fan out in parallel. `agentic` steps use the existing runtime spawn/resume. Step results are persisted so the `condition` system can key off them.
 
-**Phase 4 -- Conditional steps and retry logic**:
-Add the `condition` system. Add `maxRetries` per step. Add step-level progress events for WebSocket streaming.
+**Phase 4 -- Changed-files gating + progress events**:
+Walker computes the changed-file set once per check step and skips stacks whose `cwd` is untouched. Emit step-level progress events over the WebSocket stream so the CLI/desktop can show which step is running and which stack fanouts failed.
 
 **Files affected**:
-- `packages/shared/src/types/profile.ts` -- Blueprint type definition
-- `packages/daemon/src/sessions/session-manager.ts` -- major refactor into step functions + blueprint walker
-- `packages/daemon/src/db/migrations/` -- new migration for blueprint column
-- `packages/daemon/src/profiles/profile-validator.ts` -- Zod schema for blueprint validation
+- `packages/shared/src/types/profile.ts` -- `Stack`, `Blueprint`, `Step` type definitions
+- `packages/daemon/src/sessions/session-manager.ts` -- major refactor into step functions + walker
+- `packages/daemon/src/db/migrations/` -- new migration: add `stacks` + `blueprint` columns, drop `build_command` + `test_command`
+- `packages/daemon/src/profiles/profile-validator.ts` -- Zod schema for stacks + blueprint
+- `packages/daemon/src/profiles/inheritance.ts` -- extend `extends` resolution to merge stacks/blueprint by key
+- CLI profile commands -- surface stack declaration in profile create/edit flows
 
 **Effort**: High. Phase 1 (refactor) is the most work but also the most valuable -- it makes the session manager maintainable regardless of whether full blueprints ship.
 
@@ -205,9 +215,9 @@ Score each injected section and MCP tool against the task description for releva
 
 ### Based on OpenAI ExecPlan research
 
-Three specific enhancements to the existing `/prep` and `/exec` skills based on patterns from OpenAI's ExecPlan methodology:
+Two enhancements to the existing `/prep` and `/exec` skills, based on patterns from OpenAI's ExecPlan methodology. Handovers stay as-is -- they're how subagents get briefed without the orchestrator's full context, and nothing here replaces them. These additions sit alongside handovers (handovers are forward-looking; progress.md is backward-looking).
 
-### 5a. Living Document Updates
+### 4a. Living Document Updates
 
 **Current state**: `/prep` creates static specs. `/exec` tracks progress via handovers but the plan itself doesn't update.
 
@@ -218,15 +228,7 @@ Three specific enhancements to the existing `/prep` and `/exec` skills based on 
 
 **Proposed change**: Update `/exec` to maintain a `progress.md` file in the spec directory that gets updated after each brief completes. Include timestamps, deviations, and decisions. This creates a living audit trail of the execution.
 
-### 5b. Idempotence & Recovery Section
-
-**Current state**: Briefs don't document how to retry or roll back safely.
-
-**ExecPlan pattern**: Every plan must describe "how to retry or roll back safely; ensures steps can be rerun without harm."
-
-**Proposed change**: Add an optional `## Idempotence & Recovery` section to the brief template in `/prep`. For briefs that touch databases, external services, or stateful systems, this section documents: what happens if you run this brief twice? How do you undo it?
-
-### 5c. Context & Orientation for Novice Agents
+### 4b. Context & Orientation for Novice Agents
 
 **Current state**: Briefs assume the executing subagent has some familiarity with the codebase.
 
@@ -235,5 +237,5 @@ Three specific enhancements to the existing `/prep` and `/exec` skills based on 
 **Proposed change**: Add a `## Context & Orientation` section to briefs that briefly explains the relevant parts of the codebase: key file paths, module purposes, how things connect. This makes subagents more effective, especially for complex briefs that touch unfamiliar areas.
 
 ### Files affected
-- `skills/prep.md` -- update brief template with new optional sections
+- `skills/prep.md` -- add `## Context & Orientation` section to brief template
 - `skills/exec.md` -- add progress.md maintenance to the orchestration loop
