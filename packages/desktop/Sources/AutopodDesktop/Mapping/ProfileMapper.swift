@@ -74,6 +74,7 @@ public enum ProfileMapper {
       escalationAskAiEnabled: response.escalation.askAi.enabled,
       escalationAskAiModel: response.escalation.askAi.model,
       escalationAskAiMaxCalls: response.escalation.askAi.maxCalls,
+      escalationAdvisorEnabled: response.escalation.advisor?.enabled ?? false,
       escalationAutoPauseAfter: response.escalation.autoPauseAfter,
       escalationHumanResponseTimeout: response.escalation.humanResponseTimeout,
       outputMode: OutputMode(rawValue: response.outputMode) ?? .pr,
@@ -149,6 +150,9 @@ public enum ProfileMapper {
         "enabled": profile.escalationAskAiEnabled,
         "model": profile.escalationAskAiModel,
         "maxCalls": profile.escalationAskAiMaxCalls,
+      ] as [String: Any],
+      "advisor": [
+        "enabled": profile.escalationAdvisorEnabled,
       ] as [String: Any],
       "autoPauseAfter": profile.escalationAutoPauseAfter,
       "humanResponseTimeout": profile.escalationHumanResponseTimeout,

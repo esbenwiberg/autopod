@@ -54,6 +54,7 @@ public struct Profile: Identifiable, Sendable {
     public var escalationAskAiEnabled: Bool
     public var escalationAskAiModel: String
     public var escalationAskAiMaxCalls: Int
+    public var escalationAdvisorEnabled: Bool
     public var escalationAutoPauseAfter: Int
     public var escalationHumanResponseTimeout: Int
 
@@ -113,7 +114,7 @@ public struct Profile: Identifiable, Sendable {
         skills: [InjectedSkill] = [],
         escalationAskHuman: Bool = true,
         escalationAskAiEnabled: Bool = true, escalationAskAiModel: String = "sonnet",
-        escalationAskAiMaxCalls: Int = 3,
+        escalationAskAiMaxCalls: Int = 3, escalationAdvisorEnabled: Bool = false,
         escalationAutoPauseAfter: Int = 1, escalationHumanResponseTimeout: Int = 3600,
         outputMode: OutputMode = .pr, extendsProfile: String? = nil,
         workerProfile: String? = nil,
@@ -155,6 +156,7 @@ public struct Profile: Identifiable, Sendable {
         self.escalationAskAiEnabled = escalationAskAiEnabled
         self.escalationAskAiModel = escalationAskAiModel
         self.escalationAskAiMaxCalls = escalationAskAiMaxCalls
+        self.escalationAdvisorEnabled = escalationAdvisorEnabled
         self.escalationAutoPauseAfter = escalationAutoPauseAfter
         self.escalationHumanResponseTimeout = escalationHumanResponseTimeout
         self.outputMode = outputMode; self.extendsProfile = extendsProfile

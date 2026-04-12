@@ -121,6 +121,28 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
+  // Advisor mode — instruct the agent to proactively consult ask_ai
+  if (profile.escalation.advisor.enabled) {
+    lines.push('## AI Advisor');
+    lines.push('');
+    lines.push(
+      'An AI advisor is available via the `ask_ai` tool. Use it **proactively** — ' +
+        'do not wait until you are stuck:',
+    );
+    lines.push('');
+    lines.push('1. **Before writing complex logic** — describe your approach and ask for a review');
+    lines.push(
+      '2. **When stuck or hitting repeated errors** — share the error and what you have tried',
+    );
+    lines.push('3. **Before completing the task** — ask for a final review of your changes');
+    lines.push('');
+    lines.push(
+      'Always include relevant code context in the `context` parameter. ' +
+        'Use the `domain` parameter when asking about a specific area (e.g. "security", "performance").',
+    );
+    lines.push('');
+  }
+
   // Injected Skills (slash commands)
   const injectedSkills = options?.injectedSkills ?? [];
   if (injectedSkills.length > 0) {

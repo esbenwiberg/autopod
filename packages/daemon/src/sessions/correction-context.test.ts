@@ -63,6 +63,7 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
     escalation: {
       askHuman: true,
       askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
+      advisor: { enabled: false },
       autoPauseAfter: 3,
       humanResponseTimeout: 3600,
     },

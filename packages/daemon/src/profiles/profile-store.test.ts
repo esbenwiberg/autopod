@@ -73,6 +73,7 @@ describe('ProfileStore', () => {
       expect(profile.escalation).toEqual({
         askHuman: true,
         askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: false },
         autoPauseAfter: 3,
         humanResponseTimeout: 3600,
       });
@@ -317,6 +318,7 @@ describe('ProfileStore', () => {
       const escalation = {
         askHuman: false,
         askAi: { enabled: true, model: 'opus', maxCalls: 10 },
+        advisor: { enabled: false },
         autoPauseAfter: 5,
         humanResponseTimeout: 7200,
       };

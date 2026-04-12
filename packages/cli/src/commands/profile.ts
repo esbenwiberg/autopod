@@ -130,6 +130,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         escalation: {
           askHuman: true,
           askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+          advisor: { enabled: false },
           autoPauseAfter: 3,
           humanResponseTimeout: 3600,
         },

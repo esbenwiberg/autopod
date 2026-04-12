@@ -99,6 +99,11 @@ const escalationConfigSchema = z.object({
       maxCalls: z.number().int().min(0).max(50).default(5),
     })
     .default({}),
+  advisor: z
+    .object({
+      enabled: z.boolean().default(false),
+    })
+    .default({}),
   autoPauseAfter: z.number().int().min(1).max(20).default(3),
   humanResponseTimeout: z.number().int().min(60).max(86_400).default(3600),
 });
