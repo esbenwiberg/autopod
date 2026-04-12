@@ -167,7 +167,23 @@ public struct MainView: View {
                     onReject: onRejectMemory,
                     onDelete: onDeleteMemory,
                     onEdit: onEditMemory,
-                    onCreateMemory: onCreateMemory
+                    onCreateMemory: onCreateMemory,
+                    scopeNameLookup: { scope, id in
+                        switch scope {
+                        case .session:
+                            guard let s = sessions.first(where: { $0.id == id }) else { return id }
+                            let firstLine = s.task
+                                .split(whereSeparator: \.isNewline)
+                                .first
+                                .map(String.init)?
+                                .trimmingCharacters(in: .whitespaces) ?? ""
+                            return firstLine.isEmpty ? s.branch : firstLine
+                        case .profile:
+                            return id
+                        case .global:
+                            return nil
+                        }
+                    }
                 )
                 .frame(minWidth: 600)
                 .task { await onLoadMemories?() }

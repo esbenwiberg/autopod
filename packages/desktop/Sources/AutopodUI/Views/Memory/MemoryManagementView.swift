@@ -10,6 +10,7 @@ public struct MemoryManagementView: View {
     public var onDelete: (String) -> Void
     public var onEdit: ((String, String) -> Void)?
     public var onCreateMemory: ((MemoryScope, String?, String, String) -> Void)?
+    public var scopeNameLookup: ((MemoryScope, String) -> String?)?
 
     @State private var selectedScope: MemoryScope = .global
     @State private var showingCreate = false
@@ -22,7 +23,8 @@ public struct MemoryManagementView: View {
         onReject: @escaping (String) -> Void = { _ in },
         onDelete: @escaping (String) -> Void = { _ in },
         onEdit: ((String, String) -> Void)? = nil,
-        onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil
+        onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
+        scopeNameLookup: ((MemoryScope, String) -> String?)? = nil
     ) {
         self.entries = entries
         self.scopeFilter = scopeFilter
@@ -31,6 +33,7 @@ public struct MemoryManagementView: View {
         self.onDelete = onDelete
         self.onEdit = onEdit
         self.onCreateMemory = onCreateMemory
+        self.scopeNameLookup = scopeNameLookup
     }
 
     private var displayedScope: MemoryScope {
@@ -196,6 +199,15 @@ public struct MemoryManagementView: View {
                     .foregroundStyle(.secondary)
                 Text(entry.path)
                     .font(.system(.caption, design: .monospaced).weight(.medium))
+                if let scopeId = entry.scopeId,
+                   entry.scope != .global,
+                   let scopeName = scopeNameLookup?(entry.scope, scopeId) {
+                    Text("· \(scopeName)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 Spacer()
                 Text("v\(entry.version)")
                     .font(.caption2)
