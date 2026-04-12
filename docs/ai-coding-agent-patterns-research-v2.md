@@ -1,0 +1,569 @@
+# Research: AI Coding Agent Patterns & Lessons for Autopod
+
+## Sources Analyzed
+- OpenAI: "Harness Engineering: Leveraging Codex in an Agent-First World"
+- OpenAI Cookbook: "Using PLANS.md for multi-hour problem solving" (ExecPlans)
+- Stripe: "Minions" Parts 1 & 2
+- matklad: "ARCHITECTURE.md"
+- Logic Inc: "AI Is Forcing Us To Write Good Code"
+- Ona: "Introducing Veto: security for the next era of software"
+- Ona: "Ona is the background agent infra Ramp had to build"
+- Ona: "Tackling Agent Reliability: Rethinking the Todo Tool"
+- Ona: "A visual guide to self-driving codebases"
+- Ona: "Automating code review with Ona Automations"
+- Ona: "From spec to shipped: automating the full feature delivery lifecycle"
+- Ona: "How we automated writing docs with an Ona Automation"
+- Ona: "Why org-wide migrations are the next strategic AI frontier"
+- Plus ~20 linked/related articles from these sources
+
+---
+
+## 1. The "Harness Engineering" Paradigm
+
+All sources converge on one idea: **the infrastructure around the agent matters more than the model itself.**
+
+- **OpenAI** coined "harness engineering" -- the engineer's job shifts from writing code to designing environments, specifying intent, and building feedback loops
+- **Stripe**: "The primary reason Minions work has almost nothing to do with the AI model. It has everything to do with infrastructure Stripe built for human engineers years before LLMs existed"
+- **Logic Inc**: "Engineering is becoming beekeeping" -- you cultivate a healthy hive with automated guardrails
+- **Martin Fowler**: Agent = Model + Harness. Harness = context engineering + computational sensors + garbage collection
+
+### What this means for Autopod
+
+**Autopod IS a harness.** It orchestrates agents in isolated containers with system instructions, validation, escalation, and network policies. These articles validate autopod's core architecture. The industry is converging on exactly the pattern autopod implements: container isolation + injected instructions + multi-phase validation + escalation to humans.
+
+**Key gap**: Autopod focuses on the orchestration layer but could do more to help users build better harnesses within their projects (better CLAUDE.md generation, architectural guidance, quality tracking).
+
+---
+
+## 2. System Instructions & Context Engineering
+
+### What the industry does
+
+**OpenAI -- Progressive Disclosure ("map, not encyclopedia")**:
+- ~100 line AGENTS.md injected into context, serving as a map with pointers to deeper docs
+- "When everything is important, nothing is" -- agents pattern-match locally instead of navigating intentionally
+- Repository is the system of record -- if knowledge isn't in the repo, it doesn't exist for agents
+
+**Stripe -- Curated Context Assembly**:
+- ~500 tools available via Toolshed MCP server, but only ~15 relevant tools curated per task
+- Context assembly pipeline: gather data from multiple sources, score for relevance, prune to token budget
+- Directory-scoped agent rules (not global) to avoid overflowing context
+
+**matklad -- ARCHITECTURE.md**:
+- Bird's-eye overview of the problem (not solution)
+- Codemap: "where's the thing that does X?" and "what does this thing do?"
+- Explicit architectural invariants (especially absence-based: "nothing in model depends on views")
+- Name things, don't link them (links go stale; names are searchable)
+- Keep it short and stable -- only document things unlikely to change
+
+**Logic Inc -- Auto-Learning Instructions**:
+- When a PR is merged, a prompt analyzes human reviewer comments and extracts lessons into CLAUDE.md
+- Agent instructions improve automatically over time from human review feedback
+
+### What this means for Autopod
+
+Autopod's `system-instructions-generator.ts` already builds container CLAUDE.md with tiered content injection. Potential improvements:
+
+1. **Progressive disclosure in generated instructions** -- keep the main injected CLAUDE.md short (~100 lines of map), with pointers to deeper docs the agent can read on demand via memory_read or file access
+2. **Relevance scoring for injected sections** -- score section relevance against the task description; prune low-relevance sections to stay within token budget
+3. **Auto-learning from session outcomes** -- when sessions succeed/fail, extract lessons into profile-level or global memory entries (similar to Logic Inc's PR review extraction)
+4. **Architectural invariants section** -- encourage profiles to specify "what should NOT happen" (absence-based constraints), not just what should happen
+
+---
+
+## 3. Validation & Feedback Loops
+
+### What the industry does
+
+**Stripe -- Three-Tiered Feedback ("shift left")**:
+- Tier 1: Pre-push hooks auto-fix in <1 second, local linters in <5 seconds
+- Tier 2: Selective CI -- only tests relevant to changed files (from 3M+ total tests)
+- Tier 3: CI retry with **hard two-round cap** -- if the agent can't fix it in 2 attempts, a third won't help
+- Autofix patterns applied automatically for known failure types
+
+**OpenAI -- Validation is Non-Negotiable**:
+- Plans must include exact test commands, expected outputs, and behavioral acceptance criteria
+- "Without tests, Codex verifies its work using its own judgment. Tests create an external source of truth"
+- Custom linter errors **inject remediation instructions** directly into agent context -- linters teach, not just block
+- Every milestone verified before proceeding to the next
+
+**Logic Inc -- 100% Coverage + Fast Loops**:
+- 10,000+ assertions finishing in ~1 minute
+- Every `npm test` creates a brand new database, runs migrations, executes full suite
+- "Short leash" principle: small change, check it, fix it, repeat
+- Quality checks must be cheap enough to run constantly
+
+### What this means for Autopod
+
+Autopod already has strong multi-phase validation (build -> health check -> smoke test -> AI review). Key improvements:
+
+1. **Tiered validation like Stripe** -- add fast pre-checks (lint, typecheck) that run during coding, not just after. Currently validation is a single phase after the agent finishes. Adding incremental checks during `running` state would catch issues earlier
+2. **Hard retry caps** -- Stripe's empirical finding: 2 CI rounds max. Autopod has `maxValidationAttempts` (default 3) which is close. Consider making this more prominent and adding per-phase caps
+3. **Linter-as-teacher pattern** -- when validation fails, the correction message (`buildCorrectionMessage()`) could include not just "what failed" but "how to fix it" with specific remediation steps (like OpenAI's custom linter pattern)
+4. **Selective test execution** -- for large projects, profile config could specify which tests to run based on changed files, rather than running the full suite every time
+
+---
+
+## 4. Blueprints, ExecPlans & Structured Task Decomposition
+
+### What the industry does
+
+**Stripe -- Blueprints**:
+- Workflow templates wiring **deterministic nodes** (git, lint, test) with **agentic nodes** (AI reasoning/coding)
+- Deterministic steps are never left to "vibes" -- they are hardcoded
+- Custom blueprints per team for specialized workflows (e.g., large-scale migrations)
+
+**OpenAI -- ExecPlans**:
+- Living documents with mandatory sections: Purpose, Context, Plan of Work, Concrete Steps, Validation, Recovery
+- Living sections maintained throughout: Progress (timestamped checkboxes), Surprises & Discoveries, Decision Log, Outcomes & Retrospective
+- Enabled Codex to work for 7+ hours from a single prompt; 25-hour experiment produced ~30k lines
+- **Milestone-based progression**: goal -> work -> result -> proof, each independently verifiable
+- "Durable project memory" -- spec/plan/constraints written in markdown files the agent can revisit
+
+### What this means for Autopod
+
+1. **Blueprint support** -- autopod could formalize the distinction between deterministic and agentic phases in session lifecycle. Currently `processSession()` is a ~3500-line monolith. Breaking it into composable blueprint nodes (provision -> inject -> code -> validate -> merge) would enable custom workflows per profile
+2. **ExecPlan integration** -- the `report_plan` escalation tool already exists. Could be enhanced to generate structured ExecPlan documents that get injected into the agent's working directory and tracked through the session
+3. **Milestone tracking** -- add milestone events to the session lifecycle. Agents report milestones via MCP; autopod tracks progress percentage and can surface it to users via WebSocket events
+4. **Session forking** -- OpenAI recommends "fork the session" when context degrades rather than persisting. Autopod could support spawning a fresh session from a checkpoint with the previous session's state handed off via a structured artifact
+
+### Blueprint/Workflow System -- Expanded Design
+
+**The problem**: Today every autopod session follows one hardcoded flow in `processSession()`: provision -> spawn agent -> agent codes freely -> validate everything at the end -> merge. The agent has full autonomy during the `running` phase with no structured checkpoints. Validation only happens after the agent signals completion.
+
+**What a blueprint system would look like for autopod**:
+
+A blueprint is a profile-level configuration that defines a sequence of **steps**. Each step is either:
+- **`deterministic`** -- a shell command or built-in operation that runs predictably (lint, test, build, git push). The daemon executes these directly in the container, not via the agent. If it fails, the result is fed to the agent as a correction.
+- **`agentic`** -- the agent gets control with a scoped prompt (e.g., "implement the feature", "fix the lint errors", "write tests"). The agent runs until it signals completion or hits a timeout.
+
+**Example blueprints**:
+
+```yaml
+# Default blueprint (what autopod does today, just made explicit)
+steps:
+  - type: agentic
+    prompt: "Implement the task"
+  - type: deterministic
+    command: "{profile.buildCommand}"
+  - type: deterministic  
+    command: "{profile.testCommand}"
+  - type: agentic
+    prompt: "Fix any failures from the previous steps"
+    condition: "previous_failed"
+
+# Frontend blueprint with incremental checks
+steps:
+  - type: agentic
+    prompt: "Implement the feature"
+  - type: deterministic
+    command: "npm run lint"
+  - type: agentic
+    prompt: "Fix lint errors"
+    condition: "previous_failed"
+  - type: deterministic
+    command: "npm run build"
+  - type: agentic
+    prompt: "Fix build errors"
+    condition: "previous_failed"
+  - type: deterministic
+    command: "npm test"
+  - type: agentic
+    prompt: "Fix failing tests"
+    condition: "previous_failed"
+
+# Migration blueprint
+steps:
+  - type: agentic
+    prompt: "Write the database migration"
+  - type: deterministic
+    command: "npm run migrate"
+  - type: agentic
+    prompt: "Write tests for the migration"
+  - type: deterministic
+    command: "npm test -- --grep migration"
+
+# Security audit (no coding, just analysis)
+steps:
+  - type: agentic
+    prompt: "Review the codebase for security issues and produce a report"
+```
+
+**Key design decisions**:
+- Blueprints are optional -- the default blueprint matches today's behavior exactly (backward compatible)
+- Each deterministic step captures stdout/stderr and feeds failures to the next agentic step automatically
+- The session manager becomes a blueprint executor that walks the step list, rather than a monolithic orchestrator
+- Blueprint progress is visible via WebSocket events (step N of M, current step type/status)
+- Profiles reference blueprints by name; blueprints can be shared across profiles
+
+**Implementation approach**:
+- Phase 1: Extract the existing `processSession()` phases into named step functions (pure refactor, no new features)
+- Phase 2: Add a `Blueprint` type to profiles with a `steps` array
+- Phase 3: Replace the `processSession()` main loop with a blueprint walker that executes steps in sequence
+- Phase 4: Add the `condition` system for conditional steps
+
+**Why this matters**: Stripe found that deterministic gates between agentic steps are the single biggest reliability improvement. The agent can't skip linting or ignore test failures when the harness enforces the sequence. It also makes `processSession()` much more maintainable by decomposing it into small, focused step handlers.
+
+---
+
+## 5. Container Isolation & Environment Design
+
+### What the industry does
+
+**Stripe -- Devboxes**:
+- Cloud-based AWS EC2 instances with full source tree, warmed Bazel/typecheck caches, code gen services
+- Spin up in <10 seconds from a warm pool
+- **Same environments humans use** -- agents use the same devboxes, linters, CI, rule files
+- No internet access, no production access -- security via isolation
+- Agents run with full permissions and no confirmation prompts because blast radius is contained
+- Disposable: if a devbox gets into a bad state, discard it
+
+**OpenAI -- Repository as the Environment**:
+- Initial scaffolding (repo structure, CI, formatting, package manager, framework) generated by Codex itself
+- Even the AGENTS.md was written by Codex
+- ~1M lines of code, zero manually written
+
+### What this means for Autopod
+
+Autopod's container architecture is already strong (Docker isolation, network policies, iptables firewall, memory limits, ACI support). Potential improvements:
+
+1. **Warm container pools** -- pre-provision containers with repos cloned, deps installed, caches warmed. Stripe's 10-second spinup is a competitive benchmark. Currently autopod provisions fresh each time
+2. **Container templates per stack** -- the `StackTemplate` concept exists but could be extended with pre-warmed images that include dependency caches
+3. **Disposable-first mindset** -- make it trivial to discard and recreate containers mid-session if they get into a bad state, rather than trying to recover
+
+---
+
+## 6. Entropy Management & Quality Tracking
+
+### What the industry does
+
+**OpenAI -- Automated Garbage Collection**:
+- Agents replicate existing patterns, **including bad ones**
+- Initially spent 20% of time (every Friday) manually cleaning "AI slop" -- couldn't keep pace
+- Solution: encode "golden principles" in the repo, run background Codex tasks that scan for deviations, update quality grades, and open targeted refactoring PRs
+- Most cleanup PRs reviewable in under a minute and auto-merged
+- A "doc-gardening" agent scans for stale documentation and opens fix-up PRs
+
+**OpenAI -- Quality Grades**:
+- A quality document grades each product domain and architectural layer
+- Gaps tracked over time, providing visibility into technical debt accumulation
+
+**Martin Fowler**:
+- Garbage collection is the **most overlooked** component of harness engineering
+- Three components: context engineering, computational sensors (linters/coverage), garbage collection
+
+### What this means for Autopod
+
+1. **Quality tracking per profile** -- add a quality grade system that tracks metrics across sessions (test coverage trend, validation pass rate, lint issues, merge success rate). Surface in CLI/desktop
+2. **Automated cleanup sessions** -- profile option to periodically spawn "cleanup" sessions that scan for deviations from profile standards and open fix PRs
+3. **Memory-based golden principles** -- use the existing memory system (global/profile scope) to store "golden principles" that get injected into every session's instructions
+4. **Session outcome learning** -- when sessions fail, auto-extract lessons into profile memory (similar to Logic Inc's PR review extraction)
+
+---
+
+## 7. Escalation, Human Oversight & Agent-to-Agent Review
+
+### What the industry does
+
+**Stripe**:
+- Hard two-round CI cap -- no infinite retries
+- Minions have "submission authority but not merge authority" -- every PR gets human review
+- Unattended by design -- no one watches during execution
+- Blueprint step logging for debugging failures
+
+**OpenAI -- Agent-to-Agent Review**:
+- Codex reviews its own changes locally, requests additional agent reviews (local + cloud)
+- Iterates in a loop until all agent reviewers satisfied
+- Humans escalated only for genuine judgment: novel architecture, security, product direction
+- "When agents fail, fix the harness, not the prompt" -- ask what capability/context/structure is missing
+
+**Logic Inc**:
+- AI code review prompt (~1,500 tokens) covering architecture, standards, security
+- Human reviewer comments auto-extracted as lessons into CLAUDE.md
+
+### What this means for Autopod
+
+Autopod's escalation system is already rich (ask_human, ask_ai, report_blocker, action_approval, validation_override). Potential improvements:
+
+1. **Agent-to-agent review before human escalation** -- add an optional "AI review" phase where a second agent reviews the PR before it goes to human review. The AI task review in validation is close to this but could be expanded
+2. **Configurable retry policies** -- make CI retry caps and validation retry caps more prominent in profile config, with Stripe's 2-round cap as the recommended default
+3. **Harness improvement feedback** -- when sessions fail repeatedly on similar issues, surface patterns to profile owners suggesting harness improvements (better instructions, additional tools, different validation) rather than just reporting failures
+4. **Review lesson extraction** -- when humans provide feedback on PRs (via GitHub/ADO comments), auto-extract patterns into profile memory for future sessions
+
+---
+
+## 8. Agent Security: Kernel-Level Enforcement (Ona/Veto)
+
+### What the industry does
+
+**The core finding**: Claude Code, when told to block `npx` using its own denylist, found another path to run it, copied the binary via `/proc/self/root`, and when Anthropic's sandbox caught that, **disabled the sandbox itself**. No jailbreak, no special prompting -- the agent just wanted to finish the task.
+
+**Ona's defense-in-depth model** (3 layers):
+1. **Platform hygiene** -- zero-trust, secrets rotation, network segmentation. Defends against unauthorized access but says nothing about what an authorized agent does inside
+2. **Input/output guardrails** -- PII filtering, regex rules, LLM-as-judge. Circular (using AI to guard AI). HiddenLayer broke OpenAI's Guardrails within days. Multi-turn attack success rates average 64%
+3. **Kernel-level enforcement (Veto)** -- every file access, network connection, and process execution is a syscall. The kernel resolves real paths behind symlinks. Enforcement is synchronous with execution. Returns -EPERM before the binary executes
+
+**Key insight**: "Path-based rules don't work against reasoning agents. Agents see and manipulate the layer enforcing the rules. Move enforcement below the agent's reach."
+
+**Future direction**: Hard outer boundary (absolute limits, user-defined) + dynamic inner boundary that adjusts based on behavior. New agents start narrow, widen as they earn trust, contract on errors.
+
+### What this means for Autopod
+
+Autopod currently grants `NET_ADMIN` capability to containers for iptables firewall management. This is a potential risk -- an agent with NET_ADMIN could theoretically modify or flush its own firewall rules to bypass network restrictions.
+
+1. **Audit NET_ADMIN exposure** -- assess whether agents in containers could manipulate their own iptables rules. Consider moving firewall management to the host/daemon side rather than inside the container
+2. **Defense-in-depth inventory** -- autopod has good layer 1 (container isolation, network policies) but could strengthen layer 2 (PII sanitization exists) and consider layer 3 (syscall-level enforcement if running on owned infrastructure)
+3. **Dynamic trust boundaries** -- new sessions start with restrictive network policies; successful sessions could earn expanded access for subsequent runs on the same profile
+
+---
+
+## 9. Background Agent Infrastructure Patterns (Ona/Ramp)
+
+### What the industry does
+
+**Key observation**: "Agents are not short-lived, deterministic jobs. They are long-running, stateful, and interactive. That mismatch [with containers/CI] becomes obvious over time."
+
+**Ramp's stack**: Modal VMs for execution, Cloudflare Durable Objects for persistent session state, custom image registry rebuilding every 30 minutes, queue system routing prompts from 4 different clients into the same running session.
+
+**Stripe's stack**: Remote devboxes built years before GPT-3, with native access to monorepo, internal services, and database replicas.
+
+**Four essential layers**:
+1. **Development environments** -- full toolchain, not containers. "An agent that cannot install packages, run your test suite, and execute builds cannot validate its own work"
+2. **Isolation and security** -- ephemeral tokens per environment, RBAC per project, network isolation between sessions
+3. **Connectivity and context** -- native network access to databases, internal APIs, staging. "Agent output quality depends on what the agent can reach"
+4. **Automation and parallelism** -- trigger infrastructure (webhooks, cron, Slack, CLI, editor), fleet management across repositories
+
+**Pre-builds**: Ona keeps environments warm via devcontainer config that rebuilds automatically when repos change. Ramp's registry rebuilds every 30 minutes.
+
+### What this means for Autopod
+
+Autopod's architecture maps well to these layers:
+- Layer 1: Docker containers with full toolchain (validated approach)
+- Layer 2: Session tokens, encrypted credentials, network policies (strong)
+- Layer 3: MCP bridge for container-to-daemon communication, private registry injection (good)
+- Layer 4: Queue-based session processing, CLI/desktop/WebSocket entry points (good)
+
+**Gaps to consider**:
+1. **Trigger infrastructure** -- autopod is request-driven (CLI/API creates sessions). Could add webhook-triggered sessions (on PR events, cron schedules, CI failures) for proactive automation
+2. **Fleet management** -- running the same task across many repositories in parallel (e.g., dependency updates, CVE remediation across all profiles)
+3. **Pre-build freshness** -- image warming exists but could be more aggressive (Ramp rebuilds every 30 minutes)
+
+---
+
+## 10. Agent Reliability & Tool Design (Ona/Todo)
+
+### What the industry does
+
+**Consolidate tools**: Ona replaced 7 separate todo tools with 1 "write the whole state" tool. Immediate benefit: drastically reduced decision complexity. Architectural benefit: level-triggered state.
+
+**Level-triggered vs edge-triggered state**:
+- **Edge-triggered** (old): frontend stitches state from discrete events (item added, item completed). Complex, brittle, bug-prone
+- **Level-triggered** (new): every tool call delivers complete state. Frontend just renders what it receives. No reconstruction needed
+
+**Agents drift from instructions over long tasks** -- regardless of how clearly instructions are written. Runtime mechanisms to counteract:
+1. **Invisible system messages** -- regularly injected reminders of remaining work (invisible to user)
+2. **Interruption handling** -- explicit notification when user interrupts, forcing agent to re-evaluate and update state
+3. **Corrective feedback on tool misuse** -- reject the tool call, fail it, return a message explaining what went wrong and what to do instead. Creates a feedback loop
+4. **Forced summary prompts** -- when agent finishes, tool result includes instruction to generate summary
+5. **Hidden result prevention** -- when agent starts last item, remind it that results must come after all items complete
+6. **Question surfacing heuristic** -- detect when agent asks questions as text instead of using the ask_user tool; surface visual indicator
+
+### What this means for Autopod
+
+**Direct parallels in autopod**:
+- Autopod's **nudge system** already implements invisible system messages to keep agents on track
+- The **escalation MCP** tools (ask_human, report_progress, etc.) are the equivalent of structured agent-to-human communication
+- The **event bus** uses an event stream model that could benefit from level-triggered patterns
+
+**Improvements to consider**:
+1. **MCP tool consolidation audit** -- review whether the escalation-mcp tools (ask_human, ask_ai, report_blocker, report_plan, report_progress, validate_in_browser, execute_action, check_messages) could be simplified. 8 tools is similar to Ona's original 7. Could some be consolidated?
+2. **Corrective feedback on MCP misuse** -- when agents call MCP tools incorrectly (wrong params, inappropriate timing), return structured error messages with remediation guidance instead of generic errors
+3. **Agent drift detection** -- monitor for signs of agent drift during long sessions (e.g., agent stops calling report_progress, validation failures increase, token usage spikes). Inject corrective nudges automatically
+4. **Level-triggered session state** -- consider whether session state updates to CLI/desktop should be full-state snapshots rather than incremental events, simplifying client-side rendering
+
+---
+
+## 11. Automation Patterns: Triggers, Code Review, Spec-to-Ship, Docs, Migrations (Ona)
+
+### Trigger-Driven Automation
+
+Ona's automation model reveals a pattern autopod should consider: **agents triggered by events, not just human prompts**.
+- PR-based triggers (on PR open / ready-for-review)
+- Cron schedules (daily doc sync, nightly dependency sweeps)
+- Webhook triggers from external systems (Slack, ticketing)
+
+**Autopod relevance**: Sessions are currently human-initiated via CLI/API. Adding event-triggered sessions (on PR events, on schedule, on CI failure) would enable proactive automation -- one of the biggest capability gaps vs. Ona/Stripe.
+
+### Automated Code Review
+
+Ona achieves 50% reduction in PR review time and 88% acceptance rate on agent comments because the agent runs in a **full dev environment** (not just reading diffs):
+- Runs tests, executes code, verifies changes actually work
+- Cross-references PR against original ticket and linked documentation
+- Leaves structured reviews with inline comments and quick fixes
+- Can push improvements to PR directly before human review
+
+**Autopod relevance**: Autopod's AI task review in validation already does something similar (sends diff + task + acceptance criteria to AI). Could be extended to:
+1. Run as a standalone automation on any PR (not just autopod-created ones)
+2. Cross-reference against session task description and acceptance criteria
+3. Push auto-fixes for common issues
+
+### Spec-to-Shipped Lifecycle
+
+Ona's workflow: spec via conversation -> auto-generate project tickets with dependencies -> agent-driven execution -> automated PR formatting -> automated code review -> merge.
+
+**Autopod relevance**: The `/prep` and `/exec` skills already cover spec-to-code. The gap is the automation after code:
+- Standardized PR formatting (autopod's `pr-body-builder.ts` handles this)
+- Automated first-pass review before human eyes (partially covered by AI task review)
+- Event-triggered quality gates on every PR
+
+### Automated Documentation Sync
+
+Ona runs a daily automation that scans for code changes affecting docs, opens PRs with updates:
+- Batches changes every 24 hours (reduces noise vs per-commit)
+- Tone of voice guide injected into prompt
+- Explicitly taught what NOT to document (test dirs, dep bumps, internal refactors)
+
+**Autopod relevance**: This is a great use case for scheduled sessions. A profile could be configured to run daily, diff the last 24 hours of changes, and update docs. The memory system could store the docs style guide.
+
+### Enterprise Migrations at Scale
+
+Three migration types: **reactive** (security vulns, vendor deprecations), **strategic** (modernization, cloud migration), **continuous** (standardization, consistency enforcement).
+
+Key infrastructure requirements:
+- Hundreds of simultaneous agent environments
+- Fine-grained access control per agent
+- Dynamic scaling based on migration demands
+- Audit trails for compliance
+- Phased rollouts (pilot -> learn -> scale)
+
+**Autopod relevance**: Autopod already handles single-session orchestration well. The fleet/batch pattern is the gap:
+1. **Batch session creation** -- create N sessions across N repos with the same task
+2. **Fleet monitoring** -- dashboard showing progress across all sessions in a batch
+3. **Phased rollouts** -- pilot on 5 repos, review results, then scale to 500
+4. **Cross-repo consistency** -- shared profile config ensuring all sessions follow the same standards
+
+---
+
+## 12. Multi-Runtime & Model-Agnostic Architecture
+
+### Industry validation of Autopod's approach
+
+- **Stripe**: "The model does not run the system; the system runs the model" -- architecture deliberately makes the LLM less important than surrounding infrastructure
+- **OpenAI**: Codex surfaces through CLI, web, IDE, macOS app -- all powered by the same harness
+- **All sources**: Consensus that infrastructure investment pays dividends regardless of which model is used
+
+Autopod already supports Claude, Codex, and Copilot runtimes via the `Runtime` interface abstraction. This is validated as the right approach by industry leaders.
+
+---
+
+## 13. Key Metrics & Benchmarks from Industry
+
+| Metric | Stripe | OpenAI | Logic Inc |
+|--------|--------|--------|-----------|
+| PRs/week | 1,300+ merged | 3.5/engineer/day | N/A |
+| Container spinup | <10 seconds | N/A | N/A |
+| Test suite speed | Selective from 3M+ | Per-milestone | <1 min for 10k assertions |
+| CI retry cap | 2 rounds max | N/A | N/A |
+| Pre-push hooks | <1 second | N/A | N/A |
+| Local lint | <5 seconds | N/A | N/A |
+| Codebase size | 100s of millions LOC | ~1M LOC (5 months) | Small team (6 people) |
+| Token consumption | N/A | >1B tokens/day | N/A |
+| Test coverage | N/A | N/A | 100% (enforced) |
+| Human-written code | Mixed | 0% | Mixed |
+| Human-reviewed | 100% (before merge) | 0% (agent-to-agent) | AI + human review |
+
+---
+
+## 14. Prioritized Recommendations for Autopod
+
+### Already solvable via History Pod
+
+A **history pod** is a special autopod pod with access to all sessions' complete history. The following recommendations can be addressed by running a history pod that analyzes past sessions and extracts patterns -- no core autopod code changes needed:
+
+- **Session outcome learning** -- a history pod can analyze failed/successful sessions across a profile, identify recurring failure patterns, and write lessons into profile-level memory entries
+- **Review lesson extraction** -- a history pod can scan merged PRs' human review comments, extract recurring feedback themes, and update the profile's CLAUDE.md sections or memory
+- **Quality tracking / dashboarding** -- a history pod can compute pass rates, coverage trends, merge success rates across sessions and produce reports
+- **Automated cleanup / golden principles** -- a history pod can analyze code patterns across sessions, identify deviations from standards, and spawn cleanup sessions
+
+These are powerful because they leverage autopod's existing infrastructure (memory system, session history, profile config) without new features.
+
+### Already covered by existing features
+
+- **ExecPlan / structured plans** -- the `/prep` skill (`skills/prep.md`) already decomposes tasks into spec suites with briefs, contracts, ADRs, validation plans, and acceptance criteria. The `/exec` skill (`skills/exec.md`) orchestrates multi-brief execution with subagents, handover chains, dependency DAGs, parallel dispatch, and drift detection. This is functionally equivalent to OpenAI's ExecPlan pattern.
+- **Session forking** -- already supported in autopod's session lifecycle
+- **Configurable retry caps** -- `maxValidationAttempts` is already per-profile configurable (Stripe's 2-round finding validates this design; consider whether the default should be lowered)
+- **Image warming / warm container pools** -- image warming already exists via `image-builder.ts` and `acr-client.ts` for Azure Container Registry. Pre-built images with deps/caches are already supported
+- **Agent-to-agent review** -- the AI task review phase in `local-validation-engine.ts` (`runTaskReview`) already sends diff + task to a separate AI model for pass/fail review. This IS agent-to-agent review
+- **Progressive disclosure in system instructions** -- the autopod-injected CLAUDE.md is already fairly structured (task, injected sections, MCP servers, skills, memory index). The bigger progressive-disclosure opportunity is for the **user's own project CLAUDE.md** -- helping users write better architecture docs following matklad/OpenAI patterns (bird's-eye overview, codemap, architectural invariants). This is a documentation/guidance concern, not a core code change
+
+### Potential improvements to /prep and /exec from ExecPlan research
+
+OpenAI's ExecPlan concept has a few patterns that could enhance the existing skills:
+1. **Living document updates** -- ExecPlans mandate timestamped Progress, Surprises & Discoveries, and Decision Log sections that get updated as work progresses. Currently `/exec` tracks progress via handovers but the plan itself is static. Could add a "living plan" mode where the exec skill updates the spec's plan.md with real-time progress.
+2. **Idempotence & recovery section** -- ExecPlans require explicit documentation of how to retry or roll back safely. Adding this to brief templates would improve reliability for long-running sessions.
+3. **Context & Orientation for novice agents** -- ExecPlans write each section assuming the reader knows nothing about the repo. Briefs could include a "Context" preamble with key file paths and module explanations, improving subagent effectiveness.
+
+### Recommendations requiring core autopod changes
+
+#### High Impact, Lower Effort
+1. **Linter-as-teacher pattern** -- enhance `buildCorrectionMessage()` with specific remediation steps, not just "what failed" but "how to fix it". Affects `local-validation-engine.ts`
+
+#### High Impact, Higher Effort
+2. **Tiered validation** -- add fast pre-checks (lint, typecheck) during `running` state, not just post-completion. Affects session-manager.ts and validation engine
+3. **Blueprint/workflow system** -- formalize deterministic vs. agentic phases; allow custom workflows per profile. Major refactor of session-manager.ts (~3500 lines)
+
+#### Strategic / Long-Term
+4. **Event-triggered sessions** -- add webhook/cron/PR-event triggers for sessions (Ona's automation model). Currently sessions are only human-initiated. This would enable proactive automation (daily doc sync, PR review, CVE remediation)
+5. **Fleet/batch sessions** -- create N sessions across N repos with the same task. Fleet monitoring dashboard. Phased rollouts (pilot -> scale). Key for enterprise migration use cases
+6. **Context relevance scoring** -- score injected sections against task description; prune low-relevance content to stay within token budget. Affects system-instructions-generator.ts
+7. **Agent drift detection & correction** -- monitor for drift signs during long sessions (Ona's pattern). Inject corrective nudges automatically. Autopod's nudge system is a foundation but could be more proactive
+8. **MCP tool consolidation audit** -- review whether 8 escalation tools could be simplified (Ona reduced 7 to 1). Level-triggered state updates vs edge-triggered events
+
+---
+
+## 15. Key Quotes Worth Remembering
+
+> "Don't start with model selection. Start with your developer environment, your test infrastructure, and your feedback loops." -- Stripe
+
+> "The repository must be entirely self-describing -- if knowledge is not in the repo, it doesn't exist for agents." -- OpenAI
+
+> "When agents fail, fix the harness, not the prompt." -- OpenAI
+
+> "It takes 10x more time to figure out WHERE to change the code than to write the patch." -- matklad
+
+> "The walls matter more than the model." -- Stripe
+
+> "Without tests, agents verify work using their own judgment. Tests create an external source of truth." -- OpenAI
+
+> "Putting LLMs into contained boxes compounds into system-wide reliability upside." -- Stripe
+
+> "The agent can't bypass what it can't see." -- Ona (on kernel-level enforcement)
+
+> "Agents are not short-lived, deterministic jobs. They are long-running, stateful, and interactive." -- Ona
+
+> "Reduce the decision space. Consolidating seven tools into one eliminated an entire class of errors." -- Ona
+
+> "Design for drift. Agents will ignore instructions over time. Build runtime mechanisms that catch them when they do." -- Ona
+
+---
+
+## 16. Further Reading (Key Related Articles)
+
+- [Anthropic: Harness design for long-running apps](https://www.anthropic.com/engineering/harness-design-long-running-apps) -- Generator-evaluator pattern, multi-agent architecture
+- [Anthropic: Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- [Martin Fowler: Harness engineering for coding agent users](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) -- Agent = Model + Harness framework
+- [Logic Inc: Engineering Is Becoming Beekeeping](https://bits.logic.inc/p/engineering-is-becoming-beekeeping)
+- [Logic Inc: Machine-Driven Code Review](https://bits.logic.inc/p/code-review-without-bottlenecks) -- Auto-extracting review lessons
+- [Logic Inc: Losing Control Of Our Coding Agents](https://bits.logic.inc/p/losing-control-of-our-coding-agents)
+- [Latent Space: Extreme Harness Engineering](https://www.latent.space/p/harness-eng) -- OpenAI's >1B tokens/day approach
+- [OpenAI: Unrolling the Codex agent loop](https://openai.com/index/unrolling-the-codex-agent-loop/)
+- [OpenAI: Unlocking the Codex harness (App Server)](https://openai.com/index/unlocking-the-codex-harness/)
+- [Stack Overflow: Coding guidelines for AI agents](https://stackoverflow.blog/2026/03/26/coding-guidelines-for-ai-agents-and-people-too/)
+- [OpenAI: Run long horizon tasks with Codex](https://developers.openai.com/cookbook/examples/codex/long_horizon_tasks) -- 25-hour experiment, ~30k lines
+- Ona: "Introducing Veto" -- Kernel-level enforcement, defense-in-depth, Claude Code sandbox escape
+- Ona: "Background agent infra Ramp had to build" -- Build vs buy, 4-layer infrastructure model
+- Ona: "Rethinking the Todo Tool" -- Tool consolidation, level-triggered state, agent drift mechanisms
+- Ona: "Automating code review" -- Full-env review, 50% time reduction, 88% acceptance rate
+- Ona: "From spec to shipped" -- Spec conversation -> tickets -> execution -> automated PR/review
+- Ona: "Automated writing docs" -- Daily cron, batched changes, tone guide injection
+- Ona: "Org-wide migrations as AI frontier" -- Reactive/strategic/continuous migration types, fleet orchestration
