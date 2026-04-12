@@ -75,6 +75,7 @@ public struct PageAssertionResponse: Codable, Sendable {
 public struct EscalationConfigResponse: Codable, Sendable {
   public var askHuman: Bool
   public var askAi: AskAiConfigResponse
+  public var advisor: AdvisorConfigResponse?
   public var autoPauseAfter: Int
   public var humanResponseTimeout: Int
 
@@ -86,8 +87,20 @@ public struct EscalationConfigResponse: Codable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     askHuman = try decodeBoolOrInt(c, key: .askHuman)
     askAi = try c.decode(AskAiConfigResponse.self, forKey: .askAi)
+    advisor = try c.decodeIfPresent(AdvisorConfigResponse.self, forKey: .advisor)
     autoPauseAfter = try c.decode(Int.self, forKey: .autoPauseAfter)
     humanResponseTimeout = try c.decode(Int.self, forKey: .humanResponseTimeout)
+  }
+}
+
+public struct AdvisorConfigResponse: Codable, Sendable {
+  public var enabled: Bool
+
+  public init() { enabled = false }
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
   }
 }
 

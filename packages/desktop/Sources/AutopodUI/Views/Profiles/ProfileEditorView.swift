@@ -498,6 +498,19 @@ public struct ProfileEditorView: View {
 
         Divider().padding(.vertical, 4)
 
+        Text("AI Advisor")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+
+        Toggle(isOn: $profile.escalationAdvisorEnabled) {
+            HStack(spacing: 4) {
+                Text("Enable Advisor Mode")
+                HelpBadge(text: "When enabled, the agent is instructed to proactively consult the AI reviewer at critical decision points — before complex logic, when stuck, and before completing the task.")
+            }
+        }
+
+        Divider().padding(.vertical, 4)
+
         Text("Guardrails")
             .font(.subheadline.weight(.medium))
             .foregroundStyle(.secondary)
