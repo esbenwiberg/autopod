@@ -15,6 +15,7 @@ import {
   ProfileExistsError,
   ProfileNotFoundError,
   createProfileSchema,
+  escalationConfigSchema,
   updateProfileSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -56,7 +57,9 @@ export function rowToProfile(
     defaultRuntime: row.default_runtime as Profile['defaultRuntime'],
     executionTarget: (row.execution_target as Profile['executionTarget']) ?? 'local',
     customInstructions: (row.custom_instructions as string) ?? null,
-    escalation: JSON.parse(row.escalation_config as string) as EscalationConfig,
+    escalation: escalationConfigSchema.parse(
+      JSON.parse(row.escalation_config as string),
+    ) as EscalationConfig,
     extends: (row.extends as string) ?? null,
     workerProfile: (row.worker_profile as string) ?? null,
     warmImageTag: (row.warm_image_tag as string) ?? null,

@@ -90,7 +90,7 @@ const privateRegistrySchema = z.object({
   scope: z.string().startsWith('@').optional(),
 });
 
-const escalationConfigSchema = z.object({
+export const escalationConfigSchema = z.object({
   askHuman: z.boolean().default(true),
   askAi: z
     .object({

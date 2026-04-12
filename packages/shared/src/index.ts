@@ -179,6 +179,7 @@ export {
 export {
   createProfileSchema,
   updateProfileSchema,
+  escalationConfigSchema,
   modelProviderSchema,
   providerCredentialsSchema,
 } from './schemas/profile.schema.js';
