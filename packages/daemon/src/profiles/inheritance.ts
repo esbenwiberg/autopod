@@ -58,6 +58,10 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
       ...parent.escalation.askAi,
       ...child.escalation?.askAi,
     },
+    advisor: {
+      ...parent.escalation.advisor,
+      ...child.escalation?.advisor,
+    },
   } as EscalationConfig;
 
   // customInstructions: concatenate with separator

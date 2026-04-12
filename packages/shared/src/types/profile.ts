@@ -140,6 +140,9 @@ export interface EscalationConfig {
     model: string;
     maxCalls: number;
   };
+  advisor: {
+    enabled: boolean;
+  };
   autoPauseAfter: number;
   humanResponseTimeout: number;
 }

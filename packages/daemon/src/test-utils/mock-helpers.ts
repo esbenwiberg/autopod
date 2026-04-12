@@ -99,6 +99,7 @@ export function insertTestProfile(
     escalationConfig: JSON.stringify({
       askHuman: true,
       askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
+      advisor: { enabled: false },
       autoPauseAfter: 3,
       humanResponseTimeout: 3600,
     }),

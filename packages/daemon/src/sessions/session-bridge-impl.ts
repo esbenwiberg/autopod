@@ -112,7 +112,39 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       context?: string,
     ): Promise<string> {
       const model = this.getReviewerModel(sessionId);
-      const prompt = context ? `Context:\n${context}\n\nQuestion:\n${question}` : question;
+      const session = sessionManager.getSession(sessionId);
+
+      // Enrich the prompt with session state so the reviewer has full context
+      // beyond what the agent manually passes.
+      const contextParts: string[] = [];
+
+      contextParts.push(`Task: ${session.task}`);
+
+      if (session.plan) {
+        contextParts.push(`Plan: ${session.plan.summary}`);
+        if (session.plan.steps.length > 0) {
+          contextParts.push(
+            `Steps:\n${session.plan.steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`,
+          );
+        }
+      }
+
+      if (session.progress) {
+        contextParts.push(
+          `Progress: Phase ${session.progress.currentPhase}/${session.progress.totalPhases}` +
+            ` — ${session.progress.phase}: ${session.progress.description}`,
+        );
+      }
+
+      if (session.commitCount > 0) {
+        contextParts.push(`Commits so far: ${session.commitCount}`);
+      }
+
+      if (context) {
+        contextParts.push(`Agent-provided context:\n${context}`);
+      }
+
+      const prompt = `${contextParts.join('\n\n')}\n\nQuestion:\n${question}`;
 
       logger.info({ sessionId, model, question: question.slice(0, 100) }, 'Calling reviewer model');
 

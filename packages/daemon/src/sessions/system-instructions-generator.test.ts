@@ -24,6 +24,7 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
     escalation: {
       askHuman: true,
       askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
+      advisor: { enabled: false },
       autoPauseAfter: 3,
       humanResponseTimeout: 3600,
     },
@@ -254,6 +255,34 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('## Guidelines');
     expect(md).toContain('Commit after every meaningful unit of work');
     expect(md).toContain('Do NOT modify configuration files');
+  });
+
+  it('includes advisor section when advisor is enabled', () => {
+    const profile = makeProfile({
+      escalation: {
+        askHuman: true,
+        askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: true },
+        autoPauseAfter: 3,
+        humanResponseTimeout: 3600,
+      },
+    });
+
+    const md = generateSystemInstructions(profile, makeSession(), 'http://localhost:8080/mcp/x');
+
+    expect(md).toContain('## AI Advisor');
+    expect(md).toContain('ask_ai');
+    expect(md).toContain('Before writing complex logic');
+    expect(md).toContain('Before completing the task');
+  });
+
+  it('omits advisor section when advisor is disabled', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## AI Advisor');
   });
 
   it('includes injected skills section with descriptions', () => {

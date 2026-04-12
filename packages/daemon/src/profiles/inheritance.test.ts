@@ -21,6 +21,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     escalation: {
       askHuman: true,
       askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+      advisor: { enabled: false },
       autoPauseAfter: 3,
       humanResponseTimeout: 3600,
     },
@@ -89,6 +90,7 @@ describe('resolveInheritance', () => {
       escalation: {
         askHuman: true,
         askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: false },
         autoPauseAfter: 3,
         humanResponseTimeout: 3600,
       },
@@ -98,6 +100,7 @@ describe('resolveInheritance', () => {
       escalation: {
         askHuman: false,
         askAi: { enabled: true, model: 'opus', maxCalls: 10 },
+        advisor: { enabled: false },
         autoPauseAfter: 5,
         humanResponseTimeout: 3600,
       },
@@ -118,6 +121,7 @@ describe('resolveInheritance', () => {
       escalation: {
         askHuman: true,
         askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: false },
         autoPauseAfter: 3,
         humanResponseTimeout: 3600,
       },
@@ -127,6 +131,7 @@ describe('resolveInheritance', () => {
       escalation: {
         askHuman: true,
         askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: false },
         autoPauseAfter: 3,
         humanResponseTimeout: 3600,
       },
@@ -137,6 +142,61 @@ describe('resolveInheritance', () => {
     expect(resolved.escalation.askAi.enabled).toBe(true);
     expect(resolved.escalation.askAi.model).toBe('sonnet');
     expect(resolved.escalation.askAi.maxCalls).toBe(5);
+  });
+
+  it('should deep merge advisor config from escalation', () => {
+    const parent = makeProfile({
+      name: 'parent',
+      escalation: {
+        askHuman: true,
+        askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: true },
+        autoPauseAfter: 3,
+        humanResponseTimeout: 3600,
+      },
+    });
+    const child = makeProfile({
+      name: 'child',
+      escalation: {
+        askHuman: true,
+        askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: false },
+        autoPauseAfter: 3,
+        humanResponseTimeout: 3600,
+      },
+      extends: 'parent',
+    });
+
+    const resolved = resolveInheritance(child, parent);
+    // Child overrides parent advisor.enabled
+    expect(resolved.escalation.advisor.enabled).toBe(false);
+  });
+
+  it('should let child override parent advisor config', () => {
+    const parent = makeProfile({
+      name: 'parent',
+      escalation: {
+        askHuman: true,
+        askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: true },
+        autoPauseAfter: 3,
+        humanResponseTimeout: 3600,
+      },
+    });
+    const child = makeProfile({
+      name: 'child',
+      escalation: {
+        askHuman: true,
+        askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+        advisor: { enabled: true },
+        autoPauseAfter: 3,
+        humanResponseTimeout: 3600,
+      },
+      extends: 'parent',
+    });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.escalation.advisor.enabled).toBe(true);
   });
 
   it('should concatenate customInstructions with separator', () => {
