@@ -239,3 +239,68 @@ Two enhancements to the existing `/prep` and `/exec` skills, based on patterns f
 ### Files affected
 - `skills/prep.md` -- add `## Context & Orientation` section to brief template
 - `skills/exec.md` -- add progress.md maintenance to the orchestration loop
+
+---
+
+## Proposal 5: `run_checks` MCP Tool + Self-Validating Briefs
+
+### Problem
+
+The blueprint system (Proposal 2) enforces deterministic gates between agentic steps in a single session. But long-running sessions driven by `/exec` are a single giant agentic step from the harness's POV -- the agent may burn through many briefs over hours without ever hitting a deterministic check. Worse, `/exec` can dispatch briefs concurrently, so there is no coherent "between briefs" window for the harness to gate on: a brief completing while another is in flight would see lint errors caused by work that isn't even its own.
+
+The fix has to live with the agent, not the harness. Each brief needs to run its own checks before declaring itself complete.
+
+### Industry Pattern
+
+Stripe's finding again: "linting, test execution, pushing should never be left to vibes." The blueprint walker handles that for top-level sessions. Within a brief (which is effectively its own nested agentic flow), the equivalent is a first-class tool the agent calls -- not a shell command it might forget to run.
+
+### Proposed Design
+
+**New MCP tool** exposed by `@autopod/escalation-mcp`:
+
+```
+run_checks({
+  checks: ["lint", "typecheck", "build", "test"],  // subset of declared stack checks
+  stacks?: ["node", "dotnet"]                       // optional: restrict fanout to named stacks
+}) -> {
+  results: [
+    { stack: "node", check: "lint", passed: true, stdout: "...", stderr: "..." },
+    { stack: "dotnet", check: "lint", passed: false, ... },
+    ...
+  ],
+  skipped: [ { stack: "dotnet", reason: "no changed files under src/Api" } ]
+}
+```
+
+The tool reuses the same stack-aware dispatcher the blueprint walker uses (Proposal 2). Same command resolution, same per-stack `cwd`, same changed-files gating. One implementation, two entry points (walker and MCP tool).
+
+**`/exec` skill rule**: each brief must call `run_checks` before signaling completion, and fix any failures before handing back control. Framed as a non-negotiable in the skill text, same energy as the existing "always push before handover" rules.
+
+**Tiering**: the skill recommends `lint` + `typecheck` per brief as the default (fast, cheap, catches 80%). Full `build` + `test` runs at the end of `/exec`, not after every brief. Briefs can opt into heavier checks via their own logic.
+
+### Concurrent Briefs
+
+If two briefs run concurrently and both call `run_checks`, they'll see each other's in-flight changes. Two mitigations:
+
+1. **Decomposition discipline**: `/prep` should produce concurrent briefs only when they operate on non-overlapping surfaces. This is already a correctness requirement for concurrent briefs -- checks just make the existing constraint visible earlier.
+2. **Scoped reporting**: `run_checks` results include the stack and file path of each failure. The brief's subagent can filter "errors under files I own" from "errors caused by a sibling brief." If all the agent's own files pass, it can complete even if the workspace has unrelated failures.
+
+Full workspace isolation per brief (separate worktrees) is out of scope -- that's a different, much bigger change.
+
+### Why This Lives Alongside Blueprints, Not Inside Them
+
+`run_checks` is useful beyond `/exec`: any long agentic step (exploratory refactor, investigation, one-shot session without a blueprint) gets access to the same tool. Blueprints enforce gates at the session level; `run_checks` enforces them at the brief/sub-task level. Both share the same check dispatcher, so there's no duplication.
+
+### Implementation
+
+**Files affected**:
+- `packages/escalation-mcp/src/tools/run-checks.ts` -- new tool implementation
+- `packages/escalation-mcp/src/server.ts` -- register tool
+- `packages/escalation-mcp/src/session-bridge.ts` -- add `runChecks()` method to the bridge interface
+- `packages/daemon/src/sessions/session-bridge-impl.ts` -- wire bridge to the shared stack check dispatcher (extracted from the blueprint walker)
+- `packages/daemon/src/sessions/stack-dispatcher.ts` -- new module: the shared dispatcher used by both walker and MCP tool
+- `skills/exec.md` -- mandate calling `run_checks` at the end of each brief
+
+**Dependency**: Proposal 2's stack declaration must land first. `run_checks` has nothing to dispatch against without profile-level stacks. If Prop 2 Phase 1-2 are shipping, this can piggyback on the same stack types.
+
+**Effort**: Low-to-medium. The hard part (stack-aware dispatch + changed-files gating) already has to be built for Proposal 2. This proposal is just a second entry point into it.
