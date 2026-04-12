@@ -349,11 +349,10 @@ OpenAI's ExecPlan concept has a few patterns that could enhance the existing ski
 1. **Linter-as-teacher pattern** -- enhance `buildCorrectionMessage()` with specific remediation steps, not just "what failed" but "how to fix it". Affects `local-validation-engine.ts`
 
 #### High Impact, Higher Effort
-2. **Tiered validation** -- add fast pre-checks (lint, typecheck) during `running` state, not just post-completion. Affects session-manager.ts and validation engine
-3. **Blueprint/workflow system** -- formalize deterministic vs. agentic phases; allow custom workflows per profile. Major refactor of session-manager.ts (~3500 lines)
+2. **Blueprint/workflow system** -- formalize deterministic vs. agentic phases; allow custom workflows per profile. Major refactor of session-manager.ts (~3500 lines). **This subsumes "tiered validation"** -- blueprints let profiles define deterministic steps (lint, typecheck, test) between agentic steps, which IS tiered validation built into the workflow.
 
 #### Strategic / Long-Term
-4. **Context relevance scoring** -- score injected sections against task description; prune low-relevance content to stay within token budget. Affects system-instructions-generator.ts
+3. **Context relevance scoring** -- score injected sections against task description; prune low-relevance content to stay within token budget. Affects system-instructions-generator.ts
 
 ---
 

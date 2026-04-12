@@ -43,63 +43,13 @@ Enhance the validation correction message pipeline to include remediation contex
 
 ---
 
-## Proposal 2: Tiered Validation (Fast Pre-Checks During Coding)
-
-### Problem
-
-Validation in autopod is a single phase that runs **after** the agent finishes coding. If the agent introduced a lint error on line 5, it doesn't find out until the entire implementation is "done" and the full validation pipeline runs. This wastes the agent's coding time and makes correction harder (more changes to untangle).
-
-### Industry Pattern
-
-**Stripe's three-tier feedback**:
-- Tier 1: Pre-push hooks in <1 second, local linters in <5 seconds (catches issues immediately)
-- Tier 2: Selective CI -- only relevant tests (catches integration issues)
-- Tier 3: Full CI with a hard 2-round retry cap (catches everything else)
-
-**Logic Inc's "short leash"**: Make a small change, check it, fix it, repeat. Quality checks must be cheap enough to run constantly.
-
-**OpenAI**: Every milestone is verified before proceeding to the next. Verification commands run after each phase of work, not just at the end.
-
-### Proposed Change
-
-Add lightweight, fast checks that run **during** the `running` state, triggered by agent activity (e.g., after each commit, or periodically). These don't replace the full validation phase -- they supplement it with early feedback.
-
-### Implementation
-
-**Approach A -- Profile-level pre-check commands**:
-
-Add a `preChecks` field to profiles:
-```typescript
-preChecks?: {
-  /** Commands to run after each agent commit during the running phase */
-  onCommit?: string[];  // e.g., ["npm run lint", "npm run typecheck"]
-  /** How often to run checks (in seconds) during running phase */  
-  intervalSeconds?: number;  // e.g., 60
-  /** Commands to run on interval */
-  onInterval?: string[];
-}
-```
-
-When the session manager detects a new commit (via the existing commit tracking), it runs the pre-check commands in the container. If any fail, it injects a correction message to the agent's stream (similar to how validation failures are fed back today, but lighter weight).
-
-**Approach B -- Nudge-based mid-session checks**:
-
-Less invasive: leverage the existing nudge/message system. When the daemon detects a commit, it runs a fast check and if it fails, sends the result as a nudge message to the agent. No new infrastructure -- just wiring commit detection to a check-and-nudge flow.
-
-**Files affected**:
-- `packages/shared/src/types/profile.ts` -- add `preChecks` to Profile type
-- `packages/daemon/src/sessions/session-manager.ts` -- add commit-triggered check logic in the event consumption loop
-- `packages/daemon/src/containers/docker-container-manager.ts` -- run pre-check commands via existing `execInContainer()`
-
-**Effort**: Medium. The building blocks exist (commit tracking, container exec, nudge messages). The new part is wiring them together and handling the timing/concurrency.
-
----
-
-## Proposal 3: Blueprint/Workflow System
+## Proposal 2: Blueprint/Workflow System (subsumes Tiered Validation)
 
 ### Problem
 
 `processSession()` is a ~3500-line monolith that hardcodes one workflow: provision -> code -> validate -> merge. Every session follows the same flow regardless of task type. There's no way to insert deterministic checkpoints between agentic phases, and the agent has full autonomy during the `running` phase with no structured gates.
+
+**This proposal also eliminates the need for a separate "tiered validation" feature.** Instead of bolting on pre-checks during the running phase, blueprints let profiles define deterministic validation steps (lint, typecheck, test) between agentic steps. The blueprint IS the tiered validation -- it's just more general and more powerful. Industry evidence (Stripe, OpenAI, Logic Inc) all converge on the same finding: fast feedback during coding, not just after, is the single biggest quality lever.
 
 ### Industry Pattern
 
@@ -218,7 +168,7 @@ Add the `condition` system. Add `maxRetries` per step. Add step-level progress e
 
 ---
 
-## Proposal 4: Context Relevance Scoring
+## Proposal 3: Context Relevance Scoring
 
 ### Problem
 
@@ -251,7 +201,7 @@ Score each injected section and MCP tool against the task description for releva
 
 ---
 
-## Proposal 5: /prep and /exec Skill Improvements
+## Proposal 4: /prep and /exec Skill Improvements
 
 ### Based on OpenAI ExecPlan research
 
