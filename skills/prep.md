@@ -23,20 +23,58 @@ These rules override everything else. Violating them means the skill failed.
    for efficiency. Ask ONE, then yield. The next question depends on the
    answer you haven't received yet. This is non-negotiable.
 
-2. **The loop is real.** You will go through multiple rounds of research →
-   questions → research → questions before ever drafting anything. If you
-   find yourself drafting a spec on your first response after research,
-   you are doing it wrong. The minimum number of user interactions before
-   a draft is 3+ questions answered.
+2. **The loop is long and evidence-driven — NOT a 3-question countdown.**
+   For **Complex** tasks, expect **8–15 question rounds AND 3+ rounds of
+   codebase research** before drafting. For **Medium** tasks, expect
+   **4–8 question rounds AND 2+ rounds of research**. If you find yourself
+   at Round 5 with only your initial grep, you are cheating — go back and
+   read more code. Drafting after 3 questions on a Complex task is
+   failure, not efficiency.
 
-3. **Research is never complete on the first pass.** Your first research pass
-   gives you the lay of the land. The user's answers WILL reveal areas you
-   didn't investigate. Go back and investigate those areas. Then ask more
-   questions about what you found. This is the loop.
+3. **Research is never complete on the first pass — and you must prove it
+   by running more searches.** Your first research pass gives you the lay
+   of the land. Every substantive user answer points somewhere in the
+   codebase you haven't looked yet. Go grep, glob, and read code AGAIN
+   after (almost) every answer. "I already looked at that area" is not a
+   valid excuse when the answer opened a new dimension.
 
 4. **Do not front-load all your questions.** You don't know all your questions
    yet. The user's answer to question 1 shapes question 2. If you think you
    already know all questions upfront, you haven't thought deeply enough.
+
+5. **Every question must be grounded in specific files, functions, or line
+   numbers from your most recent research.** Abstract questions are a
+   smell. Bad: *"How should we handle auth for this endpoint?"* Good:
+   *"I see `auth.ts:42` exposes `requireUser()` and `api/admin/*.ts` uses
+   `requireAdmin()` — which applies here, or do we need a third?"* If your
+   next question is abstract, you haven't researched enough. Go grep
+   before asking.
+
+---
+
+## ANTI-PATTERNS — IF YOU CATCH YOURSELF DOING THESE, STOP
+
+These are the failure modes that make `/prep` feel like a shallow
+interview. Each one has killed a session. Re-read this list whenever you
+feel the urge to draft.
+
+- **Drafting after 3 questions on a Complex task.** That's not "efficient,"
+  that's giving up. Count your rounds. If < 8 for Complex, keep going.
+- **Asking abstract questions** like *"what's your preferred approach?"*
+  instead of grounded ones like *"I see two patterns — `X` at `a.ts:10`
+  and `Y` at `b.ts:42`. Which fits here?"* Ground every question in code.
+- **Running grep once and never again.** Each user answer should trigger
+  another targeted search with new terms. If your research is one-shot,
+  you have no way to react to what the user told you.
+- **Declaring "I have a clear picture"** when your "picture" is conceptual,
+  not file-level. Test yourself: can you name every file to modify, every
+  function to touch, every existing pattern to follow? If not, the picture
+  is a sketch, not a plan.
+- **Treating the loop as a 3-round countdown** instead of an open-ended
+  interview. There is no fixed number. The bar is evidence, not effort.
+- **Using the user's answer as a signal to draft rather than a signal to
+  research.** Every substantive answer is a new thread to pull, not a
+  green light.
 
 ---
 
@@ -65,24 +103,35 @@ silently pick one.
 ## Phase 2: The Loop (Medium + Complex only)
 
 This is an iterative conversation, not a single-shot plan. You will cycle
-through research and questions multiple times before drafting.
+through research and questions many times before drafting.
 
 ### How the loop works in practice:
 
-**Round 1:** Research the codebase → share key findings → ask your FIRST
-question (one question only, then stop and wait).
+**Every round has THREE parts, in strict order — no skipping:**
 
-**Round 2:** Based on the answer, either ask a follow-up question OR go
-research a new area the answer pointed to, then come back with findings and
-your next question.
+1. **Research** — grep, glob, read code. Round 1's research is broad
+   ("map the blast radius"). Every subsequent round is TARGETED by what
+   the user just told you. The user's answer IS your search terms. If the
+   answer mentions an area you haven't read, go read it now. Never skip
+   this step — "nothing new to look at" is almost never true on a Complex
+   task.
 
-**Round N:** Keep going. Each answer either triggers more research or the
-next question. You are done asking when you have zero unresolved ambiguities
-— not when you've hit some count.
+2. **Ground** — synthesize what you found into concrete references: file
+   paths, function names, patterns. If you can't name them, you didn't
+   research enough — back to step 1.
+
+3. **Ask ONE question**, anchored in what you just found. Then STOP. Wait.
+
+**You are NOT done after Round 1. NOT after Round 3. NOT when you "feel
+ready."** You are done when you can describe the implementation at
+file-and-function granularity with zero hand-waving — when the brief
+would contain ONLY concrete file paths and named patterns, no phrases
+like *"find the right place to add this"* or *"follow existing
+conventions."*
 
 **Then and only then:** Draft the plan/briefs.
 
-### Step A: Research Codebase
+### Step A: Initial Research (Round 1 only)
 
 Understand the terrain before forming opinions:
 
@@ -107,29 +156,47 @@ differently than you'd guess. The highest-leverage question first.
 > **Hard rule:** You MUST ask at least one question and receive an answer
 > before drafting anything. Do NOT skip to drafting on your first pass.
 
-### Step C: The Conversation (iterative — no fixed count)
+### Step C: The Loop (Research → Ground → Ask, every round)
 
-After each answer from the user, do ONE of these:
+After each answer from the user, do this — in order, always:
 
-1. **Ask a follow-up** — the answer raised a new question. Ask it. Stop. Wait.
-2. **Research then ask** — the answer pointed to a codebase area you haven't
-   explored. Go read that code, then come back with findings and your next
-   question. Stop. Wait.
-3. **Signal readiness** — you genuinely have zero ambiguities left. Tell the
-   user: "I've got a clear picture — drafting the spec." Then proceed to
-   Step D.
+1. **Research first.** Treat the answer as search terms. Grep for what the
+   user mentioned. Read the files they pointed at (or pointed away from).
+   If the answer was a decision, read the code that decision affects.
+   Only skip research if you JUST researched this exact area in the
+   previous round — not because you "already have enough."
+2. **Ground your next question in the new findings.** Name files and
+   functions. Show the user what you saw, then ask.
+3. **Ask ONE question. Stop. Wait.**
 
-**What to ask about (not a checklist — use judgment):**
-- **Contradictions** — "The task says X, but the code does Y. Which is the
-  source of truth?"
-- **Scope boundaries** — "Should this also cover X, or just Y?"
-- **Trade-off decisions** — "Option A is simpler but less flexible. Option B
-  handles edge cases but adds complexity. Which direction?"
-- **Unclear intent** — "You mentioned X — do you mean [interpretation A] or
-  [interpretation B]?"
-- **Constraint discovery** — "This touches [module] — any constraints I
-  should know about?"
-- **Edge cases** — "What should happen when [unusual scenario]?"
+**When to exit the loop (evidence-based, not vibe-based):**
+
+You can exit ONLY when you pass this test: *Could you write the brief's
+`Files` table right now — every path, every change, every existing
+pattern you'll follow — without any hand-waving?* If yes, say *"I've got
+file-level clarity — drafting the spec"* and proceed to Step D. If you'd
+have to write *"find the right place"* or *"follow existing conventions"*
+anywhere in the brief, you are NOT done. Loop again.
+
+**What to ask about (not a checklist — use judgment). Every example below
+is grounded in code — yours should be too:**
+- **Contradictions** — *"The task says sessions should expire in 24h, but
+  `session-manager.ts:180` hardcodes 1h via `SESSION_TTL_MS`. Which wins?"*
+- **Scope boundaries** — *"`feature.ts:88` already handles X for the CLI
+  path. Should this work also cover the daemon path at `api/routes.ts:210`,
+  or stop at the CLI boundary?"*
+- **Trade-off decisions** — *"I see two existing patterns — `aci-container-
+  manager.ts` uses polling, `docker-container-manager.ts` uses event
+  streams. The new adapter could go either way. Preference?"*
+- **Unclear intent** — *"You mentioned 'retry' — do you mean retry at the
+  HTTP layer (like `action-engine.ts:55` does) or retry the whole session
+  (like `session-manager.ts:processSession` does on `failed`)?"*
+- **Constraint discovery** — *"This touches `migrations/` — I see the
+  CLAUDE.md note about never reusing a migration prefix. Are there other
+  constraints you've hit in this area?"*
+- **Edge cases** — *"`state-machine.ts:validateTransition` rejects
+  `running → approved`. What should happen if the user clicks Approve
+  while the session is still running?"*
 
 **Format for multiple-choice questions:**
 ```
