@@ -340,6 +340,12 @@ export interface SessionManager {
   refreshNetworkPolicy(profileName: string): Promise<void>;
   /** Abort a currently running validation for the given session. No-op if not validating. */
   interruptValidation(sessionId: string): void;
+  /**
+   * Inject provider credentials directly into a running container without exposing the token.
+   * Reads the PAT from the profile, runs the auth command inside the container, and deletes
+   * the temp credential file. Safe to call from user-initiated flows (workspace pods, CLI).
+   */
+  injectCredential(sessionId: string, service: 'github' | 'ado'): Promise<void>;
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
@@ -799,6 +805,74 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       ],
       { timeout: 120_000 },
     );
+  }
+
+  // Injects provider credentials into a running container without exposing the token.
+  // Reads the PAT from the profile, writes it to a temp file, runs the auth command,
+  // then deletes the file. Returns a human-readable auth status message.
+  async function performCredentialInjection(
+    sessionId: string,
+    service: 'github' | 'ado',
+  ): Promise<string> {
+    const session = sessionRepo.getOrThrow(sessionId);
+    const profile = profileStore.get(session.profileName);
+
+    const pat = service === 'github' ? profile.githubPat : profile.adoPat;
+    if (!pat) {
+      throw new AutopodError(
+        `No ${service} PAT configured in profile '${session.profileName}'. Add one via ap profile update.`,
+        'MISSING_CREDENTIAL',
+        400,
+      );
+    }
+
+    if (!session.containerId) {
+      throw new AutopodError(`Session ${sessionId} has no running container`, 'INVALID_STATE', 409);
+    }
+
+    const cm = containerManagerFactory.get(session.executionTarget);
+    const tmpFile = `/tmp/.autopod_cred_${generateId(8)}`;
+
+    await cm.writeFile(session.containerId, tmpFile, `${pat}\n`);
+
+    try {
+      if (service === 'github') {
+        const result = await cm.execInContainer(
+          session.containerId,
+          [
+            'sh',
+            '-c',
+            `command -v gh > /dev/null 2>&1 && gh auth login --with-token < ${tmpFile}; ` +
+              `git config --global credential.helper store && ` +
+              `printf 'https://x-access-token:%s@github.com\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
+              `chmod 600 ~/.git-credentials && rm -f ${tmpFile}`,
+          ],
+          { timeout: 30_000 },
+        );
+        return result.exitCode === 0
+          ? 'Authenticated to github.com. git and gh (if installed) are now configured.'
+          : `Authentication partially failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`;
+      } else {
+        const result = await cm.execInContainer(
+          session.containerId,
+          [
+            'sh',
+            '-c',
+            `command -v az > /dev/null 2>&1 && az devops login --token "$(cat ${tmpFile})"; ` +
+              `git config --global credential.helper store && ` +
+              `printf 'https://oauth2:%s@dev.azure.com\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
+              `chmod 600 ~/.git-credentials && rm -f ${tmpFile}`,
+          ],
+          { timeout: 30_000 },
+        );
+        return result.exitCode === 0
+          ? 'Authenticated to dev.azure.com. git and az devops (if installed) are now configured.'
+          : `Authentication partially failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`;
+      }
+    } catch (err) {
+      await cm.execInContainer(session.containerId, ['rm', '-f', tmpFile]).catch(() => {});
+      throw err;
+    }
   }
 
   function emitActivityStatus(sessionId: string, message: string): void {
@@ -1845,70 +1919,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       // ── Credential injection ──────────────────────────────────────────
-      // Daemon reads the PAT from the profile and runs the auth command inside
-      // the container directly. The agent never receives the token value.
       if (session.pendingEscalation?.type === 'request_credential') {
         const payload = session.pendingEscalation.payload as RequestCredentialPayload;
-        const profile = profileStore.get(session.profileName);
+        const authMessage = await performCredentialInjection(sessionId, payload.service);
 
-        const pat = payload.service === 'github' ? profile.githubPat : profile.adoPat;
-        if (!pat) {
-          throw new AutopodError(
-            `No ${payload.service} PAT configured in profile '${session.profileName}'. Add one via ap profile update.`,
-            'MISSING_CREDENTIAL',
-            400,
-          );
-        }
-
-        if (!session.containerId) {
-          throw new AutopodError(`Session ${sessionId} has no running container`, 'INVALID_STATE', 409);
-        }
-
-        const cm = containerManagerFactory.get(session.executionTarget);
-        const tmpFile = `/tmp/.autopod_cred_${generateId(8)}`;
-
-        // Write PAT to a temp file inside the container, run auth, then delete the file.
-        // The token is never returned to the agent — it only sees the outcome.
-        await cm.writeFile(session.containerId, tmpFile, `${pat}\n`);
-
-        let authMessage: string;
-        try {
-          if (payload.service === 'github') {
-            // Try gh CLI first; fall back to git credential store so git ops work regardless.
-            const result = await cm.execInContainer(session.containerId, [
-              'sh',
-              '-c',
-              `command -v gh > /dev/null 2>&1 && gh auth login --with-token < ${tmpFile}; ` +
-              `git config --global credential.helper store && ` +
-              `printf 'https://x-access-token:%s@github.com\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
-              `chmod 600 ~/.git-credentials && rm -f ${tmpFile}`,
-            ], { timeout: 30_000 });
-            authMessage =
-              result.exitCode === 0
-                ? 'Authenticated to github.com. git and gh (if installed) are now configured.'
-                : `Authentication partially failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`;
-          } else {
-            // ADO: git credential store + az devops login if available.
-            const result = await cm.execInContainer(session.containerId, [
-              'sh',
-              '-c',
-              `command -v az > /dev/null 2>&1 && az devops login --token "$(cat ${tmpFile})"; ` +
-              `git config --global credential.helper store && ` +
-              `printf 'https://oauth2:%s@dev.azure.com\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
-              `chmod 600 ~/.git-credentials && rm -f ${tmpFile}`,
-            ], { timeout: 30_000 });
-            authMessage =
-              result.exitCode === 0
-                ? 'Authenticated to dev.azure.com. git and az devops (if installed) are now configured.'
-                : `Authentication partially failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`;
-          }
-        } catch (err) {
-          // Ensure the temp file is cleaned up even if execInContainer throws.
-          await cm.execInContainer(session.containerId, ['rm', '-f', tmpFile]).catch(() => {});
-          throw err;
-        }
-
-        // Store only the approval event — never the token itself.
         escalationRepo.update(session.pendingEscalation.id, {
           respondedAt: new Date().toISOString(),
           respondedBy: 'human',
@@ -1919,11 +1933,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         transition(session, 'running', { pendingEscalation: null });
         emitActivityStatus(sessionId, `Credential injected for ${payload.service} — resuming agent…`);
 
-        const pendingForSession = deps.pendingRequestsBySession?.get(sessionId);
-        if (pendingForSession) {
-          pendingForSession.resolve(escalationId, authMessage);
-        }
-
+        deps.pendingRequestsBySession?.get(sessionId)?.resolve(escalationId, authMessage);
         return;
       }
 
@@ -3604,6 +3614,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         }),
       );
+    },
+
+    async injectCredential(sessionId: string, service: 'github' | 'ado'): Promise<void> {
+      const session = sessionRepo.getOrThrow(sessionId);
+      if (!session.containerId) {
+        throw new AutopodError(`Session ${sessionId} has no running container`, 'INVALID_STATE', 409);
+      }
+      await performCredentialInjection(sessionId, service);
+      emitActivityStatus(sessionId, `${service} credentials injected.`);
     },
   };
 }

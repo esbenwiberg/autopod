@@ -107,7 +107,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
         });
       }
 
-      // Complete the session (daemon pushes branch)
+      // Complete the workspace session (daemon pushes branch)
       console.log();
       const completion = await withSpinner('Completing workspace session...', () =>
         client.completeSession(resolvedId),
@@ -121,5 +121,26 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       } else {
         console.log(chalk.green('Session complete. Branch pushed to origin.'));
       }
+    });
+
+  // ap inject <id> github|ado
+  program
+    .command('inject <id> <service>')
+    .description('Inject provider credentials into a running container (github or ado)')
+    .action(async (id: string, service: string) => {
+      if (service !== 'github' && service !== 'ado') {
+        console.error(chalk.red('service must be "github" or "ado"'));
+        process.exit(1);
+      }
+
+      const client = getClient();
+      const resolvedId = await resolveSessionId(client, id);
+
+      await withSpinner(`Injecting ${service} credentials…`, () =>
+        client.injectCredential(resolvedId, service as 'github' | 'ado'),
+      );
+
+      console.log(chalk.green(`Done. ${service} credentials injected into session ${resolvedId.slice(0, 8)}.`));
+      console.log(chalk.dim('git and CLI tools are now authenticated. Credentials are gone when the container stops.'));
     });
 }

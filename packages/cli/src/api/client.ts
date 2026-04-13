@@ -101,6 +101,10 @@ export class AutopodClient {
     return this.request<{ ok: boolean; pushError?: string }>('POST', `/sessions/${id}/complete`);
   }
 
+  async injectCredential(id: string, service: 'github' | 'ado'): Promise<void> {
+    await this.request<void>('POST', `/sessions/${id}/inject-credential`, { service });
+  }
+
   async deleteSession(id: string): Promise<void> {
     await this.request<void>('DELETE', `/sessions/${id}`);
   }

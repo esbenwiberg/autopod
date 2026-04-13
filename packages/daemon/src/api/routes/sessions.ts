@@ -196,6 +196,26 @@ export function sessionRoutes(
     return { ok: true };
   });
 
+  // POST /sessions/:sessionId/inject-credential — inject a provider PAT into the container
+  app.post('/sessions/:sessionId/inject-credential', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const { service } = request.body as { service: 'github' | 'ado' };
+    if (service !== 'github' && service !== 'ado') {
+      reply.status(400);
+      return { error: 'service must be "github" or "ado"' };
+    }
+    try {
+      await sessionManager.injectCredential(sessionId, service);
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message };
+      }
+      throw err;
+    }
+  });
+
   // POST /sessions/:sessionId/complete — complete a workspace session (push branch + transition)
   app.post('/sessions/:sessionId/complete', async (request) => {
     const { sessionId } = request.params as { sessionId: string };
