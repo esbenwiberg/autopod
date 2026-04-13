@@ -28,6 +28,7 @@ import { rateLimitPlugin } from './plugins/rate-limit.js';
 import { requestLoggerPlugin } from './plugins/request-logger.js';
 import { actionRoutes } from './routes/actions.js';
 import { diffRoutes } from './routes/diff.js';
+import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
 import { memoryRoutes } from './routes/memory.js';
@@ -130,6 +131,9 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   if (deps.containerManagerFactory) {
     diffRoutes(app, deps.sessionManager, deps.containerManagerFactory, deps.profileStore);
   }
+
+  // Files routes — browse/read files from session worktree (markdown viewer, etc.)
+  filesRoutes(app, deps.sessionManager);
 
   // Terminal WebSocket (requires docker instance)
   if (deps.containerManagerFactory && deps.docker) {
