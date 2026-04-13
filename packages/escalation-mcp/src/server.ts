@@ -12,6 +12,7 @@ import { memoryRead } from './tools/memory-read.js';
 import { memorySearch } from './tools/memory-search.js';
 import { memorySuggest } from './tools/memory-suggest.js';
 import { reportBlocker } from './tools/report-blocker.js';
+import { requestCredential } from './tools/request-credential.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
 import { reportTaskSummary } from './tools/report-task-summary.js';
@@ -131,6 +132,21 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
     async (input) => {
       const response = await reportTaskSummary(sessionId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'request_credential',
+    'Request credentials for GitHub or Azure DevOps. Blocks until a human approves — the daemon injects the credential directly into the container, you will never see the token value. Call this when you need to authenticate to push code, create PRs, or access private resources.',
+    {
+      service: z
+        .enum(['github', 'ado'])
+        .describe('Which service to authenticate against: "github" or "ado" (Azure DevOps)'),
+      reason: z.string().describe('Why you need these credentials — shown to the human for approval'),
+    },
+    async (input) => {
+      const response = await requestCredential(sessionId, input, bridge, pendingRequests);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );

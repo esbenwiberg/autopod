@@ -19,6 +19,7 @@ import type {
   ValidationFinding,
   ValidationOverride,
   ValidationOverridePayload,
+  RequestCredentialPayload,
 } from '@autopod/shared';
 import {
   AUTOPOD_INSTRUCTIONS_PATH,
@@ -1840,6 +1841,89 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
           throw err;
         }
+        return;
+      }
+
+      // ── Credential injection ──────────────────────────────────────────
+      // Daemon reads the PAT from the profile and runs the auth command inside
+      // the container directly. The agent never receives the token value.
+      if (session.pendingEscalation?.type === 'request_credential') {
+        const payload = session.pendingEscalation.payload as RequestCredentialPayload;
+        const profile = profileStore.get(session.profileName);
+
+        const pat = payload.service === 'github' ? profile.githubPat : profile.adoPat;
+        if (!pat) {
+          throw new AutopodError(
+            `No ${payload.service} PAT configured in profile '${session.profileName}'. Add one via ap profile update.`,
+            'MISSING_CREDENTIAL',
+            400,
+          );
+        }
+
+        if (!session.containerId) {
+          throw new AutopodError(`Session ${sessionId} has no running container`, 'INVALID_STATE', 409);
+        }
+
+        const cm = containerManagerFactory.get(session.executionTarget);
+        const tmpFile = `/tmp/.autopod_cred_${generateId(8)}`;
+
+        // Write PAT to a temp file inside the container, run auth, then delete the file.
+        // The token is never returned to the agent — it only sees the outcome.
+        await cm.writeFile(session.containerId, tmpFile, `${pat}\n`);
+
+        let authMessage: string;
+        try {
+          if (payload.service === 'github') {
+            // Try gh CLI first; fall back to git credential store so git ops work regardless.
+            const result = await cm.execInContainer(session.containerId, [
+              'sh',
+              '-c',
+              `command -v gh > /dev/null 2>&1 && gh auth login --with-token < ${tmpFile}; ` +
+              `git config --global credential.helper store && ` +
+              `printf 'https://x-access-token:%s@github.com\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
+              `chmod 600 ~/.git-credentials && rm -f ${tmpFile}`,
+            ], { timeout: 30_000 });
+            authMessage =
+              result.exitCode === 0
+                ? 'Authenticated to github.com. git and gh (if installed) are now configured.'
+                : `Authentication partially failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`;
+          } else {
+            // ADO: git credential store + az devops login if available.
+            const result = await cm.execInContainer(session.containerId, [
+              'sh',
+              '-c',
+              `command -v az > /dev/null 2>&1 && az devops login --token "$(cat ${tmpFile})"; ` +
+              `git config --global credential.helper store && ` +
+              `printf 'https://oauth2:%s@dev.azure.com\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
+              `chmod 600 ~/.git-credentials && rm -f ${tmpFile}`,
+            ], { timeout: 30_000 });
+            authMessage =
+              result.exitCode === 0
+                ? 'Authenticated to dev.azure.com. git and az devops (if installed) are now configured.'
+                : `Authentication partially failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`;
+          }
+        } catch (err) {
+          // Ensure the temp file is cleaned up even if execInContainer throws.
+          await cm.execInContainer(session.containerId, ['rm', '-f', tmpFile]).catch(() => {});
+          throw err;
+        }
+
+        // Store only the approval event — never the token itself.
+        escalationRepo.update(session.pendingEscalation.id, {
+          respondedAt: new Date().toISOString(),
+          respondedBy: 'human',
+          response: 'approved',
+        });
+
+        const escalationId = session.pendingEscalation.id;
+        transition(session, 'running', { pendingEscalation: null });
+        emitActivityStatus(sessionId, `Credential injected for ${payload.service} — resuming agent…`);
+
+        const pendingForSession = deps.pendingRequestsBySession?.get(sessionId);
+        if (pendingForSession) {
+          pendingForSession.resolve(escalationId, authMessage);
+        }
+
         return;
       }
 

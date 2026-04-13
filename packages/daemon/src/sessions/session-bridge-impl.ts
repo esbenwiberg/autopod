@@ -67,7 +67,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       if (
         escalation.type === 'ask_human' ||
         escalation.type === 'report_blocker' ||
-        escalation.type === 'action_approval'
+        escalation.type === 'action_approval' ||
+        escalation.type === 'request_credential'
       ) {
         sessionManager.notifyEscalation(escalation.sessionId, escalation);
       }

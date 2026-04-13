@@ -3,7 +3,8 @@ export type EscalationType =
   | 'ask_ai'
   | 'report_blocker'
   | 'action_approval'
-  | 'validation_override';
+  | 'validation_override'
+  | 'request_credential';
 
 export interface EscalationRequest {
   id: string;
@@ -15,7 +16,8 @@ export interface EscalationRequest {
     | AskAiPayload
     | ReportBlockerPayload
     | ActionApprovalPayload
-    | ValidationOverridePayload;
+    | ValidationOverridePayload
+    | RequestCredentialPayload;
   response: EscalationResponse | null;
 }
 
@@ -47,6 +49,13 @@ export interface ValidationOverridePayload {
   findings: import('./validation.js').ValidationFinding[];
   attempt: number;
   maxAttempts: number;
+}
+
+export interface RequestCredentialPayload {
+  /** Which service to authenticate against */
+  service: 'github' | 'ado';
+  /** Human-readable reason the agent needs this credential */
+  reason: string;
 }
 
 export interface EscalationResponse {
