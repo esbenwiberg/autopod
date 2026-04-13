@@ -1,3 +1,4 @@
+import AutopodClient
 import SwiftUI
 
 /// Detail panel — shown when a session is selected. Tabbed: Overview, Logs, Diff, Validation.
@@ -13,6 +14,8 @@ public struct DetailPanelView: View {
     public var onTerminalConnect: (() -> Void)?
     public var onTerminalDisconnect: (() -> Void)?
     public var onRefreshDiff: (() -> Void)?
+    public var loadFiles: ((String) async throws -> [SessionFileEntry])?
+    public var loadContent: ((String, String) async throws -> SessionFileContent)?
     @Binding public var requestedTab: DetailTab?
 
     public init(
@@ -25,6 +28,8 @@ public struct DetailPanelView: View {
         onTerminalConnect: (() -> Void)? = nil,
         onTerminalDisconnect: (() -> Void)? = nil,
         onRefreshDiff: (() -> Void)? = nil,
+        loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
+        loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
         self.session = session; self.events = events; self.actions = actions
@@ -36,6 +41,8 @@ public struct DetailPanelView: View {
         self.onTerminalConnect = onTerminalConnect
         self.onTerminalDisconnect = onTerminalDisconnect
         self.onRefreshDiff = onRefreshDiff
+        self.loadFiles = loadFiles
+        self.loadContent = loadContent
         self._requestedTab = requestedTab
     }
 
@@ -43,6 +50,7 @@ public struct DetailPanelView: View {
     @State private var isTaskExpanded: Bool = false
 
     private var isTerminalAvailable: Bool { session.isWorkspace }
+    private var isMarkdownAvailable: Bool { session.isWorkspace }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -64,6 +72,7 @@ public struct DetailPanelView: View {
                 case .validation: ValidationTab(session: session, actions: actions)
                 case .summary:    SummaryTab(session: session)
                 case .terminal:   EmptyView()
+                case .markdown:   MarkdownTab(session: session, loadFiles: loadFiles, loadContent: loadContent)
                 }
 
                 if isTerminalAvailable {
@@ -407,7 +416,12 @@ public struct DetailPanelView: View {
         HStack(spacing: 4) {
             ForEach(DetailTab.allCases, id: \.self) { tab in
                 let isSelected = selectedTab == tab
-                let isDisabled = tab == .terminal && !isTerminalAvailable
+                let isDisabled = (tab == .terminal && !isTerminalAvailable) || (tab == .markdown && !isMarkdownAvailable)
+                let disabledHelp: String = {
+                    if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace sessions" }
+                    if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer is only available for workspace sessions" }
+                    return ""
+                }()
                 Button {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
                 } label: {
@@ -427,7 +441,7 @@ public struct DetailPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isDisabled)
-                .help(isDisabled ? "Terminal is only available for workspace sessions" : "")
+                .help(disabledHelp)
             }
             Spacer()
         }
@@ -443,7 +457,7 @@ public struct DetailPanelView: View {
 // MARK: - Tab enum
 
 public enum DetailTab: CaseIterable {
-    case overview, logs, diff, terminal, validation, summary
+    case overview, logs, diff, terminal, markdown, validation, summary
 
     var label: String {
         switch self {
@@ -451,6 +465,7 @@ public enum DetailTab: CaseIterable {
         case .logs:        "Logs"
         case .diff:        "Diff"
         case .terminal:    "Terminal"
+        case .markdown:    "Markdown"
         case .validation:  "Validation"
         case .summary:     "Summary"
         }
@@ -462,6 +477,7 @@ public enum DetailTab: CaseIterable {
         case .logs:        "text.line.last.and.arrowtriangle.forward"
         case .diff:        "doc.text.magnifyingglass"
         case .terminal:    "terminal"
+        case .markdown:    "doc.richtext"
         case .validation:  "checkmark.seal"
         case .summary:     "doc.text.below.ecg"
         }

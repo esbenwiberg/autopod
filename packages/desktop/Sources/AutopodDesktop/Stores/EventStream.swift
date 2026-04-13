@@ -88,19 +88,17 @@ public final class EventStream {
   }
 
   /// Load historical agent events for a session from the daemon REST API.
-  /// No-ops if events are already present (avoids duplication on reconnect).
+  /// Always refetches; reconciles by preserving any live (positive-ID) events
+  /// already in the buffer so a stale partial WS buffer doesn't suppress the backfill.
   public func loadHistoricalEvents(sessionId: String, api: DaemonAPI) {
-    guard sessionEvents[sessionId] == nil || sessionEvents[sessionId]!.isEmpty else { return }
     Task {
       guard let events = try? await api.getSessionEvents(sessionId), !events.isEmpty else { return }
       let mapped = events.enumerated().map { (i, e) in
         // Use negative IDs so they never collide with the live eventIdCounter (which starts at 1)
         mapAgentEvent(e, id: -(events.count - i))
       }
-      // Only set if still empty — a live event may have raced us
-      if sessionEvents[sessionId]?.isEmpty ?? true {
-        sessionEvents[sessionId] = mapped
-      }
+      let liveEvents = (sessionEvents[sessionId] ?? []).filter { $0.id > 0 }
+      sessionEvents[sessionId] = mapped + liveEvents
     }
   }
 

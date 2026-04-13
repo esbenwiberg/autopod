@@ -22,6 +22,8 @@ public struct MainView: View {
     public var onSelectSession: ((String?) -> Void)?
     public var onRefreshDiff: ((String) -> Void)?
     public var onShowSettings: (() -> Void)?
+    public var loadFiles: ((String) async throws -> [SessionFileEntry])?
+    public var loadContent: ((String, String) async throws -> SessionFileContent)?
 
     // Memory
     public var memoryEntries: [MemoryEntry]
@@ -56,6 +58,8 @@ public struct MainView: View {
         onSelectSession: ((String?) -> Void)? = nil,
         onRefreshDiff: ((String) -> Void)? = nil,
         onShowSettings: (() -> Void)? = nil,
+        loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
+        loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         memoryEntries: [MemoryEntry] = [],
         pendingMemoryCount: Int = 0,
         onApproveMemory: @escaping (String) -> Void = { _ in },
@@ -85,6 +89,8 @@ public struct MainView: View {
         self.onSelectSession = onSelectSession
         self.onRefreshDiff = onRefreshDiff
         self.onShowSettings = onShowSettings
+        self.loadFiles = loadFiles
+        self.loadContent = loadContent
         self.memoryEntries = memoryEntries
         self.pendingMemoryCount = pendingMemoryCount
         self.onApproveMemory = onApproveMemory
@@ -247,6 +253,8 @@ public struct MainView: View {
                     onTerminalConnect: { onTerminalConnect?(session.id) },
                     onTerminalDisconnect: onTerminalDisconnect,
                     onRefreshDiff: { onRefreshDiff?(session.id) },
+                    loadFiles: loadFiles,
+                    loadContent: loadContent,
                     requestedTab: $requestedDetailTab
                 )
             } else {

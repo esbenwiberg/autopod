@@ -86,6 +86,14 @@ public struct AppRootView: View {
       onShowSettings: {
         showSettings = true
       },
+      loadFiles: { [connectionManager] (id: String) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.listSessionFiles(id)
+      },
+      loadContent: { [connectionManager] (id: String, path: String) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getSessionFileContent(id, path: path)
+      },
       memoryEntries: memoryStore.entries,
       pendingMemoryCount: memoryStore.pendingCount,
       onApproveMemory: { id in Task { await memoryStore.approve(id) } },
@@ -97,6 +105,13 @@ public struct AppRootView: View {
       },
       onLoadMemories: { await memoryStore.loadMemories() }
     )
+    .task(id: sessionStore.selectedSessionId) {
+      // Fires on initial appear AND whenever the selected session changes.
+      // `.onChange` (used by onSelectSession) doesn't fire on mount, so a session
+      // that's already selected at launch would never trigger the historical fetch.
+      guard let id = sessionStore.selectedSessionId, let api = connectionManager.api else { return }
+      eventStream?.loadHistoricalEvents(sessionId: id, api: api)
+    }
     .alert("Error", isPresented: $showError) {
       Button("OK") { actionHandler?.clearError() }
     } message: {

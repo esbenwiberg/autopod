@@ -142,6 +142,19 @@ public actor DaemonAPI {
     try await request("GET", "/sessions/\(id)/diff")
   }
 
+  // MARK: - Files (worktree browser)
+
+  public func listSessionFiles(_ id: String, ext: String = "md") async throws -> [SessionFileEntry] {
+    let res: SessionFilesResponse = try await request(
+      "GET", "/sessions/\(id)/files", query: ["ext": ext]
+    )
+    return res.files
+  }
+
+  public func getSessionFileContent(_ id: String, path: String) async throws -> SessionFileContent {
+    try await request("GET", "/sessions/\(id)/files/content", query: ["path": path])
+  }
+
   public func getReportToken(_ id: String) async throws -> (token: String?, reportUrl: String) {
     let res: ReportTokenResponse = try await request("GET", "/sessions/\(id)/report/token")
     return (res.token, res.reportUrl)
