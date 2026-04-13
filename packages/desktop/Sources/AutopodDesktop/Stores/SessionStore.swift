@@ -72,6 +72,8 @@ public final class SessionStore {
       let updated = SessionMapper.map(response)
       if let index = sessions.firstIndex(where: { $0.id == id }) {
         sessions[index] = updated
+      } else {
+        sessions.append(updated)
       }
     } catch {
       // Silent refresh failure — don't overwrite existing data
