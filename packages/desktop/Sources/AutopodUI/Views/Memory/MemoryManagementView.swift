@@ -1,3 +1,4 @@
+import AppKit
 import AutopodClient
 import SwiftUI
 
@@ -15,6 +16,7 @@ public struct MemoryManagementView: View {
     @State private var selectedScope: MemoryScope = .global
     @State private var showingCreate = false
     @State private var editingEntry: MemoryEntry?
+    @State private var copiedId: String?
 
     public init(
         entries: [MemoryEntry],
@@ -209,11 +211,15 @@ public struct MemoryManagementView: View {
                         .truncationMode(.tail)
                 }
                 Spacer()
-                Text(shortId(entry.id))
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-                    .help(entry.id)
+                Button {
+                    copyId(entry.id)
+                } label: {
+                    Text(copiedId == entry.id ? "copied" : shortId(entry.id))
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Click to copy full id: \(entry.id)")
                 Text("v\(entry.version)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -306,6 +312,17 @@ public struct MemoryManagementView: View {
 
     private func shortId(_ id: String) -> String {
         id.count > 8 ? String(id.prefix(8)) : id
+    }
+
+    private func copyId(_ id: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(id, forType: .string)
+        withAnimation(.easeOut(duration: 0.15)) { copiedId = id }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.easeOut(duration: 0.3)) {
+                if copiedId == id { copiedId = nil }
+            }
+        }
     }
 }
 
