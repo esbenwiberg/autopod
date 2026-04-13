@@ -60,6 +60,17 @@ export interface ServerDependencies {
 }
 
 export async function createServer(deps: ServerDependencies): Promise<FastifyInstance> {
+  // Fail closed in production: MCP escalation and proxy endpoints rely on the
+  // session-token issuer to isolate pods from one another. Missing it would
+  // silently downgrade to user-token-only auth, which a containerised agent
+  // cannot present — effectively locking itself out or (worse) opening the
+  // door if a future refactor adds `auth: false`.
+  if (process.env.NODE_ENV === 'production' && !deps.sessionTokenIssuer) {
+    throw new Error(
+      'sessionTokenIssuer is required in production — refusing to start server without it',
+    );
+  }
+
   const app = Fastify({
     logger: {
       level: deps.logLevel ?? 'info',

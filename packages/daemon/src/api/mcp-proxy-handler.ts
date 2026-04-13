@@ -41,10 +41,12 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
   const { getServersForSession, contentProcessing, logger } = config;
   const log = logger.child({ component: 'mcp-proxy' });
 
-  // Proxy all methods (MCP uses POST for JSON-RPC, GET for SSE)
+  // Proxy all methods (MCP uses POST for JSON-RPC, GET for SSE).
+  // Requires the session-scoped HMAC token so a pod on session A cannot
+  // impersonate session B and abuse session B's injected MCP credentials.
   app.all(
     '/mcp-proxy/:serverName/:sessionId',
-    { config: { auth: false } },
+    { config: { auth: 'session-token' } },
     async (request, reply) => {
       const { serverName, sessionId } = request.params as { serverName: string; sessionId: string };
 

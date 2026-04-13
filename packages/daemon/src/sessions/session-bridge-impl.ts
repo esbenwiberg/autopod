@@ -419,9 +419,27 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       return memoryRepo.list(scope, scopeId, true);
     },
 
-    readMemory(_sessionId: string, id: string): MemoryEntry {
+    readMemory(sessionId: string, id: string): MemoryEntry {
       if (!memoryRepo) throw new Error('Memory store not available');
-      return memoryRepo.getOrThrow(id);
+      const entry = memoryRepo.getOrThrow(id);
+      // Enforce scope boundary — the caller session must be allowed to see this entry.
+      // Without this check, a pod could read any memory by ID, including another
+      // session's private session-scoped entries or unapproved pending suggestions.
+      const session = sessionManager.getSession(sessionId);
+      const expectedScopeId =
+        entry.scope === 'global'
+          ? null
+          : entry.scope === 'profile'
+            ? session.profileName
+            : sessionId;
+      if (entry.scopeId !== expectedScopeId) {
+        throw new Error(`Memory ${id} is not readable from this session`);
+      }
+      // Unapproved entries are only readable by the session that suggested them.
+      if (!entry.approved && entry.createdBySessionId !== sessionId) {
+        throw new Error(`Memory ${id} is pending approval`);
+      }
+      return entry;
     },
 
     searchMemories(sessionId: string, scope: MemoryScope, query: string): MemoryEntry[] {
@@ -434,6 +452,16 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
 
     suggestMemory(sessionId: string, scope: MemoryScope, path: string, content: string): string {
       if (!memoryRepo) throw new Error('Memory store not available');
+      // Rate-limit agent-sourced suggestions per session to curb approval-fatigue
+      // prompt-injection attacks on the global/profile memory pool.
+      if (scope !== 'session') {
+        const limit = consumeSuggestBudget(sessionId);
+        if (limit.denied) {
+          throw new Error(
+            `Memory suggestion rate limit exceeded (${SUGGEST_LIMIT_PER_WINDOW} per ${SUGGEST_WINDOW_MS / 60_000}m). Retry after ${limit.retryAfterSeconds}s.`,
+          );
+        }
+      }
       const session = sessionManager.getSession(sessionId);
       const scopeId =
         scope === 'global' ? null : scope === 'profile' ? session.profileName : sessionId;
@@ -465,4 +493,34 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       return entry.id;
     },
   };
+}
+
+// Per-session rate limit for non-session scope suggestions. In-memory only —
+// this is a defensive bound against a single session spamming the approval queue,
+// not a durable policy control.
+const SUGGEST_LIMIT_PER_WINDOW = 5;
+const SUGGEST_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const suggestBudget = new Map<string, { count: number; windowStart: number }>();
+
+function consumeSuggestBudget(sessionId: string): {
+  denied: boolean;
+  retryAfterSeconds: number;
+} {
+  const now = Date.now();
+  const entry = suggestBudget.get(sessionId);
+  if (!entry || now - entry.windowStart >= SUGGEST_WINDOW_MS) {
+    suggestBudget.set(sessionId, { count: 1, windowStart: now });
+    return { denied: false, retryAfterSeconds: 0 };
+  }
+  if (entry.count >= SUGGEST_LIMIT_PER_WINDOW) {
+    const retryAfterSeconds = Math.ceil((entry.windowStart + SUGGEST_WINDOW_MS - now) / 1000);
+    return { denied: true, retryAfterSeconds };
+  }
+  entry.count += 1;
+  return { denied: false, retryAfterSeconds: 0 };
+}
+
+/** Test-only: reset the per-session suggestion rate-limit window. */
+export function __resetSuggestBudgetForTests(): void {
+  suggestBudget.clear();
 }

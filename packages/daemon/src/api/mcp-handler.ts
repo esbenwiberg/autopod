@@ -39,12 +39,18 @@ export function mcpHandler(
   // never in an "already connected" state. The pendingRequests object is reused across
   // requests to preserve in-flight ask_human / report_blocker state.
   //
-  // When a sessionTokenIssuer is available the endpoint requires a session-scoped
-  // Bearer token (injected into the container environment during provisioning).
-  // This prevents any caller who knows a sessionId from invoking escalation tools
-  // for sessions they don't own.
-  const authConfig = sessionTokenIssuer ? 'session-token' : (false as const);
-  app.all('/mcp/:sessionId', { config: { auth: authConfig } }, async (request, reply) => {
+  // The endpoint always requires a session-scoped Bearer token (HMAC, injected into
+  // the container environment during provisioning). This prevents any caller who
+  // knows a sessionId from invoking escalation tools for sessions they don't own.
+  //
+  // If sessionTokenIssuer is absent, the auth plugin falls through to user-token
+  // verification — so requests still fail closed when neither credential is valid.
+  if (!sessionTokenIssuer) {
+    logger.warn(
+      'mcpHandler: sessionTokenIssuer not configured — /mcp/:sessionId will only accept user tokens',
+    );
+  }
+  app.all('/mcp/:sessionId', { config: { auth: 'session-token' } }, async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
 
     let pendingRequests: PendingRequests;

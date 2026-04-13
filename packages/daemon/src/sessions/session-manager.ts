@@ -1303,10 +1303,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           ? { Authorization: `Bearer ${mcpSessionToken}` }
           : undefined;
 
-        // Build MCP server list for runtime
+        // Build MCP server list for runtime.
+        // The session token authenticates BOTH the escalation endpoint and the
+        // proxied-MCP endpoints — without it a pod on another session could
+        // impersonate this session and abuse its injected MCP credentials.
         const mcpServers = [
           { name: 'escalation', url: mcpUrl, headers: escalationHeaders },
-          ...proxiedMcpServers.map((s) => ({ name: s.name, url: s.url, headers: s.headers })),
+          ...proxiedMcpServers.map((s) => ({
+            name: s.name,
+            url: s.url,
+            headers: escalationHeaders,
+          })),
         ];
 
         // Build provider-aware env (API keys, OAuth creds, Foundry config)
