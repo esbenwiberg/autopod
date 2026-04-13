@@ -199,6 +199,15 @@ export class AciContainerManager implements ContainerManager {
     return Buffer.from(result.stdout.trim(), 'base64').toString('utf-8');
   }
 
+  async extractDirectoryFromContainer(
+    _containerId: string,
+    _containerPath: string,
+    _hostPath: string,
+  ): Promise<void> {
+    // ACI doesn't expose a Docker-style archive API — offline directory extraction is not supported
+    throw new Error('extractDirectoryFromContainer is not supported for ACI containers');
+  }
+
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
     try {
       const group = await this.client.containerGroups.get(this.config.resourceGroup, containerId);

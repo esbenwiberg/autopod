@@ -794,17 +794,40 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
    * The worktree is bind-mounted at /mnt/worktree while the agent works on the
    * container's native /workspace (overlayfs) — this avoids VirtioFS getcwd() bugs
    * on Docker Desktop for Mac. We sync back before any host-side git operations.
+   *
+   * If the container is already stopped (user disconnected before sync ran), falls
+   * back to Docker's archive API which reads the container filesystem offline.
    */
-  async function syncWorkspaceBack(containerId: string, cm: ContainerManager): Promise<void> {
-    await cm.execInContainer(
-      containerId,
-      [
-        'sh',
-        '-c',
-        'find /mnt/worktree -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -a /workspace/. /mnt/worktree/',
-      ],
-      { timeout: 120_000 },
-    );
+  async function syncWorkspaceBack(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+  ): Promise<void> {
+    try {
+      await cm.execInContainer(
+        containerId,
+        [
+          'sh',
+          '-c',
+          'find /mnt/worktree -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -a /workspace/. /mnt/worktree/',
+        ],
+        { timeout: 120_000 },
+      );
+    } catch (err) {
+      // Container may have already exited before we could exec into it.
+      // Docker returns 409 for exec on a stopped container. In that case, fall back to
+      // extracting /workspace directly from the container's filesystem via the archive API,
+      // which works on stopped (but not yet removed) containers.
+      const isContainerNotRunning =
+        (err && typeof err === 'object' && 'statusCode' in err &&
+          (err as { statusCode: number }).statusCode === 409) ||
+        (err instanceof Error && err.message.includes('is not running'));
+      if (isContainerNotRunning) {
+        await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath);
+      } else {
+        throw err;
+      }
+    }
   }
 
   // Injects provider credentials into a running container without exposing the token.
@@ -1917,7 +1940,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       if (session.containerId && session.worktreePath) {
         try {
           const cm = containerManagerFactory.get(session.executionTarget);
-          await syncWorkspaceBack(session.containerId, cm);
+          await syncWorkspaceBack(session.containerId, session.worktreePath, cm);
         } catch (err) {
           syncSucceeded = false;
           logger.warn({ err, sessionId }, 'Failed to sync workspace back to host');
@@ -2485,7 +2508,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       if (session.containerId && session.worktreePath) {
         try {
           const cm = containerManagerFactory.get(session.executionTarget);
-          await syncWorkspaceBack(session.containerId, cm);
+          await syncWorkspaceBack(session.containerId, session.worktreePath, cm);
         } catch (err) {
           workspaceSyncOk = false;
           logger.warn({ err, sessionId }, 'Failed to sync workspace before push');
@@ -2690,10 +2713,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         // Sync workspace back before reading diff/commit log from host worktree
-        if (session.worktreePath) {
+        if (session.containerId && session.worktreePath) {
           try {
             const cm = containerManagerFactory.get(session.executionTarget);
-            await syncWorkspaceBack(session.containerId, cm);
+            await syncWorkspaceBack(session.containerId, session.worktreePath, cm);
           } catch (err) {
             logger.warn({ err, sessionId }, 'Failed to sync workspace before validation');
           }
@@ -2796,10 +2819,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         }
 
         // Sync workspace after validation — screenshots and build artifacts are now in /workspace
-        if (session.worktreePath) {
+        if (session.containerId && session.worktreePath) {
           try {
             const cm = containerManagerFactory.get(session.executionTarget);
-            await syncWorkspaceBack(session.containerId, cm);
+            await syncWorkspaceBack(session.containerId, session.worktreePath, cm);
           } catch (err) {
             logger.warn({ err, sessionId }, 'Failed to sync workspace after validation');
           }

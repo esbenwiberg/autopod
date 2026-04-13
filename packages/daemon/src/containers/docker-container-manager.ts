@@ -1,3 +1,5 @@
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
@@ -245,6 +247,62 @@ export class DockerContainerManager implements ContainerManager {
       });
       extract.on('error', reject);
 
+      (archiveStream as NodeJS.ReadableStream).pipe(extract);
+    });
+  }
+
+  async extractDirectoryFromContainer(
+    containerId: string,
+    containerPath: string,
+    hostPath: string,
+  ): Promise<void> {
+    const container = this.docker.getContainer(containerId);
+    // getArchive works on stopped containers — safe to call after container exits
+    const archiveStream = await container.getArchive({ path: containerPath });
+
+    // Clear host directory contents before extracting (mirrors exec-based sync behaviour)
+    for (const entry of readdirSync(hostPath)) {
+      rmSync(join(hostPath, entry), { recursive: true, force: true });
+    }
+
+    // Tar entries are prefixed with the basename of containerPath (e.g. "workspace/")
+    const prefix = basename(containerPath) + '/';
+    const extract = tar.extract();
+
+    return new Promise<void>((resolve, reject) => {
+      extract.on('entry', (header, stream, next) => {
+        const rel = header.name.startsWith(prefix) ? header.name.slice(prefix.length) : header.name;
+
+        if (!rel) {
+          // Root directory entry itself — skip
+          stream.resume();
+          stream.on('end', next);
+          return;
+        }
+
+        const fullPath = join(hostPath, rel);
+
+        if (header.type === 'directory') {
+          mkdirSync(fullPath, { recursive: true });
+          stream.resume();
+          stream.on('end', next);
+        } else {
+          mkdirSync(dirname(fullPath), { recursive: true });
+          const chunks: Buffer[] = [];
+          stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+          stream.on('end', () => {
+            try {
+              writeFileSync(fullPath, Buffer.concat(chunks));
+              next();
+            } catch (err) {
+              reject(err);
+            }
+          });
+          stream.on('error', reject);
+        }
+      });
+      extract.on('finish', resolve);
+      extract.on('error', reject);
       (archiveStream as NodeJS.ReadableStream).pipe(extract);
     });
   }

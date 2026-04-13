@@ -45,6 +45,15 @@ export interface ContainerManager {
   start(containerId: string): Promise<void>;
   writeFile(containerId: string, path: string, content: string): Promise<void>;
   readFile(containerId: string, path: string): Promise<string>;
+  /**
+   * Extract a directory from a container (works on stopped containers) to a host path.
+   * Clears the host directory contents first, then extracts the container directory.
+   */
+  extractDirectoryFromContainer(
+    containerId: string,
+    containerPath: string,
+    hostPath: string,
+  ): Promise<void>;
   getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'>;
   execInContainer(
     containerId: string,
