@@ -23,6 +23,8 @@ export interface ExecResult {
 export interface ExecOptions {
   cwd?: string;
   timeout?: number;
+  /** Run the command as this user inside the container (e.g. 'root'). */
+  user?: string;
 }
 
 export interface StreamingExecResult {

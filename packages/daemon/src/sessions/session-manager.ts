@@ -808,8 +808,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   }
 
   // Injects provider credentials into a running container without exposing the token.
-  // Reads the PAT from the profile, writes it to a temp file, runs the auth command,
-  // then deletes the file. Returns a human-readable auth status message.
+  //
+  // Strategy:
+  //   1. Always wire up git credential.helper — covers `git push/pull/fetch/clone` (90% of use cases).
+  //      This is the must-have and almost always succeeds.
+  //   2. Best-effort install + authenticate the CLI tool (gh / az). If it fails, we log a warning
+  //      and still return success, because git operations work without it. Users who need the CLI
+  //      can install it manually inside the container.
+  //
+  // Returns a human-readable status describing what worked.
   async function performCredentialInjection(
     sessionId: string,
     service: 'github' | 'ado',
@@ -831,47 +838,151 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
     }
 
     const cm = containerManagerFactory.get(session.executionTarget);
+    const containerId = session.containerId;
     const tmpFile = `/tmp/.autopod_cred_${generateId(8)}`;
 
-    await cm.writeFile(session.containerId, tmpFile, `${pat}\n`);
+    await cm.writeFile(containerId, tmpFile, `${pat}\n`);
 
     try {
+      // ── STEP 1: Always set up git credentials (the must-have) ────────────────
+      const gitHost = service === 'github' ? 'github.com' : 'dev.azure.com';
+      const gitUser = service === 'github' ? 'x-access-token' : 'oauth2';
+      const gitSetup = await cm.execInContainer(
+        containerId,
+        [
+          'sh',
+          '-c',
+          `git config --global credential.helper store && ` +
+            `printf 'https://${gitUser}:%s@${gitHost}\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
+            `chmod 600 ~/.git-credentials`,
+        ],
+        { timeout: 15_000 },
+      );
+      if (gitSetup.exitCode !== 0) {
+        throw new AutopodError(
+          `Failed to write git credentials (exit ${gitSetup.exitCode}): ${gitSetup.stderr.slice(0, 300)}`,
+          'AUTH_FAILED',
+          500,
+        );
+      }
+
+      // ── STEP 2: Best-effort CLI install + auth ───────────────────────────────
+      const cliStatus = await tryInstallAndAuthCli(cm, containerId, service, tmpFile, sessionId);
+
+      return service === 'github'
+        ? `Authenticated to github.com. git is configured.${cliStatus}`
+        : `Authenticated to dev.azure.com. git is configured.${cliStatus}`;
+    } finally {
+      // Always remove the temp credential file, even on success
+      await cm.execInContainer(containerId, ['rm', '-f', tmpFile]).catch(() => {});
+    }
+  }
+
+  // Best-effort: install the CLI if missing, authenticate it. Returns a status suffix
+  // describing what happened. NEVER throws — failures here are logged and reported in the
+  // returned string, not propagated, because git credentials (which already succeeded) are
+  // sufficient for most workflows.
+  async function tryInstallAndAuthCli(
+    cm: ContainerManager,
+    containerId: string,
+    service: 'github' | 'ado',
+    tmpFile: string,
+    sessionId: string,
+  ): Promise<string> {
+    const tool = service === 'github' ? 'gh' : 'az';
+
+    try {
+      // Check if the tool is already present
+      const check = await cm.execInContainer(containerId, ['sh', '-c', `command -v ${tool}`]);
+      if (check.exitCode !== 0) {
+        // Install it
+        if (service === 'github') {
+          await installGhBinary(cm, containerId, sessionId);
+        } else {
+          await installAzViaPip(cm, containerId, sessionId);
+        }
+      }
+
+      // Authenticate
       if (service === 'github') {
-        const result = await cm.execInContainer(
-          session.containerId,
-          [
-            'sh',
-            '-c',
-            `command -v gh > /dev/null 2>&1 && gh auth login --with-token < ${tmpFile}; ` +
-              `git config --global credential.helper store && ` +
-              `printf 'https://x-access-token:%s@github.com\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
-              `chmod 600 ~/.git-credentials && rm -f ${tmpFile}`,
-          ],
+        const ghAuth = await cm.execInContainer(
+          containerId,
+          ['sh', '-c', `gh auth login --with-token < ${tmpFile}`],
           { timeout: 30_000 },
         );
-        return result.exitCode === 0
-          ? 'Authenticated to github.com. git and gh (if installed) are now configured.'
-          : `Authentication partially failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`;
+        if (ghAuth.exitCode !== 0) {
+          throw new Error(`gh auth login failed (exit ${ghAuth.exitCode}): ${ghAuth.stderr.slice(0, 200)}`);
+        }
+        return ' gh CLI is authenticated.';
       } else {
-        const result = await cm.execInContainer(
-          session.containerId,
-          [
-            'sh',
-            '-c',
-            `command -v az > /dev/null 2>&1 && az devops login --token "$(cat ${tmpFile})"; ` +
-              `git config --global credential.helper store && ` +
-              `printf 'https://oauth2:%s@dev.azure.com\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
-              `chmod 600 ~/.git-credentials && rm -f ${tmpFile}`,
-          ],
-          { timeout: 30_000 },
+        const azAuth = await cm.execInContainer(
+          containerId,
+          ['sh', '-c', `az devops login --token "$(cat ${tmpFile})"`],
+          { timeout: 60_000 },
         );
-        return result.exitCode === 0
-          ? 'Authenticated to dev.azure.com. git and az devops (if installed) are now configured.'
-          : `Authentication partially failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`;
+        if (azAuth.exitCode !== 0) {
+          throw new Error(`az devops login failed (exit ${azAuth.exitCode}): ${azAuth.stderr.slice(0, 200)}`);
+        }
+        return ' az CLI is authenticated.';
       }
     } catch (err) {
-      await cm.execInContainer(session.containerId, ['rm', '-f', tmpFile]).catch(() => {});
-      throw err;
+      logger.warn(
+        { err, sessionId, tool },
+        'CLI install/auth failed — git credentials are still configured and most workflows will work',
+      );
+      return ` (${tool} CLI install/auth failed — only git access configured; install ${tool} manually inside the container if needed)`;
+    }
+  }
+
+  // Download the gh CLI binary from GitHub releases. No apt, no GPG keys —
+  // it's a single Go binary. Throws on failure.
+  async function installGhBinary(cm: ContainerManager, containerId: string, sessionId: string): Promise<void> {
+    logger.info({ sessionId, containerId }, 'Installing gh CLI from github.com/cli/cli/releases');
+    const result = await cm.execInContainer(
+      containerId,
+      [
+        'sh',
+        '-c',
+        [
+          'ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/")',
+          'VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest' +
+            ' | node -e "let d=\'\';process.stdin.on(\'data\',c=>d+=c);process.stdin.on(\'end\',()=>console.log(JSON.parse(d).tag_name.slice(1)))")',
+          'curl -fsSL "https://github.com/cli/cli/releases/download/v${VERSION}/gh_${VERSION}_linux_${ARCH}.tar.gz" | tar xz -C /tmp',
+          'mv /tmp/gh_${VERSION}_linux_${ARCH}/bin/gh /usr/local/bin/gh',
+          'chmod +x /usr/local/bin/gh',
+        ].join(' && '),
+      ],
+      { timeout: 120_000, user: 'root' },
+    );
+    if (result.exitCode !== 0) {
+      const detail = (result.stdout + result.stderr).slice(-300).trimStart();
+      throw new Error(`gh binary install failed (exit ${result.exitCode}): ${detail}`);
+    }
+  }
+
+  // Install az CLI via pip. Uses get-pip.py because Debian/Ubuntu strip ensurepip from python3
+  // (you'd normally need apt-get install python3-pip, but apt is broken on ARM Noble).
+  // Throws on failure.
+  async function installAzViaPip(cm: ContainerManager, containerId: string, sessionId: string): Promise<void> {
+    logger.info({ sessionId, containerId }, 'Installing az CLI via pip (bootstrap.pypa.io get-pip.py)');
+    const result = await cm.execInContainer(
+      containerId,
+      [
+        'sh',
+        '-c',
+        [
+          // Bootstrap pip using get-pip.py — the canonical workaround when ensurepip is stripped
+          'curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py',
+          'python3 /tmp/get-pip.py --quiet --break-system-packages 2>&1',
+          // Now install azure-cli
+          'python3 -m pip install --quiet --break-system-packages azure-cli 2>&1',
+        ].join(' && '),
+      ],
+      { timeout: 300_000, user: 'root' },
+    );
+    if (result.exitCode !== 0) {
+      const detail = (result.stdout + result.stderr).slice(-300).trimStart();
+      throw new Error(`pip install azure-cli failed (exit ${result.exitCode}): ${detail}`);
     }
   }
 
@@ -1228,9 +1339,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         if (session.outputMode === 'workspace') {
           // Write provider credential files + Claude config (disclaimer ack, folder trust) so
           // interactive Claude Code in the terminal doesn't show onboarding/disclaimer/trust prompts.
-          const wsProviderResult = await buildProviderEnv(profile, sessionId, logger);
-          for (const file of wsProviderResult.containerFiles) {
-            await containerManager.writeFile(containerId, file.path, file.content);
+          // Best-effort — missing/expired credentials are fine for workspace pods since the user
+          // can authenticate manually via `ap inject` after attaching.
+          try {
+            const wsProviderResult = await buildProviderEnv(profile, sessionId, logger);
+            for (const file of wsProviderResult.containerFiles) {
+              await containerManager.writeFile(containerId, file.path, file.content);
+            }
+          } catch (err) {
+            logger.warn(
+              { err, sessionId },
+              'Could not write provider credentials to workspace container — user will need to authenticate manually',
+            );
           }
           // Capture starting HEAD so the diff endpoint only shows workspace changes,
           // not the entire branch history since it diverged from main.
@@ -3618,6 +3738,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     async injectCredential(sessionId: string, service: 'github' | 'ado'): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
+      if (session.status !== 'running') {
+        throw new AutopodError(
+          `Session ${sessionId} is ${session.status} — can only inject credentials into running sessions.`,
+          'INVALID_STATE',
+          409,
+        );
+      }
       if (!session.containerId) {
         throw new AutopodError(`Session ${sessionId} has no running container`, 'INVALID_STATE', 409);
       }

@@ -210,7 +210,7 @@ export function sessionRoutes(
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);
-        return { error: err.message };
+        return { message: err.message, code: err.code };
       }
       throw err;
     }

@@ -271,6 +271,7 @@ export class DockerContainerManager implements ContainerManager {
       AttachStdout: true,
       AttachStderr: true,
       ...(options?.cwd ? { WorkingDir: options.cwd } : {}),
+      ...(options?.user ? { User: options.user } : {}),
     };
 
     const exec = await container.exec(execCreateOptions);

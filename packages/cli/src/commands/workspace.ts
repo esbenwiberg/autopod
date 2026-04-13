@@ -136,9 +136,33 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       const client = getClient();
       const resolvedId = await resolveSessionId(client, id);
 
-      await withSpinner(`Injecting ${service} credentials…`, () =>
-        client.injectCredential(resolvedId, service as 'github' | 'ado'),
-      );
+      // Wait up to 60s for the container to reach 'running' before injecting
+      const WAIT_TIMEOUT_MS = 60_000;
+      const POLL_INTERVAL_MS = 1_500;
+      const deadline = Date.now() + WAIT_TIMEOUT_MS;
+
+      await withSpinner(`Injecting ${service} credentials…`, async () => {
+        while (true) {
+          const session = await client.getSession(resolvedId);
+          if (session.status === 'running') break;
+
+          const terminalStates = ['complete', 'killed', 'failed'];
+          if (terminalStates.includes(session.status)) {
+            const err = new Error(`Session ${resolvedId.slice(0, 8)} is ${session.status} — cannot inject credentials.`);
+            throw err;
+          }
+
+          if (Date.now() >= deadline) {
+            throw new Error(
+              `Session ${resolvedId.slice(0, 8)} is still ${session.status} after ${WAIT_TIMEOUT_MS / 1000}s — container may have failed to start.`,
+            );
+          }
+
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        }
+
+        await client.injectCredential(resolvedId, service as 'github' | 'ado');
+      });
 
       console.log(chalk.green(`Done. ${service} credentials injected into session ${resolvedId.slice(0, 8)}.`));
       console.log(chalk.dim('git and CLI tools are now authenticated. Credentials are gone when the container stops.'));
