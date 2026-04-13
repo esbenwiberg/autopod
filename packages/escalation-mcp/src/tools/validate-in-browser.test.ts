@@ -329,6 +329,36 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
     expect(prompt).toContain('http://127.0.0.1:45678');
   });
 
+  it('falls back to container when host execution produces no result markers (e.g. ERR_CONNECTION_REFUSED)', async () => {
+    const containerOutput = `__AUTOPOD_BROWSER_RESULTS_START__
+[{ "check": "x", "passed": true, "reasoning": "ok from container" }]
+__AUTOPOD_BROWSER_RESULTS_END__`;
+
+    const bridge = makeBridge(containerOutput);
+    bridge.getPreviewUrl.mockReturnValue('http://127.0.0.1:45678');
+    bridge.getHostScreenshotDir.mockReturnValue('/tmp/screenshots');
+    // Host runner returns a result but stdout has no markers (script crashed on connection refused)
+    bridge.runBrowserOnHost.mockResolvedValue({
+      stdout: 'page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:45678/',
+      stderr: '',
+      exitCode: 1,
+    });
+
+    const result = await validateInBrowser(
+      'sess-1',
+      { url: 'http://localhost:3000', checks: ['x'] },
+      bridge as never,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.passed).toBe(true);
+    expect(parsed.results[0].reasoning).toBe('ok from container');
+
+    // Should have fallen back to container
+    expect(bridge.writeFileInContainer).toHaveBeenCalled();
+    expect(bridge.execInContainer).toHaveBeenCalled();
+  });
+
   it('falls back to container when host browser returns null', async () => {
     const scriptOutput = `__AUTOPOD_BROWSER_RESULTS_START__
 [{ "check": "x", "passed": true, "reasoning": "ok" }]

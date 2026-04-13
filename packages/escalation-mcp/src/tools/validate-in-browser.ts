@@ -80,6 +80,13 @@ async function tryHostExecution(
   const execResult = await bridge.runBrowserOnHost(sessionId, script, timeout);
   if (!execResult) return null;
 
+  // If the script crashed before writing result markers (e.g. ERR_CONNECTION_REFUSED on the
+  // host-side port binding), fall back to in-container execution rather than reporting all
+  // checks as failed.
+  const hasMarkers =
+    execResult.stdout.includes(START_MARKER) && execResult.stdout.includes(END_MARKER);
+  if (!hasMarkers) return null;
+
   const results = parseResults(execResult.stdout, input.checks);
 
   // Collect screenshots from host filesystem

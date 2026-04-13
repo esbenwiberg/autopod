@@ -124,9 +124,18 @@ export function createLocalValidationEngine(
     ): Promise<ValidationResult> {
       const startTime = Date.now();
 
+      // Secondary abort controller fired when the stability monitor detects a crash.
+      const crashController = new AbortController();
+
       function checkAbort(): void {
         if (signal?.aborted) throw new ValidationInterruptedError('Validation interrupted by user');
+        if (crashController.signal.aborted)
+          throw new ValidationInterruptedError(
+            'App crashed after passing health check — unreachable during validation',
+          );
       }
+
+      let stopMonitor: (() => void) | undefined;
 
       try {
         // ── Phase 1: Build ──────────────────────────────────────────────
@@ -155,6 +164,22 @@ export function createLocalValidationEngine(
                 responseCode: null,
                 duration: 0,
               };
+
+        // After health passes, watch for post-startup crashes in the background.
+        // If the app goes down during smoke/AC phases, abort validation with a
+        // clear "app crashed" message rather than a cryptic ERR_CONNECTION_REFUSED.
+        if (healthResult.status === 'pass' && config.startCommand) {
+          stopMonitor = startAppStabilityMonitor(
+            config.previewUrl + config.healthPath,
+            () => {
+              log?.warn(
+                { sessionId: config.sessionId, url: config.previewUrl + config.healthPath },
+                'App became unreachable after health check passed — aborting validation',
+              );
+              crashController.abort();
+            },
+          );
+        }
 
         // ── Phase 4: Page validation ─────────────────────────────────────
         checkAbort();
@@ -236,10 +261,13 @@ export function createLocalValidationEngine(
         };
       } catch (err) {
         if (err instanceof ValidationInterruptedError) {
-          log?.info({ sessionId: config.sessionId }, 'Validation interrupted by user');
-          return makeInterruptedResult(config, startTime);
+          const reason = crashController.signal.aborted ? 'app-crashed' : 'user';
+          log?.info({ sessionId: config.sessionId, reason }, 'Validation interrupted');
+          return makeInterruptedResult(config, startTime, err.message);
         }
         throw err;
+      } finally {
+        stopMonitor?.();
       }
     },
   };
@@ -249,6 +277,7 @@ export function createLocalValidationEngine(
 function makeInterruptedResult(
   config: ValidationEngineConfig,
   startTime: number,
+  reason = 'Validation interrupted by user',
 ): ValidationResult {
   return {
     sessionId: config.sessionId,
@@ -268,9 +297,53 @@ function makeInterruptedResult(
     test: { status: 'skip', duration: 0 },
     acValidation: null,
     taskReview: null,
-    reviewSkipReason: 'Validation interrupted by user',
+    reviewSkipReason: reason,
     overall: 'fail',
     duration: Date.now() - startTime,
+  };
+}
+
+/**
+ * Poll the health URL every 5 seconds after the app passes its initial health check.
+ * If the app becomes unreachable (2 consecutive failures), fires `onCrash` once.
+ * Returns a stop function — call it when validation finishes.
+ */
+function startAppStabilityMonitor(url: string, onCrash: () => void): () => void {
+  let stopped = false;
+  let consecutiveFailures = 0;
+  const POLL_INTERVAL_MS = 5_000;
+  const FAILURE_THRESHOLD = 2;
+
+  const poll = async () => {
+    // Initial delay — give the app a moment to settle after health check
+    await sleep(POLL_INTERVAL_MS);
+
+    while (!stopped) {
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+        if (response.status >= 200 && response.status < 300) {
+          consecutiveFailures = 0;
+        } else {
+          consecutiveFailures++;
+        }
+      } catch {
+        consecutiveFailures++;
+      }
+
+      if (consecutiveFailures >= FAILURE_THRESHOLD) {
+        if (!stopped) onCrash();
+        break;
+      }
+
+      await sleep(POLL_INTERVAL_MS);
+    }
+  };
+
+  // Fire-and-forget — errors are intentionally swallowed (onCrash handles them)
+  poll().catch(() => {});
+
+  return () => {
+    stopped = true;
   };
 }
 
@@ -719,30 +792,22 @@ Respond ONLY with the JSON array, no markdown fences or extra text.`;
   }
 }
 
-/** Executor LLM generates and runs a Playwright script from instructions. */
-async function executeAcChecks(
-  containerManager: ContainerManager,
-  config: ValidationEngineConfig,
+function buildAcScriptPrompt(
   instructions: Array<{ criterion: string; instruction: string }>,
-  log?: Logger,
-  hostBrowserRunner?: HostBrowserRunner,
-): Promise<AcCheckResult[]> {
-  const useHost = hostBrowserRunner && (await hostBrowserRunner.isAvailable());
-  const baseUrl = useHost ? config.previewUrl : (config.containerBaseUrl ?? config.previewUrl);
-  const screenshotDir = useHost
-    ? `${hostBrowserRunner.screenshotDir(config.sessionId)}/ac`
-    : '/tmp/autopod-ac-screenshots';
-
+  baseUrl: string,
+  screenshotDir: string,
+  mode: 'host' | 'container',
+): string {
   const instructionList = instructions
     .map((inst, i) => `Check ${i + 1}: "${inst.criterion}"\nInstruction: ${inst.instruction}`)
     .join('\n\n');
 
-  // When running on host, use standard ESM import; in container, use createRequire for NODE_PATH
-  const importLine = useHost
-    ? `import { chromium } from 'playwright';`
-    : `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { chromium } = require('playwright');`;
+  const importLine =
+    mode === 'host'
+      ? `import { chromium } from 'playwright';`
+      : `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { chromium } = require('playwright');`;
 
-  const prompt = `You are a browser automation expert. Generate a Playwright script (ESM, using @playwright/test's chromium) that executes the following validation checks against a running web application.
+  return `You are a browser automation expert. Generate a Playwright script (ESM, using @playwright/test's chromium) that executes the following validation checks against a running web application.
 
 Base URL: ${baseUrl}
 Screenshot directory: ${screenshotDir}
@@ -751,7 +816,7 @@ Checks to perform:
 ${instructionList}
 
 Requirements:
-- Use \`${importLine}\` (${useHost ? 'standard ESM import' : 'ESM import ignores NODE_PATH, so use createRequire for CJS resolution'})
+- Use \`${importLine}\` (${mode === 'host' ? 'standard ESM import' : 'ESM import ignores NODE_PATH, so use createRequire for CJS resolution'})
 - Launch chromium with \`{ headless: true, args: ['--no-sandbox'] }\`
 - Create browser context with \`{ locale: 'en-US' }\` to avoid locale issues
 - For each check: navigate to the appropriate URL with \`{ waitUntil: 'domcontentloaded' }\`, then \`await page.waitForTimeout(2000)\` for JS rendering, perform the validation, take a screenshot
@@ -767,33 +832,66 @@ Requirements:
 - Use a 15 second timeout for each navigation
 
 Respond ONLY with the script code. No markdown fences, no explanation.`;
+}
 
-  try {
-    const reviewTimeout = config.reviewTimeout ?? 300_000;
-    const { stdout: scriptCode } = await runClaudeCli({
+/** Executor LLM generates and runs a Playwright script from instructions. */
+async function executeAcChecks(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  instructions: Array<{ criterion: string; instruction: string }>,
+  log?: Logger,
+  hostBrowserRunner?: HostBrowserRunner,
+): Promise<AcCheckResult[]> {
+  const useHost = hostBrowserRunner && (await hostBrowserRunner.isAvailable());
+  const reviewTimeout = config.reviewTimeout ?? 300_000;
+  const execTimeout = instructions.length * 45_000 + 30_000;
+
+  async function generateScript(mode: 'host' | 'container'): Promise<string> {
+    const baseUrl =
+      mode === 'host' ? config.previewUrl : (config.containerBaseUrl ?? config.previewUrl);
+    const screenshotDir =
+      mode === 'host'
+        ? `${hostBrowserRunner!.screenshotDir(config.sessionId)}/ac`
+        : '/tmp/autopod-ac-screenshots';
+    const prompt = buildAcScriptPrompt(instructions, baseUrl, screenshotDir, mode);
+    const { stdout } = await runClaudeCli({
       model: config.reviewerModel ?? 'sonnet',
       input: prompt,
       timeout: reviewTimeout,
     });
+    return stripMarkdownFences(stdout.trim());
+  }
 
-    const cleanScript = stripMarkdownFences(scriptCode.trim());
-    const execTimeout = instructions.length * 45_000 + 30_000;
-
+  try {
     if (useHost) {
-      return await executeAcOnHost(
+      const hostScript = await generateScript('host');
+      const hostResult = await executeAcOnHost(
         hostBrowserRunner,
         config,
-        cleanScript,
+        hostScript,
+        instructions,
+        execTimeout,
+        log,
+      );
+      if (hostResult !== null) return hostResult;
+      // Host Playwright produced no markers — fall back to container with a freshly generated script
+      log?.warn({ sessionId: config.sessionId }, 'Host AC checks failed — falling back to container');
+      const containerScript = await generateScript('container');
+      return await executeAcInContainer(
+        containerManager,
+        config,
+        containerScript,
         instructions,
         execTimeout,
         log,
       );
     }
 
+    const containerScript = await generateScript('container');
     return await executeAcInContainer(
       containerManager,
       config,
-      cleanScript,
+      containerScript,
       instructions,
       execTimeout,
       log,
@@ -815,13 +913,26 @@ async function executeAcOnHost(
   instructions: Array<{ criterion: string; instruction: string }>,
   timeout: number,
   log?: Logger,
-): Promise<AcCheckResult[]> {
+): Promise<AcCheckResult[] | null> {
   const screenshotDir = `${hostBrowserRunner.screenshotDir(config.sessionId)}/ac`;
 
   const result = await hostBrowserRunner.runScript(script, {
     timeout,
     sessionId: config.sessionId,
   });
+
+  // If the script crashed before writing markers (e.g. Chromium couldn't reach the host port),
+  // return null so the caller can fall back to container execution.
+  const hasMarkers =
+    result.stdout.includes('__AUTOPOD_AC_RESULTS_START__') &&
+    result.stdout.includes('__AUTOPOD_AC_RESULTS_END__');
+  if (!hasMarkers) {
+    log?.warn(
+      { sessionId: config.sessionId, stderr: result.stderr.slice(0, 500) },
+      'Host AC browser script produced no result markers — falling back to container',
+    );
+    return null;
+  }
 
   const parsed = parseAcResults(result.stdout, instructions);
 
