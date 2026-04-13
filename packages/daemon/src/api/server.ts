@@ -21,6 +21,7 @@ import type {
 } from '../sessions/index.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
+import { mcpProxyHandler } from './mcp-proxy-handler.js';
 import { authPlugin } from './plugins/auth.js';
 import { corsPlugin } from './plugins/cors.js';
 import { rateLimitPlugin } from './plugins/rate-limit.js';
@@ -152,6 +153,14 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     app.log as unknown as import('pino').Logger,
     deps.sessionTokenIssuer,
   );
+
+  // MCP proxy handler — forwards agent requests to injected profile MCP servers,
+  // stamping the real auth headers server-side so the agent never sees them.
+  // Auth is enforced at the route level (session-token, matches path sessionId).
+  mcpProxyHandler(app, {
+    getServersForSession: (sessionId) => deps.sessionManager.getInjectedMcpServers(sessionId),
+    logger: app.log as unknown as import('pino').Logger,
+  });
 
   return app;
 }

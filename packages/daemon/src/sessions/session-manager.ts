@@ -325,6 +325,13 @@ export interface SessionManager {
   getSessionStats(filters?: { profileName?: string }): SessionStats;
   getValidationHistory(sessionId: string): import('./validation-repository.js').StoredValidation[];
   /**
+   * Resolve the *real* injected MCP server configs for a session — daemon-wide
+   * defaults merged with the session profile's servers, with original URLs and
+   * auth headers preserved. Consumed by the MCP proxy handler to forward
+   * requests on the agent's behalf.
+   */
+  getInjectedMcpServers(sessionId: string): InjectedMcpServer[];
+  /**
    * Re-apply network policy to all running local containers using the given profile.
    * Called after a profile's networkPolicy is updated via the API.
    * Fire-and-forget safe — errors are logged but do not propagate.
@@ -3387,6 +3394,12 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     getSession(sessionId: string): Session {
       return sessionRepo.getOrThrow(sessionId);
+    },
+
+    getInjectedMcpServers(sessionId: string): InjectedMcpServer[] {
+      const session = sessionRepo.getOrThrow(sessionId);
+      const profile = profileStore.get(session.profileName);
+      return mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
     },
 
     listSessions(filters?) {
