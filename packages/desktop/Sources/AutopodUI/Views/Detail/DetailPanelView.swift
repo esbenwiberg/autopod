@@ -90,32 +90,8 @@ public struct DetailPanelView: View {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
             requestedTab = nil
         }
-        .alert("Reject session", isPresented: $showRejectFeedback) {
-            TextField("What needs to change?", text: $rejectFeedbackText)
-            Button("Reject", role: .destructive) {
-                let feedback = rejectFeedbackText.isEmpty ? nil : rejectFeedbackText
-                rejectFeedbackText = ""
-                Task { await actions.reject(session.id, feedback) }
-            }
-            Button("Cancel", role: .cancel) {
-                rejectFeedbackText = ""
-            }
-        } message: {
-            Text("Tell the agent what to fix. Leave blank for a generic rejection.")
-        }
-        .alert("Nudge agent", isPresented: $showNudgeInput) {
-            TextField("Message for the agent…", text: $nudgeInputText)
-            Button("Send") {
-                let message = nudgeInputText.isEmpty ? "Please refocus on the task." : nudgeInputText
-                nudgeInputText = ""
-                Task { await actions.nudge(session.id, message) }
-            }
-            Button("Cancel", role: .cancel) {
-                nudgeInputText = ""
-            }
-        } message: {
-            Text("Send a message to redirect the agent. Leave blank for a default nudge.")
-        }
+        .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
+        .sheet(isPresented: $showNudgeInput) { nudgeSheet }
         .alert("Resume session", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
             Button("Resume") {
@@ -340,6 +316,79 @@ public struct DetailPanelView: View {
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
+
+    private var nudgeSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Nudge agent")
+                .font(.headline)
+            Text("Send a message to redirect the agent. Leave blank for a default nudge.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $nudgeInputText)
+                .font(.body)
+                .frame(minHeight: 80)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                )
+            HStack {
+                Button("Cancel") {
+                    nudgeInputText = ""
+                    showNudgeInput = false
+                }
+                Spacer()
+                Button("Send") {
+                    let message = nudgeInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? "Please refocus on the task."
+                        : nudgeInputText
+                    nudgeInputText = ""
+                    showNudgeInput = false
+                    Task { await actions.nudge(session.id, message) }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 380)
+    }
+
+    private var rejectFeedbackSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Reject session")
+                .font(.headline)
+            Text("Tell the agent what to fix. Leave blank for a generic rejection.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $rejectFeedbackText)
+                .font(.body)
+                .frame(minHeight: 80)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                )
+            HStack {
+                Button("Cancel") {
+                    rejectFeedbackText = ""
+                    showRejectFeedback = false
+                }
+                Spacer()
+                Button("Reject") {
+                    let feedback = rejectFeedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? nil
+                        : rejectFeedbackText
+                    rejectFeedbackText = ""
+                    showRejectFeedback = false
+                    Task { await actions.reject(session.id, feedback) }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 380)
+    }
 
     private var forkButton: some View {
         Button {
