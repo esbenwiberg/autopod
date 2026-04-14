@@ -9,6 +9,7 @@ import type { ActionRegistry } from '../actions/action-registry.js';
 import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
+import type { IssueWatcherRepository } from '../issue-watcher/issue-watcher-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type {
   ContainerManagerFactory,
@@ -31,6 +32,7 @@ import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
+import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryRoutes } from './routes/memory.js';
 import { profileRoutes } from './routes/profiles.js';
 import { sessionRoutes } from './routes/sessions.js';
@@ -56,6 +58,7 @@ export interface ServerDependencies {
   sessionTokenIssuer?: SessionTokenIssuer;
   memoryRepo?: MemoryRepository;
   pendingOverrideRepo?: PendingOverrideRepository;
+  issueWatcherRepo?: IssueWatcherRepository;
   logLevel?: string;
   prettyLog?: boolean;
   onShutdown?: () => void;
@@ -120,6 +123,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   // Memory store routes
   if (deps.memoryRepo) {
     memoryRoutes(app, { memoryRepo: deps.memoryRepo });
+  }
+
+  // Issue watcher routes
+  if (deps.issueWatcherRepo) {
+    issueWatcherRoutes(app, { issueWatcherRepo: deps.issueWatcherRepo });
   }
 
   // Action catalog
