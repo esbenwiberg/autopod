@@ -11,6 +11,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
     case infrastructure
     case network
     case actions
+    case issueWatcher
     case validation
     case credentials
     case injections
@@ -27,6 +28,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .infrastructure: "Infrastructure"
         case .network:        "Network & Security"
         case .actions:        "Actions"
+        case .issueWatcher:   "Issue Watcher"
         case .validation:     "Validation"
         case .credentials:    "Credentials"
         case .injections:     "Injections"
@@ -43,6 +45,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .infrastructure: "server.rack"
         case .network:        "shield.checkered"
         case .actions:        "bolt.shield"
+        case .issueWatcher:   "eye"
         case .validation:     "globe"
         case .credentials:    "key"
         case .injections:     "syringe"
@@ -66,6 +69,8 @@ enum ProfileSection: String, CaseIterable, Identifiable {
             "Outbound network access controls for container isolation."
         case .actions:
             "Control plane actions the agent can execute — GitHub, ADO, Azure, and custom HTTP."
+        case .issueWatcher:
+            "Automatically pick up GitHub Issues or ADO Work Items by label and create sessions. Ideal for mobile-triggered workflows."
         case .validation:
             "Smoke test pages loaded after the app starts to verify correctness."
         case .credentials:
@@ -252,6 +257,7 @@ public struct ProfileEditorView: View {
                 case .infrastructure: infrastructureFields
                 case .network:        networkFields
                 case .actions:        actionFields
+                case .issueWatcher:   issueWatcherFields
                 case .validation:     validationFields
                 case .credentials:    credentialFields
                 case .injections:     injectionFields
@@ -708,6 +714,82 @@ public struct ProfileEditorView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Issue Watcher
+
+    @ViewBuilder
+    private var issueWatcherFields: some View {
+        Toggle(isOn: $profile.issueWatcherEnabled) {
+            HStack(spacing: 4) {
+                Text("Enable issue watcher")
+                HelpBadge(text: "When enabled, polls for GitHub Issues or ADO Work Items with a matching label prefix and automatically creates sessions. Label an issue from your phone to trigger a session.")
+            }
+        }
+
+        if profile.issueWatcherEnabled {
+            Divider().padding(.vertical, 4)
+
+            fieldRow("Label Prefix", help: "The label prefix to watch for. Issues labeled with this prefix (or '<prefix>:<profile>') will trigger sessions. Must be lowercase alphanumeric with hyphens.") {
+                TextField("autopod", text: $profile.issueWatcherLabelPrefix)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 200)
+            }
+
+            Text("Label Routing")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+
+            VStack(alignment: .leading, spacing: 4) {
+                routingRow("autopod", "Uses this profile")
+                routingRow("autopod:<profile>", "Routes to named profile")
+                routingRow("autopod:artifact", "Uses this profile with artifact output")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
+
+            Text("Lifecycle")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 4) {
+                lifecycleRow("autopod", "Trigger — picked up by watcher")
+                lifecycleRow("autopod:in-progress", "Session running")
+                lifecycleRow("autopod:done", "Session completed successfully")
+                lifecycleRow("autopod:failed", "Session failed")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
+        }
+    }
+
+    private func routingRow(_ label: String, _ desc: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(.caption, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.blue.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            Text(desc)
+        }
+    }
+
+    private func lifecycleRow(_ label: String, _ desc: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(.caption, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.orange.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            Text(desc)
         }
     }
 

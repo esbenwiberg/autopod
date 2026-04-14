@@ -39,6 +39,8 @@ public struct ProfileResponse: Codable, Sendable {
   public var privateRegistries: [PrivateRegistryResponse]
   public var registryPat: String?
   public var containerMemoryGb: Double?
+  public var issueWatcherEnabled: Bool?
+  public var issueWatcherLabelPrefix: String?
   public var version: Int
   public var createdAt: String
   public var updatedAt: String
