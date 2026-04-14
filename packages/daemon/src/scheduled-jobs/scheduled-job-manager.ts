@@ -6,12 +6,13 @@ import type {
   UpdateScheduledJobRequest,
 } from '@autopod/shared';
 import cronParser from 'cron-parser';
-
-const { parseExpression } = cronParser;
 import type { Logger } from 'pino';
 import type { EventBus } from '../sessions/event-bus.js';
 import type { SessionManager } from '../sessions/session-manager.js';
 import type { ScheduledJobRepository } from './scheduled-job-repository.js';
+
+// cron-parser is CommonJS — use default import then destructure
+const { parseExpression } = cronParser;
 
 export const SCHEDULER_USER_ID = 'scheduler';
 
