@@ -50,6 +50,8 @@ public enum ProfileMapper {
       prProvider: prProvider,
       customInstructions: response.customInstructions,
       containerMemoryGb: response.containerMemoryGb,
+      issueWatcherEnabled: response.issueWatcherEnabled ?? false,
+      issueWatcherLabelPrefix: response.issueWatcherLabelPrefix ?? "autopod",
       hasGithubPat: response.githubPat != nil,
       hasAdoPat: response.adoPat != nil,
       hasRegistryPat: response.registryPat != nil,
@@ -132,6 +134,10 @@ public enum ProfileMapper {
       },
       "allowedHosts": profile.allowedHosts,
     ]
+
+    // Issue watcher
+    d["issueWatcherEnabled"] = profile.issueWatcherEnabled
+    d["issueWatcherLabelPrefix"] = profile.issueWatcherLabelPrefix
 
     // Optional fields — only include if set
     if let v = profile.customInstructions { d["customInstructions"] = v }

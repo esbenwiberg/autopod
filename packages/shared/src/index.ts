@@ -111,7 +111,12 @@ export type {
   ValidationOverrideQueuedEvent,
   TokenBudgetWarningEvent,
   TokenBudgetExceededEvent,
+  IssueWatcherPickedUpEvent,
+  IssueWatcherCompletedEvent,
+  IssueWatcherErrorEvent,
 } from './types/events.js';
+
+export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js';
 
 export type {
   NotificationType,

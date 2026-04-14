@@ -228,7 +228,7 @@ export interface GitHubApiPrManagerConfig {
   logger: Logger;
 }
 
-function parseGitHubRepoUrl(repoUrl: string): { owner: string; repo: string } {
+export function parseGitHubRepoUrl(repoUrl: string): { owner: string; repo: string } {
   const httpsMatch = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
   if (!httpsMatch) throw new Error(`Cannot parse GitHub repo URL: ${repoUrl}`);
   return { owner: httpsMatch[1], repo: httpsMatch[2] };

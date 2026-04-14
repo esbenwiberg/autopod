@@ -403,6 +403,25 @@ const notificationService = createNotificationService({
 });
 notificationService.start();
 
+// Issue watcher (polls GitHub Issues / ADO Work Items for labeled issues)
+import { createIssueWatcherRepository } from './issue-watcher/issue-watcher-repository.js';
+import { createIssueWatcherService } from './issue-watcher/issue-watcher-service.js';
+
+const issueWatcherRepo = createIssueWatcherRepository(db);
+const ISSUE_WATCHER_POLL_INTERVAL = Number.parseInt(
+  process.env.ISSUE_WATCHER_POLL_INTERVAL_MS ?? '60000',
+  10,
+);
+const issueWatcherService = createIssueWatcherService({
+  profileStore,
+  sessionManager,
+  eventBus,
+  issueWatcherRepo,
+  logger,
+  pollIntervalMs: ISSUE_WATCHER_POLL_INTERVAL,
+});
+issueWatcherService.start();
+
 // Server
 const app = await createServer({
   authModule,
@@ -422,6 +441,7 @@ const app = await createServer({
   sessionTokenIssuer,
   memoryRepo,
   pendingOverrideRepo,
+  issueWatcherRepo,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),
@@ -484,8 +504,9 @@ async function shutdown(signal: string) {
   // Stop accepting new requests
   await app.close();
 
-  // Stop notifications
+  // Stop notifications and issue watcher
   notificationService.stop();
+  issueWatcherService.stop();
 
   // Drain session queue
   await sessionQueue.drain();

@@ -24,6 +24,10 @@ public struct Profile: Identifiable, Sendable {
     public var customInstructions: String?
     public var containerMemoryGb: Double?
 
+    // Issue watcher
+    public var issueWatcherEnabled: Bool
+    public var issueWatcherLabelPrefix: String
+
     // Credentials — `hasXxxPat` reflects API state; `xxxPat` holds new values being set
     public var hasGithubPat: Bool
     public var hasAdoPat: Bool
@@ -104,6 +108,7 @@ public struct Profile: Identifiable, Sendable {
         executionTarget: ExecutionTarget = .local,
         modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
         customInstructions: String? = nil, containerMemoryGb: Double? = nil,
+        issueWatcherEnabled: Bool = false, issueWatcherLabelPrefix: String = "autopod",
         hasGithubPat: Bool = false, hasAdoPat: Bool = false, hasRegistryPat: Bool = false,
         githubPat: String? = nil, adoPat: String? = nil, registryPat: String? = nil,
         networkEnabled: Bool = false, networkMode: NetworkPolicyMode = .restricted,
@@ -143,6 +148,8 @@ public struct Profile: Identifiable, Sendable {
         self.executionTarget = executionTarget; self.modelProvider = modelProvider
         self.prProvider = prProvider; self.customInstructions = customInstructions
         self.containerMemoryGb = containerMemoryGb
+        self.issueWatcherEnabled = issueWatcherEnabled
+        self.issueWatcherLabelPrefix = issueWatcherLabelPrefix
         self.hasGithubPat = hasGithubPat; self.hasAdoPat = hasAdoPat
         self.hasRegistryPat = hasRegistryPat
         self.githubPat = githubPat; self.adoPat = adoPat; self.registryPat = registryPat

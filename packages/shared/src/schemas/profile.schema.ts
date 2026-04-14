@@ -160,6 +160,13 @@ export const createProfileSchema = z.object({
   tokenBudgetPolicy: z.enum(['soft', 'hard']).default('soft'),
   maxBudgetExtensions: z.number().int().min(0).nullable().default(null),
   hasWebUi: z.boolean().default(true),
+  issueWatcherEnabled: z.boolean().default(false),
+  issueWatcherLabelPrefix: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z0-9\-]+$/, 'Label prefix must be lowercase alphanumeric with hyphens')
+    .default('autopod'),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });
