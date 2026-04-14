@@ -28,6 +28,7 @@ import { corsPlugin } from './plugins/cors.js';
 import { rateLimitPlugin } from './plugins/rate-limit.js';
 import { requestLoggerPlugin } from './plugins/request-logger.js';
 import { actionRoutes } from './routes/actions.js';
+import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
 import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
@@ -118,6 +119,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     (profileName) => deps.sessionManager.refreshNetworkPolicy(profileName),
     deps.imageBuilder,
   );
+
+  // Scheduled jobs routes
+  if (deps.scheduledJobManager) {
+    scheduledJobRoutes(app, deps.scheduledJobManager);
+  }
 
   // Memory store routes
   if (deps.memoryRepo) {
