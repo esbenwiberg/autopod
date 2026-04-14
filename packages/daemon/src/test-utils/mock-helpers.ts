@@ -20,9 +20,9 @@ import type {
   WorktreeManager,
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
+import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
 import { createEscalationRepository } from '../sessions/escalation-repository.js';
 import type { EscalationRepository } from '../sessions/escalation-repository.js';
-import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
 import { createEventBus } from '../sessions/event-bus.js';
 import type { EventBus } from '../sessions/event-bus.js';
 import { createEventRepository } from '../sessions/event-repository.js';

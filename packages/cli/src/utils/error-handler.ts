@@ -17,7 +17,8 @@ const SUGGESTIONS: Record<string, string> = {
   PROFILE_NOT_FOUND: 'Check available profiles with: ap profile ls',
   VALIDATION_ERROR: 'Check input and try again.',
   DAEMON_UNREACHABLE: 'Try: ap connect <url>',
-  INSTALL_FAILED: 'Set networkPolicy to "allow-all" in your profile, or add the required package domains to the allowlist.',
+  INSTALL_FAILED:
+    'Set networkPolicy to "allow-all" in your profile, or add the required package domains to the allowlist.',
   AUTH_FAILED: 'Check that the PAT in your profile is valid and has the required scopes.',
 };
 

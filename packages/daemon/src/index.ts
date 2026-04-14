@@ -33,6 +33,9 @@ import {
   CopilotRuntime,
   createRuntimeRegistry,
 } from './runtimes/index.js';
+import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
+import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
+import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -46,9 +49,6 @@ import {
   createSessionRepository,
   createValidationRepository,
 } from './sessions/index.js';
-import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
-import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
-import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';

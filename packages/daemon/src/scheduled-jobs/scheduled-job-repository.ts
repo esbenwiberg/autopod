@@ -58,9 +58,9 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
     },
 
     getOrThrow(id: string): ScheduledJob {
-      const row = db
-        .prepare('SELECT * FROM scheduled_jobs WHERE id = ?')
-        .get(id) as Record<string, unknown> | undefined;
+      const row = db.prepare('SELECT * FROM scheduled_jobs WHERE id = ?').get(id) as
+        | Record<string, unknown>
+        | undefined;
       if (!row) {
         throw new AutopodError(`Scheduled job not found: ${id}`, 'NOT_FOUND', 404);
       }
@@ -78,7 +78,7 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
       // Ensure job exists
       this.getOrThrow(id);
 
-      const setClauses: string[] = ['updated_at = datetime(\'now\')'];
+      const setClauses: string[] = ["updated_at = datetime('now')"];
       const params: Record<string, unknown> = { id };
 
       if (changes.name !== undefined) {
@@ -120,6 +120,9 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
 
     delete(id: string): void {
       this.getOrThrow(id);
+      // Nullify scheduled_job_id on sessions before deleting to avoid FK constraint violations.
+      // Sessions continue running unaffected; job is just disassociated.
+      db.prepare('UPDATE sessions SET scheduled_job_id = NULL WHERE scheduled_job_id = ?').run(id);
       db.prepare('DELETE FROM scheduled_jobs WHERE id = ?').run(id);
     },
 

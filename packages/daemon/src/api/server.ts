@@ -10,6 +10,7 @@ import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import type {
   ContainerManagerFactory,
   EventBus,
@@ -19,7 +20,6 @@ import type {
   SessionManager,
   SessionQueue,
 } from '../sessions/index.js';
-import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
 import { mcpProxyHandler } from './mcp-proxy-handler.js';
@@ -28,13 +28,13 @@ import { corsPlugin } from './plugins/cors.js';
 import { rateLimitPlugin } from './plugins/rate-limit.js';
 import { requestLoggerPlugin } from './plugins/request-logger.js';
 import { actionRoutes } from './routes/actions.js';
-import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
 import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
 import { memoryRoutes } from './routes/memory.js';
 import { profileRoutes } from './routes/profiles.js';
+import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { websocketHandler } from './websocket.js';

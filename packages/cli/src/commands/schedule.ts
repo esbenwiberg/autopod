@@ -104,7 +104,9 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       console.log(`${chalk.bold('Profile:')}      ${job.profileName}`);
       console.log(`${chalk.bold('Cron:')}         ${job.cronExpression}`);
       console.log(`${chalk.bold('Enabled:')}      ${job.enabled ? 'yes' : 'no'}`);
-      console.log(`${chalk.bold('Next run:')}     ${formatNextRun(job.nextRunAt)} (${job.nextRunAt})`);
+      console.log(
+        `${chalk.bold('Next run:')}     ${formatNextRun(job.nextRunAt)} (${job.nextRunAt})`,
+      );
       console.log(`${chalk.bold('Last run:')}     ${formatRelativeAgo(job.lastRunAt)}`);
       console.log(`${chalk.bold('Last session:')} ${job.lastSessionId ?? '-'}`);
       console.log(`${chalk.bold('Status:')}       ${formatJobStatus(job)}`);

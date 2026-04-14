@@ -45,11 +45,7 @@ function validateCronExpression(cronExpression: string): void {
   try {
     parseExpression(cronExpression);
   } catch {
-    throw new AutopodError(
-      `Invalid cron expression: "${cronExpression}"`,
-      'INVALID_INPUT',
-      400,
-    );
+    throw new AutopodError(`Invalid cron expression: "${cronExpression}"`, 'INVALID_INPUT', 400);
   }
 }
 
@@ -127,11 +123,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       const job = scheduledJobRepo.getOrThrow(id);
 
       if (!job.catchupPending) {
-        throw new AutopodError(
-          `Job "${id}" does not have a pending catch-up`,
-          'CONFLICT',
-          409,
-        );
+        throw new AutopodError(`Job "${id}" does not have a pending catch-up`, 'CONFLICT', 409);
       }
 
       const activeCount = scheduledJobRepo.countActiveSessionsForJob(id);
@@ -160,11 +152,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       const job = scheduledJobRepo.getOrThrow(id);
 
       if (!job.catchupPending) {
-        throw new AutopodError(
-          `Job "${id}" does not have a pending catch-up`,
-          'CONFLICT',
-          409,
-        );
+        throw new AutopodError(`Job "${id}" does not have a pending catch-up`, 'CONFLICT', 409);
       }
 
       scheduledJobRepo.update(id, {
@@ -237,10 +225,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         try {
           const activeCount = scheduledJobRepo.countActiveSessionsForJob(job.id);
           if (activeCount > 0) {
-            logger.debug(
-              { jobId: job.id },
-              'Skipping scheduled job fire — active session exists',
-            );
+            logger.debug({ jobId: job.id }, 'Skipping scheduled job fire — active session exists');
             continue;
           }
 

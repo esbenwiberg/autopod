@@ -1,5 +1,6 @@
 import { AutopodError } from '@autopod/shared';
 import type { Session } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createTestDb,
@@ -7,10 +8,9 @@ import {
   insertTestScheduledJob,
   logger,
 } from '../test-utils/mock-helpers.js';
-import { createScheduledJobRepository } from './scheduled-job-repository.js';
 import { SCHEDULER_USER_ID, createScheduledJobManager } from './scheduled-job-manager.js';
 import type { ScheduledJobManagerDeps } from './scheduled-job-manager.js';
-import type Database from 'better-sqlite3';
+import { createScheduledJobRepository } from './scheduled-job-repository.js';
 
 /** Insert a minimal sessions row so FK constraints on last_session_id are satisfied. */
 function insertMinimalSession(db: Database.Database, id: string): void {
@@ -384,20 +384,54 @@ describe('ScheduledJobManager', () => {
             runtime: 'claude',
             executionTarget: 'local',
             branch: 'autopod/sess-ok',
-            containerId: null, worktreePath: null, validationAttempts: 0,
-            maxValidationAttempts: 3, lastValidationResult: null, lastCorrectionMessage: null,
-            pendingEscalation: null, escalationCount: 0, skipValidation: false,
-            createdAt: new Date().toISOString(), startedAt: null, completedAt: null,
-            updatedAt: new Date().toISOString(), userId: 'scheduler', filesChanged: 0,
-            linesAdded: 0, linesRemoved: 0, previewUrl: null, prUrl: null,
-            mergeBlockReason: null, plan: null, progress: null, acceptanceCriteria: null,
-            claudeSessionId: null, outputMode: 'pr' as const, baseBranch: null, acFrom: null,
-            recoveryWorktreePath: null, reworkReason: null, lastHeartbeatAt: null,
-            inputTokens: 0, outputTokens: 0, costUsd: 0, commitCount: 0, lastCommitAt: null,
-            startCommitSha: null, linkedSessionId: null, taskSummary: null,
-            validationOverrides: null, pimGroups: null, profileSnapshot: null, prFixAttempts: 0,
-            maxPrFixAttempts: 3, fixSessionId: null, tokenBudget: null, budgetExtensionsUsed: 0,
-            pauseReason: null, scheduledJobId: null,
+            containerId: null,
+            worktreePath: null,
+            validationAttempts: 0,
+            maxValidationAttempts: 3,
+            lastValidationResult: null,
+            lastCorrectionMessage: null,
+            pendingEscalation: null,
+            escalationCount: 0,
+            skipValidation: false,
+            createdAt: new Date().toISOString(),
+            startedAt: null,
+            completedAt: null,
+            updatedAt: new Date().toISOString(),
+            userId: 'scheduler',
+            filesChanged: 0,
+            linesAdded: 0,
+            linesRemoved: 0,
+            previewUrl: null,
+            prUrl: null,
+            mergeBlockReason: null,
+            plan: null,
+            progress: null,
+            acceptanceCriteria: null,
+            claudeSessionId: null,
+            outputMode: 'pr' as const,
+            baseBranch: null,
+            acFrom: null,
+            recoveryWorktreePath: null,
+            reworkReason: null,
+            lastHeartbeatAt: null,
+            inputTokens: 0,
+            outputTokens: 0,
+            costUsd: 0,
+            commitCount: 0,
+            lastCommitAt: null,
+            startCommitSha: null,
+            linkedSessionId: null,
+            taskSummary: null,
+            validationOverrides: null,
+            pimGroups: null,
+            profileSnapshot: null,
+            prFixAttempts: 0,
+            maxPrFixAttempts: 3,
+            fixSessionId: null,
+            tokenBudget: null,
+            budgetExtensionsUsed: 0,
+            pauseReason: null,
+            scheduledJobId: null,
           } as Session;
         }),
       } as unknown as ScheduledJobManagerDeps['sessionManager'];
@@ -408,7 +442,8 @@ describe('ScheduledJobManager', () => {
 
       // Both jobs tried, job2 succeeded
       expect(sessionManager.createSession).toHaveBeenCalledTimes(2);
-      void job1; void job2;
+      void job1;
+      void job2;
     });
   });
 });

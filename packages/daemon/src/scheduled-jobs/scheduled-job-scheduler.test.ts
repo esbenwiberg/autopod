@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '../test-utils/mock-helpers.js';
-import { createScheduledJobScheduler } from './scheduled-job-scheduler.js';
 import type { ScheduledJobManager } from './scheduled-job-manager.js';
+import { createScheduledJobScheduler } from './scheduled-job-scheduler.js';
 
 function createMockManager(): ScheduledJobManager {
   return {

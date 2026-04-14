@@ -169,16 +169,13 @@ export function createLocalValidationEngine(
         // If the app goes down during smoke/AC phases, abort validation with a
         // clear "app crashed" message rather than a cryptic ERR_CONNECTION_REFUSED.
         if (healthResult.status === 'pass' && config.startCommand) {
-          stopMonitor = startAppStabilityMonitor(
-            config.previewUrl + config.healthPath,
-            () => {
-              log?.warn(
-                { sessionId: config.sessionId, url: config.previewUrl + config.healthPath },
-                'App became unreachable after health check passed — aborting validation',
-              );
-              crashController.abort();
-            },
-          );
+          stopMonitor = startAppStabilityMonitor(config.previewUrl + config.healthPath, () => {
+            log?.warn(
+              { sessionId: config.sessionId, url: config.previewUrl + config.healthPath },
+              'App became unreachable after health check passed — aborting validation',
+            );
+            crashController.abort();
+          });
         }
 
         // ── Phase 4: Page validation ─────────────────────────────────────
@@ -875,7 +872,10 @@ async function executeAcChecks(
       );
       if (hostResult !== null) return hostResult;
       // Host Playwright produced no markers — fall back to container with a freshly generated script
-      log?.warn({ sessionId: config.sessionId }, 'Host AC checks failed — falling back to container');
+      log?.warn(
+        { sessionId: config.sessionId },
+        'Host AC checks failed — falling back to container',
+      );
       const containerScript = await generateScript('container');
       return await executeAcInContainer(
         containerManager,

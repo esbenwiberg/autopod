@@ -2,8 +2,8 @@ import { AutopodError } from '@autopod/shared';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { errorHandler } from '../error-handler.js';
 import type { ScheduledJobManager } from '../../scheduled-jobs/scheduled-job-manager.js';
+import { errorHandler } from '../error-handler.js';
 import { scheduledJobRoutes } from './scheduled-jobs.js';
 
 const mockJob = {
@@ -33,7 +33,9 @@ const mockSession = {
   scheduledJobId: 'job-123',
 };
 
-function createMockScheduledJobManager(overrides: Partial<ScheduledJobManager> = {}): ScheduledJobManager {
+function createMockScheduledJobManager(
+  overrides: Partial<ScheduledJobManager> = {},
+): ScheduledJobManager {
   return {
     create: vi.fn(() => mockJob),
     list: vi.fn(() => [mockJob]),
@@ -70,7 +72,7 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/scheduled-jobs',
-        
+
         payload: {
           name: 'Test Job',
           profileName: 'my-profile',
@@ -89,7 +91,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/scheduled-jobs',
-        
       });
 
       expect(res.statusCode).toBe(200);
@@ -102,7 +103,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/scheduled-jobs/job-123',
-        
       });
 
       expect(res.statusCode).toBe(200);
@@ -117,7 +117,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/scheduled-jobs/no-such-job',
-        
       });
 
       expect(res.statusCode).toBe(404);
@@ -129,7 +128,7 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'PUT',
         url: '/scheduled-jobs/job-123',
-        
+
         payload: { name: 'Updated' },
       });
 
@@ -143,7 +142,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'DELETE',
         url: '/scheduled-jobs/job-123',
-        
       });
 
       expect(res.statusCode).toBe(204);
@@ -157,7 +155,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/scheduled-jobs/job-123/catchup',
-        
       });
 
       expect(res.statusCode).toBe(201);
@@ -172,7 +169,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/scheduled-jobs/job-123/catchup',
-        
       });
 
       expect(res.statusCode).toBe(409);
@@ -186,7 +182,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/scheduled-jobs/job-123/catchup',
-        
       });
 
       expect(res.statusCode).toBe(400);
@@ -198,7 +193,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'DELETE',
         url: '/scheduled-jobs/job-123/catchup',
-        
       });
 
       expect(res.statusCode).toBe(204);
@@ -212,7 +206,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/scheduled-jobs/job-123/trigger',
-        
       });
 
       expect(res.statusCode).toBe(201);

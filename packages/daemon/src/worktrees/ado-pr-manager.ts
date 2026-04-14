@@ -231,9 +231,7 @@ export class AdoPrManager implements PrManager {
         method: 'GET',
       })) as { value: Array<{ context: { name: string }; state: string }> };
 
-      const blocking = evaluations.value.filter(
-        (e) => e.state === 'failed' || e.state === 'error',
-      );
+      const blocking = evaluations.value.filter((e) => e.state === 'failed' || e.state === 'error');
       if (blocking.length > 0) {
         const names = blocking.map((e) => `${e.context.name} (${e.state})`).join(', ');
         reasons.push(`Policies: ${names}`);

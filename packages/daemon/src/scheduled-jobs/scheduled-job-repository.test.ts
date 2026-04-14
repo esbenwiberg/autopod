@@ -1,11 +1,11 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import type Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   createTestDb,
   insertTestProfile,
   insertTestScheduledJob,
 } from '../test-utils/mock-helpers.js';
 import { createScheduledJobRepository } from './scheduled-job-repository.js';
-import type Database from 'better-sqlite3';
 
 describe('ScheduledJobRepository', () => {
   let db: Database.Database;
@@ -56,6 +56,33 @@ describe('ScheduledJobRepository', () => {
     const job = insertTestScheduledJob(db);
     repo.delete(job.id);
     expect(() => repo.getOrThrow(job.id)).toThrow();
+  });
+
+  it('delete nullifies scheduled_job_id on sessions before removing', () => {
+    const repo = createScheduledJobRepository(db);
+    const job = insertTestScheduledJob(db);
+
+    // Insert a session linked to this job
+    db.prepare(`
+      INSERT INTO sessions (
+        id, profile_name, task, status, model, runtime, execution_target, branch,
+        user_id, max_validation_attempts, skip_validation, acceptance_criteria,
+        output_mode, scheduled_job_id
+      ) VALUES (
+        'linked-sess', 'test-profile', 'task', 'killed', 'opus', 'claude', 'local', 'main',
+        'user-1', 3, 0, NULL, 'pr', ?
+      )
+    `).run(job.id);
+
+    // Delete should not throw despite FK constraint
+    expect(() => repo.delete(job.id)).not.toThrow();
+    expect(() => repo.getOrThrow(job.id)).toThrow();
+
+    // Session should still exist but scheduled_job_id should be null
+    const sess = db
+      .prepare('SELECT scheduled_job_id FROM sessions WHERE id = ?')
+      .get('linked-sess') as { scheduled_job_id: string | null };
+    expect(sess.scheduled_job_id).toBeNull();
   });
 
   it('listDue returns jobs with next_run_at <= now', () => {
