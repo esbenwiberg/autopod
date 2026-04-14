@@ -1,3 +1,8 @@
+-- NOTE: There is a circular FK reference between scheduled_jobs and sessions:
+--   scheduled_jobs.last_session_id → sessions.id  (ON DELETE SET NULL — safe)
+--   sessions.scheduled_job_id      → scheduled_jobs.id  (see ALTER TABLE below)
+-- Both nullable columns with ON DELETE SET NULL / application-level nullify-before-delete
+-- (see ScheduledJobRepository.delete()) prevent constraint violations at runtime.
 CREATE TABLE scheduled_jobs (
   id               TEXT PRIMARY KEY,
   name             TEXT NOT NULL,

@@ -112,7 +112,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
     },
 
     delete(id: string): void {
-      scheduledJobRepo.getOrThrow(id); // throws 404 if not found
+      // repository.delete() calls getOrThrow internally — no need to call it twice
       scheduledJobRepo.delete(id);
     },
 
