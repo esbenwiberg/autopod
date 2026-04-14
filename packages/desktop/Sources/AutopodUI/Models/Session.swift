@@ -126,9 +126,10 @@ public struct AcCheckDetail: Sendable {
     public let passed: Bool
     public let reasoning: String
     public let screenshot: String?
-    public init(criterion: String, passed: Bool, reasoning: String, screenshot: String? = nil) {
+    public let validationType: String?  // "web-ui" | "api" | "none"
+    public init(criterion: String, passed: Bool, reasoning: String, screenshot: String? = nil, validationType: String? = nil) {
         self.criterion = criterion; self.passed = passed; self.reasoning = reasoning
-        self.screenshot = screenshot
+        self.screenshot = screenshot; self.validationType = validationType
     }
 }
 

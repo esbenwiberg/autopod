@@ -55,8 +55,8 @@ public enum MockData: Sendable {
             ],
             acValidation: false,
             acChecks: [
-                AcCheckDetail(criterion: "Login form renders correctly", passed: false, reasoning: "Login form element not found — page returns 502"),
-                AcCheckDetail(criterion: "OAuth tokens stored encrypted at rest", passed: true, reasoning: "Verified AES-256 encryption in storage layer"),
+                AcCheckDetail(criterion: "Login form renders correctly", passed: false, reasoning: "Login form element not found — page returns 502", validationType: "web-ui"),
+                AcCheckDetail(criterion: "OAuth tokens stored encrypted at rest", passed: true, reasoning: "Verified AES-256 encryption in storage layer", validationType: "none"),
             ],
             requirementsCheck: [
                 RequirementCheckDetail(criterion: "OAuth callback handles errors", met: false, note: "No error handling in callback route"),
