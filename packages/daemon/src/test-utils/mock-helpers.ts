@@ -6,6 +6,7 @@ import type {
   EscalationRequest,
   Runtime,
   RuntimeType,
+  ScheduledJob,
   StackTemplate,
   ValidationResult,
 } from '@autopod/shared';
@@ -21,6 +22,7 @@ import type {
 import type { ProfileStore } from '../profiles/index.js';
 import { createEscalationRepository } from '../sessions/escalation-repository.js';
 import type { EscalationRepository } from '../sessions/escalation-repository.js';
+import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
 import { createEventBus } from '../sessions/event-bus.js';
 import type { EventBus } from '../sessions/event-bus.js';
 import { createEventRepository } from '../sessions/event-repository.js';
@@ -269,6 +271,26 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
     delete: vi.fn(),
     exists: vi.fn(() => true),
   };
+}
+
+export function insertTestScheduledJob(
+  db: Database.Database,
+  overrides: Partial<ScheduledJob> = {},
+): ScheduledJob {
+  const repo = createScheduledJobRepository(db);
+  const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  return repo.insert({
+    id: overrides.id ?? `job-${Date.now()}`,
+    name: overrides.name ?? 'Test Job',
+    profileName: overrides.profileName ?? 'test-profile',
+    task: overrides.task ?? 'Run the test task',
+    cronExpression: overrides.cronExpression ?? '0 9 * * 1',
+    enabled: overrides.enabled ?? true,
+    nextRunAt: overrides.nextRunAt ?? futureDate,
+    lastRunAt: overrides.lastRunAt ?? null,
+    lastSessionId: overrides.lastSessionId ?? null,
+    catchupPending: overrides.catchupPending ?? false,
+  });
 }
 
 // ---------------------------------------------------------------------------

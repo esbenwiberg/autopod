@@ -33,6 +33,8 @@ export interface NewSession {
   prUrl?: string | null;
   /** Token budget override for this session. null = inherit from profile. */
   tokenBudget?: number | null;
+  /** ID of the scheduled job that spawned this session. */
+  scheduledJobId?: string | null;
 }
 
 export interface SessionFilters {
@@ -170,6 +172,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     tokenBudget: (row.token_budget as number | null) ?? null,
     budgetExtensionsUsed: (row.budget_extensions_used as number) ?? 0,
     pauseReason: (row.pause_reason as 'budget' | 'manual' | null) ?? null,
+    scheduledJobId: (row.scheduled_job_id as string) ?? null,
   };
 }
 
@@ -181,12 +184,12 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
           output_mode, base_branch, ac_from, linked_session_id, pim_groups, pr_url,
-          token_budget
+          token_budget, scheduled_job_id
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
           @outputMode, @baseBranch, @acFrom, @linkedSessionId, @pimGroups, @prUrl,
-          @tokenBudget
+          @tokenBudget, @scheduledJobId
         )
       `).run({
         id: session.id,
@@ -210,6 +213,7 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         pimGroups: session.pimGroups ? JSON.stringify(session.pimGroups) : null,
         prUrl: session.prUrl ?? null,
         tokenBudget: session.tokenBudget ?? null,
+        scheduledJobId: session.scheduledJobId ?? null,
       });
     },
 
