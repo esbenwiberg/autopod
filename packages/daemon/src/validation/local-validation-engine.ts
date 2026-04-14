@@ -233,7 +233,8 @@ export function createLocalValidationEngine(
           smokeStatus === 'pass' &&
           !testFailed &&
           !acFailed &&
-          (taskReview === null || taskReview.status === 'pass')
+          ((taskReview === null && !reviewSkipReason?.startsWith('Review failed:')) ||
+            taskReview?.status === 'pass')
             ? ('pass' as const)
             : ('fail' as const);
 
@@ -1636,51 +1637,49 @@ async function runTaskReview(
       );
     }
 
-    if (resolvedTier1) {
+    if (tier1Parsed) {
       log?.info(
-        { status: resolvedTier1.status, issueCount: resolvedTier1.issues.length, tier: 1 },
+        { status: tier1Parsed.status, issueCount: tier1Parsed.issues.length, tier: 1 },
         'Tier 1 task review complete',
       );
     }
 
     // If Tier 1 is conclusive and depth is standard-only, we're done.
-    // Truncated diffs always escalate (resolvedTier1 is null) so this branch is unreachable for them.
+    // Truncated diffs always escalate (tier1Parsed is null) so this branch is unreachable for them.
     // 'deep' forces Tier 2+ regardless of Tier 1 status.
     const shouldEscalate =
       diffIsTruncated ||
       (reviewDepth === 'deep' && !!config.worktreePath) ||
-      (resolvedTier1?.status === 'uncertain' &&
-        reviewDepth !== 'standard' &&
-        !!config.worktreePath);
+      (tier1Parsed?.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
 
-    if (!shouldEscalate && resolvedTier1) {
+    if (!shouldEscalate && tier1Parsed) {
       return {
         result: {
-          status: resolvedTier1.status,
-          reasoning: resolvedTier1.reasoning,
-          issues: resolvedTier1.issues,
+          status: tier1Parsed.status,
+          reasoning: tier1Parsed.reasoning,
+          issues: tier1Parsed.issues,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
-          requirementsCheck: resolvedTier1.requirementsCheck,
-          deviationsAssessment: resolvedTier1.deviationsAssessment,
+          requirementsCheck: tier1Parsed.requirementsCheck,
+          deviationsAssessment: tier1Parsed.deviationsAssessment,
         },
       };
     }
 
     if (!config.worktreePath) {
       // Escalation wanted but no worktree — return Tier 1 result if we have one
-      if (resolvedTier1) {
+      if (tier1Parsed) {
         return {
           result: {
-            status: resolvedTier1.status,
-            reasoning: resolvedTier1.reasoning,
-            issues: resolvedTier1.issues,
+            status: tier1Parsed.status,
+            reasoning: tier1Parsed.reasoning,
+            issues: tier1Parsed.issues,
             model: config.reviewerModel,
             screenshots: [],
             diff: config.diff,
-            requirementsCheck: resolvedTier1.requirementsCheck,
-            deviationsAssessment: resolvedTier1.deviationsAssessment,
+            requirementsCheck: tier1Parsed.requirementsCheck,
+            deviationsAssessment: tier1Parsed.deviationsAssessment,
           },
         };
       }
@@ -1758,7 +1757,7 @@ async function runTaskReview(
       }
 
       // Fall back to best available result (Tier 2 if parsed, else Tier 1 if available)
-      const bestParsed = tier2Parsed ?? resolvedTier1;
+      const bestParsed = tier2Parsed ?? tier1Parsed;
       if (!bestParsed) {
         return { result: null, skipReason: 'All review tiers failed to produce a result' };
       }
@@ -1776,20 +1775,20 @@ async function runTaskReview(
       };
     } catch (err) {
       log?.warn({ err }, 'Tier 2 tool-use review failed');
-      if (!resolvedTier1) {
+      if (!tier1Parsed) {
         // Truncated diff path: no Tier 1 result to fall back to
         return { result: null, skipReason: 'Tier 2 tool-use review failed and diff was truncated' };
       }
       return {
         result: {
-          status: resolvedTier1.status,
-          reasoning: resolvedTier1.reasoning,
-          issues: resolvedTier1.issues,
+          status: tier1Parsed.status,
+          reasoning: tier1Parsed.reasoning,
+          issues: tier1Parsed.issues,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
-          requirementsCheck: resolvedTier1.requirementsCheck,
-          deviationsAssessment: resolvedTier1.deviationsAssessment,
+          requirementsCheck: tier1Parsed.requirementsCheck,
+          deviationsAssessment: tier1Parsed.deviationsAssessment,
         },
       };
     }
