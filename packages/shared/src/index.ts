@@ -111,7 +111,15 @@ export type {
   ValidationOverrideQueuedEvent,
   TokenBudgetWarningEvent,
   TokenBudgetExceededEvent,
+  ScheduledJobCatchupRequestedEvent,
+  ScheduledJobFiredEvent,
 } from './types/events.js';
+
+export type {
+  ScheduledJob,
+  CreateScheduledJobRequest,
+  UpdateScheduledJobRequest,
+} from './types/scheduled-job.js';
 
 export type {
   NotificationType,

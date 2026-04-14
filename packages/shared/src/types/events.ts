@@ -16,7 +16,9 @@ export type SystemEvent =
   | MemorySuggestionCreatedEvent
   | ValidationOverrideQueuedEvent
   | TokenBudgetWarningEvent
-  | TokenBudgetExceededEvent;
+  | TokenBudgetExceededEvent
+  | ScheduledJobCatchupRequestedEvent
+  | ScheduledJobFiredEvent;
 
 export interface SessionCreatedEvent {
   type: 'session.created';
@@ -107,4 +109,20 @@ export interface TokenBudgetExceededEvent {
   tokenBudget: number;
   budgetExtensionsUsed: number;
   maxBudgetExtensions: number | null;
+}
+
+export interface ScheduledJobCatchupRequestedEvent {
+  type: 'scheduled_job.catchup_requested';
+  timestamp: string;
+  jobId: string;
+  jobName: string;
+  lastRunAt: string | null;
+}
+
+export interface ScheduledJobFiredEvent {
+  type: 'scheduled_job.fired';
+  timestamp: string;
+  jobId: string;
+  jobName: string;
+  sessionId: string;
 }
