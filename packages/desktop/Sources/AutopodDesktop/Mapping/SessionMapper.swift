@@ -187,6 +187,7 @@ public enum SessionMapper {
       task: response.task,
       model: response.model,
       startedAt: parseDate(response.startedAt ?? response.createdAt),
+      updatedAt: parseDate(response.updatedAt),
       baseBranch: response.baseBranch,
       acFrom: response.acFrom,
       acceptanceCriteria: response.acceptanceCriteria,
