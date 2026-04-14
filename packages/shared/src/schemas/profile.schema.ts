@@ -159,6 +159,7 @@ export const createProfileSchema = z.object({
   tokenBudgetWarnAt: z.number().min(0.1).max(0.99).default(0.8),
   tokenBudgetPolicy: z.enum(['soft', 'hard']).default('soft'),
   maxBudgetExtensions: z.number().int().min(0).nullable().default(null),
+  hasWebUi: z.boolean().default(true),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });

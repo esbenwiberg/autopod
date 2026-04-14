@@ -42,6 +42,9 @@ export interface ValidationEngineConfig {
   reviewDepth?: 'standard' | 'auto' | 'deep';
   /** Findings dismissed by human reviewer — exclude from review prompt */
   overrides?: ValidationOverride[];
+  /** Whether the project has a web frontend. When false, the AC classifier will not
+   *  produce web-ui checks and agents are not told to use validate_in_browser. Default true. */
+  hasWebUi?: boolean;
 }
 
 export interface ValidationEngine {

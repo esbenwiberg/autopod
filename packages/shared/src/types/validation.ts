@@ -65,6 +65,8 @@ export interface AcCheckResult {
   screenshot?: string;
   /** Reviewer/executor reasoning about why it passed or failed */
   reasoning: string;
+  /** How this criterion was (or was not) validated */
+  validationType?: 'web-ui' | 'api' | 'none';
 }
 
 export interface AcValidationResult {

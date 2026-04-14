@@ -14,12 +14,12 @@ import type {
   NetworkPolicy,
   PrivateRegistry,
   Profile,
+  RequestCredentialPayload,
   Session,
   SessionStatus,
   ValidationFinding,
   ValidationOverride,
   ValidationOverridePayload,
-  RequestCredentialPayload,
 } from '@autopod/shared';
 import {
   AUTOPOD_INSTRUCTIONS_PATH,
@@ -819,7 +819,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // extracting /workspace directly from the container's filesystem via the archive API,
       // which works on stopped (but not yet removed) containers.
       const isContainerNotRunning =
-        (err && typeof err === 'object' && 'statusCode' in err &&
+        (err &&
+          typeof err === 'object' &&
+          'statusCode' in err &&
           (err as { statusCode: number }).statusCode === 409) ||
         (err instanceof Error && err.message.includes('is not running'));
       if (isContainerNotRunning) {
@@ -934,7 +936,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           { timeout: 30_000 },
         );
         if (ghAuth.exitCode !== 0) {
-          throw new Error(`gh auth login failed (exit ${ghAuth.exitCode}): ${ghAuth.stderr.slice(0, 200)}`);
+          throw new Error(
+            `gh auth login failed (exit ${ghAuth.exitCode}): ${ghAuth.stderr.slice(0, 200)}`,
+          );
         }
         return ' gh CLI is authenticated.';
       } else {
@@ -944,7 +948,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           { timeout: 60_000 },
         );
         if (azAuth.exitCode !== 0) {
-          throw new Error(`az devops login failed (exit ${azAuth.exitCode}): ${azAuth.stderr.slice(0, 200)}`);
+          throw new Error(
+            `az devops login failed (exit ${azAuth.exitCode}): ${azAuth.stderr.slice(0, 200)}`,
+          );
         }
         return ' az CLI is authenticated.';
       }
@@ -959,7 +965,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
   // Download the gh CLI binary from GitHub releases. No apt, no GPG keys —
   // it's a single Go binary. Throws on failure.
-  async function installGhBinary(cm: ContainerManager, containerId: string, sessionId: string): Promise<void> {
+  async function installGhBinary(
+    cm: ContainerManager,
+    containerId: string,
+    sessionId: string,
+  ): Promise<void> {
     logger.info({ sessionId, containerId }, 'Installing gh CLI from github.com/cli/cli/releases');
     const result = await cm.execInContainer(
       containerId,
@@ -969,7 +979,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         [
           'ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/")',
           'VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest' +
-            ' | node -e "let d=\'\';process.stdin.on(\'data\',c=>d+=c);process.stdin.on(\'end\',()=>console.log(JSON.parse(d).tag_name.slice(1)))")',
+            " | node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).tag_name.slice(1)))\")",
           'curl -fsSL "https://github.com/cli/cli/releases/download/v${VERSION}/gh_${VERSION}_linux_${ARCH}.tar.gz" | tar xz -C /tmp',
           'mv /tmp/gh_${VERSION}_linux_${ARCH}/bin/gh /usr/local/bin/gh',
           'chmod +x /usr/local/bin/gh',
@@ -986,8 +996,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
   // Install az CLI via pip. Uses get-pip.py because Debian/Ubuntu strip ensurepip from python3
   // (you'd normally need apt-get install python3-pip, but apt is broken on ARM Noble).
   // Throws on failure.
-  async function installAzViaPip(cm: ContainerManager, containerId: string, sessionId: string): Promise<void> {
-    logger.info({ sessionId, containerId }, 'Installing az CLI via pip (bootstrap.pypa.io get-pip.py)');
+  async function installAzViaPip(
+    cm: ContainerManager,
+    containerId: string,
+    sessionId: string,
+  ): Promise<void> {
+    logger.info(
+      { sessionId, containerId },
+      'Installing az CLI via pip (bootstrap.pypa.io get-pip.py)',
+    );
     const result = await cm.execInContainer(
       containerId,
       [
@@ -2074,7 +2091,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         const escalationId = session.pendingEscalation.id;
         transition(session, 'running', { pendingEscalation: null });
-        emitActivityStatus(sessionId, `Credential injected for ${payload.service} — resuming agent…`);
+        emitActivityStatus(
+          sessionId,
+          `Credential injected for ${payload.service} — resuming agent…`,
+        );
 
         deps.pendingRequestsBySession?.get(sessionId)?.resolve(escalationId, authMessage);
         return;
@@ -2783,6 +2803,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           worktreePath: session.worktreePath ?? undefined,
           startCommitSha: session.startCommitSha ?? undefined,
           overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
+          hasWebUi: profile.hasWebUi ?? true,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
@@ -3279,6 +3300,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               taskSummary: session.taskSummary ?? undefined,
               worktreePath: session.worktreePath ?? undefined,
               startCommitSha: session.startCommitSha ?? undefined,
+              hasWebUi: profile.hasWebUi ?? true,
             },
             (phase) => emitActivityStatus(sessionId, phase),
             revalidateController.signal,
@@ -3769,7 +3791,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
       if (!session.containerId) {
-        throw new AutopodError(`Session ${sessionId} has no running container`, 'INVALID_STATE', 409);
+        throw new AutopodError(
+          `Session ${sessionId} has no running container`,
+          'INVALID_STATE',
+          409,
+        );
       }
       await performCredentialInjection(sessionId, service);
       emitActivityStatus(sessionId, `${service} credentials injected.`);

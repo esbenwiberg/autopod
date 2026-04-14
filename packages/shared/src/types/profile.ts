@@ -80,6 +80,9 @@ export interface Profile {
   tokenBudgetPolicy: 'soft' | 'hard';
   /** How many times a user may approve budget extensions per session. null = unlimited. */
   maxBudgetExtensions: number | null;
+  /** Whether the project has a web frontend. When false, AC validation skips browser checks
+   *  and the classifier will not produce web-ui validation types. Default true. */
+  hasWebUi: boolean;
   createdAt: string;
   updatedAt: string;
 }

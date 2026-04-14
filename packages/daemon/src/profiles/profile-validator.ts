@@ -141,5 +141,10 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
+  // hasWebUi
+  if (input.hasWebUi !== undefined && typeof input.hasWebUi !== 'boolean') {
+    errors.push('hasWebUi must be a boolean');
+  }
+
   return { valid: errors.length === 0, errors };
 }

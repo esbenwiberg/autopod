@@ -148,7 +148,9 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
           const terminalStates = ['complete', 'killed', 'failed'];
           if (terminalStates.includes(session.status)) {
-            const err = new Error(`Session ${resolvedId.slice(0, 8)} is ${session.status} — cannot inject credentials.`);
+            const err = new Error(
+              `Session ${resolvedId.slice(0, 8)} is ${session.status} — cannot inject credentials.`,
+            );
             throw err;
           }
 
@@ -164,7 +166,15 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
         await client.injectCredential(resolvedId, service as 'github' | 'ado');
       });
 
-      console.log(chalk.green(`Done. ${service} credentials injected into session ${resolvedId.slice(0, 8)}.`));
-      console.log(chalk.dim('git and CLI tools are now authenticated. Credentials are gone when the container stops.'));
+      console.log(
+        chalk.green(
+          `Done. ${service} credentials injected into session ${resolvedId.slice(0, 8)}.`,
+        ),
+      );
+      console.log(
+        chalk.dim(
+          'git and CLI tools are now authenticated. Credentials are gone when the container stops.',
+        ),
+      );
     });
 }

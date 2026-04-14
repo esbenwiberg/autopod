@@ -169,16 +169,13 @@ export function createLocalValidationEngine(
         // If the app goes down during smoke/AC phases, abort validation with a
         // clear "app crashed" message rather than a cryptic ERR_CONNECTION_REFUSED.
         if (healthResult.status === 'pass' && config.startCommand) {
-          stopMonitor = startAppStabilityMonitor(
-            config.previewUrl + config.healthPath,
-            () => {
-              log?.warn(
-                { sessionId: config.sessionId, url: config.previewUrl + config.healthPath },
-                'App became unreachable after health check passed — aborting validation',
-              );
-              crashController.abort();
-            },
-          );
+          stopMonitor = startAppStabilityMonitor(config.previewUrl + config.healthPath, () => {
+            log?.warn(
+              { sessionId: config.sessionId, url: config.previewUrl + config.healthPath },
+              'App became unreachable after health check passed — aborting validation',
+            );
+            crashController.abort();
+          });
         }
 
         // ── Phase 4: Page validation ─────────────────────────────────────
@@ -683,6 +680,100 @@ function makeSyntheticFailure(path: string, error: string): PageResult {
 
 // ── AC Validation phase ─────────────────────────────────────────────────────
 
+export type AcValidationType = 'web-ui' | 'api' | 'none';
+
+export interface ClassifiedAc {
+  criterion: string;
+  validationType: AcValidationType;
+  reason: string;
+}
+
+/** LLM-based classification: assigns a validation type to each AC before execution. */
+export async function classifyAcTypes(
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<ClassifiedAc[] | null> {
+  const acs = config.acceptanceCriteria ?? [];
+  const acList = acs.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
+  const hasWebUi = config.hasWebUi ?? true;
+
+  const webUiRestriction = hasWebUi
+    ? ''
+    : '\nIMPORTANT: This project has NO web frontend. Do not classify any criterion as "web-ui". Use "api" or "none" only.\n';
+
+  const prompt = `You are a QA automation planner. For each acceptance criterion, decide how it should be validated automatically.
+
+Validation types:
+- "web-ui": Verify by navigating to a URL in a real browser and checking DOM elements, visual state, or page content. Only use this for criteria that require a human-visible web interface.
+- "api": Verify by making an HTTP request to the running server and checking the status code or response body. Use for REST endpoint behaviour, JSON response shapes, or HTTP status codes.
+- "none": Cannot be verified by browser or HTTP request. Use for TypeScript type exports, internal code structure, SQL migrations, scheduler/timer logic, desktop/native app changes, CLI output formats, or anything only verifiable by reading the diff or running tests.${webUiRestriction}
+
+Task context: ${config.task}
+
+Acceptance Criteria:
+${acList}
+
+Diff of changes (for context):
+${config.diff ? config.diff.slice(0, 4000) : '(no diff available)'}
+
+Respond with a JSON array. Each element must have:
+- "criterion": exact original text (copy verbatim)
+- "validationType": "web-ui" | "api" | "none"
+- "reason": one short sentence explaining your classification
+
+Respond ONLY with the JSON array, no markdown fences or extra text.`;
+
+  try {
+    const reviewTimeout = config.reviewTimeout ?? 300_000;
+    const { stdout } = await runClaudeCli({
+      model: config.reviewerModel ?? 'sonnet',
+      input: prompt,
+      timeout: reviewTimeout,
+    });
+
+    return parseClassificationJson(stdout.trim(), acs);
+  } catch (err) {
+    log?.warn({ err }, 'failed to classify AC types, falling back to none');
+    return null;
+  }
+}
+
+/** Parse and validate the classification JSON response from the LLM. */
+export function parseClassificationJson(raw: string, originalAcs: string[]): ClassifiedAc[] | null {
+  const cleaned = stripMarkdownFences(raw);
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) return null;
+
+    const validTypes = new Set<string>(['web-ui', 'api', 'none']);
+    const results = parsed.filter(
+      (item: unknown): item is ClassifiedAc =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).criterion === 'string' &&
+        validTypes.has((item as Record<string, unknown>).validationType as string) &&
+        typeof (item as Record<string, unknown>).reason === 'string',
+    );
+
+    // If we got fewer results than ACs, fall back any missing ones to 'none'
+    if (results.length < originalAcs.length) {
+      const covered = new Set(results.map((r) => r.criterion));
+      for (const ac of originalAcs) {
+        if (!covered.has(ac)) {
+          results.push({ criterion: ac, validationType: 'none', reason: 'Not classified by LLM' });
+        }
+      }
+    }
+
+    return results;
+  } catch {
+    return null;
+  }
+}
+
 async function runAcValidation(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
@@ -704,29 +795,79 @@ async function runAcValidation(
     'running AC validation',
   );
 
-  // Step 1: Reviewer generates validation instructions from ACs
-  const instructions = await generateAcInstructions(config, log);
-  if (!instructions || instructions.length === 0) {
-    log?.warn('reviewer generated no validation instructions, skipping AC validation');
-    return { status: 'skip', results: [], model: config.reviewerModel };
+  // Step 1: Classify each AC by validation type
+  const classified = await classifyAcTypes(config, log);
+  if (!classified || classified.length === 0) {
+    log?.warn('AC classification failed, marking all as diff-reviewed');
+    const fallbackResults: AcCheckResult[] = (config.acceptanceCriteria ?? []).map((ac) => ({
+      criterion: ac,
+      passed: true,
+      validationType: 'none' as const,
+      reasoning: 'Classification failed — evaluated by diff reviewer',
+    }));
+    return { status: 'pass', results: fallbackResults, model: config.reviewerModel };
   }
 
-  // Step 2: Executor translates instructions to Playwright script and executes
-  const results = await executeAcChecks(
-    containerManager,
-    config,
-    instructions,
-    log,
-    hostBrowserRunner,
+  log?.info(
+    {
+      webUi: classified.filter((c) => c.validationType === 'web-ui').length,
+      api: classified.filter((c) => c.validationType === 'api').length,
+      none: classified.filter((c) => c.validationType === 'none').length,
+    },
+    'AC classification complete',
   );
 
-  const allPassed = results.every((r) => r.passed);
+  // Step 2: Split by type
+  const webUiAcs = classified.filter((c) => c.validationType === 'web-ui');
+  const apiAcs = classified.filter((c) => c.validationType === 'api');
+  const noneAcs = classified.filter((c) => c.validationType === 'none');
+
+  // Step 3: Execute each bucket
+  const noneResults: AcCheckResult[] = noneAcs.map((c) => ({
+    criterion: c.criterion,
+    passed: true,
+    validationType: 'none' as const,
+    reasoning: `Automated check not applicable (${c.reason}) — evaluated by diff reviewer`,
+  }));
+
+  const apiResults = apiAcs.length > 0 ? await executeApiChecks(config, apiAcs, log) : [];
+
+  let browserResults: AcCheckResult[] = [];
+  if (webUiAcs.length > 0) {
+    const webUiInstructions = await generateAcInstructions(
+      { ...config, acceptanceCriteria: webUiAcs.map((c) => c.criterion) },
+      log,
+    );
+    if (webUiInstructions && webUiInstructions.length > 0) {
+      browserResults = await executeAcChecks(
+        containerManager,
+        config,
+        webUiInstructions,
+        log,
+        hostBrowserRunner,
+      );
+    } else {
+      browserResults = webUiAcs.map((c) => ({
+        criterion: c.criterion,
+        passed: false,
+        validationType: 'web-ui' as const,
+        reasoning: 'Failed to generate browser validation instructions',
+      }));
+    }
+  }
+
+  const results: AcCheckResult[] = [...browserResults, ...apiResults, ...noneResults];
+  // Only count automated checks (web-ui and api) for pass/fail determination
+  const automatedResults = results.filter((r) => r.validationType !== 'none');
+  const allPassed = automatedResults.length === 0 || automatedResults.every((r) => r.passed);
 
   log?.info(
     {
       acCount: results.length,
-      passCount: results.filter((r) => r.passed).length,
-      failCount: results.filter((r) => !r.passed).length,
+      automated: automatedResults.length,
+      passCount: automatedResults.filter((r) => r.passed).length,
+      failCount: automatedResults.filter((r) => !r.passed).length,
+      diffReviewed: noneResults.length,
     },
     'AC validation complete',
   );
@@ -788,6 +929,144 @@ Respond ONLY with the JSON array, no markdown fences or extra text.`;
     return parseAcInstructionsJson(stdout.trim());
   } catch (err) {
     log?.warn({ err }, 'failed to generate AC validation instructions');
+    return null;
+  }
+}
+
+interface ApiCheckSpec {
+  criterion: string;
+  method: string;
+  path: string;
+  expectedStatus: number;
+  bodyContains?: string;
+  requestBody?: unknown;
+}
+
+/** Execute HTTP-based AC checks for api-type criteria. */
+async function executeApiChecks(
+  config: ValidationEngineConfig,
+  apiAcs: ClassifiedAc[],
+  log?: Logger,
+): Promise<AcCheckResult[]> {
+  const acList = apiAcs.map((c, i) => `${i + 1}. ${c.criterion} (${c.reason})`).join('\n');
+
+  const prompt = `You are a QA automation engineer. Generate HTTP request specs to validate each acceptance criterion.
+
+Server base URL: ${config.previewUrl}
+
+Acceptance Criteria to validate via HTTP:
+${acList}
+
+For each criterion, generate a JSON spec with:
+- "criterion": exact criterion text (copy verbatim)
+- "method": HTTP method (GET, POST, PUT, DELETE, PATCH)
+- "path": URL path (e.g. "/scheduled-jobs")
+- "expectedStatus": expected HTTP status code (number)
+- "bodyContains": optional string that must appear in the response body JSON (use for response shape checks)
+- "requestBody": optional JSON object to send as the request body (for POST/PUT/PATCH)
+
+Use minimal/example request bodies — the goal is to verify the endpoint exists and returns the expected status, not to test business logic in depth.
+
+Respond ONLY with a JSON array, no markdown fences or extra text.`;
+
+  let specs: ApiCheckSpec[] = [];
+  try {
+    const reviewTimeout = config.reviewTimeout ?? 300_000;
+    const { stdout } = await runClaudeCli({
+      model: config.reviewerModel ?? 'sonnet',
+      input: prompt,
+      timeout: reviewTimeout,
+    });
+    specs = parseApiCheckSpecs(stdout.trim(), apiAcs) ?? [];
+  } catch (err) {
+    log?.warn({ err }, 'failed to generate API check specs');
+    return apiAcs.map((c) => ({
+      criterion: c.criterion,
+      passed: false,
+      validationType: 'api' as const,
+      reasoning: 'Failed to generate API check specification',
+    }));
+  }
+
+  const results: AcCheckResult[] = [];
+  for (const spec of specs) {
+    try {
+      const url = `${config.previewUrl.replace(/\/$/, '')}${spec.path}`;
+      const options: RequestInit = {
+        method: spec.method,
+        headers: { 'Content-Type': 'application/json' },
+      };
+      if (spec.requestBody && ['POST', 'PUT', 'PATCH'].includes(spec.method.toUpperCase())) {
+        options.body = JSON.stringify(spec.requestBody);
+      }
+
+      const response = await fetch(url, options);
+      const statusOk = response.status === spec.expectedStatus;
+
+      let bodyOk = true;
+      let bodyNote = '';
+      if (spec.bodyContains) {
+        const body = await response.text();
+        bodyOk = body.includes(spec.bodyContains);
+        bodyNote = bodyOk
+          ? ` Response body contains "${spec.bodyContains}".`
+          : ` Response body does NOT contain "${spec.bodyContains}".`;
+      }
+
+      const passed = statusOk && bodyOk;
+      results.push({
+        criterion: spec.criterion,
+        passed,
+        validationType: 'api',
+        reasoning: passed
+          ? `${spec.method} ${spec.path} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}`
+          : `${spec.method} ${spec.path} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}`,
+      });
+    } catch (err) {
+      results.push({
+        criterion: spec.criterion,
+        passed: false,
+        validationType: 'api',
+        reasoning: `HTTP check failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  // Ensure every API AC has a result, even if spec generation missed it
+  const covered = new Set(results.map((r) => r.criterion));
+  for (const ac of apiAcs) {
+    if (!covered.has(ac.criterion)) {
+      results.push({
+        criterion: ac.criterion,
+        passed: false,
+        validationType: 'api',
+        reasoning: 'No HTTP check spec was generated for this criterion',
+      });
+    }
+  }
+
+  return results;
+}
+
+function parseApiCheckSpecs(raw: string, apiAcs: ClassifiedAc[]): ApiCheckSpec[] | null {
+  const cleaned = stripMarkdownFences(raw);
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) return null;
+
+    return parsed.filter(
+      (item: unknown): item is ApiCheckSpec =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).criterion === 'string' &&
+        typeof (item as Record<string, unknown>).method === 'string' &&
+        typeof (item as Record<string, unknown>).path === 'string' &&
+        typeof (item as Record<string, unknown>).expectedStatus === 'number',
+    );
+  } catch {
     return null;
   }
 }
@@ -875,7 +1154,10 @@ async function executeAcChecks(
       );
       if (hostResult !== null) return hostResult;
       // Host Playwright produced no markers — fall back to container with a freshly generated script
-      log?.warn({ sessionId: config.sessionId }, 'Host AC checks failed — falling back to container');
+      log?.warn(
+        { sessionId: config.sessionId },
+        'Host AC checks failed — falling back to container',
+      );
       const containerScript = await generateScript('container');
       return await executeAcInContainer(
         containerManager,
@@ -1326,7 +1608,10 @@ async function runTaskReview(
   // can't see all changed files and will either fabricate findings or skip.
   // Skip straight to Tier 2 (tool-use) where it can read files on demand.
   if (diffIsTruncated && !config.worktreePath) {
-    return { result: null, skipReason: 'Diff is truncated and no worktree available for tool-use review' };
+    return {
+      result: null,
+      skipReason: 'Diff is truncated and no worktree available for tool-use review',
+    };
   }
 
   try {
@@ -1346,7 +1631,9 @@ async function runTaskReview(
         return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
       }
     } else {
-      log?.info('diff is truncated — skipping Tier 1 single-shot review, routing to Tier 2 tool-use');
+      log?.info(
+        'diff is truncated — skipping Tier 1 single-shot review, routing to Tier 2 tool-use',
+      );
     }
 
     if (resolvedTier1) {
@@ -1362,7 +1649,9 @@ async function runTaskReview(
     const shouldEscalate =
       diffIsTruncated ||
       (reviewDepth === 'deep' && !!config.worktreePath) ||
-      (resolvedTier1?.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
+      (resolvedTier1?.status === 'uncertain' &&
+        reviewDepth !== 'standard' &&
+        !!config.worktreePath);
 
     if (!shouldEscalate && resolvedTier1) {
       return {
@@ -1395,7 +1684,10 @@ async function runTaskReview(
           },
         };
       }
-      return { result: null, skipReason: 'Diff is truncated and no worktree available for tool-use review' };
+      return {
+        result: null,
+        skipReason: 'Diff is truncated and no worktree available for tool-use review',
+      };
     }
 
     // At this point, worktreePath is defined

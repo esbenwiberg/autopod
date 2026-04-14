@@ -12,10 +12,10 @@ import { memoryRead } from './tools/memory-read.js';
 import { memorySearch } from './tools/memory-search.js';
 import { memorySuggest } from './tools/memory-suggest.js';
 import { reportBlocker } from './tools/report-blocker.js';
-import { requestCredential } from './tools/request-credential.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
 import { reportTaskSummary } from './tools/report-task-summary.js';
+import { requestCredential } from './tools/request-credential.js';
 import { validateInBrowser } from './tools/validate-in-browser.js';
 
 export interface EscalationMcpDeps {
@@ -143,7 +143,9 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       service: z
         .enum(['github', 'ado'])
         .describe('Which service to authenticate against: "github" or "ado" (Azure DevOps)'),
-      reason: z.string().describe('Why you need these credentials — shown to the human for approval'),
+      reason: z
+        .string()
+        .describe('Why you need these credentials — shown to the human for approval'),
     },
     async (input) => {
       const response = await requestCredential(sessionId, input, bridge, pendingRequests);
