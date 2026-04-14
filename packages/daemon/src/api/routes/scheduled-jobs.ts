@@ -1,6 +1,21 @@
-import type { CreateScheduledJobRequest, UpdateScheduledJobRequest } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import type { ScheduledJobManager } from '../../scheduled-jobs/scheduled-job-manager.js';
+
+const createSchema = z.object({
+  name: z.string().min(1),
+  profileName: z.string().min(1),
+  task: z.string().min(1),
+  cronExpression: z.string().min(1),
+  enabled: z.boolean().optional(),
+});
+
+const updateSchema = z.object({
+  name: z.string().min(1).optional(),
+  task: z.string().min(1).optional(),
+  cronExpression: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
+});
 
 export function scheduledJobRoutes(
   app: FastifyInstance,
@@ -8,7 +23,8 @@ export function scheduledJobRoutes(
 ): void {
   // POST /scheduled-jobs — create a scheduled job
   app.post('/scheduled-jobs', async (request, reply) => {
-    const job = scheduledJobManager.create(request.body as CreateScheduledJobRequest);
+    const body = createSchema.parse(request.body);
+    const job = scheduledJobManager.create(body);
     reply.status(201);
     return job;
   });
@@ -27,7 +43,8 @@ export function scheduledJobRoutes(
   // PUT /scheduled-jobs/:id — update a scheduled job
   app.put('/scheduled-jobs/:id', async (request) => {
     const { id } = request.params as { id: string };
-    return scheduledJobManager.update(id, request.body as UpdateScheduledJobRequest);
+    const body = updateSchema.parse(request.body);
+    return scheduledJobManager.update(id, body);
   });
 
   // DELETE /scheduled-jobs/:id — delete a scheduled job

@@ -72,7 +72,6 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/scheduled-jobs',
-
         payload: {
           name: 'Test Job',
           profileName: 'my-profile',
@@ -83,6 +82,35 @@ describe('scheduled-jobs routes', () => {
 
       expect(res.statusCode).toBe(201);
       expect(res.json()).toMatchObject({ id: 'job-123' });
+    });
+
+    it('returns 400 for missing required fields', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/scheduled-jobs',
+        payload: { name: 'Missing fields' },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 400 for invalid cron from manager', async () => {
+      vi.mocked(manager.create).mockImplementationOnce(() => {
+        throw new AutopodError('Invalid cron', 'INVALID_INPUT', 400);
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/scheduled-jobs',
+        payload: {
+          name: 'Bad Job',
+          profileName: 'my-profile',
+          task: 'task',
+          cronExpression: 'bad-cron',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
     });
   });
 
@@ -128,12 +156,25 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'PUT',
         url: '/scheduled-jobs/job-123',
-
         payload: { name: 'Updated' },
       });
 
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ id: 'job-123' });
+    });
+
+    it('returns 400 for invalid cron from manager', async () => {
+      vi.mocked(manager.update).mockImplementationOnce(() => {
+        throw new AutopodError('Invalid cron', 'INVALID_INPUT', 400);
+      });
+
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/scheduled-jobs/job-123',
+        payload: { cronExpression: 'bad-cron' },
+      });
+
+      expect(res.statusCode).toBe(400);
     });
   });
 

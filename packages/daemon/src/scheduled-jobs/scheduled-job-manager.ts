@@ -53,17 +53,14 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
   const { scheduledJobRepo, sessionManager, eventBus, logger } = deps;
 
   async function fireJob(job: ScheduledJob): Promise<Session> {
-    const session = await Promise.resolve(
-      sessionManager.createSession(
-        {
-          profileName: job.profileName,
-          task: job.task,
-          scheduledJobId: job.id,
-        },
-        SCHEDULER_USER_ID,
-      ),
+    return sessionManager.createSession(
+      {
+        profileName: job.profileName,
+        task: job.task,
+        scheduledJobId: job.id,
+      },
+      SCHEDULER_USER_ID,
     );
-    return session;
   }
 
   return {

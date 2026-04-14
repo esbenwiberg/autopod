@@ -7,7 +7,7 @@ CREATE TABLE scheduled_jobs (
   enabled          INTEGER NOT NULL DEFAULT 1,
   next_run_at      TEXT NOT NULL,
   last_run_at      TEXT,
-  last_session_id  TEXT REFERENCES sessions(id),
+  last_session_id  TEXT REFERENCES sessions(id) ON DELETE SET NULL,
   catchup_pending  INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT NOT NULL DEFAULT (datetime('now'))

@@ -1,3 +1,4 @@
+import { createInterface } from 'node:readline';
 import type { ScheduledJob } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -6,8 +7,7 @@ import { withJsonOutput } from '../output/json.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
 
 function confirm(question: string): Promise<boolean> {
-  const readline = require('node:readline') as typeof import('node:readline');
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
   return new Promise((resolve) => {
     rl.question(`${question} [y/N] `, (answer: string) => {
       rl.close();
