@@ -8,6 +8,12 @@ import AutopodUI
 @MainActor
 public final class EventStream {
 
+  // MARK: - Types
+
+  public enum HistoricalLoadState: Equatable {
+    case idle, loading, loaded, failed(String)
+  }
+
   // MARK: - State
 
   public private(set) var connectionState: String = "Disconnected"
@@ -15,6 +21,9 @@ public final class EventStream {
 
   /// Per-session event buffers (keyed by session ID)
   public private(set) var sessionEvents: [String: [AgentEvent]] = [:]
+
+  /// Load state for the historical REST fetch (keyed by session ID)
+  public private(set) var historicalLoadState: [String: HistoricalLoadState] = [:]
 
   private var eventSocket: EventSocket?
   private let sessionStore: SessionStore
@@ -91,14 +100,20 @@ public final class EventStream {
   /// Always refetches; reconciles by preserving any live (positive-ID) events
   /// already in the buffer so a stale partial WS buffer doesn't suppress the backfill.
   public func loadHistoricalEvents(sessionId: String, api: DaemonAPI) {
+    historicalLoadState[sessionId] = .loading
     Task {
-      guard let events = try? await api.getSessionEvents(sessionId), !events.isEmpty else { return }
-      let mapped = events.enumerated().map { (i, e) in
-        // Use negative IDs so they never collide with the live eventIdCounter (which starts at 1)
-        mapAgentEvent(e, id: -(events.count - i))
+      do {
+        let events = try await api.getSessionEvents(sessionId)
+        let mapped = events.enumerated().map { (i, e) in
+          // Use negative IDs so they never collide with the live eventIdCounter (which starts at 1)
+          mapAgentEvent(e, id: -(events.count - i))
+        }
+        let liveEvents = (sessionEvents[sessionId] ?? []).filter { $0.id > 0 }
+        sessionEvents[sessionId] = mapped + liveEvents
+        historicalLoadState[sessionId] = .loaded
+      } catch {
+        historicalLoadState[sessionId] = .failed(error.localizedDescription)
       }
-      let liveEvents = (sessionEvents[sessionId] ?? []).filter { $0.id > 0 }
-      sessionEvents[sessionId] = mapped + liveEvents
     }
   }
 

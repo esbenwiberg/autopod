@@ -11,6 +11,9 @@ public struct MainView: View {
     public var actions: SessionActions
     public var profileNames: [String]
     public var selectedSessionEvents: [AgentEvent]
+    public var isLoadingLogs: Bool
+    public var logsLoadError: String?
+    public var onReloadLogs: (() -> Void)?
     public var sessionDiffs: [String: String]
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
@@ -47,6 +50,9 @@ public struct MainView: View {
         actions: SessionActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
         selectedSessionEvents: [AgentEvent] = [],
+        isLoadingLogs: Bool = false,
+        logsLoadError: String? = nil,
+        onReloadLogs: (() -> Void)? = nil,
         sessionDiffs: [String: String] = [:],
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
@@ -78,6 +84,9 @@ public struct MainView: View {
         self.actions = actions
         self.profileNames = profileNames
         self.selectedSessionEvents = selectedSessionEvents
+        self.isLoadingLogs = isLoadingLogs
+        self.logsLoadError = logsLoadError
+        self.onReloadLogs = onReloadLogs
         self.sessionDiffs = sessionDiffs
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
@@ -262,6 +271,9 @@ public struct MainView: View {
                     onRefreshDiff: { onRefreshDiff?(session.id) },
                     loadFiles: loadFiles,
                     loadContent: loadContent,
+                    isLoadingLogs: isLoadingLogs,
+                    logsLoadError: logsLoadError,
+                    onReloadLogs: onReloadLogs,
                     requestedTab: $requestedDetailTab
                 )
             } else {

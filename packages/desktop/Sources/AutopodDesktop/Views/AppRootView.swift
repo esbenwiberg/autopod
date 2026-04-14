@@ -43,6 +43,18 @@ public struct AppRootView: View {
     return eventStream?.sessionEvents[id] ?? []
   }
 
+  private var selectedSessionIsLoadingLogs: Bool {
+    guard let id = sessionStore.selectedSessionId else { return false }
+    return eventStream?.historicalLoadState[id] == .some(.loading)
+  }
+
+  private var selectedSessionLogsError: String? {
+    guard let id = sessionStore.selectedSessionId,
+          let state = eventStream?.historicalLoadState[id] else { return nil }
+    if case .failed(let msg) = state { return msg }
+    return nil
+  }
+
   public var body: some View {
     MainView(
       sessions: sessionStore.sessions,
@@ -57,6 +69,12 @@ public struct AppRootView: View {
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
       selectedSessionEvents: selectedSessionEvents,
+      isLoadingLogs: selectedSessionIsLoadingLogs,
+      logsLoadError: selectedSessionLogsError,
+      onReloadLogs: {
+        guard let id = sessionStore.selectedSessionId, let api = connectionManager.api else { return }
+        eventStream?.loadHistoricalEvents(sessionId: id, api: api)
+      },
       sessionDiffs: sessionStore.sessionDiffs,
       terminalState: terminalManager?.state ?? "disconnected",
       terminalDataPipe: terminalManager?.dataPipe,

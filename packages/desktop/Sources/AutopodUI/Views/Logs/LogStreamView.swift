@@ -5,8 +5,22 @@ import SwiftUI
 public struct LogStreamView: View {
     public let events: [AgentEvent]
     public let sessionBranch: String
-    public init(events: [AgentEvent], sessionBranch: String) {
-        self.events = events; self.sessionBranch = sessionBranch
+    public var isLoading: Bool
+    public var loadError: String?
+    public var onReload: (() -> Void)?
+
+    public init(
+        events: [AgentEvent],
+        sessionBranch: String,
+        isLoading: Bool = false,
+        loadError: String? = nil,
+        onReload: (() -> Void)? = nil
+    ) {
+        self.events = events
+        self.sessionBranch = sessionBranch
+        self.isLoading = isLoading
+        self.loadError = loadError
+        self.onReload = onReload
     }
 
     @State private var activeFilters: Set<AgentEventType> = []
@@ -147,32 +161,91 @@ public struct LogStreamView: View {
     // MARK: - Log content
 
     private var logContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(filteredEvents) { event in
-                        LogEventRow(
-                            event: event,
-                            isExpanded: expandedEventId == event.id,
-                            onTap: {
-                                withAnimation(.easeOut(duration: 0.15)) {
-                                    expandedEventId = expandedEventId == event.id ? nil : event.id
-                                }
-                            }
-                        )
-                        .id(event.id)
-
-                        if event.id != filteredEvents.last?.id {
-                            Divider().padding(.leading, 80)
-                        }
+        Group {
+            if isLoading {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading logs…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = loadError {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.red.opacity(0.8))
+                    Text("Failed to load logs")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    if let onReload {
+                        Button("Retry") { onReload() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .padding(.top, 4)
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-            }
-            .onChange(of: events.count) {
-                if pinnedToBottom, let last = filteredEvents.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if events.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.tertiary)
+                    Text("No log events recorded")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if let onReload {
+                        Button("Reload") { onReload() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .padding(.top, 4)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if filteredEvents.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.tertiary)
+                    Text("No matching events")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(filteredEvents) { event in
+                                LogEventRow(
+                                    event: event,
+                                    isExpanded: expandedEventId == event.id,
+                                    onTap: {
+                                        withAnimation(.easeOut(duration: 0.15)) {
+                                            expandedEventId = expandedEventId == event.id ? nil : event.id
+                                        }
+                                    }
+                                )
+                                .id(event.id)
+
+                                if event.id != filteredEvents.last?.id {
+                                    Divider().padding(.leading, 80)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    }
+                    .onChange(of: events.count) {
+                        if pinnedToBottom, let last = filteredEvents.last {
+                            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                        }
+                    }
                 }
             }
         }

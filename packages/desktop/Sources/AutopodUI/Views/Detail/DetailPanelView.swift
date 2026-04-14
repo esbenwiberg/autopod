@@ -16,6 +16,9 @@ public struct DetailPanelView: View {
     public var onRefreshDiff: (() -> Void)?
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
+    public var isLoadingLogs: Bool
+    public var logsLoadError: String?
+    public var onReloadLogs: (() -> Void)?
     @Binding public var requestedTab: DetailTab?
 
     public init(
@@ -30,6 +33,9 @@ public struct DetailPanelView: View {
         onRefreshDiff: (() -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
+        isLoadingLogs: Bool = false,
+        logsLoadError: String? = nil,
+        onReloadLogs: (() -> Void)? = nil,
         requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
         self.session = session; self.events = events; self.actions = actions
@@ -43,6 +49,9 @@ public struct DetailPanelView: View {
         self.onRefreshDiff = onRefreshDiff
         self.loadFiles = loadFiles
         self.loadContent = loadContent
+        self.isLoadingLogs = isLoadingLogs
+        self.logsLoadError = logsLoadError
+        self.onReloadLogs = onReloadLogs
         self._requestedTab = requestedTab
     }
 
@@ -67,7 +76,13 @@ public struct DetailPanelView: View {
             ZStack {
                 switch selectedTab {
                 case .overview:   OverviewTab(session: session, events: events, actions: actions)
-                case .logs:       LogStreamView(events: events, sessionBranch: session.branch)
+                case .logs:       LogStreamView(
+                    events: events,
+                    sessionBranch: session.branch,
+                    isLoading: isLoadingLogs,
+                    loadError: logsLoadError,
+                    onReload: onReloadLogs
+                )
                 case .diff:       DiffTab(session: session, diffString: diffString, onRefresh: onRefreshDiff)
                 case .validation: ValidationTab(session: session, actions: actions)
                 case .summary:    SummaryTab(session: session)
