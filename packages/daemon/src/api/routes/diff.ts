@@ -95,6 +95,18 @@ async function tryContainerDiff(
       }
     }
 
+    if (!base) {
+      // baseBranch didn't resolve — try origin/${baseBranch} (bare repo remote-tracking ref)
+      const fallbackResult = await cm.execInContainer(
+        containerId,
+        ['git', 'merge-base', 'HEAD', `origin/${baseBranch}`],
+        { cwd: workDir, timeout: 10_000 },
+      );
+      if (fallbackResult.exitCode === 0 && fallbackResult.stdout.trim()) {
+        base = fallbackResult.stdout.trim();
+      }
+    }
+
     if (base) {
       const result = await cm.execInContainer(
         containerId,

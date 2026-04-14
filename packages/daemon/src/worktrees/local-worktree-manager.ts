@@ -130,7 +130,12 @@ export class LocalWorktreeManager implements WorktreeManager {
       try {
         await execFileAsync(
           'git',
-          ['fetch', authUrl, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
+          [
+            'fetch',
+            authUrl,
+            `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
+            `+refs/heads/${baseBranch}:refs/heads/${baseBranch}`,
+          ],
           { cwd: bareRepoPath, env: GIT_ENV },
         );
       } catch (fetchErr) {
