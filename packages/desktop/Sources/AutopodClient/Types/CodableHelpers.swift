@@ -20,3 +20,35 @@ func decodeBoolOrIntIfPresent<K: CodingKey>(
   guard let intVal = try container.decodeIfPresent(Int.self, forKey: key) else { return nil }
   return intVal != 0
 }
+
+/// Decodes a field that may be either a `String` or an array of objects with a `text` key.
+/// Legacy daemon events (pre-c97af9a) stored tool_result `output` as a content-block array;
+/// newer events always emit a plain string. Either way we return a `String?`.
+func decodeStringOrArray<K: CodingKey>(
+  _ container: KeyedDecodingContainer<K>, key: K
+) throws -> String? {
+  // Try plain string first (the common case).
+  if let s = try? container.decodeIfPresent(String.self, forKey: key) { return s }
+  // Fall back to an array of objects — join their `text` fields.
+  guard var nested = try? container.nestedUnkeyedContainer(forKey: key) else { return nil }
+  var parts: [String] = []
+  while !nested.isAtEnd {
+    if let obj = try? nested.nestedContainer(keyedBy: DynamicCodingKey.self) {
+      let textKey = DynamicCodingKey(stringValue: "text")
+      let text = try? obj.decodeIfPresent(String.self, forKey: textKey)
+      parts.append(text ?? "")
+    } else {
+      _ = try? nested.decode(AnyCodable.self)
+    }
+  }
+  let joined = parts.joined(separator: "\n")
+  return joined.isEmpty ? nil : joined
+}
+
+/// Minimal CodingKey for dynamic string keys used in `decodeStringOrArray`.
+private struct DynamicCodingKey: CodingKey {
+  var stringValue: String
+  var intValue: Int? { nil }
+  init(stringValue: String) { self.stringValue = stringValue }
+  init?(intValue: Int) { nil }
+}
