@@ -163,21 +163,32 @@ public struct DetailPanelView: View {
         HStack(spacing: 6) {
             switch session.status {
             case .running:
-                Button {
-                    showNudgeInput = true
-                } label: {
-                    Label("Nudge", systemImage: "hand.tap")
+                if session.outputMode == .workspace {
+                    Button {
+                        Task { await actions.complete(session.id) }
+                    } label: {
+                        Label("Complete", systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.green)
+                } else {
+                    Button {
+                        showNudgeInput = true
+                    } label: {
+                        Label("Nudge", systemImage: "hand.tap")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    Button {
+                        Task { await actions.pause(session.id) }
+                    } label: {
+                        Label("Pause", systemImage: "pause.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.yellow)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                Button {
-                    Task { await actions.pause(session.id) }
-                } label: {
-                    Label("Pause", systemImage: "pause.circle")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.yellow)
                 Button {
                     Task { await actions.kill(session.id) }
                 } label: {
