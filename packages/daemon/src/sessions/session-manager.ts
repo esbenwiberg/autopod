@@ -1088,6 +1088,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               request.tokenBudget !== undefined
                 ? request.tokenBudget
                 : (profile.tokenBudget ?? null),
+            scheduledJobId: request.scheduledJobId ?? null,
           });
           break;
         } catch (err: unknown) {

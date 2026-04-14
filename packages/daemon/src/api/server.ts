@@ -19,6 +19,7 @@ import type {
   SessionManager,
   SessionQueue,
 } from '../sessions/index.js';
+import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
 import { mcpProxyHandler } from './mcp-proxy-handler.js';
@@ -56,6 +57,7 @@ export interface ServerDependencies {
   sessionTokenIssuer?: SessionTokenIssuer;
   memoryRepo?: MemoryRepository;
   pendingOverrideRepo?: PendingOverrideRepository;
+  scheduledJobManager?: ScheduledJobManager;
   logLevel?: string;
   prettyLog?: boolean;
   onShutdown?: () => void;

@@ -46,6 +46,9 @@ import {
   createSessionRepository,
   createValidationRepository,
 } from './sessions/index.js';
+import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
+import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
+import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import { createSessionBridge } from './sessions/session-bridge-impl.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
@@ -361,6 +364,16 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
   });
 }
 
+// Scheduled jobs
+const scheduledJobRepo = createScheduledJobRepository(db);
+const scheduledJobManager = createScheduledJobManager({
+  scheduledJobRepo,
+  sessionManager,
+  eventBus,
+  logger,
+});
+const scheduledJobScheduler = createScheduledJobScheduler(scheduledJobManager, logger);
+
 // Session bridge for MCP escalation
 const sessionBridge = createSessionBridge({
   sessionManager,
@@ -422,6 +435,7 @@ const app = await createServer({
   sessionTokenIssuer,
   memoryRepo,
   pendingOverrideRepo,
+  scheduledJobManager,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),
@@ -435,6 +449,9 @@ try {
   app.log.fatal(err, 'Failed to start daemon');
   process.exit(1);
 }
+
+// Start scheduled job scheduler AFTER server is listening
+scheduledJobScheduler.start();
 
 // Reconcile ACI sessions after startup (non-blocking — errors are logged, not fatal)
 if (aciContainerManager) {
@@ -486,6 +503,9 @@ async function shutdown(signal: string) {
 
   // Stop notifications
   notificationService.stop();
+
+  // Stop scheduled job scheduler
+  scheduledJobScheduler.stop();
 
   // Drain session queue
   await sessionQueue.drain();
