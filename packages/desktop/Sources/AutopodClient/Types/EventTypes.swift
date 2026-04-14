@@ -41,6 +41,11 @@ public struct RawSystemEvent: Codable, Sendable {
 
   // validation.override_queued
   public let override: ValidationOverrideEntry?
+
+  // scheduled_job.catchup_requested / scheduled_job.fired
+  public let jobId: String?
+  public let jobName: String?
+  public let lastRunAt: String?
 }
 
 // MARK: - Typed event enum (parsed from RawSystemEvent)
@@ -56,6 +61,8 @@ public enum SystemEvent: Sendable {
   case sessionCompleted(sessionId: String, finalStatus: String, summary: SessionSummaryResponse)
   case memorySuggestionCreated(sessionId: String, entry: MemoryEntry)
   case validationOverrideQueued(sessionId: String, override: ValidationOverrideEntry)
+  case scheduledJobCatchupRequested(jobId: String, jobName: String, lastRunAt: String?)
+  case scheduledJobFired(jobId: String, jobName: String, sessionId: String)
 
   public var eventId: Int? { nil }  // Set externally from _eventId
 
@@ -102,6 +109,22 @@ public enum SystemEvent: Sendable {
     case "validation.override_queued":
       guard let id = raw.sessionId, let ov = raw.override else { return nil }
       return .validationOverrideQueued(sessionId: id, override: ov)
+
+    case "scheduled_job.catchup_requested":
+      guard let jobId = raw.jobId else { return nil }
+      return .scheduledJobCatchupRequested(
+        jobId: jobId,
+        jobName: raw.jobName ?? jobId,
+        lastRunAt: raw.lastRunAt
+      )
+
+    case "scheduled_job.fired":
+      guard let jobId = raw.jobId, let sessionId = raw.sessionId else { return nil }
+      return .scheduledJobFired(
+        jobId: jobId,
+        jobName: raw.jobName ?? jobId,
+        sessionId: sessionId
+      )
 
     default:
       return nil

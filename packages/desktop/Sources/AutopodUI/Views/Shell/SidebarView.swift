@@ -8,6 +8,8 @@ public struct SidebarView: View {
     public var isConnected: Bool
     public var connectionLabel: String
     public var pendingMemoryCount: Int
+    public var scheduledJobCount: Int
+    public var catchupPendingCount: Int
     public var onShowSettings: (() -> Void)?
 
     public init(
@@ -17,6 +19,8 @@ public struct SidebarView: View {
         isConnected: Bool = true,
         connectionLabel: String = "localhost:3000",
         pendingMemoryCount: Int = 0,
+        scheduledJobCount: Int = 0,
+        catchupPendingCount: Int = 0,
         onShowSettings: (() -> Void)? = nil
     ) {
         self.sessions = sessions
@@ -25,6 +29,8 @@ public struct SidebarView: View {
         self.isConnected = isConnected
         self.connectionLabel = connectionLabel
         self.pendingMemoryCount = pendingMemoryCount
+        self.scheduledJobCount = scheduledJobCount
+        self.catchupPendingCount = catchupPendingCount
         self.onShowSettings = onShowSettings
     }
 
@@ -66,6 +72,7 @@ public struct SidebarView: View {
                     sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
                     sidebarRow(.history, icon: "clock.arrow.circlepath", color: .secondary, badge: 0)
                     sidebarRow(.memory, icon: "brain", color: .purple, badge: pendingMemoryCount)
+                    sidebarRow(.scheduledJobs, icon: "clock.badge.checkmark", color: catchupPendingCount > 0 ? .orange : .secondary, badge: catchupPendingCount > 0 ? catchupPendingCount : scheduledJobCount)
                 }
 
                 Section("Profiles") {
@@ -205,6 +212,7 @@ public enum SidebarItem: Hashable {
     case profile(String)
     case featureOverview
     case salesPitch
+    case scheduledJobs
 
     public var label: String {
         switch self {
@@ -220,6 +228,7 @@ public enum SidebarItem: Hashable {
         case .profile(let name): name
         case .featureOverview: "How it Works"
         case .salesPitch: "Why Autopod"
+        case .scheduledJobs: "Scheduled Jobs"
         }
     }
 }

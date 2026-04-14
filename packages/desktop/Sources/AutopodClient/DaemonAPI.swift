@@ -268,6 +268,28 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/memory/\(id)")
   }
 
+  // MARK: - Scheduled Jobs
+
+  public func listScheduledJobs() async throws -> [ScheduledJob] {
+    try await request("GET", "/scheduled-jobs")
+  }
+
+  public func getScheduledJob(_ id: String) async throws -> ScheduledJob {
+    try await request("GET", "/scheduled-jobs/\(id)")
+  }
+
+  public func runScheduledJobCatchup(_ id: String) async throws -> SessionResponse {
+    try await request("POST", "/scheduled-jobs/\(id)/catchup")
+  }
+
+  public func skipScheduledJobCatchup(_ id: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/scheduled-jobs/\(id)/catchup")
+  }
+
+  public func triggerScheduledJob(_ id: String) async throws -> SessionResponse {
+    try await request("POST", "/scheduled-jobs/\(id)/trigger")
+  }
+
   // MARK: - Validation
 
   public func interruptValidation(sessionId: String) async throws {
