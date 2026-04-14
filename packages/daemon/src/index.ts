@@ -131,8 +131,10 @@ function getOrCreateDevToken(): string {
   }
 }
 
-const DEV_TOKEN = IS_DEV ? getOrCreateDevToken() : null;
+// In dev mode, create the token file so the CLI can read it as a convenience credential.
+// The daemon itself no longer validates against this specific token — any Bearer string is accepted.
 if (IS_DEV) {
+  getOrCreateDevToken();
   logger.info({ path: path.join(os.homedir(), '.autopod', 'dev-token') }, 'Dev auth token path');
 }
 
@@ -153,9 +155,12 @@ const authModule: AuthModule = {
       const { AuthError } = await import('@autopod/shared');
       throw new AuthError('Auth module not configured');
     }
-    if (token !== DEV_TOKEN) {
+    // In dev mode, accept any non-empty Bearer token (documented behaviour).
+    // The CLI stores the dev token at ~/.autopod/dev-token for convenience,
+    // but the daemon does not enforce it — any caller with any Bearer string is accepted.
+    if (!token) {
       const { AuthError } = await import('@autopod/shared');
-      throw new AuthError('Invalid dev token');
+      throw new AuthError('Missing token');
     }
     return devPayload();
   },
@@ -163,8 +168,8 @@ const authModule: AuthModule = {
     if (!IS_DEV) {
       throw new Error('Auth module not configured');
     }
-    if (token !== DEV_TOKEN) {
-      throw new Error('Invalid dev token');
+    if (!token) {
+      throw new Error('Missing token');
     }
     return devPayload();
   },
