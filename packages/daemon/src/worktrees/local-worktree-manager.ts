@@ -274,7 +274,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   async getDiff(
     worktreePath: string,
     baseBranch: string,
-    maxLength = 50_000,
+    maxLength = 200_000,
     sinceCommit?: string,
   ): Promise<string> {
     const base = sinceCommit ?? (await this.resolveMergeBase(worktreePath, baseBranch));
@@ -288,7 +288,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
 
     try {
-      const bufOpts = { cwd: worktreePath, maxBuffer: 2 * 1024 * 1024 };
+      const bufOpts = { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 };
 
       // Committed changes: base..HEAD
       const { stdout: committedDiff } = await execFileAsync('git', ['diff', base, 'HEAD'], bufOpts);
@@ -299,7 +299,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       const combined =
         uncommittedDiff.length > 0 ? `${committedDiff}\n${uncommittedDiff}` : committedDiff;
 
-      return combined.slice(0, maxLength);
+      return truncateDiffAtFileBoundary(combined, maxLength);
     } catch (err) {
       this.logger.warn({ err: sanitizeGitError(err), worktreePath }, 'getDiff: git diff failed');
       return '';
@@ -572,4 +572,42 @@ export class LocalWorktreeManager implements WorktreeManager {
       }
     }
   }
+}
+
+/**
+ * Truncates a unified diff at file boundaries rather than mid-hunk.
+ * Splits on `diff --git` headers, includes whole files until `maxLength` is
+ * exceeded, then appends a summary of omitted file paths so reviewers know
+ * to fetch them via tools.
+ */
+export function truncateDiffAtFileBoundary(diff: string, maxLength: number): string {
+  if (diff.length <= maxLength) return diff;
+
+  // Split into per-file chunks — the separator is "diff --git "
+  const chunks = diff.split(/(?=^diff --git )/m).filter(Boolean);
+
+  const included: string[] = [];
+  const omitted: string[] = [];
+  let size = 0;
+
+  for (const chunk of chunks) {
+    if (size + chunk.length <= maxLength) {
+      included.push(chunk);
+      size += chunk.length;
+    } else {
+      // Extract the file path from the header for the omitted list
+      const match = chunk.match(/^diff --git a\/.+ b\/(.+)$/m);
+      omitted.push(match ? match[1] : '(unknown file)');
+    }
+  }
+
+  if (omitted.length === 0) return diff;
+
+  const warning =
+    `\n⚠ DIFF TRUNCATED: ${omitted.length} file${omitted.length > 1 ? 's' : ''} omitted (diff exceeded ${maxLength} chars).\n` +
+    `Omitted files — use read_file / Read tools to inspect them:\n` +
+    omitted.map((f) => `  - ${f}`).join('\n') +
+    '\n';
+
+  return included.join('') + warning;
 }

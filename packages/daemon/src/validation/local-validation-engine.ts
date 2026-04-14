@@ -1317,59 +1317,95 @@ async function runTaskReview(
 
   log?.info({ model: config.reviewerModel }, 'running AI task review');
 
+  const diffIsTruncated = config.diff?.includes('⚠ DIFF TRUNCATED:') ?? false;
   const prompt = buildReviewPrompt(config, reviewContext);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const reviewDepth = config.reviewDepth ?? 'auto';
 
-  try {
-    // ── Tier 1: Single-shot review with enriched context ──────────────
-    const { stdout } = await runClaudeCli({
-      model: config.reviewerModel,
-      input: prompt,
-      timeout: reviewTimeout,
-    });
+  // Tier 1 (single-shot) is useless when the diff is truncated — the model
+  // can't see all changed files and will either fabricate findings or skip.
+  // Skip straight to Tier 2 (tool-use) where it can read files on demand.
+  if (diffIsTruncated && !config.worktreePath) {
+    return { result: null, skipReason: 'Diff is truncated and no worktree available for tool-use review' };
+  }
 
-    const tier1Parsed = parseReviewJson(stdout.trim());
-    if (!tier1Parsed) {
-      log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
-      return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
+  try {
+    let tier1Parsed: ReturnType<typeof parseReviewJson> = null;
+
+    if (!diffIsTruncated) {
+      // ── Tier 1: Single-shot review with enriched context ──────────────
+      const { stdout } = await runClaudeCli({
+        model: config.reviewerModel,
+        input: prompt,
+        timeout: reviewTimeout,
+      });
+
+      tier1Parsed = parseReviewJson(stdout.trim());
+      if (!tier1Parsed) {
+        log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
+        return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
+      }
+    } else {
+      log?.info('diff is truncated — skipping Tier 1 single-shot review, routing to Tier 2 tool-use');
     }
 
-    log?.info(
-      {
-        status: tier1Parsed.status,
-        issueCount: tier1Parsed.issues.length,
-        tier: 1,
-      },
-      'Tier 1 task review complete',
-    );
+    if (resolvedTier1) {
+      log?.info(
+        { status: resolvedTier1.status, issueCount: resolvedTier1.issues.length, tier: 1 },
+        'Tier 1 task review complete',
+      );
+    }
 
-    // If Tier 1 is conclusive or depth is standard-only, we're done.
-    // 'deep' forces Tier 2+ regardless of Tier 1 status (e.g. for auto-hoist on recurring findings).
+    // If Tier 1 is conclusive and depth is standard-only, we're done.
+    // Truncated diffs always escalate (resolvedTier1 is null) so this branch is unreachable for them.
+    // 'deep' forces Tier 2+ regardless of Tier 1 status.
     const shouldEscalate =
+      diffIsTruncated ||
       (reviewDepth === 'deep' && !!config.worktreePath) ||
-      (tier1Parsed.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
+      (resolvedTier1?.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
 
-    if (!shouldEscalate) {
+    if (!shouldEscalate && resolvedTier1) {
       return {
         result: {
-          status: tier1Parsed.status,
-          reasoning: tier1Parsed.reasoning,
-          issues: tier1Parsed.issues,
+          status: resolvedTier1.status,
+          reasoning: resolvedTier1.reasoning,
+          issues: resolvedTier1.issues,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
-          requirementsCheck: tier1Parsed.requirementsCheck,
-          deviationsAssessment: tier1Parsed.deviationsAssessment,
+          requirementsCheck: resolvedTier1.requirementsCheck,
+          deviationsAssessment: resolvedTier1.deviationsAssessment,
         },
       };
     }
 
-    // At this point, shouldEscalate guarantees worktreePath is defined
-    const worktreePath = config.worktreePath as string;
+    if (!config.worktreePath) {
+      // Escalation wanted but no worktree — return Tier 1 result if we have one
+      if (resolvedTier1) {
+        return {
+          result: {
+            status: resolvedTier1.status,
+            reasoning: resolvedTier1.reasoning,
+            issues: resolvedTier1.issues,
+            model: config.reviewerModel,
+            screenshots: [],
+            diff: config.diff,
+            requirementsCheck: resolvedTier1.requirementsCheck,
+            deviationsAssessment: resolvedTier1.deviationsAssessment,
+          },
+        };
+      }
+      return { result: null, skipReason: 'Diff is truncated and no worktree available for tool-use review' };
+    }
 
-    // ── Tier 2: Tool-use review (on uncertain) ───────────────────────
-    log?.info('Tier 1 returned uncertain, escalating to Tier 2 tool-use review');
+    // At this point, worktreePath is defined
+    const worktreePath = config.worktreePath;
+
+    // ── Tier 2: Tool-use review ───────────────────────────────────────
+    const tier2Reason = diffIsTruncated
+      ? 'diff is truncated — routing directly to Tier 2 tool-use review'
+      : 'Tier 1 returned uncertain, escalating to Tier 2 tool-use review';
+    log?.info(tier2Reason);
 
     try {
       const tier2Result = await runToolUseReview({
@@ -1429,8 +1465,11 @@ async function runTaskReview(
         }
       }
 
-      // Fall back to best available result
-      const bestParsed = tier2Parsed ?? tier1Parsed;
+      // Fall back to best available result (Tier 2 if parsed, else Tier 1 if available)
+      const bestParsed = tier2Parsed ?? resolvedTier1;
+      if (!bestParsed) {
+        return { result: null, skipReason: 'All review tiers failed to produce a result' };
+      }
       return {
         result: {
           status: bestParsed.status,
@@ -1444,18 +1483,21 @@ async function runTaskReview(
         },
       };
     } catch (err) {
-      log?.warn({ err }, 'Tier 2 tool-use review failed, using Tier 1 result');
-      // Fall back to Tier 1 result
+      log?.warn({ err }, 'Tier 2 tool-use review failed');
+      if (!resolvedTier1) {
+        // Truncated diff path: no Tier 1 result to fall back to
+        return { result: null, skipReason: 'Tier 2 tool-use review failed and diff was truncated' };
+      }
       return {
         result: {
-          status: tier1Parsed.status,
-          reasoning: tier1Parsed.reasoning,
-          issues: tier1Parsed.issues,
+          status: resolvedTier1.status,
+          reasoning: resolvedTier1.reasoning,
+          issues: resolvedTier1.issues,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
-          requirementsCheck: tier1Parsed.requirementsCheck,
-          deviationsAssessment: tier1Parsed.deviationsAssessment,
+          requirementsCheck: resolvedTier1.requirementsCheck,
+          deviationsAssessment: resolvedTier1.deviationsAssessment,
         },
       };
     }

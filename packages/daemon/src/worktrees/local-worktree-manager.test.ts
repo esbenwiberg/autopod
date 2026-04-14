@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LocalWorktreeManager } from './local-worktree-manager.js';
+import { LocalWorktreeManager, truncateDiffAtFileBoundary } from './local-worktree-manager.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -291,15 +291,20 @@ describe('LocalWorktreeManager', () => {
       expect(result).toBe(diffContent);
     });
 
-    it('truncates diff to maxLength', async () => {
-      const longDiff = 'x'.repeat(100);
+    it('truncates diff at file boundaries when too long', async () => {
+      // Two file hunks — first fits in 60 chars, second should be omitted
+      const hunk1 = 'diff --git a/small.ts b/small.ts\n+small change\n';
+      const hunk2 = 'diff --git a/big.ts b/big.ts\n+' + 'x'.repeat(200) + '\n';
       setupExecFileMock({
         'merge-base': { stdout: 'abc1234\n' },
-        'diff abc1234': { stdout: longDiff },
+        'diff abc1234': { stdout: hunk1 + hunk2 },
       });
 
-      const result = await manager.getDiff('/tmp/worktree/sess', 'main', 10);
-      expect(result).toBe('x'.repeat(10));
+      const result = await manager.getDiff('/tmp/worktree/sess', 'main', 60);
+      expect(result).toContain(hunk1);
+      expect(result).toContain('⚠ DIFF TRUNCATED');
+      expect(result).toContain('big.ts');
+      expect(result).not.toContain('x'.repeat(200));
     });
 
     it('combines committed and uncommitted diffs', async () => {
@@ -772,5 +777,39 @@ describe('LocalWorktreeManager', () => {
       >;
       expect([...patCache.values()]).toContain('cached-pat');
     });
+  });
+});
+
+describe('truncateDiffAtFileBoundary', () => {
+  const h1 = 'diff --git a/a.ts b/a.ts\n+line\n';
+  const h2 = 'diff --git a/b.ts b/b.ts\n+' + 'x'.repeat(200) + '\n';
+  const h3 = 'diff --git a/c.ts b/c.ts\n+other\n';
+
+  it('returns diff unchanged when under limit', () => {
+    const diff = h1 + h3;
+    expect(truncateDiffAtFileBoundary(diff, 10_000)).toBe(diff);
+  });
+
+  it('includes complete files up to the limit', () => {
+    const diff = h1 + h2 + h3;
+    const result = truncateDiffAtFileBoundary(diff, h1.length + 50);
+    expect(result).toContain(h1);
+    expect(result).not.toContain('x'.repeat(200));
+    expect(result).toContain('⚠ DIFF TRUNCATED');
+    expect(result).toContain('b.ts');
+    expect(result).toContain('c.ts');
+  });
+
+  it('lists all omitted file names', () => {
+    const diff = h1 + h2 + h3;
+    const result = truncateDiffAtFileBoundary(diff, h1.length + 5);
+    expect(result).toContain('2 files omitted');
+    expect(result).toContain('b.ts');
+    expect(result).toContain('c.ts');
+  });
+
+  it('instructs reviewer to use read_file tools', () => {
+    const result = truncateDiffAtFileBoundary(h1 + h2, h1.length + 5);
+    expect(result).toContain('read_file');
   });
 });
