@@ -2283,8 +2283,60 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
           emitActivityStatus(sessionId, 'PR merge failed — session still completing');
         }
+      } else if (!session.prUrl && prManager && session.worktreePath) {
+        // PR creation failed during validation — retry it now
+        emitActivityStatus(sessionId, 'No PR found — creating PR before merging…');
+        try {
+          const retryProfile = profileStore.get(session.profileName);
+          await worktreeManager.mergeBranch({
+            worktreePath: session.worktreePath,
+            targetBranch: retryProfile.defaultBranch,
+          });
+          const newPrUrl = await prManager.createPr({
+            worktreePath: session.worktreePath,
+            repoUrl: retryProfile.repoUrl,
+            branch: session.branch,
+            baseBranch: retryProfile.defaultBranch,
+            sessionId,
+            task: session.task,
+            profileName: session.profileName,
+            validationResult: null,
+            filesChanged: session.filesChanged,
+            linesAdded: session.linesAdded,
+            linesRemoved: session.linesRemoved,
+            previewUrl: session.previewUrl,
+            screenshots: [],
+            taskSummary: session.taskSummary ?? undefined,
+          });
+          sessionRepo.update(sessionId, { prUrl: newPrUrl });
+          emitActivityStatus(sessionId, `PR created: ${newPrUrl}`);
+          const retryMergeResult = await prManager.mergePr({
+            worktreePath: session.worktreePath,
+            prUrl: newPrUrl,
+            squash: options?.squash,
+          });
+          if (retryMergeResult.merged) {
+            emitActivityStatus(sessionId, 'PR merged successfully');
+          } else {
+            const retryStatus = await prManager.getPrStatus({
+              prUrl: newPrUrl,
+              worktreePath: session.worktreePath,
+            });
+            const blockReason = retryStatus.blockReason ?? 'Waiting for merge conditions';
+            emitActivityStatus(sessionId, `Merge pending: ${blockReason}`);
+            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
+            startMergePolling(sessionId);
+            return;
+          }
+        } catch (err) {
+          logger.error({ err, sessionId }, 'Failed to create/merge PR during approval');
+          emitActivityStatus(
+            sessionId,
+            'PR creation failed — branch is pushed but no PR was merged',
+          );
+        }
       } else if (session.worktreePath) {
-        // Fallback: push branch directly (no PR was created)
+        // Fallback: no PR manager configured — push branch directly
         emitActivityStatus(sessionId, 'Pushing branch…');
         try {
           const profile = profileStore.get(session.profileName);

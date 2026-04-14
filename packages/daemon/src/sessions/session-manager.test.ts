@@ -639,8 +639,32 @@ describe('SessionManager', () => {
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith(expect.objectContaining({ squash: true }));
     });
 
-    it('falls back to branch push when no prUrl', async () => {
+    it('creates and merges PR when prUrl is missing but prManager is available', async () => {
       const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt' });
+
+      await manager.approveSession(session.id);
+
+      // Branch is pushed first, then PR is created and merged
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
+        worktreePath: '/tmp/wt',
+        targetBranch: 'main',
+      });
+      expect(ctx.prManager.createPr).toHaveBeenCalled();
+      expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+        expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
+      );
+    });
+
+    it('falls back to branch push when no prUrl and no prManager', async () => {
+      const ctx = createTestContext();
+      ctx.deps.prManagerFactory = undefined;
       const manager = createSessionManager(ctx.deps);
 
       const session = manager.createSession(
