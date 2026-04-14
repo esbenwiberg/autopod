@@ -5,7 +5,9 @@ import type {
   Session,
   UpdateScheduledJobRequest,
 } from '@autopod/shared';
-import { parseExpression } from 'cron-parser';
+import cronParser from 'cron-parser';
+
+const { parseExpression } = cronParser;
 import type { Logger } from 'pino';
 import type { EventBus } from '../sessions/event-bus.js';
 import type { SessionManager } from '../sessions/session-manager.js';
