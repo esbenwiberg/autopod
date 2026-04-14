@@ -87,6 +87,7 @@ struct AutopodApp: App {
     Task {
       await sessionStore.loadSessions()
       await profileStore.loadProfiles()
+      await memoryStore.loadMemories()
     }
   }
 }
