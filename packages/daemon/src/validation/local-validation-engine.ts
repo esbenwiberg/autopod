@@ -1417,7 +1417,7 @@ function buildReviewPrompt(config: ValidationEngineConfig, reviewContext?: Revie
 
   return `You are an expert software engineer performing an independent code review of changes made by an AI agent.
 
-Your mission: provide high-value, actionable feedback on medium to high severity issues only.
+Your mission: provide high-value, actionable feedback on medium and above severity issues. Low severity findings should be skipped entirely — if they don't meet the medium bar, don't report them.
 
 Core principles:
 - Be helpful, not noisy. Only raise fair, actionable concerns that genuinely improve code.
@@ -1470,7 +1470,7 @@ An undisclosed deviation that the diff reveals IS a negative signal.
     : ''
 }### ${acList ? (taskSummarySection ? 'Step 3' : 'Step 2') : taskSummarySection ? 'Step 2' : 'Step 1'}: Code review
 
-Review ONLY the changed code across these dimensions. Only raise medium or high severity issues:
+Review ONLY the changed code across these dimensions. Only raise medium, high, or critical severity issues — skip anything below that bar:
 
 **Correctness & Quality**: error handling completeness, resource management, type/null safety, edge case handling
 
@@ -1508,12 +1508,12 @@ Respond ONLY with a JSON object — no markdown fences, no extra text:
 {
   "status": "pass" | "fail" | "uncertain",
   "reasoning": "one or two sentence summary of the overall assessment",
-  ${acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["specific medium/high severity issues only"]
+  ${acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["specific medium/high/critical severity issues only — omit anything below medium"]
 }
 
 Status rules:
-- "pass": requirements met (if any), no significant issues, and no unjustified undisclosed deviations
-- "fail": one or more requirements unmet, OR critical/high severity issues, OR undisclosed deviations that compromised scope
+- "pass": requirements met (if any), no medium/high/critical severity issues found, and no unjustified undisclosed deviations. If you set "pass" but have minor observations below the medium bar, include them in reasoning and explain why they didn't reach the threshold.
+- "fail": one or more requirements unmet, OR any medium/high/critical severity issue found, OR undisclosed deviations that compromised scope
 - "uncertain": task is clear but diff is inconclusive without runtime context (use sparingly)`;
 }
 
