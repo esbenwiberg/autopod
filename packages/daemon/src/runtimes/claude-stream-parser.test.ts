@@ -134,6 +134,32 @@ describe('ClaudeStreamParser.mapEvent', () => {
     });
   });
 
+  it('handles tool_result with array content blocks (not a string)', () => {
+    const event = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_02',
+            // Claude CLI sends content as an array of blocks when tool output has structure
+            content: [{ type: 'text', text: 'line1\nline2' }],
+            is_error: false,
+          },
+        ],
+      },
+      // no tool_use_result — forces fallback to content
+    };
+    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    expect(result).toMatchObject({
+      type: 'tool_use',
+      tool: 'tool_result',
+      input: { tool_use_id: 'toolu_02' },
+      output: 'line1\nline2',
+    });
+  });
+
   it('returns null for user events without tool_result content', () => {
     const event = {
       type: 'user',
