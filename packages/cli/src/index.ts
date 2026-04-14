@@ -5,6 +5,7 @@ import { registerAuthCommands } from './commands/auth.js';
 import { registerDaemonCommands } from './commands/daemon.js';
 import { registerHistoryCommands } from './commands/history.js';
 import { registerProfileCommands } from './commands/profile.js';
+import { registerScheduleCommands } from './commands/schedule.js';
 import { registerSessionCommands } from './commands/session.js';
 import { registerValidateCommands } from './commands/validate.js';
 import { registerWorkspaceCommands } from './commands/workspace.js';
@@ -43,6 +44,7 @@ registerSessionCommands(program, getClient);
 registerWorkspaceCommands(program, getClient);
 registerHistoryCommands(program, getClient);
 registerValidateCommands(program, getClient);
+registerScheduleCommands(program, getClient);
 
 // Parse and handle errors
 async function main(): Promise<void> {
