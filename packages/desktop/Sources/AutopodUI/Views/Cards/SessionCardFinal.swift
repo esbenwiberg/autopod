@@ -102,7 +102,8 @@ public struct SessionCardFinal: View {
                         "pr",
                         session.acceptanceCriteria,
                         session.branch,
-                        session.acFrom
+                        session.acFrom,
+                        nil
                     )
                 }
             }
