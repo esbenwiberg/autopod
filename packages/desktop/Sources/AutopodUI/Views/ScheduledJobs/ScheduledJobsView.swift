@@ -4,20 +4,28 @@ import SwiftUI
 /// Full-pane list of all scheduled jobs.
 public struct ScheduledJobsView: View {
   public let jobs: [ScheduledJob]
+  public var profileNames: [String]
   public var onRunCatchup: ((ScheduledJob) -> Void)?
   public var onSkipCatchup: ((ScheduledJob) -> Void)?
   public var onTriggerJob: ((ScheduledJob) -> Void)?
+  public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
+
+  @State private var showCreateSheet = false
 
   public init(
     jobs: [ScheduledJob],
+    profileNames: [String] = [],
     onRunCatchup: ((ScheduledJob) -> Void)? = nil,
     onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
-    onTriggerJob: ((ScheduledJob) -> Void)? = nil
+    onTriggerJob: ((ScheduledJob) -> Void)? = nil,
+    onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil
   ) {
     self.jobs = jobs
+    self.profileNames = profileNames
     self.onRunCatchup = onRunCatchup
     self.onSkipCatchup = onSkipCatchup
     self.onTriggerJob = onTriggerJob
+    self.onCreateJob = onCreateJob
   }
 
   private var pendingJobs: [ScheduledJob] { jobs.filter { $0.catchupPending } }
@@ -32,6 +40,23 @@ public struct ScheduledJobsView: View {
       }
     }
     .navigationTitle("Scheduled Jobs")
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          showCreateSheet = true
+        } label: {
+          Image(systemName: "plus")
+        }
+        .help("New Scheduled Job")
+      }
+    }
+    .sheet(isPresented: $showCreateSheet) {
+      CreateScheduledJobSheet(
+        isPresented: $showCreateSheet,
+        profileNames: profileNames,
+        onCreateJob: onCreateJob
+      )
+    }
   }
 
   // MARK: - Empty state
@@ -44,10 +69,14 @@ public struct ScheduledJobsView: View {
       Text("No scheduled jobs")
         .font(.title3)
         .foregroundStyle(.secondary)
-      Text("Use `ap schedule create` to add a scheduled job.")
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-        .multilineTextAlignment(.center)
+      Button {
+        showCreateSheet = true
+      } label: {
+        Label("New Scheduled Job", systemImage: "plus")
+          .font(.caption)
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
@@ -95,12 +124,13 @@ public struct ScheduledJobsView: View {
 
 #Preview("Scheduled Jobs — populated") {
   ScheduledJobsView(
-    jobs: [.previewCatchup, .previewActive, .previewDisabled]
+    jobs: [.previewCatchup, .previewActive, .previewDisabled],
+    profileNames: ["my-app", "webapp"]
   )
   .frame(width: 600, height: 400)
 }
 
 #Preview("Scheduled Jobs — empty") {
-  ScheduledJobsView(jobs: [])
+  ScheduledJobsView(jobs: [], profileNames: ["my-app"])
     .frame(width: 600, height: 400)
 }

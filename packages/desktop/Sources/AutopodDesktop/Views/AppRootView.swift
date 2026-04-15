@@ -119,6 +119,7 @@ public struct AppRootView: View {
       onRunCatchup: { job in Task { try? await scheduledJobStore.runCatchup(job.id) } },
       onSkipCatchup: { job in Task { try? await scheduledJobStore.skipCatchup(job.id) } },
       onTriggerJob: { job in Task { try? await scheduledJobStore.triggerJob(job.id) } },
+      onCreateJob: { req in Task { try? await scheduledJobStore.createJob(req) } },
       memoryEntries: memoryStore.entries,
       pendingMemoryCount: memoryStore.pendingCount,
       onApproveMemory: { id in Task { await memoryStore.approve(id) } },

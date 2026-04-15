@@ -33,6 +33,7 @@ public struct MainView: View {
     public var onRunCatchup: ((ScheduledJob) -> Void)?
     public var onSkipCatchup: ((ScheduledJob) -> Void)?
     public var onTriggerJob: ((ScheduledJob) -> Void)?
+    public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
 
     // Memory
     public var memoryEntries: [MemoryEntry]
@@ -76,6 +77,7 @@ public struct MainView: View {
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
         onTriggerJob: ((ScheduledJob) -> Void)? = nil,
+        onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil,
         memoryEntries: [MemoryEntry] = [],
         pendingMemoryCount: Int = 0,
         onApproveMemory: @escaping (String) -> Void = { _ in },
@@ -114,6 +116,7 @@ public struct MainView: View {
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
         self.onTriggerJob = onTriggerJob
+        self.onCreateJob = onCreateJob
         self.memoryEntries = memoryEntries
         self.pendingMemoryCount = pendingMemoryCount
         self.onApproveMemory = onApproveMemory
@@ -229,9 +232,11 @@ public struct MainView: View {
             } else if sidebarSelection == .scheduledJobs {
                 ScheduledJobsView(
                     jobs: scheduledJobs,
+                    profileNames: profileNames,
                     onRunCatchup: onRunCatchup,
                     onSkipCatchup: onSkipCatchup,
-                    onTriggerJob: onTriggerJob
+                    onTriggerJob: onTriggerJob,
+                    onCreateJob: onCreateJob
                 )
                 .frame(minWidth: 600)
             } else if sidebarSelection == .salesPitch {

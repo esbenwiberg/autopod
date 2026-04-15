@@ -286,6 +286,10 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/scheduled-jobs/\(id)/catchup")
   }
 
+  public func createScheduledJob(_ body: CreateScheduledJobRequest) async throws -> ScheduledJob {
+    try await request("POST", "/scheduled-jobs", body: try encode(body))
+  }
+
   public func triggerScheduledJob(_ id: String) async throws -> SessionResponse {
     try await request("POST", "/scheduled-jobs/\(id)/trigger")
   }

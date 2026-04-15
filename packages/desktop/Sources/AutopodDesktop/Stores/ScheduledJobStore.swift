@@ -84,4 +84,10 @@ public final class ScheduledJobStore {
     _ = try await api.triggerScheduledJob(jobId)
     await refreshJob(jobId)
   }
+
+  public func createJob(_ request: CreateScheduledJobRequest) async throws {
+    guard let api else { return }
+    let job = try await api.createScheduledJob(request)
+    jobs.append(job)
+  }
 }
