@@ -40,12 +40,26 @@ export function runMigrations(db: Database.Database, migrationsDir: string, logg
 
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
 
+    // PRAGMA foreign_keys = OFF/ON must be set at the connection level — they are
+    // silently ignored when executed inside a transaction. Detect migrations that
+    // need FK enforcement suspended and toggle it around the transaction.
+    const needsFkDisabled = /PRAGMA\s+foreign_keys\s*=\s*OFF/i.test(sql);
+    if (needsFkDisabled) {
+      db.pragma('foreign_keys = OFF');
+    }
+
     const migrate = db.transaction(() => {
       db.exec(sql);
       db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version);
     });
 
-    migrate();
+    try {
+      migrate();
+    } finally {
+      if (needsFkDisabled) {
+        db.pragma('foreign_keys = ON');
+      }
+    }
     applied++;
     logger.info({ version, file }, 'Applied migration');
   }

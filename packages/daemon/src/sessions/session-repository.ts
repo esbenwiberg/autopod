@@ -459,6 +459,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
     },
 
     delete(id: string): void {
+      // Null out self-referential FKs from other sessions before deleting.
+      // linked_session_id and fix_session_id were added without ON DELETE SET NULL
+      // (SQLite can't ALTER COLUMN), so we nullify them at the application level.
+      db.prepare('UPDATE sessions SET linked_session_id = NULL WHERE linked_session_id = ?').run(id);
+      db.prepare('UPDATE sessions SET fix_session_id = NULL WHERE fix_session_id = ?').run(id);
       const result = db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
       if (result.changes === 0) throw new SessionNotFoundError(id);
     },
