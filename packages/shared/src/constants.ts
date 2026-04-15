@@ -48,5 +48,5 @@ export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = 
   merge_pending: ['complete', 'failed', 'killing'],
   complete: [],
   killing: ['killed'],
-  killed: ['validating'],
+  killed: ['validating', 'queued'],
 };

@@ -97,6 +97,13 @@ export function generateSystemInstructions(
   );
   lines.push('  - check_messages — poll for human nudge messages (non-blocking)');
   lines.push('  - validate_in_browser — open a browser to verify your work (localhost URLs only)');
+  lines.push('  - memory_list — list approved memories for global/profile/session scope');
+  lines.push('  - memory_read — retrieve full content of a memory entry by ID');
+  lines.push('  - memory_search — search memories by keyword');
+  lines.push(
+    '  - memory_suggest — suggest a new memory for human approval ' +
+      '(use to capture conventions, patterns, or reusable knowledge discovered during the session)',
+  );
 
   // Action tools live on the same MCP server — list them in the same bullet list
   // so the agent includes them in its initial ToolSearch select: call.
@@ -104,6 +111,9 @@ export function generateSystemInstructions(
   for (const action of availableActions) {
     lines.push(`  - ${action.name} — ${action.description}`);
   }
+  lines.push(
+    'After completing significant work, use memory_suggest to capture patterns or conventions that should persist across sessions.',
+  );
   lines.push('');
 
   const injectedMcpServers = options?.injectedMcpServers ?? [];
