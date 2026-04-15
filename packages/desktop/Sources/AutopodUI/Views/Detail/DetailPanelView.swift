@@ -322,6 +322,24 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
                 forkButton
 
+            case .killed:
+                Button {
+                    Task { await actions.rework(session.id) }
+                } label: {
+                    Label("Rework", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.orange)
+                forkButton
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
             default:
                 if session.isTerminal {
                     forkButton

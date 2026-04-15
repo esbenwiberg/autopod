@@ -213,24 +213,13 @@ public final class EventStream {
     pendingSessionEvents.append((sessionId, uiEvent))
     scheduleFlush()
 
+    // Update card activity with human-readable summary for overview-worthy events only
+    if uiEvent.type.isOverviewWorthy {
+      sessionStore.updateActivity(sessionId, activity: uiEvent.summary)
+    }
+
     // Update session fields based on event type
     switch event.type {
-    case "status":
-      if let msg = event.message {
-        sessionStore.updateActivity(sessionId, activity: msg)
-      }
-
-    case "tool_use":
-      if let tool = event.tool {
-        let summary = event.path.map { "\(tool): \($0)" } ?? tool
-        sessionStore.updateActivity(sessionId, activity: summary)
-      }
-
-    case "file_change":
-      if let path = event.path, let action = event.action {
-        sessionStore.updateActivity(sessionId, activity: "\(action) \(path)")
-      }
-
     case "plan":
       if let summary = event.summary {
         sessionStore.updatePlan(

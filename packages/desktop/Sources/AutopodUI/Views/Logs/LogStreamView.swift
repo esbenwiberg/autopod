@@ -28,6 +28,7 @@ public struct LogStreamView: View {
     @State private var pinnedToBottom = true
     @State private var expandedEventId: Int?
     @State private var showCopiedFeedback = false
+    @State private var isNearBottom = true
 
     private var filteredEvents: [AgentEvent] {
         events.filter { event in
@@ -219,31 +220,60 @@ public struct LogStreamView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(filteredEvents) { event in
-                                LogEventRow(
-                                    event: event,
-                                    isExpanded: expandedEventId == event.id,
-                                    onTap: {
-                                        withAnimation(.easeOut(duration: 0.15)) {
-                                            expandedEventId = expandedEventId == event.id ? nil : event.id
+                    ZStack(alignment: .bottomTrailing) {
+                        ScrollView(.vertical) {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(filteredEvents) { event in
+                                    LogEventRow(
+                                        event: event,
+                                        isExpanded: expandedEventId == event.id,
+                                        onTap: {
+                                            withAnimation(.easeOut(duration: 0.15)) {
+                                                expandedEventId = expandedEventId == event.id ? nil : event.id
+                                            }
                                         }
-                                    }
-                                )
-                                .id(event.id)
+                                    )
+                                    .id(event.id)
 
-                                if event.id != filteredEvents.last?.id {
-                                    Divider().padding(.leading, 80)
+                                    if event.id != filteredEvents.last?.id {
+                                        Divider().padding(.leading, 80)
+                                    }
                                 }
+                                // Anchor for scrolling to bottom
+                                Color.clear.frame(height: 1).id("__bottom__")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                        }
+                        .onScrollGeometryChange(for: Bool.self) { geo in
+                            geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 40
+                        } action: { _, atBottom in
+                            isNearBottom = atBottom
+                            if atBottom { pinnedToBottom = true }
+                        }
+                        .onAppear {
+                            proxy.scrollTo("__bottom__", anchor: .bottom)
+                        }
+                        .onChange(of: events.count) {
+                            if pinnedToBottom {
+                                proxy.scrollTo("__bottom__", anchor: .bottom)
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                    }
-                    .onChange(of: events.count) {
-                        if pinnedToBottom, let last = filteredEvents.last {
-                            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+
+                        // Scroll-to-bottom FAB
+                        if !isNearBottom {
+                            Button {
+                                pinnedToBottom = true
+                                withAnimation { proxy.scrollTo("__bottom__", anchor: .bottom) }
+                            } label: {
+                                Image(systemName: "arrow.down.to.line.circle.fill")
+                                    .font(.system(size: 28))
+                                    .foregroundStyle(.white)
+                                    .shadow(radius: 4)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(16)
+                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
                         }
                     }
                 }
