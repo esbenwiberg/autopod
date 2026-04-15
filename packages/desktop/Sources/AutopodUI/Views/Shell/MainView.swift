@@ -34,6 +34,8 @@ public struct MainView: View {
     public var onSkipCatchup: ((ScheduledJob) -> Void)?
     public var onTriggerJob: ((ScheduledJob) -> Void)?
     public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
+    public var onEditJob: ((String, UpdateScheduledJobRequest) -> Void)?
+    public var onDeleteJob: ((ScheduledJob) -> Void)?
 
     // Memory
     public var memoryEntries: [MemoryEntry]
@@ -78,6 +80,8 @@ public struct MainView: View {
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
         onTriggerJob: ((ScheduledJob) -> Void)? = nil,
         onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil,
+        onEditJob: ((String, UpdateScheduledJobRequest) -> Void)? = nil,
+        onDeleteJob: ((ScheduledJob) -> Void)? = nil,
         memoryEntries: [MemoryEntry] = [],
         pendingMemoryCount: Int = 0,
         onApproveMemory: @escaping (String) -> Void = { _ in },
@@ -117,6 +121,8 @@ public struct MainView: View {
         self.onSkipCatchup = onSkipCatchup
         self.onTriggerJob = onTriggerJob
         self.onCreateJob = onCreateJob
+        self.onEditJob = onEditJob
+        self.onDeleteJob = onDeleteJob
         self.memoryEntries = memoryEntries
         self.pendingMemoryCount = pendingMemoryCount
         self.onApproveMemory = onApproveMemory
@@ -236,7 +242,9 @@ public struct MainView: View {
                     onRunCatchup: onRunCatchup,
                     onSkipCatchup: onSkipCatchup,
                     onTriggerJob: onTriggerJob,
-                    onCreateJob: onCreateJob
+                    onCreateJob: onCreateJob,
+                    onEditJob: onEditJob,
+                    onDeleteJob: onDeleteJob
                 )
                 .frame(minWidth: 600)
             } else if sidebarSelection == .salesPitch {

@@ -90,4 +90,18 @@ public final class ScheduledJobStore {
     let job = try await api.createScheduledJob(request)
     jobs.append(job)
   }
+
+  public func updateJob(_ jobId: String, _ request: UpdateScheduledJobRequest) async throws {
+    guard let api else { return }
+    let updated = try await api.updateScheduledJob(jobId, request)
+    if let idx = jobs.firstIndex(where: { $0.id == jobId }) {
+      jobs[idx] = updated
+    }
+  }
+
+  public func deleteJob(_ jobId: String) async throws {
+    guard let api else { return }
+    try await api.deleteScheduledJob(jobId)
+    jobs.removeAll { $0.id == jobId }
+  }
 }

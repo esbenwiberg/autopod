@@ -24,6 +24,27 @@ public struct CreateScheduledJobRequest: Codable, Sendable {
   }
 }
 
+// MARK: - UpdateScheduledJobRequest
+
+public struct UpdateScheduledJobRequest: Codable, Sendable {
+  public let name: String?
+  public let task: String?
+  public let cronExpression: String?
+  public let enabled: Bool?
+
+  public init(
+    name: String? = nil,
+    task: String? = nil,
+    cronExpression: String? = nil,
+    enabled: Bool? = nil
+  ) {
+    self.name = name
+    self.task = task
+    self.cronExpression = cronExpression
+    self.enabled = enabled
+  }
+}
+
 // MARK: - ScheduledJob
 
 public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {

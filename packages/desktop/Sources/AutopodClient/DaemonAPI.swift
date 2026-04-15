@@ -290,6 +290,14 @@ public actor DaemonAPI {
     try await request("POST", "/scheduled-jobs", body: try encode(body))
   }
 
+  public func updateScheduledJob(_ id: String, _ body: UpdateScheduledJobRequest) async throws -> ScheduledJob {
+    try await request("PUT", "/scheduled-jobs/\(id)", body: try encode(body))
+  }
+
+  public func deleteScheduledJob(_ id: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/scheduled-jobs/\(id)")
+  }
+
   public func triggerScheduledJob(_ id: String) async throws -> SessionResponse {
     try await request("POST", "/scheduled-jobs/\(id)/trigger")
   }
