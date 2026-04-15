@@ -848,7 +848,7 @@ async function executeAcChecks(
       mode === 'host' ? config.previewUrl : (config.containerBaseUrl ?? config.previewUrl);
     const screenshotDir =
       mode === 'host'
-        ? `${hostBrowserRunner!.screenshotDir(config.sessionId)}/ac`
+        ? `${hostBrowserRunner?.screenshotDir(config.sessionId)}/ac`
         : '/tmp/autopod-ac-screenshots';
     const prompt = buildAcScriptPrompt(instructions, baseUrl, screenshotDir, mode);
     const { stdout } = await runClaudeCli({
