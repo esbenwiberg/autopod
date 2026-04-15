@@ -3,6 +3,7 @@ import type {
   OutputMode,
   PimGroupConfig,
   Profile,
+  ReferenceRepo,
   Session,
   SessionStatus,
   TaskSummary,
@@ -33,6 +34,10 @@ export interface NewSession {
   prUrl?: string | null;
   /** Token budget override for this session. null = inherit from profile. */
   tokenBudget?: number | null;
+  /** Reference repos to clone read-only into the container. */
+  referenceRepos?: ReferenceRepo[] | null;
+  /** Shared PAT for authenticating against all reference repos (plaintext — no encryption at repo layer). */
+  referenceRepoPat?: string | null;
   /** ID of the scheduled job that spawned this session. */
   scheduledJobId?: string | null;
 }
@@ -89,6 +94,8 @@ export interface SessionUpdates {
   tokenBudget?: number | null;
   budgetExtensionsUsed?: number;
   pauseReason?: 'budget' | 'manual' | null;
+  referenceRepos?: ReferenceRepo[] | null;
+  artifactsPath?: string | null;
 }
 
 export interface SessionStats {
@@ -172,6 +179,10 @@ function rowToSession(row: Record<string, unknown>): Session {
     tokenBudget: (row.token_budget as number | null) ?? null,
     budgetExtensionsUsed: (row.budget_extensions_used as number) ?? 0,
     pauseReason: (row.pause_reason as 'budget' | 'manual' | null) ?? null,
+    referenceRepos: row.reference_repos
+      ? (JSON.parse(row.reference_repos as string) as ReferenceRepo[])
+      : null,
+    artifactsPath: (row.artifacts_path as string) ?? null,
     scheduledJobId: (row.scheduled_job_id as string) ?? null,
   };
 }
@@ -184,12 +195,12 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
           output_mode, base_branch, ac_from, linked_session_id, pim_groups, pr_url,
-          token_budget, scheduled_job_id
+          token_budget, reference_repos, reference_repo_pat, scheduled_job_id
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
           @outputMode, @baseBranch, @acFrom, @linkedSessionId, @pimGroups, @prUrl,
-          @tokenBudget, @scheduledJobId
+          @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId
         )
       `).run({
         id: session.id,
@@ -213,6 +224,8 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         pimGroups: session.pimGroups ? JSON.stringify(session.pimGroups) : null,
         prUrl: session.prUrl ?? null,
         tokenBudget: session.tokenBudget ?? null,
+        referenceRepos: session.referenceRepos ? JSON.stringify(session.referenceRepos) : null,
+        referenceRepoPat: session.referenceRepoPat ?? null,
         scheduledJobId: session.scheduledJobId ?? null,
       });
     },
@@ -396,6 +409,15 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       if (changes.pauseReason !== undefined) {
         setClauses.push('pause_reason = @pauseReason');
         params.pauseReason = changes.pauseReason ?? null;
+      }
+      if (changes.referenceRepos !== undefined) {
+        setClauses.push('reference_repos = @referenceRepos');
+        params.referenceRepos =
+          changes.referenceRepos !== null ? JSON.stringify(changes.referenceRepos) : null;
+      }
+      if (changes.artifactsPath !== undefined) {
+        setClauses.push('artifacts_path = @artifactsPath');
+        params.artifactsPath = changes.artifactsPath ?? null;
       }
 
       if (setClauses.length === 0) return;

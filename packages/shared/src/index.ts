@@ -4,6 +4,7 @@ export type {
   Session,
   CreateSessionRequest,
   SessionSummary,
+  ReferenceRepo,
 } from './types/session.js';
 
 export type {

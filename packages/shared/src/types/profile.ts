@@ -15,7 +15,7 @@ export type StackTemplate =
 
 export interface Profile {
   name: string;
-  repoUrl: string;
+  repoUrl: string | null;
   defaultBranch: string;
   template: StackTemplate;
   buildCommand: string;

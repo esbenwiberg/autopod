@@ -303,6 +303,13 @@ function prManagerFactory(
       );
       return null;
     }
+    if (!profile.repoUrl) {
+      logger.warn(
+        { profileName: profile.name },
+        'ADO pr provider configured but repoUrl is missing — skipping PR creation',
+      );
+      return null;
+    }
     try {
       const { orgUrl, project, repoName } = parseAdoRepoUrl(profile.repoUrl);
       return new AdoPrManager({ orgUrl, project, repoName, pat: profile.adoPat, logger });

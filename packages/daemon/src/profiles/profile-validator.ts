@@ -27,9 +27,10 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
 
   // Repo URL
   const repoUrl = input.repoUrl;
-  if (typeof repoUrl !== 'string' || repoUrl.length === 0) {
+  const isArtifactMode = input.outputMode === 'artifact';
+  if (!isArtifactMode && (typeof repoUrl !== 'string' || repoUrl.length === 0)) {
     errors.push('repoUrl is required');
-  } else {
+  } else if (typeof repoUrl === 'string' && repoUrl.length > 0) {
     try {
       const url = new URL(repoUrl);
       if (url.protocol !== 'https:') {

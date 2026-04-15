@@ -5,6 +5,11 @@ import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
 import type { ValidationOverride, ValidationResult } from './validation.js';
 
+export interface ReferenceRepo {
+  url: string;
+  mountPath: string; // derived from last URL segment at session creation time
+}
+
 export type SessionStatus =
   | 'queued'
   | 'provisioning'
@@ -87,6 +92,10 @@ export interface Session {
   budgetExtensionsUsed: number;
   /** Why the session is paused. 'budget' = waiting for budget approval, 'manual' = user-paused mid-run. */
   pauseReason: 'budget' | 'manual' | null;
+  /** Reference repos cloned read-only into the container for research sessions. */
+  referenceRepos: ReferenceRepo[] | null;
+  /** Host path where /workspace was extracted on session completion (artifact mode). */
+  artifactsPath: string | null;
   /** ID of the scheduled job that spawned this session (null for on-demand sessions). */
   scheduledJobId: string | null;
 }
@@ -112,6 +121,10 @@ export interface CreateSessionRequest {
   prUrl?: string | null;
   /** Override the profile's token budget for this session. null = inherit from profile. */
   tokenBudget?: number | null;
+  /** Reference repos to clone read-only into the container. Mount paths are derived automatically. */
+  referenceRepos?: { url: string }[];
+  /** Shared PAT for authenticating against all reference repos (optional). */
+  referenceRepoPat?: string;
   /** ID of the scheduled job that spawned this session (null for on-demand sessions). */
   scheduledJobId?: string | null;
 }
