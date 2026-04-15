@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import { config as loadDotenv } from 'dotenv';
 import pino from 'pino';
+import { build as buildPrettyStream } from 'pino-pretty';
 import {
   createActionAuditRepository,
   createActionEngine,
@@ -69,11 +70,10 @@ const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
 
-// Logger
-const logger = pino({
-  level: LOG_LEVEL,
-  transport: IS_DEV ? { target: 'pino-pretty', options: { colorize: true } } : undefined,
-});
+// Logger — use pino-pretty as a direct stream (not a transport) to avoid worker-thread issues
+const logger = IS_DEV
+  ? pino({ level: LOG_LEVEL }, buildPrettyStream({ colorize: true }))
+  : pino({ level: LOG_LEVEL });
 
 // Database
 const db = createDatabase(DB_PATH, logger);

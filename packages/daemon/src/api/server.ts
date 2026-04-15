@@ -5,6 +5,8 @@ import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import pino from 'pino';
+import { build as buildPrettyStream } from 'pino-pretty';
 import type { ActionRegistry } from '../actions/action-registry.js';
 import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
@@ -76,13 +78,15 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     );
   }
 
+  // Use pino-pretty as a direct stream (not a transport) to avoid worker-thread crashes
+  const fastifyLogger = deps.prettyLog
+    ? pino({ level: deps.logLevel ?? 'info' }, buildPrettyStream({ colorize: true }))
+    : { level: deps.logLevel ?? 'info' };
+
   const app = Fastify({
-    logger: {
-      level: deps.logLevel ?? 'info',
-      ...(deps.prettyLog
-        ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
-        : {}),
-    },
+    ...(deps.prettyLog
+      ? { loggerInstance: fastifyLogger as import('pino').Logger }
+      : { logger: fastifyLogger }),
   });
 
   // Error handler
