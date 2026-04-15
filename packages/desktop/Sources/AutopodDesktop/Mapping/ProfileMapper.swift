@@ -50,6 +50,12 @@ public enum ProfileMapper {
       prProvider: prProvider,
       customInstructions: response.customInstructions,
       containerMemoryGb: response.containerMemoryGb,
+      branchPrefix: response.branchPrefix ?? "autopod/",
+      hasWebUi: response.hasWebUi ?? true,
+      tokenBudget: response.tokenBudget,
+      tokenBudgetPolicy: TokenBudgetPolicy(rawValue: response.tokenBudgetPolicy ?? "soft") ?? .soft,
+      tokenBudgetWarnAt: response.tokenBudgetWarnAt ?? 0.8,
+      maxBudgetExtensions: response.maxBudgetExtensions,
       issueWatcherEnabled: response.issueWatcherEnabled ?? false,
       issueWatcherLabelPrefix: response.issueWatcherLabelPrefix ?? "autopod",
       hasGithubPat: response.githubPat != nil,
@@ -138,6 +144,20 @@ public enum ProfileMapper {
     // Issue watcher
     d["issueWatcherEnabled"] = profile.issueWatcherEnabled
     d["issueWatcherLabelPrefix"] = profile.issueWatcherLabelPrefix
+
+    // Branch & web UI
+    d["branchPrefix"] = profile.branchPrefix
+    d["hasWebUi"] = profile.hasWebUi
+
+    // Token budget
+    if let budget = profile.tokenBudget {
+      d["tokenBudget"] = budget
+      d["tokenBudgetPolicy"] = profile.tokenBudgetPolicy.rawValue
+      d["tokenBudgetWarnAt"] = profile.tokenBudgetWarnAt
+      if let ext = profile.maxBudgetExtensions { d["maxBudgetExtensions"] = ext }
+    } else {
+      d["tokenBudget"] = NSNull()
+    }
 
     // Optional fields — only include if set
     if let v = profile.customInstructions { d["customInstructions"] = v }
