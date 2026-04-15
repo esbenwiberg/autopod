@@ -59,7 +59,7 @@ public struct DetailPanelView: View {
     @State private var isTaskExpanded: Bool = false
 
     private var isTerminalAvailable: Bool { session.isWorkspace }
-    private var isMarkdownAvailable: Bool { session.isWorkspace }
+    private var isMarkdownAvailable: Bool { session.isWorkspace || session.outputMode == .artifact }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -108,6 +108,11 @@ public struct DetailPanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            if session.outputMode == .artifact {
+                selectedTab = .markdown
+            }
+        }
         .onChange(of: requestedTab) { _, tab in
             guard let tab else { return }
             guard tab != .terminal || isTerminalAvailable else { requestedTab = nil; return }
@@ -463,7 +468,7 @@ public struct DetailPanelView: View {
                 let isDisabled = (tab == .terminal && !isTerminalAvailable) || (tab == .markdown && !isMarkdownAvailable)
                 let disabledHelp: String = {
                     if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace sessions" }
-                    if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer is only available for workspace sessions" }
+                    if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer is only available for workspace and artifact sessions" }
                     return ""
                 }()
                 Button {
