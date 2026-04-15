@@ -155,6 +155,8 @@ public struct AgentEventResponse: Codable, Sendable {
   // tool_use
   public let tool: String?
   public let input: AnyCodable?
+  /// `output` is normally a plain string, but legacy events (pre-c97af9a) stored it as a
+  /// content-block array. The custom decoder below handles both shapes.
   public let output: String?
 
   // file_change
@@ -188,4 +190,32 @@ public struct AgentEventResponse: Codable, Sendable {
   // task_summary
   public let actualSummary: String?
   public let deviations: [DeviationResponse]?
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    type = try c.decode(String.self, forKey: .type)
+    timestamp = try c.decode(String.self, forKey: .timestamp)
+    message = try c.decodeIfPresent(String.self, forKey: .message)
+    tool = try c.decodeIfPresent(String.self, forKey: .tool)
+    input = try c.decodeIfPresent(AnyCodable.self, forKey: .input)
+    // `output` can be a String or a legacy array of content blocks — normalize to String.
+    output = try decodeStringOrArray(c, key: .output)
+    path = try c.decodeIfPresent(String.self, forKey: .path)
+    action = try c.decodeIfPresent(String.self, forKey: .action)
+    diff = try c.decodeIfPresent(String.self, forKey: .diff)
+    totalInputTokens = try c.decodeIfPresent(Int.self, forKey: .totalInputTokens)
+    totalOutputTokens = try c.decodeIfPresent(Int.self, forKey: .totalOutputTokens)
+    costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd)
+    fatal = try c.decodeIfPresent(Bool.self, forKey: .fatal)
+    escalationType = try c.decodeIfPresent(String.self, forKey: .escalationType)
+    payload = try c.decodeIfPresent(EscalationPayload.self, forKey: .payload)
+    summary = try c.decodeIfPresent(String.self, forKey: .summary)
+    steps = try c.decodeIfPresent([String].self, forKey: .steps)
+    phase = try c.decodeIfPresent(String.self, forKey: .phase)
+    description = try c.decodeIfPresent(String.self, forKey: .description)
+    currentPhase = try c.decodeIfPresent(Int.self, forKey: .currentPhase)
+    totalPhases = try c.decodeIfPresent(Int.self, forKey: .totalPhases)
+    actualSummary = try c.decodeIfPresent(String.self, forKey: .actualSummary)
+    deviations = try c.decodeIfPresent([DeviationResponse].self, forKey: .deviations)
+  }
 }

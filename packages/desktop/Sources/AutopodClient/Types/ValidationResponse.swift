@@ -86,6 +86,7 @@ public struct AcCheckResponse: Codable, Sendable {
   public let passed: Bool
   public let screenshot: String?
   public let reasoning: String
+  public let validationType: String?  // "web-ui" | "api" | "none"
 
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -93,6 +94,7 @@ public struct AcCheckResponse: Codable, Sendable {
     passed = try decodeBoolOrInt(c, key: .passed)
     screenshot = try c.decodeIfPresent(String.self, forKey: .screenshot)
     reasoning = try c.decode(String.self, forKey: .reasoning)
+    validationType = try c.decodeIfPresent(String.self, forKey: .validationType)
   }
 }
 

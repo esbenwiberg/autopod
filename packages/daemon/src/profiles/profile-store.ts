@@ -93,6 +93,9 @@ export function rowToProfile(
     tokenBudgetWarnAt: (row.token_budget_warn_at as number | null) ?? 0.8,
     tokenBudgetPolicy: (row.token_budget_policy as 'soft' | 'hard' | null) ?? 'soft',
     maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
+    hasWebUi: row.has_web_ui !== undefined ? Boolean(row.has_web_ui) : true,
+    issueWatcherEnabled: !!(row.issue_watcher_enabled as number),
+    issueWatcherLabelPrefix: (row.issue_watcher_label_prefix as string) ?? 'autopod',
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -201,6 +204,8 @@ export function createProfileStore(
           private_registries, registry_pat, branch_prefix, container_memory_gb,
           build_timeout, test_timeout,
           token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
+          has_web_ui,
+          issue_watcher_enabled, issue_watcher_label_prefix,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
@@ -211,6 +216,8 @@ export function createProfileStore(
           @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout,
           @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
+          @hasWebUi,
+          @issueWatcherEnabled, @issueWatcherLabelPrefix,
           @createdAt, @updatedAt
         )
       `).run({
@@ -253,6 +260,9 @@ export function createProfileStore(
         tokenBudgetWarnAt: parsed.tokenBudgetWarnAt,
         tokenBudgetPolicy: parsed.tokenBudgetPolicy,
         maxBudgetExtensions: parsed.maxBudgetExtensions ?? null,
+        hasWebUi: parsed.hasWebUi ? 1 : 0,
+        issueWatcherEnabled: parsed.issueWatcherEnabled ? 1 : 0,
+        issueWatcherLabelPrefix: parsed.issueWatcherLabelPrefix,
         createdAt: now,
         updatedAt: now,
       });
@@ -455,6 +465,18 @@ export function createProfileStore(
       if (parsed.maxBudgetExtensions !== undefined) {
         setClauses.push('max_budget_extensions = @maxBudgetExtensions');
         fieldMap.maxBudgetExtensions = parsed.maxBudgetExtensions ?? null;
+      }
+      if (parsed.hasWebUi !== undefined) {
+        setClauses.push('has_web_ui = @hasWebUi');
+        fieldMap.hasWebUi = parsed.hasWebUi ? 1 : 0;
+      }
+      if (parsed.issueWatcherEnabled !== undefined) {
+        setClauses.push('issue_watcher_enabled = @issueWatcherEnabled');
+        fieldMap.issueWatcherEnabled = parsed.issueWatcherEnabled ? 1 : 0;
+      }
+      if (parsed.issueWatcherLabelPrefix !== undefined) {
+        setClauses.push('issue_watcher_label_prefix = @issueWatcherLabelPrefix');
+        fieldMap.issueWatcherLabelPrefix = parsed.issueWatcherLabelPrefix;
       }
 
       if (setClauses.length === 0) {

@@ -113,7 +113,12 @@ export type {
   TokenBudgetExceededEvent,
   ScheduledJobCatchupRequestedEvent,
   ScheduledJobFiredEvent,
+  IssueWatcherPickedUpEvent,
+  IssueWatcherCompletedEvent,
+  IssueWatcherErrorEvent,
 } from './types/events.js';
+
+export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js';
 
 export type {
   ScheduledJob,

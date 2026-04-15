@@ -1,4 +1,5 @@
 import SwiftUI
+import AutopodClient
 
 /// Modal sheet for creating a new session.
 public struct CreateSessionSheet: View {
@@ -24,6 +25,8 @@ public struct CreateSessionSheet: View {
     @State private var criteria: [String] = [""]
     @State private var showBulkImport = false
     @State private var bulkText = ""
+    @State private var pimGroups: [PimGroupRequest] = []
+    @State private var showAdvanced = false
 
     private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
     private let outputs = [("pr", "Worker (PR)"), ("workspace", "Workspace (Interactive)"), ("artifact", "Artifact")]
@@ -152,8 +155,8 @@ public struct CreateSessionSheet: View {
                         }
                     }
 
-                    // AC from file (optional — for workspace handoff)
-                    if !isWorkspace && !baseBranch.isEmpty {
+                    // AC from file (optional)
+                    if !isWorkspace {
                         formSection("AC File Path (optional)") {
                             HStack(spacing: 6) {
                                 Image(systemName: "doc.text")
@@ -263,6 +266,81 @@ public struct CreateSessionSheet: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                     } // end if !isWorkspace
+
+                    // Advanced options (PIM groups)
+                    if !isWorkspace {
+                        DisclosureGroup(isExpanded: $showAdvanced) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text("Azure PIM Groups")
+                                        .font(.system(.caption).weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    HelpBadge(text: "PIM groups activated at session start. The agent can use activate_pim_group / deactivate_pim_group actions during the session. Requires the Azure PIM action group to be enabled in the profile.")
+                                    Spacer()
+                                    Button {
+                                        pimGroups.append(PimGroupRequest())
+                                    } label: {
+                                        Label("Add group", systemImage: "plus")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .foregroundStyle(.blue)
+                                }
+
+                                if pimGroups.isEmpty {
+                                    Text("No PIM groups — add one to activate privileged access at session start.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                } else {
+                                    ForEach($pimGroups) { $group in
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            HStack(spacing: 6) {
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    TextField("Group ID (UUID)", text: $group.groupId)
+                                                        .textFieldStyle(.roundedBorder)
+                                                        .font(.system(.caption, design: .monospaced))
+                                                    TextField("Display name (optional)", text: Binding(
+                                                        get: { group.displayName ?? "" },
+                                                        set: { group.displayName = $0.isEmpty ? nil : $0 }
+                                                    ))
+                                                    .textFieldStyle(.roundedBorder)
+                                                    .font(.caption)
+                                                    HStack(spacing: 6) {
+                                                        TextField("Duration (e.g. PT8H)", text: Binding(
+                                                            get: { group.duration ?? "" },
+                                                            set: { group.duration = $0.isEmpty ? nil : $0 }
+                                                        ))
+                                                        .textFieldStyle(.roundedBorder)
+                                                        .font(.system(.caption, design: .monospaced))
+                                                        .frame(minWidth: 120)
+                                                        TextField("Justification (optional)", text: Binding(
+                                                            get: { group.justification ?? "" },
+                                                            set: { group.justification = $0.isEmpty ? nil : $0 }
+                                                        ))
+                                                        .textFieldStyle(.roundedBorder)
+                                                        .font(.caption)
+                                                    }
+                                                }
+                                                Button {
+                                                    pimGroups.removeAll { $0.id == group.id }
+                                                } label: {
+                                                    Image(systemName: "minus.circle.fill")
+                                                        .foregroundStyle(.red.opacity(0.6))
+                                                }
+                                                .buttonStyle(.borderless)
+                                            }
+                                            Divider()
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.top, 8)
+                        } label: {
+                            Text("Advanced")
+                                .font(.system(.caption).weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 .padding(20)
             }
@@ -278,11 +356,13 @@ public struct CreateSessionSheet: View {
                     Task {
                         let ac = criteria.filter { !$0.isEmpty }
                         let model = modelText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let pim = pimGroups.filter { !$0.groupId.isEmpty }
                         _ = await actions.createSession(
                             selectedProfile, task, model.isEmpty ? nil : model,
                             outputMode, ac.isEmpty ? nil : ac,
                             baseBranch.isEmpty ? nil : baseBranch,
-                            acFromPath.isEmpty ? nil : acFromPath
+                            acFromPath.isEmpty ? nil : acFromPath,
+                            pim.isEmpty ? nil : pim
                         )
                         isPresented = false
                     }
@@ -293,7 +373,7 @@ public struct CreateSessionSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 480, maxWidth: 480, minHeight: 560)
+        .frame(minWidth: 480, maxWidth: 480, minHeight: 580)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

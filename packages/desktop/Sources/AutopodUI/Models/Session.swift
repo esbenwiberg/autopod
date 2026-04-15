@@ -126,9 +126,10 @@ public struct AcCheckDetail: Sendable {
     public let passed: Bool
     public let reasoning: String
     public let screenshot: String?
-    public init(criterion: String, passed: Bool, reasoning: String, screenshot: String? = nil) {
+    public let validationType: String?  // "web-ui" | "api" | "none"
+    public init(criterion: String, passed: Bool, reasoning: String, screenshot: String? = nil, validationType: String? = nil) {
         self.criterion = criterion; self.passed = passed; self.reasoning = reasoning
-        self.screenshot = screenshot
+        self.screenshot = screenshot; self.validationType = validationType
     }
 }
 
@@ -241,6 +242,7 @@ public struct Session: Identifiable, Sendable {
     public var task: String
     public var model: String
     public var startedAt: Date
+    public var updatedAt: Date
 
     /// Base branch this session was forked from (workspace handoff)
     public var baseBranch: String?
@@ -304,6 +306,7 @@ public struct Session: Identifiable, Sendable {
         task: String = "",
         model: String,
         startedAt: Date,
+        updatedAt: Date = Date(),
         baseBranch: String? = nil,
         acFrom: String? = nil,
         acceptanceCriteria: [String]? = nil,
@@ -330,7 +333,8 @@ public struct Session: Identifiable, Sendable {
     ) {
         self.id = id; self.status = status; self.outputMode = outputMode
         self.branch = branch; self.profileName = profileName; self.task = task
-        self.model = model; self.startedAt = startedAt; self.baseBranch = baseBranch
+        self.model = model; self.startedAt = startedAt; self.updatedAt = updatedAt
+        self.baseBranch = baseBranch
         self.acFrom = acFrom; self.acceptanceCriteria = acceptanceCriteria
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
         self.escalationOptions = escalationOptions; self.escalationType = escalationType

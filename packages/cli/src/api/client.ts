@@ -16,6 +16,7 @@ import type {
   SessionStatus,
   UpdateScheduledJobRequest,
   ValidationResult,
+  WatchedIssue,
 } from '@autopod/shared';
 import { fetch } from 'undici';
 
@@ -217,6 +218,18 @@ export class AutopodClient {
 
   async stopDaemon(): Promise<void> {
     await this.request<void>('POST', '/shutdown');
+  }
+
+  // Issue watcher
+  async listWatchedIssues(filters?: {
+    profile?: string;
+    status?: string;
+  }): Promise<WatchedIssue[]> {
+    const params = new URLSearchParams();
+    if (filters?.profile) params.set('profile', filters.profile);
+    if (filters?.status) params.set('status', filters.status);
+    const qs = params.toString();
+    return this.request<WatchedIssue[]>('GET', `/issue-watcher${qs ? `?${qs}` : ''}`);
   }
 
   // Health

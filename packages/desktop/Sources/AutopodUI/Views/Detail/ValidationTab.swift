@@ -99,41 +99,7 @@ public struct ValidationTab: View {
 
           // Acceptance criteria (full list)
           if let criteria = session.acceptanceCriteria, !criteria.isEmpty {
-            detailSection("Acceptance Criteria (\(criteria.count))", icon: "checklist") {
-              VStack(alignment: .leading, spacing: 6) {
-                if let source = session.acFrom {
-                  HStack(spacing: 3) {
-                    Image(systemName: "doc.text")
-                      .font(.system(size: 9))
-                    Text(source)
-                      .font(.system(.caption2, design: .monospaced))
-                  }
-                  .foregroundStyle(.tertiary)
-                }
-                ForEach(Array(criteria.enumerated()), id: \.offset) { idx, criterion in
-                  let acResult: AcCheckDetail? = {
-                    guard let acChecks = checks.acChecks else { return nil }
-                    return acChecks.first(where: { $0.criterion == criterion })
-                        ?? (idx < acChecks.count ? acChecks[idx] : nil)
-                  }()
-                  HStack(alignment: .top, spacing: 8) {
-                    if let acResult {
-                      Image(systemName: acResult.passed ? "checkmark.square.fill" : "xmark.square.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(acResult.passed ? .green : .red)
-                        .padding(.top, 1)
-                    } else {
-                      Image(systemName: "square")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 1)
-                    }
-                    Text(criterion)
-                      .font(.callout)
-                  }
-                }
-              }
-            }
+            acListSection(criteria: criteria, acChecks: checks.acChecks)
           }
 
           // Build / Smoke
@@ -452,7 +418,10 @@ public struct ValidationTab: View {
           }
 
         } else {
-          // No validation yet
+          // No validation yet — still show ACs if present
+          if let criteria = session.acceptanceCriteria, !criteria.isEmpty {
+            acListSection(criteria: criteria, acChecks: nil)
+          }
           VStack(spacing: 10) {
             Image(systemName: "checkmark.seal")
               .font(.system(size: 32))
@@ -516,6 +485,65 @@ public struct ValidationTab: View {
     }
     .padding(16)
     .frame(width: 280)
+  }
+
+  @ViewBuilder
+  private func acListSection(criteria: [String], acChecks: [AcCheckDetail]?) -> some View {
+    detailSection("Acceptance Criteria (\(criteria.count))", icon: "checklist") {
+      VStack(alignment: .leading, spacing: 6) {
+        if let source = session.acFrom {
+          HStack(spacing: 3) {
+            Image(systemName: "doc.text")
+              .font(.system(size: 9))
+            Text(source)
+              .font(.system(.caption2, design: .monospaced))
+          }
+          .foregroundStyle(.tertiary)
+        }
+        ForEach(Array(criteria.enumerated()), id: \.offset) { idx, criterion in
+          let acResult: AcCheckDetail? = {
+            guard let acChecks else { return nil }
+            return acChecks.first(where: { $0.criterion == criterion })
+                ?? (idx < acChecks.count ? acChecks[idx] : nil)
+          }()
+          HStack(alignment: .top, spacing: 8) {
+            if let acResult {
+              Image(systemName: acResult.passed ? "checkmark.square.fill" : "xmark.square.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(acResult.passed ? .green : .red)
+                .padding(.top, 1)
+            } else {
+              Image(systemName: "square")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.top, 1)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+              Text(criterion)
+                .font(.callout)
+              if let type = acResult?.validationType {
+                triageBadge(type)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func triageBadge(_ type: String) -> some View {
+    let (label, color): (String, Color) = switch type {
+    case "web-ui": ("web-ui", .blue)
+    case "api":    ("api",    .orange)
+    default:       ("none",   Color.secondary)
+    }
+    return Text(label)
+      .font(.system(.caption2, design: .monospaced))
+      .padding(.horizontal, 5)
+      .padding(.vertical, 2)
+      .background(color.opacity(0.12))
+      .foregroundStyle(color)
+      .clipShape(Capsule())
   }
 
   private func validationBadge(_ label: String, status: Bool?, icon: String) -> some View {

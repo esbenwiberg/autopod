@@ -167,7 +167,7 @@ public struct FeatureDetailPanelView: View {
     private func diagramCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Image(systemName: "diagram")
+                Image(systemName: "rectangle.connected.to.line.below")
                     .font(.system(size: 10))
                     .foregroundStyle(feature.color)
                 Text(title)

@@ -8,6 +8,7 @@ import { registerProfileCommands } from './commands/profile.js';
 import { registerScheduleCommands } from './commands/schedule.js';
 import { registerSessionCommands } from './commands/session.js';
 import { registerValidateCommands } from './commands/validate.js';
+import { registerWatchCommands } from './commands/watch.js';
 import { registerWorkspaceCommands } from './commands/workspace.js';
 import * as configStore from './config/config-store.js';
 import { handleError } from './utils/error-handler.js';
@@ -45,6 +46,7 @@ registerWorkspaceCommands(program, getClient);
 registerHistoryCommands(program, getClient);
 registerValidateCommands(program, getClient);
 registerScheduleCommands(program, getClient);
+registerWatchCommands(program, getClient);
 
 // Parse and handle errors
 async function main(): Promise<void> {

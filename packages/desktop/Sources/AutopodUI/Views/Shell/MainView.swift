@@ -12,6 +12,9 @@ public struct MainView: View {
     public var actions: SessionActions
     public var profileNames: [String]
     public var selectedSessionEvents: [AgentEvent]
+    public var isLoadingLogs: Bool
+    public var logsLoadError: String?
+    public var onReloadLogs: (() -> Void)?
     public var sessionDiffs: [String: String]
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
@@ -54,6 +57,9 @@ public struct MainView: View {
         actions: SessionActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
         selectedSessionEvents: [AgentEvent] = [],
+        isLoadingLogs: Bool = false,
+        logsLoadError: String? = nil,
+        onReloadLogs: (() -> Void)? = nil,
         sessionDiffs: [String: String] = [:],
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
@@ -89,6 +95,9 @@ public struct MainView: View {
         self.actions = actions
         self.profileNames = profileNames
         self.selectedSessionEvents = selectedSessionEvents
+        self.isLoadingLogs = isLoadingLogs
+        self.logsLoadError = logsLoadError
+        self.onReloadLogs = onReloadLogs
         self.sessionDiffs = sessionDiffs
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
@@ -120,6 +129,7 @@ public struct MainView: View {
     @State private var showCommandPalette = false
     @State private var viewMode: ViewMode = .cards
     @State private var cardDensity: CardDensity = .detailed
+    @State private var sortOrder: SortOrder = .created
     @State private var selectedFeature: FeatureCategory?
     @State private var requestedDetailTab: DetailTab?
 
@@ -145,7 +155,7 @@ public struct MainView: View {
     }
 
     private var filteredSessions: [Session] {
-        switch sidebarSelection {
+        let filtered: [Session] = switch sidebarSelection {
         case .attention:      sessions.filter { $0.status.needsAttention }
         case .active:         sessions.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
         case .running:        sessions.filter { $0.status.isActive && !$0.isWorkspace }
@@ -159,6 +169,12 @@ public struct MainView: View {
         case .featureOverview:  []
         case .salesPitch:       []
         case .profile(let p):   sessions.filter { $0.profileName == p }
+        }
+        return filtered.sorted { a, b in
+            switch sortOrder {
+            case .created:    a.startedAt > b.startedAt
+            case .lastActive: a.updatedAt > b.updatedAt
+            }
         }
     }
 
@@ -280,6 +296,9 @@ public struct MainView: View {
                     onRefreshDiff: { onRefreshDiff?(session.id) },
                     loadFiles: loadFiles,
                     loadContent: loadContent,
+                    isLoadingLogs: isLoadingLogs,
+                    logsLoadError: logsLoadError,
+                    onReloadLogs: onReloadLogs,
                     requestedTab: $requestedDetailTab
                 )
             } else {
@@ -339,6 +358,13 @@ public struct MainView: View {
                 .foregroundStyle(.blue)
                 .clipShape(Capsule())
             Spacer()
+            Picker("", selection: $sortOrder) {
+                ForEach(SortOrder.allCases, id: \.self) { order in
+                    Text(order.rawValue).tag(order)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 160)
             if viewMode == .cards {
                 Picker("", selection: $cardDensity) {
                     Text("Compact").tag(CardDensity.compact)
@@ -438,6 +464,13 @@ public struct MainView: View {
 
 enum ViewMode: String {
     case cards, list
+}
+
+// MARK: - Sort order
+
+enum SortOrder: String, CaseIterable {
+    case created = "Created"
+    case lastActive = "Last Active"
 }
 
 // MARK: - Session list row (compact list view)

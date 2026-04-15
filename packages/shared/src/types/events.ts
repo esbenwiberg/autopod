@@ -18,7 +18,10 @@ export type SystemEvent =
   | TokenBudgetWarningEvent
   | TokenBudgetExceededEvent
   | ScheduledJobCatchupRequestedEvent
-  | ScheduledJobFiredEvent;
+  | ScheduledJobFiredEvent
+  | IssueWatcherPickedUpEvent
+  | IssueWatcherCompletedEvent
+  | IssueWatcherErrorEvent;
 
 export interface SessionCreatedEvent {
   type: 'session.created';
@@ -125,4 +128,29 @@ export interface ScheduledJobFiredEvent {
   jobId: string;
   jobName: string;
   sessionId: string;
+}
+
+export interface IssueWatcherPickedUpEvent {
+  type: 'issue_watcher.picked_up';
+  timestamp: string;
+  profileName: string;
+  issueUrl: string;
+  issueTitle: string;
+  sessionId: string;
+}
+
+export interface IssueWatcherCompletedEvent {
+  type: 'issue_watcher.completed';
+  timestamp: string;
+  profileName: string;
+  issueUrl: string;
+  sessionId: string;
+  outcome: 'done' | 'failed';
+}
+
+export interface IssueWatcherErrorEvent {
+  type: 'issue_watcher.error';
+  timestamp: string;
+  profileName: string;
+  error: string;
 }

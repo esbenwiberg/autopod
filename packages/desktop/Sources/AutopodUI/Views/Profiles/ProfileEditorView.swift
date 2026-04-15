@@ -7,10 +7,12 @@ enum ProfileSection: String, CaseIterable, Identifiable {
     case general
     case buildRun
     case agent
+    case providers
     case escalation
-    case infrastructure
+    case container
     case network
     case actions
+    case issueWatcher
     case validation
     case credentials
     case injections
@@ -20,33 +22,37 @@ enum ProfileSection: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .general:        "General"
-        case .buildRun:       "Build & Run"
-        case .agent:          "Agent"
-        case .escalation:     "Escalation"
-        case .infrastructure: "Infrastructure"
-        case .network:        "Network & Security"
-        case .actions:        "Actions"
-        case .validation:     "Validation"
-        case .credentials:    "Credentials"
-        case .injections:     "Injections"
-        case .memory:         "Memory"
+        case .general:    "General"
+        case .buildRun:   "Build & Run"
+        case .agent:      "Agent"
+        case .providers:  "Providers"
+        case .escalation: "Escalation"
+        case .container:  "Container"
+        case .network:    "Network & Security"
+        case .actions:    "Actions"
+        case .issueWatcher: "Issue Watcher"
+        case .validation: "Validation"
+        case .credentials: "Credentials"
+        case .injections: "Injections"
+        case .memory:     "Memory"
         }
     }
 
     var icon: String {
         switch self {
-        case .general:        "info.circle"
-        case .buildRun:       "hammer"
-        case .agent:          "cpu"
-        case .escalation:     "bubble.left.and.exclamationmark.bubble.right"
-        case .infrastructure: "server.rack"
-        case .network:        "shield.checkered"
-        case .actions:        "bolt.shield"
-        case .validation:     "globe"
-        case .credentials:    "key"
-        case .injections:     "syringe"
-        case .memory:         "brain"
+        case .general:    "info.circle"
+        case .buildRun:   "hammer"
+        case .agent:      "cpu"
+        case .providers:  "network"
+        case .escalation: "bubble.left.and.exclamationmark.bubble.right"
+        case .container:  "server.rack"
+        case .network:    "shield.checkered"
+        case .actions:    "bolt.shield"
+        case .issueWatcher: "eye"
+        case .validation: "globe"
+        case .credentials: "key"
+        case .injections: "syringe"
+        case .memory:     "brain"
         }
     }
 
@@ -58,22 +64,57 @@ enum ProfileSection: String, CaseIterable, Identifiable {
             "Commands executed inside the container to build, test, and run the application."
         case .agent:
             "AI model and runtime configuration for code generation sessions."
+        case .providers:
+            "AI model provider and code platform — where PRs are created, which service the Issue Watcher monitors, and OAuth credentials."
         case .escalation:
-            "Controls how and when the agent escalates to humans or other AI models."
-        case .infrastructure:
-            "Execution environment, resource limits, and service provider configuration."
+            "Controls how and when the agent escalates to humans or other AI models. Also configures token budget limits."
+        case .container:
+            "Execution environment and resource limits for the agent container."
         case .network:
             "Outbound network access controls for container isolation."
         case .actions:
             "Control plane actions the agent can execute — GitHub, ADO, Azure, and custom HTTP."
+        case .issueWatcher:
+            "Automatically pick up GitHub Issues or ADO Work Items by label and create sessions. Ideal for mobile-triggered workflows."
         case .validation:
             "Smoke test pages loaded after the app starts to verify correctness."
         case .credentials:
-            "Authentication tokens for Git providers and package registries. Encrypted at rest."
+            "PATs for Git providers and package registries. OAuth credentials are managed in Providers."
         case .injections:
             "Additional tools, documentation, and commands injected into agent containers."
         case .memory:
             "Persistent memory entries injected into agent sessions for this profile. Agents can suggest new memories via memory_suggest."
+        }
+    }
+
+    var searchKeywords: [String] {
+        switch self {
+        case .general:
+            ["repository", "repo url", "branch", "branch prefix", "template", "output mode", "extends", "worker profile", "autopod/", "git", "clone"]
+        case .buildRun:
+            ["build command", "start command", "test command", "health path", "timeout", "npm", "dotnet", "python", "compile"]
+        case .agent:
+            ["model", "opus", "sonnet", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
+        case .providers:
+            ["model provider", "anthropic", "max", "foundry", "azure foundry", "copilot", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
+        case .escalation:
+            ["escalation", "ask human", "ai consultation", "advisor", "auto pause", "guardrails", "human response timeout", "token budget", "budget", "soft", "hard", "warn at", "extensions", "limit"]
+        case .container:
+            ["execution target", "docker", "aci", "azure container instances", "memory", "memory limit", "warm image"]
+        case .network:
+            ["network", "isolation", "firewall", "allow all", "deny all", "restricted", "allowed hosts", "package managers", "egress"]
+        case .actions:
+            ["actions", "github issues", "github prs", "github code", "ado workitems", "ado prs", "azure logs", "azure pim", "pim", "action overrides", "sanitization", "quarantine", "custom actions"]
+        case .issueWatcher:
+            ["issue watcher", "label", "github issues", "ado work items", "watcher", "trigger", "mobile", "label prefix"]
+        case .validation:
+            ["validation", "smoke test", "smoke pages", "max attempts", "has web ui", "web ui", "browser", "playwright"]
+        case .credentials:
+            ["pat", "personal access token", "github pat", "ado pat", "registry pat", "private registry", "npm", "nuget", "encrypted"]
+        case .injections:
+            ["mcp", "mcp servers", "claude.md", "sections", "skills", "slash commands", "injection", "tools"]
+        case .memory:
+            ["memory", "persistent", "memory_suggest", "memory entries"]
         }
     }
 }
@@ -147,6 +188,18 @@ public struct ProfileEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedSection: ProfileSection = .general
     @State private var authStatus: AuthStatus?
+    @State private var searchText: String = ""
+    @State private var searchLastSection: ProfileSection = .general
+
+    private var filteredSections: [ProfileSection] {
+        guard !searchText.isEmpty else { return ProfileSection.allCases }
+        let q = searchText.lowercased()
+        return ProfileSection.allCases.filter {
+            $0.label.lowercased().contains(q) ||
+            $0.description.lowercased().contains(q) ||
+            $0.searchKeywords.contains { $0.contains(q) }
+        }
+    }
 
     private enum AuthStatus: Equatable {
         case inProgress(String)
@@ -166,7 +219,7 @@ public struct ProfileEditorView: View {
             Divider()
             actionBar
         }
-        .frame(width: 860, height: 700)
+        .frame(width: 880, height: 720)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -203,37 +256,90 @@ public struct ProfileEditorView: View {
     // MARK: - Section sidebar
 
     private var sectionSidebar: some View {
-        VStack(spacing: 1) {
-            ForEach(ProfileSection.allCases) { section in
-                Button {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        selectedSection = section
+        VStack(spacing: 0) {
+            // Search field
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                TextField("Search settings", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(.callout))
+                    .onChange(of: searchText) { _, newValue in
+                        if newValue.isEmpty {
+                            // Restore last manually selected section
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                selectedSection = searchLastSection
+                            }
+                        } else {
+                            // Auto-select first matching section
+                            if let first = filteredSections.first, !filteredSections.contains(selectedSection) {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    selectedSection = first
+                                }
+                            }
+                        }
                     }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: section.icon)
-                            .font(.system(size: 12))
-                            .frame(width: 18)
-                            .foregroundStyle(selectedSection == section ? .white : .blue)
-                        Text(section.label)
-                            .font(.system(.callout))
-                            .foregroundStyle(selectedSection == section ? .white : .primary)
-                        Spacer()
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(selectedSection == section ? Color.accentColor : .clear)
-                    )
-                    .contentShape(Rectangle())
+                    .buttonStyle(.borderless)
                 }
-                .buttonStyle(.plain)
             }
-            Spacer()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            ScrollView {
+                VStack(spacing: 1) {
+                    if filteredSections.isEmpty {
+                        Text("No results")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 16)
+                    } else {
+                        ForEach(filteredSections) { section in
+                            Button {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    selectedSection = section
+                                    if searchText.isEmpty {
+                                        searchLastSection = section
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: section.icon)
+                                        .font(.system(size: 12))
+                                        .frame(width: 18)
+                                        .foregroundStyle(selectedSection == section ? .white : .blue)
+                                    Text(section.label)
+                                        .font(.system(.callout))
+                                        .foregroundStyle(selectedSection == section ? .white : .primary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(selectedSection == section ? Color.accentColor : .clear)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(8)
+            }
         }
-        .padding(10)
-        .frame(width: 180)
+        .frame(width: 190)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
 
@@ -245,17 +351,19 @@ public struct ProfileEditorView: View {
                 sectionHeader(selectedSection)
 
                 switch selectedSection {
-                case .general:        generalFields
-                case .buildRun:       buildRunFields
-                case .agent:          agentFields
-                case .escalation:     escalationFields
-                case .infrastructure: infrastructureFields
-                case .network:        networkFields
-                case .actions:        actionFields
-                case .validation:     validationFields
-                case .credentials:    credentialFields
-                case .injections:     injectionFields
-                case .memory:         memorySection
+                case .general:      generalFields
+                case .buildRun:     buildRunFields
+                case .agent:        agentFields
+                case .providers:    providersFields
+                case .escalation:   escalationFields
+                case .container:    containerFields
+                case .network:      networkFields
+                case .actions:      actionFields
+                case .issueWatcher: issueWatcherFields
+                case .validation:   validationFields
+                case .credentials:  credentialFields
+                case .injections:   injectionFields
+                case .memory:       memorySection
                 }
             }
             .padding(24)
@@ -320,10 +428,18 @@ public struct ProfileEditorView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.callout, design: .monospaced))
         }
-        fieldRow("Default Branch", help: "Base branch for worktrees. Feature branches are created off this.") {
-            TextField("main", text: $profile.defaultBranch)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 180)
+        HStack(spacing: 16) {
+            fieldRow("Default Branch", help: "Base branch for worktrees. Feature branches are created off this.") {
+                TextField("main", text: $profile.defaultBranch)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+            }
+            fieldRow("Branch Prefix", help: "Prefix for auto-generated session branch names. e.g. 'autopod/' → 'autopod/abc12345'. Set per-session to override.") {
+                TextField("autopod/", text: $profile.branchPrefix)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(width: 160)
+            }
         }
         HStack(spacing: 24) {
             fieldRow("Template", help: "Container image and toolchain — determines pre-installed runtimes and build tools.") {
@@ -545,12 +661,214 @@ public struct ProfileEditorView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.top, 2)
+
+        Divider().padding(.vertical, 4)
+
+        Text("Token Budget")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+
+        Toggle(isOn: Binding(
+            get: { profile.tokenBudget != nil },
+            set: { enabled in
+                if enabled { profile.tokenBudget = 500_000 }
+                else { profile.tokenBudget = nil }
+            }
+        )) {
+            HStack(spacing: 4) {
+                Text("Enable token budget")
+                HelpBadge(text: "Limit the total tokens (input + output) consumed per session. Useful for cost control.")
+            }
+        }
+
+        if profile.tokenBudget != nil {
+            HStack(spacing: 24) {
+                fieldRow("Budget (tokens)", help: "Maximum total tokens allowed per session. null = unlimited.") {
+                    TextField("500000", value: Binding(
+                        get: { profile.tokenBudget ?? 500_000 },
+                        set: { profile.tokenBudget = $0 }
+                    ), format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 110)
+                }
+                fieldRow("Policy", help: "Soft: pause and ask for approval when exceeded. Hard: fail immediately.") {
+                    Picker("", selection: $profile.tokenBudgetPolicy) {
+                        ForEach(TokenBudgetPolicy.allCases, id: \.self) { p in
+                            Text(p.label).tag(p)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 110)
+                }
+            }
+            HStack(spacing: 24) {
+                fieldRow("Warn At", help: "Fraction of the budget at which a warning is emitted (0–100%).") {
+                    HStack(spacing: 6) {
+                        Slider(value: $profile.tokenBudgetWarnAt, in: 0...1, step: 0.05)
+                            .frame(width: 100)
+                        Text("\(Int(profile.tokenBudgetWarnAt * 100))%")
+                            .monospacedDigit()
+                            .frame(width: 36)
+                    }
+                }
+                fieldRow("Max Extensions", help: "How many times a human can approve budget extensions per session. Leave empty for unlimited.") {
+                    HStack(spacing: 6) {
+                        TextField("∞", value: Binding(
+                            get: { profile.maxBudgetExtensions ?? 0 },
+                            set: { profile.maxBudgetExtensions = $0 > 0 ? $0 : nil }
+                        ), format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 60)
+                        if profile.maxBudgetExtensions == nil {
+                            Text("unlimited")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    // MARK: - Infrastructure
+    // MARK: - Providers (AI model provider + code platform)
 
     @ViewBuilder
-    private var infrastructureFields: some View {
+    private var providersFields: some View {
+        Text("AI Provider")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+
+        fieldRow("Model Provider", help: "Authentication backend for AI model API calls.") {
+            Picker("", selection: $profile.modelProvider) {
+                ForEach(ModelProvider.allCases, id: \.self) { p in
+                    Text(p.rawValue.capitalized).tag(p)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 160)
+        }
+
+        // Provider credentials indicator
+        if let credType = profile.providerCredentialsType {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                Text("Credentials configured: \(credType)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        // Foundry-specific fields
+        if profile.modelProvider == .foundry {
+            HStack(spacing: 16) {
+                fieldRow("Endpoint URL", help: "Azure Foundry deployment endpoint URL.") {
+                    TextField("https://...", text: Binding(
+                        get: { profile.customInstructions ?? "" }, // placeholder — Foundry fields need dedicated storage
+                        set: { _ in }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(minWidth: 200)
+                    .disabled(true)
+                }
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.blue.opacity(0.7))
+                Text("Foundry endpoint and project ID are configured via the daemon environment variables.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+
+        // OAuth auth buttons for MAX and Copilot
+        if !isNew && (profile.modelProvider == .max || profile.modelProvider == .copilot) {
+            HStack(spacing: 12) {
+                if profile.modelProvider == .max {
+                    Button {
+                        startAuth(provider: "max", label: "Claude MAX")
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.key")
+                            Text("Authenticate with Claude MAX")
+                        }
+                    }
+                    .disabled(onAuthenticate == nil || authStatus == .inProgress("max"))
+                    .help("Opens Claude CLI to complete OAuth login. Credentials are saved to this profile.")
+                }
+                if profile.modelProvider == .copilot {
+                    Button {
+                        startAuth(provider: "copilot", label: "Copilot")
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.key")
+                            Text("Authenticate with Copilot")
+                        }
+                    }
+                    .disabled(onAuthenticate == nil || authStatus == .inProgress("copilot"))
+                    .help("Opens GitHub Copilot login. Token is saved to this profile.")
+                }
+            }
+
+            if let authStatus {
+                HStack(spacing: 6) {
+                    switch authStatus {
+                    case .inProgress(let label):
+                        ProgressView().scaleEffect(0.6)
+                        Text("Authenticating with \(label)...")
+                            .foregroundStyle(.secondary)
+                    case .success(let msg):
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(msg)
+                            .foregroundStyle(.green)
+                    case .failure(let msg):
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.red)
+                        Text(msg)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .font(.caption)
+            } else {
+                Text("Opens an interactive login flow in Terminal. Complete the OAuth flow, then return here.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+
+        Divider().padding(.vertical, 4)
+
+        Text("Code Platform")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+
+        fieldRow("Platform", help: "Determines where pull requests are created, which service the Issue Watcher monitors, and which GitHub/ADO read actions are available. Use the Actions section to control fine-grained read access.") {
+            Picker("", selection: $profile.prProvider) {
+                ForEach(PRProvider.allCases, id: \.self) { p in
+                    Text(p.label).tag(p)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 180)
+        }
+
+        HStack(spacing: 6) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.blue.opacity(0.6))
+            Text(profile.prProvider == .github
+                 ? "GitHub — PRs created via GitHub API. Issue Watcher monitors GitHub Issues. Authenticate with a GitHub PAT in Credentials."
+                 : "Azure DevOps — PRs created via ADO API. Issue Watcher monitors ADO Work Items. Authenticate with an ADO PAT in Credentials.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: - Container (was Infrastructure)
+
+    @ViewBuilder
+    private var containerFields: some View {
         HStack(spacing: 24) {
             fieldRow("Run Environment", help: "Where containers are created. Local uses Docker on the host machine; ACI runs in Azure cloud.") {
                 Picker("", selection: $profile.executionTarget) {
@@ -574,45 +892,6 @@ public struct ProfileEditorView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-
-        Divider().padding(.vertical, 4)
-
-        Text("Providers")
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(.secondary)
-
-        HStack(spacing: 24) {
-            fieldRow("Model Provider", help: "Authentication method for the AI model API.") {
-                Picker("", selection: $profile.modelProvider) {
-                    ForEach(ModelProvider.allCases, id: \.self) { p in
-                        Text(p.rawValue.capitalized).tag(p)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 150)
-            }
-            fieldRow("PR Provider", help: "Service where pull requests are created and managed.") {
-                Picker("", selection: $profile.prProvider) {
-                    ForEach(PRProvider.allCases, id: \.self) { p in
-                        Text(p.label).tag(p)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 150)
-            }
-        }
-
-        // Provider credentials indicator
-        if let credType = profile.providerCredentialsType {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(.green)
-                Text("Provider credentials configured: \(credType)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, 2)
         }
 
         // Warm image
@@ -708,6 +987,82 @@ public struct ProfileEditorView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Issue Watcher
+
+    @ViewBuilder
+    private var issueWatcherFields: some View {
+        Toggle(isOn: $profile.issueWatcherEnabled) {
+            HStack(spacing: 4) {
+                Text("Enable issue watcher")
+                HelpBadge(text: "When enabled, polls for GitHub Issues or ADO Work Items with a matching label prefix and automatically creates sessions. Label an issue from your phone to trigger a session.")
+            }
+        }
+
+        if profile.issueWatcherEnabled {
+            Divider().padding(.vertical, 4)
+
+            fieldRow("Label Prefix", help: "The label prefix to watch for. Issues labeled with this prefix (or '<prefix>:<profile>') will trigger sessions. Must be lowercase alphanumeric with hyphens.") {
+                TextField("autopod", text: $profile.issueWatcherLabelPrefix)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 200)
+            }
+
+            Text("Label Routing")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+
+            VStack(alignment: .leading, spacing: 4) {
+                routingRow("autopod", "Uses this profile")
+                routingRow("autopod:<profile>", "Routes to named profile")
+                routingRow("autopod:artifact", "Uses this profile with artifact output")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
+
+            Text("Lifecycle")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 4) {
+                lifecycleRow("autopod", "Trigger — picked up by watcher")
+                lifecycleRow("autopod:in-progress", "Session running")
+                lifecycleRow("autopod:done", "Session completed successfully")
+                lifecycleRow("autopod:failed", "Session failed")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
+        }
+    }
+
+    private func routingRow(_ label: String, _ desc: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(.caption, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.blue.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            Text(desc)
+        }
+    }
+
+    private func lifecycleRow(_ label: String, _ desc: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(.caption, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.orange.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            Text(desc)
         }
     }
 
@@ -1054,14 +1409,24 @@ public struct ProfileEditorView: View {
 
     @ViewBuilder
     private var validationFields: some View {
+        Toggle(isOn: $profile.hasWebUi) {
+            HStack(spacing: 4) {
+                Text("Has Web UI")
+                HelpBadge(text: "When disabled, browser-based smoke tests are skipped entirely. Use this for API-only or CLI services with no HTTP frontend.")
+            }
+        }
+
+        Divider().padding(.vertical, 4)
+
         fieldRow("Max Attempts", help: "How many times the agent can retry after a failed smoke test before the session is marked failed.") {
             Stepper("\(profile.maxValidationAttempts)", value: $profile.maxValidationAttempts, in: 1...10)
                 .frame(width: 120)
         }
 
-        Divider().padding(.vertical, 4)
+        if profile.hasWebUi {
+            Divider().padding(.vertical, 4)
 
-        fieldRow("Smoke Pages", help: "Each page is loaded in a headless browser after the app starts. Verifies the app renders correctly.") {
+            fieldRow("Smoke Pages", help: "Each page is loaded in a headless browser after the app starts. Verifies the app renders correctly.") {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(profile.smokePages.indices, id: \.self) { i in
                     HStack(spacing: 6) {
@@ -1097,73 +1462,25 @@ public struct ProfileEditorView: View {
             }
             .padding(.top, 4)
         }
+        } // end if profile.hasWebUi
     }
 
     // MARK: - Credentials
 
     @ViewBuilder
     private var credentialFields: some View {
-        // Model provider authentication
-        if !isNew {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Model Provider Auth")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 12) {
-                    Button {
-                        startAuth(provider: "max", label: "Claude MAX")
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "person.badge.key")
-                            Text("Authenticate with Claude MAX")
-                        }
-                    }
-                    .disabled(onAuthenticate == nil || authStatus == .inProgress("max"))
-                    .help("Opens Claude CLI to complete OAuth login. Credentials are saved to this profile.")
-
-                    Button {
-                        startAuth(provider: "copilot", label: "Copilot")
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "person.badge.key")
-                            Text("Authenticate with Copilot")
-                        }
-                    }
-                    .disabled(onAuthenticate == nil || authStatus == .inProgress("copilot"))
-                    .help("Opens GitHub Copilot login. Token is saved to this profile.")
-                }
-
-                // Status feedback
-                if let authStatus {
-                    HStack(spacing: 6) {
-                        switch authStatus {
-                        case .inProgress(let label):
-                            ProgressView().scaleEffect(0.6)
-                            Text("Authenticating with \(label)...")
-                                .foregroundStyle(.secondary)
-                        case .success(let msg):
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(msg)
-                                .foregroundStyle(.green)
-                        case .failure(let msg):
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.red)
-                            Text(msg)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    .font(.caption)
-                } else {
-                    Text("Opens an interactive login flow in Terminal. Complete the OAuth flow, then return here.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            Divider().padding(.vertical, 4)
+        // Info banner pointing to Providers for OAuth
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle.fill")
+                .foregroundStyle(.blue.opacity(0.7))
+            Text("OAuth credentials for Claude MAX and GitHub Copilot are managed in the **Providers** section.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+        .padding(10)
+        .background(.blue.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.blue.opacity(0.15), lineWidth: 0.5))
 
         patRow("GitHub PAT", value: $profile.githubPat, isSet: profile.hasGithubPat,
                help: "Personal access token for GitHub — needed for PR creation and private repo cloning.")

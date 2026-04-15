@@ -17,7 +17,8 @@ interface ClaudeStreamContentBlock {
   id?: string;
   input?: Record<string, unknown>;
   tool_use_id?: string;
-  content?: string;
+  // tool_result content can be a plain string or an array of content blocks
+  content?: string | ClaudeStreamContentBlock[];
   is_error?: boolean;
   thinking?: string;
 }
@@ -161,14 +162,19 @@ export class ClaudeStreamParser {
         const toolResultBlock = userContent.find((b) => b.type === 'tool_result');
         if (!toolResultBlock) return null;
 
-        const output = event.tool_use_result?.stdout ?? toolResultBlock.content?.slice(0, 2000);
+        // content can be a string or an array of content blocks — extract text in both cases
+        const rawContent = toolResultBlock.content;
+        const contentText = Array.isArray(rawContent)
+          ? rawContent.map((b) => b.text ?? '').join('\n')
+          : rawContent;
+        const output = event.tool_use_result?.stdout ?? contentText;
 
         return {
           type: 'tool_use',
           timestamp: ts,
           tool: 'tool_result',
           input: { tool_use_id: toolResultBlock.tool_use_id },
-          output: output?.slice(0, 2000),
+          output: typeof output === 'string' ? output.slice(0, 2000) : undefined,
         };
       }
 

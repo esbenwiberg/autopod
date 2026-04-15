@@ -91,7 +91,18 @@ export function sessionRoutes(
     const stored = eventRepo.getForSession(sessionId);
     return stored
       .filter((e) => e.type === 'session.agent_activity')
-      .map((e) => (e.payload as { event: unknown }).event);
+      .map((e) => {
+        const raw = (e.payload as { event: Record<string, unknown> }).event;
+        // Normalize legacy events where `output` was stored as a content-block array
+        // (produced before the claude-stream-parser fix in c97af9a).
+        if (raw && typeof raw === 'object' && Array.isArray(raw.output)) {
+          const joined = (raw.output as Array<{ text?: string }>)
+            .map((b) => b.text ?? '')
+            .join('\n');
+          return { ...raw, output: joined || undefined };
+        }
+        return raw;
+      });
   });
 
   // GET /sessions/:sessionId/report — HTML validation report (session-token auth)

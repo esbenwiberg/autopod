@@ -88,10 +88,14 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
       const containerName = `autopod-${session.id}`;
       console.log(chalk.dim(`Attaching to ${containerName}…`));
-      console.log(chalk.dim('Type "exit" to detach and complete the session.\n'));
+      console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
 
-      // Try bash first, fall back to sh
-      let result = spawnSync('docker', ['exec', '-it', containerName, 'bash'], {
+      // Use tmux if available — reattaches to an existing session so reconnects
+      // pick up right where you left off. Falls back to bash/sh if tmux isn't installed.
+      const tmuxCmd =
+        'command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s main || exec /bin/bash -l';
+
+      const result = spawnSync('docker', ['exec', '-it', containerName, '/bin/sh', '-c', tmuxCmd], {
         stdio: 'inherit',
       });
 
@@ -100,14 +104,54 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
         process.exit(1);
       }
 
-      // Non-zero exit could mean bash not available — retry with sh
+      console.log();
+
+      // Non-zero exit may mean the container stopped unexpectedly
       if (result.status !== 0) {
-        result = spawnSync('docker', ['exec', '-it', containerName, 'sh'], {
-          stdio: 'inherit',
-        });
+        try {
+          const refreshed = await client.getSession(resolvedId);
+          if (refreshed.status !== 'running') {
+            console.log(chalk.yellow('Container stopped unexpectedly.'));
+            console.log(
+              chalk.dim(
+                `Run "ap complete ${resolvedId.slice(0, 8)}" to recover changes and push branch.`,
+              ),
+            );
+            return;
+          }
+        } catch {
+          // Couldn't refresh — fall through to normal detach message
+        }
       }
 
-      // Complete the workspace session (daemon pushes branch)
+      console.log(chalk.dim('Detached. Session is still running.'));
+      console.log(chalk.dim(`Re-attach:  ap attach ${resolvedId.slice(0, 8)}`));
+      console.log(chalk.dim(`Complete:   ap complete ${resolvedId.slice(0, 8)}`));
+    });
+
+  // ap complete <id>
+  program
+    .command('complete <id>')
+    .description('Complete a workspace pod — sync changes and push branch to origin')
+    .action(async (id: string) => {
+      const client = getClient();
+      const resolvedId = await resolveSessionId(client, id);
+      const session = await client.getSession(resolvedId);
+
+      if (session.outputMode !== 'workspace') {
+        console.error(chalk.red(`Session ${resolvedId} is not a workspace session.`));
+        process.exit(1);
+      }
+
+      if (session.status !== 'running') {
+        console.error(
+          chalk.red(
+            `Session ${resolvedId} is ${session.status} — can only complete running sessions.`,
+          ),
+        );
+        process.exit(1);
+      }
+
       console.log();
       const completion = await withSpinner('Completing workspace session...', () =>
         client.completeSession(resolvedId),

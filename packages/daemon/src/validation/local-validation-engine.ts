@@ -233,7 +233,8 @@ export function createLocalValidationEngine(
           smokeStatus === 'pass' &&
           !testFailed &&
           !acFailed &&
-          (taskReview === null || taskReview.status === 'pass')
+          ((taskReview === null && !reviewSkipReason?.startsWith('Review failed:')) ||
+            taskReview?.status === 'pass')
             ? ('pass' as const)
             : ('fail' as const);
 
@@ -680,6 +681,100 @@ function makeSyntheticFailure(path: string, error: string): PageResult {
 
 // ── AC Validation phase ─────────────────────────────────────────────────────
 
+export type AcValidationType = 'web-ui' | 'api' | 'none';
+
+export interface ClassifiedAc {
+  criterion: string;
+  validationType: AcValidationType;
+  reason: string;
+}
+
+/** LLM-based classification: assigns a validation type to each AC before execution. */
+export async function classifyAcTypes(
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<ClassifiedAc[] | null> {
+  const acs = config.acceptanceCriteria ?? [];
+  const acList = acs.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
+  const hasWebUi = config.hasWebUi ?? true;
+
+  const webUiRestriction = hasWebUi
+    ? ''
+    : '\nIMPORTANT: This project has NO web frontend. Do not classify any criterion as "web-ui". Use "api" or "none" only.\n';
+
+  const prompt = `You are a QA automation planner. For each acceptance criterion, decide how it should be validated automatically.
+
+Validation types:
+- "web-ui": Verify by navigating to a URL in a real browser and checking DOM elements, visual state, or page content. Only use this for criteria that require a human-visible web interface.
+- "api": Verify by making an HTTP request to the running server and checking the status code or response body. Use for REST endpoint behaviour, JSON response shapes, or HTTP status codes.
+- "none": Cannot be verified by browser or HTTP request. Use for TypeScript type exports, internal code structure, SQL migrations, scheduler/timer logic, desktop/native app changes, CLI output formats, or anything only verifiable by reading the diff or running tests.${webUiRestriction}
+
+Task context: ${config.task}
+
+Acceptance Criteria:
+${acList}
+
+Diff of changes (for context):
+${config.diff ? config.diff.slice(0, 4000) : '(no diff available)'}
+
+Respond with a JSON array. Each element must have:
+- "criterion": exact original text (copy verbatim)
+- "validationType": "web-ui" | "api" | "none"
+- "reason": one short sentence explaining your classification
+
+Respond ONLY with the JSON array, no markdown fences or extra text.`;
+
+  try {
+    const reviewTimeout = config.reviewTimeout ?? 300_000;
+    const { stdout } = await runClaudeCli({
+      model: config.reviewerModel ?? 'sonnet',
+      input: prompt,
+      timeout: reviewTimeout,
+    });
+
+    return parseClassificationJson(stdout.trim(), acs);
+  } catch (err) {
+    log?.warn({ err }, 'failed to classify AC types, falling back to none');
+    return null;
+  }
+}
+
+/** Parse and validate the classification JSON response from the LLM. */
+export function parseClassificationJson(raw: string, originalAcs: string[]): ClassifiedAc[] | null {
+  const cleaned = stripMarkdownFences(raw);
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) return null;
+
+    const validTypes = new Set<string>(['web-ui', 'api', 'none']);
+    const results = parsed.filter(
+      (item: unknown): item is ClassifiedAc =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).criterion === 'string' &&
+        validTypes.has((item as Record<string, unknown>).validationType as string) &&
+        typeof (item as Record<string, unknown>).reason === 'string',
+    );
+
+    // If we got fewer results than ACs, fall back any missing ones to 'none'
+    if (results.length < originalAcs.length) {
+      const covered = new Set(results.map((r) => r.criterion));
+      for (const ac of originalAcs) {
+        if (!covered.has(ac)) {
+          results.push({ criterion: ac, validationType: 'none', reason: 'Not classified by LLM' });
+        }
+      }
+    }
+
+    return results;
+  } catch {
+    return null;
+  }
+}
+
 async function runAcValidation(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
@@ -701,29 +796,79 @@ async function runAcValidation(
     'running AC validation',
   );
 
-  // Step 1: Reviewer generates validation instructions from ACs
-  const instructions = await generateAcInstructions(config, log);
-  if (!instructions || instructions.length === 0) {
-    log?.warn('reviewer generated no validation instructions, skipping AC validation');
-    return { status: 'skip', results: [], model: config.reviewerModel };
+  // Step 1: Classify each AC by validation type
+  const classified = await classifyAcTypes(config, log);
+  if (!classified || classified.length === 0) {
+    log?.warn('AC classification failed, marking all as diff-reviewed');
+    const fallbackResults: AcCheckResult[] = (config.acceptanceCriteria ?? []).map((ac) => ({
+      criterion: ac,
+      passed: true,
+      validationType: 'none' as const,
+      reasoning: 'Classification failed — evaluated by diff reviewer',
+    }));
+    return { status: 'pass', results: fallbackResults, model: config.reviewerModel };
   }
 
-  // Step 2: Executor translates instructions to Playwright script and executes
-  const results = await executeAcChecks(
-    containerManager,
-    config,
-    instructions,
-    log,
-    hostBrowserRunner,
+  log?.info(
+    {
+      webUi: classified.filter((c) => c.validationType === 'web-ui').length,
+      api: classified.filter((c) => c.validationType === 'api').length,
+      none: classified.filter((c) => c.validationType === 'none').length,
+    },
+    'AC classification complete',
   );
 
-  const allPassed = results.every((r) => r.passed);
+  // Step 2: Split by type
+  const webUiAcs = classified.filter((c) => c.validationType === 'web-ui');
+  const apiAcs = classified.filter((c) => c.validationType === 'api');
+  const noneAcs = classified.filter((c) => c.validationType === 'none');
+
+  // Step 3: Execute each bucket
+  const noneResults: AcCheckResult[] = noneAcs.map((c) => ({
+    criterion: c.criterion,
+    passed: true,
+    validationType: 'none' as const,
+    reasoning: `Automated check not applicable (${c.reason}) — evaluated by diff reviewer`,
+  }));
+
+  const apiResults = apiAcs.length > 0 ? await executeApiChecks(config, apiAcs, log) : [];
+
+  let browserResults: AcCheckResult[] = [];
+  if (webUiAcs.length > 0) {
+    const webUiInstructions = await generateAcInstructions(
+      { ...config, acceptanceCriteria: webUiAcs.map((c) => c.criterion) },
+      log,
+    );
+    if (webUiInstructions && webUiInstructions.length > 0) {
+      browserResults = await executeAcChecks(
+        containerManager,
+        config,
+        webUiInstructions,
+        log,
+        hostBrowserRunner,
+      );
+    } else {
+      browserResults = webUiAcs.map((c) => ({
+        criterion: c.criterion,
+        passed: false,
+        validationType: 'web-ui' as const,
+        reasoning: 'Failed to generate browser validation instructions',
+      }));
+    }
+  }
+
+  const results: AcCheckResult[] = [...browserResults, ...apiResults, ...noneResults];
+  // Only count automated checks (web-ui and api) for pass/fail determination
+  const automatedResults = results.filter((r) => r.validationType !== 'none');
+  const allPassed = automatedResults.length === 0 || automatedResults.every((r) => r.passed);
 
   log?.info(
     {
       acCount: results.length,
-      passCount: results.filter((r) => r.passed).length,
-      failCount: results.filter((r) => !r.passed).length,
+      automated: automatedResults.length,
+      passCount: automatedResults.filter((r) => r.passed).length,
+      failCount: automatedResults.filter((r) => !r.passed).length,
+      diffReviewed: noneResults.length,
     },
     'AC validation complete',
   );
@@ -785,6 +930,144 @@ Respond ONLY with the JSON array, no markdown fences or extra text.`;
     return parseAcInstructionsJson(stdout.trim());
   } catch (err) {
     log?.warn({ err }, 'failed to generate AC validation instructions');
+    return null;
+  }
+}
+
+interface ApiCheckSpec {
+  criterion: string;
+  method: string;
+  path: string;
+  expectedStatus: number;
+  bodyContains?: string;
+  requestBody?: unknown;
+}
+
+/** Execute HTTP-based AC checks for api-type criteria. */
+async function executeApiChecks(
+  config: ValidationEngineConfig,
+  apiAcs: ClassifiedAc[],
+  log?: Logger,
+): Promise<AcCheckResult[]> {
+  const acList = apiAcs.map((c, i) => `${i + 1}. ${c.criterion} (${c.reason})`).join('\n');
+
+  const prompt = `You are a QA automation engineer. Generate HTTP request specs to validate each acceptance criterion.
+
+Server base URL: ${config.previewUrl}
+
+Acceptance Criteria to validate via HTTP:
+${acList}
+
+For each criterion, generate a JSON spec with:
+- "criterion": exact criterion text (copy verbatim)
+- "method": HTTP method (GET, POST, PUT, DELETE, PATCH)
+- "path": URL path (e.g. "/scheduled-jobs")
+- "expectedStatus": expected HTTP status code (number)
+- "bodyContains": optional string that must appear in the response body JSON (use for response shape checks)
+- "requestBody": optional JSON object to send as the request body (for POST/PUT/PATCH)
+
+Use minimal/example request bodies — the goal is to verify the endpoint exists and returns the expected status, not to test business logic in depth.
+
+Respond ONLY with a JSON array, no markdown fences or extra text.`;
+
+  let specs: ApiCheckSpec[] = [];
+  try {
+    const reviewTimeout = config.reviewTimeout ?? 300_000;
+    const { stdout } = await runClaudeCli({
+      model: config.reviewerModel ?? 'sonnet',
+      input: prompt,
+      timeout: reviewTimeout,
+    });
+    specs = parseApiCheckSpecs(stdout.trim(), apiAcs) ?? [];
+  } catch (err) {
+    log?.warn({ err }, 'failed to generate API check specs');
+    return apiAcs.map((c) => ({
+      criterion: c.criterion,
+      passed: false,
+      validationType: 'api' as const,
+      reasoning: 'Failed to generate API check specification',
+    }));
+  }
+
+  const results: AcCheckResult[] = [];
+  for (const spec of specs) {
+    try {
+      const url = `${config.previewUrl.replace(/\/$/, '')}${spec.path}`;
+      const options: RequestInit = {
+        method: spec.method,
+        headers: { 'Content-Type': 'application/json' },
+      };
+      if (spec.requestBody && ['POST', 'PUT', 'PATCH'].includes(spec.method.toUpperCase())) {
+        options.body = JSON.stringify(spec.requestBody);
+      }
+
+      const response = await fetch(url, options);
+      const statusOk = response.status === spec.expectedStatus;
+
+      let bodyOk = true;
+      let bodyNote = '';
+      if (spec.bodyContains) {
+        const body = await response.text();
+        bodyOk = body.includes(spec.bodyContains);
+        bodyNote = bodyOk
+          ? ` Response body contains "${spec.bodyContains}".`
+          : ` Response body does NOT contain "${spec.bodyContains}".`;
+      }
+
+      const passed = statusOk && bodyOk;
+      results.push({
+        criterion: spec.criterion,
+        passed,
+        validationType: 'api',
+        reasoning: passed
+          ? `${spec.method} ${spec.path} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}`
+          : `${spec.method} ${spec.path} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}`,
+      });
+    } catch (err) {
+      results.push({
+        criterion: spec.criterion,
+        passed: false,
+        validationType: 'api',
+        reasoning: `HTTP check failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  // Ensure every API AC has a result, even if spec generation missed it
+  const covered = new Set(results.map((r) => r.criterion));
+  for (const ac of apiAcs) {
+    if (!covered.has(ac.criterion)) {
+      results.push({
+        criterion: ac.criterion,
+        passed: false,
+        validationType: 'api',
+        reasoning: 'No HTTP check spec was generated for this criterion',
+      });
+    }
+  }
+
+  return results;
+}
+
+function parseApiCheckSpecs(raw: string, apiAcs: ClassifiedAc[]): ApiCheckSpec[] | null {
+  const cleaned = stripMarkdownFences(raw);
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) return null;
+
+    return parsed.filter(
+      (item: unknown): item is ApiCheckSpec =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).criterion === 'string' &&
+        typeof (item as Record<string, unknown>).method === 'string' &&
+        typeof (item as Record<string, unknown>).path === 'string' &&
+        typeof (item as Record<string, unknown>).expectedStatus === 'number',
+    );
+  } catch {
     return null;
   }
 }
@@ -1134,7 +1417,7 @@ function buildReviewPrompt(config: ValidationEngineConfig, reviewContext?: Revie
 
   return `You are an expert software engineer performing an independent code review of changes made by an AI agent.
 
-Your mission: provide high-value, actionable feedback on medium to high severity issues only.
+Your mission: provide high-value, actionable feedback on medium and above severity issues. Low severity findings should be skipped entirely — if they don't meet the medium bar, don't report them.
 
 Core principles:
 - Be helpful, not noisy. Only raise fair, actionable concerns that genuinely improve code.
@@ -1187,7 +1470,7 @@ An undisclosed deviation that the diff reveals IS a negative signal.
     : ''
 }### ${acList ? (taskSummarySection ? 'Step 3' : 'Step 2') : taskSummarySection ? 'Step 2' : 'Step 1'}: Code review
 
-Review ONLY the changed code across these dimensions. Only raise medium or high severity issues:
+Review ONLY the changed code across these dimensions. Only raise medium, high, or critical severity issues — skip anything below that bar:
 
 **Correctness & Quality**: error handling completeness, resource management, type/null safety, edge case handling
 
@@ -1225,12 +1508,12 @@ Respond ONLY with a JSON object — no markdown fences, no extra text:
 {
   "status": "pass" | "fail" | "uncertain",
   "reasoning": "one or two sentence summary of the overall assessment",
-  ${acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["specific medium/high severity issues only"]
+  ${acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["specific medium/high/critical severity issues only — omit anything below medium"]
 }
 
 Status rules:
-- "pass": requirements met (if any), no significant issues, and no unjustified undisclosed deviations
-- "fail": one or more requirements unmet, OR critical/high severity issues, OR undisclosed deviations that compromised scope
+- "pass": requirements met (if any), no medium/high/critical severity issues found, and no unjustified undisclosed deviations. If you set "pass" but have minor observations below the medium bar, include them in reasoning and explain why they didn't reach the threshold.
+- "fail": one or more requirements unmet, OR any medium/high/critical severity issue found, OR undisclosed deviations that compromised scope
 - "uncertain": task is clear but diff is inconclusive without runtime context (use sparingly)`;
 }
 
@@ -1317,40 +1600,59 @@ async function runTaskReview(
 
   log?.info({ model: config.reviewerModel }, 'running AI task review');
 
+  const diffIsTruncated = config.diff?.includes('⚠ DIFF TRUNCATED:') ?? false;
   const prompt = buildReviewPrompt(config, reviewContext);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const reviewDepth = config.reviewDepth ?? 'auto';
 
-  try {
-    // ── Tier 1: Single-shot review with enriched context ──────────────
-    const { stdout } = await runClaudeCli({
-      model: config.reviewerModel,
-      input: prompt,
-      timeout: reviewTimeout,
-    });
+  // Tier 1 (single-shot) is useless when the diff is truncated — the model
+  // can't see all changed files and will either fabricate findings or skip.
+  // Skip straight to Tier 2 (tool-use) where it can read files on demand.
+  if (diffIsTruncated && !config.worktreePath) {
+    return {
+      result: null,
+      skipReason: 'Diff is truncated and no worktree available for tool-use review',
+    };
+  }
 
-    const tier1Parsed = parseReviewJson(stdout.trim());
-    if (!tier1Parsed) {
-      log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
-      return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
+  try {
+    let tier1Parsed: ReturnType<typeof parseReviewJson> = null;
+
+    if (!diffIsTruncated) {
+      // ── Tier 1: Single-shot review with enriched context ──────────────
+      const { stdout } = await runClaudeCli({
+        model: config.reviewerModel,
+        input: prompt,
+        timeout: reviewTimeout,
+      });
+
+      tier1Parsed = parseReviewJson(stdout.trim());
+      if (!tier1Parsed) {
+        log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
+        return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
+      }
+    } else {
+      log?.info(
+        'diff is truncated — skipping Tier 1 single-shot review, routing to Tier 2 tool-use',
+      );
     }
 
-    log?.info(
-      {
-        status: tier1Parsed.status,
-        issueCount: tier1Parsed.issues.length,
-        tier: 1,
-      },
-      'Tier 1 task review complete',
-    );
+    if (tier1Parsed) {
+      log?.info(
+        { status: tier1Parsed.status, issueCount: tier1Parsed.issues.length, tier: 1 },
+        'Tier 1 task review complete',
+      );
+    }
 
-    // If Tier 1 is conclusive or depth is standard-only, we're done.
-    // 'deep' forces Tier 2+ regardless of Tier 1 status (e.g. for auto-hoist on recurring findings).
+    // If Tier 1 is conclusive and depth is standard-only, we're done.
+    // Truncated diffs always escalate (tier1Parsed is null) so this branch is unreachable for them.
+    // 'deep' forces Tier 2+ regardless of Tier 1 status.
     const shouldEscalate =
+      diffIsTruncated ||
       (reviewDepth === 'deep' && !!config.worktreePath) ||
-      (tier1Parsed.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
+      (tier1Parsed?.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
 
-    if (!shouldEscalate) {
+    if (!shouldEscalate && tier1Parsed) {
       return {
         result: {
           status: tier1Parsed.status,
@@ -1365,11 +1667,36 @@ async function runTaskReview(
       };
     }
 
-    // At this point, shouldEscalate guarantees worktreePath is defined
-    const worktreePath = config.worktreePath as string;
+    if (!config.worktreePath) {
+      // Escalation wanted but no worktree — return Tier 1 result if we have one
+      if (tier1Parsed) {
+        return {
+          result: {
+            status: tier1Parsed.status,
+            reasoning: tier1Parsed.reasoning,
+            issues: tier1Parsed.issues,
+            model: config.reviewerModel,
+            screenshots: [],
+            diff: config.diff,
+            requirementsCheck: tier1Parsed.requirementsCheck,
+            deviationsAssessment: tier1Parsed.deviationsAssessment,
+          },
+        };
+      }
+      return {
+        result: null,
+        skipReason: 'Diff is truncated and no worktree available for tool-use review',
+      };
+    }
 
-    // ── Tier 2: Tool-use review (on uncertain) ───────────────────────
-    log?.info('Tier 1 returned uncertain, escalating to Tier 2 tool-use review');
+    // At this point, worktreePath is defined
+    const worktreePath = config.worktreePath;
+
+    // ── Tier 2: Tool-use review ───────────────────────────────────────
+    const tier2Reason = diffIsTruncated
+      ? 'diff is truncated — routing directly to Tier 2 tool-use review'
+      : 'Tier 1 returned uncertain, escalating to Tier 2 tool-use review';
+    log?.info(tier2Reason);
 
     try {
       const tier2Result = await runToolUseReview({
@@ -1429,8 +1756,11 @@ async function runTaskReview(
         }
       }
 
-      // Fall back to best available result
+      // Fall back to best available result (Tier 2 if parsed, else Tier 1 if available)
       const bestParsed = tier2Parsed ?? tier1Parsed;
+      if (!bestParsed) {
+        return { result: null, skipReason: 'All review tiers failed to produce a result' };
+      }
       return {
         result: {
           status: bestParsed.status,
@@ -1444,8 +1774,11 @@ async function runTaskReview(
         },
       };
     } catch (err) {
-      log?.warn({ err }, 'Tier 2 tool-use review failed, using Tier 1 result');
-      // Fall back to Tier 1 result
+      log?.warn({ err }, 'Tier 2 tool-use review failed');
+      if (!tier1Parsed) {
+        // Truncated diff path: no Tier 1 result to fall back to
+        return { result: null, skipReason: 'Tier 2 tool-use review failed and diff was truncated' };
+      }
       return {
         result: {
           status: tier1Parsed.status,

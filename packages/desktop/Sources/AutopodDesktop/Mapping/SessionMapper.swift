@@ -85,7 +85,7 @@ public enum SessionMapper {
       }
       let acValidation: Bool? = v.acValidation.flatMap { $0.status == "skip" ? nil : ($0.status == "pass") }
       let acChecks: [AcCheckDetail]? = v.acValidation?.results.map { r in
-        AcCheckDetail(criterion: r.criterion, passed: r.passed, reasoning: r.reasoning, screenshot: r.screenshot)
+        AcCheckDetail(criterion: r.criterion, passed: r.passed, reasoning: r.reasoning, screenshot: r.screenshot, validationType: r.validationType)
       }
       let requirementsCheck: [RequirementCheckDetail]? = v.taskReview?.requirementsCheck?.map { r in
         RequirementCheckDetail(criterion: r.criterion, met: r.met, note: r.note)
@@ -187,6 +187,7 @@ public enum SessionMapper {
       task: response.task,
       model: response.model,
       startedAt: parseDate(response.startedAt ?? response.createdAt),
+      updatedAt: parseDate(response.updatedAt),
       baseBranch: response.baseBranch,
       acFrom: response.acFrom,
       acceptanceCriteria: response.acceptanceCriteria,

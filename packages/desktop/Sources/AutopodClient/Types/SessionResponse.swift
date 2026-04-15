@@ -135,6 +135,7 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var baseBranch: String?
   public var acFrom: String?
   public var linkedSessionId: String?
+  public var pimGroups: [PimGroupRequest]?
 
   public init(
     profileName: String,
@@ -148,7 +149,8 @@ public struct CreateSessionRequest: Codable, Sendable {
     outputMode: String? = nil,
     baseBranch: String? = nil,
     acFrom: String? = nil,
-    linkedSessionId: String? = nil
+    linkedSessionId: String? = nil,
+    pimGroups: [PimGroupRequest]? = nil
   ) {
     self.profileName = profileName
     self.task = task
@@ -162,6 +164,26 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.baseBranch = baseBranch
     self.acFrom = acFrom
     self.linkedSessionId = linkedSessionId
+    self.pimGroups = pimGroups
+  }
+}
+
+public struct PimGroupRequest: Codable, Sendable, Identifiable {
+  public var id: UUID = UUID()
+  public var groupId: String
+  public var displayName: String?
+  public var duration: String?
+  public var justification: String?
+
+  public init(groupId: String = "", displayName: String? = nil, duration: String? = nil, justification: String? = nil) {
+    self.groupId = groupId
+    self.displayName = displayName
+    self.duration = duration
+    self.justification = justification
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case groupId, displayName, duration, justification
   }
 }
 

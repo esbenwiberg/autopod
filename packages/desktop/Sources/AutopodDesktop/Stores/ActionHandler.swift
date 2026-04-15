@@ -34,11 +34,11 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createSession: { [weak self] profile, task, model, output, ac, base, acFrom in
+      createSession: { [weak self] profile, task, model, output, ac, base, acFrom, pimGroups in
         await self?.createSession(
           profileName: profile, task: task, model: model,
           outputMode: output, acceptanceCriteria: ac,
-          baseBranch: base, acFrom: acFrom
+          baseBranch: base, acFrom: acFrom, pimGroups: pimGroups
         )
       },
       approveAll: { [weak self] in await self?.approveAllValidated() },
@@ -190,7 +190,7 @@ public final class ActionHandler {
   public func createSession(
     profileName: String, task: String, model: String?,
     outputMode: String?, acceptanceCriteria: [String]?,
-    baseBranch: String?, acFrom: String?
+    baseBranch: String?, acFrom: String?, pimGroups: [PimGroupRequest]? = nil
   ) async -> String? {
     pendingAction = "create"
     let req = CreateSessionRequest(
@@ -200,7 +200,8 @@ public final class ActionHandler {
       acceptanceCriteria: acceptanceCriteria?.filter { !$0.isEmpty },
       outputMode: outputMode,
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
-      acFrom: acFrom?.isEmpty == true ? nil : acFrom
+      acFrom: acFrom?.isEmpty == true ? nil : acFrom,
+      pimGroups: pimGroups?.filter { !$0.groupId.isEmpty }
     )
     do {
       let response = try await api.createSession(req)

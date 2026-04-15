@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseAcInstructionsJson,
   parseAcResults,
+  parseClassificationJson,
   stripMarkdownFences,
 } from './local-validation-engine.js';
 
@@ -129,5 +130,76 @@ __AUTOPOD_AC_RESULTS_END__`;
     const result = parseAcResults(stdout, instructions);
     // The criterion comes from the instructions, not the parsed output
     expect(result[0].criterion).toBe('Has toggle');
+  });
+});
+
+describe('parseClassificationJson', () => {
+  const acTypeExport = 'ScheduledJob type is exported from @autopod/shared';
+  const acApiEndpoint = 'POST /scheduled-jobs returns 201';
+  const acUiToggle = 'Settings page has a dark mode toggle';
+  const acs = [acTypeExport, acApiEndpoint, acUiToggle];
+
+  it('parses valid classification array', () => {
+    const input = JSON.stringify([
+      {
+        criterion: acTypeExport,
+        validationType: 'none',
+        reason: 'TypeScript export — verified by diff',
+      },
+      { criterion: acApiEndpoint, validationType: 'api', reason: 'HTTP endpoint status check' },
+      { criterion: acUiToggle, validationType: 'web-ui', reason: 'Visual UI element' },
+    ]);
+    const result = parseClassificationJson(input, acs);
+    expect(result).toHaveLength(3);
+    expect(result?.at(0)?.validationType).toBe('none');
+    expect(result?.at(1)?.validationType).toBe('api');
+    expect(result?.at(2)?.validationType).toBe('web-ui');
+  });
+
+  it('handles markdown-fenced JSON', () => {
+    const input = `\`\`\`json\n${JSON.stringify([{ criterion: acTypeExport, validationType: 'none', reason: 'type check' }])}\n\`\`\``;
+    const result = parseClassificationJson(input, [acTypeExport]);
+    expect(result).toHaveLength(1);
+    expect(result?.at(0)?.validationType).toBe('none');
+  });
+
+  it('filters out entries with invalid validationType', () => {
+    const input = JSON.stringify([
+      { criterion: acTypeExport, validationType: 'none', reason: 'ok' },
+      { criterion: acApiEndpoint, validationType: 'browser', reason: 'invalid type' },
+    ]);
+    const result = parseClassificationJson(input, acs);
+    // 'browser' is not a valid type — filtered; missing AC falls back to none
+    const types = result?.map((r) => r.validationType) ?? [];
+    expect(types).not.toContain('browser');
+  });
+
+  it('backfills missing ACs as none', () => {
+    const input = JSON.stringify([
+      { criterion: acTypeExport, validationType: 'none', reason: 'type check' },
+    ]);
+    const result = parseClassificationJson(input, acs);
+    expect(result).toHaveLength(3);
+    const missing = result?.filter((r) => r.criterion !== acTypeExport) ?? [];
+    expect(missing.every((r) => r.validationType === 'none')).toBe(true);
+  });
+
+  it('returns null for garbage input', () => {
+    expect(parseClassificationJson('not json at all', acs)).toBeNull();
+  });
+
+  it('returns null for non-array JSON', () => {
+    expect(parseClassificationJson('{"not": "array"}', acs)).toBeNull();
+  });
+
+  it('extracts JSON from surrounding text', () => {
+    const jsonPart = JSON.stringify([
+      { criterion: acApiEndpoint, validationType: 'api', reason: 'endpoint' },
+    ]);
+    const result = parseClassificationJson(`Here is my answer:\n${jsonPart}\nDone.`, [
+      acApiEndpoint,
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result?.at(0)?.validationType).toBe('api');
   });
 });
