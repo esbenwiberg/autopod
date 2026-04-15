@@ -28,6 +28,7 @@ public final class EventStream {
   private var eventSocket: EventSocket?
   private let sessionStore: SessionStore
   private weak var memoryStore: MemoryStore?
+  private weak var scheduledJobStore: ScheduledJobStore?
   private var eventIdCounter = 0
 
   private static let globalEventCap = 500
@@ -40,9 +41,14 @@ public final class EventStream {
 
   // MARK: - Init
 
-  public init(sessionStore: SessionStore, memoryStore: MemoryStore? = nil) {
+  public init(
+    sessionStore: SessionStore,
+    memoryStore: MemoryStore? = nil,
+    scheduledJobStore: ScheduledJobStore? = nil
+  ) {
     self.sessionStore = sessionStore
     self.memoryStore = memoryStore
+    self.scheduledJobStore = scheduledJobStore
   }
 
   // MARK: - Lifecycle
@@ -199,6 +205,14 @@ public final class EventStream {
 
     case .validationOverrideQueued(let sessionId, _):
       // Refresh session so pending overrides count updates in the UI
+      Task { await sessionStore.refreshSession(sessionId) }
+
+    case .scheduledJobCatchupRequested(let jobId, let jobName, let lastRunAt):
+      scheduledJobStore?.markCatchupPending(jobId)
+      NotificationService.shared.notifyMissedJob(jobId: jobId, jobName: jobName, lastRunAt: lastRunAt)
+
+    case .scheduledJobFired(let jobId, _, let sessionId):
+      Task { await scheduledJobStore?.refreshJob(jobId) }
       Task { await sessionStore.refreshSession(sessionId) }
     }
   }

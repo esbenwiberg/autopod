@@ -87,6 +87,8 @@ export interface Session {
   budgetExtensionsUsed: number;
   /** Why the session is paused. 'budget' = waiting for budget approval, 'manual' = user-paused mid-run. */
   pauseReason: 'budget' | 'manual' | null;
+  /** ID of the scheduled job that spawned this session (null for on-demand sessions). */
+  scheduledJobId: string | null;
 }
 
 export interface CreateSessionRequest {
@@ -110,6 +112,8 @@ export interface CreateSessionRequest {
   prUrl?: string | null;
   /** Override the profile's token budget for this session. null = inherit from profile. */
   tokenBudget?: number | null;
+  /** ID of the scheduled job that spawned this session (null for on-demand sessions). */
+  scheduledJobId?: string | null;
 }
 
 export interface SessionSummary {

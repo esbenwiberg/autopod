@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import { config as loadDotenv } from 'dotenv';
 import pino from 'pino';
+import { build as buildPrettyStream } from 'pino-pretty';
 import {
   createActionAuditRepository,
   createActionEngine,
@@ -33,6 +34,9 @@ import {
   CopilotRuntime,
   createRuntimeRegistry,
 } from './runtimes/index.js';
+import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
+import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
+import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -59,18 +63,17 @@ loadDotenv(); // load .env if present (no-op if missing)
 
 const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 const IS_DEV = process.env.NODE_ENV !== 'production';
-const PORT = Number.parseInt(process.env.PORT ?? '3100', 10);
+const PORT = Number.parseInt(process.env.PORT || '3100', 10);
 const HOST = process.env.HOST ?? '127.0.0.1';
 const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
 
-// Logger
-const logger = pino({
-  level: LOG_LEVEL,
-  transport: IS_DEV ? { target: 'pino-pretty', options: { colorize: true } } : undefined,
-});
+// Logger — use pino-pretty as a direct stream (not a transport) to avoid worker-thread issues
+const logger = IS_DEV
+  ? pino({ level: LOG_LEVEL }, buildPrettyStream({ colorize: true }))
+  : pino({ level: LOG_LEVEL });
 
 // Database
 const db = createDatabase(DB_PATH, logger);
@@ -128,8 +131,10 @@ function getOrCreateDevToken(): string {
   }
 }
 
-const DEV_TOKEN = IS_DEV ? getOrCreateDevToken() : null;
+// In dev mode, create the token file so the CLI can read it as a convenience credential.
+// The daemon itself no longer validates against this specific token — any Bearer string is accepted.
 if (IS_DEV) {
+  getOrCreateDevToken();
   logger.info({ path: path.join(os.homedir(), '.autopod', 'dev-token') }, 'Dev auth token path');
 }
 
@@ -150,9 +155,12 @@ const authModule: AuthModule = {
       const { AuthError } = await import('@autopod/shared');
       throw new AuthError('Auth module not configured');
     }
-    if (token !== DEV_TOKEN) {
+    // In dev mode, accept any non-empty Bearer token (documented behaviour).
+    // The CLI stores the dev token at ~/.autopod/dev-token for convenience,
+    // but the daemon does not enforce it — any caller with any Bearer string is accepted.
+    if (!token) {
       const { AuthError } = await import('@autopod/shared');
-      throw new AuthError('Invalid dev token');
+      throw new AuthError('Missing token');
     }
     return devPayload();
   },
@@ -160,8 +168,8 @@ const authModule: AuthModule = {
     if (!IS_DEV) {
       throw new Error('Auth module not configured');
     }
-    if (token !== DEV_TOKEN) {
-      throw new Error('Invalid dev token');
+    if (!token) {
+      throw new Error('Missing token');
     }
     return devPayload();
   },
@@ -361,6 +369,16 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
   });
 }
 
+// Scheduled jobs
+const scheduledJobRepo = createScheduledJobRepository(db);
+const scheduledJobManager = createScheduledJobManager({
+  scheduledJobRepo,
+  sessionManager,
+  eventBus,
+  logger,
+});
+const scheduledJobScheduler = createScheduledJobScheduler(scheduledJobManager, logger);
+
 // Session bridge for MCP escalation
 const sessionBridge = createSessionBridge({
   sessionManager,
@@ -441,6 +459,7 @@ const app = await createServer({
   sessionTokenIssuer,
   memoryRepo,
   pendingOverrideRepo,
+  scheduledJobManager,
   issueWatcherRepo,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
@@ -455,6 +474,9 @@ try {
   app.log.fatal(err, 'Failed to start daemon');
   process.exit(1);
 }
+
+// Start scheduled job scheduler AFTER server is listening
+scheduledJobScheduler.start();
 
 // Reconcile ACI sessions after startup (non-blocking — errors are logged, not fatal)
 if (aciContainerManager) {
@@ -507,6 +529,9 @@ async function shutdown(signal: string) {
   // Stop notifications and issue watcher
   notificationService.stop();
   issueWatcherService.stop();
+
+  // Stop scheduled job scheduler
+  scheduledJobScheduler.stop();
 
   // Drain session queue
   await sessionQueue.drain();

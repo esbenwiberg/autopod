@@ -877,9 +877,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         [
           'sh',
           '-c',
-          `git config --global credential.helper store && ` +
-            `printf 'https://${gitUser}:%s@${gitHost}\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && ` +
-            `chmod 600 ~/.git-credentials`,
+          `git config --global credential.helper store && printf 'https://${gitUser}:%s@${gitHost}\\n' "$(cat ${tmpFile})" >> ~/.git-credentials && chmod 600 ~/.git-credentials`,
         ],
         { timeout: 15_000 },
       );
@@ -941,19 +939,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           );
         }
         return ' gh CLI is authenticated.';
-      } else {
-        const azAuth = await cm.execInContainer(
-          containerId,
-          ['sh', '-c', `az devops login --token "$(cat ${tmpFile})"`],
-          { timeout: 60_000 },
-        );
-        if (azAuth.exitCode !== 0) {
-          throw new Error(
-            `az devops login failed (exit ${azAuth.exitCode}): ${azAuth.stderr.slice(0, 200)}`,
-          );
-        }
-        return ' az CLI is authenticated.';
       }
+      const azAuth = await cm.execInContainer(
+        containerId,
+        ['sh', '-c', `az devops login --token "$(cat ${tmpFile})"`],
+        { timeout: 60_000 },
+      );
+      if (azAuth.exitCode !== 0) {
+        throw new Error(
+          `az devops login failed (exit ${azAuth.exitCode}): ${azAuth.stderr.slice(0, 200)}`,
+        );
+      }
+      return ' az CLI is authenticated.';
     } catch (err) {
       logger.warn(
         { err, sessionId, tool },
@@ -1105,6 +1102,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               request.tokenBudget !== undefined
                 ? request.tokenBudget
                 : (profile.tokenBudget ?? null),
+            scheduledJobId: request.scheduledJobId ?? null,
           });
           break;
         } catch (err: unknown) {

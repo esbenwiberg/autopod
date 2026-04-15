@@ -95,8 +95,8 @@ export function sessionRoutes(
         const raw = (e.payload as { event: Record<string, unknown> }).event;
         // Normalize legacy events where `output` was stored as a content-block array
         // (produced before the claude-stream-parser fix in c97af9a).
-        if (raw && typeof raw === 'object' && Array.isArray(raw['output'])) {
-          const joined = (raw['output'] as Array<{ text?: string }>)
+        if (raw && typeof raw === 'object' && Array.isArray(raw.output)) {
+          const joined = (raw.output as Array<{ text?: string }>)
             .map((b) => b.text ?? '')
             .join('\n');
           return { ...raw, output: joined || undefined };

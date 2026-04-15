@@ -4,6 +4,7 @@ import SwiftUI
 /// Root view — three-column layout: Sidebar | Fleet/List | Detail
 public struct MainView: View {
     public var sessions: [Session]
+    public var scheduledJobs: [ScheduledJob]
     public var isConnected: Bool
     public var connectionLabel: String
     public var connectionState: String
@@ -28,6 +29,11 @@ public struct MainView: View {
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
 
+    // Scheduled Jobs
+    public var onRunCatchup: ((ScheduledJob) -> Void)?
+    public var onSkipCatchup: ((ScheduledJob) -> Void)?
+    public var onTriggerJob: ((ScheduledJob) -> Void)?
+
     // Memory
     public var memoryEntries: [MemoryEntry]
     public var pendingMemoryCount: Int
@@ -42,6 +48,7 @@ public struct MainView: View {
 
     public init(
         sessions: [Session] = MockData.all,
+        scheduledJobs: [ScheduledJob] = [],
         selectedSessionId: Binding<String?> = .constant(nil),
         isConnected: Bool = true,
         connectionLabel: String = "localhost:3000",
@@ -66,6 +73,9 @@ public struct MainView: View {
         onShowSettings: (() -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
+        onRunCatchup: ((ScheduledJob) -> Void)? = nil,
+        onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
+        onTriggerJob: ((ScheduledJob) -> Void)? = nil,
         memoryEntries: [MemoryEntry] = [],
         pendingMemoryCount: Int = 0,
         onApproveMemory: @escaping (String) -> Void = { _ in },
@@ -76,6 +86,7 @@ public struct MainView: View {
         onLoadMemories: (() async -> Void)? = nil
     ) {
         self.sessions = sessions
+        self.scheduledJobs = scheduledJobs
         self._selectedSessionId = selectedSessionId
         self.isConnected = isConnected
         self.connectionLabel = connectionLabel
@@ -100,6 +111,9 @@ public struct MainView: View {
         self.onShowSettings = onShowSettings
         self.loadFiles = loadFiles
         self.loadContent = loadContent
+        self.onRunCatchup = onRunCatchup
+        self.onSkipCatchup = onSkipCatchup
+        self.onTriggerJob = onTriggerJob
         self.memoryEntries = memoryEntries
         self.pendingMemoryCount = pendingMemoryCount
         self.onApproveMemory = onApproveMemory
@@ -151,6 +165,7 @@ public struct MainView: View {
         case .analytics:        []
         case .history:          []
         case .memory:           []
+        case .scheduledJobs:    []
         case .featureOverview:  []
         case .salesPitch:       []
         case .profile(let p):   sessions.filter { $0.profileName == p }
@@ -172,6 +187,8 @@ public struct MainView: View {
                 isConnected: isConnected,
                 connectionLabel: connectionLabel,
                 pendingMemoryCount: pendingMemoryCount,
+                scheduledJobCount: scheduledJobs.count,
+                catchupPendingCount: scheduledJobs.filter { $0.catchupPending }.count,
                 onShowSettings: onShowSettings
             )
         } content: {
@@ -209,6 +226,14 @@ public struct MainView: View {
                 )
                 .frame(minWidth: 600)
                 .task { await onLoadMemories?() }
+            } else if sidebarSelection == .scheduledJobs {
+                ScheduledJobsView(
+                    jobs: scheduledJobs,
+                    onRunCatchup: onRunCatchup,
+                    onSkipCatchup: onSkipCatchup,
+                    onTriggerJob: onTriggerJob
+                )
+                .frame(minWidth: 600)
             } else if sidebarSelection == .salesPitch {
                 SalesPitchView()
                     .frame(minWidth: 600)

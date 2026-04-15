@@ -7,7 +7,7 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['better-sqlite3'],
+  external: ['better-sqlite3', 'pino-pretty'],
   onSuccess: async () => {
     mkdirSync('dist/db/migrations', { recursive: true });
     cpSync('src/db/migrations', 'dist/db/migrations', { recursive: true });

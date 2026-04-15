@@ -266,7 +266,7 @@ export class DockerContainerManager implements ContainerManager {
     }
 
     // Tar entries are prefixed with the basename of containerPath (e.g. "workspace/")
-    const prefix = basename(containerPath) + '/';
+    const prefix = `${basename(containerPath)}/`;
     const extract = tar.extract();
 
     return new Promise<void>((resolve, reject) => {

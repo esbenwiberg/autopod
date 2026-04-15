@@ -111,12 +111,20 @@ export type {
   ValidationOverrideQueuedEvent,
   TokenBudgetWarningEvent,
   TokenBudgetExceededEvent,
+  ScheduledJobCatchupRequestedEvent,
+  ScheduledJobFiredEvent,
   IssueWatcherPickedUpEvent,
   IssueWatcherCompletedEvent,
   IssueWatcherErrorEvent,
 } from './types/events.js';
 
 export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js';
+
+export type {
+  ScheduledJob,
+  CreateScheduledJobRequest,
+  UpdateScheduledJobRequest,
+} from './types/scheduled-job.js';
 
 export type {
   NotificationType,

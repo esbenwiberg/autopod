@@ -17,6 +17,8 @@ export type SystemEvent =
   | ValidationOverrideQueuedEvent
   | TokenBudgetWarningEvent
   | TokenBudgetExceededEvent
+  | ScheduledJobCatchupRequestedEvent
+  | ScheduledJobFiredEvent
   | IssueWatcherPickedUpEvent
   | IssueWatcherCompletedEvent
   | IssueWatcherErrorEvent;
@@ -110,6 +112,22 @@ export interface TokenBudgetExceededEvent {
   tokenBudget: number;
   budgetExtensionsUsed: number;
   maxBudgetExtensions: number | null;
+}
+
+export interface ScheduledJobCatchupRequestedEvent {
+  type: 'scheduled_job.catchup_requested';
+  timestamp: string;
+  jobId: string;
+  jobName: string;
+  lastRunAt: string | null;
+}
+
+export interface ScheduledJobFiredEvent {
+  type: 'scheduled_job.fired';
+  timestamp: string;
+  jobId: string;
+  jobName: string;
+  sessionId: string;
 }
 
 export interface IssueWatcherPickedUpEvent {

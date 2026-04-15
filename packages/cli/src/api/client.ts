@@ -7,11 +7,14 @@ import {
   ValidationError,
 } from '@autopod/shared';
 import type {
+  CreateScheduledJobRequest,
   CreateSessionRequest,
   HistoryQuery,
   Profile,
+  ScheduledJob,
   Session,
   SessionStatus,
+  UpdateScheduledJobRequest,
   ValidationResult,
   WatchedIssue,
 } from '@autopod/shared';
@@ -169,6 +172,39 @@ export class AutopodClient {
     credentials: { modelProvider: string; providerCredentials: unknown },
   ): Promise<Profile> {
     return this.request<Profile>('PATCH', `/profiles/${name}`, credentials);
+  }
+
+  // Scheduled Jobs
+  async createScheduledJob(req: CreateScheduledJobRequest): Promise<ScheduledJob> {
+    return this.request<ScheduledJob>('POST', '/scheduled-jobs', req);
+  }
+
+  async listScheduledJobs(): Promise<ScheduledJob[]> {
+    return this.request<ScheduledJob[]>('GET', '/scheduled-jobs');
+  }
+
+  async getScheduledJob(id: string): Promise<ScheduledJob> {
+    return this.request<ScheduledJob>('GET', `/scheduled-jobs/${id}`);
+  }
+
+  async updateScheduledJob(id: string, req: UpdateScheduledJobRequest): Promise<ScheduledJob> {
+    return this.request<ScheduledJob>('PUT', `/scheduled-jobs/${id}`, req);
+  }
+
+  async deleteScheduledJob(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/scheduled-jobs/${id}`);
+  }
+
+  async runScheduledJobCatchup(id: string): Promise<Session> {
+    return this.request<Session>('POST', `/scheduled-jobs/${id}/catchup`);
+  }
+
+  async skipScheduledJobCatchup(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/scheduled-jobs/${id}/catchup`);
+  }
+
+  async triggerScheduledJob(id: string): Promise<Session> {
+    return this.request<Session>('POST', `/scheduled-jobs/${id}/trigger`);
   }
 
   // Bulk

@@ -8,6 +8,7 @@ public struct AppRootView: View {
   public let sessionStore: SessionStore
   public let profileStore: ProfileStore
   public let memoryStore: MemoryStore
+  public let scheduledJobStore: ScheduledJobStore
   public let actionHandler: ActionHandler?
   public let eventStream: EventStream?
   public let terminalManager: TerminalManager?
@@ -18,6 +19,7 @@ public struct AppRootView: View {
     sessionStore: SessionStore,
     profileStore: ProfileStore,
     memoryStore: MemoryStore,
+    scheduledJobStore: ScheduledJobStore,
     actionHandler: ActionHandler?,
     eventStream: EventStream?,
     terminalManager: TerminalManager?,
@@ -27,6 +29,7 @@ public struct AppRootView: View {
     self.sessionStore = sessionStore
     self.profileStore = profileStore
     self.memoryStore = memoryStore
+    self.scheduledJobStore = scheduledJobStore
     self.actionHandler = actionHandler
     self.eventStream = eventStream
     self.terminalManager = terminalManager
@@ -58,6 +61,7 @@ public struct AppRootView: View {
   public var body: some View {
     MainView(
       sessions: sessionStore.sessions,
+      scheduledJobs: scheduledJobStore.jobs,
       selectedSessionId: Binding(
         get: { sessionStore.selectedSessionId },
         set: { sessionStore.selectedSessionId = $0 }
@@ -112,6 +116,9 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.getSessionFileContent(id, path: path)
       },
+      onRunCatchup: { job in Task { try? await scheduledJobStore.runCatchup(job.id) } },
+      onSkipCatchup: { job in Task { try? await scheduledJobStore.skipCatchup(job.id) } },
+      onTriggerJob: { job in Task { try? await scheduledJobStore.triggerJob(job.id) } },
       memoryEntries: memoryStore.entries,
       pendingMemoryCount: memoryStore.pendingCount,
       onApproveMemory: { id in Task { await memoryStore.approve(id) } },

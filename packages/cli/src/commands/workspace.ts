@@ -95,11 +95,9 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       const tmuxCmd =
         'command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s main || exec /bin/bash -l';
 
-      const result = spawnSync(
-        'docker',
-        ['exec', '-it', containerName, '/bin/sh', '-c', tmuxCmd],
-        { stdio: 'inherit' },
-      );
+      const result = spawnSync('docker', ['exec', '-it', containerName, '/bin/sh', '-c', tmuxCmd], {
+        stdio: 'inherit',
+      });
 
       if (result.error) {
         console.error(chalk.red('docker CLI not found on PATH'));
