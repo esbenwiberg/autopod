@@ -23,6 +23,14 @@ public struct Profile: Identifiable, Sendable {
     public var prProvider: PRProvider
     public var customInstructions: String?
     public var containerMemoryGb: Double?
+    public var branchPrefix: String
+    public var hasWebUi: Bool
+
+    // Token budget
+    public var tokenBudget: Int?
+    public var tokenBudgetPolicy: TokenBudgetPolicy
+    public var tokenBudgetWarnAt: Double
+    public var maxBudgetExtensions: Int?
 
     // Issue watcher
     public var issueWatcherEnabled: Bool
@@ -108,6 +116,9 @@ public struct Profile: Identifiable, Sendable {
         executionTarget: ExecutionTarget = .local,
         modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
         customInstructions: String? = nil, containerMemoryGb: Double? = nil,
+        branchPrefix: String = "autopod/", hasWebUi: Bool = true,
+        tokenBudget: Int? = nil, tokenBudgetPolicy: TokenBudgetPolicy = .soft,
+        tokenBudgetWarnAt: Double = 0.8, maxBudgetExtensions: Int? = nil,
         issueWatcherEnabled: Bool = false, issueWatcherLabelPrefix: String = "autopod",
         hasGithubPat: Bool = false, hasAdoPat: Bool = false, hasRegistryPat: Bool = false,
         githubPat: String? = nil, adoPat: String? = nil, registryPat: String? = nil,
@@ -148,6 +159,9 @@ public struct Profile: Identifiable, Sendable {
         self.executionTarget = executionTarget; self.modelProvider = modelProvider
         self.prProvider = prProvider; self.customInstructions = customInstructions
         self.containerMemoryGb = containerMemoryGb
+        self.branchPrefix = branchPrefix; self.hasWebUi = hasWebUi
+        self.tokenBudget = tokenBudget; self.tokenBudgetPolicy = tokenBudgetPolicy
+        self.tokenBudgetWarnAt = tokenBudgetWarnAt; self.maxBudgetExtensions = maxBudgetExtensions
         self.issueWatcherEnabled = issueWatcherEnabled
         self.issueWatcherLabelPrefix = issueWatcherLabelPrefix
         self.hasGithubPat = hasGithubPat; self.hasAdoPat = hasAdoPat
@@ -230,6 +244,17 @@ public enum PRProvider: String, CaseIterable, Sendable {
     }
 }
 
+public enum TokenBudgetPolicy: String, CaseIterable, Sendable {
+    case soft, hard
+    public var label: String { rawValue.capitalized }
+    public var description: String {
+        switch self {
+        case .soft: "Pause for approval when budget is exceeded"
+        case .hard: "Fail immediately when budget is exceeded"
+        }
+    }
+}
+
 public enum ActionGroup: String, CaseIterable, Sendable, Hashable {
     case githubIssues = "github-issues"
     case githubPrs = "github-prs"
@@ -238,6 +263,7 @@ public enum ActionGroup: String, CaseIterable, Sendable, Hashable {
     case adoPrs = "ado-prs"
     case adoCode = "ado-code"
     case azureLogs = "azure-logs"
+    case azurePim = "azure-pim"
     case custom
 
     public var label: String {
@@ -249,6 +275,7 @@ public enum ActionGroup: String, CaseIterable, Sendable, Hashable {
         case .adoPrs:        "ADO PRs"
         case .adoCode:       "ADO Code"
         case .azureLogs:     "Azure Logs"
+        case .azurePim:      "Azure PIM"
         case .custom:        "Custom"
         }
     }
