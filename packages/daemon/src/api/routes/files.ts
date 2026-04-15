@@ -45,13 +45,14 @@ export function filesRoutes(app: FastifyInstance, sessionManager: SessionManager
     const query = request.query as { ext?: string };
     const session = sessionManager.getSession(sessionId);
 
-    if (!session.worktreePath) {
+    const rootPath = session.worktreePath ?? session.artifactsPath;
+    if (!rootPath) {
       reply.status(404);
-      return { error: 'Session has no worktree on this host' };
+      return { error: 'No files available for this session' };
     }
 
     const extensions = parseExtensions(query.ext);
-    const root = path.resolve(session.worktreePath);
+    const root = path.resolve(rootPath);
     const files = await walk(root, extensions);
     files.sort((a, b) => a.path.localeCompare(b.path));
 
@@ -64,9 +65,10 @@ export function filesRoutes(app: FastifyInstance, sessionManager: SessionManager
     const query = request.query as { path?: string };
     const session = sessionManager.getSession(sessionId);
 
-    if (!session.worktreePath) {
+    const rootPath = session.worktreePath ?? session.artifactsPath;
+    if (!rootPath) {
       reply.status(404);
-      return { error: 'Session has no worktree on this host' };
+      return { error: 'No files available for this session' };
     }
 
     const relPath = query.path;
@@ -75,12 +77,12 @@ export function filesRoutes(app: FastifyInstance, sessionManager: SessionManager
       return { error: 'path query parameter is required' };
     }
 
-    const root = path.resolve(session.worktreePath);
+    const root = path.resolve(rootPath);
     const resolved = path.resolve(root, relPath);
-    // Path-traversal guard — resolved must stay under the worktree root.
+    // Path-traversal guard — resolved must stay under the root.
     if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
       reply.status(400);
-      return { error: 'path escapes the session worktree' };
+      return { error: 'path escapes the session root' };
     }
 
     let stats: Awaited<ReturnType<typeof stat>>;

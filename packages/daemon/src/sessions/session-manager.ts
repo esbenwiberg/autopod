@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
@@ -2012,6 +2012,70 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         session.status === 'failed' ||
         session.status === 'review_required'
       ) {
+        return;
+      }
+
+      // Artifact sessions: extract /workspace, optionally push branch, skip validation entirely
+      if (session.outputMode === 'artifact') {
+        const profile = profileStore.get(session.profileName);
+        const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+        const artifactsPath = path.join(dataDir, 'artifacts', sessionId);
+
+        await mkdir(artifactsPath, { recursive: true });
+
+        if (session.containerId) {
+          const cm = containerManagerFactory.get(session.executionTarget);
+          try {
+            emitActivityStatus(sessionId, 'Collecting artifacts…');
+            await cm.extractDirectoryFromContainer(session.containerId, '/workspace', artifactsPath);
+            logger.info({ sessionId, artifactsPath }, 'Artifacts extracted from container');
+          } catch (err) {
+            logger.warn(
+              { err, sessionId },
+              'Failed to extract artifacts — session will complete with empty artifact store',
+            );
+          }
+        }
+
+        sessionRepo.update(sessionId, { artifactsPath });
+
+        // If profile has a destination repo: lazy-clone, copy artifacts, push branch (best-effort)
+        if (profile.repoUrl) {
+          const repoBranch = session.branch ?? `research/${sessionId}`;
+          try {
+            emitActivityStatus(sessionId, 'Pushing artifact branch…');
+            const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
+            await mkdir(tempWorktreeParent, { recursive: true });
+            const pat = profile.adoPat ?? profile.githubPat ?? undefined;
+            const worktreeResult = await worktreeManager.create({
+              repoUrl: profile.repoUrl,
+              branch: repoBranch,
+              baseBranch: session.baseBranch ?? profile.defaultBranch,
+              pat,
+            });
+            // Copy artifacts into the worktree (cp -a copies contents, trailing /. required)
+            await execFileAsync('cp', [
+              '-a',
+              `${artifactsPath}/.`,
+              `${worktreeResult.worktreePath}/`,
+            ]);
+            await worktreeManager.commitPendingChanges(
+              worktreeResult.worktreePath,
+              `research: ${session.task.slice(0, 72)}`,
+              { maxDeletions: 1000 },
+            );
+            await worktreeManager.pushBranch(worktreeResult.worktreePath);
+            logger.info({ sessionId, branch: repoBranch }, 'Artifact branch pushed');
+          } catch (err) {
+            logger.warn(
+              { err, sessionId },
+              'Failed to push artifact branch — artifacts available via API',
+            );
+          }
+        }
+
+        // Transition to complete — skip validation entirely
+        transition(session, 'complete');
         return;
       }
 
