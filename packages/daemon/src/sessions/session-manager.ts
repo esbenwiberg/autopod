@@ -14,6 +14,7 @@ import type {
   NetworkPolicy,
   PrivateRegistry,
   Profile,
+  ReferenceRepo,
   RequestCredentialPayload,
   Session,
   SessionStatus,
@@ -86,6 +87,12 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
+
+/** Inject a PAT into an https URL: https://host/... → https://x-access-token:PAT@host/...
+ * Strips any existing userinfo first to avoid double-injection. */
+function injectPatIntoUrl(url: string, pat: string): string {
+  return url.replace(/^https:\/\/([^@]*@)?/, `https://x-access-token:${pat}@`);
+}
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
  * Capped at 48999 to avoid the Windows/Hyper-V dynamic port reservation range (49152+). */
@@ -1073,11 +1080,25 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
 
+      // Derive referenceRepos with mountPath from URL last segment
+      const derivedReferenceRepos: ReferenceRepo[] = (request.referenceRepos ?? []).map((r) => ({
+        url: r.url,
+        mountPath: r.url.replace(/\.git$/, '').split('/').pop() ?? r.url,
+      }));
+
       let id: string;
       for (let attempt = 0; attempt < 10; attempt++) {
         id = generateSessionId();
-        const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
-        const branch = request.branch ?? `${prefix}${id}`;
+        const effectiveOutputMode = request.outputMode ?? profile.outputMode ?? 'pr';
+        let branch: string;
+        if (request.branch) {
+          branch = request.branch;
+        } else if (effectiveOutputMode === 'artifact') {
+          branch = `research/${id}`;
+        } else {
+          const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
+          branch = `${prefix}${id}`;
+        }
         try {
           sessionRepo.insert({
             id,
@@ -1092,7 +1113,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             maxValidationAttempts: profile.maxValidationAttempts,
             skipValidation,
             acceptanceCriteria: request.acceptanceCriteria ?? null,
-            outputMode: request.outputMode ?? profile.outputMode ?? 'pr',
+            outputMode: effectiveOutputMode,
             baseBranch: request.baseBranch ?? null,
             acFrom: request.acFrom ?? null,
             linkedSessionId: request.linkedSessionId ?? null,
@@ -1102,6 +1123,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               request.tokenBudget !== undefined
                 ? request.tokenBudget
                 : (profile.tokenBudget ?? null),
+            referenceRepos: derivedReferenceRepos.length > 0 ? derivedReferenceRepos : null,
+            referenceRepoPat: request.referenceRepoPat ?? null,
             scheduledJobId: request.scheduledJobId ?? null,
           });
           break;
@@ -1180,48 +1203,50 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         // Snapshot the resolved profile at session start time for auditability
         sessionRepo.update(sessionId, { profileSnapshot: profile });
 
-        // Recovery mode: reuse existing worktree instead of creating new one
-        let worktreePath: string;
-        let bareRepoPath: string;
+        // Worktree is optional — artifact-mode profiles may have no repoUrl.
+        let worktreePath: string | null = null;
+        let bareRepoPath: string | null = null;
 
-        // Validate recovery worktree is still a usable git directory.
-        // It may have been cleaned up by another session's kill (e.g. shared worktree path).
-        let recoveryViable = false;
-        if (isRecovery && session.recoveryWorktreePath) {
-          try {
-            await access(path.join(session.recoveryWorktreePath, '.git'));
-            recoveryViable = true;
-          } catch {
-            logger.warn(
-              { sessionId, worktreePath: session.recoveryWorktreePath },
-              'Recovery worktree missing or not a git directory — falling back to fresh worktree',
-            );
+        if (profile.repoUrl) {
+          // Validate recovery worktree is still a usable git directory.
+          // It may have been cleaned up by another session's kill (e.g. shared worktree path).
+          let recoveryViable = false;
+          if (isRecovery && session.recoveryWorktreePath) {
+            try {
+              await access(path.join(session.recoveryWorktreePath, '.git'));
+              recoveryViable = true;
+            } catch {
+              logger.warn(
+                { sessionId, worktreePath: session.recoveryWorktreePath },
+                'Recovery worktree missing or not a git directory — falling back to fresh worktree',
+              );
+              sessionRepo.update(sessionId, { recoveryWorktreePath: null });
+            }
+          }
+
+          if (recoveryViable && session.recoveryWorktreePath) {
+            worktreePath = session.recoveryWorktreePath;
+            bareRepoPath = await deriveBareRepoPath(worktreePath);
+            // Clear recovery flag now that we've captured the path
             sessionRepo.update(sessionId, { recoveryWorktreePath: null });
+            emitStatus('Recovering session — reusing existing worktree…');
+            logger.info({ sessionId, worktreePath }, 'Recovery mode: reusing worktree');
+          } else {
+            // Normal path: create worktree
+            emitStatus('Creating worktree…');
+            const result = await worktreeManager.create({
+              repoUrl: profile.repoUrl,
+              branch: session.branch,
+              baseBranch: session.baseBranch ?? profile.defaultBranch,
+              pat: profile.adoPat ?? profile.githubPat ?? undefined,
+            });
+            worktreePath = result.worktreePath;
+            bareRepoPath = result.bareRepoPath;
           }
         }
 
-        if (recoveryViable && session.recoveryWorktreePath) {
-          worktreePath = session.recoveryWorktreePath;
-          bareRepoPath = await deriveBareRepoPath(worktreePath);
-          // Clear recovery flag now that we've captured the path
-          sessionRepo.update(sessionId, { recoveryWorktreePath: null });
-          emitStatus('Recovering session — reusing existing worktree…');
-          logger.info({ sessionId, worktreePath }, 'Recovery mode: reusing worktree');
-        } else {
-          // Normal path: create worktree
-          emitStatus('Creating worktree…');
-          const result = await worktreeManager.create({
-            repoUrl: profile.repoUrl,
-            branch: session.branch,
-            baseBranch: session.baseBranch ?? profile.defaultBranch,
-            pat: profile.adoPat ?? profile.githubPat ?? undefined,
-          });
-          worktreePath = result.worktreePath;
-          bareRepoPath = result.bareRepoPath;
-        }
-
         // If acFrom is set, read acceptance criteria from the worktree
-        if (session.acFrom) {
+        if (session.acFrom && worktreePath) {
           const criteria = await readAcFile(worktreePath, session.acFrom);
           sessionRepo.update(sessionId, { acceptanceCriteria: criteria });
           session = sessionRepo.getOrThrow(sessionId);
@@ -1293,8 +1318,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           env: containerEnv,
           ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
           volumes: [
-            { host: worktreePath, container: '/mnt/worktree' },
-            { host: bareRepoPath, container: bareRepoPath },
+            ...(worktreePath ? [{ host: worktreePath, container: '/mnt/worktree' }] : []),
+            ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
           ],
           networkName,
           firewallScript,
@@ -1304,12 +1329,49 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
         // Copy worktree content from bind mount to container's native filesystem.
         // VirtioFS bind mounts break getcwd() on Docker Desktop for Mac — overlayfs does not.
-        emitStatus('Populating workspace…');
-        await containerManager.execInContainer(
-          containerId,
-          ['cp', '-a', '/mnt/worktree/.', '/workspace/'],
-          { timeout: 120_000 },
-        );
+        // Skipped for artifact sessions with no worktree.
+        if (worktreePath) {
+          emitStatus('Populating workspace…');
+          await containerManager.execInContainer(
+            containerId,
+            ['cp', '-a', '/mnt/worktree/.', '/workspace/'],
+            { timeout: 120_000 },
+          );
+        }
+
+        // Clone reference repos into /repos/<mountPath> inside the container (read-only)
+        const referenceRepos = session.referenceRepos ?? [];
+        if (referenceRepos.length > 0) {
+          emitStatus('Cloning reference repos…');
+          await containerManager.execInContainer(containerId, ['mkdir', '-p', '/repos'], {
+            timeout: 5_000,
+          });
+          for (const repo of referenceRepos) {
+            const destPath = `/repos/${repo.mountPath}`;
+            const refPat = session.referenceRepoPat ?? undefined;
+            const authUrl = refPat ? injectPatIntoUrl(repo.url, refPat) : repo.url;
+            try {
+              await containerManager.execInContainer(
+                containerId,
+                ['git', 'clone', '--depth', '1', authUrl, destPath],
+                { timeout: 60_000 },
+              );
+              if (refPat) {
+                // Strip the PAT from the remote so it cannot be read inside the container
+                await containerManager.execInContainer(
+                  containerId,
+                  ['git', 'remote', 'set-url', 'origin', repo.url],
+                  { cwd: destPath, timeout: 5_000 },
+                );
+              }
+            } catch (err) {
+              logger.warn(
+                { err, sessionId, url: repo.url },
+                'Failed to clone reference repo — skipping',
+              );
+            }
+          }
+        }
 
         const previewUrl = `http://127.0.0.1:${hostPort}`;
         session = transition(session, 'running', {
@@ -1658,8 +1720,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           // claudeSessionId was already cleared by triggerValidation so we never
           // resume a stale/broken session context.
           emitStatus('Reworking session…');
-          // biome-ignore lint/style/noNonNullAssertion: reworkReason is always set when isRework=true
-          const reworkTask = await buildReworkTask(session, worktreePath, session.reworkReason!);
+          // biome-ignore lint/style/noNonNullAssertion: reworkReason is always set when isRework=true; worktreePath is non-null when isRework=true (rework requires a prior run with a worktree)
+          const reworkTask = await buildReworkTask(session, worktreePath!, session.reworkReason!);
           events = runtime.spawn({
             sessionId,
             task: reworkTask,
@@ -1682,13 +1744,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             (runtime as ClaudeRuntime).setClaudeSessionId(sessionId, session.claudeSessionId);
           }
 
-          const continuationPrompt = await buildContinuationPrompt(session, worktreePath);
+          // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery sessions (recovery requires a prior run with a worktree)
+          const continuationPrompt = await buildContinuationPrompt(session, worktreePath!);
 
           try {
             events = runtime.resume(sessionId, continuationPrompt, containerId, secretEnv);
           } catch (err) {
             logger.warn({ err, sessionId }, 'Claude --resume failed, falling back to fresh spawn');
-            const recoveryTask = await buildRecoveryTask(session, worktreePath);
+            // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery sessions
+            const recoveryTask = await buildRecoveryTask(session, worktreePath!);
             events = runtime.spawn({
               sessionId,
               task: recoveryTask,
@@ -1702,7 +1766,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           }
         } else if (isRecovery) {
           // Non-Claude runtime or no claudeSessionId — fresh spawn with recovery context
-          const recoveryTask = await buildRecoveryTask(session, worktreePath);
+          // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery sessions
+          const recoveryTask = await buildRecoveryTask(session, worktreePath!);
           events = runtime.spawn({
             sessionId,
             task: recoveryTask,
@@ -2291,8 +2356,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             targetBranch: retryProfile.defaultBranch,
           });
           const newPrUrl = await prManager.createPr({
-            worktreePath: session.worktreePath,
-            repoUrl: retryProfile.repoUrl,
+            // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — sessions reach approved only after successful validation which requires a worktree
+            worktreePath: session.worktreePath!,
+            repoUrl: retryProfile.repoUrl ?? undefined,
             branch: session.branch,
             baseBranch: retryProfile.defaultBranch,
             sessionId,
@@ -3122,25 +3188,29 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               logger.warn({ err, sessionId }, 'Failed to recompute diff stats after merge');
             }
 
-            // Build screenshot URLs for the PR body
-            const screenshotRefs = result.smoke.pages
-              .filter((p) => p.screenshotPath)
-              .map((p) => ({
-                pagePath: p.path,
-                imageUrl: buildGitHubImageUrl(
-                  profile.repoUrl,
-                  s2.branch,
-                  p.screenshotPath.replace(/^\/workspace\//, ''),
-                ),
-              }));
+            // Build screenshot URLs for the PR body (only for sessions with a repo URL)
+            const repoUrlForScreenshots = profile.repoUrl;
+            const screenshotRefs = repoUrlForScreenshots
+              ? result.smoke.pages
+                  .filter((p) => p.screenshotPath)
+                  .map((p) => ({
+                    pagePath: p.path,
+                    imageUrl: buildGitHubImageUrl(
+                      repoUrlForScreenshots,
+                      s2.branch,
+                      p.screenshotPath.replace(/^\/workspace\//, ''),
+                    ),
+                  }))
+              : [];
 
             if (!prUrl) {
               try {
                 emitActivityStatus(sessionId, 'Creating PR…');
                 const s3 = sessionRepo.getOrThrow(sessionId);
                 prUrl = await prManager.createPr({
-                  worktreePath: s2.worktreePath,
-                  repoUrl: profile.repoUrl,
+                  // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact sessions which always have a worktree
+                  worktreePath: s2.worktreePath!,
+                  repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
                   baseBranch: profile.defaultBranch,
                   sessionId,
@@ -3442,8 +3512,9 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 emitActivityStatus(sessionId, 'Creating PR…');
                 const s3 = sessionRepo.getOrThrow(sessionId);
                 prUrl = await prManager.createPr({
-                  worktreePath: s2.worktreePath,
-                  repoUrl: profile.repoUrl,
+                  // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact sessions which always have a worktree
+                  worktreePath: s2.worktreePath!,
+                  repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
                   baseBranch: profile.defaultBranch,
                   sessionId,

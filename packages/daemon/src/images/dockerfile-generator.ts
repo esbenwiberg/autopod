@@ -26,14 +26,16 @@ export function generateDockerfile(options: DockerfileOptions): string {
     'WORKDIR /workspace',
   ];
 
-  // Git credentials for private repos
-  if (options.gitCredentials === 'pat') {
-    lines.push(
-      'ARG GIT_PAT',
-      `RUN git clone --depth 1 https://x-access-token:\${GIT_PAT}@${stripProtocol(profile.repoUrl)} .`,
-    );
-  } else {
-    lines.push(`RUN git clone --depth 1 ${profile.repoUrl} .`);
+  // Git credentials for private repos (repoUrl may be null for artifact-mode profiles)
+  if (profile.repoUrl) {
+    if (options.gitCredentials === 'pat') {
+      lines.push(
+        'ARG GIT_PAT',
+        `RUN git clone --depth 1 https://x-access-token:\${GIT_PAT}@${stripProtocol(profile.repoUrl)} .`,
+      );
+    } else {
+      lines.push(`RUN git clone --depth 1 ${profile.repoUrl} .`);
+    }
   }
 
   // Inject private registry config for install step (uses build args, cleaned up below)

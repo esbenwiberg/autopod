@@ -167,12 +167,26 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
+  // Reference repos (artifact mode only)
+  if (session.referenceRepos?.length) {
+    lines.push('## Reference Repositories');
+    lines.push('The following repos are cloned read-only at:');
+    for (const repo of session.referenceRepos) {
+      lines.push(`- \`/repos/${repo.mountPath}/\` — ${repo.url}`);
+    }
+    lines.push('Do not attempt to push to these repos. They are read-only clones.');
+    lines.push('');
+  }
+
   // Build & Run (adapts for artifact mode)
   if (profile.outputMode === 'artifact') {
     lines.push('## Output');
     lines.push('');
     lines.push('- Write your findings to `research-output.md` in the workspace root.');
     lines.push('- No build or validation will run — your output IS the deliverable.');
+    lines.push(
+      '- Web search and browsing are available via built-in Claude tools. Write all output files to `/workspace/` — they will be collected as artifacts on completion.',
+    );
     lines.push('');
   } else {
     lines.push('## Build & Run');

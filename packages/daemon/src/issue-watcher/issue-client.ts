@@ -22,6 +22,11 @@ export interface IssueClient {
 }
 
 export function createIssueClient(profile: Profile): IssueClient {
+  if (!profile.repoUrl) {
+    throw new Error(
+      `Profile '${profile.name}' has no repoUrl — cannot create an issue client for artifact-mode profiles`,
+    );
+  }
   if (profile.prProvider === 'github') {
     const { owner, repo } = parseGitHubRepoUrl(profile.repoUrl);
     return new GitHubIssueClient({ owner, repo, pat: profile.githubPat ?? '' });
