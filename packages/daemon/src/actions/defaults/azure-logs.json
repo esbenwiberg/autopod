@@ -63,6 +63,11 @@
         "default": "PT1H",
         "description": "ISO 8601 duration (default: last hour)"
       },
+      "workspace_id": {
+        "type": "string",
+        "required": false,
+        "description": "Log Analytics workspace ID associated with the Container App. Required in practice — without it the call will fail."
+      },
       "filter": {
         "type": "string",
         "required": false,

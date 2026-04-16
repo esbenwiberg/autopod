@@ -26,9 +26,10 @@ public struct SessionCardFinal: View {
     public let session: Session
     public var actions: SessionActions
     public var density: CardDensity
+    public var isSelected: Bool
 
-    public init(session: Session, actions: SessionActions = .preview, density: CardDensity = .detailed) {
-        self.session = session; self.actions = actions; self.density = density
+    public init(session: Session, actions: SessionActions = .preview, density: CardDensity = .detailed, isSelected: Bool = false) {
+        self.session = session; self.actions = actions; self.density = density; self.isSelected = isSelected
     }
 
     @State private var isHovered = false
@@ -38,7 +39,7 @@ public struct SessionCardFinal: View {
             // Accent stripe
             session.status.color
                 .frame(height: 2)
-                .opacity(session.status.needsAttention ? 0.9 : 0.25)
+                .opacity(isSelected ? 0.8 : session.status.needsAttention ? 0.9 : 0.25)
 
             compactContent
                 .padding(12)
@@ -54,24 +55,27 @@ public struct SessionCardFinal: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .controlBackgroundColor))
                 .shadow(
-                    color: .black.opacity(isHovered ? 0.08 : 0.03),
-                    radius: isHovered ? 8 : 3,
-                    y: isHovered ? 2 : 1
+                    color: .black.opacity(isSelected ? 0.1 : isHovered ? 0.08 : 0.03),
+                    radius: isSelected ? 10 : isHovered ? 8 : 3,
+                    y: isSelected ? 3 : isHovered ? 2 : 1
                 )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(
-                    isHovered
-                        ? Color.accentColor.opacity(0.4)
-                        : session.status.needsAttention
-                            ? session.status.color.opacity(0.35)
-                            : Color.white.opacity(0.15),
-                    lineWidth: 1.5
+                    isSelected
+                        ? Color.accentColor.opacity(0.9)
+                        : isHovered
+                            ? Color.accentColor.opacity(0.4)
+                            : session.status.needsAttention
+                                ? session.status.color.opacity(0.35)
+                                : Color.white.opacity(0.15),
+                    lineWidth: isSelected ? 2 : 1.5
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .animation(.easeOut(duration: 0.15), value: isHovered)
+        .animation(.easeOut(duration: 0.15), value: isSelected)
         .onHover { isHovered = $0 }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }

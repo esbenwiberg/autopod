@@ -16,6 +16,7 @@ export type {
   EscalationConfig,
   NetworkPolicy,
   PimGroupConfig,
+  PimActivationConfig,
   PrivateRegistry,
   RegistryType,
 } from './types/profile.js';
@@ -196,6 +197,7 @@ export {
   escalationConfigSchema,
   modelProviderSchema,
   providerCredentialsSchema,
+  pimActivationConfigSchema,
 } from './schemas/profile.schema.js';
 
 export {

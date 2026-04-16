@@ -14,7 +14,7 @@ public struct AnalyticsView: View {
     private var totalSessions: Int { workerSessions.count }
     private var successCount: Int { workerSessions.filter { $0.status == .complete }.count }
     private var successRate: Double { totalSessions > 0 ? Double(successCount) / Double(totalSessions) : 0 }
-    private var totalCost: Double { sessions.reduce(0) { $0 + $1.costUsd } }
+    private var totalCost: Double { sessions.filter { $0.status != .running && $0.status != .paused }.reduce(0) { $0 + $1.costUsd } }
     private var totalInputTokens: Int { sessions.reduce(0) { $0 + $1.inputTokens } }
     private var totalOutputTokens: Int { sessions.reduce(0) { $0 + $1.outputTokens } }
     private var totalLinesAdded: Int { sessions.compactMap(\.diffStats).reduce(0) { $0 + $1.added } }

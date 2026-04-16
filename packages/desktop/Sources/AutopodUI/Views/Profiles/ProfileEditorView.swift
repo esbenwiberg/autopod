@@ -1070,339 +1070,7 @@ public struct ProfileEditorView: View {
 
     @ViewBuilder
     private var actionFields: some View {
-        Toggle(isOn: $profile.actionPolicyEnabled) {
-            HStack(spacing: 4) {
-                Text("Enable action policy")
-                HelpBadge(text: "When enabled, agents can execute control-plane actions like reading GitHub issues, ADO work items, or calling custom HTTP endpoints.")
-            }
-        }
-
-        if profile.actionPolicyEnabled {
-            Divider().padding(.vertical, 4)
-
-            Text("Enabled Actions")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-
-            actionGroupDisclosures
-
-            Divider().padding(.vertical, 4)
-
-            HStack {
-                Text("Action Overrides")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                HelpBadge(text: "Per-action restrictions. Limit an action to specific repos (exact or wildcard, e.g. myorg/*) and optionally require a human to approve before it runs.")
-                Spacer()
-                Button {
-                    profile.actionOverrides.append(ActionOverride())
-                } label: {
-                    Label("Add Override", systemImage: "plus")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-            }
-
-            if profile.actionOverrides.isEmpty {
-                Text("No overrides — all enabled actions run without restrictions.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach($profile.actionOverrides) { $override in
-                        HStack(alignment: .center, spacing: 8) {
-                            actionNamePicker(selection: $override.action)
-
-                            TextField("repos (myorg/*, myorg/repo)", text: Binding(
-                                get: { override.allowedResources.joined(separator: ", ") },
-                                set: { raw in
-                                    override.allowedResources = raw
-                                        .split(separator: ",")
-                                        .map { $0.trimmingCharacters(in: .whitespaces) }
-                                        .filter { !$0.isEmpty }
-                                }
-                            ))
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.caption, design: .monospaced))
-                            .frame(minWidth: 180)
-                            .help("Comma-separated repo patterns. Supports wildcards: myorg/* allows all repos in the org.")
-
-                            Toggle("Approval", isOn: $override.requiresApproval)
-                                .toggleStyle(.checkbox)
-                                .help("Require a human to approve this action before it runs")
-                                .frame(width: 80)
-
-                            Toggle("Disabled", isOn: $override.disabled)
-                                .toggleStyle(.checkbox)
-                                .help("Completely disable this action for sessions using this profile")
-                                .frame(width: 70)
-
-                            Button {
-                                profile.actionOverrides.removeAll { $0.id == override.id }
-                            } label: {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundStyle(.red.opacity(0.6))
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-                }
-                .padding(.leading, 4)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            Text("Data Sanitization")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-
-            fieldRow("Preset", help: "Controls how aggressively PII and sensitive data are stripped from action responses before the agent sees them.") {
-                Picker("", selection: $profile.actionSanitizationPreset) {
-                    ForEach(SanitizationPreset.allCases, id: \.self) { p in
-                        Text(p.label).tag(p)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 150)
-            }
-
-            Text(profile.actionSanitizationPreset.description)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.top, -8)
-
-            fieldRow("Allowed Domains", help: "Domains excluded from sanitization filtering. Data from these domains passes through unmodified.") {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(profile.actionSanitizationAllowedDomains.indices, id: \.self) { i in
-                        HStack(spacing: 6) {
-                            TextField("example.com", text: $profile.actionSanitizationAllowedDomains[i])
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.caption, design: .monospaced))
-                            Button {
-                                profile.actionSanitizationAllowedDomains.remove(at: i)
-                            } label: {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundStyle(.red.opacity(0.6))
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-                    Button {
-                        profile.actionSanitizationAllowedDomains.append("")
-                    } label: {
-                        Label("Add domain", systemImage: "plus")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-
-            Divider().padding(.vertical, 4)
-
-            Text("Quarantine")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-
-            Toggle(isOn: $profile.actionQuarantineEnabled) {
-                HStack(spacing: 4) {
-                    Text("Enable quarantine")
-                    HelpBadge(text: "Quarantine scores action responses for PII risk. High-scoring responses are blocked or escalated.")
-                }
-            }
-
-            if profile.actionQuarantineEnabled {
-                HStack(spacing: 24) {
-                    fieldRow("Warn Threshold", help: "PII score (0–1) at which a warning is logged.") {
-                        HStack(spacing: 6) {
-                            Slider(value: $profile.actionQuarantineThreshold, in: 0...1, step: 0.05)
-                                .frame(width: 100)
-                            Text(String(format: "%.2f", profile.actionQuarantineThreshold))
-                                .monospacedDigit()
-                                .frame(width: 36)
-                        }
-                    }
-                    fieldRow("Block Threshold", help: "PII score (0–1) at which the response is blocked entirely.") {
-                        HStack(spacing: 6) {
-                            Slider(value: $profile.actionQuarantineBlockThreshold, in: 0...1, step: 0.05)
-                                .frame(width: 100)
-                            Text(String(format: "%.2f", profile.actionQuarantineBlockThreshold))
-                                .monospacedDigit()
-                                .frame(width: 36)
-                        }
-                    }
-                    fieldRow("On Block", help: "What happens when a response is blocked — skip silently or escalate to human.") {
-                        Picker("", selection: $profile.actionQuarantineOnBlock) {
-                            ForEach(QuarantineOnBlock.allCases, id: \.self) { o in
-                                Text(o.label).tag(o)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 140)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Action disclosure groups
-
-    private var catalogByGroup: [String: [ActionCatalogItem]] {
-        Dictionary(grouping: actionCatalog, by: \.group)
-    }
-
-    @ViewBuilder
-    private var actionGroupDisclosures: some View {
-        if actionCatalog.isEmpty {
-            // Fallback when catalog is unavailable — show classic group checkboxes
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(ActionGroup.allCases, id: \.self) { group in
-                    Toggle(isOn: Binding(
-                        get: { profile.actionEnabledGroups.contains(group) },
-                        set: { enabled in
-                            if enabled { profile.actionEnabledGroups.insert(group) }
-                            else { profile.actionEnabledGroups.remove(group) }
-                        }
-                    )) {
-                        Text(group.label)
-                            .font(.callout)
-                    }
-                    .toggleStyle(.checkbox)
-                }
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(ActionGroup.allCases, id: \.self) { group in
-                    let items = catalogByGroup[group.rawValue] ?? []
-                    if !items.isEmpty {
-                        actionGroupRow(group: group, items: items)
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func actionGroupRow(group: ActionGroup, items: [ActionCatalogItem]) -> some View {
-        let groupEnabled = profile.actionEnabledGroups.contains(group)
-        let enabledCount = items.filter { isActionEnabled($0.name, group: group) }.count
-
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(items) { item in
-                    Toggle(isOn: Binding(
-                        get: { isActionEnabled(item.name, group: group) },
-                        set: { enabled in toggleAction(item.name, group: group, enabled: enabled) }
-                    )) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(item.name)
-                                .font(.system(.caption, design: .monospaced))
-                            Text(item.description)
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .toggleStyle(.checkbox)
-                    .padding(.leading, 8)
-                }
-            }
-        } label: {
-            Toggle(isOn: Binding(
-                get: { groupEnabled },
-                set: { enabled in toggleGroup(group, items: items, enabled: enabled) }
-            )) {
-                HStack(spacing: 6) {
-                    Text(group.label)
-                        .font(.callout)
-                    if enabledCount > 0 && enabledCount < items.count {
-                        Text("\(enabledCount) of \(items.count)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(.quaternary, in: Capsule())
-                    }
-                }
-            }
-            .toggleStyle(.checkbox)
-        }
-    }
-
-    private func isActionEnabled(_ name: String, group: ActionGroup) -> Bool {
-        let hasDisabledOverride = profile.actionOverrides.contains { $0.action == name && $0.disabled }
-        if hasDisabledOverride { return false }
-        return profile.actionEnabledGroups.contains(group) || profile.actionEnabledActions.contains(name)
-    }
-
-    private func toggleAction(_ name: String, group: ActionGroup, enabled: Bool) {
-        if enabled {
-            if profile.actionEnabledGroups.contains(group) {
-                // Group is on — remove the disabled override
-                profile.actionOverrides.removeAll { $0.action == name && $0.disabled }
-            } else {
-                // Group is off — add to individual enabledActions
-                profile.actionEnabledActions.insert(name)
-            }
-        } else {
-            if profile.actionEnabledGroups.contains(group) {
-                // Group is on — add disabled override to suppress this one
-                if !profile.actionOverrides.contains(where: { $0.action == name }) {
-                    profile.actionOverrides.append(ActionOverride(action: name, disabled: true))
-                } else {
-                    // Update existing override
-                    if let idx = profile.actionOverrides.firstIndex(where: { $0.action == name }) {
-                        profile.actionOverrides[idx].disabled = true
-                    }
-                }
-            } else {
-                // Group is off — remove from individual enabledActions
-                profile.actionEnabledActions.remove(name)
-            }
-        }
-    }
-
-    private func toggleGroup(_ group: ActionGroup, items: [ActionCatalogItem], enabled: Bool) {
-        if enabled {
-            profile.actionEnabledGroups.insert(group)
-            // Clean up: remove individual enabledActions that are now covered by the group
-            for item in items {
-                profile.actionEnabledActions.remove(item.name)
-            }
-            // Clean up: remove disabled overrides for this group's actions
-            profile.actionOverrides.removeAll { o in
-                o.disabled && items.contains { $0.name == o.action }
-            }
-        } else {
-            profile.actionEnabledGroups.remove(group)
-            // Don't auto-add individual actions — clean disable
-        }
-    }
-
-    @ViewBuilder
-    private func actionNamePicker(selection: Binding<String>) -> some View {
-        if actionCatalog.isEmpty {
-            // Fallback to text field when catalog unavailable
-            TextField("action name", text: selection)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.caption, design: .monospaced))
-                .frame(width: 160)
-        } else {
-            Picker("", selection: selection) {
-                Text("Select action...").tag("")
-                ForEach(ActionGroup.allCases, id: \.self) { group in
-                    let items = catalogByGroup[group.rawValue] ?? []
-                    if !items.isEmpty {
-                        Section(group.label) {
-                            ForEach(items) { item in
-                                Text(item.name).tag(item.name)
-                            }
-                        }
-                    }
-                }
-            }
-            .labelsHidden()
-            .frame(width: 160)
-        }
+        ActionsSection(profile: $profile, actionCatalog: actionCatalog)
     }
 
     // MARK: - Validation
@@ -1735,6 +1403,470 @@ public struct ProfileEditorView: View {
         }
     }
 }
+
+// MARK: - Actions section
+
+private struct ActionsSection: View {
+    @Binding var profile: Profile
+    let actionCatalog: [ActionCatalogItem]
+
+    var body: some View {
+        Toggle(isOn: $profile.actionPolicyEnabled) {
+            HStack(spacing: 4) {
+                Text("Enable action policy")
+                HelpBadge(text: "When enabled, agents can execute control-plane actions like reading GitHub issues, ADO work items, or calling custom HTTP endpoints.")
+            }
+        }
+
+        if profile.actionPolicyEnabled {
+            Divider().padding(.vertical, 4)
+
+            Text("Enabled Actions")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            actionGroupDisclosures
+
+            Divider().padding(.vertical, 4)
+
+            HStack {
+                Text("Action Overrides")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                HelpBadge(text: "Per-action restrictions. Limit an action to specific repos (exact or wildcard, e.g. myorg/*) and optionally require a human to approve before it runs.")
+                Spacer()
+                Button {
+                    profile.actionOverrides.append(ActionOverride())
+                } label: {
+                    Label("Add Override", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if profile.actionOverrides.isEmpty {
+                Text("No overrides — all enabled actions run without restrictions.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach($profile.actionOverrides) { $override in
+                        HStack(alignment: .center, spacing: 8) {
+                            actionNamePicker(selection: $override.action)
+
+                            TextField("repos (myorg/*, myorg/repo)", text: Binding(
+                                get: { override.allowedResources.joined(separator: ", ") },
+                                set: { raw in
+                                    override.allowedResources = raw
+                                        .split(separator: ",")
+                                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                                        .filter { !$0.isEmpty }
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(minWidth: 180)
+                            .help("Comma-separated repo patterns. Supports wildcards: myorg/* allows all repos in the org.")
+
+                            Toggle("Approval", isOn: $override.requiresApproval)
+                                .toggleStyle(.checkbox)
+                                .help("Require a human to approve this action before it runs")
+                                .frame(width: 80)
+
+                            Toggle("Disabled", isOn: $override.disabled)
+                                .toggleStyle(.checkbox)
+                                .help("Completely disable this action for sessions using this profile")
+                                .frame(width: 70)
+
+                            Button {
+                                profile.actionOverrides.removeAll { $0.id == override.id }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red.opacity(0.6))
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                .padding(.leading, 4)
+            }
+
+            Divider().padding(.vertical, 4)
+
+            HStack {
+                Text("PIM Activations")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                HelpBadge(text: "Security allowlist for Azure PIM actions. Agents can only activate RBAC roles and Entra groups listed here.")
+                Spacer()
+                Button {
+                    profile.pimActivations.append(PimActivationEntry())
+                } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if profile.pimActivations.isEmpty {
+                Text("No PIM activations configured. Add entries to allow agents to activate Azure RBAC roles or Entra group memberships via the ACP.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach($profile.pimActivations) { $entry in
+                        PimActivationRow(entry: $entry, onDelete: {
+                            profile.pimActivations.removeAll { $0.id == entry.id }
+                        })
+                    }
+                }
+                .padding(.leading, 4)
+            }
+
+            Divider().padding(.vertical, 4)
+
+            Text("Data Sanitization")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            fieldRow("Preset", help: "Controls how aggressively PII and sensitive data are stripped from action responses before the agent sees them.") {
+                Picker("", selection: $profile.actionSanitizationPreset) {
+                    ForEach(SanitizationPreset.allCases, id: \.self) { p in
+                        Text(p.label).tag(p)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 150)
+            }
+
+            Text(profile.actionSanitizationPreset.description)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.top, -8)
+
+            fieldRow("Allowed Domains", help: "Domains excluded from sanitization filtering. Data from these domains passes through unmodified.") {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(profile.actionSanitizationAllowedDomains.indices, id: \.self) { i in
+                        HStack(spacing: 6) {
+                            TextField("example.com", text: $profile.actionSanitizationAllowedDomains[i])
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                            Button {
+                                profile.actionSanitizationAllowedDomains.remove(at: i)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red.opacity(0.6))
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    Button {
+                        profile.actionSanitizationAllowedDomains.append("")
+                    } label: {
+                        Label("Add domain", systemImage: "plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            Divider().padding(.vertical, 4)
+
+            Text("Quarantine")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            Toggle(isOn: $profile.actionQuarantineEnabled) {
+                HStack(spacing: 4) {
+                    Text("Enable quarantine")
+                    HelpBadge(text: "Quarantine scores action responses for PII risk. High-scoring responses are blocked or escalated.")
+                }
+            }
+
+            if profile.actionQuarantineEnabled {
+                HStack(spacing: 24) {
+                    fieldRow("Warn Threshold", help: "PII score (0–1) at which a warning is logged.") {
+                        HStack(spacing: 6) {
+                            Slider(value: $profile.actionQuarantineThreshold, in: 0...1, step: 0.05)
+                                .frame(width: 100)
+                            Text(String(format: "%.2f", profile.actionQuarantineThreshold))
+                                .monospacedDigit()
+                                .frame(width: 36)
+                        }
+                    }
+                    fieldRow("Block Threshold", help: "PII score (0–1) at which the response is blocked entirely.") {
+                        HStack(spacing: 6) {
+                            Slider(value: $profile.actionQuarantineBlockThreshold, in: 0...1, step: 0.05)
+                                .frame(width: 100)
+                            Text(String(format: "%.2f", profile.actionQuarantineBlockThreshold))
+                                .monospacedDigit()
+                                .frame(width: 36)
+                        }
+                    }
+                    fieldRow("On Block", help: "What happens when a response is blocked — skip silently or escalate to human.") {
+                        Picker("", selection: $profile.actionQuarantineOnBlock) {
+                            ForEach(QuarantineOnBlock.allCases, id: \.self) { o in
+                                Text(o.label).tag(o)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 140)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Action disclosure groups
+
+    private var catalogByGroup: [String: [ActionCatalogItem]] {
+        Dictionary(grouping: actionCatalog, by: \.group)
+    }
+
+    @ViewBuilder
+    private var actionGroupDisclosures: some View {
+        if actionCatalog.isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(ActionGroup.allCases, id: \.self) { group in
+                    Toggle(isOn: Binding(
+                        get: { profile.actionEnabledGroups.contains(group) },
+                        set: { enabled in
+                            if enabled { profile.actionEnabledGroups.insert(group) }
+                            else { profile.actionEnabledGroups.remove(group) }
+                        }
+                    )) {
+                        Text(group.label)
+                            .font(.callout)
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(ActionGroup.allCases, id: \.self) { group in
+                    let items = catalogByGroup[group.rawValue] ?? []
+                    if !items.isEmpty {
+                        actionGroupRow(group: group, items: items)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actionGroupRow(group: ActionGroup, items: [ActionCatalogItem]) -> some View {
+        let groupEnabled = profile.actionEnabledGroups.contains(group)
+        let enabledCount = items.filter { isActionEnabled($0.name, group: group) }.count
+
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(items) { item in
+                    Toggle(isOn: Binding(
+                        get: { isActionEnabled(item.name, group: group) },
+                        set: { enabled in toggleAction(item.name, group: group, enabled: enabled) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.name)
+                                .font(.system(.caption, design: .monospaced))
+                            Text(item.description)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .padding(.leading, 8)
+                }
+            }
+        } label: {
+            Toggle(isOn: Binding(
+                get: { groupEnabled },
+                set: { enabled in toggleGroup(group, items: items, enabled: enabled) }
+            )) {
+                HStack(spacing: 6) {
+                    Text(group.label)
+                        .font(.callout)
+                    if enabledCount > 0 && enabledCount < items.count {
+                        Text("\(enabledCount) of \(items.count)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(.quaternary, in: Capsule())
+                    }
+                }
+            }
+            .toggleStyle(.checkbox)
+        }
+    }
+
+    private func isActionEnabled(_ name: String, group: ActionGroup) -> Bool {
+        let hasDisabledOverride = profile.actionOverrides.contains { $0.action == name && $0.disabled }
+        if hasDisabledOverride { return false }
+        return profile.actionEnabledGroups.contains(group) || profile.actionEnabledActions.contains(name)
+    }
+
+    private func toggleAction(_ name: String, group: ActionGroup, enabled: Bool) {
+        if enabled {
+            if profile.actionEnabledGroups.contains(group) {
+                profile.actionOverrides.removeAll { $0.action == name && $0.disabled }
+            } else {
+                profile.actionEnabledActions.insert(name)
+            }
+        } else {
+            if profile.actionEnabledGroups.contains(group) {
+                if !profile.actionOverrides.contains(where: { $0.action == name }) {
+                    profile.actionOverrides.append(ActionOverride(action: name, disabled: true))
+                } else {
+                    if let idx = profile.actionOverrides.firstIndex(where: { $0.action == name }) {
+                        profile.actionOverrides[idx].disabled = true
+                    }
+                }
+            } else {
+                profile.actionEnabledActions.remove(name)
+            }
+        }
+    }
+
+    private func toggleGroup(_ group: ActionGroup, items: [ActionCatalogItem], enabled: Bool) {
+        if enabled {
+            profile.actionEnabledGroups.insert(group)
+            for item in items {
+                profile.actionEnabledActions.remove(item.name)
+            }
+            profile.actionOverrides.removeAll { o in
+                o.disabled && items.contains { $0.name == o.action }
+            }
+        } else {
+            profile.actionEnabledGroups.remove(group)
+        }
+    }
+
+    @ViewBuilder
+    private func actionNamePicker(selection: Binding<String>) -> some View {
+        if actionCatalog.isEmpty {
+            TextField("action name", text: selection)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.caption, design: .monospaced))
+                .frame(width: 160)
+        } else {
+            Picker("", selection: selection) {
+                Text("Select action...").tag("")
+                ForEach(ActionGroup.allCases, id: \.self) { group in
+                    let items = catalogByGroup[group.rawValue] ?? []
+                    if !items.isEmpty {
+                        Section(group.label) {
+                            ForEach(items) { item in
+                                Text(item.name).tag(item.name)
+                            }
+                        }
+                    }
+                }
+            }
+            .labelsHidden()
+            .frame(width: 160)
+        }
+    }
+
+    private func fieldRow<Content: View>(
+        _ label: String,
+        help: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let help {
+                    HelpBadge(text: help)
+                }
+            }
+            content()
+        }
+    }
+}
+
+// MARK: - PIM activation row (extracted to reduce ActionsSection node count)
+
+private struct PimActivationRow: View {
+    @Binding var entry: PimActivationEntry
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Picker("", selection: $entry.type) {
+                    ForEach(PimActivationType.allCases, id: \.self) { t in
+                        Text(t.label).tag(t)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 120)
+
+                if entry.type == .rbacRole {
+                    TextField("ARM scope (/subscriptions/…)", text: $entry.scope)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .help("ARM resource scope, e.g. /subscriptions/{id}/resourceGroups/{rg}")
+                } else {
+                    TextField("Group ID (UUID)", text: $entry.groupId)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .help("Entra group ID (UUID)")
+                }
+
+                Button(action: onDelete) {
+                    Image(systemName: "minus.circle.fill")
+                        .foregroundStyle(.red.opacity(0.6))
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if entry.type == .rbacRole {
+                HStack(spacing: 8) {
+                    Text("Role Def ID")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 80, alignment: .trailing)
+                    TextField("UUID (e.g. 73c42c96-…)", text: $entry.roleDefinitionId)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .help("Role definition UUID")
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text("Display Name")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 80, alignment: .trailing)
+                TextField("Optional label", text: Binding(
+                    get: { entry.displayName ?? "" },
+                    set: { entry.displayName = $0.isEmpty ? nil : $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+
+                Text("Duration")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                TextField("PT8H", text: Binding(
+                    get: { entry.duration ?? "" },
+                    set: { entry.duration = $0.isEmpty ? nil : $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.caption, design: .monospaced))
+                .frame(width: 70)
+                .help("ISO 8601 duration, e.g. PT8H")
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.3))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
 
 // MARK: - Previews
 

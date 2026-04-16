@@ -44,6 +44,7 @@ public final class ActionHandler {
       approveAll: { [weak self] in await self?.approveAllValidated() },
       killAllFailed: { [weak self] in await self?.killAllFailed() },
       extendAttempts: { [weak self] id, count in await self?.extendAttempts(id, additionalAttempts: count) },
+      extendPrAttempts: { [weak self] id, count in await self?.extendPrAttempts(id, additionalAttempts: count) },
       fork: { [weak self] id in await self?.forkSession(id) },
       delete: { [weak self] id in await self?.deleteSession(id) },
       createHistoryWorkspace: { [weak self] profile, limit in
@@ -56,7 +57,8 @@ public final class ActionHandler {
       interruptValidation: { [weak self] id in await self?.interruptValidation(id) },
       addValidationOverride: { [weak self] id, fid, desc, action, reason, guidance in
         await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
-      }
+      },
+      spawnFix: { [weak self] id in await self?.spawnFixSession(id) }
     )
   }
 
@@ -181,6 +183,28 @@ public final class ActionHandler {
     do {
       try await api.extendAttempts(sessionId, additionalAttempts: additionalAttempts)
       // Status will be updated via WebSocket event (back to running/validating)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func extendPrAttempts(_ sessionId: String, additionalAttempts: Int) async {
+    pendingAction = "extend-pr-\(sessionId)"
+    do {
+      try await api.extendPrAttempts(sessionId, additionalAttempts: additionalAttempts)
+      // Status will be updated via WebSocket event (back to merge_pending)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func spawnFixSession(_ sessionId: String) async {
+    pendingAction = "spawn-fix-\(sessionId)"
+    do {
+      try await api.spawnFixSession(sessionId)
+      // Fix session will appear via WebSocket session.created event
     } catch {
       lastError = error.localizedDescription
     }

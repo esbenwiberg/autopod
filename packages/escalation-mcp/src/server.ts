@@ -135,6 +135,11 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe(
           'Deviations from the original plan. Use an empty array if you followed the plan exactly.',
         ),
+      memoriesSuggested: z
+        .boolean()
+        .describe(
+          'Set true if you called memory_suggest at least once this session. Set false only if the task was purely mechanical with zero new observations.',
+        ),
     },
     async (input) => {
       const response = await reportTaskSummary(sessionId, input, bridge);

@@ -92,6 +92,9 @@ public struct Profile: Identifiable, Sendable {
     public var actionQuarantineBlockThreshold: Double
     public var actionQuarantineOnBlock: QuarantineOnBlock
 
+    // PIM activations (security allowlist for Azure PIM actions)
+    public var pimActivations: [PimActivationEntry]
+
     // Provider credentials (read-only indicator)
     public var providerCredentialsType: String?
 
@@ -145,6 +148,7 @@ public struct Profile: Identifiable, Sendable {
         actionQuarantineThreshold: Double = 0.5,
         actionQuarantineBlockThreshold: Double = 0.8,
         actionQuarantineOnBlock: QuarantineOnBlock = .askHuman,
+        pimActivations: [PimActivationEntry] = [],
         providerCredentialsType: String? = nil,
         version: Int = 1,
         createdAt: Date = Date(), updatedAt: Date = Date()
@@ -193,6 +197,7 @@ public struct Profile: Identifiable, Sendable {
         self.actionQuarantineThreshold = actionQuarantineThreshold
         self.actionQuarantineBlockThreshold = actionQuarantineBlockThreshold
         self.actionQuarantineOnBlock = actionQuarantineOnBlock
+        self.pimActivations = pimActivations
         self.providerCredentialsType = providerCredentialsType
         self.version = version
         self.createdAt = createdAt; self.updatedAt = updatedAt
@@ -315,6 +320,47 @@ public struct ActionCatalogItem: Identifiable, Hashable, Sendable {
         self.name = name
         self.description = description
         self.group = group
+    }
+}
+
+public enum PimActivationType: String, CaseIterable, Sendable {
+    case group
+    case rbacRole = "rbac_role"
+
+    public var label: String {
+        switch self {
+        case .group:    "Entra Group"
+        case .rbacRole: "RBAC Role"
+        }
+    }
+}
+
+public struct PimActivationEntry: Identifiable, Sendable {
+    public var id: UUID = UUID()
+    public var type: PimActivationType
+    public var groupId: String
+    public var scope: String
+    public var roleDefinitionId: String
+    public var displayName: String?
+    public var duration: String?
+    public var justification: String?
+
+    public init(
+        type: PimActivationType = .rbacRole,
+        groupId: String = "",
+        scope: String = "",
+        roleDefinitionId: String = "",
+        displayName: String? = nil,
+        duration: String? = nil,
+        justification: String? = nil
+    ) {
+        self.type = type
+        self.groupId = groupId
+        self.scope = scope
+        self.roleDefinitionId = roleDefinitionId
+        self.displayName = displayName
+        self.duration = duration
+        self.justification = justification
     }
 }
 

@@ -83,7 +83,14 @@ export async function fetchWithTimeout(
   const timer = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        'Accept-Language': 'en-US',
+        ...init.headers,
+      },
+      signal: controller.signal,
+    });
     return response;
   } finally {
     clearTimeout(timer);

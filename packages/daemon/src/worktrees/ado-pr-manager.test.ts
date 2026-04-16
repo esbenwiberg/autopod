@@ -15,14 +15,14 @@ const BASE_CONFIG = {
 const PR_URL = 'https://dev.azure.com/myorg/MyProject/_git/MyRepo/pullrequest/42';
 
 /** Build a minimal fetch mock that returns different bodies per call. */
-function makeFetch(responses: Array<{ ok: boolean; body: unknown }>) {
+function makeFetch(responses: Array<{ ok: boolean; body: unknown; status?: number }>) {
   let callIndex = 0;
   return vi.fn().mockImplementation(async () => {
     const res = responses[callIndex] ?? { ok: true, body: null };
     callIndex++;
     return {
       ok: res.ok,
-      status: res.ok ? 200 : 422,
+      status: res.status ?? (res.ok ? 200 : 422),
       text: async () => (res.body !== null ? JSON.stringify(res.body) : ''),
     };
   });
@@ -51,6 +51,22 @@ describe('parseAdoRepoUrl', () => {
     });
   });
 });
+
+/** Minimal active PR body with repository.id for policy evaluations fetch. */
+const ACTIVE_PR = { status: 'active', mergeStatus: 'notSet', repository: { id: 'repo-guid-123' } };
+
+/** Policy evaluation entry builder. */
+function policyEval(
+  displayName: string,
+  status: string,
+  isBlocking: boolean,
+): { policyEvaluationId: string; status: string; configuration: { isBlocking: boolean; settings: { displayName: string } } } {
+  return {
+    policyEvaluationId: `eval-${displayName}`,
+    status,
+    configuration: { isBlocking, settings: { displayName } },
+  };
+}
 
 describe('AdoPrManager.getPrStatus', () => {
   beforeEach(() => {
@@ -85,18 +101,18 @@ describe('AdoPrManager.getPrStatus', () => {
     expect(status.blockReason).toBe('PR was abandoned');
   });
 
-  it('does NOT report ciFailures when CI is in-progress (pending state)', async () => {
-    // PR metadata, then statuses (SonarCloud pending, Build failed), then threads (empty)
+  it('does NOT report ciFailures when a required policy is still running', async () => {
+    // A required policy is running — old failures on other checks are potentially stale.
     vi.stubGlobal(
       'fetch',
       makeFetch([
-        { ok: true, body: { status: 'active', mergeStatus: 'notSet' } },
+        { ok: true, body: ACTIVE_PR },
         {
           ok: true,
           body: {
             value: [
-              { context: { name: 'SonarCloud' }, state: 'pending' },
-              { context: { name: 'quality_gate' }, state: 'failed' },
+              policyEval('Build', 'running', true),
+              policyEval('Quality Gate', 'rejected', true),
             ],
           },
         },
@@ -109,20 +125,20 @@ describe('AdoPrManager.getPrStatus', () => {
 
     expect(status.ciFailures).toEqual([]);
     expect(status.blockReason).toContain('CI in progress');
-    expect(status.blockReason).toContain('SonarCloud');
-    // quality_gate failure is suppressed because CI is still running
-    expect(status.blockReason).not.toContain('quality_gate');
+    expect(status.blockReason).toContain('Build');
+    // quality gate failure is suppressed because CI is still running
+    expect(status.blockReason).not.toContain('Quality Gate');
   });
 
-  it('does NOT report ciFailures when CI has notSet status (just started)', async () => {
+  it('does NOT report ciFailures when a required policy is queued (just started)', async () => {
     vi.stubGlobal(
       'fetch',
       makeFetch([
-        { ok: true, body: { status: 'active', mergeStatus: 'notSet' } },
+        { ok: true, body: ACTIVE_PR },
         {
           ok: true,
           body: {
-            value: [{ context: { name: 'Build' }, state: 'notSet' }],
+            value: [policyEval('Build', 'queued', true)],
           },
         },
         { ok: true, body: { value: [] } },
@@ -136,18 +152,18 @@ describe('AdoPrManager.getPrStatus', () => {
     expect(status.blockReason).toContain('CI in progress');
   });
 
-  it('reports ciFailures when all checks are terminal and some failed', async () => {
+  it('reports ciFailures from required policies when all required checks have settled', async () => {
     vi.stubGlobal(
       'fetch',
       makeFetch([
-        { ok: true, body: { status: 'active', mergeStatus: 'notSet' } },
+        { ok: true, body: ACTIVE_PR },
         {
           ok: true,
           body: {
             value: [
-              { context: { name: 'SonarCloud' }, state: 'failed' },
-              { context: { name: 'Build' }, state: 'succeeded' },
-              { context: { name: 'Lint' }, state: 'error' },
+              policyEval('Unit Tests', 'rejected', true),
+              policyEval('Build', 'approved', true),
+              policyEval('Lint', 'broken', true),
             ],
           },
         },
@@ -159,17 +175,46 @@ describe('AdoPrManager.getPrStatus', () => {
     const status = await manager.getPrStatus({ prUrl: PR_URL });
 
     expect(status.ciFailures).toHaveLength(2);
-    expect(status.ciFailures.map((f) => f.name)).toEqual(['SonarCloud', 'Lint']);
-    expect(status.blockReason).toContain('SonarCloud');
+    expect(status.ciFailures.map((f) => f.name)).toEqual(['Unit Tests', 'Lint']);
+    expect(status.blockReason).toContain('Unit Tests');
     expect(status.blockReason).toContain('Lint');
+  });
+
+  it('does NOT suppress ciFailures when only optional policies are still queued', async () => {
+    // This is the exact scenario from the bug: optional "AI Code Review" stays Queued
+    // while required "teamplanner unit PR validation" has already rejected.
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        { ok: true, body: ACTIVE_PR },
+        {
+          ok: true,
+          body: {
+            value: [
+              policyEval('teamplanner unit PR validation', 'rejected', true),
+              policyEval('AI Code Review', 'queued', false),      // optional — must not block
+              policyEval('Agent SDK Reviewer', 'queued', false),  // optional — must not block
+            ],
+          },
+        },
+        { ok: true, body: { value: [] } },
+      ]),
+    );
+
+    const manager = new AdoPrManager(BASE_CONFIG);
+    const status = await manager.getPrStatus({ prUrl: PR_URL });
+
+    expect(status.ciFailures).toHaveLength(1);
+    expect(status.ciFailures[0]?.name).toBe('teamplanner unit PR validation');
+    expect(status.blockReason).toContain('teamplanner unit PR validation');
   });
 
   it('reports reviewComments from active threads', async () => {
     vi.stubGlobal(
       'fetch',
       makeFetch([
-        { ok: true, body: { status: 'active', mergeStatus: 'notSet' } },
-        { ok: true, body: { value: [] } }, // no CI failures
+        { ok: true, body: ACTIVE_PR },
+        { ok: true, body: { value: [] } }, // no policy failures
         {
           ok: true,
           body: {
@@ -207,7 +252,7 @@ describe('AdoPrManager.getPrStatus', () => {
     vi.stubGlobal(
       'fetch',
       makeFetch([
-        { ok: true, body: { status: 'active', mergeStatus: 'notSet' } },
+        { ok: true, body: ACTIVE_PR },
         { ok: true, body: { value: [] } },
         {
           ok: true,
@@ -235,7 +280,7 @@ describe('AdoPrManager.getPrStatus', () => {
     vi.stubGlobal(
       'fetch',
       makeFetch([
-        { ok: true, body: { status: 'active', mergeStatus: 'notSet' } },
+        { ok: true, body: ACTIVE_PR },
         { ok: true, body: { value: [] } },
         {
           ok: true,
@@ -260,12 +305,32 @@ describe('AdoPrManager.getPrStatus', () => {
     expect(status.reviewComments[0]?.body).toBe('Needs refactor');
   });
 
+  it('silently continues when policy evaluations returns 404 (no branch policies)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        { ok: true, body: ACTIVE_PR },
+        { ok: false, status: 404, body: { message: "Artifact id '...' does not exist or you do not have permission to view it." } },
+        { ok: true, body: { value: [] } }, // threads
+      ]),
+    );
+
+    const manager = new AdoPrManager(BASE_CONFIG);
+    const status = await manager.getPrStatus({ prUrl: PR_URL });
+
+    // 404 = no policies configured — should not block, no CI failures
+    expect(status.ciFailures).toEqual([]);
+    expect(status.blockReason).toBe('Waiting for policies to pass');
+    expect(status.open).toBe(true);
+    expect(status.merged).toBe(false);
+  });
+
   it('reports merge conflicts in blockReason', async () => {
     vi.stubGlobal(
       'fetch',
       makeFetch([
-        { ok: true, body: { status: 'active', mergeStatus: 'conflicts' } },
-        { ok: true, body: { value: [] } }, // no CI failures
+        { ok: true, body: { ...ACTIVE_PR, mergeStatus: 'conflicts' } },
+        { ok: true, body: { value: [] } }, // no policy failures
         { ok: true, body: { value: [] } }, // no threads
       ]),
     );
@@ -275,5 +340,24 @@ describe('AdoPrManager.getPrStatus', () => {
 
     expect(status.blockReason).toContain('Merge conflicts');
     expect(status.ciFailures).toEqual([]);
+  });
+
+  it('uses the correct policy evaluations URL with repository id and PR id', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: ACTIVE_PR },
+      { ok: true, body: { value: [] } },
+      { ok: true, body: { value: [] } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const manager = new AdoPrManager(BASE_CONFIG);
+    await manager.getPrStatus({ prUrl: PR_URL });
+
+    // Second call must be the policy evaluations endpoint at project scope
+    const calls = fetchMock.mock.calls as Array<[string, ...unknown[]]>;
+    const policyUrl = calls[1]?.[0] ?? '';
+    expect(policyUrl).toContain('/_apis/policy/evaluations');
+    expect(policyUrl).toContain('repo-guid-123');
+    expect(policyUrl).toContain('42'); // PR id
   });
 });

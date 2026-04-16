@@ -21,6 +21,7 @@ public struct SessionActions: Sendable {
   public var approveAll: @MainActor @Sendable () async -> Void
   public var killAllFailed: @MainActor @Sendable () async -> Void
   public var extendAttempts: @MainActor @Sendable (String, Int) async -> Void
+  public var extendPrAttempts: @MainActor @Sendable (String, Int) async -> Void
   public var fork: @MainActor @Sendable (String) async -> String?
   public var delete: @MainActor @Sendable (String) async -> Void
   public var createHistoryWorkspace: @MainActor @Sendable (String?, Int) async -> Void
@@ -32,6 +33,8 @@ public struct SessionActions: Sendable {
   public var interruptValidation: @MainActor @Sendable (String) async -> Void
   /// Enqueue a finding override — params: sessionId, findingId, description, action, reason?, guidance?
   public var addValidationOverride: @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void
+  /// Manually force-spawn a fix session for a merge_pending session, bypassing auto-detection guards
+  public var spawnFix: @MainActor @Sendable (String) async -> Void
 
   public init(
     approve: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -49,13 +52,15 @@ public struct SessionActions: Sendable {
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
     killAllFailed: @escaping @MainActor @Sendable () async -> Void = {},
     extendAttempts: @escaping @MainActor @Sendable (String, Int) async -> Void = { _, _ in },
+    extendPrAttempts: @escaping @MainActor @Sendable (String, Int) async -> Void = { _, _ in },
     fork: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     createHistoryWorkspace: @escaping @MainActor @Sendable (String?, Int) async -> Void = { _, _ in },
     openLiveApp: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     workerProfileForProfile: @escaping @MainActor @Sendable (String) -> String? = { _ in nil },
     interruptValidation: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in }
+    addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
+    spawnFix: @escaping @MainActor @Sendable (String) async -> Void = { _ in }
   ) {
     self.approve = approve
     self.reject = reject
@@ -72,6 +77,7 @@ public struct SessionActions: Sendable {
     self.approveAll = approveAll
     self.killAllFailed = killAllFailed
     self.extendAttempts = extendAttempts
+    self.extendPrAttempts = extendPrAttempts
     self.fork = fork
     self.delete = delete
     self.createHistoryWorkspace = createHistoryWorkspace
@@ -79,6 +85,7 @@ public struct SessionActions: Sendable {
     self.workerProfileForProfile = workerProfileForProfile
     self.interruptValidation = interruptValidation
     self.addValidationOverride = addValidationOverride
+    self.spawnFix = spawnFix
   }
 
   /// No-op instance for previews

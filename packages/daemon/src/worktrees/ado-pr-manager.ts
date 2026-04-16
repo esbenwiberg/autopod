@@ -67,6 +67,21 @@ export function parseAdoRepoUrl(repoUrl: string): {
 }
 
 /**
+ * Typed HTTP error from the ADO REST API, carrying the response status code.
+ * Allows callers to distinguish 404 (resource not found / no policies configured)
+ * from auth failures, server errors, etc.
+ */
+export class AdoHttpError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AdoHttpError';
+  }
+}
+
+/**
  * Creates and completes pull requests via the Azure DevOps REST API.
  *
  * Authentication: PAT via HTTP Basic auth (empty username, PAT as password).
@@ -91,8 +106,7 @@ export class AdoPrManager implements PrManager {
     return `${this.orgUrl}/${encodeURIComponent(this.project)}/_apis/git/repositories/${encodeURIComponent(this.repoName)}`;
   }
 
-  private async adoFetch(path: string, options: RequestInit): Promise<unknown> {
-    const url = `${this.baseUrl}${path}`;
+  private async rawFetch(url: string, options: RequestInit): Promise<unknown> {
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -105,9 +119,24 @@ export class AdoPrManager implements PrManager {
 
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`ADO API ${options.method ?? 'GET'} ${url} → ${response.status}: ${text}`);
+      throw new AdoHttpError(
+        response.status,
+        `ADO API ${options.method ?? 'GET'} ${url} → ${response.status}: ${text}`,
+      );
     }
     return text ? JSON.parse(text) : null;
+  }
+
+  private async adoFetch(path: string, options: RequestInit): Promise<unknown> {
+    return this.rawFetch(`${this.baseUrl}${path}`, options);
+  }
+
+  /** Fetch from the project-level API base (e.g. policy evaluations). */
+  private async projectFetch(path: string, options: RequestInit): Promise<unknown> {
+    return this.rawFetch(
+      `${this.orgUrl}/${encodeURIComponent(this.project)}/_apis${path}`,
+      options,
+    );
   }
 
   async createPr(config: CreatePrConfig): Promise<string> {
@@ -209,7 +238,7 @@ export class AdoPrManager implements PrManager {
 
     const pr = (await this.adoFetch(`/pullrequests/${prId}?api-version=7.1`, {
       method: 'GET',
-    })) as { status: string; mergeStatus?: string };
+    })) as { status: string; mergeStatus?: string; repository: { id: string } };
 
     if (pr.status === 'completed') {
       return { merged: true, open: false, blockReason: null, ciFailures: [], reviewComments: [] };
@@ -224,43 +253,84 @@ export class AdoPrManager implements PrManager {
       };
     }
 
-    // PR is still active — check policy evaluations
+    // PR is still active — check blocking policy evaluations.
+    //
+    // We use the /policy/evaluations endpoint (not /statuses) because it is the
+    // authoritative source for branch policy results and — crucially — it exposes
+    // configuration.isBlocking so we can distinguish required from optional checks.
+    //
+    // The /statuses endpoint does NOT carry required/optional metadata.  Optional
+    // checks left in a queued/pending state would cause the old code to treat CI
+    // as "still running" indefinitely, preventing fix sessions from ever spawning.
     const reasons: string[] = [];
     const ciFailures: CiFailureDetail[] = [];
     try {
-      const evaluations = (await this.adoFetch(`/pullrequests/${prId}/statuses?api-version=7.1`, {
-        method: 'GET',
-      })) as { value: Array<{ context: { name: string }; state: string }> };
-
-      // If any check is still running/queued, old failures are potentially stale —
-      // new commits may have already been pushed and CI hasn't settled yet.
-      // Don't report failures until all checks reach a terminal state.
-      // ADO states: notSet | pending | succeeded | failed | error
-      const inFlight = evaluations.value.filter(
-        (e) => e.state === 'pending' || e.state === 'notSet',
+      // ADO policy artifact ID for a pull request:
+      //   vstfs:///Git/PullRequestId/{repositoryId}/{pullRequestId}
+      const artifactId = encodeURIComponent(
+        `vstfs:///Git/PullRequestId/${pr.repository.id}/${prId}`,
       );
-      if (inFlight.length > 0) {
-        reasons.push(`CI in progress: ${inFlight.map((e) => e.context.name).join(', ')}`);
-        // ciFailures stays empty — no fixer spawn while CI is running
-      } else {
-        const blocking = evaluations.value.filter(
-          (e) => e.state === 'failed' || e.state === 'error',
+      const evaluations = (await this.projectFetch(
+        `/policy/evaluations?artifactId=${artifactId}&api-version=7.2-preview.1`,
+        { method: 'GET' },
+      )) as {
+        value: Array<{
+          policyEvaluationId: string;
+          // ADO policy evaluation statuses:
+          //   approved | running | queued | rejected | notApplicable | broken
+          status: string;
+          configuration: {
+            isBlocking: boolean;
+            settings: { displayName?: string };
+          };
+        }>;
+      };
+
+      // Only required (blocking) policies drive fix-session decisions.
+      // Optional policies can stay queued indefinitely and must not suppress
+      // fix sessions that are needed for genuinely failing required checks.
+      const required = evaluations.value.filter((e) => e.configuration.isBlocking);
+
+      const inFlightRequired = required.filter(
+        (e) => e.status === 'running' || e.status === 'queued',
+      );
+
+      if (inFlightRequired.length > 0) {
+        reasons.push(
+          `CI in progress: ${inFlightRequired
+            .map((e) => e.configuration.settings.displayName ?? 'unknown')
+            .join(', ')}`,
         );
-        if (blocking.length > 0) {
-          const names = blocking.map((e) => `${e.context.name} (${e.state})`).join(', ');
-          reasons.push(`Policies: ${names}`);
-          for (const e of blocking) {
+        // ciFailures stays empty — don't spawn a fix while required checks are still running
+      } else {
+        const failedRequired = required.filter(
+          (e) => e.status === 'rejected' || e.status === 'broken',
+        );
+        if (failedRequired.length > 0) {
+          reasons.push(
+            `Required policies failed: ${failedRequired
+              .map((e) => `${e.configuration.settings.displayName ?? 'unknown'} (${e.status})`)
+              .join(', ')}`,
+          );
+          for (const e of failedRequired) {
             ciFailures.push({
-              name: e.context.name,
-              conclusion: e.state,
+              name: e.configuration.settings.displayName ?? e.policyEvaluationId,
+              conclusion: e.status,
               detailsUrl: null,
               annotations: [],
             });
           }
         }
       }
-    } catch {
-      // Policy status endpoint may not be available — fall through
+    } catch (evalErr) {
+      // 404 = no branch policies are configured on this repo/branch — that's fine, treat as "no blocking checks"
+      if (evalErr instanceof AdoHttpError && evalErr.status === 404) {
+        this.logger.debug({ prUrl: config.prUrl }, 'ADO policy evaluations returned 404 — no branch policies configured');
+      } else {
+        // Permissions issue, unexpected API version, network error, etc.
+        // Log at warn so operators can see why auto-detection failed — fall through with empty ciFailures
+        this.logger.warn({ err: evalErr, prUrl: config.prUrl }, 'ADO policy evaluations fetch failed — fix sessions may not auto-spawn');
+      }
     }
 
     if (pr.mergeStatus === 'conflicts') {
@@ -294,8 +364,9 @@ export class AdoPrManager implements PrManager {
           path: thread.pullRequestThreadContext?.filePath ?? null,
         });
       }
-    } catch {
+    } catch (threadErr) {
       // Non-fatal — reviewComments stays empty
+      this.logger.warn({ err: threadErr, prUrl: config.prUrl }, 'ADO PR threads fetch failed');
     }
 
     return {

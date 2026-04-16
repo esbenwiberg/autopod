@@ -111,10 +111,6 @@ export function generateSystemInstructions(
   for (const action of availableActions) {
     lines.push(`  - ${action.name} — ${action.description}`);
   }
-  lines.push(
-    'After completing significant work, use memory_suggest to capture patterns or conventions that should persist across sessions.',
-  );
-  lines.push('');
 
   const injectedMcpServers = options?.injectedMcpServers ?? [];
   for (const server of injectedMcpServers) {
@@ -347,7 +343,16 @@ export function generateSystemInstructions(
     '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
   );
   lines.push(
-    '5. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
+    '5. **Capture knowledge**: Call `memory_suggest` at least once before finishing — this step is required. ' +
+      'Use scope `profile` for repo-specific patterns, `global` for universal ones, `session` for working notes. ' +
+      'There is always something worth noting. Good candidates:',
+  );
+  lines.push('   - Naming conventions, coding patterns, or idioms specific to this repo');
+  lines.push('   - Commands or workflows that work well (or that failed and why)');
+  lines.push('   - Architectural decisions or constraints you uncovered');
+  lines.push('   - Common pitfalls or debugging tips');
+  lines.push(
+    '6. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
   );
   lines.push('   - `actualSummary`: a concise description of what was actually accomplished');
   lines.push(
@@ -360,7 +365,7 @@ export function generateSystemInstructions(
       'whether they were justified. A well-reasoned deviation is better than silently skipping a step.',
   );
   lines.push(
-    '6. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
+    '7. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
   );
   lines.push('   - Exploration → Implementation → Testing → Cleanup');
   lines.push('   - Analysis → Design → Build → Verify');
@@ -495,6 +500,9 @@ function generateOperatingEnvironment(
     if (groups.has('azure-logs')) {
       coveredDomains.push('Azure logs');
     }
+    if (groups.has('azure-pim')) {
+      coveredDomains.push('Azure PIM');
+    }
 
     if (coveredDomains.length > 0) {
       lines.push(
@@ -507,6 +515,31 @@ function generateOperatingEnvironment(
           'actions handle authentication, PII redaction, and audit logging automatically.',
       );
     }
+    // PIM activation details — give the agent the exact values so it doesn't guess
+    const pimActivations = profile.pimActivations ?? [];
+    if (groups.has('azure-pim') && pimActivations.length > 0) {
+      lines.push('### Azure PIM — Pre-configured Activations');
+      lines.push(
+        'The following roles/groups are allowlisted on this profile. Use these **exact** values when calling `activate_pim_role` or `activate_pim_group`. Do NOT attempt to discover or infer scope/ID values — use only what is listed here.',
+      );
+      lines.push('');
+      for (const entry of pimActivations) {
+        if (entry.type === 'rbac_role') {
+          const label = entry.displayName ?? 'RBAC Role';
+          lines.push(`- **${label}** (RBAC Role)`);
+          lines.push(`  - scope: \`${entry.scope}\``);
+          lines.push(`  - role_definition_id: \`${entry.roleDefinitionId}\``);
+          if (entry.duration) lines.push(`  - duration: ${entry.duration}`);
+        } else {
+          const label = entry.displayName ?? 'Entra Group';
+          lines.push(`- **${label}** (Group)`);
+          lines.push(`  - group_id: \`${entry.groupId}\``);
+          if (entry.duration) lines.push(`  - duration: ${entry.duration}`);
+        }
+      }
+      lines.push('');
+    }
+
     lines.push('');
   }
 

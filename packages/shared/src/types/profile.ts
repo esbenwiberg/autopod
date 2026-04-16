@@ -87,6 +87,8 @@ export interface Profile {
   issueWatcherEnabled: boolean;
   /** Label prefix to watch for. Default 'autopod'. Triggers on exact match or '<prefix>:<target-profile>' */
   issueWatcherLabelPrefix: string;
+  /** PIM activations (group membership and/or RBAC roles) auto-activated for sessions using this profile */
+  pimActivations: PimActivationConfig[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,6 +141,28 @@ export interface PimGroupConfig {
   duration?: string;
   justification?: string;
 }
+
+/** Discriminated union covering both PIM for Groups and Azure RBAC role activation. */
+export type PimActivationConfig =
+  | {
+      type: 'group';
+      groupId: string;
+      displayName?: string;
+      /** ISO 8601 duration (e.g. "PT4H"). Defaults to "PT8H". */
+      duration?: string;
+      justification?: string;
+    }
+  | {
+      type: 'rbac_role';
+      /** ARM scope path, e.g. "/subscriptions/{subId}/resourceGroups/{rg}" */
+      scope: string;
+      /** Role definition UUID, e.g. "73c42c96-874c-492b-b04d-ab87d138a893" (Log Analytics Reader) */
+      roleDefinitionId: string;
+      displayName?: string;
+      /** ISO 8601 duration (e.g. "PT4H"). Defaults to "PT8H". */
+      duration?: string;
+      justification?: string;
+    };
 
 export interface EscalationConfig {
   askHuman: boolean;

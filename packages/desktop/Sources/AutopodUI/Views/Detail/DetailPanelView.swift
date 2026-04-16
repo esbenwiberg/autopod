@@ -309,6 +309,25 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
                 .tint(.red)
 
+            case .mergePending:
+                Button {
+                    Task { await actions.spawnFix(session.id) }
+                } label: {
+                    Label("Spawn Fix", systemImage: "hammer.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.orange)
+                .help("Manually spawn a fix session for the failing PR checks")
+                Button {
+                    Task { await actions.kill(session.id) }
+                } label: {
+                    Label("Kill", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+
             case .failed:
                 Button {
                     Task { await actions.rework(session.id) }
@@ -326,6 +345,16 @@ public struct DetailPanelView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 forkButton
+                if session.latestActivity?.contains("PR fix attempts") == true {
+                    Button {
+                        Task { await actions.extendPrAttempts(session.id, 3) }
+                    } label: {
+                        Label("Extend PR Attempts", systemImage: "arrow.clockwise.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.orange)
+                }
 
             case .killed:
                 Button {

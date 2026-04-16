@@ -100,6 +100,18 @@ public enum ProfileMapper {
       actionQuarantineThreshold: ap?.quarantine?.threshold ?? 0.5,
       actionQuarantineBlockThreshold: ap?.quarantine?.blockThreshold ?? 0.8,
       actionQuarantineOnBlock: QuarantineOnBlock(rawValue: ap?.quarantine?.onBlock ?? "ask_human") ?? .askHuman,
+      pimActivations: (response.pimActivations ?? []).compactMap { r in
+        guard let type = PimActivationType(rawValue: r.type) else { return nil }
+        return PimActivationEntry(
+          type: type,
+          groupId: r.groupId ?? "",
+          scope: r.scope ?? "",
+          roleDefinitionId: r.roleDefinitionId ?? "",
+          displayName: r.displayName,
+          duration: r.duration,
+          justification: r.justification
+        )
+      },
       providerCredentialsType: response.providerCredentials?.provider,
       version: response.version,
       createdAt: SessionMapper.parseDate(response.createdAt),
@@ -197,6 +209,26 @@ public enum ProfileMapper {
       d["networkPolicy"] = np
     } else {
       d["networkPolicy"] = ["enabled": false, "mode": "restricted", "allowedHosts": []] as [String: Any]
+    }
+
+    // PIM activations
+    if !profile.pimActivations.isEmpty {
+      d["pimActivations"] = profile.pimActivations.map { e -> [String: Any] in
+        var entry: [String: Any] = ["type": e.type.rawValue]
+        switch e.type {
+        case .group:
+          entry["groupId"] = e.groupId
+        case .rbacRole:
+          entry["scope"] = e.scope
+          entry["roleDefinitionId"] = e.roleDefinitionId
+        }
+        if let v = e.displayName, !v.isEmpty { entry["displayName"] = v }
+        if let v = e.duration, !v.isEmpty { entry["duration"] = v }
+        if let v = e.justification, !v.isEmpty { entry["justification"] = v }
+        return entry
+      }
+    } else {
+      d["pimActivations"] = NSNull()
     }
 
     // Action policy

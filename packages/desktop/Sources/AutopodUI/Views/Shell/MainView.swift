@@ -440,7 +440,7 @@ public struct MainView: View {
                 spacing: 10
             ) {
                 ForEach(filteredSessions) { session in
-                    SessionCardFinal(session: session, actions: wiredActions, density: cardDensity)
+                    SessionCardFinal(session: session, actions: wiredActions, density: cardDensity, isSelected: selectedSessionId == session.id)
                         .onTapGesture { selectedSessionId = session.id }
                 }
             }

@@ -5,6 +5,7 @@ import type {
   InjectedMcpServer,
   InjectedSkill,
   NetworkPolicy,
+  PimActivationConfig,
   PrivateRegistry,
   Profile,
   ProviderCredentials,
@@ -96,6 +97,9 @@ export function rowToProfile(
     hasWebUi: row.has_web_ui !== undefined ? Boolean(row.has_web_ui) : true,
     issueWatcherEnabled: !!(row.issue_watcher_enabled as number),
     issueWatcherLabelPrefix: (row.issue_watcher_label_prefix as string) ?? 'autopod',
+    pimActivations: row.pim_activations
+      ? (JSON.parse(row.pim_activations as string) as PimActivationConfig[])
+      : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -206,6 +210,7 @@ export function createProfileStore(
           token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
           has_web_ui,
           issue_watcher_enabled, issue_watcher_label_prefix,
+          pim_activations,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
@@ -218,6 +223,7 @@ export function createProfileStore(
           @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
           @hasWebUi,
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
+          @pimActivations,
           @createdAt, @updatedAt
         )
       `).run({
@@ -263,6 +269,7 @@ export function createProfileStore(
         hasWebUi: parsed.hasWebUi ? 1 : 0,
         issueWatcherEnabled: parsed.issueWatcherEnabled ? 1 : 0,
         issueWatcherLabelPrefix: parsed.issueWatcherLabelPrefix,
+        pimActivations: parsed.pimActivations ? JSON.stringify(parsed.pimActivations) : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -477,6 +484,12 @@ export function createProfileStore(
       if (parsed.issueWatcherLabelPrefix !== undefined) {
         setClauses.push('issue_watcher_label_prefix = @issueWatcherLabelPrefix');
         fieldMap.issueWatcherLabelPrefix = parsed.issueWatcherLabelPrefix;
+      }
+      if (parsed.pimActivations !== undefined) {
+        setClauses.push('pim_activations = @pimActivations');
+        fieldMap.pimActivations = parsed.pimActivations
+          ? JSON.stringify(parsed.pimActivations)
+          : null;
       }
 
       if (setClauses.length === 0) {

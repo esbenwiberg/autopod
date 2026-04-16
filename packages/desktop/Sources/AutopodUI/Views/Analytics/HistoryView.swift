@@ -31,8 +31,9 @@ public struct HistoryView: View {
             let failed = s.filter { [.failed, .killed, .reviewRequired].contains($0.status) }.count
             let completed = s.filter { $0.status == .complete }.count
             let total = s.count
-            let totalCost = s.reduce(0.0) { $0 + $1.costUsd }
-            let avgCost = total > 0 ? totalCost / Double(total) : 0
+            let settledSessions = s.filter { $0.status != .running && $0.status != .paused }
+            let totalCost = settledSessions.reduce(0.0) { $0 + $1.costUsd }
+            let avgCost = !settledSessions.isEmpty ? totalCost / Double(settledSessions.count) : 0
             let multiAttempt = s.filter { ($0.attempts?.current ?? 1) > 1 }.count
             let reworkRate = total > 0 ? Double(multiAttempt) / Double(total) : 0
             let avgAttempts: Double = {
@@ -105,7 +106,6 @@ public struct HistoryView: View {
         let totalWorker = workerSessions.count
         let totalFailed = failedSessions.count
         let failureRate = totalWorker > 0 ? Double(totalFailed) / Double(totalWorker) : 0
-        let totalCost = workerSessions.reduce(0.0) { $0 + $1.costUsd }
         let wastedCost = failedSessions.reduce(0.0) { $0 + $1.costUsd }
 
         return HStack(spacing: 0) {
@@ -113,8 +113,8 @@ public struct HistoryView: View {
                 value: "\(totalWorker)",
                 label: "Total Sessions",
                 icon: "square.stack.3d.up"
-            )
-            Spacer()
+            );
+            Spacer();
             heroStat(
                 value: totalWorker > 0 ? "\(totalFailed)" : "—",
                 label: "Failed",

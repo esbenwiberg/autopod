@@ -337,7 +337,10 @@ struct OverviewTab: View {
             if session.inputTokens > 0 || session.costUsd > 0 || session.status == .running || session.status == .paused {
                 items.append(("arrow.up.circle", formatTokens(session.inputTokens), "In tokens", session.inputTokens > 0 ? .primary : .secondary))
                 items.append(("arrow.down.circle", formatTokens(session.outputTokens), "Out tokens", session.outputTokens > 0 ? .primary : .secondary))
-                items.append(("dollarsign.circle", String(format: "$%.3f", session.costUsd), "Cost", session.costUsd > 0 ? .primary : .secondary))
+                let costKnown = session.costUsd > 0
+                let costInProgress = session.status == .running || session.status == .paused
+                let costDisplay = (!costKnown && costInProgress) ? "—" : String(format: "$%.3f", session.costUsd)
+                items.append(("dollarsign.circle", costDisplay, "Cost", costKnown ? .primary : .secondary))
             }
             return items
         }()

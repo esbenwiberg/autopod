@@ -70,7 +70,11 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
         };
       }
       if (override?.allowedResources?.length) {
-        const resource = (params.repo as string) ?? (params.org as string);
+        const resource =
+          (params.repo as string) ??
+          (params.org as string) ??
+          (params.scope as string) ?? // Azure RBAC PIM role actions
+          (params.group_id as string); // Azure PIM group actions
         if (!resource) {
           // allowedResources is set but the action carries no repo/org identifier —
           // deny to prevent bypassing resource restrictions via resource-agnostic params.

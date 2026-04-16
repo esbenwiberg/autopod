@@ -45,5 +45,52 @@
     "response": {
       "fields": ["activations"]
     }
+  },
+  {
+    "name": "activate_pim_role",
+    "description": "Activate an Azure RBAC role assignment via PIM. Only roles pre-configured on the profile can be activated.",
+    "group": "azure-pim",
+    "handler": "azure-pim",
+    "params": {
+      "scope": {
+        "type": "string",
+        "required": true,
+        "description": "ARM scope the role targets (e.g. /subscriptions/{subId}/resourceGroups/{rg})"
+      },
+      "role_definition_id": {
+        "type": "string",
+        "required": true,
+        "description": "Role definition UUID (e.g. 73c42c96-874c-492b-b04d-ab87d138a893 for Log Analytics Reader)"
+      },
+      "justification": {
+        "type": "string",
+        "required": false,
+        "description": "Reason for activating this role (defaults to 'Agent session access')"
+      }
+    },
+    "response": {
+      "fields": ["name", "properties.status", "properties.scope", "properties.roleDefinitionId"]
+    }
+  },
+  {
+    "name": "deactivate_pim_role",
+    "description": "Deactivate an Azure RBAC role assignment via PIM.",
+    "group": "azure-pim",
+    "handler": "azure-pim",
+    "params": {
+      "scope": {
+        "type": "string",
+        "required": true,
+        "description": "ARM scope the role targets"
+      },
+      "role_definition_id": {
+        "type": "string",
+        "required": true,
+        "description": "Role definition UUID"
+      }
+    },
+    "response": {
+      "fields": ["name", "properties.status"]
+    }
   }
 ]

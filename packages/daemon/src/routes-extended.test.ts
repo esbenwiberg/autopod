@@ -615,7 +615,10 @@ describe('Extended Route Tests', () => {
       });
       const sessionId = createRes.json().id;
 
-      // queued is not pausable
+      // Force to a terminal state so the session is definitively not pausable,
+      // avoiding a race condition where async processing transitions it to 'running'.
+      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('complete', sessionId);
+
       const res = await app.inject({
         method: 'POST',
         url: `/sessions/${sessionId}/pause`,

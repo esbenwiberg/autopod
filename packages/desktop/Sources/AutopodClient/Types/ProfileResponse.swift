@@ -47,6 +47,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var tokenBudgetPolicy: String?
   public var tokenBudgetWarnAt: Double?
   public var maxBudgetExtensions: Int?
+  public var pimActivations: [PimActivationResponse]?
   public var version: Int
   public var createdAt: String
   public var updatedAt: String
@@ -157,6 +158,16 @@ public struct PrivateRegistryResponse: Codable, Sendable {
   public init(type: String, url: String, scope: String? = nil) {
     self.type = type; self.url = url; self.scope = scope
   }
+}
+
+public struct PimActivationResponse: Codable, Sendable {
+  public var type: String
+  public var groupId: String?
+  public var scope: String?
+  public var roleDefinitionId: String?
+  public var displayName: String?
+  public var duration: String?
+  public var justification: String?
 }
 
 public struct InjectedMcpServerResponse: Codable, Sendable {

@@ -90,6 +90,24 @@ const privateRegistrySchema = z.object({
   scope: z.string().startsWith('@').optional(),
 });
 
+export const pimActivationConfigSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('group'),
+    groupId: z.string().uuid('groupId must be a UUID'),
+    displayName: z.string().min(1).max(128).optional(),
+    duration: z.string().min(1).max(32).optional(),
+    justification: z.string().min(1).max(500).optional(),
+  }),
+  z.object({
+    type: z.literal('rbac_role'),
+    scope: z.string().min(1).max(512),
+    roleDefinitionId: z.string().uuid('roleDefinitionId must be a UUID'),
+    displayName: z.string().min(1).max(128).optional(),
+    duration: z.string().min(1).max(32).optional(),
+    justification: z.string().min(1).max(500).optional(),
+  }),
+]);
+
 export const escalationConfigSchema = z.object({
   askHuman: z.boolean().default(true),
   askAi: z
@@ -167,6 +185,7 @@ export const createProfileSchema = z.object({
     .max(64)
     .regex(/^[a-z0-9\-]+$/, 'Label prefix must be lowercase alphanumeric with hyphens')
     .default('autopod'),
+  pimActivations: z.array(pimActivationConfigSchema).nullable().default(null),
 });
 
 export const updateProfileSchema = createProfileSchema.partial().omit({ name: true });

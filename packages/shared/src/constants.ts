@@ -41,7 +41,7 @@ export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = 
   paused: ['running', 'killing'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
   validated: ['approved', 'running', 'validating', 'killing', 'queued'],
-  failed: ['running', 'validating', 'killing', 'queued'],
+  failed: ['running', 'validating', 'killing', 'queued', 'merge_pending'],
   review_required: ['running', 'validating', 'killing'],
   approved: ['merging'],
   merging: ['complete', 'merge_pending'],

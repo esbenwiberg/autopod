@@ -63,29 +63,50 @@ export function createAzureLogsHandler(config: HandlerConfig): ActionHandler {
     query: string,
     timespan: string,
   ): Promise<unknown> {
-    const token = await getToken();
+    // Azure RBAC propagation after PIM activation can take up to ~5 minutes.
+    // Retry on InsufficientAccessError (403) with increasing backoff so agents
+    // don't need to manually wait after activate_pim_role.
+    const PIM_RETRY_DELAYS_MS = [15_000, 30_000, 60_000, 60_000]; // max ~2.75 min
 
-    const response = await fetchWithTimeout(`${apiBase}${resourcePath}/query`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ query, timespan }),
-      timeout: 30_000, // Log queries can be slow
-    });
+    for (let attempt = 0; ; attempt++) {
+      // Re-acquire token on retries — cached token is fine but a fresh one avoids stale state
+      const token = await getToken();
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`Azure Monitor ${response.status}: ${body.slice(0, 200)}`);
+      const response = await fetchWithTimeout(`${apiBase}${resourcePath}/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query, timespan }),
+        timeout: 30_000, // Log queries can be slow
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        const isInsufficientAccess =
+          response.status === 403 && body.includes('InsufficientAccessError');
+
+        if (isInsufficientAccess && attempt < PIM_RETRY_DELAYS_MS.length) {
+          const delayMs = PIM_RETRY_DELAYS_MS[attempt]!;
+          log.warn(
+            { attempt: attempt + 1, delayMs },
+            'Azure Monitor 403 InsufficientAccessError — likely PIM propagation delay, retrying',
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        throw new Error(`Azure Monitor ${response.status}: ${body.slice(0, 200)}`);
+      }
+
+      const data = (await readSafeJson(response)) as {
+        tables: Array<{ name: string; columns: Array<{ name: string }>; rows: unknown[][] }>;
+      };
+
+      // Convert tabular format to more readable objects
+      return { tables: formatTables(data.tables) };
     }
-
-    const data = (await readSafeJson(response)) as {
-      tables: Array<{ name: string; columns: Array<{ name: string }>; rows: unknown[][] }>;
-    };
-
-    // Convert tabular format to more readable objects
-    return { tables: formatTables(data.tables) };
   }
 
   return {

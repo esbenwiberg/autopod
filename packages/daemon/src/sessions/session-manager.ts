@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
@@ -335,6 +335,7 @@ export interface SessionManager {
   approveAllValidated(): Promise<{ approved: string[] }>;
   killAllFailed(): Promise<{ killed: string[] }>;
   extendAttempts(sessionId: string, additionalAttempts: number): Promise<void>;
+  extendPrAttempts(sessionId: string, additionalAttempts: number): Promise<void>;
   pauseSession(sessionId: string): Promise<void>;
   nudgeSession(sessionId: string, message: string): void;
   killSession(sessionId: string): Promise<void>;
@@ -378,6 +379,13 @@ export interface SessionManager {
    * the temp credential file. Safe to call from user-initiated flows (workspace pods, CLI).
    */
   injectCredential(sessionId: string, service: 'github' | 'ado'): Promise<void>;
+  /**
+   * Manually spawn a fix session for a merge_pending session, bypassing the
+   * automatic detection guards. Clears any stale fixSessionId first so the fix
+   * is created immediately rather than waiting for the next poll cycle.
+   * Bumps maxPrFixAttempts if the current cap would otherwise block spawn.
+   */
+  spawnFixSession(sessionId: string): Promise<void>;
 }
 
 export function createSessionManager(deps: SessionManagerDependencies): SessionManager {
@@ -416,6 +424,141 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
   /** Active AbortControllers for in-progress validation runs, keyed by sessionId. */
   const validationAbortControllers = new Map<string, AbortController>();
+
+  /**
+   * Spawns a new child fix session on the same branch when the PR has actionable
+   * failures (CI check failures or CHANGES_REQUESTED review comments).
+   * Guards against double-spawning and enforces maxPrFixAttempts.
+   * Lifted to outer scope so both the merge poller and spawnFixSession can call it.
+   */
+  const maybeSpawnFixSession = async (
+    parentSessionId: string,
+    status: PrMergeStatus,
+  ): Promise<void> => {
+    // Re-read from DB to avoid stale closure state across 60s intervals
+    const parent = sessionRepo.getOrThrow(parentSessionId);
+
+    // Guard: fix sessions must never spawn sub-fixers.
+    // The root parent's merge poller owns all fix-spawn decisions.
+    if (parent.linkedSessionId) {
+      logger.debug({ sessionId: parentSessionId }, 'Fix session — skipping sub-fixer spawn');
+      return;
+    }
+
+    // Guard: a fix session is already alive
+    if (parent.fixSessionId) {
+      try {
+        const fix = sessionRepo.getOrThrow(parent.fixSessionId);
+        const fixIsLive =
+          fix.status !== 'complete' && fix.status !== 'killed' && fix.status !== 'failed';
+        if (fixIsLive) {
+          logger.debug(
+            { sessionId: parentSessionId, fixSessionId: parent.fixSessionId },
+            'Fix session already active — skipping spawn',
+          );
+          return;
+        }
+      } catch {
+        // Fix session not found — treat as terminal, fall through
+      }
+      // Clear stale fixSessionId and return — let the *next* poll cycle decide whether
+      // to spawn. This gives CI time to restart and re-run on the fix's new commits
+      // before we evaluate failures again (e.g. SonarCloud takes a full rebuild).
+      sessionRepo.update(parentSessionId, { fixSessionId: null });
+      return;
+    }
+
+    // Guard: max retries exhausted
+    const maxAttempts = parent.maxPrFixAttempts ?? DEFAULT_MAX_PR_FIX_ATTEMPTS;
+    if ((parent.prFixAttempts ?? 0) >= maxAttempts) {
+      emitActivityStatus(
+        parentSessionId,
+        `Max PR fix attempts (${maxAttempts}) exhausted — session failed`,
+      );
+      transition(parent, 'failed', {
+        mergeBlockReason: `Max PR fix attempts (${maxAttempts}) exhausted`,
+      });
+      stopMergePolling(parentSessionId);
+      logger.warn(
+        { sessionId: parentSessionId, attempts: parent.prFixAttempts },
+        'Merge polling: max fix attempts exhausted — session failed',
+      );
+      return;
+    }
+
+    // Build fix task and create child session directly using closure deps
+    const newAttempt = (parent.prFixAttempts ?? 0) + 1;
+    const fixTask = buildPrFixTask(parent, status, sessionRepo);
+    const profile = profileStore.get(parent.profileName);
+
+    let fixId = '';
+    for (let attempt = 0; attempt < 10; attempt++) {
+      fixId = generateSessionId();
+      try {
+        sessionRepo.insert({
+          id: fixId,
+          profileName: parent.profileName,
+          task: fixTask,
+          status: 'queued',
+          model: parent.model,
+          runtime: parent.runtime,
+          executionTarget: parent.executionTarget,
+          branch: parent.branch,
+          userId: parent.userId,
+          maxValidationAttempts: profile.maxValidationAttempts,
+          skipValidation: false,
+          outputMode: parent.outputMode,
+          baseBranch: parent.baseBranch ?? null,
+          linkedSessionId: parent.id,
+          pimGroups: parent.pimGroups ?? null,
+          prUrl: parent.prUrl ?? null,
+        });
+        break;
+      } catch (err: unknown) {
+        if (
+          err instanceof Error &&
+          err.message.includes('UNIQUE constraint failed') &&
+          attempt < 9
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    enqueueSession(fixId);
+    eventBus.emit({
+      type: 'session.created',
+      timestamp: new Date().toISOString(),
+      session: {
+        id: fixId,
+        profileName: parent.profileName,
+        task: fixTask,
+        status: 'queued',
+        model: parent.model,
+        runtime: parent.runtime,
+        duration: null,
+        filesChanged: 0,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    // Record fix session on parent
+    sessionRepo.update(parentSessionId, {
+      prFixAttempts: newAttempt,
+      fixSessionId: fixId,
+      mergeBlockReason: `Fix attempt ${newAttempt}/${maxAttempts} in progress (session ${fixId})`,
+    });
+
+    emitActivityStatus(
+      parentSessionId,
+      `Spawned fix session ${fixId} (attempt ${newAttempt}/${maxAttempts})`,
+    );
+    logger.info(
+      { sessionId: parentSessionId, fixSessionId: fixId, attempt: newAttempt },
+      'Merge polling: spawned fix session for actionable failures',
+    );
+  };
 
   /** Start polling PR merge status for a session in merge_pending state. */
   function startMergePolling(sessionId: string): void {
@@ -510,140 +653,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       } catch (err) {
         logger.debug({ err, sessionId }, 'Merge polling failed, skipping cycle');
       }
-    };
-
-    /**
-     * Spawns a new child fix session on the same branch when the PR has actionable
-     * failures (CI check failures or CHANGES_REQUESTED review comments).
-     * Guards against double-spawning and enforces maxPrFixAttempts.
-     */
-    const maybeSpawnFixSession = async (
-      parentSessionId: string,
-      status: PrMergeStatus,
-    ): Promise<void> => {
-      // Re-read from DB to avoid stale closure state across 60s intervals
-      const parent = sessionRepo.getOrThrow(parentSessionId);
-
-      // Guard: fix sessions must never spawn sub-fixers.
-      // The root parent's merge poller owns all fix-spawn decisions.
-      if (parent.linkedSessionId) {
-        logger.debug({ sessionId: parentSessionId }, 'Fix session — skipping sub-fixer spawn');
-        return;
-      }
-
-      // Guard: a fix session is already alive
-      if (parent.fixSessionId) {
-        try {
-          const fix = sessionRepo.getOrThrow(parent.fixSessionId);
-          const fixIsLive =
-            fix.status !== 'complete' && fix.status !== 'killed' && fix.status !== 'failed';
-          if (fixIsLive) {
-            logger.debug(
-              { sessionId: parentSessionId, fixSessionId: parent.fixSessionId },
-              'Fix session already active — skipping spawn',
-            );
-            return;
-          }
-        } catch {
-          // Fix session not found — treat as terminal, fall through
-        }
-        // Clear stale fixSessionId and return — let the *next* poll cycle decide whether
-        // to spawn. This gives CI time to restart and re-run on the fix's new commits
-        // before we evaluate failures again (e.g. SonarCloud takes a full rebuild).
-        sessionRepo.update(parentSessionId, { fixSessionId: null });
-        return;
-      }
-
-      // Guard: max retries exhausted
-      const maxAttempts = parent.maxPrFixAttempts ?? DEFAULT_MAX_PR_FIX_ATTEMPTS;
-      if ((parent.prFixAttempts ?? 0) >= maxAttempts) {
-        emitActivityStatus(
-          parentSessionId,
-          `Max PR fix attempts (${maxAttempts}) exhausted — session failed`,
-        );
-        transition(parent, 'failed', {
-          mergeBlockReason: `Max PR fix attempts (${maxAttempts}) exhausted`,
-        });
-        stopMergePolling(parentSessionId);
-        logger.warn(
-          { sessionId: parentSessionId, attempts: parent.prFixAttempts },
-          'Merge polling: max fix attempts exhausted — session failed',
-        );
-        return;
-      }
-
-      // Build fix task and create child session directly using closure deps
-      const newAttempt = (parent.prFixAttempts ?? 0) + 1;
-      const fixTask = buildPrFixTask(parent, status, sessionRepo);
-      const profile = profileStore.get(parent.profileName);
-
-      let fixId = '';
-      for (let attempt = 0; attempt < 10; attempt++) {
-        fixId = generateSessionId();
-        try {
-          sessionRepo.insert({
-            id: fixId,
-            profileName: parent.profileName,
-            task: fixTask,
-            status: 'queued',
-            model: parent.model,
-            runtime: parent.runtime,
-            executionTarget: parent.executionTarget,
-            branch: parent.branch,
-            userId: parent.userId,
-            maxValidationAttempts: profile.maxValidationAttempts,
-            skipValidation: false,
-            outputMode: parent.outputMode,
-            baseBranch: parent.baseBranch ?? null,
-            linkedSessionId: parent.id,
-            pimGroups: parent.pimGroups ?? null,
-            prUrl: parent.prUrl ?? null,
-          });
-          break;
-        } catch (err: unknown) {
-          if (
-            err instanceof Error &&
-            err.message.includes('UNIQUE constraint failed') &&
-            attempt < 9
-          ) {
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      enqueueSession(fixId);
-      eventBus.emit({
-        type: 'session.created',
-        timestamp: new Date().toISOString(),
-        session: {
-          id: fixId,
-          profileName: parent.profileName,
-          task: fixTask,
-          status: 'queued',
-          model: parent.model,
-          runtime: parent.runtime,
-          duration: null,
-          filesChanged: 0,
-          createdAt: new Date().toISOString(),
-        },
-      });
-
-      // Record fix session on parent
-      sessionRepo.update(parentSessionId, {
-        prFixAttempts: newAttempt,
-        fixSessionId: fixId,
-        mergeBlockReason: `Fix attempt ${newAttempt}/${maxAttempts} in progress (session ${fixId})`,
-      });
-
-      emitActivityStatus(
-        parentSessionId,
-        `Spawned fix session ${fixId} (attempt ${newAttempt}/${maxAttempts})`,
-      );
-      logger.info(
-        { sessionId: parentSessionId, fixSessionId: fixId, attempt: newAttempt },
-        'Merge polling: spawned fix session for actionable failures',
-      );
     };
 
     // Run first poll immediately
@@ -871,6 +880,17 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       } else {
         throw err;
       }
+    }
+
+    // Restore the bare repo's worktrees/<name>/gitdir to the host path now that files
+    // are back on the host filesystem. During the session it was pointed at /workspace/.git
+    // (a container-only path) — leaving it there would break host-side git operations.
+    try {
+      const gitlinkContent = await readFile(path.join(worktreePath, '.git'), 'utf8');
+      const bareWtDir = gitlinkContent.replace(/^gitdir:\s*/m, '').trim();
+      await writeFile(path.join(bareWtDir, 'gitdir'), path.join(worktreePath, '.git') + '\n');
+    } catch (err) {
+      logger.warn({ err, worktreePath }, 'Failed to restore worktree gitdir after sync');
     }
   }
 
@@ -1152,7 +1172,21 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             baseBranch: request.baseBranch ?? null,
             acFrom: request.acFrom ?? null,
             linkedSessionId: request.linkedSessionId ?? null,
-            pimGroups: request.pimGroups ?? null,
+            pimGroups: (() => {
+              if (request.pimGroups != null) return request.pimGroups;
+              // Fall back to profile-level pimActivations (group type only — stored as PimGroupConfig)
+              const groupActivations = (profile.pimActivations ?? [])
+                .filter(
+                  (a): a is Extract<typeof a, { type: 'group' }> => a.type === 'group',
+                )
+                .map(({ groupId, displayName, duration, justification }) => ({
+                  groupId,
+                  displayName,
+                  duration,
+                  justification,
+                }));
+              return groupActivations.length > 0 ? groupActivations : null;
+            })(),
             prUrl: request.prUrl ?? null,
             tokenBudget:
               request.tokenBudget !== undefined
@@ -1371,6 +1405,18 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             containerId,
             ['cp', '-a', '/mnt/worktree/.', '/workspace/'],
             { timeout: 120_000 },
+          );
+          // The bare repo's worktrees/<name>/gitdir still points to the host bind-mount
+          // path (/mnt/worktree or the host worktree dir). Repoint it to /workspace so
+          // git commands work on the container's native overlayfs filesystem.
+          await containerManager.execInContainer(
+            containerId,
+            [
+              'sh',
+              '-c',
+              'BARE_WT=$(sed "s/^gitdir: //" /workspace/.git) && echo "/workspace/.git" > "${BARE_WT}/gitdir"',
+            ],
+            { timeout: 5_000 },
           );
         }
 
@@ -1944,7 +1990,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               tokenUpdates.outputTokens = newOutputTokens;
             }
             if (event.costUsd !== undefined) {
-              tokenUpdates.costUsd = event.costUsd;
+              tokenUpdates.costUsd = currentSession.costUsd + event.costUsd;
             }
             if (Object.keys(tokenUpdates).length > 0) {
               sessionRepo.update(sessionId, tokenUpdates);
@@ -2379,6 +2425,34 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
     async approveSession(sessionId: string, options?: { squash?: boolean }): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
+
+      // No-change session: skip PR creation and branch push, complete directly.
+      if (session.filesChanged === 0 && session.worktreePath && !session.prUrl) {
+        emitActivityStatus(sessionId, 'No changes to merge — completing session');
+        const s1 = transition(session, 'approved');
+        const s2 = transition(s1, 'merging');
+        transition(s2, 'complete', { completedAt: new Date().toISOString() });
+        eventBus.emit({
+          type: 'session.completed',
+          timestamp: new Date().toISOString(),
+          sessionId,
+          finalStatus: 'complete',
+          summary: {
+            id: sessionId,
+            profileName: session.profileName,
+            task: session.task,
+            status: 'complete',
+            model: session.model,
+            runtime: session.runtime,
+            duration: session.startedAt ? Date.now() - new Date(session.startedAt).getTime() : null,
+            filesChanged: session.filesChanged,
+            createdAt: session.createdAt,
+          },
+        });
+        logger.info({ sessionId }, 'Session approved with no changes — completed without PR');
+        return;
+      }
+
       emitActivityStatus(sessionId, 'Approved — merging changes…');
       const s1 = transition(session, 'approved');
       const s2 = transition(s1, 'merging');
@@ -2810,6 +2884,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           logger.warn({ err, sessionId }, 'Failed to load PIM client for deactivation');
         }
       }
+
 
       eventBus.emit({
         type: 'session.completed',
@@ -3985,6 +4060,45 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       await this.triggerValidation(sessionId);
     },
 
+    async extendPrAttempts(sessionId: string, additionalAttempts: number): Promise<void> {
+      const session = sessionRepo.getOrThrow(sessionId);
+      if (session.status !== 'failed') {
+        throw new AutopodError(
+          `Cannot extend PR attempts for session ${sessionId} in status ${session.status} — only failed sessions`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!session.mergeBlockReason?.startsWith('Max PR fix attempts')) {
+        throw new AutopodError(
+          `Session ${sessionId} did not fail due to exhausted PR fix attempts`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      const currentMax = session.maxPrFixAttempts ?? DEFAULT_MAX_PR_FIX_ATTEMPTS;
+      const newMax = currentMax + additionalAttempts;
+      if (newMax > 20) {
+        throw new AutopodError(
+          `Cannot exceed 20 total PR fix attempts (current: ${currentMax}, requested: +${additionalAttempts})`,
+          'VALIDATION_ERROR',
+          400,
+        );
+      }
+      // Clear stale fixSessionId so the next poll can spawn freely
+      sessionRepo.update(sessionId, { maxPrFixAttempts: newMax, fixSessionId: null });
+      // failed → merge_pending re-enters the polling loop
+      transition(session, 'merge_pending', {
+        mergeBlockReason: 'Awaiting merge — PR fix attempts extended',
+      });
+      emitActivityStatus(sessionId, `PR fix attempts extended to ${newMax} — resuming merge polling`);
+      startMergePolling(sessionId);
+      logger.info(
+        { sessionId, oldMax: currentMax, newMax, additionalAttempts },
+        'Extended PR fix attempts',
+      );
+    },
+
     interruptValidation(sessionId: string): void {
       validationAbortControllers.get(sessionId)?.abort();
     },
@@ -4052,6 +4166,70 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
       await performCredentialInjection(sessionId, service);
       emitActivityStatus(sessionId, `${service} credentials injected.`);
+    },
+
+    async spawnFixSession(sessionId: string): Promise<void> {
+      const session = sessionRepo.getOrThrow(sessionId);
+      if (session.status !== 'merge_pending') {
+        throw new AutopodError(
+          `Cannot spawn fix session for ${sessionId} in status ${session.status} — only merge_pending sessions`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (session.linkedSessionId) {
+        throw new AutopodError(
+          `Session ${sessionId} is already a fix session — only root sessions can spawn fixers`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!session.prUrl) {
+        throw new AutopodError(
+          `Session ${sessionId} has no PR URL`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      // Bump maxPrFixAttempts if the current cap would block the spawn
+      const currentMax = session.maxPrFixAttempts ?? DEFAULT_MAX_PR_FIX_ATTEMPTS;
+      const currentAttempts = session.prFixAttempts ?? 0;
+      if (currentAttempts >= currentMax) {
+        const newMax = Math.min(currentAttempts + 3, 20);
+        sessionRepo.update(sessionId, { maxPrFixAttempts: newMax });
+        logger.info(
+          { sessionId, currentAttempts, newMax },
+          'Manual spawn: bumped maxPrFixAttempts to allow fix',
+        );
+      }
+
+      // Clear any stale fixSessionId so maybeSpawnFixSession won't wait a cycle
+      sessionRepo.update(sessionId, { fixSessionId: null });
+
+      // Fetch current PR status to build a meaningful fix task
+      const profile = profileStore.get(session.profileName);
+      const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+      let status: PrMergeStatus = {
+        merged: false,
+        open: true,
+        blockReason: session.mergeBlockReason ?? 'PR is blocked',
+        ciFailures: [],
+        reviewComments: [],
+      };
+      if (prManager) {
+        try {
+          status = await prManager.getPrStatus({
+            prUrl: session.prUrl,
+            worktreePath: session.worktreePath ?? undefined,
+          });
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Manual spawn: failed to fetch PR status, using cached block reason');
+        }
+      }
+
+      await maybeSpawnFixSession(sessionId, status);
+      logger.info({ sessionId }, 'Manual fix session spawn triggered');
     },
   };
 }

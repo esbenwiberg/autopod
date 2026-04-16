@@ -158,6 +158,32 @@ export function sessionRoutes(
     return { ok: true, maxValidationAttempts: session.maxValidationAttempts };
   });
 
+  // POST /sessions/:sessionId/extend-pr-attempts — extend PR fix attempts for an exhausted-attempts failed session
+  app.post('/sessions/:sessionId/extend-pr-attempts', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const body = (request.body ?? {}) as { additionalAttempts?: number };
+    const additionalAttempts = body.additionalAttempts ?? 3;
+    await sessionManager.extendPrAttempts(sessionId, additionalAttempts);
+    const session = sessionManager.getSession(sessionId);
+    return { ok: true, maxPrFixAttempts: session.maxPrFixAttempts };
+  });
+
+  // POST /sessions/:sessionId/spawn-fix — manually force-spawn a fix session for merge_pending
+  app.post('/sessions/:sessionId/spawn-fix', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    try {
+      await sessionManager.spawnFixSession(sessionId);
+      reply.status(202);
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message };
+      }
+      throw err;
+    }
+  });
+
   // POST /sessions/:sessionId/fix-manually — create linked workspace for human fixes
   app.post('/sessions/:sessionId/fix-manually', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };

@@ -647,7 +647,7 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt' });
+      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt', filesChanged: 1 });
 
       await manager.approveSession(session.id);
 
@@ -671,7 +671,7 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt' });
+      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt', filesChanged: 1 });
 
       await manager.approveSession(session.id);
 
@@ -1277,6 +1277,59 @@ describe('SessionManager', () => {
       const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
       const npmrcCalls = writeCalls.filter(([, path]) => path === '/workspace/.npmrc');
       expect(npmrcCalls).toHaveLength(0);
+    });
+
+    it('accumulates costUsd across multiple runs instead of replacing', async () => {
+      const ctx = createTestContext();
+      const manager = createSessionManager(ctx.deps);
+
+      const session = manager.createSession(
+        { profileName: 'test-profile', task: 'Multi-run task', skipValidation: true },
+        'user-1',
+      );
+
+      // First run: spawn emits a complete event with $0.02 cost
+      (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Done first run',
+            costUsd: 0.02,
+            totalInputTokens: 1000,
+            totalOutputTokens: 200,
+          };
+        },
+      );
+      await manager.processSession(session.id);
+
+      const afterFirstRun = manager.getSession(session.id);
+      expect(afterFirstRun.costUsd).toBeCloseTo(0.02);
+
+      // Put session back to validated so we can reject it and trigger a second run
+      ctx.sessionRepo.update(session.id, { status: 'validated', containerId: 'ctr-1' });
+
+      // Second run: resume emits a complete event with $0.03 cost
+      (ctx.runtime.resume as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Done second run',
+            costUsd: 0.03,
+            totalInputTokens: 500,
+            totalOutputTokens: 100,
+          };
+        },
+      );
+      await manager.rejectSession(session.id, 'Try again');
+
+      const afterSecondRun = manager.getSession(session.id);
+      // Cost should accumulate: $0.02 + $0.03 = $0.05 (not just $0.03)
+      expect(afterSecondRun.costUsd).toBeCloseTo(0.05);
+      // Tokens should also accumulate
+      expect(afterSecondRun.inputTokens).toBe(1500);
+      expect(afterSecondRun.outputTokens).toBe(300);
     });
   });
 

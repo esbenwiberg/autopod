@@ -116,6 +116,17 @@ public actor DaemonAPI {
     )
   }
 
+  public func extendPrAttempts(_ id: String, additionalAttempts: Int) async throws {
+    let _: OkResponse = try await request(
+      "POST", "/sessions/\(id)/extend-pr-attempts",
+      body: try encode(ExtendAttemptsBody(additionalAttempts: additionalAttempts))
+    )
+  }
+
+  public func spawnFixSession(_ id: String) async throws {
+    let _: OkResponse = try await request("POST", "/sessions/\(id)/spawn-fix")
+  }
+
   public func deleteSession(_ id: String) async throws {
     let _: EmptyResponse = try await request("DELETE", "/sessions/\(id)")
   }

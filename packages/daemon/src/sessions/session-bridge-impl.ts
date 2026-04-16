@@ -7,6 +7,7 @@ import type {
   EscalationResponse,
   MemoryEntry,
   MemoryScope,
+  PimActivationConfig,
   Profile,
 } from '@autopod/shared';
 import { generateId } from '@autopod/shared';
@@ -322,6 +323,39 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       }
       if (actionName === 'list_pim_activations') {
         resolvedParams = { ...params, principal_id: session.userId };
+      }
+      if (actionName === 'activate_pim_role' || actionName === 'deactivate_pim_role') {
+        const scope = params.scope as string | undefined;
+        const roleDefinitionId = params.role_definition_id as string | undefined;
+        if (!scope || !roleDefinitionId) {
+          return {
+            success: false,
+            error: 'Missing required parameters: scope, role_definition_id',
+            sanitized: false,
+            quarantined: false,
+          };
+        }
+        const allowedRbac = (profile.pimActivations ?? []).filter(
+          (a): a is Extract<PimActivationConfig, { type: 'rbac_role' }> => a.type === 'rbac_role',
+        );
+        const normScopeStr = (s: string) => (s.startsWith('/') ? s.slice(1) : s);
+        const match = allowedRbac.find(
+          (a) =>
+            normScopeStr(a.scope) === normScopeStr(scope) && a.roleDefinitionId === roleDefinitionId,
+        );
+        if (!match) {
+          return {
+            success: false,
+            error: `PIM RBAC role '${roleDefinitionId}' at scope '${scope}' is not configured for this profile. Configured roles: ${allowedRbac.map((a) => a.displayName ?? a.roleDefinitionId).join(', ') || 'none'}`,
+            sanitized: false,
+            quarantined: false,
+          };
+        }
+        resolvedParams = {
+          ...params,
+          principal_id: session.userId,
+          duration: match.duration ?? 'PT8H',
+        };
       }
 
       const actionEngine = makeActionEngine(profile);
