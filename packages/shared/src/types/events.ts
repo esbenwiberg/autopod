@@ -2,7 +2,17 @@ import type { EscalationRequest, EscalationResponse } from './escalation.js';
 import type { MemoryEntry } from './memory.js';
 import type { AgentEvent } from './runtime.js';
 import type { SessionStatus, SessionSummary } from './session.js';
-import type { ValidationOverride, ValidationResult } from './validation.js';
+import type {
+  AcValidationResult,
+  BuildResult,
+  HealthResult,
+  PageResult,
+  TaskReviewResult,
+  ValidationOverride,
+  ValidationResult,
+} from './validation.js';
+
+export type ValidationPhase = 'build' | 'test' | 'health' | 'pages' | 'ac' | 'review';
 
 export type SystemEvent =
   | SessionCreatedEvent
@@ -10,6 +20,8 @@ export type SystemEvent =
   | AgentActivityEvent
   | ValidationStartedEvent
   | ValidationCompletedEvent
+  | ValidationPhaseStartedEvent
+  | ValidationPhaseCompletedEvent
   | EscalationCreatedEvent
   | EscalationResolvedEvent
   | SessionCompletedEvent
@@ -56,6 +68,29 @@ export interface ValidationCompletedEvent {
   timestamp: string;
   sessionId: string;
   result: ValidationResult;
+}
+
+export interface ValidationPhaseStartedEvent {
+  type: 'session.validation_phase_started';
+  timestamp: string;
+  sessionId: string;
+  phase: ValidationPhase;
+}
+
+export interface ValidationPhaseCompletedEvent {
+  type: 'session.validation_phase_completed';
+  timestamp: string;
+  sessionId: string;
+  phase: ValidationPhase;
+  /** Phase outcome — separate from "status" to avoid JSON key collisions with other events */
+  phaseStatus: 'pass' | 'fail' | 'skip';
+  // Exactly one of these is populated per event, matching the phase:
+  buildResult?: BuildResult;
+  testResult?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
+  healthResult?: HealthResult;
+  pageResults?: PageResult[];
+  acResult?: AcValidationResult | null;
+  reviewResult?: TaskReviewResult | null;
 }
 
 export interface EscalationCreatedEvent {

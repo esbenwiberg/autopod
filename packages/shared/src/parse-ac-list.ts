@@ -12,10 +12,13 @@
 const PREFIX = /^(?:[-*]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|[a-zA-Z][.)]\s+)/;
 
 export function parseAcList(text: string): string[] {
-  return text
+  const parsed = text
     .split(/\r?\n/)
     .map((line) => line.trimStart())
     .map((line) => line.replace(PREFIX, ''))
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+
+  // Deduplicate exact matches (preserves first occurrence order)
+  return [...new Set(parsed)];
 }
