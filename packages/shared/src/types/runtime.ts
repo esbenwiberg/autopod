@@ -106,6 +106,7 @@ export interface AgentTaskSummaryEvent {
   type: 'task_summary';
   timestamp: string;
   actualSummary: string;
+  how?: string;
   deviations: Array<{
     step: string;
     planned: string;

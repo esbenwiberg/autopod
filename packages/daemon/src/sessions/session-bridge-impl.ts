@@ -221,6 +221,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       sessionId: string,
       actualSummary: string,
       deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
+      how?: string,
     ): void {
       sessionManager.touchHeartbeat(sessionId);
       logger.info(
@@ -232,7 +233,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         'Agent reported task summary',
       );
       sessionRepo.update(sessionId, {
-        taskSummary: { actualSummary, deviations },
+        taskSummary: { actualSummary, how, deviations },
       });
       eventBus.emit({
         type: 'session.agent_activity',
@@ -241,6 +242,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         event: {
           type: 'task_summary',
           actualSummary,
+          how,
           deviations,
           timestamp: new Date().toISOString(),
         },

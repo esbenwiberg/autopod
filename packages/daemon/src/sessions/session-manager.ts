@@ -1920,6 +1920,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             sessionRepo.update(sessionId, {
               taskSummary: {
                 actualSummary: event.actualSummary,
+                how: event.how,
                 deviations: event.deviations,
               },
             });

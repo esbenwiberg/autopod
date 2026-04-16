@@ -29,6 +29,7 @@ export interface SessionBridge {
     sessionId: string,
     actualSummary: string,
     deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
+    how?: string,
   ): void;
   consumeMessages(sessionId: string): { hasMessage: boolean; message?: string };
   /** Check if an action requires human approval before execution */

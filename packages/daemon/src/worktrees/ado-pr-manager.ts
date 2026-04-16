@@ -123,6 +123,7 @@ export class AdoPrManager implements PrManager {
       previewUrl: config.previewUrl,
       screenshots: config.screenshots,
       taskSummary: config.taskSummary,
+      inlineImages: false,
     });
 
     this.logger.info(

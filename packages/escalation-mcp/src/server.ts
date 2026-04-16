@@ -117,6 +117,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'Report what you actually did and any deviations from your original plan. Call this as your final step before finishing. Fire-and-forget — does not block.',
     {
       actualSummary: z.string().describe('A concise description of what was actually accomplished'),
+      how: z
+        .string()
+        .optional()
+        .describe(
+          'Implementation approach — key technical decisions, libraries chosen, patterns used. Helps reviewers understand why you built it this way.',
+        ),
       deviations: z
         .array(
           z.object({

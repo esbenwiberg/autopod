@@ -2,6 +2,7 @@ import type { SessionBridge } from '../session-bridge.js';
 
 export interface ReportTaskSummaryInput {
   actualSummary: string;
+  how?: string;
   deviations: Array<{
     step: string;
     planned: string;
@@ -15,7 +16,7 @@ export async function reportTaskSummary(
   input: ReportTaskSummaryInput,
   bridge: SessionBridge,
 ): Promise<string> {
-  bridge.reportTaskSummary(sessionId, input.actualSummary, input.deviations);
+  bridge.reportTaskSummary(sessionId, input.actualSummary, input.deviations, input.how);
   const deviationCount = input.deviations.length;
   const deviationNote =
     deviationCount === 0

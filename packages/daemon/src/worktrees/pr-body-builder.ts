@@ -18,8 +18,14 @@ export interface PrBodyConfig {
   previewUrl: string | null;
   /** Screenshot references for embedding in the PR body */
   screenshots?: ScreenshotRef[];
-  /** Agent-reported task summary (what was done + deviations from plan) */
+  /** Agent-reported task summary (what was done + how + deviations from plan) */
   taskSummary?: TaskSummary;
+  /**
+   * Whether to embed screenshots as inline images (`![](url)`).
+   * Set to false for platforms that don't render external images (e.g. Azure DevOps).
+   * Defaults to true.
+   */
+  inlineImages?: boolean;
 }
 
 export function buildPrTitle(task: string): string {
@@ -41,127 +47,160 @@ export function buildPrBody(config: PrBodyConfig): string {
     linesRemoved,
     previewUrl,
     taskSummary,
+    inlineImages = true,
   } = config;
 
   const sections: string[] = [];
 
-  // Summary
-  sections.push(`## Summary\n\n${task}`);
+  // ── Narrative: Why / What / How ──────────────────────────────────────────
 
-  // Task Summary (agent-reported: what was done + deviations)
+  sections.push(`## Why\n\n${task}`);
+
   if (taskSummary) {
-    const lines: string[] = ['## Task Summary'];
-    lines.push(`\n${taskSummary.actualSummary}`);
+    sections.push(`## What\n\n${taskSummary.actualSummary}`);
 
-    if (taskSummary.deviations.length > 0) {
-      lines.push('\n### Deviations from Plan');
-      lines.push('');
-      for (const d of taskSummary.deviations) {
-        lines.push(`**${d.step}**`);
-        lines.push(`- Planned: ${d.planned}`);
-        lines.push(`- Actual: ${d.actual}`);
-        lines.push(`- Reason: ${d.reason}`);
-        lines.push('');
-      }
-    } else {
-      lines.push('\n_No deviations from plan reported._');
+    if (taskSummary.how) {
+      sections.push(`## How\n\n${taskSummary.how}`);
     }
-
-    // Reviewer's assessment of deviations (if available)
-    const deviationsAssessment = validationResult?.taskReview?.deviationsAssessment;
-    if (deviationsAssessment) {
-      if (
-        deviationsAssessment.disclosedDeviations.length > 0 ||
-        deviationsAssessment.undisclosedDeviations.length > 0
-      ) {
-        lines.push('\n### Deviation Review');
-        lines.push('');
-        for (const d of deviationsAssessment.disclosedDeviations) {
-          const verdictIcon =
-            d.verdict === 'justified' ? '✅' : d.verdict === 'questionable' ? '⚠️' : '❌';
-          lines.push(`> ${verdictIcon} **${d.step}** (${d.verdict}): ${d.reasoning}`);
-        }
-        if (deviationsAssessment.undisclosedDeviations.length > 0) {
-          lines.push('');
-          lines.push('> **Undisclosed deviations detected:**');
-          for (const u of deviationsAssessment.undisclosedDeviations) {
-            lines.push(`> ⚠️ ${u}`);
-          }
-        }
-      }
-    }
-
-    sections.push(lines.join('\n'));
   }
 
-  // Validation results
+  // ── Reviewer sections ─────────────────────────────────────────────────────
+
+  // Concerns: surfaces issues and problematic deviations upfront
+  const concernLines: string[] = [];
+
+  const aiIssues = validationResult?.taskReview?.issues ?? [];
+  for (const issue of aiIssues) {
+    concernLines.push(`- ⚠️ ${issue}`);
+  }
+
+  const deviationsAssessment = validationResult?.taskReview?.deviationsAssessment;
+  if (deviationsAssessment) {
+    for (const d of deviationsAssessment.disclosedDeviations) {
+      if (d.verdict === 'questionable' || d.verdict === 'unjustified') {
+        const icon = d.verdict === 'unjustified' ? '❌' : '⚠️';
+        concernLines.push(`- ${icon} **${d.step}** (${d.verdict}): ${d.reasoning}`);
+      }
+    }
+    for (const u of deviationsAssessment.undisclosedDeviations) {
+      concernLines.push(`- ⚠️ Undisclosed deviation: ${u}`);
+    }
+  }
+
+  if (concernLines.length > 0) {
+    sections.push(`## ⚠️ Concerns\n\n${concernLines.join('\n')}`);
+  }
+
+  // Review Checklist
+  const requirementsCheck = validationResult?.taskReview?.requirementsCheck;
+  if (requirementsCheck && requirementsCheck.length > 0) {
+    const checklistLines = requirementsCheck.map((req) => {
+      const check = req.met ? '[x]' : '[ ]';
+      const icon = req.met ? '✅' : '❌';
+      const note = req.note ? ` — ${req.note}` : '';
+      return `- ${check} ${icon} ${req.criterion}${note}`;
+    });
+    sections.push(`## Review Checklist\n\n${checklistLines.join('\n')}`);
+  }
+
+  // Deviations from Plan (table format)
+  if (taskSummary && taskSummary.deviations.length > 0) {
+    const hasVerdicts =
+      deviationsAssessment && deviationsAssessment.disclosedDeviations.length > 0;
+
+    const verdictMap = new Map<
+      string,
+      { verdict: 'justified' | 'questionable' | 'unjustified'; reasoning: string }
+    >();
+    if (deviationsAssessment) {
+      for (const d of deviationsAssessment.disclosedDeviations) {
+        verdictMap.set(d.step, { verdict: d.verdict, reasoning: d.reasoning });
+      }
+    }
+
+    const lines: string[] = [];
+    if (hasVerdicts) {
+      lines.push('| Step | Planned | Actual | Reason | Verdict |');
+      lines.push('|------|---------|--------|--------|---------|');
+    } else {
+      lines.push('| Step | Planned | Actual | Reason |');
+      lines.push('|------|---------|--------|--------|');
+    }
+
+    for (const d of taskSummary.deviations) {
+      if (hasVerdicts) {
+        const v = verdictMap.get(d.step);
+        const verdictCell = v
+          ? `${v.verdict === 'justified' ? '✅' : v.verdict === 'questionable' ? '⚠️' : '❌'} ${v.verdict}`
+          : '—';
+        lines.push(
+          `| ${d.step} | ${d.planned} | ${d.actual} | ${d.reason} | ${verdictCell} |`,
+        );
+      } else {
+        lines.push(`| ${d.step} | ${d.planned} | ${d.actual} | ${d.reason} |`);
+      }
+    }
+
+    sections.push(`## Deviations from Plan\n\n${lines.join('\n')}`);
+  }
+
+  // ── Automated results ─────────────────────────────────────────────────────
+
   if (validationResult) {
     const v = validationResult;
-    const lines: string[] = ['## Validation'];
-
     const icon = (status: string) => (status === 'pass' ? '✅' : '❌');
 
-    lines.push('\n| Phase | Status |');
-    lines.push('|-------|--------|');
-    lines.push(`| Build | ${icon(v.smoke.build.status)} ${v.smoke.build.status} |`);
-    lines.push(`| Health check | ${icon(v.smoke.health.status)} ${v.smoke.health.status} |`);
+    const tableLines: string[] = [];
+    tableLines.push('| Phase | Status |');
+    tableLines.push('|-------|--------|');
+    tableLines.push(`| Build | ${icon(v.smoke.build.status)} ${v.smoke.build.status} |`);
+    tableLines.push(
+      `| Health check | ${icon(v.smoke.health.status)} ${v.smoke.health.status} |`,
+    );
 
     if (v.smoke.pages.length > 0) {
       const passed = v.smoke.pages.filter((p: { status: string }) => p.status === 'pass').length;
       const pageStatus = passed === v.smoke.pages.length ? 'pass' : 'fail';
-      lines.push(
+      tableLines.push(
         `| Page validation | ${icon(pageStatus)} ${passed}/${v.smoke.pages.length} pages passed |`,
       );
     }
 
     if (v.taskReview) {
-      lines.push(`| AI review | ${icon(v.taskReview.status)} ${v.taskReview.status} |`);
-      if (v.taskReview.reasoning) {
-        lines.push(`\n> ${v.taskReview.reasoning}`);
-      }
-      if (v.taskReview.requirementsCheck && v.taskReview.requirementsCheck.length > 0) {
-        lines.push('');
-        for (const req of v.taskReview.requirementsCheck) {
-          const reqIcon = req.met ? '✅' : '❌';
-          const note = req.note ? ` — ${req.note}` : '';
-          lines.push(`> ${reqIcon} ${req.criterion}${note}`);
-        }
-      }
-      if (v.taskReview.issues && v.taskReview.issues.length > 0) {
-        lines.push('');
-        for (const issue of v.taskReview.issues) {
-          lines.push(`> ⚠️ ${issue}`);
-        }
-      }
+      tableLines.push(`| AI review | ${icon(v.taskReview.status)} ${v.taskReview.status} |`);
     }
 
-    lines.push(
-      `\n**Overall: ${icon(v.overall)} ${v.overall}** (attempt ${v.attempt}, ${formatDuration(v.duration)})`,
-    );
-    sections.push(lines.join('\n'));
+    const overallLine = `\n**Overall: ${icon(v.overall)} ${v.overall}** (attempt ${v.attempt}, ${formatDuration(v.duration)})`;
+
+    let validationSection = `## Validation\n\n${tableLines.join('\n')}${overallLine}`;
+
+    if (v.taskReview?.reasoning) {
+      validationSection += `\n\n<details>\n<summary>AI Review Details</summary>\n\n${v.taskReview.reasoning}\n\n</details>`;
+    }
+
+    sections.push(validationSection);
   }
 
-  // Stats
-  sections.push(
-    `## Stats\n\n- **Files changed:** ${filesChanged}\n- **Lines:** +${linesAdded} / -${linesRemoved}`,
-  );
+  // ── Meta ──────────────────────────────────────────────────────────────────
 
-  // Screenshots
+  sections.push(`## Stats\n\n\`${filesChanged} files\` · \`+${linesAdded}\` / \`-${linesRemoved}\``);
+
   if (config.screenshots && config.screenshots.length > 0) {
-    const imgs = config.screenshots.map(
-      (s) => `### \`${s.pagePath}\`\n![${s.pagePath}](${s.imageUrl})`,
-    );
+    const imgs = config.screenshots.map((s) => {
+      if (inlineImages) {
+        return `### \`${s.pagePath}\`\n![${s.pagePath}](${s.imageUrl})`;
+      }
+      return `### \`${s.pagePath}\`\n[View screenshot](${s.imageUrl})`;
+    });
     sections.push(`## Screenshots\n\n${imgs.join('\n\n')}`);
   }
 
-  // Preview
   if (previewUrl) {
     sections.push(`## Preview\n\n[Open preview](${previewUrl})`);
   }
 
-  // Footer
   sections.push(
-    `---\n🤖 Created by [autopod](https://github.com/esbenwiberg/autopod) session \`${sessionId}\` (profile: \`${profileName}\`)`,
+    `---\n🤖 Created by [autopod](https://github.com/esbenwiberg/autopod) · session \`${sessionId}\` · profile \`${profileName}\``,
   );
 
   return sections.join('\n\n');

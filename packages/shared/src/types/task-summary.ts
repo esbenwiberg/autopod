@@ -14,6 +14,8 @@ export interface DeviationItem {
 export interface TaskSummary {
   /** High-level description of what was actually accomplished */
   actualSummary: string;
+  /** Implementation approach — key technical decisions, libraries chosen, patterns used */
+  how?: string;
   /** Deviations from the original plan, if any */
   deviations: DeviationItem[];
 }
