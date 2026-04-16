@@ -69,8 +69,10 @@ public final class SessionStore {
     guard let api else { return }
     do {
       let response = try await api.getSession(id)
-      let updated = SessionMapper.map(response)
+      var updated = SessionMapper.map(response)
       if let index = sessions.firstIndex(where: { $0.id == id }) {
+        // Preserve live WebSocket state that REST doesn't carry
+        updated.validationProgress = sessions[index].validationProgress
         sessions[index] = updated
       } else {
         sessions.append(updated)
@@ -150,6 +152,21 @@ public final class SessionStore {
   public func setValidationChecks(_ sessionId: String, checks: ValidationChecks) {
     guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
     sessions[index].validationChecks = checks
+  }
+
+  public func initValidationProgress(_ sessionId: String, attempt: Int) {
+    guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+    sessions[index].validationProgress = ValidationProgress.initial(attempt: attempt)
+  }
+
+  public func markValidationPhaseStarted(_ sessionId: String, phase: ValidationPhase) {
+    guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+    sessions[index].validationProgress?.markStarted(phase)
+  }
+
+  public func markValidationPhaseCompleted(_ sessionId: String, phase: ValidationPhase, result: ValidationPhaseResult) {
+    guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+    sessions[index].validationProgress?.markCompleted(phase, result: result)
   }
 
   public func setPrUrl(_ sessionId: String, url: URL) {

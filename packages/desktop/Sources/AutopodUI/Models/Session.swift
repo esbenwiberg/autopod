@@ -1,3 +1,4 @@
+import AutopodClient
 import SwiftUI
 
 // MARK: - Output mode (mirrors daemon outputMode)
@@ -188,6 +189,186 @@ public struct ValidationChecks: Sendable {
     public var allPassed: Bool { smoke && (tests ?? true) && (review ?? true) && (acValidation ?? true) }
 }
 
+// MARK: - Live validation progress (streams as phases complete)
+
+public enum PhaseStatus: Sendable, Equatable {
+    case notStarted, running, passed, failed, skipped
+
+    public var icon: String {
+        switch self {
+        case .notStarted: return "circle"
+        case .running:    return "arrow.triangle.2.circlepath"
+        case .passed:     return "checkmark.circle.fill"
+        case .failed:     return "xmark.circle.fill"
+        case .skipped:    return "minus.circle"
+        }
+    }
+
+    public var color: Color {
+        switch self {
+        case .notStarted: return .secondary
+        case .running:    return .accentColor
+        case .passed:     return .green
+        case .failed:     return .red
+        case .skipped:    return .secondary
+        }
+    }
+
+    public var isTerminal: Bool { self != .notStarted && self != .running }
+}
+
+public struct ValidationPhaseState: Sendable {
+    public let status: PhaseStatus
+    /// Duration in milliseconds (only set for phases that report it: build, test, health).
+    public let duration: Int?
+    public init(status: PhaseStatus, duration: Int? = nil) {
+        self.status = status; self.duration = duration
+    }
+    public static let notStarted = ValidationPhaseState(status: .notStarted)
+}
+
+/// Detail data for the Review phase chip.
+public struct ReviewPhaseDetail: Sendable {
+    public let status: String   // "pass" | "fail" | "uncertain"
+    public let reasoning: String
+    public let issues: [String]
+    public let requirementsCheck: [RequirementCheckDetail]?
+    public let screenshots: [String]
+    public init(
+        status: String, reasoning: String, issues: [String],
+        requirementsCheck: [RequirementCheckDetail]?, screenshots: [String]
+    ) {
+        self.status = status; self.reasoning = reasoning; self.issues = issues
+        self.requirementsCheck = requirementsCheck; self.screenshots = screenshots
+    }
+}
+
+/// Live per-phase state built up as `session.validation_phase_*` events arrive.
+public struct ValidationProgress: Sendable {
+    public var attempt: Int
+
+    // Phase status (updated by events)
+    public var build: ValidationPhaseState
+    public var test: ValidationPhaseState
+    public var health: ValidationPhaseState
+    public var pages: ValidationPhaseState
+    public var ac: ValidationPhaseState
+    public var review: ValidationPhaseState
+
+    // Phase result data (populated on completion, used by detail panel)
+    public var buildOutput: String?          // build logs
+    public var testOutput: String?           // combined stdout/stderr
+    public var healthDetail: HealthCheckDetail?
+    public var pageDetails: [PageDetail]?
+    public var acChecks: [AcCheckDetail]?
+    public var reviewDetail: ReviewPhaseDetail?
+
+    // Counts for chip sub-labels
+    public var pageCount: Int
+    public var acTotalCount: Int
+
+    // The currently running phase (drives auto-selection in the chip row)
+    public var activePhase: ValidationPhase?
+
+    public static func initial(attempt: Int) -> ValidationProgress {
+        let idle = ValidationPhaseState.notStarted
+        return ValidationProgress(
+            attempt: attempt,
+            build: idle, test: idle, health: idle, pages: idle, ac: idle, review: idle,
+            pageCount: 0, acTotalCount: 0
+        )
+    }
+
+    public func state(for phase: ValidationPhase) -> ValidationPhaseState {
+        switch phase {
+        case .build:   return build
+        case .test:    return test
+        case .health:  return health
+        case .pages:   return pages
+        case .ac:      return ac
+        case .review:  return review
+        }
+    }
+
+    public mutating func markStarted(_ phase: ValidationPhase) {
+        activePhase = phase
+        let s = ValidationPhaseState(status: .running)
+        switch phase {
+        case .build:   build   = s
+        case .test:    test    = s
+        case .health:  health  = s
+        case .pages:   pages   = s
+        case .ac:      ac      = s
+        case .review:  review  = s
+        }
+    }
+
+    public mutating func markCompleted(_ phase: ValidationPhase, result: ValidationPhaseResult) {
+        let ps: PhaseStatus = result.phaseStatus == "pass" ? .passed
+            : result.phaseStatus == "fail" ? .failed
+            : .skipped
+        switch phase {
+        case .build:
+            build = ValidationPhaseState(status: ps, duration: result.buildResult?.duration)
+            buildOutput = result.buildResult.map { $0.output.isEmpty ? nil : $0.output } ?? nil
+        case .test:
+            test = ValidationPhaseState(status: ps, duration: result.testResult?.duration)
+            let stdout = result.testResult?.stdout ?? ""
+            let stderr = result.testResult?.stderr ?? ""
+            testOutput = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
+            if testOutput?.isEmpty == true { testOutput = nil }
+        case .health:
+            health = ValidationPhaseState(status: ps, duration: result.healthResult?.duration)
+            if let h = result.healthResult {
+                healthDetail = HealthCheckDetail(
+                    status: h.status, url: h.url,
+                    responseCode: h.responseCode, duration: h.duration
+                )
+            }
+        case .pages:
+            pages = ValidationPhaseState(status: ps)
+            pageCount = result.pageResults?.count ?? 0
+            pageDetails = result.pageResults?.map { page in
+                PageDetail(
+                    path: page.path,
+                    status: page.status,
+                    consoleErrors: page.consoleErrors,
+                    assertions: page.assertions.map { a in
+                        AssertionDetail(
+                            selector: a.selector, type: a.type,
+                            expected: a.expected, actual: a.actual, passed: a.passed
+                        )
+                    },
+                    loadTime: page.loadTime,
+                    screenshotBase64: page.screenshotBase64
+                )
+            }
+        case .ac:
+            ac = ValidationPhaseState(status: ps)
+            acTotalCount = result.acResult?.results.count ?? 0
+            acChecks = result.acResult?.results.map { check in
+                AcCheckDetail(
+                    criterion: check.criterion, passed: check.passed,
+                    reasoning: check.reasoning, screenshot: check.screenshot,
+                    validationType: check.validationType
+                )
+            }
+        case .review:
+            review = ValidationPhaseState(status: ps)
+            if let r = result.reviewResult {
+                reviewDetail = ReviewPhaseDetail(
+                    status: r.status, reasoning: r.reasoning, issues: r.issues,
+                    requirementsCheck: r.requirementsCheck?.map { rc in
+                        RequirementCheckDetail(criterion: rc.criterion, met: rc.met, note: rc.note)
+                    },
+                    screenshots: r.screenshots
+                )
+            }
+        }
+        if activePhase == phase { activePhase = nil }
+    }
+}
+
 public struct SessionPlan: Sendable {
     public let summary: String
     public let steps: [String]
@@ -256,6 +437,8 @@ public struct Session: Identifiable, Sendable {
     public var escalationOptions: [String]?
     public var escalationType: String?
     public var validationChecks: ValidationChecks?
+    /// Live per-phase validation state streamed from the daemon as each phase completes.
+    public var validationProgress: ValidationProgress?
     public var prUrl: URL?
     public var containerUrl: URL?
     public var plan: SessionPlan?
@@ -315,6 +498,7 @@ public struct Session: Identifiable, Sendable {
         escalationOptions: [String]? = nil,
         escalationType: String? = nil,
         validationChecks: ValidationChecks? = nil,
+        validationProgress: ValidationProgress? = nil,
         prUrl: URL? = nil,
         containerUrl: URL? = nil,
         plan: SessionPlan? = nil,
@@ -338,7 +522,7 @@ public struct Session: Identifiable, Sendable {
         self.acFrom = acFrom; self.acceptanceCriteria = acceptanceCriteria
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
         self.escalationOptions = escalationOptions; self.escalationType = escalationType
-        self.validationChecks = validationChecks; self.prUrl = prUrl
+        self.validationChecks = validationChecks; self.validationProgress = validationProgress; self.prUrl = prUrl
         self.containerUrl = containerUrl; self.plan = plan; self.phase = phase
         self.latestActivity = latestActivity; self.errorSummary = errorSummary
         self.attempts = attempts; self.queuePosition = queuePosition

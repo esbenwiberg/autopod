@@ -150,8 +150,15 @@ public final class EventStream {
     case .agentActivity(let sessionId, let agentEvent):
       handleAgentActivity(sessionId: sessionId, event: agentEvent)
 
-    case .validationStarted(let sessionId, _):
+    case .validationStarted(let sessionId, let attempt):
       sessionStore.updateStatus(sessionId, to: .validating)
+      sessionStore.initValidationProgress(sessionId, attempt: attempt)
+
+    case .validationPhaseStarted(let sessionId, let phase):
+      sessionStore.markValidationPhaseStarted(sessionId, phase: phase)
+
+    case .validationPhaseCompleted(let sessionId, let phase, let result):
+      sessionStore.markValidationPhaseCompleted(sessionId, phase: phase, result: result)
 
     case .validationCompleted(let sessionId, let result):
       let passed = result.overall == "pass"

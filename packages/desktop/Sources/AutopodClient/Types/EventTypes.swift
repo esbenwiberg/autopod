@@ -25,6 +25,17 @@ public struct RawSystemEvent: Codable, Sendable {
   public let attempt: Int?
   public let result: ValidationResponse?
 
+  // session.validation_phase_started / session.validation_phase_completed
+  public let phase: String?
+  public let phaseStatus: String?
+  // Phase-specific results (only one is set per validation_phase_completed event):
+  public let buildResult: BuildResultResponse?
+  public let testResult: TestResultResponse?
+  public let healthResult: HealthResultResponse?
+  public let pageResults: [PageResultResponse]?
+  public let acResult: AcValidationResponse?
+  public let reviewResult: TaskReviewResponse?
+
   // session.escalation_created
   public let escalation: EscalationResponse?
 
@@ -48,6 +59,52 @@ public struct RawSystemEvent: Codable, Sendable {
   public let lastRunAt: String?
 }
 
+// MARK: - ValidationPhase
+
+public enum ValidationPhase: String, Sendable, CaseIterable {
+  case build
+  case test
+  case health
+  case pages
+  case ac
+  case review
+
+  public var displayName: String {
+    switch self {
+    case .build: return "Build"
+    case .test: return "Tests"
+    case .health: return "Health"
+    case .pages: return "Pages"
+    case .ac: return "AC"
+    case .review: return "Review"
+    }
+  }
+}
+
+// MARK: - ValidationPhaseResult
+
+/// Carries the per-phase result data from a session.validation_phase_completed event.
+/// Exactly one result field is populated, matching the phase.
+public struct ValidationPhaseResult: Sendable {
+  public let phaseStatus: String  // "pass" | "fail" | "skip"
+  public let buildResult: BuildResultResponse?
+  public let testResult: TestResultResponse?
+  public let healthResult: HealthResultResponse?
+  public let pageResults: [PageResultResponse]?
+  public let acResult: AcValidationResponse?
+  public let reviewResult: TaskReviewResponse?
+
+  init(from raw: RawSystemEvent) {
+    phaseStatus = raw.phaseStatus ?? "skip"
+    buildResult = raw.buildResult
+    testResult = raw.testResult
+    healthResult = raw.healthResult
+    pageResults = raw.pageResults
+    acResult = raw.acResult
+    reviewResult = raw.reviewResult
+  }
+}
+
 // MARK: - Typed event enum (parsed from RawSystemEvent)
 
 public enum SystemEvent: Sendable {
@@ -56,6 +113,8 @@ public enum SystemEvent: Sendable {
   case agentActivity(sessionId: String, event: AgentEventResponse)
   case validationStarted(sessionId: String, attempt: Int)
   case validationCompleted(sessionId: String, result: ValidationResponse)
+  case validationPhaseStarted(sessionId: String, phase: ValidationPhase)
+  case validationPhaseCompleted(sessionId: String, phase: ValidationPhase, result: ValidationPhaseResult)
   case escalationCreated(sessionId: String, escalation: EscalationResponse)
   case escalationResolved(sessionId: String, escalationId: String)
   case sessionCompleted(sessionId: String, finalStatus: String, summary: SessionSummaryResponse)
@@ -88,6 +147,16 @@ public enum SystemEvent: Sendable {
     case "session.validation_completed":
       guard let id = raw.sessionId, let result = raw.result else { return nil }
       return .validationCompleted(sessionId: id, result: result)
+
+    case "session.validation_phase_started":
+      guard let id = raw.sessionId, let phaseStr = raw.phase,
+            let phase = ValidationPhase(rawValue: phaseStr) else { return nil }
+      return .validationPhaseStarted(sessionId: id, phase: phase)
+
+    case "session.validation_phase_completed":
+      guard let id = raw.sessionId, let phaseStr = raw.phase,
+            let phase = ValidationPhase(rawValue: phaseStr) else { return nil }
+      return .validationPhaseCompleted(sessionId: id, phase: phase, result: ValidationPhaseResult(from: raw))
 
     case "session.escalation_created":
       guard let id = raw.sessionId, let escalation = raw.escalation else { return nil }
