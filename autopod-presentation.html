@@ -1,0 +1,2240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Autopod — AI Coding That Ships</title>
+<style>
+  :root {
+    --bg: #080810;
+    --surface: #0e0e1a;
+    --surface2: #14142a;
+    --border: rgba(120, 80, 255, 0.15);
+    --accent: #7c3aed;
+    --accent2: #06b6d4;
+    --accent3: #10b981;
+    --accent4: #f59e0b;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --danger: #ef4444;
+    --glow: rgba(124, 58, 237, 0.4);
+    --glow2: rgba(6, 182, 212, 0.3);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── NOISE TEXTURE ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── GRID OVERLAY ── */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(120,80,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,80,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  section { position: relative; z-index: 1; }
+
+  /* ── HEADER NAV ── */
+  nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 40px;
+    background: rgba(8, 8, 16, 0.8);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav-logo {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    background: linear-gradient(135deg, #a78bfa, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 32px;
+    list-style: none;
+  }
+
+  .nav-links a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    transition: color 0.2s;
+  }
+
+  .nav-links a:hover { color: var(--text); }
+
+  /* ── HERO ── */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 120px 40px 80px;
+    position: relative;
+  }
+
+  .hero-orb {
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(124,58,237,0.15) 0%, transparent 70%);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    animation: pulse-orb 4s ease-in-out infinite;
+  }
+
+  .hero-orb2 {
+    position: absolute;
+    width: 400px;
+    height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(6,182,212,0.1) 0%, transparent 70%);
+    top: 30%;
+    right: 10%;
+    animation: pulse-orb 6s ease-in-out infinite reverse;
+  }
+
+  @keyframes pulse-orb {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+  }
+
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    border-radius: 100px;
+    border: 1px solid rgba(124,58,237,0.4);
+    background: rgba(124,58,237,0.1);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #a78bfa;
+    margin-bottom: 32px;
+    animation: fadeInDown 0.6s ease both;
+  }
+
+  .hero-badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #a78bfa;
+    animation: blink 1.5s ease-in-out infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  h1 {
+    font-size: clamp(2.5rem, 6vw, 5rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-bottom: 24px;
+    animation: fadeInUp 0.8s ease 0.1s both;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #a78bfa 0%, #06b6d4 50%, #10b981 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-sub {
+    font-size: clamp(1rem, 2vw, 1.25rem);
+    color: var(--muted);
+    max-width: 640px;
+    margin-bottom: 48px;
+    animation: fadeInUp 0.8s ease 0.2s both;
+  }
+
+  .hero-cta {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    animation: fadeInUp 0.8s ease 0.3s both;
+  }
+
+  .btn-primary {
+    padding: 14px 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    color: white;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 0 40px rgba(124,58,237,0.3);
+    letter-spacing: 0.02em;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 60px rgba(124,58,237,0.5);
+  }
+
+  .btn-ghost {
+    padding: 14px 32px;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.9rem;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.02em;
+  }
+
+  .btn-ghost:hover { color: var(--text); border-color: rgba(120,80,255,0.4); }
+
+  /* ── SCROLL INDICATOR ── */
+  .scroll-hint {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    animation: fadeIn 1s ease 1s both;
+  }
+
+  .scroll-arrow {
+    width: 20px;
+    height: 20px;
+    border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted);
+    transform: rotate(45deg);
+    animation: bounce 2s ease infinite;
+  }
+
+  @keyframes bounce {
+    0%, 100% { transform: rotate(45deg) translateY(0); }
+    50% { transform: rotate(45deg) translateY(6px); }
+  }
+
+  /* ── SECTION WRAPPER ── */
+  .section {
+    padding: 100px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .section-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent2);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .section-label::before {
+    content: '';
+    display: block;
+    width: 40px;
+    height: 1px;
+    background: var(--accent2);
+  }
+
+  .section-title {
+    font-size: clamp(1.75rem, 3vw, 2.5rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    margin-bottom: 16px;
+  }
+
+  .section-desc {
+    color: var(--muted);
+    max-width: 600px;
+    font-size: 1.05rem;
+    margin-bottom: 60px;
+  }
+
+  /* ── LIFECYCLE SECTION ── */
+  .lifecycle-section {
+    padding: 100px 0;
+    background: linear-gradient(180deg, var(--bg) 0%, var(--surface) 50%, var(--bg) 100%);
+  }
+
+  .lifecycle-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 40px;
+  }
+
+  .lifecycle-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    padding: 40px 0;
+    scrollbar-width: none;
+    position: relative;
+  }
+
+  .lifecycle-flow::-webkit-scrollbar { display: none; }
+
+  .state-node {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+  }
+
+  .state-bubble {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-align: center;
+    line-height: 1.3;
+    border: 2px solid;
+    position: relative;
+    transition: all 0.3s;
+    cursor: default;
+  }
+
+  .state-bubble:hover {
+    transform: scale(1.1);
+    z-index: 10;
+  }
+
+  .state-bubble.queued { border-color: var(--muted); color: var(--muted); background: rgba(100,116,139,0.1); }
+  .state-bubble.provisioning { border-color: var(--accent4); color: var(--accent4); background: rgba(245,158,11,0.1); }
+  .state-bubble.running { border-color: var(--accent2); color: var(--accent2); background: rgba(6,182,212,0.1); animation: state-pulse 2s ease-in-out infinite; }
+  .state-bubble.validating { border-color: #818cf8; color: #818cf8; background: rgba(129,140,248,0.1); }
+  .state-bubble.validated { border-color: var(--accent3); color: var(--accent3); background: rgba(16,185,129,0.1); }
+  .state-bubble.approved { border-color: var(--accent3); color: var(--accent3); background: rgba(16,185,129,0.15); }
+  .state-bubble.merging { border-color: var(--accent); color: var(--accent); background: rgba(124,58,237,0.1); }
+  .state-bubble.complete { border-color: var(--accent3); color: var(--accent3); background: rgba(16,185,129,0.2); }
+  .state-bubble.failed { border-color: var(--danger); color: var(--danger); background: rgba(239,68,68,0.1); }
+
+  @keyframes state-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(6,182,212,0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(6,182,212,0); }
+  }
+
+  .state-label {
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-align: center;
+    max-width: 90px;
+  }
+
+  .flow-arrow {
+    flex-shrink: 0;
+    width: 40px;
+    height: 2px;
+    position: relative;
+    margin-bottom: 20px;
+  }
+
+  .flow-arrow-main {
+    background: linear-gradient(90deg, rgba(124,58,237,0.3), rgba(124,58,237,0.6));
+    width: 100%;
+    height: 100%;
+  }
+
+  .flow-arrow::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 5px solid transparent;
+    border-left-color: rgba(124,58,237,0.6);
+  }
+
+  .flow-arrow-down {
+    width: 2px;
+    height: 40px;
+    background: linear-gradient(180deg, rgba(239,68,68,0.4), rgba(239,68,68,0.6));
+    margin: 0 auto;
+    position: relative;
+  }
+
+  .flow-arrow-down::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: rgba(239,68,68,0.6);
+  }
+
+  .lifecycle-side {
+    display: flex;
+    align-items: flex-start;
+    gap: 60px;
+    margin-top: 40px;
+  }
+
+  .fix-loop-card {
+    flex: 1;
+    padding: 24px;
+    border-radius: 12px;
+    background: var(--surface2);
+    border: 1px solid rgba(239,68,68,0.2);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .fix-loop-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--danger), transparent);
+  }
+
+  .fix-loop-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--danger);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .fix-loop-card p {
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* ── FEATURES GRID ── */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+
+  @media (max-width: 900px) {
+    .features-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 600px) {
+    .features-grid { grid-template-columns: 1fr; }
+  }
+
+  .feature-card {
+    padding: 28px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: all 0.3s;
+    position: relative;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(30px);
+  }
+
+  .feature-card.visible {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.5s ease, transform 0.5s ease, all 0.3s;
+  }
+
+  .feature-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    background: radial-gradient(circle at top left, var(--card-glow, rgba(124,58,237,0.08)), transparent 60%);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .feature-card:hover {
+    border-color: rgba(124,58,237,0.3);
+    transform: translateY(-4px) !important;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+  }
+
+  .feature-card:hover::before { opacity: 1; }
+
+  .feature-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    font-size: 1.4rem;
+  }
+
+  .feature-card h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+    letter-spacing: -0.01em;
+  }
+
+  .feature-card p {
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.65;
+  }
+
+  .feature-tag {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* ── ESCALATION SECTION ── */
+  .escalation-section {
+    padding: 100px 0;
+    background: linear-gradient(180deg, var(--bg) 0%, #0a0a18 100%);
+  }
+
+  .escalation-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 40px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 80px;
+    align-items: center;
+  }
+
+  @media (max-width: 800px) {
+    .escalation-inner { grid-template-columns: 1fr; gap: 40px; }
+  }
+
+  .code-window {
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #0d0d1a;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.4);
+  }
+
+  .code-window-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 20px;
+    background: #111122;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.red { background: #ff5f57; }
+  .dot.yellow { background: #ffbd2e; }
+  .dot.green { background: #28c941; }
+
+  .code-window-title {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-left: 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  pre {
+    padding: 24px;
+    font-size: 0.78rem;
+    line-height: 1.8;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    overflow-x: auto;
+  }
+
+  .token-keyword { color: #c792ea; }
+  .token-string { color: #c3e88d; }
+  .token-comment { color: #546e7a; font-style: italic; }
+  .token-type { color: #82aaff; }
+  .token-func { color: #82aaff; }
+  .token-num { color: #f78c6c; }
+  .token-punct { color: #89ddff; }
+  .token-prop { color: #f07178; }
+
+  /* ── SECURITY SECTION ── */
+  .security-section {
+    padding: 100px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .security-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    margin-top: 60px;
+  }
+
+  @media (max-width: 800px) {
+    .security-grid { grid-template-columns: 1fr; }
+  }
+
+  .security-card {
+    padding: 32px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .security-card.featured {
+    grid-column: span 2;
+    background: linear-gradient(135deg, rgba(124,58,237,0.1), rgba(6,182,212,0.05));
+    border-color: rgba(124,58,237,0.3);
+  }
+
+  @media (max-width: 800px) {
+    .security-card.featured { grid-column: span 1; }
+  }
+
+  .security-title {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .security-title-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+  }
+
+  .security-card p {
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.65;
+  }
+
+  .network-tiers {
+    display: flex;
+    gap: 16px;
+    margin-top: 20px;
+  }
+
+  .network-tier {
+    flex: 1;
+    padding: 16px;
+    border-radius: 10px;
+    text-align: center;
+    font-size: 0.78rem;
+  }
+
+  .tier-allow { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: var(--accent3); }
+  .tier-deny { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); color: var(--danger); }
+  .tier-restrict { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); color: var(--accent4); }
+
+  .tier-name { font-weight: 700; margin-bottom: 4px; }
+  .tier-desc { color: var(--muted); font-size: 0.72rem; }
+
+  /* ── COMPARE TABLE ── */
+  .compare-section {
+    padding: 100px 40px;
+    background: var(--surface);
+  }
+
+  .compare-inner { max-width: 1100px; margin: 0 auto; }
+
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 60px;
+    font-size: 0.85rem;
+  }
+
+  .compare-table th {
+    padding: 16px 20px;
+    text-align: left;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .compare-table th.highlight {
+    color: var(--accent);
+    font-size: 0.85rem;
+  }
+
+  .compare-table td {
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    vertical-align: middle;
+  }
+
+  .compare-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .compare-table td:first-child {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .compare-table td.ours {
+    background: rgba(124,58,237,0.05);
+    border-left: 1px solid rgba(124,58,237,0.1);
+    border-right: 1px solid rgba(124,58,237,0.1);
+  }
+
+  .check { color: var(--accent3); font-size: 1.1rem; }
+  .cross { color: var(--danger); opacity: 0.5; font-size: 1rem; }
+  .partial { color: var(--accent4); font-size: 0.75rem; font-weight: 600; }
+
+  /* ── RUNTIME SECTION ── */
+  .runtime-section {
+    padding: 100px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .runtime-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-top: 60px;
+  }
+
+  @media (max-width: 700px) {
+    .runtime-cards { grid-template-columns: 1fr; }
+  }
+
+  .runtime-card {
+    padding: 32px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    text-align: center;
+    transition: all 0.3s;
+  }
+
+  .runtime-card:hover {
+    border-color: rgba(124,58,237,0.4);
+    transform: translateY(-4px);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+  }
+
+  .runtime-logo {
+    font-size: 2.5rem;
+    margin-bottom: 16px;
+  }
+
+  .runtime-card h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .runtime-card p {
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  .runtime-badge {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 4px 12px;
+    border-radius: 100px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: rgba(124,58,237,0.15);
+    border: 1px solid rgba(124,58,237,0.3);
+    color: #a78bfa;
+  }
+
+  /* ── ENTERPRISE SECTION ── */
+  .enterprise-section {
+    padding: 100px 40px;
+    background: linear-gradient(135deg, rgba(124,58,237,0.05) 0%, rgba(6,182,212,0.03) 100%);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .enterprise-inner { max-width: 1200px; margin: 0 auto; }
+
+  .enterprise-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    margin-top: 60px;
+  }
+
+  @media (max-width: 900px) {
+    .enterprise-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  @media (max-width: 500px) {
+    .enterprise-grid { grid-template-columns: 1fr; }
+  }
+
+  .ent-card {
+    padding: 24px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    text-align: center;
+  }
+
+  .ent-icon { font-size: 2rem; margin-bottom: 12px; }
+
+  .ent-card h4 {
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .ent-card p {
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* ── STATS ── */
+  .stats-bar {
+    padding: 60px 40px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .stats-inner {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-around;
+    gap: 40px;
+    flex-wrap: wrap;
+  }
+
+  .stat {
+    text-align: center;
+  }
+
+  .stat-num {
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, #a78bfa, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .stat-label {
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* ── FOOTER ── */
+  footer {
+    padding: 40px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.8rem;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* ── VALIDATION PIPELINE ── */
+  .pipeline-section {
+    padding: 100px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .pipeline-steps {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-top: 60px;
+    position: relative;
+  }
+
+  .pipeline-step {
+    flex: 1;
+    padding: 28px 24px;
+    border-radius: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-right: none;
+    position: relative;
+    transition: all 0.3s;
+  }
+
+  .pipeline-step:first-child { border-radius: 16px 0 0 16px; }
+  .pipeline-step:last-child { border-radius: 0 16px 16px 0; border-right: 1px solid var(--border); }
+
+  .pipeline-step:hover { background: var(--surface2); z-index: 1; }
+
+  .pipeline-step::after {
+    content: '→';
+    position: absolute;
+    right: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 1.1rem;
+    color: var(--accent);
+    z-index: 2;
+    background: var(--surface);
+    padding: 4px;
+  }
+
+  .pipeline-step:last-child::after { display: none; }
+
+  .step-num {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .step-name {
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .step-desc {
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .pipeline-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 0;
+    gap: 8px;
+    margin-top: 24px;
+  }
+
+  .arrow-line {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    color: var(--danger);
+    font-style: italic;
+  }
+
+  @media (max-width: 700px) {
+    .pipeline-steps { flex-direction: column; }
+    .pipeline-step { border-right: 1px solid var(--border); border-bottom: none; border-radius: 0; }
+    .pipeline-step:first-child { border-radius: 16px 16px 0 0; }
+    .pipeline-step:last-child { border-radius: 0 0 16px 16px; border-bottom: 1px solid var(--border); }
+    .pipeline-step::after { content: '↓'; right: auto; left: 50%; top: auto; bottom: -14px; transform: translateX(-50%); }
+  }
+
+  /* ── HIGHLIGHT STRIPE ── */
+  .highlight-stripe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .workspace-pods-section {
+    padding: 80px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 60px;
+    align-items: center;
+  }
+
+  @media (max-width: 800px) {
+    .workspace-pods-section { grid-template-columns: 1fr; gap: 40px; }
+  }
+
+  .mode-card {
+    padding: 36px;
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .mode-card.auto { border-color: rgba(124,58,237,0.3); }
+  .mode-card.interactive { border-color: rgba(6,182,212,0.3); }
+
+  .mode-card .mode-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .mode-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+  }
+
+  .mode-icon.auto { background: rgba(124,58,237,0.15); }
+  .mode-icon.interactive { background: rgba(6,182,212,0.15); }
+
+  .mode-card h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  .mode-card .mode-subtitle {
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+
+  .mode-features {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .mode-features li {
+    font-size: 0.83rem;
+    color: var(--muted);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .mode-features li::before {
+    content: '▸';
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    margin-top: 2px;
+  }
+
+  .mode-card.auto .mode-features li::before { color: #a78bfa; }
+  .mode-card.interactive .mode-features li::before { color: var(--accent2); }
+
+  /* ── ACP SECTION ── */
+  .acp-section {
+    padding: 100px 0;
+    background: linear-gradient(180deg, var(--bg) 0%, #0b0b1f 50%, var(--bg) 100%);
+    border-top: 1px solid var(--border);
+  }
+
+  .acp-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 40px;
+  }
+
+  .acp-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 60px 0 48px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .acp-flow::-webkit-scrollbar { display: none; }
+
+  .acp-node {
+    flex-shrink: 0;
+    padding: 16px 20px;
+    border-radius: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    text-align: center;
+    min-width: 120px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    transition: all 0.25s;
+    cursor: default;
+  }
+
+  .acp-node:hover { transform: translateY(-3px); border-color: rgba(124,58,237,0.4); }
+
+  .acp-node.agent  { border-color: rgba(6,182,212,0.4); color: var(--accent2); background: rgba(6,182,212,0.06); }
+  .acp-node.daemon { border-color: rgba(124,58,237,0.4); color: #a78bfa; background: rgba(124,58,237,0.08); }
+  .acp-node.gate   { border-color: rgba(245,158,11,0.4); color: var(--accent4); background: rgba(245,158,11,0.06); }
+  .acp-node.pipe   { border-color: rgba(16,185,129,0.4); color: var(--accent3); background: rgba(16,185,129,0.06); }
+  .acp-node.backend { border-color: rgba(239,68,68,0.3); color: #fca5a5; background: rgba(239,68,68,0.06); }
+  .acp-node.audit  { border-color: rgba(100,116,139,0.4); color: var(--muted); }
+
+  .acp-node .node-label {
+    font-size: 0.65rem;
+    opacity: 0.65;
+    font-weight: 400;
+    margin-top: 4px;
+  }
+
+  .acp-arrow {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    color: rgba(124,58,237,0.5);
+    font-size: 1.1rem;
+  }
+
+  .acp-arrow.danger { color: rgba(239,68,68,0.5); }
+
+  .acp-three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 48px;
+  }
+
+  @media (max-width: 900px) {
+    .acp-three-col { grid-template-columns: 1fr; }
+  }
+
+  .acp-card {
+    padding: 28px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.25s;
+  }
+
+  .acp-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 16px 32px rgba(0,0,0,0.3);
+  }
+
+  .acp-card-accent {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+
+  .acp-card h4 {
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .acp-card p {
+    font-size: 0.82rem;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .acp-handlers {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-top: 48px;
+  }
+
+  @media (max-width: 800px) {
+    .acp-handlers { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  .handler-card {
+    padding: 20px 16px;
+    border-radius: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    text-align: center;
+    transition: all 0.25s;
+    cursor: default;
+  }
+
+  .handler-card:hover {
+    border-color: rgba(124,58,237,0.3);
+    transform: translateY(-3px);
+  }
+
+  .handler-icon { font-size: 1.8rem; margin-bottom: 10px; }
+
+  .handler-card h5 {
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .handler-card p {
+    font-size: 0.7rem;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  .policy-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  @media (max-width: 600px) {
+    .policy-grid { grid-template-columns: 1fr; }
+  }
+
+  .policy-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .policy-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #a78bfa;
+    flex-shrink: 0;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── NAV ── -->
+<nav>
+  <div class="nav-logo">⬡ AUTOPOD</div>
+  <ul class="nav-links">
+    <li><a href="#lifecycle">Lifecycle</a></li>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#acp">ACP</a></li>
+    <li><a href="#security">Security</a></li>
+    <li><a href="#enterprise">Enterprise</a></li>
+    <li><a href="#compare">vs. Others</a></li>
+  </ul>
+</nav>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="hero-orb"></div>
+  <div class="hero-orb2"></div>
+
+  <div class="hero-badge">
+    <div class="hero-badge-dot"></div>
+    AI-native CI/CD platform
+  </div>
+
+  <h1>
+    The AI Coding Agent<br/>
+    <span class="gradient-text">Built to Actually Ship</span>
+  </h1>
+
+  <p class="hero-sub">
+    Not a one-shot assistant. A full orchestration platform — containerized, self-healing,
+    enterprise-grade. From task to merged PR, autonomously.
+  </p>
+
+  <div class="hero-cta">
+    <button class="btn-primary" onclick="document.getElementById('lifecycle').scrollIntoView({behavior:'smooth'})">
+      See how it works
+    </button>
+    <button class="btn-ghost" onclick="document.getElementById('compare').scrollIntoView({behavior:'smooth'})">
+      Compare vs. alternatives
+    </button>
+  </div>
+
+  <div class="scroll-hint">
+    <span>Scroll</span>
+    <div class="scroll-arrow"></div>
+  </div>
+</section>
+
+<!-- ── STATS ── -->
+<div class="stats-bar">
+  <div class="stats-inner">
+    <div class="stat">
+      <div class="stat-num">9</div>
+      <div class="stat-label">Session states</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">3</div>
+      <div class="stat-label">AI runtimes supported</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">7</div>
+      <div class="stat-label">Escalation types</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">256-bit</div>
+      <div class="stat-label">Credential encryption</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">∞</div>
+      <div class="stat-label">Self-correcting loops</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── LIFECYCLE ── -->
+<div id="lifecycle" class="lifecycle-section">
+  <div class="lifecycle-inner">
+    <div class="section-label">Session Orchestration</div>
+    <h2 class="section-title">A full lifecycle, not a single prompt</h2>
+    <p class="section-desc">
+      Every session is a state machine with real validation feedback loops.
+      Code gets tested before it gets merged. Automatically.
+    </p>
+
+    <!-- Main flow -->
+    <div class="lifecycle-flow">
+      <div class="state-node">
+        <div class="state-bubble queued">QUEUED</div>
+        <div class="state-label">waiting in pool</div>
+      </div>
+      <div class="flow-arrow"><div class="flow-arrow-main"></div></div>
+      <div class="state-node">
+        <div class="state-bubble provisioning">PROVISION&shy;ING</div>
+        <div class="state-label">container spawn</div>
+      </div>
+      <div class="flow-arrow"><div class="flow-arrow-main"></div></div>
+      <div class="state-node">
+        <div class="state-bubble running">RUNNING</div>
+        <div class="state-label">agent executing</div>
+      </div>
+      <div class="flow-arrow"><div class="flow-arrow-main"></div></div>
+      <div class="state-node">
+        <div class="state-bubble validating">VALIDATING</div>
+        <div class="state-label">build + smoke tests</div>
+      </div>
+      <div class="flow-arrow"><div class="flow-arrow-main"></div></div>
+      <div class="state-node">
+        <div class="state-bubble validated">VALIDATED</div>
+        <div class="state-label">tests passed</div>
+      </div>
+      <div class="flow-arrow"><div class="flow-arrow-main"></div></div>
+      <div class="state-node">
+        <div class="state-bubble approved">APPROVED</div>
+        <div class="state-label">human sign-off</div>
+      </div>
+      <div class="flow-arrow"><div class="flow-arrow-main"></div></div>
+      <div class="state-node">
+        <div class="state-bubble merging">MERGING</div>
+        <div class="state-label">PR lifecycle</div>
+      </div>
+      <div class="flow-arrow"><div class="flow-arrow-main"></div></div>
+      <div class="state-node">
+        <div class="state-bubble complete">COMPLETE</div>
+        <div class="state-label">shipped</div>
+      </div>
+    </div>
+
+    <!-- Self-healing cards -->
+    <div class="lifecycle-side">
+      <div class="fix-loop-card">
+        <div class="fix-loop-title">
+          <span>🔄</span> Validation Feedback Loop
+        </div>
+        <p>
+          When tests fail, Autopod doesn't give up. It feeds the exact failure context back to
+          the agent — which tests failed, what was expected, what happened — and lets it retry
+          in the same session. Up to 3 correction attempts before escalating to a human.
+        </p>
+      </div>
+      <div class="fix-loop-card">
+        <div class="fix-loop-title">
+          <span>🛠</span> Auto Fix Sessions on CI Failure
+        </div>
+        <p>
+          Even after merge, if CI breaks, Autopod spawns a new fix session automatically.
+          It reads the CI logs, understands the failure, fixes the code, and re-opens a PR.
+          No human needs to triage the failure. Up to 3 fix attempts, configurable.
+        </p>
+      </div>
+      <div class="fix-loop-card">
+        <div class="fix-loop-title">
+          <span>💬</span> Human Rejection → Fresh Run
+        </div>
+        <p>
+          When a human rejects work (not just validation), the attempt counter resets completely.
+          The agent gets fresh context, the human's feedback, and starts again from that state.
+          Not a new session — a smarter retry.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── VALIDATION PIPELINE ── -->
+<div id="validation" class="pipeline-section">
+  <div class="section-label">Quality Gates</div>
+  <h2 class="section-title">Four-phase validation before any merge</h2>
+  <p class="section-desc">
+    Not just "does it compile." Every PR runs a full verification pipeline,
+    inside the same container the agent worked in.
+  </p>
+
+  <div class="pipeline-steps">
+    <div class="pipeline-step">
+      <div class="highlight-stripe" style="background: linear-gradient(90deg, #f59e0b, #ef4444)"></div>
+      <div class="step-num">Phase 01</div>
+      <div class="step-name">Build</div>
+      <div class="step-desc">Runs your profile's build command. Captures stdout, stderr, exit code. No assumptions.</div>
+    </div>
+    <div class="pipeline-step">
+      <div class="highlight-stripe" style="background: linear-gradient(90deg, #06b6d4, #3b82f6)"></div>
+      <div class="step-num">Phase 02</div>
+      <div class="step-name">Health Check</div>
+      <div class="step-desc">Polls your health check URL until 200 OK or timeout. Configurable per profile.</div>
+    </div>
+    <div class="pipeline-step">
+      <div class="highlight-stripe" style="background: linear-gradient(90deg, #8b5cf6, #ec4899)"></div>
+      <div class="step-num">Phase 03</div>
+      <div class="step-name">Playwright Smoke Tests</div>
+      <div class="step-desc">Auto-generated browser tests run against your app. Screenshots captured and embedded in PRs.</div>
+    </div>
+    <div class="pipeline-step">
+      <div class="highlight-stripe" style="background: linear-gradient(90deg, #10b981, #06b6d4)"></div>
+      <div class="step-num">Phase 04</div>
+      <div class="step-name">AI Task Review</div>
+      <div class="step-desc">The diff + acceptance criteria go to an AI reviewer. Pass/fail with specific notes fed back to agent.</div>
+    </div>
+  </div>
+
+  <p style="margin-top: 24px; font-size: 0.82rem; color: var(--muted); font-style: italic;">
+    ↩ Failures at any phase produce structured feedback, automatically sent back to the agent for correction.
+    Findings are fingerprinted — duplicates across retries don't cause extra loops.
+  </p>
+</div>
+
+<!-- ── FEATURES GRID ── -->
+<section id="features">
+  <div class="section" style="padding-top: 0;">
+    <div class="section-label">Core Features</div>
+    <h2 class="section-title">Everything else does one thing.<br/>Autopod does the whole job.</h2>
+    <p class="section-desc">
+      From ephemeral container isolation to full PR lifecycle management,
+      the features that enterprise teams actually need.
+    </p>
+
+    <div class="features-grid">
+
+      <div class="feature-card" style="--card-glow: rgba(124,58,237,0.1);">
+        <div class="feature-icon" style="background: rgba(124,58,237,0.15);">🔐</div>
+        <h3>Escalation to Humans & AI</h3>
+        <p>Agents can block on human input, consult another AI, report a blocker, or request credentials — all without polling. The MCP server injected into every container makes it native to the agent's toolchain.</p>
+        <span class="feature-tag" style="background: rgba(124,58,237,0.15); color: #a78bfa;">7 escalation types</span>
+      </div>
+
+      <div class="feature-card" style="--card-glow: rgba(6,182,212,0.1);">
+        <div class="feature-icon" style="background: rgba(6,182,212,0.15);">🛡</div>
+        <h3>Network Isolation per Container</h3>
+        <p>Three-tier firewall: allow-all, deny-all, or restricted allowlist. Every container gets its own network stack with iptables rules. Agents can't exfiltrate data or hit unexpected endpoints.</p>
+        <span class="feature-tag" style="background: rgba(6,182,212,0.15); color: var(--accent2);">3 firewall modes</span>
+      </div>
+
+      <div class="feature-card" style="--card-glow: rgba(16,185,129,0.08);">
+        <div class="feature-icon" style="background: rgba(16,185,129,0.15);">🤖</div>
+        <h3>Multi-Runtime: Bring Your Own AI</h3>
+        <p>Claude, GPT/Codex, or GitHub Copilot — all behind the same interface. Each runtime has its own stream parser with edge-case test coverage. Switch runtimes per profile, not per deployment.</p>
+        <span class="feature-tag" style="background: rgba(16,185,129,0.15); color: var(--accent3);">3 runtimes</span>
+      </div>
+
+      <div class="feature-card" style="--card-glow: rgba(245,158,11,0.08);">
+        <div class="feature-icon" style="background: rgba(245,158,11,0.15);">📦</div>
+        <h3>Private Registry Injection</h3>
+        <p>Auto-generates .npmrc for npm + Azure DevOps feeds. Auto-generates NuGet.config with credential guard hooks for .NET. Validated before container start. No manual config per session.</p>
+        <span class="feature-tag" style="background: rgba(245,158,11,0.15); color: var(--accent4);">npm + NuGet</span>
+      </div>
+
+      <div class="feature-card" style="--card-glow: rgba(129,140,248,0.08);">
+        <div class="feature-icon" style="background: rgba(129,140,248,0.15);">🧠</div>
+        <h3>Persistent Memory System</h3>
+        <p>Three-scope memory (global, profile, session). Agents suggest memories; humans approve before they activate. Agents learn your codebase conventions without hallucinating them.</p>
+        <span class="feature-tag" style="background: rgba(129,140,248,0.15); color: #818cf8;">human-approved</span>
+      </div>
+
+      <div class="feature-card" style="--card-glow: rgba(239,68,68,0.08);">
+        <div class="feature-icon" style="background: rgba(239,68,68,0.15);">🛂</div>
+        <h3>Action Control Plane (ACP)</h3>
+        <p>A secure broker between agents and the real world. Agents call GitHub, ADO, Azure, and any HTTP API through a policy gate — with approval flows, resource restrictions, 3-stage sanitization, and a full audit trail. Credentials never leave the daemon.</p>
+        <span class="feature-tag" style="background: rgba(239,68,68,0.15); color: var(--danger);">zero credential exposure</span>
+      </div>
+
+      <div class="feature-card" style="--card-glow: rgba(16,185,129,0.08);">
+        <div class="feature-icon" style="background: rgba(16,185,129,0.15);">🌳</div>
+        <h3>Git Worktree Isolation</h3>
+        <p>Each session gets its own git worktree. No branch conflicts between concurrent sessions. Local worktree manager handles create, checkout, push. PATs are stripped from remote URLs before mounting.</p>
+        <span class="feature-tag" style="background: rgba(16,185,129,0.15); color: var(--accent3);">concurrent sessions</span>
+      </div>
+
+      <div class="feature-card" style="--card-glow: rgba(124,58,237,0.08);">
+        <div class="feature-icon" style="background: rgba(124,58,237,0.15);">💻</div>
+        <h3>Native macOS Desktop App</h3>
+        <p>Swift/Xcode app for real-time session monitoring. Stream logs to your desktop, pause/resume/kill sessions, respond to escalation prompts, and connect an interactive terminal — all without touching the CLI.</p>
+        <span class="feature-tag" style="background: rgba(124,58,237,0.15); color: #a78bfa;">Swift native</span>
+      </div>
+
+      <div class="feature-card" style="--card-glow: rgba(6,182,212,0.08);">
+        <div class="feature-icon" style="background: rgba(6,182,212,0.15);">⚡</div>
+        <h3>Skills + MCP Extensibility</h3>
+        <p>Reusable skills (from local files or GitHub repos) merge into every session's system prompt. Inject custom MCP servers into containers. Build your toolchain once, compose it everywhere.</p>
+        <span class="feature-tag" style="background: rgba(6,182,212,0.15); color: var(--accent2);">fully extensible</span>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── ESCALATION ── -->
+<div id="escalation" class="escalation-section">
+  <div class="escalation-inner">
+    <div>
+      <div class="section-label">Human in the Loop</div>
+      <h2 class="section-title">Agents that know when to ask</h2>
+      <p style="color: var(--muted); font-size: 0.95rem; line-height: 1.7; margin-bottom: 32px;">
+        Autopod agents aren't fire-and-forget. When they hit an ambiguous requirement,
+        they block and wait. When they need credentials, they request them — and the
+        daemon injects them directly into the container without exposing the token.
+        After a configurable threshold, the session auto-pauses for human review.
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; gap: 12px; align-items: center; font-size: 0.82rem; color: var(--muted);">
+          <span style="color: var(--accent3);">●</span>
+          <code style="color: #c3e88d;">ask_human</code> — blocks session until human responds (up to 1hr timeout)
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; font-size: 0.82rem; color: var(--muted);">
+          <span style="color: var(--accent3);">●</span>
+          <code style="color: #c3e88d;">ask_ai</code> — consults a second AI model, rate-limited to 5 per session
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; font-size: 0.82rem; color: var(--muted);">
+          <span style="color: var(--accent3);">●</span>
+          <code style="color: #c3e88d;">report_blocker</code> — auto-pauses after N blockers, configurable threshold
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; font-size: 0.82rem; color: var(--muted);">
+          <span style="color: var(--accent3);">●</span>
+          <code style="color: #c3e88d;">request_credential</code> — credential injected by daemon, agent never sees the token
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; font-size: 0.82rem; color: var(--muted);">
+          <span style="color: var(--accent3);">●</span>
+          <code style="color: #c3e88d;">validate_in_browser</code> — Playwright smoke test triggered by the agent itself
+        </div>
+      </div>
+    </div>
+
+    <div class="code-window">
+      <div class="code-window-bar">
+        <div class="dot red"></div>
+        <div class="dot yellow"></div>
+        <div class="dot green"></div>
+        <span class="code-window-title">escalation-mcp / tools / ask_human.ts</span>
+      </div>
+      <pre><span class="token-comment">// Injected MCP server inside agent container</span>
+<span class="token-comment">// Agent calls this when it needs human input</span>
+
+<span class="token-keyword">const</span> <span class="token-func">ask_human</span> <span class="token-punct">=</span> <span class="token-func">tool</span><span class="token-punct">({</span>
+  <span class="token-prop">description</span><span class="token-punct">:</span> <span class="token-string">'Block until human responds'</span><span class="token-punct">,</span>
+  <span class="token-prop">inputSchema</span><span class="token-punct">:</span> <span class="token-punct">{</span>
+    <span class="token-prop">question</span><span class="token-punct">:</span> <span class="token-type">string</span><span class="token-punct">,</span>
+    <span class="token-prop">context</span><span class="token-punct">?:</span> <span class="token-type">string</span><span class="token-punct">,</span>
+    <span class="token-prop">timeout_ms</span><span class="token-punct">?:</span> <span class="token-type">number</span>   <span class="token-comment">// default: 3_600_000</span>
+  <span class="token-punct">},</span>
+  <span class="token-keyword">async</span> <span class="token-func">handler</span><span class="token-punct">(</span><span class="token-punct">{</span> question<span class="token-punct">,</span> context<span class="token-punct">,</span> timeout_ms <span class="token-punct">})</span> <span class="token-punct">{</span>
+    <span class="token-comment">// Push escalation to daemon event bus</span>
+    <span class="token-keyword">const</span> pending <span class="token-punct">=</span> <span class="token-keyword">await</span> bridge
+      <span class="token-punct">.</span><span class="token-func">createEscalation</span><span class="token-punct">({</span>
+        type<span class="token-punct">:</span> <span class="token-string">'ask_human'</span><span class="token-punct">,</span>
+        question<span class="token-punct">,</span> context
+      <span class="token-punct">});</span>
+
+    <span class="token-comment">// Block until human responds or times out</span>
+    <span class="token-keyword">return</span> <span class="token-keyword">await</span> pending<span class="token-punct">.</span><span class="token-func">waitForResolution</span><span class="token-punct">(</span>
+      timeout_ms <span class="token-punct">??</span> <span class="token-num">3_600_000</span>
+    <span class="token-punct">);</span>
+  <span class="token-punct">}</span>
+<span class="token-punct">});</span></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ── WORKSPACE PODS ── -->
+<section>
+  <div style="max-width: 1200px; margin: 0 auto; padding: 100px 40px 60px;">
+    <div class="section-label">Two Modes</div>
+    <h2 class="section-title">Automated sessions and interactive workspaces</h2>
+    <p class="section-desc">
+      Not everything should be fully autonomous. Autopod gives you both.
+    </p>
+  </div>
+
+  <div class="workspace-pods-section" style="padding-top: 0;">
+    <div class="mode-card auto">
+      <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #7c3aed, #a78bfa);"></div>
+      <div class="mode-header">
+        <div class="mode-icon auto">🤖</div>
+        <div>
+          <h3>Automated Sessions</h3>
+          <div class="mode-subtitle">Fully autonomous, end-to-end</div>
+        </div>
+      </div>
+      <ul class="mode-features">
+        <li>Agent executes your task autonomously inside an isolated container</li>
+        <li>Multi-phase validation — build, health check, smoke tests, AI review</li>
+        <li>Validation failures feed back to agent for self-correction</li>
+        <li>PR created, monitored, and fixed automatically</li>
+        <li>Escalation gates for blocking decisions</li>
+        <li>Full audit trail of every action taken</li>
+      </ul>
+    </div>
+
+    <div class="mode-card interactive">
+      <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #06b6d4, #3b82f6);"></div>
+      <div class="mode-header">
+        <div class="mode-icon interactive">🧑‍💻</div>
+        <div>
+          <h3>Workspace Pods</h3>
+          <div class="mode-subtitle">Interactive — you are the agent</div>
+        </div>
+      </div>
+      <ul class="mode-features">
+        <li>Shell access to a container with your full stack pre-configured</li>
+        <li>No agent — you drive, with full build tooling available</li>
+        <li>Branch auto-pushed when container exits</li>
+        <li>Same network isolation and credential injection as automated sessions</li>
+        <li>Ideal for exploratory refactors, complex debugging, or risky migrations</li>
+        <li>Hand off to an automated session for validation and PR</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ── ACP ── -->
+<div id="acp" class="acp-section">
+  <div class="acp-inner">
+    <div class="section-label">Action Control Plane</div>
+    <h2 class="section-title">Agents that interact with the real world.<br/>Safely.</h2>
+    <p class="section-desc">
+      ACP is the broker between AI agents and your external systems — GitHub, Azure DevOps,
+      Azure services, or any HTTP API. Agents never touch credentials, never make direct
+      network calls, and every action is logged. The daemon is the only one who knows the secrets.
+    </p>
+
+    <!-- Flow diagram -->
+    <div class="acp-flow">
+      <div class="acp-node agent">
+        🤖 Agent
+        <div class="node-label">inside container</div>
+      </div>
+      <div class="acp-arrow">→</div>
+      <div class="acp-node daemon">
+        execute_action
+        <div class="node-label">MCP tool call</div>
+      </div>
+      <div class="acp-arrow">→</div>
+      <div class="acp-node gate">
+        Policy Gate
+        <div class="node-label">enabled? approved? allowed?</div>
+      </div>
+      <div class="acp-arrow">→</div>
+      <div class="acp-node backend">
+        Handler
+        <div class="node-label">GitHub / ADO / Azure / HTTP</div>
+      </div>
+      <div class="acp-arrow danger">→</div>
+      <div class="acp-node pipe">
+        Sanitize
+        <div class="node-label">injection + PII + field whitelist</div>
+      </div>
+      <div class="acp-arrow">→</div>
+      <div class="acp-node audit">
+        Audit Log
+        <div class="node-label">every call, every result</div>
+      </div>
+      <div class="acp-arrow">→</div>
+      <div class="acp-node agent">
+        🤖 Agent
+        <div class="node-label">gets clean result</div>
+      </div>
+    </div>
+
+    <!-- Three pillars -->
+    <div class="acp-three-col">
+      <div class="acp-card">
+        <div class="acp-card-accent" style="background: linear-gradient(90deg, #f59e0b, #ef4444);"></div>
+        <h4>🛂 Policy Gate — Three Layers</h4>
+        <p>Every action is checked against the profile's <code style="color: #c3e88d;">ActionPolicy</code> before execution. Three independent checks must all pass:</p>
+        <div class="policy-grid" style="margin-top: 14px;">
+          <div class="policy-item">
+            <div class="policy-dot" style="background: var(--accent4);"></div>
+            <span><strong style="color: var(--text);">Group enabled?</strong> — action group must be in the profile's allowlist</span>
+          </div>
+          <div class="policy-item">
+            <div class="policy-dot" style="background: var(--danger);"></div>
+            <span><strong style="color: var(--text);">Approval gate</strong> — high-risk actions require explicit human approval before execution</span>
+          </div>
+          <div class="policy-item">
+            <div class="policy-dot" style="background: #a78bfa;"></div>
+            <span><strong style="color: var(--text);">Resource restriction</strong> — per-action allowlist of specific repos, orgs, or endpoints</span>
+          </div>
+          <div class="policy-item">
+            <div class="policy-dot" style="background: var(--accent2);"></div>
+            <span><strong style="color: var(--text);">Per-action override</strong> — disable or reconfigure any built-in action per profile</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="acp-card">
+        <div class="acp-card-accent" style="background: linear-gradient(90deg, #ef4444, #ec4899);"></div>
+        <h4>🧹 3-Stage Sanitization Pipeline</h4>
+        <p>Every response from a backend passes through three sequential filters before the agent sees a single byte:</p>
+        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 14px;">
+          <div style="padding: 10px 14px; border-radius: 8px; background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.15); font-size: 0.78rem;">
+            <div style="color: var(--danger); font-weight: 700; margin-bottom: 4px;">① Prompt Injection Quarantine</div>
+            <div style="color: var(--muted);">Score-based detection. Above threshold → blocked entirely before any processing.</div>
+          </div>
+          <div style="padding: 10px 14px; border-radius: 8px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.15); font-size: 0.78rem;">
+            <div style="color: var(--accent4); font-weight: 700; margin-bottom: 4px;">② PII Stripping</div>
+            <div style="color: var(--muted);">Emails, API keys, AWS/Azure secrets, IP addresses stripped via regex patterns.</div>
+          </div>
+          <div style="padding: 10px 14px; border-radius: 8px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.15); font-size: 0.78rem;">
+            <div style="color: var(--accent3); font-weight: 700; margin-bottom: 4px;">③ Field Whitelist</div>
+            <div style="color: var(--muted);">Only explicitly configured fields returned. Everything else redacted — including surprise fields from API updates.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="acp-card">
+        <div class="acp-card-accent" style="background: linear-gradient(90deg, #7c3aed, #06b6d4);"></div>
+        <h4>⚙️ Fully Configurable Per Profile</h4>
+        <p>ACP isn't a global toggle. Every profile configures its own action surface:</p>
+        <div style="margin-top: 14px;">
+          <div class="code-window">
+            <div class="code-window-bar" style="padding: 10px 16px;">
+              <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
+              <span class="code-window-title">ActionPolicy</span>
+            </div>
+            <pre style="padding: 16px; font-size: 0.7rem;"><span class="token-punct">{</span>
+  <span class="token-prop">enabledGroups</span><span class="token-punct">:</span> <span class="token-punct">[</span>
+    <span class="token-string">'github-issues'</span><span class="token-punct">,</span>
+    <span class="token-string">'ado-workitems'</span>
+  <span class="token-punct">],</span>
+  <span class="token-prop">actionOverrides</span><span class="token-punct">:</span> <span class="token-punct">[{</span>
+    <span class="token-prop">name</span><span class="token-punct">:</span> <span class="token-string">'close_issue'</span><span class="token-punct">,</span>
+    <span class="token-prop">requiresApproval</span><span class="token-punct">:</span> <span class="token-keyword">true</span><span class="token-punct">,</span>
+    <span class="token-prop">allowedResources</span><span class="token-punct">:</span> <span class="token-punct">[</span><span class="token-string">'myorg/myrepo'</span><span class="token-punct">]</span>
+  <span class="token-punct">}],</span>
+  <span class="token-prop">sanitization</span><span class="token-punct">:</span> <span class="token-punct">{</span>
+    <span class="token-prop">preset</span><span class="token-punct">:</span> <span class="token-string">'strict'</span>
+  <span class="token-punct">}</span>
+<span class="token-punct">}</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Handlers -->
+    <div class="section-label" style="margin-bottom: 16px;">Available Handlers</div>
+    <div class="acp-handlers">
+      <div class="handler-card">
+        <div class="handler-icon">🐙</div>
+        <h5>GitHub</h5>
+        <p>Issues, PRs, code search, file reads — via Octokit</p>
+      </div>
+      <div class="handler-card">
+        <div class="handler-icon">🔷</div>
+        <h5>Azure DevOps</h5>
+        <p>Work items, PRs, code search — native REST client</p>
+      </div>
+      <div class="handler-card">
+        <div class="handler-icon">☁️</div>
+        <h5>Azure Logs</h5>
+        <p>Azure Monitor + Log Analytics queries for debugging</p>
+      </div>
+      <div class="handler-card">
+        <div class="handler-icon">🔐</div>
+        <h5>Azure PIM</h5>
+        <p>Privileged Identity Management — role elevation requests</p>
+      </div>
+      <div class="handler-card">
+        <div class="handler-icon">🌐</div>
+        <h5>Generic HTTP</h5>
+        <p>Any REST API. Define actions in profile config, no code required</p>
+      </div>
+    </div>
+
+    <div style="margin-top: 32px; padding: 20px 24px; border-radius: 12px; background: rgba(124,58,237,0.06); border: 1px solid rgba(124,58,237,0.2); font-size: 0.83rem; color: var(--muted); line-height: 1.6;">
+      <strong style="color: #a78bfa;">Why this matters:</strong> other tools let agents run shell commands and hope for the best.
+      Autopod gives agents <em>structured</em> access to real systems — with the same audit trail, approval gates,
+      and sanitization pipeline whether they're reading a GitHub issue or querying Azure Monitor logs.
+      The agent never sees a secret. You always know what happened.
+    </div>
+  </div>
+</div>
+
+<!-- ── SECURITY ── -->
+<section id="security">
+  <div class="security-section">
+    <div class="section-label">Security Model</div>
+    <h2 class="section-title">Defense in depth, not defense in hope</h2>
+    <p class="section-desc">
+      Credentials never leave the daemon. Agents can't reach the internet without permission.
+      Every action is logged. Every output is sanitized.
+    </p>
+
+    <div class="security-grid">
+      <div class="security-card featured">
+        <div class="security-title">
+          <div class="security-title-icon" style="background: rgba(6,182,212,0.15); color: var(--accent2);">🔒</div>
+          Network Firewall — Three Tiers
+        </div>
+        <p style="margin-bottom: 20px;">
+          Every container gets its own network stack. You choose the security posture per profile.
+          The restricted mode uses dnsmasq with wildcard host matching — fine-grained enough for
+          package registries and API endpoints, strict enough for sensitive workloads.
+        </p>
+        <div class="network-tiers">
+          <div class="network-tier tier-allow">
+            <div class="tier-name">allow-all</div>
+            <div class="tier-desc">unrestricted outbound — for trusted agents</div>
+          </div>
+          <div class="network-tier tier-deny">
+            <div class="tier-name">deny-all</div>
+            <div class="tier-desc">zero outbound — pure sandbox mode</div>
+          </div>
+          <div class="network-tier tier-restrict">
+            <div class="tier-name">restricted</div>
+            <div class="tier-desc">allowlist of host:port pairs with wildcard support</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="security-card">
+        <div class="security-title">
+          <div class="security-title-icon" style="background: rgba(124,58,237,0.15); color: #a78bfa;">🗝</div>
+          AES-256 Credential Encryption
+        </div>
+        <p>All stored credentials are AES-256 encrypted at rest. The key lives at ~/.autopod/secrets.key, separate from the database. Agents receive credentials via daemon injection — the plaintext token never appears in logs or in the container filesystem.</p>
+      </div>
+
+      <div class="security-card">
+        <div class="security-title">
+          <div class="security-title-icon" style="background: rgba(16,185,129,0.15); color: var(--accent3);">🧹</div>
+          PII Sanitization Pipeline
+        </div>
+        <p>Agent output passes through a pattern-detection engine before storage. Matches against known PII patterns and prompt injection attempts. Quarantines suspicious output with flagged sections before persisting to the database.</p>
+      </div>
+
+      <div class="security-card">
+        <div class="security-title">
+          <div class="security-title-icon" style="background: rgba(245,158,11,0.15); color: var(--accent4);">🔑</div>
+          HMAC Session Tokens
+        </div>
+        <p>Session tokens are HMAC-signed, short-lived, and validated on every request. In production, Azure Entra ID authentication is enforced end-to-end. Development mode stubs auth for local testing without config overhead.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── RUNTIMES ── -->
+<div id="runtimes" class="runtime-section">
+  <div class="section-label">AI Runtimes</div>
+  <h2 class="section-title">No vendor lock-in. Bring your own AI.</h2>
+  <p class="section-desc">
+    Autopod doesn't care which AI you use. All three runtimes speak the same interface,
+    with vendor-specific stream parsers that handle the edge cases.
+  </p>
+
+  <div class="runtime-cards">
+    <div class="runtime-card">
+      <div class="runtime-logo">🟣</div>
+      <h3>Anthropic Claude</h3>
+      <p>Full SSE streaming with session resumption via claude_session_id. Supports all Claude models via API.</p>
+      <div class="runtime-badge">Anthropic API</div>
+    </div>
+    <div class="runtime-card">
+      <div class="runtime-logo">🟢</div>
+      <h3>OpenAI / Codex</h3>
+      <p>GPT and Codex streaming with transcript reconstruction for mid-stream recovery and resume.</p>
+      <div class="runtime-badge">OpenAI API</div>
+    </div>
+    <div class="runtime-card">
+      <div class="runtime-logo">🔵</div>
+      <h3>GitHub Copilot</h3>
+      <p>Custom streaming format parser, tested against Copilot's edge cases. Works with enterprise GitHub Copilot.</p>
+      <div class="runtime-badge">Copilot API</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 32px; padding: 24px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); font-size: 0.85rem; color: var(--muted);">
+    <strong style="color: var(--text);">Model provider abstraction</strong> — credentials stored per-provider (Anthropic, OpenAI, Max, Foundry).
+    Token refresh handled automatically. Entra auth delegation for enterprise accounts. Switch models per profile without touching code.
+  </div>
+</div>
+
+<!-- ── ENTERPRISE ── -->
+<div id="enterprise" class="enterprise-section">
+  <div class="enterprise-inner">
+    <div class="section-label">Enterprise Ready</div>
+    <h2 class="section-title">Built for teams that live in Azure</h2>
+    <p class="section-desc">
+      First-class Azure, ADO, and enterprise registry support — not bolted on as afterthoughts.
+    </p>
+
+    <div class="enterprise-grid">
+      <div class="ent-card">
+        <div class="ent-icon">☁️</div>
+        <h4>Azure Container Instances</h4>
+        <p>Drop-in replacement for Docker. Run sessions at scale on ACI without managing infrastructure.</p>
+      </div>
+      <div class="ent-card">
+        <div class="ent-icon">🗂</div>
+        <h4>Azure DevOps PRs</h4>
+        <p>Native ADO PR creation, merge, review comment handling. Full parity with GitHub flow.</p>
+      </div>
+      <div class="ent-card">
+        <div class="ent-icon">📦</div>
+        <h4>ACR + Private Registries</h4>
+        <p>Azure Container Registry for image warming. Auto-generated .npmrc and NuGet.config for private ADO feeds.</p>
+      </div>
+      <div class="ent-card">
+        <div class="ent-icon">🔐</div>
+        <h4>Entra ID (Azure AD)</h4>
+        <p>MSAL-based login for CLI. Configurable client/tenant IDs. Token caching and refresh built in.</p>
+      </div>
+      <div class="ent-card">
+        <div class="ent-icon">🔔</div>
+        <h4>MS Teams Notifications</h4>
+        <p>Webhook adapter with rate limiting. Session status pushed to Teams channels automatically.</p>
+      </div>
+      <div class="ent-card">
+        <div class="ent-icon">🧾</div>
+        <h4>ADO Work Item Linking</h4>
+        <p>Test case creation, result linking, work item references in PR descriptions.</p>
+      </div>
+      <div class="ent-card">
+        <div class="ent-icon">📊</div>
+        <h4>Token Usage Tracking</h4>
+        <p>Per-session and per-profile token consumption tracked. Cost allocation across teams and projects.</p>
+      </div>
+      <div class="ent-card">
+        <div class="ent-icon">🌐</div>
+        <h4>Custom Action Handlers</h4>
+        <p>Azure, ADO, GitHub, and generic HTTP handlers. Agents trigger real control-plane actions — all audited.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── COMPARE TABLE ── -->
+<div id="compare" class="compare-section">
+  <div class="compare-inner">
+    <div class="section-label">Comparison</div>
+    <h2 class="section-title">Not the same category.</h2>
+    <p class="section-desc">
+      Most tools are single-shot assistants. Autopod is an orchestration platform.
+      The table makes it obvious.
+    </p>
+
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th class="highlight">Autopod</th>
+          <th>Copilot Workspace</th>
+          <th>Devin</th>
+          <th>Cursor</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Multi-phase validation (build + health + smoke + AI)</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="partial">partial</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Validation-driven auto-correction loops</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Auto fix sessions on CI failure post-merge</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Network isolation + iptables firewall</td>
+          <td class="ours"><span class="check">✓</span> (3-tier)</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="partial">limited</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Human escalation (blocking ask_human)</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="partial">partial</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Credential injection (agent never sees token)</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Azure DevOps native (ACI, ADO PRs, NuGet)</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Multi-runtime (Claude + GPT + Copilot)</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td>Copilot only</td>
+          <td>Devin only</td>
+          <td>Claude only</td>
+        </tr>
+        <tr>
+          <td>AES-256 credential encryption at rest</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Private registry auto-injection (.npmrc / NuGet)</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="partial">partial</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Human-approved memory system (global/profile/session)</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Interactive workspace pods</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="partial">partial</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>MCP server extensibility inside containers</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Full audit trail of agent actions</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Native desktop app for monitoring</td>
+          <td class="ours"><span class="check">✓</span> (Swift/macOS)</td>
+          <td><span class="cross">✗</span></td>
+          <td>Web UI only</td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>PII sanitization of agent output</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Action Control Plane (controlled API proxy + audit)</td>
+          <td class="ours"><span class="check">✓</span> (GitHub, ADO, Azure, HTTP)</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="partial">limited</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Prompt injection quarantine on API responses</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td>Per-action approval gates + resource restrictions</td>
+          <td class="ours"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── FOOTER ── -->
+<footer>
+  <div style="margin-bottom: 8px;">
+    <span style="background: linear-gradient(135deg, #a78bfa, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 700; font-size: 1rem;">⬡ AUTOPOD</span>
+  </div>
+  <p>AI coding orchestration for teams that ship.</p>
+</footer>
+
+<script>
+  // Intersection observer for scroll animations
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry, i) => {
+      if (entry.isIntersecting) {
+        setTimeout(() => {
+          entry.target.classList.add('visible');
+        }, entry.target.dataset.delay || 0);
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.feature-card').forEach((el, i) => {
+    el.dataset.delay = i * 80;
+    observer.observe(el);
+  });
+
+  // Active nav highlighting
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.nav-links a');
+
+  const sectionObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(link => {
+          link.style.color = link.getAttribute('href') === '#' + entry.target.id
+            ? 'var(--text)'
+            : '';
+        });
+      }
+    });
+  }, { threshold: 0.4 });
+
+  sections.forEach(s => sectionObserver.observe(s));
+
+  // State bubble interactive hover labels
+  const stateInfo = {
+    'QUEUED': 'Waiting in the concurrency queue. MAX_CONCURRENCY controls how many run simultaneously.',
+    'PROVISION\u00ADING': 'Container being created with the right image, mounts, network policy, and registry config.',
+    'RUNNING': 'Agent is executing. The session manager streams events to the event bus in real time.',
+    'VALIDATING': 'Four-phase pipeline: build → health check → Playwright smoke tests → AI task review.',
+    'VALIDATED': 'All validation phases passed. Waiting for human approval or auto-approve if configured.',
+    'APPROVED': 'Human signed off. Moving to PR creation and merge polling.',
+    'MERGING': 'PR is live. Daemon polls every 60s. Spawns fix sessions if CI fails.',
+    'COMPLETE': 'Done. Branch merged, container destroyed, token usage recorded.',
+  };
+</script>
+</body>
+</html>
