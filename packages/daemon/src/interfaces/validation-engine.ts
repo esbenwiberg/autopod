@@ -1,4 +1,10 @@
-import type { TaskSummary, ValidationOverride, ValidationResult } from '@autopod/shared';
+import type {
+  AcCheckResult,
+  TaskSummary,
+  ValidationOverride,
+  ValidationPhase,
+  ValidationResult,
+} from '@autopod/shared';
 
 export interface ValidationEngineConfig {
   sessionId: string;
@@ -47,10 +53,17 @@ export interface ValidationEngineConfig {
   hasWebUi?: boolean;
 }
 
+export interface ValidationPhaseCallbacks {
+  onPhaseStarted?: (phase: ValidationPhase) => void;
+  onPhaseCompleted?: (phase: ValidationPhase, status: 'pass' | 'fail' | 'skip', result: unknown) => void;
+  onAcProgress?: (completed: number, total: number, latest: AcCheckResult) => void;
+}
+
 export interface ValidationEngine {
   validate(
     config: ValidationEngineConfig,
     onProgress?: (message: string) => void,
     signal?: AbortSignal,
+    callbacks?: ValidationPhaseCallbacks,
   ): Promise<ValidationResult>;
 }

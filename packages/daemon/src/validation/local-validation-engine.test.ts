@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildReviewPrompt,
+  deduplicateAcsByBaseText,
+  enforceRequirementsStatus,
   parseAcInstructionsJson,
   parseAcResults,
+  parseApiCheckSpecs,
   parseClassificationJson,
   stripMarkdownFences,
 } from './local-validation-engine.js';
@@ -201,5 +205,381 @@ describe('parseClassificationJson', () => {
     ]);
     expect(result).toHaveLength(1);
     expect(result?.at(0)?.validationType).toBe('api');
+  });
+});
+
+describe('parseApiCheckSpecs', () => {
+  it('parses valid specs with numeric expectedStatus', () => {
+    const input = JSON.stringify([
+      { criterion: 'POST /jobs returns 201', method: 'POST', path: '/jobs', expectedStatus: 201 },
+      { criterion: 'GET /users returns 200', method: 'GET', path: '/users', expectedStatus: 200 },
+    ]);
+    const result = parseApiCheckSpecs(input);
+    expect(result).toHaveLength(2);
+    expect(result?.[0]?.expectedStatus).toBe(201);
+    expect(result?.[1]?.expectedStatus).toBe(200);
+  });
+
+  it('coerces string expectedStatus "201" to number 201', () => {
+    const input = JSON.stringify([
+      {
+        criterion: 'POST /jobs returns 201',
+        method: 'POST',
+        path: '/jobs',
+        expectedStatus: '201',
+      },
+    ]);
+    const result = parseApiCheckSpecs(input);
+    expect(result).toHaveLength(1);
+    expect(result?.[0]?.expectedStatus).toBe(201);
+    expect(typeof result?.[0]?.expectedStatus).toBe('number');
+  });
+
+  it('drops spec when expectedStatus is a non-numeric string', () => {
+    const input = JSON.stringify([
+      { criterion: 'POST /jobs returns 201', method: 'POST', path: '/jobs', expectedStatus: 'ok' },
+    ]);
+    const result = parseApiCheckSpecs(input);
+    expect(result).toHaveLength(0);
+  });
+
+  it('drops spec when expectedStatus is missing entirely', () => {
+    const input = JSON.stringify([
+      { criterion: 'POST /jobs returns 201', method: 'POST', path: '/jobs' },
+    ]);
+    const result = parseApiCheckSpecs(input);
+    expect(result).toHaveLength(0);
+  });
+
+  it('parses markdown-wrapped JSON', () => {
+    const inner = JSON.stringify([
+      { criterion: 'POST /jobs returns 201', method: 'POST', path: '/jobs', expectedStatus: 201 },
+    ]);
+    const result = parseApiCheckSpecs(`\`\`\`json\n${inner}\n\`\`\``);
+    expect(result).toHaveLength(1);
+    expect(result?.[0]?.expectedStatus).toBe(201);
+  });
+
+  it('returns null for garbage input', () => {
+    expect(parseApiCheckSpecs('this is not json at all')).toBeNull();
+  });
+
+  it('returns null for non-array JSON', () => {
+    expect(parseApiCheckSpecs('{"criterion": "x", "method": "GET"}')).toBeNull();
+  });
+
+  it('extracts JSON from surrounding prose', () => {
+    const inner = JSON.stringify([
+      { criterion: 'GET /users returns 200', method: 'GET', path: '/users', expectedStatus: 200 },
+    ]);
+    const result = parseApiCheckSpecs(`Here are the specs:\n${inner}\nDone.`);
+    expect(result).toHaveLength(1);
+    expect(result?.[0]?.method).toBe('GET');
+  });
+
+  it('preserves optional bodyContains field', () => {
+    const input = JSON.stringify([
+      {
+        criterion: 'GET /users returns 200',
+        method: 'GET',
+        path: '/users',
+        expectedStatus: 200,
+        bodyContains: '"id"',
+      },
+    ]);
+    const result = parseApiCheckSpecs(input);
+    expect(result).toHaveLength(1);
+    expect(result?.[0]?.bodyContains).toBe('"id"');
+  });
+
+  it('preserves captureAs and captureField fields', () => {
+    const input = JSON.stringify([
+      {
+        criterion: 'POST /jobs returns 201',
+        method: 'POST',
+        path: '/jobs',
+        expectedStatus: 201,
+        captureAs: 'jobId',
+        captureField: 'id',
+      },
+    ]);
+    const result = parseApiCheckSpecs(input);
+    expect(result).toHaveLength(1);
+    expect(result?.[0]?.captureAs).toBe('jobId');
+    expect(result?.[0]?.captureField).toBe('id');
+  });
+
+  it('preserves dependsOn field for chained specs', () => {
+    const input = JSON.stringify([
+      {
+        criterion: 'GET /jobs/{id} returns 200',
+        method: 'GET',
+        path: '/jobs/{jobId}',
+        expectedStatus: 200,
+        dependsOn: 'POST /jobs returns 201',
+      },
+    ]);
+    const result = parseApiCheckSpecs(input);
+    expect(result).toHaveLength(1);
+    expect(result?.[0]?.dependsOn).toBe('POST /jobs returns 201');
+    expect(result?.[0]?.path).toBe('/jobs/{jobId}');
+  });
+
+  it('parses a chained create-then-fetch spec set', () => {
+    const input = JSON.stringify([
+      {
+        criterion: 'POST /jobs creates a job',
+        method: 'POST',
+        path: '/jobs',
+        expectedStatus: 201,
+        requestBody: { name: 'test' },
+        captureAs: 'jobId',
+        captureField: 'id',
+      },
+      {
+        criterion: 'GET /jobs/{id} returns the job',
+        method: 'GET',
+        path: '/jobs/{jobId}',
+        expectedStatus: 200,
+        dependsOn: 'POST /jobs creates a job',
+      },
+    ]);
+    const result = parseApiCheckSpecs(input);
+    expect(result).toHaveLength(2);
+    expect(result?.[0]?.captureAs).toBe('jobId');
+    expect(result?.[1]?.dependsOn).toBe('POST /jobs creates a job');
+    expect(result?.[1]?.path).toBe('/jobs/{jobId}');
+  });
+});
+
+describe('deduplicateAcsByBaseText', () => {
+  it('passes through non-duplicate criteria unchanged', () => {
+    const acs = ['POST /jobs returns 201', 'GET /jobs returns 200', 'DELETE /jobs/{id} returns 204'];
+    const { deduped } = deduplicateAcsByBaseText(acs);
+    expect(deduped).toHaveLength(3);
+    expect(deduped).toEqual(acs);
+  });
+
+  it('deduplicates exact duplicates', () => {
+    const acs = ['POST /jobs returns 201', 'POST /jobs returns 201'];
+    const { deduped } = deduplicateAcsByBaseText(acs);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toBe('POST /jobs returns 201');
+  });
+
+  it('deduplicates when one AC is the other plus a parenthetical suffix', () => {
+    const short = 'POST /jobs returns 201';
+    const long = 'POST /jobs returns 201 (HTTP status code is directly verifiable via a POST request)';
+    const { deduped } = deduplicateAcsByBaseText([short, long]);
+    expect(deduped).toHaveLength(1);
+    // Keeps the longer (more informative) form
+    expect(deduped[0]).toBe(long);
+  });
+
+  it('deduplicates and keeps longest when long form comes first', () => {
+    const short = 'ConsecutiveFailureCount increments by 1 on each failure';
+    const long = 'ConsecutiveFailureCount increments by 1 on each failure (ConsecutiveFailureCount is a persisted job field verifiable via GET /api/schedule/jobs/{id} after induced failures.)';
+    const { deduped } = deduplicateAcsByBaseText([long, short]);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toBe(long);
+  });
+
+  it('expandResult maps canonical result back to all original criteria', () => {
+    const short = 'POST /jobs returns 201';
+    const long = 'POST /jobs returns 201 (HTTP status code is directly verifiable)';
+    const { expandResult } = deduplicateAcsByBaseText([short, long]);
+
+    const compactResults = [
+      {
+        criterion: long,
+        passed: true,
+        validationType: 'api' as const,
+        reasoning: 'POST /jobs → 201',
+      },
+    ];
+    const expanded = expandResult(compactResults);
+    expect(expanded).toHaveLength(2);
+    // Short form gets a result too (re-mapped from the canonical long form)
+    const shortResult = expanded.find((r) => r.criterion === short);
+    expect(shortResult).toBeDefined();
+    expect(shortResult?.passed).toBe(true);
+    // Long form result is also present
+    const longResult = expanded.find((r) => r.criterion === long);
+    expect(longResult).toBeDefined();
+    expect(longResult?.passed).toBe(true);
+  });
+
+  it('expandResult propagates failures to all matching originals', () => {
+    const short = 'GET /jobs/{id} returns 200';
+    const long = 'GET /jobs/{id} returns 200 (use the id from the POST response)';
+    const { expandResult } = deduplicateAcsByBaseText([short, long]);
+
+    const compactResults = [
+      {
+        criterion: long,
+        passed: false,
+        validationType: 'api' as const,
+        reasoning: 'GET /jobs/1 → 404',
+      },
+    ];
+    const expanded = expandResult(compactResults);
+    expect(expanded).toHaveLength(2);
+    expect(expanded.every((r) => !r.passed)).toBe(true);
+  });
+
+  it('handles criteria with no near-duplicates mixed with ones that do have near-duplicates', () => {
+    const unique = 'GET /health returns 200';
+    const short = 'POST /jobs returns 201';
+    const long = 'POST /jobs returns 201 (verifiable via a POST request)';
+    const { deduped } = deduplicateAcsByBaseText([unique, short, long]);
+    expect(deduped).toHaveLength(2);
+    expect(deduped).toContain(unique);
+    expect(deduped).toContain(long);
+    expect(deduped).not.toContain(short);
+  });
+});
+
+describe('enforceRequirementsStatus', () => {
+  it('returns null unchanged', () => {
+    expect(enforceRequirementsStatus(null)).toBeNull();
+  });
+
+  it('leaves pass status unchanged when all requirements are met', () => {
+    const parsed = {
+      status: 'pass' as const,
+      reasoning: 'All good',
+      issues: [],
+      requirementsCheck: [
+        { criterion: 'Scheduler runs on startup', met: true, note: 'Confirmed in diff' },
+      ],
+    };
+    const result = enforceRequirementsStatus(parsed);
+    expect(result?.status).toBe('pass');
+  });
+
+  it('forces status to fail when any requirementsCheck item is unmet', () => {
+    const parsed = {
+      status: 'pass' as const,
+      reasoning: 'Code quality looks fine',
+      issues: [],
+      requirementsCheck: [
+        { criterion: 'Scheduler runs on startup', met: true },
+        { criterion: 'ConsecutiveFailureCount increments on failure', met: false, note: 'Not found in diff' },
+      ],
+    };
+    const result = enforceRequirementsStatus(parsed);
+    expect(result?.status).toBe('fail');
+  });
+
+  it('leaves fail status unchanged even when all requirements are met', () => {
+    const parsed = {
+      status: 'fail' as const,
+      reasoning: 'Code quality issues found',
+      issues: ['Missing error handling'],
+      requirementsCheck: [{ criterion: 'Scheduler runs on startup', met: true }],
+    };
+    const result = enforceRequirementsStatus(parsed);
+    expect(result?.status).toBe('fail');
+  });
+
+  it('leaves pass status unchanged when requirementsCheck is absent', () => {
+    const parsed = {
+      status: 'pass' as const,
+      reasoning: 'Looks good',
+      issues: [],
+    };
+    const result = enforceRequirementsStatus(parsed);
+    expect(result?.status).toBe('pass');
+  });
+
+  it('preserves all other fields when overriding status', () => {
+    const parsed = {
+      status: 'pass' as const,
+      reasoning: 'Mostly fine',
+      issues: ['minor nit'],
+      requirementsCheck: [{ criterion: 'Some AC', met: false, note: 'Not done' }],
+    };
+    const result = enforceRequirementsStatus(parsed);
+    expect(result?.reasoning).toBe('Mostly fine');
+    expect(result?.issues).toEqual(['minor nit']);
+    expect(result?.requirementsCheck).toHaveLength(1);
+  });
+});
+
+describe('buildReviewPrompt', () => {
+  const baseConfig = {
+    sessionId: 'sess-1',
+    containerId: 'c1',
+    previewUrl: 'http://localhost:3000',
+    buildCommand: 'npm run build',
+    startCommand: 'npm start',
+    healthPath: '/health',
+    healthTimeout: 30_000,
+    smokePages: [],
+    attempt: 1,
+    task: 'Implement a job scheduler',
+    diff: '+const x = 1;',
+    reviewerModel: 'claude-opus-4-6',
+  };
+
+  it('renders DIFF VERIFICATION REQUIRED section when noneAcCriteria is provided', () => {
+    const noneAcs = ['Scheduler runs on startup', 'ConsecutiveFailureCount increments on failure'];
+    const prompt = buildReviewPrompt(baseConfig, undefined, noneAcs);
+    expect(prompt).toContain('ACCEPTANCE CRITERIA — DIFF VERIFICATION REQUIRED');
+    expect(prompt).toContain('Scheduler runs on startup');
+    expect(prompt).toContain('ConsecutiveFailureCount increments on failure');
+    expect(prompt).toContain('YOU ARE THE ONLY CHECK');
+  });
+
+  it('renders AUTO-VERIFIED section for non-none ACs when noneAcCriteria is provided', () => {
+    const config = {
+      ...baseConfig,
+      acceptanceCriteria: [
+        'POST /api/jobs returns 201',
+        'Scheduler runs on startup',
+      ],
+    };
+    const noneAcs = ['Scheduler runs on startup'];
+    const prompt = buildReviewPrompt(config, undefined, noneAcs);
+    expect(prompt).toContain('ACCEPTANCE CRITERIA — AUTO-VERIFIED');
+    expect(prompt).toContain('POST /api/jobs returns 201');
+    expect(prompt).toContain('ACCEPTANCE CRITERIA — DIFF VERIFICATION REQUIRED');
+    expect(prompt).toContain('Scheduler runs on startup');
+    // The auto-verified section should NOT include the none AC
+    const autoSectionMatch = prompt.match(/AUTO-VERIFIED[\s\S]*?DIFF VERIFICATION/);
+    expect(autoSectionMatch?.[0]).not.toContain('Scheduler runs on startup');
+  });
+
+  it('omits DIFF VERIFICATION section when noneAcCriteria is empty', () => {
+    const config = { ...baseConfig, acceptanceCriteria: ['POST /api/jobs returns 201'] };
+    const prompt = buildReviewPrompt(config, undefined, []);
+    expect(prompt).not.toContain('DIFF VERIFICATION REQUIRED');
+  });
+
+  it('omits AUTO-VERIFIED section when all ACs are none-classified', () => {
+    const config = { ...baseConfig, acceptanceCriteria: ['Scheduler runs on startup'] };
+    const noneAcs = ['Scheduler runs on startup'];
+    const prompt = buildReviewPrompt(config, undefined, noneAcs);
+    expect(prompt).not.toContain('AUTO-VERIFIED');
+    expect(prompt).toContain('DIFF VERIFICATION REQUIRED');
+  });
+
+  it('omits requirementsCheck from JSON format comment when no none ACs', () => {
+    const config = { ...baseConfig, acceptanceCriteria: ['POST /api/jobs returns 201'] };
+    const prompt = buildReviewPrompt(config, undefined, []);
+    // Standard requirementsCheck format (not the diff-only variant)
+    expect(prompt).toContain('"requirementsCheck"');
+    expect(prompt).not.toContain('DIFF VERIFICATION REQUIRED');
+  });
+
+  it('instructs reviewer to include only DIFF VERIFICATION criteria in requirementsCheck', () => {
+    const config = {
+      ...baseConfig,
+      acceptanceCriteria: ['POST /api/jobs returns 201', 'Scheduler runs on startup'],
+    };
+    const noneAcs = ['Scheduler runs on startup'];
+    const prompt = buildReviewPrompt(config, undefined, noneAcs);
+    expect(prompt).toContain('Include ONLY the "DIFF VERIFICATION REQUIRED" criteria');
+    expect(prompt).toContain('Do NOT include auto-verified');
   });
 });

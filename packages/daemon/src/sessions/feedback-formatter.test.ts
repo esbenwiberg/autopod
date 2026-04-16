@@ -171,6 +171,107 @@ describe('formatFeedback', () => {
       expect(output).not.toContain('Acceptance Criteria Failures');
     });
 
+    it('renders unmet requirementsCheck items as a separate section', () => {
+      const result = mockValidationResult({ taskReviewFailed: true });
+      result.taskReview = {
+        status: 'fail',
+        reasoning: 'Some code issues',
+        issues: ['Missing tests'],
+        model: 'opus',
+        screenshots: [],
+        diff: '+const x = 1;',
+        requirementsCheck: [
+          { criterion: 'Scheduler runs on startup', met: true, note: 'Found in DI config' },
+          { criterion: 'ConsecutiveFailureCount increments on failure', met: false, note: 'No increment logic in diff' },
+        ],
+      };
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result,
+        task: 'Implement scheduler',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(output).toContain('Unmet Acceptance Criteria (code review)');
+      expect(output).toContain('ConsecutiveFailureCount increments on failure');
+      expect(output).toContain('No increment logic in diff');
+      // Met items should not appear in this section
+      expect(output).not.toContain('Scheduler runs on startup');
+    });
+
+    it('omits unmet requirementsCheck section when all items are met', () => {
+      const result = mockValidationResult({});
+      result.taskReview = {
+        status: 'pass',
+        reasoning: 'All good',
+        issues: [],
+        model: 'opus',
+        screenshots: [],
+        diff: '+const x = 1;',
+        requirementsCheck: [
+          { criterion: 'Scheduler runs on startup', met: true },
+        ],
+      };
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result,
+        task: 'Implement scheduler',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(output).not.toContain('Unmet Acceptance Criteria (code review)');
+    });
+
+    it('uses fallback note when requirementsCheck item has no note', () => {
+      const result = mockValidationResult({});
+      result.taskReview = {
+        status: 'fail',
+        reasoning: 'Missing implementation',
+        issues: [],
+        model: 'opus',
+        screenshots: [],
+        diff: '+const x = 1;',
+        requirementsCheck: [
+          { criterion: 'Job runs exactly once', met: false },
+        ],
+      };
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result,
+        task: 'Implement scheduler',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(output).toContain('Not implemented or evidence absent in the diff');
+    });
+
+    it('renders unmet requirementsCheck section before Task Review Issues', () => {
+      const result = mockValidationResult({ taskReviewFailed: true });
+      result.taskReview = {
+        status: 'fail',
+        reasoning: 'Code issues plus missing AC',
+        issues: ['Bad error handling'],
+        model: 'opus',
+        screenshots: [],
+        diff: '+const x = 1;',
+        requirementsCheck: [
+          { criterion: 'Job deduplication', met: false, note: 'Not in diff' },
+        ],
+      };
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result,
+        task: 'Implement scheduler',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      const unmetPos = output.indexOf('Unmet Acceptance Criteria (code review)');
+      const reviewPos = output.indexOf('Task Review Issues');
+      expect(unmetPos).toBeGreaterThanOrEqual(0);
+      expect(reviewPos).toBeGreaterThanOrEqual(0);
+      expect(unmetPos).toBeLessThan(reviewPos);
+    });
+
     it('detects native binding errors in health check output and warns agent', () => {
       const result = mockValidationResult({ healthFailed: true });
       result.smoke.health.startOutput =

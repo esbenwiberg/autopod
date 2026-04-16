@@ -304,6 +304,23 @@ export class LocalWorktreeManager implements WorktreeManager {
       const combined =
         uncommittedDiff.length > 0 ? `${committedDiff}\n${uncommittedDiff}` : committedDiff;
 
+      // If sinceCommit produced an empty diff, fall back to merge-base.
+      // This handles the case where the worktree wasn't synced from the container
+      // (git history didn't carry over) but the branch diverged from defaultBranch.
+      if (!combined.trim() && sinceCommit) {
+        const mergeBase = await this.resolveMergeBase(worktreePath, baseBranch);
+        if (mergeBase && mergeBase !== sinceCommit) {
+          const { stdout: mbCommitted } = await execFileAsync(
+            'git',
+            ['diff', mergeBase, 'HEAD'],
+            bufOpts,
+          );
+          const mbCombined =
+            uncommittedDiff.length > 0 ? `${mbCommitted}\n${uncommittedDiff}` : mbCommitted;
+          return truncateDiffAtFileBoundary(mbCombined, maxLength);
+        }
+      }
+
       return truncateDiffAtFileBoundary(combined, maxLength);
     } catch (err) {
       this.logger.warn({ err: sanitizeGitError(err), worktreePath }, 'getDiff: git diff failed');

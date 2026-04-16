@@ -4,20 +4,25 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
+  AcValidationResult,
   AgentEvent,
+  BuildResult,
   CreateSessionRequest,
   DaemonConfig,
   EscalationRequest,
   ExecutionTarget,
+  HealthResult,
   HistoryQuery,
   InjectedMcpServer,
   NetworkPolicy,
+  PageResult,
   PrivateRegistry,
   Profile,
   ReferenceRepo,
   RequestCredentialPayload,
   Session,
   SessionStatus,
+  TaskReviewResult,
   ValidationFinding,
   ValidationOverride,
   ValidationOverridePayload,
@@ -2994,6 +2999,38 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             validationConfig,
             (phase) => emitActivityStatus(sessionId, phase),
             validationController.signal,
+            {
+              onPhaseStarted: (phase) => {
+                eventBus.emit({
+                  type: 'session.validation_phase_started',
+                  timestamp: new Date().toISOString(),
+                  sessionId,
+                  phase,
+                });
+              },
+              onPhaseCompleted: (phase, status, phaseResult) => {
+                const base = {
+                  type: 'session.validation_phase_completed' as const,
+                  timestamp: new Date().toISOString(),
+                  sessionId,
+                  phase,
+                  phaseStatus: status,
+                };
+                if (phase === 'build') {
+                  eventBus.emit({ ...base, buildResult: phaseResult as BuildResult });
+                } else if (phase === 'test') {
+                  eventBus.emit({ ...base, testResult: phaseResult as { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string } });
+                } else if (phase === 'health') {
+                  eventBus.emit({ ...base, healthResult: phaseResult as HealthResult });
+                } else if (phase === 'pages') {
+                  eventBus.emit({ ...base, pageResults: phaseResult as PageResult[] });
+                } else if (phase === 'ac') {
+                  eventBus.emit({ ...base, acResult: phaseResult as AcValidationResult | null });
+                } else if (phase === 'review') {
+                  eventBus.emit({ ...base, reviewResult: phaseResult as TaskReviewResult | null });
+                }
+              },
+            },
           );
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies

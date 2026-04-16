@@ -9,6 +9,7 @@ import type {
   ValidationOverride,
   ValidationResult,
 } from '@autopod/shared';
+import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.js';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
 
@@ -115,12 +116,17 @@ export function createLocalValidationEngine(
   hostBrowserRunner?: HostBrowserRunner,
 ): ValidationEngine {
   const log = logger?.child({ component: 'local-validation-engine' });
+  // Cache classification results within this engine instance.
+  // Key: sorted AC texts joined with '|'. Value: ClassifiedAc[].
+  // Prevents non-deterministic re-classification across validation retry attempts.
+  const acClassificationCache = new Map<string, ClassifiedAc[]>();
 
   return {
     async validate(
       config: ValidationEngineConfig,
       onProgress?: (message: string) => void,
       signal?: AbortSignal,
+      callbacks?: ValidationPhaseCallbacks,
     ): Promise<ValidationResult> {
       const startTime = Date.now();
 
@@ -140,19 +146,24 @@ export function createLocalValidationEngine(
       try {
         // ── Phase 1: Build ──────────────────────────────────────────────
         checkAbort();
+        callbacks?.onPhaseStarted?.('build');
         if (config.buildCommand) onProgress?.('Running build…');
         const buildResult = await runBuild(containerManager, config, log);
+        callbacks?.onPhaseCompleted?.('build', buildResult.status, buildResult);
 
         // ── Phase 2: Test ───────────────────────────────────────────────
         checkAbort();
+        callbacks?.onPhaseStarted?.('test');
         if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
         const testResult =
           buildResult.status === 'pass'
             ? await runTests(containerManager, config, log)
             : { status: 'skip' as const, duration: 0 };
+        callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
         // ── Phase 3: Health check ───────────────────────────────────────
         checkAbort();
+        callbacks?.onPhaseStarted?.('health');
         if (buildResult.status === 'pass' && config.startCommand)
           onProgress?.('Running health check…');
         const healthResult =
@@ -164,6 +175,7 @@ export function createLocalValidationEngine(
                 responseCode: null,
                 duration: 0,
               };
+        callbacks?.onPhaseCompleted?.('health', healthResult.status, healthResult);
 
         // After health passes, watch for post-startup crashes in the background.
         // If the app goes down during smoke/AC phases, abort validation with a
@@ -180,24 +192,42 @@ export function createLocalValidationEngine(
 
         // ── Phase 4: Page validation ─────────────────────────────────────
         checkAbort();
+        callbacks?.onPhaseStarted?.('pages');
         if (healthResult.status === 'pass' && config.smokePages.length > 0)
           onProgress?.('Validating pages…');
         const pages: PageResult[] =
           healthResult.status === 'pass' && config.smokePages.length > 0
             ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
             : [];
+        const pagesStatus: 'pass' | 'fail' | 'skip' =
+          config.smokePages.length === 0
+            ? 'skip'
+            : pages.every((p) => p.status === 'pass')
+              ? 'pass'
+              : 'fail';
+        callbacks?.onPhaseCompleted?.('pages', pagesStatus, pages);
 
         // ── Phase 5: AC Validation ────────────────────────────────────────
         checkAbort();
+        callbacks?.onPhaseStarted?.('ac');
         if (healthResult.status === 'pass' && config.acceptanceCriteria?.length)
           onProgress?.('Checking acceptance criteria…');
         const acValidation =
           healthResult.status === 'pass'
-            ? await runAcValidation(containerManager, config, log, hostBrowserRunner)
+            ? await runAcValidation(containerManager, config, log, hostBrowserRunner, acClassificationCache)
             : null;
+        const acStatus: 'pass' | 'fail' | 'skip' = acValidation?.status ?? 'skip';
+        callbacks?.onPhaseCompleted?.('ac', acStatus, acValidation);
+
+        // Collect "none"-classified ACs so the AI reviewer can own them
+        const noneAcCriteria: string[] =
+          acValidation?.results
+            .filter((r) => r.validationType === 'none')
+            .map((r) => r.criterion) ?? [];
 
         // ── Phase 6: AI Task Review ─────────────────────────────────────
         checkAbort();
+        callbacks?.onPhaseStarted?.('review');
         onProgress?.('Running AI task review…');
 
         // Gather enriched context from the worktree (Tier 0+1)
@@ -218,7 +248,12 @@ export function createLocalValidationEngine(
           config,
           log,
           reviewContext,
+          noneAcCriteria,
         );
+        // Map 'uncertain' to 'pass' for the chip status — the detail view shows the full result.
+        const reviewStatus: 'pass' | 'fail' | 'skip' =
+          taskReview === null ? 'skip' : taskReview.status === 'fail' ? 'fail' : 'pass';
+        callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
         // ── Phase 7: Overall result ─────────────────────────────────────
         const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
@@ -229,12 +264,18 @@ export function createLocalValidationEngine(
 
         const testFailed = testResult.status === 'fail';
         const acFailed = acValidation !== null && acValidation.status === 'fail';
+        // Timeouts and infra errors during review are not code quality failures.
+        // Only treat review as a blocker when it returns an actual opinion (pass/fail).
+        const isReviewInfraFailure =
+          reviewSkipReason?.startsWith('Review failed:') &&
+          (reviewSkipReason.includes('timed out') || reviewSkipReason.includes('timed_out'));
+        const isReviewBlocker =
+          reviewSkipReason?.startsWith('Review failed:') && !isReviewInfraFailure;
         const overall =
           smokeStatus === 'pass' &&
           !testFailed &&
           !acFailed &&
-          ((taskReview === null && !reviewSkipReason?.startsWith('Review failed:')) ||
-            taskReview?.status === 'pass')
+          ((taskReview === null && !isReviewBlocker) || taskReview?.status === 'pass')
             ? ('pass' as const)
             : ('fail' as const);
 
@@ -702,12 +743,27 @@ export async function classifyAcTypes(
     ? ''
     : '\nIMPORTANT: This project has NO web frontend. Do not classify any criterion as "web-ui". Use "api" or "none" only.\n';
 
-  const prompt = `You are a QA automation planner. For each acceptance criterion, decide how it should be validated automatically.
+  const prompt = `You are a QA automation planner. For each acceptance criterion, decide how it should be validated automatically by a test harness that can only make synchronous HTTP requests to a running server.
 
-Validation types:
-- "web-ui": Verify by navigating to a URL in a real browser and checking DOM elements, visual state, or page content. Only use this for criteria that require a human-visible web interface.
-- "api": Verify by making an HTTP request to the running server and checking the status code or response body. Use for REST endpoint behaviour, JSON response shapes, or HTTP status codes.
-- "none": Cannot be verified by browser or HTTP request. Use for TypeScript type exports, internal code structure, SQL migrations, scheduler/timer logic, desktop/native app changes, CLI output formats, or anything only verifiable by reading the diff or running tests.${webUiRestriction}
+## Validation types
+
+### "api" — only use this when ALL of the following are true:
+1. The check is a single synchronous HTTP request (or a short sequence: create → then read/delete).
+2. The expected behaviour is observable in the HTTP response immediately — no waiting for background workers, timers, cron jobs, schedulers, or queued tasks to execute.
+3. The check does NOT require a specific authenticated user role or credential that the test harness won't have.
+4. The endpoint and expected response shape are deterministic from the criterion text alone.
+
+### "web-ui" — verify by navigating a real browser and checking DOM elements. Only for criteria that require a human-visible frontend.${webUiRestriction}
+
+### "none" — use for EVERYTHING else:
+- TypeScript type exports, internal code structure, SQL migrations
+- Any criterion whose observable state depends on a background process, scheduler, cron job, timer, or async worker having already executed (e.g. "Status is set to Succeeded after job runs", "ConsecutiveFailureCount increments", "IsEnabled is set to false after N failures")
+- Auth/RBAC behaviour that requires a specific role credential the harness won't possess (e.g. "a non-Administrator user receives 403")
+- Criteria that mention "after a run completes", "on each tick", "on startup", "after N consecutive failures" — these require the scheduler to have fired, which a synchronous HTTP check cannot trigger or wait for
+- Desktop/native app changes, CLI output formats, anything only verifiable by reading the diff or running unit tests
+
+## Decision rule (use it literally)
+Ask yourself: "Can I write a single curl command (or a create-then-read chain) that, RIGHT NOW against the live server, observes the required state without waiting for any background process?" If NO → use "none".
 
 Task context: ${config.task}
 
@@ -775,11 +831,76 @@ export function parseClassificationJson(raw: string, originalAcs: string[]): Cla
   }
 }
 
+/**
+ * Deduplicates acceptance criteria that differ only by an appended parenthetical
+ * testability-guidance suffix.  For example:
+ *   "POST /jobs returns 201"
+ *   "POST /jobs returns 201 (HTTP status code verifiable via a POST request)"
+ * are treated as the same criterion; we keep the longer (more informative) form
+ * and expose an `expandResult` function to fan results back out to ALL originals.
+ *
+ * @internal Exported for testing.
+ */
+export function deduplicateAcsByBaseText(criteria: string[]): {
+  deduped: string[];
+  expandResult: (results: AcCheckResult[]) => AcCheckResult[];
+} {
+  // Normalise: strip trailing " (...)" parenthetical that /prep adds for testability context.
+  function baseText(ac: string): string {
+    return ac.replace(/\s+\([^)]*\)\s*$/, '').trim();
+  }
+
+  // Map from base text → longest original criterion that shares it.
+  const canonical = new Map<string, string>();
+  for (const ac of criteria) {
+    const base = baseText(ac);
+    const existing = canonical.get(base);
+    if (!existing || ac.length > existing.length) {
+      canonical.set(base, ac);
+    }
+  }
+
+  const deduped = [...canonical.values()];
+
+  // For each original criterion, find which canonical form it maps to.
+  const originalToCanonical = new Map<string, string>();
+  for (const ac of criteria) {
+    const canon = canonical.get(baseText(ac));
+    if (canon) originalToCanonical.set(ac, canon);
+  }
+
+  function expandResult(results: AcCheckResult[]): AcCheckResult[] {
+    const byCanonical = new Map(results.map((r) => [r.criterion, r]));
+    const expanded: AcCheckResult[] = [];
+    for (const ac of criteria) {
+      const canon = originalToCanonical.get(ac);
+      const result = canon ? byCanonical.get(canon) : undefined;
+      if (result) {
+        // Re-emit the result under the original criterion text so the feedback
+        // message shows the text the user actually wrote.
+        expanded.push({ ...result, criterion: ac });
+      } else {
+        // Fallback: shouldn't happen, but don't silently drop a criterion
+        expanded.push({
+          criterion: ac,
+          passed: false,
+          validationType: 'none' as const,
+          reasoning: 'No result available for this criterion',
+        });
+      }
+    }
+    return expanded;
+  }
+
+  return { deduped, expandResult };
+}
+
 async function runAcValidation(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,
   hostBrowserRunner?: HostBrowserRunner,
+  acClassificationCache?: Map<string, ClassifiedAc[]>,
 ): Promise<AcValidationResult | null> {
   if (!config.acceptanceCriteria || config.acceptanceCriteria.length === 0) {
     log?.info('no acceptance criteria provided, skipping AC validation');
@@ -796,8 +917,27 @@ async function runAcValidation(
     'running AC validation',
   );
 
-  // Step 1: Classify each AC by validation type
-  const classified = await classifyAcTypes(config, log);
+  // Step 1: Deduplicate ACs before classification.
+  // Near-duplicates arise when a spec file contains both a short form and a long form with
+  // appended parenthetical testability guidance, e.g.:
+  //   "POST /jobs returns 201"
+  //   "POST /jobs returns 201 (HTTP status code is directly verifiable via a POST request)"
+  // Both forms are semantically the same criterion.  We normalise by keeping the longest
+  // form for each base text and map results back to ALL matching originals.
+  const { deduped: dedupedCriteria, expandResult } = deduplicateAcsByBaseText(
+    config.acceptanceCriteria,
+  );
+  const dedupedConfig = dedupedCriteria.length < config.acceptanceCriteria.length
+    ? { ...config, acceptanceCriteria: dedupedCriteria }
+    : config;
+
+  // Step 2: Classify each AC by validation type (cached to prevent non-deterministic re-classification)
+  const cacheKey = [...dedupedCriteria].sort().join('|');
+  const cachedClassification = acClassificationCache?.get(cacheKey) ?? null;
+  const classified = cachedClassification ?? (await classifyAcTypes(dedupedConfig, log));
+  if (classified && classified.length > 0 && !cachedClassification) {
+    acClassificationCache?.set(cacheKey, classified);
+  }
   if (!classified || classified.length === 0) {
     log?.warn('AC classification failed, marking all as diff-reviewed');
     const fallbackResults: AcCheckResult[] = (config.acceptanceCriteria ?? []).map((ac) => ({
@@ -814,16 +954,17 @@ async function runAcValidation(
       webUi: classified.filter((c) => c.validationType === 'web-ui').length,
       api: classified.filter((c) => c.validationType === 'api').length,
       none: classified.filter((c) => c.validationType === 'none').length,
+      deduped: config.acceptanceCriteria.length - dedupedCriteria.length,
     },
     'AC classification complete',
   );
 
-  // Step 2: Split by type
+  // Step 3: Split by type
   const webUiAcs = classified.filter((c) => c.validationType === 'web-ui');
   const apiAcs = classified.filter((c) => c.validationType === 'api');
   const noneAcs = classified.filter((c) => c.validationType === 'none');
 
-  // Step 3: Execute each bucket
+  // Step 4: Execute each bucket (using dedupedConfig so the LLM sees clean, non-duplicate ACs)
   const noneResults: AcCheckResult[] = noneAcs.map((c) => ({
     criterion: c.criterion,
     passed: true,
@@ -831,18 +972,18 @@ async function runAcValidation(
     reasoning: `Automated check not applicable (${c.reason}) — evaluated by diff reviewer`,
   }));
 
-  const apiResults = apiAcs.length > 0 ? await executeApiChecks(config, apiAcs, log) : [];
+  const apiResults = apiAcs.length > 0 ? await executeApiChecks(dedupedConfig, apiAcs, log) : [];
 
   let browserResults: AcCheckResult[] = [];
   if (webUiAcs.length > 0) {
     const webUiInstructions = await generateAcInstructions(
-      { ...config, acceptanceCriteria: webUiAcs.map((c) => c.criterion) },
+      { ...dedupedConfig, acceptanceCriteria: webUiAcs.map((c) => c.criterion) },
       log,
     );
     if (webUiInstructions && webUiInstructions.length > 0) {
       browserResults = await executeAcChecks(
         containerManager,
-        config,
+        dedupedConfig,
         webUiInstructions,
         log,
         hostBrowserRunner,
@@ -857,7 +998,12 @@ async function runAcValidation(
     }
   }
 
-  const results: AcCheckResult[] = [...browserResults, ...apiResults, ...noneResults];
+  // Step 5: Expand deduplicated results back to original criteria.
+  // When two original ACs mapped to the same canonical form (e.g., one has a
+  // parenthetical suffix), both get the same result so neither shows as "missing".
+  const compactResults: AcCheckResult[] = [...browserResults, ...apiResults, ...noneResults];
+  const results: AcCheckResult[] = expandResult(compactResults);
+
   // Only count automated checks (web-ui and api) for pass/fail determination
   const automatedResults = results.filter((r) => r.validationType !== 'none');
   const allPassed = automatedResults.length === 0 || automatedResults.every((r) => r.passed);
@@ -941,6 +1087,21 @@ interface ApiCheckSpec {
   expectedStatus: number;
   bodyContains?: string;
   requestBody?: unknown;
+  /**
+   * Variable name to capture from this response (e.g. "jobId").
+   * Used when a POST creates a resource whose ID is needed by later checks.
+   */
+  captureAs?: string;
+  /**
+   * Dot-separated JSON field path to extract from the response body (e.g. "id" or "data.id").
+   * Required when captureAs is set.
+   */
+  captureField?: string;
+  /**
+   * Criterion text of the spec this one depends on.
+   * The dependent spec runs AFTER its dependency and may use {variableName} in path.
+   */
+  dependsOn?: string;
 }
 
 /** Execute HTTP-based AC checks for api-type criteria. */
@@ -951,48 +1112,129 @@ async function executeApiChecks(
 ): Promise<AcCheckResult[]> {
   const acList = apiAcs.map((c, i) => `${i + 1}. ${c.criterion} (${c.reason})`).join('\n');
 
-  const prompt = `You are a QA automation engineer. Generate HTTP request specs to validate each acceptance criterion.
+  const prompt = `You are a QA automation engineer. Generate HTTP request specs to validate each acceptance criterion against a running server.
 
 Server base URL: ${config.previewUrl}
 
-Acceptance Criteria to validate via HTTP:
+## Criteria to validate (YOUR OUTPUT MUST HAVE ONE SPEC PER CRITERION)
 ${acList}
 
-For each criterion, generate a JSON spec with:
-- "criterion": exact criterion text (copy verbatim)
-- "method": HTTP method (GET, POST, PUT, DELETE, PATCH)
-- "path": URL path (e.g. "/scheduled-jobs")
-- "expectedStatus": expected HTTP status code (number)
-- "bodyContains": optional string that must appear in the response body JSON (use for response shape checks)
-- "requestBody": optional JSON object to send as the request body (for POST/PUT/PATCH)
+## Output format — one JSON object per criterion above
 
-Use minimal/example request bodies — the goal is to verify the endpoint exists and returns the expected status, not to test business logic in depth.
+Fields:
+- "criterion": COPY the criterion text VERBATIM from the numbered list above. Do NOT paraphrase, shorten, or alter it.
+- "method": HTTP method (GET, POST, PUT, DELETE, PATCH)
+- "path": URL path — use {varName} placeholders for dynamic IDs (explained below)
+- "expectedStatus": HTTP status code as a NUMBER (e.g. 200, 201, 400, 404)
+- "bodyContains": optional string that must appear in the JSON response body
+- "requestBody": optional JSON object for POST/PUT/PATCH
+
+## Chained requests (for endpoints that need a resource to exist first)
+
+REST APIs typically use server-generated UUIDs, not integer IDs like 1, 2, 3.
+Never hardcode integer IDs in paths — use the chaining mechanism below instead.
+
+To create a resource and then use its ID in later specs:
+- On the CREATE spec: add "captureAs": "someVar" and "captureField": "id"
+- On the DEPENDENT spec: add "dependsOn": "<verbatim criterion of the create spec>"
+  and use {someVar} in the path
+
+## Example (uses a FICTIONAL blog API — do NOT copy these criterion texts into your output)
+
+[
+  {
+    "criterion": "POST /api/articles creates an article and returns 201",
+    "method": "POST", "path": "/api/articles", "expectedStatus": 201,
+    "requestBody": {"title": "Test", "body": "Hello"},
+    "captureAs": "articleId", "captureField": "id"
+  },
+  {
+    "criterion": "DELETE /api/articles/{id} returns 204",
+    "method": "DELETE", "path": "/api/articles/{articleId}", "expectedStatus": 204,
+    "dependsOn": "POST /api/articles creates an article and returns 201"
+  }
+]
+
+## Rules
+1. Output MUST contain exactly one spec for EVERY criterion in the numbered list — no omissions.
+2. The "criterion" value MUST be copied character-for-character from the numbered list.
+3. Use {varName} placeholders instead of hardcoded integer IDs.
+4. Keep requestBody minimal — just enough to pass validation.
 
 Respond ONLY with a JSON array, no markdown fences or extra text.`;
 
   let specs: ApiCheckSpec[] = [];
-  try {
-    const reviewTimeout = config.reviewTimeout ?? 300_000;
-    const { stdout } = await runClaudeCli({
-      model: config.reviewerModel ?? 'sonnet',
-      input: prompt,
-      timeout: reviewTimeout,
-    });
-    specs = parseApiCheckSpecs(stdout.trim(), apiAcs) ?? [];
-  } catch (err) {
-    log?.warn({ err }, 'failed to generate API check specs');
-    return apiAcs.map((c) => ({
-      criterion: c.criterion,
-      passed: false,
-      validationType: 'api' as const,
-      reasoning: 'Failed to generate API check specification',
-    }));
+  const reviewTimeout = config.reviewTimeout ?? 300_000;
+  let parseAttempt = 0;
+  while (parseAttempt < 2) {
+    try {
+      const { stdout } = await runClaudeCli({
+        model: config.reviewerModel ?? 'sonnet',
+        input: prompt,
+        timeout: reviewTimeout,
+      });
+      const rawOutput = stdout.trim();
+      const parsed = parseApiCheckSpecs(rawOutput, log);
+      if (parsed !== null) {
+        specs = parsed;
+        break;
+      }
+      parseAttempt++;
+      if (parseAttempt < 2) {
+        log?.warn(
+          { rawPreview: rawOutput.slice(0, 500) },
+          'parseApiCheckSpecs returned null — retrying LLM call',
+        );
+      } else {
+        log?.warn(
+          { rawPreview: rawOutput.slice(0, 500) },
+          'parseApiCheckSpecs returned null after retry — gap-filling all API ACs',
+        );
+      }
+    } catch (err) {
+      log?.warn({ err }, 'failed to generate API check specs');
+      return apiAcs.map((c) => ({
+        criterion: c.criterion,
+        passed: false,
+        validationType: 'api' as const,
+        reasoning: 'Failed to generate API check specification (LLM call error)',
+      }));
+    }
   }
 
+  const specsWereGenerated = specs.length > 0;
   const results: AcCheckResult[] = [];
-  for (const spec of specs) {
+
+  // Execute specs in dependency order so captured variables are available.
+  // Build a lookup by criterion for fast dependency resolution.
+  const specsByCriterion = new Map(specs.map((s) => [s.criterion, s]));
+  const captured = new Map<string, string>(); // varName → captured value
+
+  // Topological sort: specs with no dependsOn go first; dependent specs follow.
+  const independent = specs.filter((s) => !s.dependsOn);
+  const dependent = specs.filter((s) => !!s.dependsOn);
+  const orderedSpecs = [...independent, ...dependent];
+
+  for (const spec of orderedSpecs) {
+    // If this spec depends on another, skip it if its dependency failed (no variable captured).
+    if (spec.dependsOn && spec.captureAs === undefined) {
+      const dep = specsByCriterion.get(spec.dependsOn);
+      if (dep?.captureAs && !captured.has(dep.captureAs)) {
+        results.push({
+          criterion: spec.criterion,
+          passed: false,
+          validationType: 'api',
+          reasoning: `Skipped: dependency "${spec.dependsOn}" did not capture a variable (setup failed)`,
+        });
+        continue;
+      }
+    }
+
+    // Interpolate {varName} placeholders in the path using captured values.
+    const resolvedPath = spec.path.replace(/\{(\w+)\}/g, (_, name) => captured.get(name) ?? `{${name}}`);
+
     try {
-      const url = `${config.previewUrl.replace(/\/$/, '')}${spec.path}`;
+      const url = `${config.previewUrl.replace(/\/$/, '')}${resolvedPath}`;
       const options: RequestInit = {
         method: spec.method,
         headers: { 'Content-Type': 'application/json' },
@@ -1004,15 +1246,40 @@ Respond ONLY with a JSON array, no markdown fences or extra text.`;
       const response = await fetch(url, options);
       const statusOk = response.status === spec.expectedStatus;
 
+      // Always read the body — we need it for capture and for diagnostic info on failure.
+      const responseBody = await response.text();
+
+      // Capture a value from the response if requested.
+      if (spec.captureAs && spec.captureField && response.status >= 200 && response.status < 300) {
+        try {
+          const json = JSON.parse(responseBody) as Record<string, unknown>;
+          const value = spec.captureField
+            .split('.')
+            .reduce<unknown>((obj, key) => (obj as Record<string, unknown>)?.[key], json);
+          if (typeof value === 'string' || typeof value === 'number') {
+            captured.set(spec.captureAs, String(value));
+            log?.debug({ varName: spec.captureAs, value }, 'captured variable from API response');
+          }
+        } catch {
+          log?.warn({ captureField: spec.captureField }, 'failed to extract capture field from response');
+        }
+      }
+
       let bodyOk = true;
       let bodyNote = '';
       if (spec.bodyContains) {
-        const body = await response.text();
-        bodyOk = body.includes(spec.bodyContains);
+        bodyOk = responseBody.includes(spec.bodyContains);
         bodyNote = bodyOk
           ? ` Response body contains "${spec.bodyContains}".`
           : ` Response body does NOT contain "${spec.bodyContains}".`;
       }
+
+      // For failing checks, include the first 300 chars of the response body so the agent
+      // can understand WHY the request was rejected (e.g. validation error details on 400s).
+      const failureBodyHint =
+        !statusOk && responseBody
+          ? ` Response: ${responseBody.slice(0, 300)}${responseBody.length > 300 ? '…' : ''}`
+          : '';
 
       const passed = statusOk && bodyOk;
       results.push({
@@ -1020,8 +1287,8 @@ Respond ONLY with a JSON array, no markdown fences or extra text.`;
         passed,
         validationType: 'api',
         reasoning: passed
-          ? `${spec.method} ${spec.path} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}`
-          : `${spec.method} ${spec.path} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}`,
+          ? `${spec.method} ${resolvedPath} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}`
+          : `${spec.method} ${resolvedPath} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}${failureBodyHint}`,
       });
     } catch (err) {
       results.push({
@@ -1033,15 +1300,35 @@ Respond ONLY with a JSON array, no markdown fences or extra text.`;
     }
   }
 
-  // Ensure every API AC has a result, even if spec generation missed it
-  const covered = new Set(results.map((r) => r.criterion));
+  // Ensure every API AC has a result, even if spec generation missed it.
+  // Use fuzzy matching: normalise both sides to lower-case trimmed text so minor
+  // whitespace or capitalisation differences from the LLM don't cause a false miss.
+  // Also treat a result as covering an AC when one is a leading substring of the other
+  // (handles cases where the LLM slightly truncates or extends the criterion text).
+  function normCriterion(s: string): string {
+    return s.toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  const coveredNorm = new Set(results.map((r) => normCriterion(r.criterion)));
+
+  function isCovered(ac: string): boolean {
+    const n = normCriterion(ac);
+    if (coveredNorm.has(n)) return true;
+    // Check prefix match: result is a prefix of AC (LLM truncated) or AC is a prefix of result
+    for (const c of coveredNorm) {
+      if (n.startsWith(c) || c.startsWith(n)) return true;
+    }
+    return false;
+  }
+
   for (const ac of apiAcs) {
-    if (!covered.has(ac.criterion)) {
+    if (!isCovered(ac.criterion)) {
       results.push({
         criterion: ac.criterion,
         passed: false,
         validationType: 'api',
-        reasoning: 'No HTTP check spec was generated for this criterion',
+        reasoning: specsWereGenerated
+          ? 'No HTTP check spec was generated for this criterion (criterion missing from LLM response)'
+          : 'No HTTP check spec was generated for this criterion (JSON parse failure after retry)',
       });
     }
   }
@@ -1049,7 +1336,8 @@ Respond ONLY with a JSON array, no markdown fences or extra text.`;
   return results;
 }
 
-function parseApiCheckSpecs(raw: string, apiAcs: ClassifiedAc[]): ApiCheckSpec[] | null {
+/** @internal Exported for testing. */
+export function parseApiCheckSpecs(raw: string, log?: Logger): ApiCheckSpec[] | null {
   const cleaned = stripMarkdownFences(raw);
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
   if (!jsonMatch) return null;
@@ -1058,15 +1346,37 @@ function parseApiCheckSpecs(raw: string, apiAcs: ClassifiedAc[]): ApiCheckSpec[]
     const parsed = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(parsed)) return null;
 
-    return parsed.filter(
-      (item: unknown): item is ApiCheckSpec =>
-        typeof item === 'object' &&
-        item !== null &&
-        typeof (item as Record<string, unknown>).criterion === 'string' &&
-        typeof (item as Record<string, unknown>).method === 'string' &&
-        typeof (item as Record<string, unknown>).path === 'string' &&
-        typeof (item as Record<string, unknown>).expectedStatus === 'number',
-    );
+    const results: ApiCheckSpec[] = [];
+    for (const item of parsed as unknown[]) {
+      if (typeof item !== 'object' || item === null) {
+        log?.warn({ item }, 'parseApiCheckSpecs: dropping non-object spec entry');
+        continue;
+      }
+      const rec = item as Record<string, unknown>;
+
+      // LLM frequently returns "200" (string) — coerce it to a number
+      if (typeof rec.expectedStatus === 'string' && /^\d+$/.test(rec.expectedStatus)) {
+        rec.expectedStatus = Number.parseInt(rec.expectedStatus, 10);
+      }
+
+      const missingFields: string[] = [];
+      if (typeof rec.criterion !== 'string') missingFields.push('criterion');
+      if (typeof rec.method !== 'string') missingFields.push('method');
+      if (typeof rec.path !== 'string') missingFields.push('path');
+      if (typeof rec.expectedStatus !== 'number') missingFields.push('expectedStatus');
+
+      if (missingFields.length > 0) {
+        log?.warn(
+          { criterion: rec.criterion, missingFields },
+          'parseApiCheckSpecs: dropping spec — failed type guard',
+        );
+        continue;
+      }
+
+      // Pass through optional fields without validating — they are used at execution time
+      results.push(rec as unknown as ApiCheckSpec);
+    }
+    return results;
   } catch {
     return null;
   }
@@ -1376,11 +1686,28 @@ export function stripMarkdownFences(text: string): string {
  * Builds the review prompt with all available context.
  * Extracted so it can be reused across tiers.
  */
-function buildReviewPrompt(config: ValidationEngineConfig, reviewContext?: ReviewContext): string {
-  const acList =
-    config.acceptanceCriteria && config.acceptanceCriteria.length > 0
-      ? config.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n')
-      : null;
+export function buildReviewPrompt(
+  config: ValidationEngineConfig,
+  reviewContext?: ReviewContext,
+  noneAcCriteria: string[] = [],
+): string {
+  const allAcs = config.acceptanceCriteria ?? [];
+
+  // ACs already verified by the automated harness (api + web-ui)
+  const autoVerifiedAcs = allAcs.filter((ac) => !noneAcCriteria.includes(ac));
+
+  // For backward-compat: we still need acList as a boolean signal for step numbering
+  const acList = allAcs.length > 0 ? true : null;
+
+  const autoSection =
+    autoVerifiedAcs.length > 0
+      ? `\n## ACCEPTANCE CRITERIA — AUTO-VERIFIED\nThe following were already checked by the automated test harness (HTTP calls / browser). You do not need to re-verify these unless you spot a code defect that would cause them to fail at runtime:\n${autoVerifiedAcs.map((ac, i) => `${i + 1}. ${ac}`).join('\n')}\n`
+      : '';
+
+  const noneSection =
+    noneAcCriteria.length > 0
+      ? `\n## ACCEPTANCE CRITERIA — DIFF VERIFICATION REQUIRED\nThe following criteria cannot be tested via HTTP or browser. YOU ARE THE ONLY CHECK. Examine the diff carefully and assess each one:\n${noneAcCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n')}\n\nFor each criterion above include it in "requirementsCheck" with:\n- met=true  — diff clearly implements this\n- met=false — implementation is absent or clearly wrong\n\nBenefit of the doubt: if the diff is ambiguous or you can't confirm, default to met=true. Only fail when you have clear evidence of absence or incorrectness.\n`
+      : '';
 
   const planSection = config.plan
     ? `\n## ORIGINAL PLAN\n\nSummary: ${config.plan.summary}\n\nSteps:\n${config.plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n`
@@ -1402,8 +1729,6 @@ function buildReviewPrompt(config: ValidationEngineConfig, reviewContext?: Revie
   const repoRulesSection = config.codeReviewSkill
     ? `\n## REPO-SPECIFIC REVIEW RULES (these take precedence over standard rules)\n\n${config.codeReviewSkill}\n`
     : '';
-
-  const acSection = acList ? `\n## ACCEPTANCE CRITERIA\n\n${acList}\n` : '';
 
   const commitLogSection = config.commitLog
     ? `\n## COMMIT HISTORY\n\nCommits on this branch (most recent first — use to understand progression and intent):\n\n${config.commitLog}\n`
@@ -1430,7 +1755,7 @@ ${repoRulesSection}
 ## TASK
 
 ${config.task}
-${acSection}${planSection}${taskSummarySection}
+${autoSection}${noneSection}${planSection}${taskSummarySection}
 ${commitLogSection}${contextSection}## DIFF
 
 ${config.diff}
@@ -1438,8 +1763,21 @@ ${overridesSection}
 ## INSTRUCTIONS
 
 ${
-  acList
+  noneAcCriteria.length > 0
     ? `### Step 1: Requirements check
+
+For each criterion in the "ACCEPTANCE CRITERIA — DIFF VERIFICATION REQUIRED" section above, examine the diff carefully and assess whether it is implemented. These are YOUR responsibility — they cannot be tested any other way.
+
+- met=true  — diff clearly implements this criterion
+- met=false — implementation is absent or clearly wrong
+- Benefit of the doubt: if the diff is ambiguous or you can't tell, default to met=true. Only fail when you have clear evidence of absence or incorrectness.
+- Add a brief note explaining your assessment.
+
+Do NOT include auto-verified criteria in requirementsCheck.
+
+`
+    : acList
+      ? `### Step 1: Requirements check
 
 For each acceptance criterion above, determine whether the diff addresses it:
 - Mark met=true only if the diff clearly and fully implements the criterion
@@ -1447,7 +1785,7 @@ For each acceptance criterion above, determine whether the diff addresses it:
 - Add a brief note if the criterion is partially met or needs context
 
 `
-    : ''
+      : ''
 }${
   taskSummarySection
     ? `### ${acList ? 'Step 2' : 'Step 1'}: Deviation assessment
@@ -1508,7 +1846,7 @@ Respond ONLY with a JSON object — no markdown fences, no extra text:
 {
   "status": "pass" | "fail" | "uncertain",
   "reasoning": "one or two sentence summary of the overall assessment",
-  ${acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["specific medium/high/critical severity issues only — omit anything below medium"]
+  ${noneAcCriteria.length > 0 ? '"requirementsCheck": [\n    // Include ONLY the "DIFF VERIFICATION REQUIRED" criteria. Do NOT include auto-verified ones.\n    { "criterion": "...", "met": true|false, "note": "optional" }\n  ],\n  ' : acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["specific medium/high/critical severity issues only — omit anything below medium"]
 }
 
 Status rules:
@@ -1583,10 +1921,26 @@ function buildContextSection(ctx: ReviewContext): string {
   return parts.join('\n');
 }
 
+/**
+ * Forces status to 'fail' if any requirementsCheck item is unmet.
+ * The reviewer may set status='pass' holistically while still marking individual items as unmet.
+ */
+export function enforceRequirementsStatus(
+  parsed: ReturnType<typeof parseReviewJson>,
+): ReturnType<typeof parseReviewJson> {
+  if (!parsed) return parsed;
+  const anyUnmet = parsed.requirementsCheck?.some((r) => !r.met) ?? false;
+  if (anyUnmet && parsed.status === 'pass') {
+    return { ...parsed, status: 'fail' };
+  }
+  return parsed;
+}
+
 async function runTaskReview(
   config: ValidationEngineConfig,
   log?: Logger,
   reviewContext?: ReviewContext,
+  noneAcCriteria: string[] = [],
 ): Promise<{ result: TaskReviewResult | null; skipReason?: string }> {
   if (!config.reviewerModel || !config.diff || !config.task) {
     const reason = !config.diff
@@ -1601,7 +1955,7 @@ async function runTaskReview(
   log?.info({ model: config.reviewerModel }, 'running AI task review');
 
   const diffIsTruncated = config.diff?.includes('⚠ DIFF TRUNCATED:') ?? false;
-  const prompt = buildReviewPrompt(config, reviewContext);
+  const prompt = buildReviewPrompt(config, reviewContext, noneAcCriteria);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const reviewDepth = config.reviewDepth ?? 'auto';
 
@@ -1626,7 +1980,7 @@ async function runTaskReview(
         timeout: reviewTimeout,
       });
 
-      tier1Parsed = parseReviewJson(stdout.trim());
+      tier1Parsed = enforceRequirementsStatus(parseReviewJson(stdout.trim()));
       if (!tier1Parsed) {
         log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
         return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
@@ -1706,7 +2060,7 @@ async function runTaskReview(
         timeout: reviewTimeout,
       });
 
-      const tier2Parsed = parseReviewJson(tier2Result.stdout.trim());
+      const tier2Parsed = enforceRequirementsStatus(parseReviewJson(tier2Result.stdout.trim()));
       if (tier2Parsed && tier2Parsed.status !== 'uncertain') {
         log?.info({ status: tier2Parsed.status, tier: 2 }, 'Tier 2 tool-use review resolved');
         return {
@@ -1735,7 +2089,7 @@ async function runTaskReview(
             timeout: reviewTimeout,
           });
 
-          const tier3Parsed = parseReviewJson(tier3Result.stdout.trim());
+          const tier3Parsed = enforceRequirementsStatus(parseReviewJson(tier3Result.stdout.trim()));
           if (tier3Parsed) {
             log?.info({ status: tier3Parsed.status, tier: 3 }, 'Tier 3 agentic review complete');
             return {

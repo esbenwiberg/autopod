@@ -134,6 +134,20 @@ function formatValidationFailure(input: ValidationFeedback): string {
     }
   }
 
+  // Unmet "none" ACs surfaced by the AI reviewer
+  if (result.taskReview?.requirementsCheck) {
+    const unmetNoneAcs = result.taskReview.requirementsCheck.filter((r) => !r.met);
+    if (unmetNoneAcs.length > 0) {
+      lines.push('### Unmet Acceptance Criteria (code review)');
+      lines.push('The following criteria were not met according to the code reviewer:');
+      for (const item of unmetNoneAcs) {
+        lines.push(`**${item.criterion}**:`);
+        lines.push(`- ${item.note ?? 'Not implemented or evidence absent in the diff'}`);
+      }
+      lines.push('');
+    }
+  }
+
   // Task review issues
   if (result.taskReview && result.taskReview.status !== 'pass') {
     lines.push('### Task Review Issues');
