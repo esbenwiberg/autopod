@@ -112,12 +112,32 @@ const CONTAINER_APP_PORT = 3000;
  * Build the task string for a PR fix session, injecting CI failure details and
  * review comments so the agent knows exactly what to fix.
  */
-function buildPrFixTask(session: Session, status: PrMergeStatus): string {
+function buildPrFixTask(
+  session: Session,
+  status: PrMergeStatus,
+  sessionRepo: SessionRepository,
+): string {
   const attempt = (session.prFixAttempts ?? 0) + 1;
+
+  // Resolve the root original task by following linkedSessionId back to the source.
+  // Prevents nested [PR FIX] boilerplate + duplicate review-comment blocks when a
+  // fix session somehow ends up spawning a sub-fixer.
+  let rootTask = session.task;
+  let cursor: Session = session;
+  while (cursor.linkedSessionId) {
+    try {
+      const parent = sessionRepo.getOrThrow(cursor.linkedSessionId);
+      rootTask = parent.task;
+      cursor = parent;
+    } catch {
+      break;
+    }
+  }
+
   const sections: string[] = [
     `[PR FIX] The pull request at ${session.prUrl} needs fixes (attempt ${attempt}).`,
     '',
-    `Original task: ${session.task}`,
+    `Original task: ${rootTask}`,
     '',
     'Your job is to fix the failures listed below by pushing commits to the existing branch.',
     'Do NOT create a new PR — one already exists.',
@@ -140,10 +160,10 @@ function buildPrFixTask(session: Session, status: PrMergeStatus): string {
   }
 
   if (status.reviewComments.length > 0) {
-    sections.push('## Reviewer Comments\n');
+    sections.push('## Review Comments\n');
     for (const rc of status.reviewComments) {
-      const location = rc.path ? ` (on \`${rc.path}\`)` : '';
-      sections.push(`**${rc.author}**${location}: ${rc.body}`);
+      const prefix = rc.path ? `\`${rc.path}\`: ` : '';
+      sections.push(`${prefix}${rc.body}`);
       sections.push('');
     }
   }
@@ -504,6 +524,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // Re-read from DB to avoid stale closure state across 60s intervals
       const parent = sessionRepo.getOrThrow(parentSessionId);
 
+      // Guard: fix sessions must never spawn sub-fixers.
+      // The root parent's merge poller owns all fix-spawn decisions.
+      if (parent.linkedSessionId) {
+        logger.debug({ sessionId: parentSessionId }, 'Fix session — skipping sub-fixer spawn');
+        return;
+      }
+
       // Guard: a fix session is already alive
       if (parent.fixSessionId) {
         try {
@@ -520,8 +547,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         } catch {
           // Fix session not found — treat as terminal, fall through
         }
-        // Clear stale fixSessionId so we can potentially spawn a new one
+        // Clear stale fixSessionId and return — let the *next* poll cycle decide whether
+        // to spawn. This gives CI time to restart and re-run on the fix's new commits
+        // before we evaluate failures again (e.g. SonarCloud takes a full rebuild).
         sessionRepo.update(parentSessionId, { fixSessionId: null });
+        return;
       }
 
       // Guard: max retries exhausted
@@ -544,7 +574,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
 
       // Build fix task and create child session directly using closure deps
       const newAttempt = (parent.prFixAttempts ?? 0) + 1;
-      const fixTask = buildPrFixTask(parent, status);
+      const fixTask = buildPrFixTask(parent, status, sessionRepo);
       const profile = profileStore.get(parent.profileName);
 
       let fixId = '';

@@ -57,8 +57,8 @@ export interface CiFailureDetail {
 }
 
 export interface ReviewCommentDetail {
-  /** Display name of the reviewer */
-  author: string;
+  /** Reviewer display name — stored for audit, NOT injected into agent task */
+  author?: string;
   /** Comment body text */
   body: string;
   /** File path for inline comments, null for PR-level review comments */

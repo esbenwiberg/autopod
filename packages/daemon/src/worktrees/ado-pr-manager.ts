@@ -231,17 +231,31 @@ export class AdoPrManager implements PrManager {
         method: 'GET',
       })) as { value: Array<{ context: { name: string }; state: string }> };
 
-      const blocking = evaluations.value.filter((e) => e.state === 'failed' || e.state === 'error');
-      if (blocking.length > 0) {
-        const names = blocking.map((e) => `${e.context.name} (${e.state})`).join(', ');
-        reasons.push(`Policies: ${names}`);
-        for (const e of blocking) {
-          ciFailures.push({
-            name: e.context.name,
-            conclusion: e.state,
-            detailsUrl: null,
-            annotations: [],
-          });
+      // If any check is still running/queued, old failures are potentially stale —
+      // new commits may have already been pushed and CI hasn't settled yet.
+      // Don't report failures until all checks reach a terminal state.
+      // ADO states: notSet | pending | succeeded | failed | error
+      const inFlight = evaluations.value.filter(
+        (e) => e.state === 'pending' || e.state === 'notSet',
+      );
+      if (inFlight.length > 0) {
+        reasons.push(`CI in progress: ${inFlight.map((e) => e.context.name).join(', ')}`);
+        // ciFailures stays empty — no fixer spawn while CI is running
+      } else {
+        const blocking = evaluations.value.filter(
+          (e) => e.state === 'failed' || e.state === 'error',
+        );
+        if (blocking.length > 0) {
+          const names = blocking.map((e) => `${e.context.name} (${e.state})`).join(', ');
+          reasons.push(`Policies: ${names}`);
+          for (const e of blocking) {
+            ciFailures.push({
+              name: e.context.name,
+              conclusion: e.state,
+              detailsUrl: null,
+              annotations: [],
+            });
+          }
         }
       }
     } catch {
@@ -255,23 +269,29 @@ export class AdoPrManager implements PrManager {
     // Collect active reviewer thread comments
     const reviewComments: ReviewCommentDetail[] = [];
     try {
-      const threads = (await this.adoFetch(`/pullrequests/${prId}/threads?api-version=7.1`, {
-        method: 'GET',
-      })) as {
+      const threads = (await this.adoFetch(
+        `/pullrequests/${prId}/threads?api-version=7.1&$top=500`,
+        { method: 'GET' },
+      )) as {
         value: Array<{
-          status: string;
+          status: string | number | undefined;
+          isDeleted?: boolean;
+          pullRequestThreadContext?: { filePath?: string } | null;
           comments: Array<{ author: { displayName: string }; content: string }>;
         }>;
       };
       for (const thread of threads.value) {
-        if (thread.status === 'active' && thread.comments?.[0]) {
-          const first = thread.comments[0];
-          reviewComments.push({
-            author: first.author.displayName,
-            body: first.content,
-            path: null,
-          });
-        }
+        if (thread.isDeleted) continue;
+        // ADO REST API may return status as the string "active" or the integer 1
+        const isActive = thread.status === 'active' || thread.status === 1;
+        if (!isActive) continue;
+        const first = thread.comments?.[0];
+        if (!first?.content?.trim()) continue; // skip empty system/policy threads
+        reviewComments.push({
+          author: first.author.displayName,
+          body: first.content,
+          path: thread.pullRequestThreadContext?.filePath ?? null,
+        });
       }
     } catch {
       // Non-fatal — reviewComments stays empty

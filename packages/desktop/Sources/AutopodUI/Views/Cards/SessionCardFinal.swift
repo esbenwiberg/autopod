@@ -471,7 +471,7 @@ public struct SessionCardFinal: View {
                             .padding(.top, 2)
                         Text(q)
                             .font(.callout)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(3)
                     }
                 }
                 if session.escalationType == "action_approval" {
