@@ -84,8 +84,16 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/sessions/\(id)/kill")
   }
 
-  public func completeSession(_ id: String) async throws {
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/complete")
+  public func completeSession(_ id: String, promoteTo: String? = nil) async throws {
+    let body = try promoteTo.map { try encode(CompleteBody(promoteTo: $0)) }
+    let _: OkResponse = try await request("POST", "/sessions/\(id)/complete", body: body)
+  }
+
+  /// Promote an interactive session to agent-driven (in-place, same session ID).
+  /// `targetOutput` must be one of `pr`, `branch`, `artifact`, `none`. Defaults to `pr` daemon-side.
+  public func promoteSession(_ id: String, targetOutput: String? = nil) async throws {
+    let body = try targetOutput.map { try encode(PromoteBody(targetOutput: $0)) }
+    let _: OkResponse = try await request("POST", "/sessions/\(id)/promote", body: body)
   }
 
   public func triggerValidation(_ id: String) async throws {
@@ -451,6 +459,14 @@ struct ApproveBody: Codable {
 
 struct RejectBody: Codable {
   let feedback: String?
+}
+
+struct CompleteBody: Codable {
+  let promoteTo: String
+}
+
+struct PromoteBody: Codable {
+  let targetOutput: String
 }
 
 struct WarmBody: Codable {

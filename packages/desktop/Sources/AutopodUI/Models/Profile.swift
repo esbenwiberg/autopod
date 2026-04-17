@@ -70,8 +70,8 @@ public struct Profile: Identifiable, Sendable {
     public var escalationAutoPauseAfter: Int
     public var escalationHumanResponseTimeout: Int
 
-    // Output & inheritance
-    public var outputMode: OutputMode
+    // Pod config (orthogonal axes) + back-compat single-enum legacy output mode
+    public var pod: PodConfig
     public var extendsProfile: String?
     /// Profile to use when spawning worker sessions from a workspace using this profile
     public var workerProfile: String?
@@ -97,6 +97,12 @@ public struct Profile: Identifiable, Sendable {
 
     // Provider credentials (read-only indicator)
     public var providerCredentialsType: String?
+
+    /// Backward-compat legacy output mode derived from `pod`.
+    public var outputMode: OutputMode {
+        get { pod.legacyOutputMode }
+        set { pod = PodConfig.fromLegacy(newValue.rawValue) }
+    }
 
     // Convenience counts (for badges / list views)
     public var mcpServerCount: Int { mcpServers.count }
@@ -135,7 +141,8 @@ public struct Profile: Identifiable, Sendable {
         escalationAskAiEnabled: Bool = true, escalationAskAiModel: String = "sonnet",
         escalationAskAiMaxCalls: Int = 3, escalationAdvisorEnabled: Bool = false,
         escalationAutoPauseAfter: Int = 1, escalationHumanResponseTimeout: Int = 3600,
-        outputMode: OutputMode = .pr, extendsProfile: String? = nil,
+        pod: PodConfig = PodConfig(),
+        extendsProfile: String? = nil,
         workerProfile: String? = nil,
         warmImageTag: String? = nil, warmImageBuiltAt: String? = nil,
         actionPolicyEnabled: Bool = false,
@@ -184,7 +191,8 @@ public struct Profile: Identifiable, Sendable {
         self.escalationAdvisorEnabled = escalationAdvisorEnabled
         self.escalationAutoPauseAfter = escalationAutoPauseAfter
         self.escalationHumanResponseTimeout = escalationHumanResponseTimeout
-        self.outputMode = outputMode; self.extendsProfile = extendsProfile
+        self.pod = pod
+        self.extendsProfile = extendsProfile
         self.workerProfile = workerProfile
         self.warmImageTag = warmImageTag; self.warmImageBuiltAt = warmImageBuiltAt
         self.actionPolicyEnabled = actionPolicyEnabled

@@ -27,8 +27,14 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
 
   // Repo URL
   const repoUrl = input.repoUrl;
-  const isArtifactMode = input.outputMode === 'artifact';
-  if (!isArtifactMode && (typeof repoUrl !== 'string' || repoUrl.length === 0)) {
+  // The pod axes determine whether a repoUrl is needed:
+  //  - output='artifact' | 'none' → ephemeral, no push target required
+  //  - output='pr' | 'branch'     → must have somewhere to push
+  // Legacy outputMode='artifact' is still honored as a fallback.
+  const pod = (input.pod ?? null) as { output?: string } | null;
+  const outputTarget = pod?.output ?? (input.outputMode as string | undefined);
+  const repoUrlRequired = outputTarget !== 'artifact' && outputTarget !== 'none';
+  if (repoUrlRequired && (typeof repoUrl !== 'string' || repoUrl.length === 0)) {
     errors.push('repoUrl is required');
   } else if (typeof repoUrl === 'string' && repoUrl.length > 0) {
     try {

@@ -28,7 +28,14 @@ public enum SessionMapper {
 
   public static func map(_ response: SessionResponse) -> Session {
     let status = SessionStatus(rawValue: response.status) ?? .queued
-    let outputMode = OutputMode(rawValue: response.outputMode) ?? .pr
+    let pod: PodConfig = {
+      if let p = response.pod {
+        let agent = AgentMode(rawValue: p.agentMode) ?? .auto
+        let output = OutputTarget(rawValue: p.output) ?? .pr
+        return PodConfig(agentMode: agent, output: output, validate: p.validate, promotable: p.promotable)
+      }
+      return PodConfig.fromLegacy(response.outputMode)
+    }()
 
     // Map escalation from pending escalation
     let escalationQuestion: String? = {
@@ -181,7 +188,7 @@ public enum SessionMapper {
     return Session(
       id: response.id,
       status: status,
-      outputMode: outputMode,
+      pod: pod,
       branch: response.branch,
       profileName: response.profileName,
       task: response.task,

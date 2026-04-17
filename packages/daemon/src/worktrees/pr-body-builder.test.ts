@@ -353,9 +353,7 @@ describe('buildPrBody', () => {
         screenshots: [],
         diff: '',
         deviationsAssessment: {
-          disclosedDeviations: [
-            { step: 'Step 2', verdict: 'justified', reasoning: 'Good reason' },
-          ],
+          disclosedDeviations: [{ step: 'Step 2', verdict: 'justified', reasoning: 'Good reason' }],
           undisclosedDeviations: [],
         },
       },

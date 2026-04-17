@@ -38,6 +38,13 @@ export type {
   ActionAuditEntry,
 } from './types/actions.js';
 
+export type { AgentMode, OutputTarget, PodConfig } from './types/pod.js';
+export {
+  podConfigFromOutputMode,
+  outputModeFromPod,
+  resolvePodConfig,
+} from './types/pod.js';
+
 export type {
   InjectedMcpServer,
   InjectedClaudeMdSection,

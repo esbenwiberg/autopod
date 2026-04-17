@@ -1,6 +1,7 @@
 import type { ActionPolicy, OutputMode } from './actions.js';
 import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from './injection.js';
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
+import type { PodConfig } from './pod.js';
 import type { RuntimeType } from './runtime.js';
 
 export type ExecutionTarget = 'local' | 'aci';
@@ -44,7 +45,17 @@ export interface Profile {
   networkPolicy: NetworkPolicy | null;
   /** Action control plane policy — which actions are enabled, PII rules, custom actions */
   actionPolicy: ActionPolicy | null;
-  /** Output mode — 'pr' for code changes, 'artifact' for research/output collection */
+  /**
+   * Profile-level default pod configuration (agent mode, output target, etc.).
+   * Optional — when null, session creation falls back to `outputMode` or
+   * built-in defaults (`{auto, pr}`). Per-session overrides shallow-merge
+   * over this.
+   */
+  pod: PodConfig | null;
+  /**
+   * @deprecated Mirrors `pod` for wire/storage back-compat. New code should
+   * read `pod` directly. Kept in sync by the profile store.
+   */
   outputMode: OutputMode;
   /** Model provider — determines how the daemon authenticates with the AI backend */
   modelProvider: ModelProvider;

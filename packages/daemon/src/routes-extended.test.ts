@@ -729,7 +729,11 @@ describe('Extended Route Tests', () => {
       // First call: git merge-base HEAD main (returns a SHA)
       // Second call: git diff <sha> HEAD (returns unified diff)
       containerManager.execInContainer
-        .mockResolvedValueOnce({ stdout: 'abc123def456abc123def456abc123def456abc1', stderr: '', exitCode: 0 }) // git merge-base
+        .mockResolvedValueOnce({
+          stdout: 'abc123def456abc123def456abc123def456abc1',
+          stderr: '',
+          exitCode: 0,
+        }) // git merge-base
         .mockResolvedValueOnce({ stdout: unifiedDiff, stderr: '', exitCode: 0 }); // git diff
 
       const res = await app.inject({

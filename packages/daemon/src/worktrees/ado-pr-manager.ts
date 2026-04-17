@@ -329,11 +329,17 @@ export class AdoPrManager implements PrManager {
     } catch (evalErr) {
       // 404 = no branch policies are configured on this repo/branch — that's fine, treat as "no blocking checks"
       if (evalErr instanceof AdoHttpError && evalErr.status === 404) {
-        this.logger.debug({ prUrl: config.prUrl }, 'ADO policy evaluations returned 404 — no branch policies configured');
+        this.logger.debug(
+          { prUrl: config.prUrl },
+          'ADO policy evaluations returned 404 — no branch policies configured',
+        );
       } else {
         // Permissions issue, unexpected API version, network error, etc.
         // Log at warn so operators can see why auto-detection failed — fall through with empty ciFailures
-        this.logger.warn({ err: evalErr, prUrl: config.prUrl }, 'ADO policy evaluations fetch failed — fix sessions may not auto-spawn');
+        this.logger.warn(
+          { err: evalErr, prUrl: config.prUrl },
+          'ADO policy evaluations fetch failed — fix sessions may not auto-spawn',
+        );
       }
     }
 

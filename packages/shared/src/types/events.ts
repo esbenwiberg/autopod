@@ -86,7 +86,12 @@ export interface ValidationPhaseCompletedEvent {
   phaseStatus: 'pass' | 'fail' | 'skip';
   // Exactly one of these is populated per event, matching the phase:
   buildResult?: BuildResult;
-  testResult?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
+  testResult?: {
+    status: 'pass' | 'fail' | 'skip';
+    duration: number;
+    stdout?: string;
+    stderr?: string;
+  };
   healthResult?: HealthResult;
   pageResults?: PageResult[];
   acResult?: AcValidationResult | null;

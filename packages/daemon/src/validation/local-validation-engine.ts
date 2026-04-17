@@ -9,9 +9,9 @@ import type {
   ValidationOverride,
   ValidationResult,
 } from '@autopod/shared';
-import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.js';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
+import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.js';
 
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
@@ -214,7 +214,13 @@ export function createLocalValidationEngine(
           onProgress?.('Checking acceptance criteria…');
         const acValidation =
           healthResult.status === 'pass'
-            ? await runAcValidation(containerManager, config, log, hostBrowserRunner, acClassificationCache)
+            ? await runAcValidation(
+                containerManager,
+                config,
+                log,
+                hostBrowserRunner,
+                acClassificationCache,
+              )
             : null;
         const acStatus: 'pass' | 'fail' | 'skip' = acValidation?.status ?? 'skip';
         callbacks?.onPhaseCompleted?.('ac', acStatus, acValidation);
@@ -927,9 +933,10 @@ async function runAcValidation(
   const { deduped: dedupedCriteria, expandResult } = deduplicateAcsByBaseText(
     config.acceptanceCriteria,
   );
-  const dedupedConfig = dedupedCriteria.length < config.acceptanceCriteria.length
-    ? { ...config, acceptanceCriteria: dedupedCriteria }
-    : config;
+  const dedupedConfig =
+    dedupedCriteria.length < config.acceptanceCriteria.length
+      ? { ...config, acceptanceCriteria: dedupedCriteria }
+      : config;
 
   // Step 2: Classify each AC by validation type (cached to prevent non-deterministic re-classification)
   const cacheKey = [...dedupedCriteria].sort().join('|');
@@ -1231,7 +1238,10 @@ Respond ONLY with a JSON array, no markdown fences or extra text.`;
     }
 
     // Interpolate {varName} placeholders in the path using captured values.
-    const resolvedPath = spec.path.replace(/\{(\w+)\}/g, (_, name) => captured.get(name) ?? `{${name}}`);
+    const resolvedPath = spec.path.replace(
+      /\{(\w+)\}/g,
+      (_, name) => captured.get(name) ?? `{${name}}`,
+    );
 
     try {
       const url = `${config.previewUrl.replace(/\/$/, '')}${resolvedPath}`;
@@ -1261,7 +1271,10 @@ Respond ONLY with a JSON array, no markdown fences or extra text.`;
             log?.debug({ varName: spec.captureAs, value }, 'captured variable from API response');
           }
         } catch {
-          log?.warn({ captureField: spec.captureField }, 'failed to extract capture field from response');
+          log?.warn(
+            { captureField: spec.captureField },
+            'failed to extract capture field from response',
+          );
         }
       }
 

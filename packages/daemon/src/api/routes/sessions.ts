@@ -22,12 +22,13 @@ export function sessionRoutes(
   app.post('/sessions', async (request, reply) => {
     const body = createSessionRequestSchema.parse(request.body);
 
-    // Workspace sessions are local-only — reject if execution target is not 'local'
-    if (body.outputMode === 'workspace') {
+    // Interactive sessions are local-only — reject if execution target is not 'local'
+    const isInteractive = body.pod?.agentMode === 'interactive' || body.outputMode === 'workspace';
+    if (isInteractive) {
       const resolvedTarget = body.executionTarget ?? 'local';
       if (resolvedTarget !== 'local') {
         reply.status(400);
-        return { error: 'Workspace sessions only support local execution target' };
+        return { error: 'Interactive sessions only support local execution target' };
       }
     }
 
@@ -253,11 +254,48 @@ export function sessionRoutes(
     }
   });
 
-  // POST /sessions/:sessionId/complete — complete a workspace session (push branch + transition)
-  app.post('/sessions/:sessionId/complete', async (request) => {
+  // POST /sessions/:sessionId/complete — complete an interactive session.
+  // Without a body this pushes the branch and transitions to `complete`.
+  // With `promoteTo` set to 'pr' | 'artifact' | 'none', the session is
+  // handed off to an agent-driven run on the same ID.
+  app.post('/sessions/:sessionId/complete', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
-    const result = await sessionManager.completeSession(sessionId);
-    return { ok: true, ...result };
+    const body = (request.body ?? {}) as {
+      promoteTo?: 'pr' | 'branch' | 'artifact' | 'none';
+    };
+    try {
+      const result = await sessionManager.completeSession(sessionId, {
+        promoteTo: body.promoteTo,
+      });
+      return { ok: true, ...result };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
+  // POST /sessions/:sessionId/promote — in-place interactive → auto promotion.
+  // Alias of `/complete` with a promoteTo target.
+  app.post('/sessions/:sessionId/promote', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const body = (request.body ?? {}) as {
+      targetOutput?: 'pr' | 'branch' | 'artifact' | 'none';
+    };
+    const target = body.targetOutput ?? 'pr';
+    try {
+      await sessionManager.promoteToAuto(sessionId, target);
+      reply.status(202);
+      return { ok: true, promotedTo: target };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
   });
 
   // POST /sessions/:sessionId/kill — kill session

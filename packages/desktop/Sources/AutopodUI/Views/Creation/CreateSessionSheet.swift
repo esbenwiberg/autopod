@@ -19,7 +19,9 @@ public struct CreateSessionSheet: View {
     @State private var selectedProfile = "my-app"
     @State private var task = ""
     @State private var modelText = ""
-    @State private var outputMode = "pr"
+    @State private var agentMode: String = "auto"
+    @State private var outputTarget: String = "pr"
+    @State private var validate: Bool = true
     @State private var baseBranch = ""
     @State private var acFromPath = ""
     @State private var criteria: [String] = [""]
@@ -29,11 +31,17 @@ public struct CreateSessionSheet: View {
     @State private var showAdvanced = false
 
     private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
-    private let outputs = [("pr", "Worker (PR)"), ("workspace", "Workspace (Interactive)"), ("artifact", "Artifact")]
+    private let agentModes = [("auto", "Agent"), ("interactive", "Interactive")]
+    private let outputTargets = [
+        ("pr", "Pull Request"),
+        ("branch", "Branch Push"),
+        ("artifact", "Artifact"),
+        ("none", "Ephemeral"),
+    ]
 
-    private var isWorkspace: Bool { outputMode == "workspace" }
+    private var isInteractive: Bool { agentMode == "interactive" }
     private var canCreate: Bool {
-        isWorkspace || !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        isInteractive || !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     public var body: some View {
@@ -71,17 +79,49 @@ public struct CreateSessionSheet: View {
                         .labelsHidden()
                     }
 
-                    // Type + Model
+                    // Agent + Output
                     HStack(alignment: .top, spacing: 16) {
-                        formSection("Type") {
-                            Picker("", selection: $outputMode) {
-                                ForEach(outputs, id: \.0) { value, label in
+                        formSection("Agent") {
+                            Picker("", selection: $agentMode) {
+                                ForEach(agentModes, id: \.0) { value, label in
+                                    Text(label).tag(value)
+                                }
+                            }
+                            .labelsHidden()
+                            .onChange(of: agentMode) { _, newValue in
+                                if newValue == "interactive" {
+                                    // Interactive sessions default to branch-push on complete
+                                    if outputTarget == "pr" { outputTarget = "branch" }
+                                    validate = false
+                                } else {
+                                    if outputTarget == "none" || outputTarget == "branch" {
+                                        outputTarget = "pr"
+                                    }
+                                    validate = true
+                                }
+                            }
+                        }
+                        formSection("Output") {
+                            Picker("", selection: $outputTarget) {
+                                ForEach(outputTargets, id: \.0) { value, label in
                                     Text(label).tag(value)
                                 }
                             }
                             .labelsHidden()
                         }
-                        if !isWorkspace {
+                    }
+
+                    // Validate toggle + Model
+                    HStack(alignment: .top, spacing: 16) {
+                        formSection("Validate") {
+                            Toggle(isOn: $validate) {
+                                Text(validate ? "Run build / smoke / review" : "Skip validation")
+                                    .font(.callout)
+                            }
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                        }
+                        if !isInteractive {
                             formSection("Model (optional)") {
                                 HStack(spacing: 6) {
                                     Image(systemName: "cpu")
@@ -98,12 +138,12 @@ public struct CreateSessionSheet: View {
                         }
                     }
 
-                    if isWorkspace {
-                        // Workspace info
+                    if isInteractive {
+                        // Interactive info
                         HStack(spacing: 6) {
                             Image(systemName: "info.circle")
                                 .foregroundStyle(.teal)
-                            Text("Workspace pods are interactive — no agent, no task. You'll get a shell to work in.")
+                            Text("Interactive sessions have no agent. You drive the container. Promote later with Complete → PR to hand off.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -112,8 +152,8 @@ public struct CreateSessionSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
 
-                    // Task (not for workspace)
-                    if !isWorkspace {
+                    // Task (not for interactive)
+                    if !isInteractive {
                         formSection("Task") {
                             TextEditor(text: $task)
                                 .font(.system(.body, design: .default))
@@ -139,7 +179,7 @@ public struct CreateSessionSheet: View {
                     }
 
                     // Base branch (optional — for workspace handoff)
-                    if !isWorkspace {
+                    if !isInteractive {
                         formSection("Base Branch (optional)") {
                             HStack(spacing: 6) {
                                 Image(systemName: "arrow.branch")
@@ -156,7 +196,7 @@ public struct CreateSessionSheet: View {
                     }
 
                     // AC from file (optional)
-                    if !isWorkspace {
+                    if !isInteractive {
                         formSection("AC File Path (optional)") {
                             HStack(spacing: 6) {
                                 Image(systemName: "doc.text")
@@ -173,7 +213,7 @@ public struct CreateSessionSheet: View {
                     }
 
                     // Acceptance criteria (manual — only for worker/artifact, and only if no AC file)
-                    if !isWorkspace && acFromPath.isEmpty {
+                    if !isInteractive && acFromPath.isEmpty {
                     formSection("Acceptance Criteria") {
                         VStack(alignment: .leading, spacing: 6) {
                             if showBulkImport {
@@ -265,10 +305,10 @@ public struct CreateSessionSheet: View {
                     Text("Optional — helps the agent validate its own work")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    } // end if !isWorkspace
+                    } // end if !isInteractive
 
                     // Advanced options (PIM groups)
-                    if !isWorkspace {
+                    if !isInteractive {
                         DisclosureGroup(isExpanded: $showAdvanced) {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
@@ -352,14 +392,20 @@ public struct CreateSessionSheet: View {
                 Spacer()
                 Button("Cancel") { isPresented = false }
                     .keyboardShortcut(.cancelAction)
-                Button(isWorkspace ? "Create Workspace" : "Create Session") {
+                Button(isInteractive ? "Create Workspace" : "Create Session") {
                     Task {
                         let ac = criteria.filter { !$0.isEmpty }
                         let model = modelText.trimmingCharacters(in: .whitespacesAndNewlines)
                         let pim = pimGroups.filter { !$0.groupId.isEmpty }
+                        let pod = PodConfigRequest(
+                            agentMode: agentMode,
+                            output: outputTarget,
+                            validate: validate,
+                            promotable: isInteractive
+                        )
                         _ = await actions.createSession(
                             selectedProfile, task, model.isEmpty ? nil : model,
-                            outputMode, ac.isEmpty ? nil : ac,
+                            pod, ac.isEmpty ? nil : ac,
                             baseBranch.isEmpty ? nil : baseBranch,
                             acFromPath.isEmpty ? nil : acFromPath,
                             pim.isEmpty ? nil : pim

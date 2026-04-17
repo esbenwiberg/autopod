@@ -26,6 +26,7 @@ public enum SessionStatus: String, Sendable {
     case reviewRequired = "review_required"
     case approved, merging, mergePending = "merge_pending", complete
     case paused
+    case handoff
     case killing, killed
 
     public var label: String {
@@ -33,6 +34,7 @@ public enum SessionStatus: String, Sendable {
         case .awaitingInput: "awaiting input"
         case .reviewRequired: "needs review"
         case .mergePending: "merge pending"
+        case .handoff: "handing off"
         default: rawValue
         }
     }
@@ -52,6 +54,7 @@ public enum SessionStatus: String, Sendable {
         case .mergePending:  .orange
         case .complete:      .secondary
         case .paused:        .gray
+        case .handoff:       .blue
         case .killing:       .red
         case .killed:        .gray
         }
@@ -66,7 +69,7 @@ public enum SessionStatus: String, Sendable {
 
     public var isActive: Bool {
         switch self {
-        case .provisioning, .running, .validating, .merging, .mergePending, .killing: true
+        case .provisioning, .running, .validating, .merging, .mergePending, .killing, .handoff: true
         default: false
         }
     }
@@ -417,7 +420,7 @@ public struct TaskSummary: Sendable {
 public struct Session: Identifiable, Sendable {
     public let id: String
     public var status: SessionStatus
-    public var outputMode: OutputMode
+    public var pod: PodConfig
     public var branch: String
     public var profileName: String
     public var task: String
@@ -463,7 +466,19 @@ public struct Session: Identifiable, Sendable {
     /// Snapshot of the resolved profile config at session creation time
     public var profileSnapshot: Profile?
 
-    public var isWorkspace: Bool { outputMode == .workspace }
+    /// Backward-compat convenience derived from `pod`.
+    public var outputMode: OutputMode { pod.legacyOutputMode }
+
+    public var isWorkspace: Bool { pod.agentMode == .interactive }
+
+    /// Can this session be promoted to agent-driven mode (interactive → auto)?
+    public var isPromotable: Bool {
+        guard pod.isPromotable else { return false }
+        switch status {
+        case .running, .awaitingInput, .paused: return true
+        default: return false
+        }
+    }
 
     /// Whether this session is in a terminal state and can be deleted.
     public var isTerminal: Bool {
@@ -483,7 +498,7 @@ public struct Session: Identifiable, Sendable {
     public init(
         id: String = UUID().uuidString,
         status: SessionStatus,
-        outputMode: OutputMode = .pr,
+        pod: PodConfig = PodConfig(),
         branch: String,
         profileName: String,
         task: String = "",
@@ -515,7 +530,7 @@ public struct Session: Identifiable, Sendable {
         linkedSessionId: String? = nil,
         profileSnapshot: Profile? = nil
     ) {
-        self.id = id; self.status = status; self.outputMode = outputMode
+        self.id = id; self.status = status; self.pod = pod
         self.branch = branch; self.profileName = profileName; self.task = task
         self.model = model; self.startedAt = startedAt; self.updatedAt = updatedAt
         self.baseBranch = baseBranch
@@ -530,5 +545,62 @@ public struct Session: Identifiable, Sendable {
         self.costUsd = costUsd; self.commitCount = commitCount
         self.taskSummary = taskSummary; self.linkedSessionId = linkedSessionId
         self.profileSnapshot = profileSnapshot
+    }
+
+    /// Back-compat init that takes a legacy `OutputMode` and derives a `PodConfig`.
+    public init(
+        id: String = UUID().uuidString,
+        status: SessionStatus,
+        outputMode: OutputMode,
+        branch: String,
+        profileName: String,
+        task: String = "",
+        model: String,
+        startedAt: Date,
+        updatedAt: Date = Date(),
+        baseBranch: String? = nil,
+        acFrom: String? = nil,
+        acceptanceCriteria: [String]? = nil,
+        diffStats: DiffStats? = nil,
+        escalationQuestion: String? = nil,
+        escalationOptions: [String]? = nil,
+        escalationType: String? = nil,
+        validationChecks: ValidationChecks? = nil,
+        validationProgress: ValidationProgress? = nil,
+        prUrl: URL? = nil,
+        containerUrl: URL? = nil,
+        plan: SessionPlan? = nil,
+        phase: PhaseProgress? = nil,
+        latestActivity: String? = nil,
+        errorSummary: String? = nil,
+        attempts: AttemptInfo? = nil,
+        queuePosition: Int? = nil,
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
+        costUsd: Double = 0,
+        commitCount: Int = 0,
+        taskSummary: TaskSummary? = nil,
+        linkedSessionId: String? = nil,
+        profileSnapshot: Profile? = nil
+    ) {
+        self.init(
+            id: id, status: status,
+            pod: PodConfig.fromLegacy(outputMode.rawValue),
+            branch: branch, profileName: profileName, task: task, model: model,
+            startedAt: startedAt, updatedAt: updatedAt,
+            baseBranch: baseBranch, acFrom: acFrom, acceptanceCriteria: acceptanceCriteria,
+            diffStats: diffStats,
+            escalationQuestion: escalationQuestion, escalationOptions: escalationOptions,
+            escalationType: escalationType,
+            validationChecks: validationChecks, validationProgress: validationProgress,
+            prUrl: prUrl, containerUrl: containerUrl,
+            plan: plan, phase: phase,
+            latestActivity: latestActivity, errorSummary: errorSummary,
+            attempts: attempts, queuePosition: queuePosition,
+            inputTokens: inputTokens, outputTokens: outputTokens,
+            costUsd: costUsd, commitCount: commitCount,
+            taskSummary: taskSummary, linkedSessionId: linkedSessionId,
+            profileSnapshot: profileSnapshot
+        )
     }
 }

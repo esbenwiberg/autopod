@@ -36,7 +36,7 @@ export const AUTOPOD_INSTRUCTIONS_PATH = '/home/autopod/.autopod/system-instruct
 export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
   queued: ['provisioning', 'killing'],
   provisioning: ['running', 'killing'],
-  running: ['awaiting_input', 'validating', 'paused', 'killing', 'complete', 'failed'],
+  running: ['awaiting_input', 'validating', 'paused', 'handoff', 'killing', 'complete', 'failed'],
   awaiting_input: ['running', 'killing'],
   paused: ['running', 'killing'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
@@ -47,6 +47,9 @@ export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = 
   merging: ['complete', 'merge_pending'],
   merge_pending: ['complete', 'failed', 'killing'],
   complete: [],
+  // handoff re-enters orchestration: interactive session has been stopped and
+  // is being provisioned again with a new pod config (agentMode: 'auto').
+  handoff: ['provisioning', 'killing'],
   killing: ['killed'],
   killed: ['validating', 'queued'],
 };
