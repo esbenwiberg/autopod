@@ -139,6 +139,17 @@ public struct LogStreamView: View {
 
     // MARK: - Copy
 
+    private func copySingleEvent(_ event: AgentEvent) {
+        var line = "[\(event.timeString)] [\(event.type.label)]"
+        if let tool = event.toolName { line += " (\(tool))" }
+        line += " \(event.summary)"
+        if let detail = event.detail {
+            line += "\n    \(detail.replacingOccurrences(of: "\n", with: "\n    "))"
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(line, forType: .string)
+    }
+
     private func copyLogsToClipboard() {
         let text = filteredEvents.map { event in
             var line = "[\(event.timeString)] [\(event.type.label)]"
@@ -233,6 +244,13 @@ public struct LogStreamView: View {
                                             }
                                         }
                                     )
+                                    .contextMenu {
+                                        Button {
+                                            copySingleEvent(event)
+                                        } label: {
+                                            Label("Copy", systemImage: "doc.on.doc")
+                                        }
+                                    }
                                     .id(event.id)
 
                                     if event.id != filteredEvents.last?.id {
