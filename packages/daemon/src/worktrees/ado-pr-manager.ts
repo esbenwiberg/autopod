@@ -160,9 +160,13 @@ export class AdoPrManager implements PrManager {
       'Creating ADO pull request',
     );
 
+    const ADO_DESCRIPTION_LIMIT = 4000;
     const body = {
       title,
-      description,
+      description:
+        description.length > ADO_DESCRIPTION_LIMIT
+          ? `${description.slice(0, ADO_DESCRIPTION_LIMIT - 3)}...`
+          : description,
       sourceRefName: `refs/heads/${config.branch}`,
       targetRefName: `refs/heads/${config.baseBranch}`,
     };
