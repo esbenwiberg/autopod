@@ -21,6 +21,7 @@ public struct MemoryEntry: Identifiable, Sendable, Codable {
     public let path: String
     public let content: String
     public let contentSha256: String
+    public let rationale: String?
     public let version: Int
     public let approved: Bool
     public let createdBySessionId: String?
@@ -30,12 +31,14 @@ public struct MemoryEntry: Identifiable, Sendable, Codable {
     public init(
         id: String, scope: MemoryScope, scopeId: String? = nil,
         path: String, content: String, contentSha256: String = "",
+        rationale: String? = nil,
         version: Int = 1, approved: Bool = false,
         createdBySessionId: String? = nil,
         createdAt: String = "", updatedAt: String = ""
     ) {
         self.id = id; self.scope = scope; self.scopeId = scopeId
         self.path = path; self.content = content; self.contentSha256 = contentSha256
+        self.rationale = rationale
         self.version = version; self.approved = approved
         self.createdBySessionId = createdBySessionId
         self.createdAt = createdAt; self.updatedAt = updatedAt

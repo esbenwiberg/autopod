@@ -16,6 +16,7 @@ public struct MemoryManagementView: View {
     @State private var selectedScope: MemoryScope = .global
     @State private var showingCreate = false
     @State private var editingEntry: MemoryEntry?
+    @State private var viewingEntry: MemoryEntry?
     @State private var copiedId: String?
 
     public init(
@@ -122,6 +123,28 @@ public struct MemoryManagementView: View {
                 onCancel: { editingEntry = nil }
             )
         }
+        .sheet(item: $viewingEntry) { entry in
+            ViewMemorySheet(
+                entry: entry,
+                onApprove: !entry.approved ? { id in
+                    onApprove(id)
+                    viewingEntry = nil
+                } : nil,
+                onReject: !entry.approved ? { id in
+                    onReject(id)
+                    viewingEntry = nil
+                } : nil,
+                onEdit: (entry.approved && onEdit != nil) ? {
+                    editingEntry = entry
+                    viewingEntry = nil
+                } : nil,
+                onDelete: entry.approved ? { id in
+                    onDelete(id)
+                    viewingEntry = nil
+                } : nil,
+                onClose: { viewingEntry = nil }
+            )
+        }
     }
 
     // MARK: - Scope picker
@@ -194,6 +217,7 @@ public struct MemoryManagementView: View {
     // MARK: - Memory card
 
     private func memoryCard(_ entry: MemoryEntry, isPending: Bool) -> some View {
+        Button { viewingEntry = entry } label: {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "doc.text")
@@ -227,6 +251,19 @@ public struct MemoryManagementView: View {
                     Text("by \(sid)")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                }
+            }
+
+            if let rationale = entry.rationale, !rationale.isEmpty {
+                HStack(alignment: .top, spacing: 4) {
+                    Text("Why:")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(rationale)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
@@ -289,6 +326,8 @@ public struct MemoryManagementView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isPending ? Color.orange.opacity(0.2) : Color.clear, lineWidth: 1)
         )
+        } // end label
+        .buttonStyle(.plain)
     }
 
     // MARK: - Empty state
@@ -443,6 +482,120 @@ struct CreateMemorySheet: View {
             }
         }
         .frame(width: 480)
+    }
+}
+
+// MARK: - View memory sheet (read-only)
+
+struct ViewMemorySheet: View {
+    let entry: MemoryEntry
+    let onApprove: ((String) -> Void)?
+    let onReject: ((String) -> Void)?
+    let onEdit: (() -> Void)?
+    let onDelete: ((String) -> Void)?
+    let onClose: () -> Void
+
+    private var isPending: Bool { !entry.approved }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "doc.text")
+                    .foregroundStyle(isPending ? .orange : .purple)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isPending ? "Pending Memory" : "Memory")
+                        .font(.headline)
+                    Text(entry.path)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("v\(entry.version)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                if let sid = entry.createdBySessionId {
+                    Text("by \(sid)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Button("Close", action: onClose)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+
+            Divider()
+
+            if let rationale = entry.rationale, !rationale.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Why it matters")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(rationale)
+                        .font(.callout)
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                Divider()
+            }
+
+            ScrollView {
+                Text(entry.content)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(16)
+            }
+
+            if isPending || onEdit != nil || onDelete != nil {
+                Divider()
+                HStack(spacing: 8) {
+                    if isPending {
+                        if let approve = onApprove {
+                            Button { approve(entry.id) } label: {
+                                Label("Approve", systemImage: "checkmark")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.mini)
+                            .tint(.green)
+                        }
+                        if let reject = onReject {
+                            Button { reject(entry.id) } label: {
+                                Label("Reject", systemImage: "xmark")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                            .tint(.red)
+                        }
+                    } else {
+                        Spacer()
+                        if let edit = onEdit {
+                            Button { edit() } label: {
+                                Label("Edit", systemImage: "pencil")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                        }
+                        if let delete = onDelete {
+                            Button(role: .destructive) { delete(entry.id) } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                        }
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .frame(minWidth: 520, maxWidth: 520, minHeight: 320)
     }
 }
 

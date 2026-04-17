@@ -29,6 +29,7 @@ struct AutopodXcodeApp: App {
         terminalManager: terminalManager,
         showSetup: $showSetup
       )
+      .environment(\.controlActiveState, .key)
       .onAppear {
         if connectionManager.connection == nil {
           showSetup = true

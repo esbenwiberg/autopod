@@ -743,80 +743,91 @@ public struct SessionCardFinal: View {
     @State private var launchWorkerTask = ""
 
     private var replySheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(session.escalationQuestion ?? "Agent needs input")
-                .font(.headline)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(session.escalationQuestion ?? "Agent needs input")
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let options = session.escalationOptions, !options.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(options, id: \.self) { option in
-                        Button {
-                            showOptionsPicker = false
-                            Task { await actions.reply(session.id, option) }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "circle")
-                                    .font(.system(size: 11))
-                                Text(option)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .multilineTextAlignment(.leading)
+                    if let options = session.escalationOptions, !options.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(options, id: \.self) { option in
+                                Button {
+                                    showOptionsPicker = false
+                                    Task { await actions.reply(session.id, option) }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "circle")
+                                            .font(.system(size: 11))
+                                        Text(option)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.orange)
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.orange)
+
+                        Divider()
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "pencil")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Or type a custom reply:")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-
-                Divider()
-
-                HStack(spacing: 4) {
-                    Image(systemName: "pencil")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("Or type a custom reply:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                .padding(20)
+                .padding(.bottom, 4)
             }
 
-            HStack(spacing: 8) {
-                TextField("Type your reply…", text: $replyInputText)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        guard !replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    TextField("Type your reply…", text: $replyInputText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            guard !replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                            let message = replyInputText
+                            replyInputText = ""
+                            showOptionsPicker = false
+                            Task { await actions.reply(session.id, message) }
+                        }
+
+                    Button {
                         let message = replyInputText
                         replyInputText = ""
                         showOptionsPicker = false
                         Task { await actions.reply(session.id, message) }
+                    } label: {
+                        Image(systemName: "paperplane.fill")
                     }
-
-                Button {
-                    let message = replyInputText
-                    replyInputText = ""
-                    showOptionsPicker = false
-                    Task { await actions.reply(session.id, message) }
-                } label: {
-                    Image(systemName: "paperplane.fill")
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
+                    .disabled(replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-                .disabled(replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
 
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) {
-                    replyInputText = ""
-                    showOptionsPicker = false
+                HStack {
+                    Spacer()
+                    Button("Cancel", role: .cancel) {
+                        replyInputText = ""
+                        showOptionsPicker = false
+                    }
+                    .controlSize(.small)
                 }
-                .controlSize(.small)
             }
+            .padding(20)
         }
-        .padding(20)
-        .frame(minWidth: 400)
+        .frame(minWidth: 560, maxWidth: 760, minHeight: 200, maxHeight: 600)
     }
 
     private var nudgeSheet: some View {
