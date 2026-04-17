@@ -90,12 +90,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       console.log(chalk.dim(`Attaching to ${containerName}…`));
       console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
 
-      // Use tmux if available — reattaches to an existing session so reconnects
-      // pick up right where you left off. Falls back to bash/sh if tmux isn't installed.
-      const tmuxCmd =
-        'command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s main || exec /bin/bash -l';
-
-      const result = spawnSync('docker', ['exec', '-it', containerName, '/bin/sh', '-c', tmuxCmd], {
+      const result = spawnSync('docker', ['exec', '-it', containerName, '/bin/bash', '-l'], {
         stdio: 'inherit',
       });
 
