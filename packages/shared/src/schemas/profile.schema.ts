@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   actionPolicySchema,
   outputModeSchema,
-  podConfigSchema,
+  podOptionsSchema,
 } from './action-definition.schema.js';
 import {
   injectedClaudeMdSectionSchema,
@@ -159,7 +159,7 @@ export const createProfileSchema = z.object({
   skills: z.array(injectedSkillSchema).default([]),
   networkPolicy: networkPolicySchema.nullable().default(null),
   actionPolicy: actionPolicySchema.nullable().default(null),
-  pod: podConfigSchema.nullable().default(null),
+  pod: podOptionsSchema.nullable().default(null),
   outputMode: outputModeSchema.default('pr'),
   modelProvider: modelProviderSchema.default('anthropic'),
   providerCredentials: providerCredentialsSchema.nullable().default(null),

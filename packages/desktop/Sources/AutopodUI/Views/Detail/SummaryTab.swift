@@ -1,23 +1,23 @@
 import SwiftUI
 
-/// Summary tab — plan, task summary, deviations from plan, and original session prompt.
+/// Summary tab — plan, task summary, deviations from plan, and original pod prompt.
 struct SummaryTab: View {
-    let session: Session
+    let pod: Pod
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 // Plan
-                if let plan = session.plan {
+                if let plan = pod.plan {
                     planCard(plan)
                 }
 
                 // Task summary (persistent once reported)
-                if let summary = session.taskSummary {
+                if let summary = pod.taskSummary {
                     taskSummaryCard(summary)
                 }
 
-                // Session prompt
+                // Pod prompt
                 promptSection
             }
             .padding(20)
@@ -124,14 +124,14 @@ struct SummaryTab: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Session prompt
+    // MARK: - Pod prompt
 
     private var promptSection: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "text.quote")
                 .foregroundStyle(.secondary)
                 .padding(.top, 2)
-            Text(session.task)
+            Text(pod.task)
                 .font(.subheadline)
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
@@ -146,11 +146,11 @@ struct SummaryTab: View {
 // MARK: - Previews
 
 #Preview("Summary — validated") {
-    SummaryTab(session: MockData.validated)
+    SummaryTab(pod: MockData.validated)
         .frame(width: 550, height: 600)
 }
 
 #Preview("Summary — running") {
-    SummaryTab(session: MockData.running)
+    SummaryTab(pod: MockData.running)
         .frame(width: 550, height: 400)
 }

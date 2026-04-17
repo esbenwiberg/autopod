@@ -48,7 +48,7 @@ export interface LocalWorktreeManagerConfig {
  * Git bare-repo cache + worktree manager for local-first execution.
  *
  * Avoids cloning every time by maintaining bare repos as a cache layer.
- * Each session gets its own worktree checked out from the bare repo.
+ * Each pod gets its own worktree checked out from the bare repo.
  */
 export class LocalWorktreeManager implements WorktreeManager {
   private cacheDir: string;
@@ -92,7 +92,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       this.patCache.set(bareRepoPath, pat);
     }
 
-    // Create worktree — use session-derived path
+    // Create worktree — use pod-derived path
     const sessionDir = branch.replace(/[^a-zA-Z0-9_-]/g, '_');
     const worktreePath = path.join(this.worktreeDir, sessionDir);
 
@@ -125,7 +125,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
       // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
       // Fetch baseBranch from remote. If the branch hasn't been pushed yet (e.g. forking
-      // a session that failed before pushing), fall back to the local ref in the bare repo.
+      // a pod that failed before pushing), fall back to the local ref in the bare repo.
       let baseBranchRef = `refs/remotes/origin/${baseBranch}`;
       try {
         await execFileAsync(
@@ -142,7 +142,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         const sanitized = sanitizeGitError(fetchErr);
         this.logger.debug({ err: sanitized }, 'Remote fetch for baseBranch failed');
         // Remote fetch failed — check if the branch exists locally (created by a prior
-        // session's `git worktree add -B` and still in the bare repo after cleanup).
+        // pod's `git worktree add -B` and still in the bare repo after cleanup).
         try {
           await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${baseBranch}`], {
             cwd: bareRepoPath,
@@ -173,13 +173,13 @@ export class LocalWorktreeManager implements WorktreeManager {
           startPoint = `refs/remotes/origin/${branch}`;
           this.logger.info({ branch }, 'Branch exists on remote — resuming from it');
         } catch {
-          // Branch doesn't exist on remote yet — normal for new sessions
+          // Branch doesn't exist on remote yet — normal for new pods
           this.logger.info({ branch }, 'Branch not found on remote — creating from baseBranch');
         }
       }
 
-      // Clean up stale worktree registration if a previous session left one behind
-      // (e.g. killed session whose cleanup didn't fully complete).
+      // Clean up stale worktree registration if a previous pod left one behind
+      // (e.g. killed pod whose cleanup didn't fully complete).
       // Always try both git worktree remove AND fs.rm — either alone can leave remnants.
       await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
         cwd: bareRepoPath,

@@ -24,7 +24,7 @@ function mapRow(row: Record<string, unknown>): ScheduledJob {
     enabled: Boolean(row.enabled),
     nextRunAt: row.next_run_at as string,
     lastRunAt: (row.last_run_at as string) ?? null,
-    lastSessionId: (row.last_session_id as string) ?? null,
+    lastPodId: (row.last_pod_id as string) ?? null,
     catchupPending: Boolean(row.catchup_pending),
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
@@ -37,10 +37,10 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
       db.prepare(`
         INSERT INTO scheduled_jobs (
           id, name, profile_name, task, cron_expression, enabled,
-          next_run_at, last_run_at, last_session_id, catchup_pending
+          next_run_at, last_run_at, last_pod_id, catchup_pending
         ) VALUES (
           @id, @name, @profileName, @task, @cronExpression, @enabled,
-          @nextRunAt, @lastRunAt, @lastSessionId, @catchupPending
+          @nextRunAt, @lastRunAt, @lastPodId, @catchupPending
         )
       `).run({
         id: job.id,
@@ -51,7 +51,7 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
         enabled: job.enabled ? 1 : 0,
         nextRunAt: job.nextRunAt,
         lastRunAt: job.lastRunAt ?? null,
-        lastSessionId: job.lastSessionId ?? null,
+        lastPodId: job.lastPodId ?? null,
         catchupPending: job.catchupPending ? 1 : 0,
       });
       return this.getOrThrow(job.id);
@@ -105,9 +105,9 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
         setClauses.push('last_run_at = @lastRunAt');
         params.lastRunAt = changes.lastRunAt;
       }
-      if (changes.lastSessionId !== undefined) {
-        setClauses.push('last_session_id = @lastSessionId');
-        params.lastSessionId = changes.lastSessionId;
+      if (changes.lastPodId !== undefined) {
+        setClauses.push('last_pod_id = @lastPodId');
+        params.lastPodId = changes.lastPodId;
       }
       if (changes.catchupPending !== undefined) {
         setClauses.push('catchup_pending = @catchupPending');
@@ -120,9 +120,9 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
 
     delete(id: string): void {
       this.getOrThrow(id);
-      // Nullify scheduled_job_id on sessions before deleting to avoid FK constraint violations.
+      // Nullify scheduled_job_id on pods before deleting to avoid FK constraint violations.
       // Sessions continue running unaffected; job is just disassociated.
-      db.prepare('UPDATE sessions SET scheduled_job_id = NULL WHERE scheduled_job_id = ?').run(id);
+      db.prepare('UPDATE pods SET scheduled_job_id = NULL WHERE scheduled_job_id = ?').run(id);
       db.prepare('DELETE FROM scheduled_jobs WHERE id = ?').run(id);
     },
 
@@ -158,7 +158,7 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
     countActiveSessionsForJob(jobId: string): number {
       const row = db
         .prepare(`
-          SELECT COUNT(*) as count FROM sessions
+          SELECT COUNT(*) as count FROM pods
           WHERE scheduled_job_id = ? AND status NOT IN ('complete', 'failed', 'killed')
         `)
         .get(jobId) as { count: number };

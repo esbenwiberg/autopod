@@ -1,12 +1,12 @@
 import { nanoid } from 'nanoid';
 import { adjectives, animals, uniqueNamesGenerator } from 'unique-names-generator';
-import { SESSION_ID_LENGTH } from './constants.js';
+import { POD_ID_LENGTH } from './constants.js';
 
-export function generateId(length: number = SESSION_ID_LENGTH): string {
+export function generateId(length: number = POD_ID_LENGTH): string {
   return nanoid(length);
 }
 
-export function generateSessionId(): string {
+export function generatePodId(): string {
   return uniqueNamesGenerator({
     dictionaries: [adjectives, animals],
     separator: '-',

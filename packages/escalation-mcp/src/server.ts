@@ -2,7 +2,7 @@ import type { ActionDefinition } from '@autopod/shared';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PendingRequests } from './pending-requests.js';
-import type { SessionBridge } from './session-bridge.js';
+import type { PodBridge } from './pod-bridge.js';
 import { executeAction } from './tools/actions.js';
 import { askAi } from './tools/ask-ai.js';
 import { askHuman } from './tools/ask-human.js';
@@ -19,9 +19,9 @@ import { requestCredential } from './tools/request-credential.js';
 import { validateInBrowser } from './tools/validate-in-browser.js';
 
 export interface EscalationMcpDeps {
-  sessionId: string;
-  bridge: SessionBridge;
-  /** Actions available for this session (pre-resolved from profile) */
+  podId: string;
+  bridge: PodBridge;
+  /** Actions available for this pod (pre-resolved from profile) */
   availableActions?: ActionDefinition[];
   /** Reuse an existing PendingRequests instance (e.g. when creating a fresh server per HTTP request) */
   pendingRequests?: PendingRequests;
@@ -31,7 +31,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   server: McpServer;
   pendingRequests: PendingRequests;
 } {
-  const { sessionId, bridge, availableActions } = deps;
+  const { podId, bridge, availableActions } = deps;
   const pendingRequests = deps.pendingRequests ?? new PendingRequests();
 
   const server = new McpServer({
@@ -51,7 +51,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe('Suggested options for the human to choose from'),
     },
     async (input) => {
-      const response = await askHuman(sessionId, input, bridge, pendingRequests);
+      const response = await askHuman(podId, input, bridge, pendingRequests);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -65,21 +65,21 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       domain: z.string().optional().describe('Domain area (e.g., "security", "performance")'),
     },
     async (input) => {
-      const response = await askAi(sessionId, input, bridge);
+      const response = await askAi(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
 
   server.tool(
     'report_blocker',
-    'Report a blocking issue that prevents progress. If too many blockers, the session will pause for human review.',
+    'Report a blocking issue that prevents progress. If too many blockers, the pod will pause for human review.',
     {
       description: z.string().describe('Description of the blocking issue'),
       attempted: z.array(z.string()).describe('List of approaches already attempted'),
       needs: z.string().describe('What is needed to unblock'),
     },
     async (input) => {
-      const response = await reportBlocker(sessionId, input, bridge, pendingRequests);
+      const response = await reportBlocker(podId, input, bridge, pendingRequests);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -92,7 +92,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       steps: z.array(z.string()).describe('Numbered steps you plan to take'),
     },
     async (input) => {
-      const response = await reportPlan(sessionId, input, bridge);
+      const response = await reportPlan(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -107,7 +107,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       totalPhases: z.number().int().min(1).describe('Total number of phases'),
     },
     async (input) => {
-      const response = await reportProgress(sessionId, input, bridge);
+      const response = await reportProgress(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -138,11 +138,11 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       memoriesSuggested: z
         .boolean()
         .describe(
-          'Set true if you called memory_suggest this session. Set false if you had nothing worth capturing — filler suggestions are actively discouraged.',
+          'Set true if you called memory_suggest this pod. Set false if you had nothing worth capturing — filler suggestions are actively discouraged.',
         ),
     },
     async (input) => {
-      const response = await reportTaskSummary(sessionId, input, bridge);
+      const response = await reportTaskSummary(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -159,7 +159,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe('Why you need these credentials — shown to the human for approval'),
     },
     async (input) => {
-      const response = await requestCredential(sessionId, input, bridge, pendingRequests);
+      const response = await requestCredential(podId, input, bridge, pendingRequests);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -169,7 +169,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'Check if the human has sent you a message. Call between phases. Returns immediately.',
     {},
     async () => {
-      const response = await checkMessages(sessionId, bridge);
+      const response = await checkMessages(podId, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -191,7 +191,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         ),
     },
     async (input) => {
-      const response = await validateInBrowser(sessionId, input, bridge);
+      const response = await validateInBrowser(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -202,11 +202,11 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'List approved memories for a scope. Use this to check existing knowledge before starting work.',
     {
       scope: z
-        .enum(['global', 'profile', 'session'])
-        .describe('global = cross-project, profile = this repo, session = this session only'),
+        .enum(['global', 'profile', 'pod'])
+        .describe('global = cross-project, profile = this repo, pod = this pod only'),
     },
     async (input) => {
-      const response = await memoryList(sessionId, input, bridge);
+      const response = await memoryList(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -218,7 +218,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       id: z.string().describe('Memory entry ID from memory_list or memory_search'),
     },
     async (input) => {
-      const response = await memoryRead(sessionId, input, bridge);
+      const response = await memoryRead(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -228,10 +228,10 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'Search memories by keyword within a scope.',
     {
       query: z.string().describe('Search text to match against path or content'),
-      scope: z.enum(['global', 'profile', 'session']).describe('Scope to search within'),
+      scope: z.enum(['global', 'profile', 'pod']).describe('Scope to search within'),
     },
     async (input) => {
-      const response = await memorySearch(sessionId, input, bridge);
+      const response = await memorySearch(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
@@ -241,8 +241,8 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'Suggest a memory for human approval. Only suggest if a future agent starting cold on this repo would benefit. Skip filler and restatements of CLAUDE.md. Include rationale explaining why the memory matters.',
     {
       scope: z
-        .enum(['global', 'profile', 'session'])
-        .describe('global = applies everywhere, profile = this repo, session = this session only'),
+        .enum(['global', 'profile', 'pod'])
+        .describe('global = applies everywhere, profile = this repo, pod = this pod only'),
       path: z
         .string()
         .describe(
@@ -257,27 +257,27 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         ),
     },
     async (input) => {
-      const response = await memorySuggest(sessionId, input, bridge);
+      const response = await memorySuggest(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );
 
   // ─── Revalidation tool (only for workspace pods linked to a failed worker) ───
-  const linkedId = bridge.getLinkedSessionId(sessionId);
+  const linkedId = bridge.getLinkedPodId(podId);
   if (linkedId) {
     server.tool(
       'trigger_revalidation',
-      'Trigger revalidation on the linked failed worker session. Call after you have committed and pushed your fixes. Pulls latest changes and runs validation (build, tests, smoke, AI review). Returns the result.',
+      'Trigger revalidation on the linked failed worker pod. Call after you have committed and pushed your fixes. Pulls latest changes and runs validation (build, tests, smoke, AI review). Returns the result.',
       {},
       async () => {
-        const result = await bridge.revalidateLinkedSession(linkedId);
+        const result = await bridge.revalidateLinkedPod(linkedId);
         let text: string;
         if (!result.newCommits) {
           text =
             'No new commits found on the branch. Make sure you have committed and pushed your changes before triggering revalidation.';
         } else if (result.result === 'pass') {
           text =
-            'Revalidation PASSED! The linked worker session has been transitioned to validated.';
+            'Revalidation PASSED! The linked worker pod has been transitioned to validated.';
         } else {
           text =
             'Revalidation FAILED. The fixes did not resolve all issues. Check the validation results and try again.';
@@ -294,7 +294,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       const zodShape = buildZodShape(action);
       server.tool(action.name, action.description, zodShape, async (input) => {
         const response = await executeAction(
-          sessionId,
+          podId,
           action.name,
           input as Record<string, unknown>,
           bridge,

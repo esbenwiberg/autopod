@@ -1,5 +1,5 @@
 import { AutopodError } from '@autopod/shared';
-import type { Session } from '@autopod/shared';
+import type { Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -12,10 +12,10 @@ import { SCHEDULER_USER_ID, createScheduledJobManager } from './scheduled-job-ma
 import type { ScheduledJobManagerDeps } from './scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-job-repository.js';
 
-/** Insert a minimal sessions row so FK constraints on last_session_id are satisfied. */
+/** Insert a minimal pods row so FK constraints on last_pod_id are satisfied. */
 function insertMinimalSession(db: Database.Database, id: string): void {
   db.prepare(`
-    INSERT INTO sessions (
+    INSERT INTO pods (
       id, profile_name, task, status, model, runtime, execution_target, branch,
       user_id, max_validation_attempts, skip_validation, output_mode
     ) VALUES (
@@ -25,8 +25,8 @@ function insertMinimalSession(db: Database.Database, id: string): void {
   `).run(id);
 }
 
-/** Build a minimal Session object for use in createSession mocks. */
-function makeSession(id: string): Session {
+/** Build a minimal Pod object for use in createSession mocks. */
+function makeSession(id: string): Pod {
   return {
     id,
     profileName: 'test-profile',
@@ -72,14 +72,14 @@ function makeSession(id: string): Session {
     commitCount: 0,
     lastCommitAt: null,
     startCommitSha: null,
-    linkedSessionId: null,
+    linkedPodId: null,
     taskSummary: null,
     validationOverrides: null,
     pimGroups: null,
     profileSnapshot: null,
     prFixAttempts: 0,
     maxPrFixAttempts: 3,
-    fixSessionId: null,
+    fixPodId: null,
     tokenBudget: null,
     budgetExtensionsUsed: 0,
     pauseReason: null,
@@ -90,20 +90,20 @@ function makeSession(id: string): Session {
 function makeDeps(db: Database.Database): ScheduledJobManagerDeps {
   const scheduledJobRepo = createScheduledJobRepository(db);
 
-  const sessionManager = {
+  const podManager = {
     createSession: vi.fn(() => {
-      // Insert the session into DB so FK constraints are satisfied
+      // Insert the pod into DB so FK constraints are satisfied
       insertMinimalSession(db, 'sess-abc');
       return makeSession('sess-abc');
     }),
-  } as unknown as ScheduledJobManagerDeps['sessionManager'];
+  } as unknown as ScheduledJobManagerDeps['podManager'];
 
   const eventBus = {
     emit: vi.fn(),
     subscribe: vi.fn(),
   } as unknown as ScheduledJobManagerDeps['eventBus'];
 
-  return { scheduledJobRepo, sessionManager, eventBus, logger };
+  return { scheduledJobRepo, podManager, eventBus, logger };
 }
 
 describe('ScheduledJobManager', () => {
@@ -212,23 +212,23 @@ describe('ScheduledJobManager', () => {
   });
 
   describe('runCatchup', () => {
-    it('creates a session and clears catchupPending', async () => {
+    it('creates a pod and clears catchupPending', async () => {
       const deps = makeDeps(db);
       const manager = createScheduledJobManager(deps);
       const pastDate = new Date(Date.now() - 60_000).toISOString();
       const job = insertTestScheduledJob(db, { nextRunAt: pastDate, catchupPending: true });
 
-      const session = await manager.runCatchup(job.id);
+      const pod = await manager.runCatchup(job.id);
 
-      expect(session.id).toBe('sess-abc');
-      expect(deps.sessionManager.createSession).toHaveBeenCalledWith(
+      expect(pod.id).toBe('sess-abc');
+      expect(deps.podManager.createSession).toHaveBeenCalledWith(
         expect.objectContaining({ scheduledJobId: job.id }),
         SCHEDULER_USER_ID,
       );
 
       const updated = deps.scheduledJobRepo.getOrThrow(job.id);
       expect(updated.catchupPending).toBe(false);
-      expect(updated.lastSessionId).toBe('sess-abc');
+      expect(updated.lastPodId).toBe('sess-abc');
     });
 
     it('throws 409 if catchupPending is false', async () => {
@@ -240,14 +240,14 @@ describe('ScheduledJobManager', () => {
       await expect(manager.runCatchup(job.id)).rejects.toMatchObject({ statusCode: 409 });
     });
 
-    it('throws 400 if an active session exists', async () => {
+    it('throws 400 if an active pod exists', async () => {
       const deps = makeDeps(db);
       const manager = createScheduledJobManager(deps);
       const job = insertTestScheduledJob(db, { catchupPending: true });
 
-      // Insert an active session for this job
+      // Insert an active pod for this job
       db.prepare(`
-        INSERT INTO sessions (
+        INSERT INTO pods (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, output_mode, scheduled_job_id
         ) VALUES (
@@ -325,24 +325,24 @@ describe('ScheduledJobManager', () => {
 
       await manager.tick();
 
-      expect(deps.sessionManager.createSession).toHaveBeenCalledOnce();
+      expect(deps.podManager.createSession).toHaveBeenCalledOnce();
       expect(deps.eventBus.emit).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'scheduled_job.fired', jobId: job.id }),
       );
 
       const updated = deps.scheduledJobRepo.getOrThrow(job.id);
-      expect(updated.lastSessionId).toBe('sess-abc');
+      expect(updated.lastPodId).toBe('sess-abc');
       expect(updated.lastRunAt).toBeTruthy();
     });
 
-    it('skips jobs with active sessions', async () => {
+    it('skips jobs with active pods', async () => {
       const deps = makeDeps(db);
       const manager = createScheduledJobManager(deps);
       const pastDate = new Date(Date.now() - 60_000).toISOString();
       const job = insertTestScheduledJob(db, { nextRunAt: pastDate });
 
       db.prepare(`
-        INSERT INTO sessions (
+        INSERT INTO pods (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, output_mode, scheduled_job_id
         ) VALUES (
@@ -353,8 +353,8 @@ describe('ScheduledJobManager', () => {
 
       await manager.tick();
 
-      expect(deps.sessionManager.createSession).not.toHaveBeenCalled();
-      // nextRunAt must NOT advance when we skip due to active session (AC #24)
+      expect(deps.podManager.createSession).not.toHaveBeenCalled();
+      // nextRunAt must NOT advance when we skip due to active pod (AC #24)
       const unchanged = deps.scheduledJobRepo.getOrThrow(job.id);
       expect(unchanged.nextRunAt).toBe(pastDate);
     });
@@ -367,7 +367,7 @@ describe('ScheduledJobManager', () => {
 
       await manager.tick();
 
-      expect(deps.sessionManager.createSession).not.toHaveBeenCalled();
+      expect(deps.podManager.createSession).not.toHaveBeenCalled();
     });
 
     it('continues processing other jobs when one errors', async () => {
@@ -377,22 +377,22 @@ describe('ScheduledJobManager', () => {
       const job2 = insertTestScheduledJob(db, { id: 'job-ok', nextRunAt: pastDate });
 
       let callCount = 0;
-      const sessionManager = {
+      const podManager = {
         createSession: vi.fn(() => {
           callCount++;
           if (callCount === 1) throw new Error('Simulated error for job1');
-          // Insert a real session row so FK constraints pass for job2
+          // Insert a real pod row so FK constraints pass for job2
           insertMinimalSession(db, 'sess-ok');
           return makeSession('sess-ok');
         }),
-      } as unknown as ScheduledJobManagerDeps['sessionManager'];
+      } as unknown as ScheduledJobManagerDeps['podManager'];
 
-      const manager = createScheduledJobManager({ ...deps, sessionManager });
+      const manager = createScheduledJobManager({ ...deps, podManager });
 
       await manager.tick(); // should not throw
 
       // Both jobs tried, job2 succeeded
-      expect(sessionManager.createSession).toHaveBeenCalledTimes(2);
+      expect(podManager.createSession).toHaveBeenCalledTimes(2);
       void job1;
       void job2;
     });

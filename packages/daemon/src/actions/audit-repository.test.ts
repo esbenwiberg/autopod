@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createActionAuditRepository } from './audit-repository.js';
 
 const PROFILE_NAME = 'test-profile';
-const SESSION_ID = 'sess-001';
+const POD_ID = 'sess-001';
 
 function setupDb(): InstanceType<typeof Database> {
   const db = new Database(':memory:');
@@ -18,7 +18,7 @@ function setupDb(): InstanceType<typeof Database> {
       escalation_config TEXT NOT NULL DEFAULT '{}'
     );
 
-    CREATE TABLE IF NOT EXISTS sessions (
+    CREATE TABLE IF NOT EXISTS pods (
       id TEXT PRIMARY KEY, profile_name TEXT NOT NULL REFERENCES profiles(name),
       task TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
       model TEXT NOT NULL DEFAULT 'sonnet', runtime TEXT NOT NULL DEFAULT 'claude',
@@ -27,7 +27,7 @@ function setupDb(): InstanceType<typeof Database> {
 
     CREATE TABLE IF NOT EXISTS action_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      pod_id TEXT NOT NULL REFERENCES pods(id) ON DELETE CASCADE,
       action_name TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}',
       response_summary TEXT DEFAULT NULL, pii_detected INTEGER NOT NULL DEFAULT 0,
       quarantine_score REAL NOT NULL DEFAULT 0.0,
@@ -37,8 +37,8 @@ function setupDb(): InstanceType<typeof Database> {
     INSERT INTO profiles (name, repo_url, build_command, start_command)
     VALUES ('${PROFILE_NAME}', 'https://github.com/test/repo', 'npm run build', 'npm start');
 
-    INSERT INTO sessions (id, profile_name, task)
-    VALUES ('${SESSION_ID}', '${PROFILE_NAME}', 'test task');
+    INSERT INTO pods (id, profile_name, task)
+    VALUES ('${POD_ID}', '${PROFILE_NAME}', 'test task');
   `);
 
   return db;
@@ -46,7 +46,7 @@ function setupDb(): InstanceType<typeof Database> {
 
 function makeEntry(overrides: Record<string, unknown> = {}) {
   return {
-    sessionId: SESSION_ID,
+    podId: POD_ID,
     actionName: 'deploy',
     params: { env: 'staging' },
     responseSummary: 'deployed ok',
@@ -69,12 +69,12 @@ describe('ActionAuditRepository', () => {
     const entry = makeEntry();
     repo.insert(entry);
 
-    const results = repo.listBySession(SESSION_ID);
+    const results = repo.listBySession(POD_ID);
     expect(results).toHaveLength(1);
 
     const row = results[0];
     expect(row.id).toBeTypeOf('number');
-    expect(row.sessionId).toBe(SESSION_ID);
+    expect(row.podId).toBe(POD_ID);
     expect(row.actionName).toBe('deploy');
     expect(row.params).toEqual({ env: 'staging' });
     expect(row.responseSummary).toBe('deployed ok');
@@ -91,19 +91,19 @@ describe('ActionAuditRepository', () => {
     };
     repo.insert(makeEntry({ params: complexParams }));
 
-    const [row] = repo.listBySession(SESSION_ID);
+    const [row] = repo.listBySession(POD_ID);
     expect(row.params).toEqual(complexParams);
   });
 
   it('piiDetected boolean conversion: true stored as 1, returned as true', () => {
     repo.insert(makeEntry({ piiDetected: true }));
-    const [row] = repo.listBySession(SESSION_ID);
+    const [row] = repo.listBySession(POD_ID);
     expect(row.piiDetected).toBe(true);
   });
 
   it('piiDetected boolean conversion: false stored as 0, returned as false', () => {
     repo.insert(makeEntry({ piiDetected: false }));
-    const [row] = repo.listBySession(SESSION_ID);
+    const [row] = repo.listBySession(POD_ID);
     expect(row.piiDetected).toBe(false);
   });
 
@@ -112,21 +112,21 @@ describe('ActionAuditRepository', () => {
       repo.insert(makeEntry({ actionName: `action-${i}` }));
     }
 
-    const results = repo.listBySession(SESSION_ID, 2);
+    const results = repo.listBySession(POD_ID, 2);
     expect(results).toHaveLength(2);
   });
 
   it('listBySession orders by created_at DESC', () => {
     // Manually insert with explicit created_at to guarantee ordering
     const stmt = db.prepare(`
-      INSERT INTO action_audit (session_id, action_name, params, pii_detected, quarantine_score, created_at)
-      VALUES (@sessionId, @actionName, '{}', 0, 0, @createdAt)
+      INSERT INTO action_audit (pod_id, action_name, params, pii_detected, quarantine_score, created_at)
+      VALUES (@podId, @actionName, '{}', 0, 0, @createdAt)
     `);
-    stmt.run({ sessionId: SESSION_ID, actionName: 'first', createdAt: '2026-01-01 00:00:00' });
-    stmt.run({ sessionId: SESSION_ID, actionName: 'second', createdAt: '2026-01-02 00:00:00' });
-    stmt.run({ sessionId: SESSION_ID, actionName: 'third', createdAt: '2026-01-03 00:00:00' });
+    stmt.run({ podId: POD_ID, actionName: 'first', createdAt: '2026-01-01 00:00:00' });
+    stmt.run({ podId: POD_ID, actionName: 'second', createdAt: '2026-01-02 00:00:00' });
+    stmt.run({ podId: POD_ID, actionName: 'third', createdAt: '2026-01-03 00:00:00' });
 
-    const results = repo.listBySession(SESSION_ID);
+    const results = repo.listBySession(POD_ID);
     expect(results[0].actionName).toBe('third');
     expect(results[1].actionName).toBe('second');
     expect(results[2].actionName).toBe('first');
@@ -137,27 +137,27 @@ describe('ActionAuditRepository', () => {
     repo.insert(makeEntry({ actionName: 'restart' }));
     repo.insert(makeEntry({ actionName: 'rollback' }));
 
-    expect(repo.countBySession(SESSION_ID)).toBe(3);
+    expect(repo.countBySession(POD_ID)).toBe(3);
   });
 
-  it('countBySession returns 0 for unknown session', () => {
+  it('countBySession returns 0 for unknown pod', () => {
     expect(repo.countBySession('nonexistent')).toBe(0);
   });
 
-  it('listBySession returns empty array for unknown session', () => {
+  it('listBySession returns empty array for unknown pod', () => {
     expect(repo.listBySession('nonexistent')).toEqual([]);
   });
 
-  it('multiple sessions do not leak across queries', () => {
+  it('multiple pods do not leak across queries', () => {
     const otherSessionId = 'sess-002';
     db.exec(
-      `INSERT INTO sessions (id, profile_name, task) VALUES ('${otherSessionId}', '${PROFILE_NAME}', 'other task')`,
+      `INSERT INTO pods (id, profile_name, task) VALUES ('${otherSessionId}', '${PROFILE_NAME}', 'other task')`,
     );
 
     repo.insert(makeEntry({ actionName: 'action-a' }));
-    repo.insert(makeEntry({ sessionId: otherSessionId, actionName: 'action-b' }));
+    repo.insert(makeEntry({ podId: otherSessionId, actionName: 'action-b' }));
 
-    const sess1Results = repo.listBySession(SESSION_ID);
+    const sess1Results = repo.listBySession(POD_ID);
     const sess2Results = repo.listBySession(otherSessionId);
 
     expect(sess1Results).toHaveLength(1);
@@ -166,7 +166,7 @@ describe('ActionAuditRepository', () => {
     expect(sess2Results).toHaveLength(1);
     expect(sess2Results[0].actionName).toBe('action-b');
 
-    expect(repo.countBySession(SESSION_ID)).toBe(1);
+    expect(repo.countBySession(POD_ID)).toBe(1);
     expect(repo.countBySession(otherSessionId)).toBe(1);
   });
 });

@@ -1,11 +1,11 @@
 // Types
 export type {
-  SessionStatus,
-  Session,
-  CreateSessionRequest,
-  SessionSummary,
+  PodStatus,
+  Pod,
+  CreatePodRequest,
+  PodSummary,
   ReferenceRepo,
-} from './types/session.js';
+} from './types/pod.js';
 
 export type {
   Profile,
@@ -15,6 +15,7 @@ export type {
   PageAssertion,
   EscalationConfig,
   NetworkPolicy,
+  NetworkPolicyMode,
   PimGroupConfig,
   PimActivationConfig,
   PrivateRegistry,
@@ -38,12 +39,12 @@ export type {
   ActionAuditEntry,
 } from './types/actions.js';
 
-export type { AgentMode, OutputTarget, PodConfig } from './types/pod.js';
+export type { AgentMode, OutputTarget, PodOptions } from './types/pod-options.js';
 export {
-  podConfigFromOutputMode,
-  outputModeFromPod,
-  resolvePodConfig,
-} from './types/pod.js';
+  podOptionsFromOutputMode,
+  outputModeFromPodOptions,
+  resolvePodOptions,
+} from './types/pod-options.js';
 
 export type {
   InjectedMcpServer,
@@ -103,19 +104,23 @@ export type {
   ReportBlockerPayload,
   ActionApprovalPayload,
   ValidationOverridePayload,
+  RequestCredentialPayload,
   EscalationResponse,
 } from './types/escalation.js';
 
 export type {
   SystemEvent,
-  SessionCreatedEvent,
-  SessionStatusChangedEvent,
+  ValidationPhase,
+  PodCreatedEvent,
+  PodStatusChangedEvent,
   AgentActivityEvent,
   ValidationStartedEvent,
   ValidationCompletedEvent,
+  ValidationPhaseStartedEvent,
+  ValidationPhaseCompletedEvent,
   EscalationCreatedEvent,
   EscalationResolvedEvent,
-  SessionCompletedEvent,
+  PodCompletedEvent,
   MemorySuggestionCreatedEvent,
   ValidationOverrideQueuedEvent,
   TokenBudgetWarningEvent,
@@ -138,10 +143,10 @@ export type {
 export type {
   NotificationType,
   NotificationPayload,
-  SessionValidatedNotification,
-  SessionFailedNotification,
-  SessionNeedsInputNotification,
-  SessionErrorNotification,
+  PodValidatedNotification,
+  PodFailedNotification,
+  PodNeedsInputNotification,
+  PodErrorNotification,
 } from './types/notification.js';
 
 export type {
@@ -160,7 +165,7 @@ export {
   AutopodError,
   AuthError,
   ForbiddenError,
-  SessionNotFoundError,
+  PodNotFoundError,
   InvalidStateTransitionError,
   ProfileNotFoundError,
   ProfileExistsError,
@@ -172,7 +177,7 @@ export {
 
 // Constants (runtime values)
 export {
-  SESSION_ID_LENGTH,
+  POD_ID_LENGTH,
   DEFAULT_MAX_VALIDATION_ATTEMPTS,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
   DEFAULT_HEALTH_TIMEOUT,
@@ -193,10 +198,10 @@ export {
 
 // Schemas (runtime values — Zod objects)
 export {
-  createSessionRequestSchema,
-  sessionStatusSchema,
+  createPodRequestSchema,
+  podStatusSchema,
   sendMessageSchema,
-} from './schemas/session.schema.js';
+} from './schemas/pod.schema.js';
 
 export {
   createProfileSchema,
@@ -255,7 +260,7 @@ export type {
 } from './sanitize/index.js';
 
 // ID generation utility
-export { generateId, generateSessionId } from './id.js';
+export { generateId, generatePodId } from './id.js';
 
 // AC list parser
 export { parseAcList } from './parse-ac-list.js';

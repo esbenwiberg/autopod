@@ -7,7 +7,7 @@ export interface ScheduledJob {
   enabled: boolean;
   nextRunAt: string; // ISO 8601
   lastRunAt: string | null;
-  lastSessionId: string | null;
+  lastPodId: string | null;
   catchupPending: boolean;
   createdAt: string;
   updatedAt: string;

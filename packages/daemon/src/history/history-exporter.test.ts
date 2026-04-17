@@ -1,12 +1,12 @@
-import type { AgentActivityEvent, SessionStatus, ValidationResult } from '@autopod/shared';
+import type { AgentActivityEvent, PodStatus, ValidationResult } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { createActionAuditRepository } from '../actions/audit-repository.js';
-import { createEscalationRepository } from '../sessions/escalation-repository.js';
-import { createEventRepository } from '../sessions/event-repository.js';
-import { createProgressEventRepository } from '../sessions/progress-event-repository.js';
-import { createSessionRepository } from '../sessions/session-repository.js';
-import { createValidationRepository } from '../sessions/validation-repository.js';
+import { createEscalationRepository } from '../pods/escalation-repository.js';
+import { createEventRepository } from '../pods/event-repository.js';
+import { createProgressEventRepository } from '../pods/progress-event-repository.js';
+import { createPodRepository } from '../pods/pod-repository.js';
+import { createValidationRepository } from '../pods/validation-repository.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createHistoryExporter } from './history-exporter.js';
 
@@ -15,7 +15,7 @@ function seedSession(
   overrides: {
     id?: string;
     profileName?: string;
-    status?: SessionStatus;
+    status?: PodStatus;
     task?: string;
     costUsd?: number;
     validationAttempts?: number;
@@ -23,7 +23,7 @@ function seedSession(
 ) {
   const id = overrides.id ?? `sess-${Math.random().toString(36).slice(2, 8)}`;
   db.prepare(`
-    INSERT INTO sessions (id, profile_name, task, status, model, runtime, branch, user_id,
+    INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id,
       max_validation_attempts, skip_validation, output_mode, validation_attempts, cost_usd,
       input_tokens, output_tokens, files_changed, lines_added, lines_removed, escalation_count, commit_count)
     VALUES (@id, @profileName, @task, @status, 'opus', 'claude', @branch, 'user1',
@@ -42,7 +42,7 @@ function seedSession(
 
 function makeValidationResult(overall: 'pass' | 'fail'): ValidationResult {
   return {
-    sessionId: '',
+    podId: '',
     attempt: 1,
     timestamp: new Date().toISOString(),
     smoke: {
@@ -87,11 +87,11 @@ function makeValidationResult(overall: 'pass' | 'fail'): ValidationResult {
 }
 
 describe('history-exporter', () => {
-  it('exports sessions to a valid SQLite database', () => {
+  it('exports pods to a valid SQLite database', () => {
     const db = createTestDb();
     insertTestProfile(db);
 
-    const sessionRepo = createSessionRepository(db);
+    const podRepo = createPodRepository(db);
     const validationRepo = createValidationRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const eventRepo = createEventRepository(db);
@@ -102,23 +102,23 @@ describe('history-exporter', () => {
     const id2 = seedSession(db, { status: 'failed', costUsd: 2.0, validationAttempts: 3 });
     seedSession(db, { status: 'complete', costUsd: 0.3 });
 
-    // Add a validation for session 2
+    // Add a validation for pod 2
     validationRepo.insert(id2, 1, makeValidationResult('fail'));
 
-    // Add an escalation for session 2
+    // Add an escalation for pod 2
     db.prepare(`
-      INSERT INTO escalations (id, session_id, type, payload)
-      VALUES ('esc1', @sessionId, 'ask_human', @payload)
+      INSERT INTO escalations (id, pod_id, type, payload)
+      VALUES ('esc1', @podId, 'ask_human', @payload)
     `).run({
-      sessionId: id2,
+      podId: id2,
       payload: JSON.stringify({ question: 'How do I configure the database?' }),
     });
 
-    // Add an error event for session 1
+    // Add an error event for pod 1
     const errorEvent: AgentActivityEvent = {
-      type: 'session.agent_activity',
+      type: 'pod.agent_activity',
       timestamp: new Date().toISOString(),
-      sessionId: id1,
+      podId: id1,
       event: {
         type: 'error',
         timestamp: new Date().toISOString(),
@@ -132,7 +132,7 @@ describe('history-exporter', () => {
     progressEventRepo.insert(id1, 'analyzing', 'Analyzing codebase', 1, 3);
 
     const exporter = createHistoryExporter({
-      sessionRepo,
+      podRepo,
       validationRepo,
       escalationRepo,
       eventRepo,
@@ -144,9 +144,9 @@ describe('history-exporter', () => {
     // Verify the DB buffer is valid SQLite
     const historyDb = new Database(result.dbBuffer);
 
-    // Check sessions table
-    const sessions = historyDb.prepare('SELECT * FROM sessions').all() as Record<string, unknown>[];
-    expect(sessions).toHaveLength(3);
+    // Check pods table
+    const pods = historyDb.prepare('SELECT * FROM pods').all() as Record<string, unknown>[];
+    expect(pods).toHaveLength(3);
 
     // Check validations table
     const validations = historyDb.prepare('SELECT * FROM validations').all() as Record<
@@ -186,11 +186,11 @@ describe('history-exporter', () => {
     expect(result.stats.totalCost).toBeCloseTo(3.8, 1);
 
     // Verify summary contains expected text
-    expect(result.summary).toContain('Total sessions');
+    expect(result.summary).toContain('Total pods');
     expect(result.summary).toContain('test-profile');
 
     // Verify analysis guide
-    expect(result.analysisGuide).toContain('sessions');
+    expect(result.analysisGuide).toContain('pods');
     expect(result.analysisGuide).toContain('validations');
     expect(result.analysisGuide).toContain('escalations');
     expect(result.analysisGuide).toContain('SELECT');
@@ -200,7 +200,7 @@ describe('history-exporter', () => {
     const db = createTestDb();
     insertTestProfile(db);
 
-    const sessionRepo = createSessionRepository(db);
+    const podRepo = createPodRepository(db);
     const validationRepo = createValidationRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const eventRepo = createEventRepository(db);
@@ -211,7 +211,7 @@ describe('history-exporter', () => {
     seedSession(db, { status: 'killed' });
 
     const exporter = createHistoryExporter({
-      sessionRepo,
+      podRepo,
       validationRepo,
       escalationRepo,
       eventRepo,
@@ -226,7 +226,7 @@ describe('history-exporter', () => {
     const db = createTestDb();
     insertTestProfile(db);
 
-    const sessionRepo = createSessionRepository(db);
+    const podRepo = createPodRepository(db);
     const validationRepo = createValidationRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const eventRepo = createEventRepository(db);
@@ -237,7 +237,7 @@ describe('history-exporter', () => {
     }
 
     const exporter = createHistoryExporter({
-      sessionRepo,
+      podRepo,
       validationRepo,
       escalationRepo,
       eventRepo,
@@ -252,7 +252,7 @@ describe('history-exporter', () => {
     const db = createTestDb();
     insertTestProfile(db);
 
-    const sessionRepo = createSessionRepository(db);
+    const podRepo = createPodRepository(db);
     const validationRepo = createValidationRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const eventRepo = createEventRepository(db);
@@ -262,7 +262,7 @@ describe('history-exporter', () => {
     validationRepo.insert(id, 1, makeValidationResult('pass'));
 
     const exporter = createHistoryExporter({
-      sessionRepo,
+      podRepo,
       validationRepo,
       escalationRepo,
       eventRepo,

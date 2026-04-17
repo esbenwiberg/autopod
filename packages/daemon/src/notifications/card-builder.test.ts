@@ -1,8 +1,8 @@
 import type {
-  SessionErrorNotification,
-  SessionFailedNotification,
-  SessionNeedsInputNotification,
-  SessionValidatedNotification,
+  PodErrorNotification,
+  PodFailedNotification,
+  PodNeedsInputNotification,
+  PodValidatedNotification,
 } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,16 +14,16 @@ import {
 
 describe('Card Builder', () => {
   const basePayload = {
-    sessionId: 'sess-abc123',
+    podId: 'sess-abc123',
     profileName: 'my-app',
     task: 'Add dark mode toggle',
     timestamp: '2026-01-01T00:00:00.000Z',
   };
 
   describe('buildValidatedCard', () => {
-    const notification: SessionValidatedNotification = {
+    const notification: PodValidatedNotification = {
       ...basePayload,
-      type: 'session_validated',
+      type: 'pod_validated',
       previewUrl: 'https://preview.example.com/sess-abc123',
       prUrl: 'https://github.com/org/repo/pull/42',
       screenshots: [],
@@ -48,14 +48,14 @@ describe('Card Builder', () => {
       expect(header.color).toBe('good');
     });
 
-    it('includes session facts', () => {
+    it('includes pod facts', () => {
       const card = buildValidatedCard(notification);
       const factSet = card.body.find((b) => b.type === 'FactSet');
       expect(factSet).toBeDefined();
       const facts = factSet?.facts as Array<{ title: string; value: string }>;
       expect(facts.find((f) => f.title === 'Profile')?.value).toBe('my-app');
       expect(facts.find((f) => f.title === 'Files Changed')?.value).toBe('5');
-      expect(facts.find((f) => f.title === 'Session')?.value).toBe('sess-abc123');
+      expect(facts.find((f) => f.title === 'Pod')?.value).toBe('sess-abc123');
     });
 
     it('includes PR and preview URL actions when present', () => {
@@ -95,12 +95,12 @@ describe('Card Builder', () => {
   });
 
   describe('buildFailedCard', () => {
-    const notification: SessionFailedNotification = {
+    const notification: PodFailedNotification = {
       ...basePayload,
-      type: 'session_failed',
+      type: 'pod_failed',
       reason: 'Build failed with exit code 1',
       validationResult: {
-        sessionId: 'sess-abc123',
+        podId: 'sess-abc123',
         attempt: 2,
         timestamp: '2026-01-01T00:01:00.000Z',
         smoke: {
@@ -157,12 +157,12 @@ describe('Card Builder', () => {
 
   describe('buildNeedsInputCard', () => {
     it('builds card for ask_human escalation', () => {
-      const notification: SessionNeedsInputNotification = {
+      const notification: PodNeedsInputNotification = {
         ...basePayload,
-        type: 'session_needs_input',
+        type: 'pod_needs_input',
         escalation: {
           id: 'esc-1',
-          sessionId: 'sess-abc123',
+          podId: 'sess-abc123',
           type: 'ask_human',
           timestamp: '2026-01-01T00:00:00.000Z',
           payload: {
@@ -196,12 +196,12 @@ describe('Card Builder', () => {
     });
 
     it('builds card for report_blocker escalation', () => {
-      const notification: SessionNeedsInputNotification = {
+      const notification: PodNeedsInputNotification = {
         ...basePayload,
-        type: 'session_needs_input',
+        type: 'pod_needs_input',
         escalation: {
           id: 'esc-2',
-          sessionId: 'sess-abc123',
+          podId: 'sess-abc123',
           type: 'report_blocker',
           timestamp: '2026-01-01T00:00:00.000Z',
           payload: {
@@ -224,12 +224,12 @@ describe('Card Builder', () => {
     });
 
     it('matches snapshot', () => {
-      const notification: SessionNeedsInputNotification = {
+      const notification: PodNeedsInputNotification = {
         ...basePayload,
-        type: 'session_needs_input',
+        type: 'pod_needs_input',
         escalation: {
           id: 'esc-1',
-          sessionId: 'sess-abc123',
+          podId: 'sess-abc123',
           type: 'ask_human',
           timestamp: '2026-01-01T00:00:00.000Z',
           payload: { question: 'Pick a color' },
@@ -242,9 +242,9 @@ describe('Card Builder', () => {
   });
 
   describe('buildErrorCard', () => {
-    const notification: SessionErrorNotification = {
+    const notification: PodErrorNotification = {
       ...basePayload,
-      type: 'session_error',
+      type: 'pod_error',
       error: 'Container OOM killed',
       fatal: true,
     };
@@ -261,9 +261,9 @@ describe('Card Builder', () => {
       expect(card.body[0]?.text).toContain('Fatal');
     });
 
-    it('shows Session Error for non-fatal errors', () => {
+    it('shows Pod Error for non-fatal errors', () => {
       const card = buildErrorCard({ ...notification, fatal: false });
-      expect(card.body[0]?.text).toBe('Session Error');
+      expect(card.body[0]?.text).toBe('Pod Error');
     });
 
     it('includes error message and fatal flag', () => {

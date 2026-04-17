@@ -1,5 +1,5 @@
 import type { RuntimeType } from './types/runtime.js';
-import type { SessionStatus } from './types/session.js';
+import type { PodStatus } from './types/pod.js';
 
 export class AutopodError extends Error {
   constructor(
@@ -26,17 +26,17 @@ export class ForbiddenError extends AutopodError {
   }
 }
 
-export class SessionNotFoundError extends AutopodError {
-  constructor(sessionId: string) {
-    super(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND', 404);
-    this.name = 'SessionNotFoundError';
+export class PodNotFoundError extends AutopodError {
+  constructor(podId: string) {
+    super(`Pod ${podId} not found`, 'POD_NOT_FOUND', 404);
+    this.name = 'PodNotFoundError';
   }
 }
 
 export class InvalidStateTransitionError extends AutopodError {
-  constructor(sessionId: string, from: SessionStatus, to: SessionStatus) {
+  constructor(podId: string, from: PodStatus, to: PodStatus) {
     super(
-      `Cannot transition session ${sessionId} from ${from} to ${to}`,
+      `Cannot transition pod ${podId} from ${from} to ${to}`,
       'INVALID_STATE_TRANSITION',
       409,
     );

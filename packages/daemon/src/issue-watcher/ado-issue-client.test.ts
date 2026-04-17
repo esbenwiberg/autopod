@@ -212,13 +212,13 @@ describe('AdoIssueClient', () => {
     it('posts comment via work item comments API', async () => {
       mockFetch.mockResolvedValueOnce({ ok: true });
 
-      await client.addComment('100', 'Session started.');
+      await client.addComment('100', 'Pod started.');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('/_apis/wit/workitems/100/comments'),
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ text: 'Session started.' }),
+          body: JSON.stringify({ text: 'Pod started.' }),
         }),
       );
     });

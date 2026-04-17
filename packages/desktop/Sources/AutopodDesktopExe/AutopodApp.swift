@@ -7,7 +7,7 @@ import AutopodDesktop
 @main
 struct AutopodApp: App {
   @State private var connectionManager = ConnectionManager()
-  @State private var sessionStore = SessionStore()
+  @State private var podStore = PodStore()
   @State private var profileStore = ProfileStore()
   @State private var memoryStore = MemoryStore()
   @State private var scheduledJobStore = ScheduledJobStore()
@@ -20,7 +20,7 @@ struct AutopodApp: App {
     WindowGroup {
       AppRootView(
         connectionManager: connectionManager,
-        sessionStore: sessionStore,
+        podStore: podStore,
         profileStore: profileStore,
         memoryStore: memoryStore,
         scheduledJobStore: scheduledJobStore,
@@ -60,11 +60,11 @@ struct AutopodApp: App {
 
     MenuBarExtra {
       MenuBarView(
-        sessions: sessionStore.sessions,
+        pods: podStore.pods,
         actions: actionHandler?.actions ?? .preview
       )
     } label: {
-      let count = sessionStore.attentionSessions.count
+      let count = podStore.attentionSessions.count
       Image(systemName: count > 0 ? "\(min(count, 50)).circle.fill" : "circle")
     }
     .menuBarExtraStyle(.window)
@@ -75,17 +75,17 @@ struct AutopodApp: App {
     guard let api = connectionManager.api,
           let conn = connectionManager.connection else { return }
 
-    sessionStore.configure(api: api)
+    podStore.configure(api: api)
     profileStore.configure(api: api)
     memoryStore.configure(api: api)
     scheduledJobStore.configure(api: api)
-    actionHandler = ActionHandler(api: api, sessionStore: sessionStore, profileStore: profileStore)
+    actionHandler = ActionHandler(api: api, podStore: podStore, profileStore: profileStore)
 
     let connToken = connectionManager.activeToken ?? ""
     terminalManager = TerminalManager(baseURL: conn.url, token: connToken)
 
     let stream = EventStream(
-      sessionStore: sessionStore,
+      podStore: podStore,
       memoryStore: memoryStore,
       scheduledJobStore: scheduledJobStore
     )
@@ -96,7 +96,7 @@ struct AutopodApp: App {
     NotificationService.shared.scheduledJobStore = scheduledJobStore
 
     Task {
-      await sessionStore.loadSessions()
+      await podStore.loadSessions()
       await profileStore.loadProfiles()
       await scheduledJobStore.load()
       await memoryStore.loadMemories()

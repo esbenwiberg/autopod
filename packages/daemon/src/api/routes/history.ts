@@ -1,10 +1,10 @@
 import { AutopodError, type HistoryQuery } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
-import type { SessionManager } from '../../sessions/index.js';
+import type { PodManager } from '../../pods/index.js';
 
-export function historyRoutes(app: FastifyInstance, sessionManager: SessionManager): void {
-  // POST /sessions/history-workspace — create a workspace pod with history data
-  app.post('/sessions/history-workspace', async (request, reply) => {
+export function historyRoutes(app: FastifyInstance, podManager: PodManager): void {
+  // POST /pods/history-workspace — create a workspace pod with history data
+  app.post('/pods/history-workspace', async (request, reply) => {
     const body = request.body as {
       profileName?: string;
       since?: string;
@@ -25,13 +25,13 @@ export function historyRoutes(app: FastifyInstance, sessionManager: SessionManag
     };
 
     try {
-      const session = sessionManager.createHistoryWorkspace(
+      const pod = podManager.createHistoryWorkspace(
         body.profileName,
         request.user.oid,
         historyQuery,
       );
       reply.status(201);
-      return session;
+      return pod;
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);

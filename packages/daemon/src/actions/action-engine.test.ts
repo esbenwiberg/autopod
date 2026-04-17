@@ -90,7 +90,7 @@ describe('ActionEngine', () => {
 
   it('returns error when action not found', async () => {
     const result = await engine.execute(
-      { sessionId: 'sess-1', actionName: 'nonexistent', params: {} },
+      { podId: 'sess-1', actionName: 'nonexistent', params: {} },
       testPolicy,
     );
     expect(result.success).toBe(false);
@@ -99,7 +99,7 @@ describe('ActionEngine', () => {
 
   it('returns error for missing required params', async () => {
     const result = await engine.execute(
-      { sessionId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo' } },
+      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo' } },
       testPolicy,
     );
     expect(result.success).toBe(false);
@@ -109,7 +109,7 @@ describe('ActionEngine', () => {
   it('returns error for wrong param type', async () => {
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'read_issue',
         params: { repo: 'org/repo', issue_number: 'not-a-number' },
       },
@@ -127,7 +127,7 @@ describe('ActionEngine', () => {
 
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'read_issue',
         params: { repo: 'org/repo', issue_number: 1 },
       },
@@ -145,7 +145,7 @@ describe('ActionEngine', () => {
 
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'read_issue',
         params: { repo: 'org/forbidden-repo', issue_number: 1 },
       },
@@ -164,7 +164,7 @@ describe('ActionEngine', () => {
     // This will fail because we don't have a real GitHub API, but it should get past the resource check
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'read_issue',
         params: { repo: 'org/allowed-repo', issue_number: 1 },
       },
@@ -182,7 +182,7 @@ describe('ActionEngine', () => {
 
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'read_issue',
         params: { repo: 'myorg/any-repo', issue_number: 1 },
       },
@@ -199,7 +199,7 @@ describe('ActionEngine', () => {
 
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'read_issue',
         params: { repo: 'other-org/repo', issue_number: 1 },
       },
@@ -217,7 +217,7 @@ describe('ActionEngine', () => {
 
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'read_issue',
         params: { repo: 'totally/different', issue_number: 1 },
       },
@@ -231,7 +231,7 @@ describe('ActionEngine', () => {
     // so this tests the error audit path
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'read_issue',
         params: { repo: 'org/repo', issue_number: 1 },
       },
@@ -244,7 +244,7 @@ describe('ActionEngine', () => {
       string,
       unknown
     >;
-    expect(auditCall?.sessionId).toBe('sess-1');
+    expect(auditCall?.podId).toBe('sess-1');
     expect(auditCall?.actionName).toBe('read_issue');
   });
 
@@ -283,7 +283,7 @@ describe('ActionEngine', () => {
 
     const result = await engine.execute(
       {
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         actionName: 'search_issues',
         params: { repo: 'org/repo', query: 'bug', state: 'invalid' },
       },

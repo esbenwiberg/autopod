@@ -7,7 +7,7 @@ import { registerHistoryCommands } from './commands/history.js';
 import { registerProfileCommands } from './commands/profile.js';
 import { registerResearchCommands } from './commands/research.js';
 import { registerScheduleCommands } from './commands/schedule.js';
-import { registerSessionCommands } from './commands/session.js';
+import { registerPodCommands } from './commands/pod.js';
 import { registerValidateCommands } from './commands/validate.js';
 import { registerWatchCommands } from './commands/watch.js';
 import { registerWorkspaceCommands } from './commands/workspace.js';
@@ -18,7 +18,7 @@ const program = new Command();
 
 program
   .name('ap')
-  .description('Autopod — Sandboxed AI coding sessions with self-validation')
+  .description('Autopod — Sandboxed AI coding pods with self-validation')
   .version('0.0.1');
 
 // Initialize MSAL if env vars are set
@@ -42,7 +42,7 @@ function getClient(): AutopodClient {
 registerAuthCommands(program);
 registerDaemonCommands(program);
 registerProfileCommands(program, getClient);
-registerSessionCommands(program, getClient);
+registerPodCommands(program, getClient);
 registerWorkspaceCommands(program, getClient);
 registerResearchCommands(program, getClient);
 registerHistoryCommands(program, getClient);

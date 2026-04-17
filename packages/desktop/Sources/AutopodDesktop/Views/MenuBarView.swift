@@ -3,20 +3,20 @@ import AutopodUI
 
 /// Menubar dropdown showing fleet status at a glance.
 public struct MenuBarView: View {
-  public let sessions: [Session]
-  public var actions: SessionActions
+  public let pods: [Pod]
+  public var actions: PodActions
   public var onOpenDashboard: () -> Void = {}
 
-  public init(sessions: [Session], actions: SessionActions = .preview, onOpenDashboard: @escaping () -> Void = {}) {
-    self.sessions = sessions; self.actions = actions; self.onOpenDashboard = onOpenDashboard
+  public init(pods: [Pod], actions: PodActions = .preview, onOpenDashboard: @escaping () -> Void = {}) {
+    self.pods = pods; self.actions = actions; self.onOpenDashboard = onOpenDashboard
   }
 
-  private var attentionSessions: [Session] {
-    sessions.filter { $0.status.needsAttention }
+  private var attentionSessions: [Pod] {
+    pods.filter { $0.status.needsAttention }
   }
 
-  private var runningSessions: [Session] {
-    sessions.filter { $0.status.isActive }
+  private var runningSessions: [Pod] {
+    pods.filter { $0.status.isActive }
   }
 
   public var body: some View {
@@ -37,10 +37,10 @@ public struct MenuBarView: View {
 
       Divider()
 
-      // Attention sessions
+      // Attention pods
       if !attentionSessions.isEmpty {
-        ForEach(attentionSessions.prefix(5)) { session in
-          menuSessionRow(session)
+        ForEach(attentionSessions.prefix(5)) { pod in
+          menuSessionRow(pod)
         }
         Divider()
       }
@@ -83,16 +83,16 @@ public struct MenuBarView: View {
     .padding(.vertical, 4)
   }
 
-  private func menuSessionRow(_ session: Session) -> some View {
+  private func menuSessionRow(_ pod: Pod) -> some View {
     HStack(spacing: 8) {
       Circle()
-        .fill(session.status.color)
+        .fill(pod.status.color)
         .frame(width: 6, height: 6)
-      Text(session.branch)
+      Text(pod.branch)
         .font(.system(.caption, design: .monospaced))
         .lineLimit(1)
       Spacer()
-      Text(session.status.label)
+      Text(pod.status.label)
         .font(.caption2)
         .foregroundStyle(.secondary)
     }

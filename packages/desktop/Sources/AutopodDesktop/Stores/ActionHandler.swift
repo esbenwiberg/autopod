@@ -3,7 +3,7 @@ import AppKit
 import AutopodClient
 import AutopodUI
 
-/// Executes session actions against the daemon API with optimistic UI updates.
+/// Executes pod actions against the daemon API with optimistic UI updates.
 @Observable
 @MainActor
 public final class ActionHandler {
@@ -12,18 +12,18 @@ public final class ActionHandler {
   public private(set) var lastError: String?
 
   private let api: DaemonAPI
-  private let sessionStore: SessionStore
+  private let podStore: PodStore
   private let profileStore: ProfileStore
 
-  public init(api: DaemonAPI, sessionStore: SessionStore, profileStore: ProfileStore) {
+  public init(api: DaemonAPI, podStore: PodStore, profileStore: ProfileStore) {
     self.api = api
-    self.sessionStore = sessionStore
+    self.podStore = podStore
     self.profileStore = profileStore
   }
 
-  /// Build a SessionActions struct wired to this handler.
-  public var actions: SessionActions {
-    SessionActions(
+  /// Build a PodActions struct wired to this handler.
+  public var actions: PodActions {
+    PodActions(
       approve: { [weak self] id in await self?.approve(id) },
       reject: { [weak self] id, feedback in await self?.reject(id, feedback: feedback) },
       reply: { [weak self] id, message in await self?.reply(id, message: message) },
@@ -34,8 +34,8 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createSession: { [weak self] profile, task, model, pod, ac, base, acFrom, pimGroups in
-        await self?.createSession(
+      createPod: { [weak self] profile, task, model, pod, ac, base, acFrom, pimGroups in
+        await self?.createPod(
           profileName: profile, task: task, model: model,
           pod: pod, acceptanceCriteria: ac,
           baseBranch: base, acFrom: acFrom, pimGroups: pimGroups
@@ -47,7 +47,7 @@ public final class ActionHandler {
       extendAttempts: { [weak self] id, count in await self?.extendAttempts(id, additionalAttempts: count) },
       extendPrAttempts: { [weak self] id, count in await self?.extendPrAttempts(id, additionalAttempts: count) },
       fork: { [weak self] id in await self?.forkSession(id) },
-      delete: { [weak self] id in await self?.deleteSession(id) },
+      delete: { [weak self] id in await self?.deletePod(id) },
       createHistoryWorkspace: { [weak self] profile, limit in
         await self?.createHistoryWorkspace(profileName: profile, limit: limit)
       },
@@ -65,22 +65,22 @@ public final class ActionHandler {
 
   // MARK: - Actions
 
-  public func approve(_ sessionId: String) async {
-    pendingAction = "approve-\(sessionId)"
-    sessionStore.updateStatus(sessionId, to: .approved)
+  public func approve(_ podId: String) async {
+    pendingAction = "approve-\(podId)"
+    podStore.updateStatus(podId, to: .approved)
     do {
-      try await api.approveSession(sessionId)
+      try await api.approvePod(podId)
     } catch {
-      sessionStore.updateStatus(sessionId, to: .validated)
+      podStore.updateStatus(podId, to: .validated)
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func reject(_ sessionId: String, feedback: String?) async {
-    pendingAction = "reject-\(sessionId)"
+  public func reject(_ podId: String, feedback: String?) async {
+    pendingAction = "reject-\(podId)"
     do {
-      try await api.rejectSession(sessionId, feedback: feedback)
+      try await api.rejectPod(podId, feedback: feedback)
       // Status will be updated via WebSocket event
     } catch {
       lastError = error.localizedDescription
@@ -88,77 +88,77 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
-  public func reply(_ sessionId: String, message: String) async {
-    pendingAction = "reply-\(sessionId)"
-    sessionStore.setEscalation(sessionId, question: nil)
-    sessionStore.updateStatus(sessionId, to: .running)
+  public func reply(_ podId: String, message: String) async {
+    pendingAction = "reply-\(podId)"
+    podStore.setEscalation(podId, question: nil)
+    podStore.updateStatus(podId, to: .running)
     do {
-      try await api.sendMessage(sessionId, message: message)
+      try await api.sendMessage(podId, message: message)
     } catch {
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func nudge(_ sessionId: String, message: String) async {
-    pendingAction = "nudge-\(sessionId)"
+  public func nudge(_ podId: String, message: String) async {
+    pendingAction = "nudge-\(podId)"
     do {
-      try await api.nudgeSession(sessionId, message: message)
+      try await api.nudgeSession(podId, message: message)
     } catch {
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func kill(_ sessionId: String) async {
-    pendingAction = "kill-\(sessionId)"
-    sessionStore.updateStatus(sessionId, to: .killing)
+  public func kill(_ podId: String) async {
+    pendingAction = "kill-\(podId)"
+    podStore.updateStatus(podId, to: .killing)
     do {
-      try await api.killSession(sessionId)
+      try await api.killPod(podId)
     } catch {
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func complete(_ sessionId: String) async {
-    pendingAction = "complete-\(sessionId)"
+  public func complete(_ podId: String) async {
+    pendingAction = "complete-\(podId)"
     do {
-      try await api.completeSession(sessionId)
+      try await api.completeSession(podId)
     } catch {
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func pause(_ sessionId: String) async {
-    pendingAction = "pause-\(sessionId)"
-    sessionStore.updateStatus(sessionId, to: .paused)
+  public func pause(_ podId: String) async {
+    pendingAction = "pause-\(podId)"
+    podStore.updateStatus(podId, to: .paused)
     do {
-      try await api.pauseSession(sessionId)
+      try await api.pauseSession(podId)
     } catch {
-      sessionStore.updateStatus(sessionId, to: .running)
+      podStore.updateStatus(podId, to: .running)
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func rework(_ sessionId: String) async {
-    pendingAction = "rework-\(sessionId)"
+  public func rework(_ podId: String) async {
+    pendingAction = "rework-\(podId)"
     do {
-      try await api.triggerValidation(sessionId)
+      try await api.triggerValidation(podId)
     } catch {
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func fixManually(_ sessionId: String) async -> String? {
-    pendingAction = "fix-\(sessionId)"
+  public func fixManually(_ podId: String) async -> String? {
+    pendingAction = "fix-\(podId)"
     do {
-      let workspace = try await api.fixManually(sessionId)
-      let session = SessionMapper.map(workspace)
-      sessionStore.upsertSession(session)
+      let workspace = try await api.fixManually(podId)
+      let pod = PodMapper.map(workspace)
+      podStore.upsertSession(pod)
       pendingAction = nil
       return workspace.id
     } catch {
@@ -168,10 +168,10 @@ public final class ActionHandler {
     }
   }
 
-  public func revalidate(_ sessionId: String) async {
-    pendingAction = "revalidate-\(sessionId)"
+  public func revalidate(_ podId: String) async {
+    pendingAction = "revalidate-\(podId)"
     do {
-      _ = try await api.revalidateSession(sessionId)
+      _ = try await api.revalidateSession(podId)
       // Status will be updated via WebSocket event
     } catch {
       lastError = error.localizedDescription
@@ -179,10 +179,10 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
-  public func extendAttempts(_ sessionId: String, additionalAttempts: Int) async {
-    pendingAction = "extend-\(sessionId)"
+  public func extendAttempts(_ podId: String, additionalAttempts: Int) async {
+    pendingAction = "extend-\(podId)"
     do {
-      try await api.extendAttempts(sessionId, additionalAttempts: additionalAttempts)
+      try await api.extendAttempts(podId, additionalAttempts: additionalAttempts)
       // Status will be updated via WebSocket event (back to running/validating)
     } catch {
       lastError = error.localizedDescription
@@ -190,10 +190,10 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
-  public func extendPrAttempts(_ sessionId: String, additionalAttempts: Int) async {
-    pendingAction = "extend-pr-\(sessionId)"
+  public func extendPrAttempts(_ podId: String, additionalAttempts: Int) async {
+    pendingAction = "extend-pr-\(podId)"
     do {
-      try await api.extendPrAttempts(sessionId, additionalAttempts: additionalAttempts)
+      try await api.extendPrAttempts(podId, additionalAttempts: additionalAttempts)
       // Status will be updated via WebSocket event (back to merge_pending)
     } catch {
       lastError = error.localizedDescription
@@ -201,18 +201,18 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
-  public func spawnFixSession(_ sessionId: String) async {
-    pendingAction = "spawn-fix-\(sessionId)"
+  public func spawnFixSession(_ podId: String) async {
+    pendingAction = "spawn-fix-\(podId)"
     do {
-      try await api.spawnFixSession(sessionId)
-      // Fix session will appear via WebSocket session.created event
+      try await api.spawnFixSession(podId)
+      // Fix pod will appear via WebSocket pod.created event
     } catch {
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func createSession(
+  public func createPod(
     profileName: String, task: String, model: String?,
     pod: PodConfigRequest?, acceptanceCriteria: [String]?,
     baseBranch: String?, acFrom: String?, pimGroups: [PimGroupRequest]? = nil
@@ -229,9 +229,9 @@ public final class ActionHandler {
       pimGroups: pimGroups?.filter { !$0.groupId.isEmpty }
     )
     do {
-      let response = try await api.createSession(req)
-      let session = SessionMapper.map(response)
-      sessionStore.upsertSession(session)
+      let response = try await api.createPod(req)
+      let pod = PodMapper.map(response)
+      podStore.upsertSession(pod)
       pendingAction = nil
       return response.id
     } catch {
@@ -241,10 +241,10 @@ public final class ActionHandler {
     }
   }
 
-  public func promoteSession(_ sessionId: String, targetOutput: String?) async {
-    pendingAction = "promote-\(sessionId)"
+  public func promoteSession(_ podId: String, targetOutput: String?) async {
+    pendingAction = "promote-\(podId)"
     do {
-      try await api.promoteSession(sessionId, targetOutput: targetOutput)
+      try await api.promoteSession(podId, targetOutput: targetOutput)
       // Status will be updated via WebSocket event (running → handoff → provisioning → ...)
     } catch {
       lastError = error.localizedDescription
@@ -256,7 +256,7 @@ public final class ActionHandler {
     pendingAction = "approve-all"
     do {
       _ = try await api.approveAllValidated()
-      await sessionStore.loadSessions()
+      await podStore.loadSessions()
     } catch {
       lastError = error.localizedDescription
     }
@@ -267,22 +267,22 @@ public final class ActionHandler {
     pendingAction = "kill-failed"
     do {
       _ = try await api.killAllFailed()
-      await sessionStore.loadSessions()
+      await podStore.loadSessions()
     } catch {
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func forkSession(_ sessionId: String) async -> String? {
-    pendingAction = "fork-\(sessionId)"
-    guard let source = sessionStore.sessions.first(where: { $0.id == sessionId }) else {
-      lastError = "Session \(sessionId) not found"
+  public func forkSession(_ podId: String) async -> String? {
+    pendingAction = "fork-\(podId)"
+    guard let source = podStore.pods.first(where: { $0.id == podId }) else {
+      lastError = "Pod \(podId) not found"
       pendingAction = nil
       return nil
     }
-    // Create a new session with the same config, using the source branch as baseBranch
-    let result = await createSession(
+    // Create a new pod with the same config, using the source branch as baseBranch
+    let result = await createPod(
       profileName: source.profileName,
       task: source.task,
       model: source.model,
@@ -300,11 +300,11 @@ public final class ActionHandler {
     return result
   }
 
-  public func deleteSession(_ sessionId: String) async {
-    pendingAction = "delete-\(sessionId)"
+  public func deletePod(_ podId: String) async {
+    pendingAction = "delete-\(podId)"
     do {
-      try await api.deleteSession(sessionId)
-      sessionStore.removeSession(sessionId)
+      try await api.deletePod(podId)
+      podStore.removeSession(podId)
     } catch {
       lastError = error.localizedDescription
     }
@@ -318,18 +318,18 @@ public final class ActionHandler {
         profileName: profileName,
         limit: limit
       )
-      let session = SessionMapper.map(response)
-      sessionStore.upsertSession(session)
-      sessionStore.selectedSessionId = session.id
+      let pod = PodMapper.map(response)
+      podStore.upsertSession(pod)
+      podStore.selectedSessionId = pod.id
     } catch {
       lastError = error.localizedDescription
     }
     pendingAction = nil
   }
 
-  public func openLiveApp(_ sessionId: String) async {
+  public func openLiveApp(_ podId: String) async {
     do {
-      let previewUrl = try await api.startPreview(sessionId)
+      let previewUrl = try await api.startPreview(podId)
       guard let url = URL(string: previewUrl) else { return }
       NSWorkspace.shared.open(url)
     } catch {
@@ -337,16 +337,16 @@ public final class ActionHandler {
     }
   }
 
-  public func interruptValidation(_ sessionId: String) async {
+  public func interruptValidation(_ podId: String) async {
     do {
-      try await api.interruptValidation(sessionId: sessionId)
+      try await api.interruptValidation(podId: podId)
     } catch {
       lastError = error.localizedDescription
     }
   }
 
   public func addValidationOverride(
-    _ sessionId: String,
+    _ podId: String,
     findingId: String,
     description: String,
     action: String,
@@ -355,7 +355,7 @@ public final class ActionHandler {
   ) async {
     do {
       try await api.addValidationOverride(
-        sessionId: sessionId,
+        podId: podId,
         findingId: findingId,
         description: description,
         action: action,

@@ -1,12 +1,12 @@
 import type { MemoryScope } from '@autopod/shared';
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export async function memorySearch(
-  sessionId: string,
+  podId: string,
   input: { query: string; scope: MemoryScope },
-  bridge: SessionBridge,
+  bridge: PodBridge,
 ): Promise<string> {
-  const entries = bridge.searchMemories(sessionId, input.scope, input.query);
+  const entries = bridge.searchMemories(podId, input.scope, input.query);
   if (entries.length === 0) {
     return `No memories matching "${input.query}" in scope: ${input.scope}`;
   }

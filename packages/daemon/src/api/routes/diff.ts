@@ -3,7 +3,7 @@ import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type { FastifyInstance } from 'fastify';
 import type { ProfileStore } from '../../profiles/index.js';
-import type { ContainerManagerFactory, SessionManager } from '../../sessions/session-manager.js';
+import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -20,33 +20,33 @@ interface DiffResponse {
 
 export function diffRoutes(
   app: FastifyInstance,
-  sessionManager: SessionManager,
+  podManager: PodManager,
   containerManagerFactory: ContainerManagerFactory,
   profileStore: ProfileStore,
 ): void {
-  // GET /sessions/:sessionId/diff — get unified diff for a session
-  app.get('/sessions/:sessionId/diff', async (request) => {
-    const { sessionId } = request.params as { sessionId: string };
-    const session = sessionManager.getSession(sessionId);
+  // GET /pods/:podId/diff — get unified diff for a pod
+  app.get('/pods/:podId/diff', async (request) => {
+    const { podId } = request.params as { podId: string };
+    const pod = podManager.getSession(podId);
 
-    const baseBranch = session.baseBranch ?? getBaseBranch(profileStore, session.profileName);
-    const sinceCommit = session.startCommitSha ?? undefined;
+    const baseBranch = pod.baseBranch ?? getBaseBranch(profileStore, pod.profileName);
+    const sinceCommit = pod.startCommitSha ?? undefined;
 
     // Strategy 1: Try container-based diff (works when container is running)
     let rawDiff = '';
-    if (session.containerId) {
+    if (pod.containerId) {
       rawDiff = await tryContainerDiff(
         containerManagerFactory,
-        session.containerId,
-        session.executionTarget,
+        pod.containerId,
+        pod.executionTarget,
         baseBranch,
         sinceCommit,
       );
     }
 
     // Strategy 2: Fall back to host-side worktree diff (works after container stops)
-    if (!rawDiff.trim() && session.worktreePath) {
-      rawDiff = await tryWorktreeDiff(session.worktreePath, baseBranch, sinceCommit);
+    if (!rawDiff.trim() && pod.worktreePath) {
+      rawDiff = await tryWorktreeDiff(pod.worktreePath, baseBranch, sinceCommit);
     }
 
     if (!rawDiff.trim()) {
@@ -81,10 +81,10 @@ async function tryContainerDiff(
     let base: string | undefined;
 
     if (sinceCommit) {
-      // Scope to only the agent's commits from this session
+      // Scope to only the agent's commits from this pod
       base = sinceCommit;
     } else {
-      // Fall back to merge-base for sessions without startCommitSha
+      // Fall back to merge-base for pods without startCommitSha
       const mergeBaseResult = await cm.execInContainer(
         containerId,
         ['git', 'merge-base', 'HEAD', baseBranch],

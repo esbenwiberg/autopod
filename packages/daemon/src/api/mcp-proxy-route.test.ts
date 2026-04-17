@@ -2,7 +2,7 @@ import type { InjectedMcpServer } from '@autopod/shared';
 import Fastify, { type FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
+import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import type { AuthModule } from '../interfaces/index.js';
 import { errorHandler } from './error-handler.js';
 import { mcpProxyHandler } from './mcp-proxy-handler.js';
@@ -10,13 +10,13 @@ import { authPlugin } from './plugins/auth.js';
 
 const logger = pino({ level: 'silent' });
 
-// Deterministic session-token issuer for tests — pure in-memory, no file I/O.
-function makeIssuer(): SessionTokenIssuer {
-  const valid = new Map<string, string>(); // token → sessionId
+// Deterministic pod-token issuer for tests — pure in-memory, no file I/O.
+function makeIssuer(): PodTokenIssuer {
+  const valid = new Map<string, string>(); // token → podId
   return {
-    generate(sessionId: string) {
-      const token = `tok-${sessionId}-${Math.random().toString(36).slice(2)}`;
-      valid.set(token, sessionId);
+    generate(podId: string) {
+      const token = `tok-${podId}-${Math.random().toString(36).slice(2)}`;
+      valid.set(token, podId);
       return token;
     },
     verify(token: string) {
@@ -36,7 +36,7 @@ const rejectAuthModule: AuthModule = {
 
 describe('mcp-proxy route wiring (F2e follow-up)', () => {
   let app: FastifyInstance;
-  let issuer: SessionTokenIssuer;
+  let issuer: PodTokenIssuer;
   let serversBySession: Map<string, InjectedMcpServer[]>;
   let fetchMock: ReturnType<typeof vi.fn>;
   let originalFetch: typeof globalThis.fetch;
@@ -65,7 +65,7 @@ describe('mcp-proxy route wiring (F2e follow-up)', () => {
     app.setErrorHandler(errorHandler);
     authPlugin(app, rejectAuthModule, issuer);
     mcpProxyHandler(app, {
-      getServersForSession: (sid) => serversBySession.get(sid) ?? [],
+      getServersForPod: (sid) => serversBySession.get(sid) ?? [],
       logger,
     });
     await app.ready();
@@ -85,7 +85,7 @@ describe('mcp-proxy route wiring (F2e follow-up)', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('rejects cross-session impersonation (token for B, path for A)', async () => {
+  it('rejects cross-pod impersonation (token for B, path for A)', async () => {
     serversBySession.set('sess-a', [{ name: 'github', url: 'https://mcp.github.example/sse' }]);
     const tokenForB = issuer.generate('sess-b');
 
@@ -130,7 +130,7 @@ describe('mcp-proxy route wiring (F2e follow-up)', () => {
     expect(headers['X-Api']).toBe('k');
   });
 
-  it('returns 404 when the session has no matching server name', async () => {
+  it('returns 404 when the pod has no matching server name', async () => {
     serversBySession.set('sess-a', [{ name: 'github', url: 'https://mcp.github.example/sse' }]);
     const tokenForA = issuer.generate('sess-a');
 

@@ -7,7 +7,7 @@ import type {
 } from '@autopod/shared';
 
 export interface ValidationEngineConfig {
-  sessionId: string;
+  podId: string;
   containerId: string;
   previewUrl: string;
   /** URL reachable from inside the container (e.g. http://127.0.0.1:3000).

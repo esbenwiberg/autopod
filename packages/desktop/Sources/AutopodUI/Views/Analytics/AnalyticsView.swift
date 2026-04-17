@@ -1,23 +1,23 @@
 import SwiftUI
 
-/// Analytics dashboard — aggregate stats across all sessions.
+/// Analytics dashboard — aggregate stats across all pods.
 public struct AnalyticsView: View {
-    public let sessions: [Session]
+    public let pods: [Pod]
 
-    public init(sessions: [Session]) {
-        self.sessions = sessions
+    public init(pods: [Pod]) {
+        self.pods = pods
     }
 
     // MARK: - Computed stats
 
-    private var workerSessions: [Session] { sessions.filter { !$0.isWorkspace } }
+    private var workerSessions: [Pod] { pods.filter { !$0.isWorkspace } }
     private var totalSessions: Int { workerSessions.count }
     private var successCount: Int { workerSessions.filter { $0.status == .complete }.count }
     private var successRate: Double { totalSessions > 0 ? Double(successCount) / Double(totalSessions) : 0 }
-    private var totalCost: Double { sessions.filter { $0.status != .running && $0.status != .paused }.reduce(0) { $0 + $1.costUsd } }
-    private var totalInputTokens: Int { sessions.reduce(0) { $0 + $1.inputTokens } }
-    private var totalOutputTokens: Int { sessions.reduce(0) { $0 + $1.outputTokens } }
-    private var totalLinesAdded: Int { sessions.compactMap(\.diffStats).reduce(0) { $0 + $1.added } }
+    private var totalCost: Double { pods.filter { $0.status != .running && $0.status != .paused }.reduce(0) { $0 + $1.costUsd } }
+    private var totalInputTokens: Int { pods.reduce(0) { $0 + $1.inputTokens } }
+    private var totalOutputTokens: Int { pods.reduce(0) { $0 + $1.outputTokens } }
+    private var totalLinesAdded: Int { pods.compactMap(\.diffStats).reduce(0) { $0 + $1.added } }
 
     private var profileStats: [ProfileStat] {
         let profiles = Array(Set(workerSessions.map(\.profileName))).sorted()
@@ -38,12 +38,12 @@ public struct AnalyticsView: View {
     }
 
     private var statusCounts: [StatusCount] {
-        let relevantStatuses: [SessionStatus] = [
+        let relevantStatuses: [PodStatus] = [
             .complete, .failed, .reviewRequired, .running, .validated,
             .validating, .awaitingInput, .killed, .queued, .provisioning,
         ]
         return relevantStatuses.compactMap { status in
-            let count = sessions.filter { $0.status == status }.count
+            let count = pods.filter { $0.status == status }.count
             guard count > 0 else { return nil }
             return StatusCount(status: status, count: count)
         }
@@ -78,7 +78,7 @@ public struct AnalyticsView: View {
         HStack(spacing: 0) {
             heroStat(
                 value: "\(totalSessions)",
-                label: "Sessions",
+                label: "Pods",
                 icon: "square.stack.3d.up"
             )
             Spacer()
@@ -220,7 +220,7 @@ public struct AnalyticsView: View {
                     .font(.system(.subheadline).weight(.medium))
                     .lineLimit(1)
                 HStack(spacing: 12) {
-                    Text("\(stat.sessionCount) sessions")
+                    Text("\(stat.sessionCount) pods")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if stat.avgCost > 0 {
@@ -331,7 +331,7 @@ struct ProfileStat: Identifiable {
 }
 
 struct StatusCount: Identifiable {
-    let status: SessionStatus
+    let status: PodStatus
     let count: Int
     var id: String { status.rawValue }
 }
@@ -339,6 +339,6 @@ struct StatusCount: Identifiable {
 // MARK: - Preview
 
 #Preview("Analytics") {
-    AnalyticsView(sessions: MockData.all)
+    AnalyticsView(pods: MockData.all)
         .frame(width: 800, height: 600)
 }

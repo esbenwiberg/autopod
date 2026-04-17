@@ -1,4 +1,4 @@
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export interface ReportTaskSummaryInput {
   actualSummary: string;
@@ -12,11 +12,11 @@ export interface ReportTaskSummaryInput {
 }
 
 export async function reportTaskSummary(
-  sessionId: string,
+  podId: string,
   input: ReportTaskSummaryInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
 ): Promise<string> {
-  bridge.reportTaskSummary(sessionId, input.actualSummary, input.deviations, input.how);
+  bridge.reportTaskSummary(podId, input.actualSummary, input.deviations, input.how);
   const deviationCount = input.deviations.length;
   const deviationNote =
     deviationCount === 0

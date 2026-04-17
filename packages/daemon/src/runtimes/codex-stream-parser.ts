@@ -27,7 +27,7 @@ interface CodexEvent {
  * - "task_complete"    → AgentCompleteEvent
  * - "error"            → AgentErrorEvent
  */
-function mapEvent(event: CodexEvent, sessionId: string, logger?: Logger): AgentEvent | null {
+function mapEvent(event: CodexEvent, podId: string, logger?: Logger): AgentEvent | null {
   const ts = event.timestamp ?? new Date().toISOString();
 
   switch (event.type) {
@@ -106,7 +106,7 @@ function mapEvent(event: CodexEvent, sessionId: string, logger?: Logger): AgentE
     default:
       logger?.debug({
         component: 'codex-stream-parser',
-        sessionId,
+        podId,
         msg: `Unknown Codex event type: ${event.type}`,
       });
       return null;
@@ -121,7 +121,7 @@ function mapEvent(event: CodexEvent, sessionId: string, logger?: Logger): AgentE
  */
 async function* parse(
   stream: Readable,
-  sessionId: string,
+  podId: string,
   logger: Logger,
 ): AsyncIterable<AgentEvent> {
   const rl = createInterface({ input: stream });
@@ -136,13 +136,13 @@ async function* parse(
     } catch {
       logger.warn({
         component: 'codex-stream-parser',
-        sessionId,
+        podId,
         msg: `Failed to parse JSONL line: ${trimmed.slice(0, 200)}`,
       });
       continue;
     }
 
-    const mapped = mapEvent(event, sessionId, logger);
+    const mapped = mapEvent(event, podId, logger);
     if (mapped) yield mapped;
   }
 }

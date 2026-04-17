@@ -45,7 +45,7 @@ function createTestDb(): Database.Database {
     }
   }
 
-  // Insert a test session (needed for FK constraint on action_audit)
+  // Insert a test pod (needed for FK constraint on action_audit)
   db.exec(`
     INSERT INTO profiles (name, repo_url, default_branch, template, build_command, start_command,
       health_path, health_timeout, validation_pages, max_validation_attempts,
@@ -54,7 +54,7 @@ function createTestDb(): Database.Database {
       '/', 120, '[]', 3, 'opus', 'claude',
       '{"askHuman":true,"askAi":{"enabled":false,"model":"sonnet","maxCalls":5},"autoPauseAfter":3,"humanResponseTimeout":3600}');
 
-    INSERT INTO sessions (id, profile_name, task, status, model, runtime, execution_target, user_id, branch)
+    INSERT INTO pods (id, profile_name, task, status, model, runtime, execution_target, user_id, branch)
     VALUES ('sess-integration', 'test-profile', 'test task', 'running', 'opus', 'claude', 'local', 'test-user', 'feature/test');
   `);
 
@@ -157,7 +157,7 @@ describe('Action Control Plane Integration', () => {
       // 4. Execute the action
       const result = await engine.execute(
         {
-          sessionId: 'sess-integration',
+          podId: 'sess-integration',
           actionName: 'search_kb',
           params: { query: 'bug fix', max_results: 10 },
         },
@@ -180,7 +180,7 @@ describe('Action Control Plane Integration', () => {
       const auditEntries = auditRepo.listBySession('sess-integration');
       expect(auditEntries).toHaveLength(1);
       expect(auditEntries[0]?.actionName).toBe('search_kb');
-      expect(auditEntries[0]?.sessionId).toBe('sess-integration');
+      expect(auditEntries[0]?.podId).toBe('sess-integration');
     } finally {
       await mockServer.close();
     }
@@ -233,7 +233,7 @@ describe('Action Control Plane Integration', () => {
       };
 
       const result = await engine.execute(
-        { sessionId: 'sess-integration', actionName: 'fetch_data', params: { query: 'test' } },
+        { podId: 'sess-integration', actionName: 'fetch_data', params: { query: 'test' } },
         policy,
       );
 
@@ -378,7 +378,7 @@ describe('Action Control Plane Integration', () => {
 
     // Missing required param
     let result = await engine.execute(
-      { sessionId: 'sess-integration', actionName: 'strict_tool', params: { env: 'dev' } },
+      { podId: 'sess-integration', actionName: 'strict_tool', params: { env: 'dev' } },
       policy,
     );
     expect(result.success).toBe(false);
@@ -387,7 +387,7 @@ describe('Action Control Plane Integration', () => {
     // Invalid enum value
     result = await engine.execute(
       {
-        sessionId: 'sess-integration',
+        podId: 'sess-integration',
         actionName: 'strict_tool',
         params: { env: 'production', count: 5 },
       },
@@ -399,7 +399,7 @@ describe('Action Control Plane Integration', () => {
     // Wrong type
     result = await engine.execute(
       {
-        sessionId: 'sess-integration',
+        podId: 'sess-integration',
         actionName: 'strict_tool',
         params: { env: 'dev', count: 'not-a-number' },
       },
@@ -443,15 +443,15 @@ describe('Action Control Plane Integration', () => {
 
       // Execute 3 times
       await engine.execute(
-        { sessionId: 'sess-integration', actionName: 'ping', params: {} },
+        { podId: 'sess-integration', actionName: 'ping', params: {} },
         policy,
       );
       await engine.execute(
-        { sessionId: 'sess-integration', actionName: 'ping', params: {} },
+        { podId: 'sess-integration', actionName: 'ping', params: {} },
         policy,
       );
       await engine.execute(
-        { sessionId: 'sess-integration', actionName: 'ping', params: {} },
+        { podId: 'sess-integration', actionName: 'ping', params: {} },
         policy,
       );
 

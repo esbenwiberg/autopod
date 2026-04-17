@@ -43,8 +43,8 @@ public final class MemoryStore {
             if scope == nil {
                 // Load all three scopes and merge
                 let profile = try await api.listMemories(scope: "profile", scopeId: scopeId, approvedOnly: false)
-                let session = try await api.listMemories(scope: "session", scopeId: scopeId, approvedOnly: false)
-                entries = fetched + profile + session
+                let pod = try await api.listMemories(scope: "pod", scopeId: scopeId, approvedOnly: false)
+                entries = fetched + profile + pod
             } else {
                 entries = fetched
             }

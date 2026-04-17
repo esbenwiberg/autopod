@@ -12,33 +12,33 @@ describe('RateLimiter', () => {
 
   it('allows sending when no previous sends', () => {
     const limiter = createRateLimiter();
-    const result = limiter.canSend('session-1');
+    const result = limiter.canSend('pod-1');
     expect(result.allowed).toBe(true);
   });
 
-  it('enforces cooldown between sends for same session', () => {
+  it('enforces cooldown between sends for same pod', () => {
     const limiter = createRateLimiter({ cooldownMs: 5000 });
 
-    limiter.recordSent('session-1');
+    limiter.recordSent('pod-1');
 
-    const result = limiter.canSend('session-1');
+    const result = limiter.canSend('pod-1');
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('Cooldown');
 
     // Advance past cooldown
     vi.advanceTimersByTime(5001);
-    const result2 = limiter.canSend('session-1');
+    const result2 = limiter.canSend('pod-1');
     expect(result2.allowed).toBe(true);
   });
 
   it('enforces max count per window', () => {
     const limiter = createRateLimiter({ maxPerSession: 3, cooldownMs: 0 });
 
-    limiter.recordSent('session-1');
-    limiter.recordSent('session-1');
-    limiter.recordSent('session-1');
+    limiter.recordSent('pod-1');
+    limiter.recordSent('pod-1');
+    limiter.recordSent('pod-1');
 
-    const result = limiter.canSend('session-1');
+    const result = limiter.canSend('pod-1');
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('Rate limit exceeded');
     expect(result.reason).toContain('3/3');
@@ -48,31 +48,31 @@ describe('RateLimiter', () => {
     const windowMs = 60_000;
     const limiter = createRateLimiter({ maxPerSession: 2, windowMs, cooldownMs: 0 });
 
-    limiter.recordSent('session-1');
-    limiter.recordSent('session-1');
-    expect(limiter.canSend('session-1').allowed).toBe(false);
+    limiter.recordSent('pod-1');
+    limiter.recordSent('pod-1');
+    expect(limiter.canSend('pod-1').allowed).toBe(false);
 
     // Advance past window
     vi.advanceTimersByTime(windowMs + 1);
-    expect(limiter.canSend('session-1').allowed).toBe(true);
+    expect(limiter.canSend('pod-1').allowed).toBe(true);
   });
 
-  it('tracks sessions independently', () => {
+  it('tracks pods independently', () => {
     const limiter = createRateLimiter({ maxPerSession: 1, cooldownMs: 0 });
 
-    limiter.recordSent('session-1');
-    expect(limiter.canSend('session-1').allowed).toBe(false);
-    expect(limiter.canSend('session-2').allowed).toBe(true);
+    limiter.recordSent('pod-1');
+    expect(limiter.canSend('pod-1').allowed).toBe(false);
+    expect(limiter.canSend('pod-2').allowed).toBe(true);
   });
 
-  it('reset clears state for a session', () => {
+  it('reset clears state for a pod', () => {
     const limiter = createRateLimiter({ maxPerSession: 1, cooldownMs: 0 });
 
-    limiter.recordSent('session-1');
-    expect(limiter.canSend('session-1').allowed).toBe(false);
+    limiter.recordSent('pod-1');
+    expect(limiter.canSend('pod-1').allowed).toBe(false);
 
-    limiter.reset('session-1');
-    expect(limiter.canSend('session-1').allowed).toBe(true);
+    limiter.reset('pod-1');
+    expect(limiter.canSend('pod-1').allowed).toBe(true);
   });
 
   it('uses default values when no options provided', () => {
@@ -80,11 +80,11 @@ describe('RateLimiter', () => {
 
     // Should allow up to 10 sends
     for (let i = 0; i < 10; i++) {
-      limiter.recordSent('session-1');
+      limiter.recordSent('pod-1');
       // Advance past cooldown (30s default)
       vi.advanceTimersByTime(31_000);
     }
 
-    expect(limiter.canSend('session-1').allowed).toBe(false);
+    expect(limiter.canSend('pod-1').allowed).toBe(false);
   });
 });

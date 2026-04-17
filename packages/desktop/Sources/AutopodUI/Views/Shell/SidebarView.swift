@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Sidebar with smart groups, profiles, and connection status.
 public struct SidebarView: View {
-    public let sessions: [Session]
+    public let pods: [Pod]
     @Binding public var selection: SidebarItem
     @Binding public var showCreateSheet: Bool
     public var isConnected: Bool
@@ -13,7 +13,7 @@ public struct SidebarView: View {
     public var onShowSettings: (() -> Void)?
 
     public init(
-        sessions: [Session],
+        pods: [Pod],
         selection: Binding<SidebarItem>,
         showCreateSheet: Binding<Bool>,
         isConnected: Bool = true,
@@ -23,7 +23,7 @@ public struct SidebarView: View {
         catchupPendingCount: Int = 0,
         onShowSettings: (() -> Void)? = nil
     ) {
-        self.sessions = sessions
+        self.pods = pods
         self._selection = selection
         self._showCreateSheet = showCreateSheet
         self.isConnected = isConnected
@@ -34,12 +34,12 @@ public struct SidebarView: View {
         self.onShowSettings = onShowSettings
     }
 
-    private var attentionCount: Int { sessions.filter { $0.status.needsAttention }.count }
-    private var activeCount: Int { sessions.filter { $0.status.isActive || $0.status.needsAttention }.filter { !$0.isWorkspace }.count }
-    private var runningCount: Int { sessions.filter { $0.status.isActive && !$0.isWorkspace }.count }
-    private var workspaceCount: Int { sessions.filter { $0.isWorkspace }.count }
-    private var completedCount: Int { sessions.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }.count }
-    private var profiles: [String] { Array(Set(sessions.map(\.profileName))).sorted() }
+    private var attentionCount: Int { pods.filter { $0.status.needsAttention }.count }
+    private var activeCount: Int { pods.filter { $0.status.isActive || $0.status.needsAttention }.filter { !$0.isWorkspace }.count }
+    private var runningCount: Int { pods.filter { $0.status.isActive && !$0.isWorkspace }.count }
+    private var workspaceCount: Int { pods.filter { $0.isWorkspace }.count }
+    private var completedCount: Int { pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }.count }
+    private var profiles: [String] { Array(Set(pods.map(\.profileName))).sorted() }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,11 +48,11 @@ public struct SidebarView: View {
 
             Divider().padding(.bottom, 8)
 
-            // New session button
+            // New pod button
             Button {
                 showCreateSheet = true
             } label: {
-                Label("New Session", systemImage: "plus.circle.fill")
+                Label("New Pod", systemImage: "plus.circle.fill")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.borderedProminent)
@@ -62,13 +62,13 @@ public struct SidebarView: View {
 
             // Smart groups
             List(selection: $selection) {
-                Section("Sessions") {
+                Section("Pods") {
                     sidebarRow(.attention, icon: "exclamationmark.circle.fill", color: .orange, badge: attentionCount)
                     sidebarRow(.active, icon: "bolt.circle.fill", color: .blue, badge: activeCount)
                     sidebarRow(.running, icon: "play.circle.fill", color: .secondary, badge: runningCount)
                     sidebarRow(.workspaces, icon: "terminal.fill", color: .secondary, badge: workspaceCount)
                     sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
-                    sidebarRow(.all, icon: "square.grid.2x2", color: .secondary, badge: sessions.count)
+                    sidebarRow(.all, icon: "square.grid.2x2", color: .secondary, badge: pods.count)
                     sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
                     sidebarRow(.history, icon: "clock.arrow.circlepath", color: .secondary, badge: 0)
                     sidebarRow(.memory, icon: "brain", color: .purple, badge: pendingMemoryCount)
@@ -77,7 +77,7 @@ public struct SidebarView: View {
 
                 Section("Profiles") {
                     ForEach(profiles, id: \.self) { profile in
-                        sidebarRow(.profile(profile), icon: "folder.fill", color: .secondary, badge: sessions.filter { $0.profileName == profile }.count)
+                        sidebarRow(.profile(profile), icon: "folder.fill", color: .secondary, badge: pods.filter { $0.profileName == profile }.count)
                     }
                 }
             }
@@ -221,7 +221,7 @@ public enum SidebarItem: Hashable {
         case .running: "Running"
         case .workspaces: "Workspaces"
         case .completed: "Completed"
-        case .all: "All Sessions"
+        case .all: "All Pods"
         case .analytics: "Analytics"
         case .history: "History"
         case .memory: "Memory"
@@ -238,6 +238,6 @@ public enum SidebarItem: Hashable {
 #Preview("Sidebar") {
     @Previewable @State var selection: SidebarItem = .attention
     @Previewable @State var showCreate = false
-    SidebarView(sessions: MockData.all, selection: $selection, showCreateSheet: $showCreate)
+    SidebarView(pods: MockData.all, selection: $selection, showCreateSheet: $showCreate)
         .frame(height: 500)
 }

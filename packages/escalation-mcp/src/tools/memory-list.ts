@@ -1,12 +1,12 @@
 import type { MemoryScope } from '@autopod/shared';
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export async function memoryList(
-  sessionId: string,
+  podId: string,
   input: { scope: MemoryScope },
-  bridge: SessionBridge,
+  bridge: PodBridge,
 ): Promise<string> {
-  const entries = bridge.listMemories(sessionId, input.scope);
+  const entries = bridge.listMemories(podId, input.scope);
   if (entries.length === 0) {
     return `No approved memories found for scope: ${input.scope}`;
   }

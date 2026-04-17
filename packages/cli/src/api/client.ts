@@ -3,17 +3,17 @@ import {
   AutopodError,
   InvalidStateTransitionError,
   ProfileNotFoundError,
-  SessionNotFoundError,
+  PodNotFoundError,
   ValidationError,
 } from '@autopod/shared';
 import type {
   CreateScheduledJobRequest,
-  CreateSessionRequest,
+  CreatePodRequest,
   HistoryQuery,
   Profile,
   ScheduledJob,
-  Session,
-  SessionStatus,
+  Pod,
+  PodStatus,
   UpdateScheduledJobRequest,
   ValidationResult,
   WatchedIssue,
@@ -42,16 +42,16 @@ export class AutopodClient {
   }
 
   // Sessions
-  async createSession(req: CreateSessionRequest): Promise<Session> {
-    return this.request<Session>('POST', '/sessions', req);
+  async createSession(req: CreatePodRequest): Promise<Pod> {
+    return this.request<Pod>('POST', '/pods', req);
   }
 
-  async listSessions(filters?: { status?: string; profile?: string }): Promise<Session[]> {
+  async listSessions(filters?: { status?: string; profile?: string }): Promise<Pod[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set('status', filters.status);
     if (filters?.profile) params.set('profile', filters.profile);
     const qs = params.toString();
-    return this.request<Session[]>('GET', `/sessions${qs ? `?${qs}` : ''}`);
+    return this.request<Pod[]>('GET', `/pods${qs ? `?${qs}` : ''}`);
   }
 
   async getSessionStats(filters?: {
@@ -60,45 +60,45 @@ export class AutopodClient {
     const params = new URLSearchParams();
     if (filters?.profile) params.set('profile', filters.profile);
     const qs = params.toString();
-    return this.request('GET', `/sessions/stats${qs ? `?${qs}` : ''}`);
+    return this.request('GET', `/pods/stats${qs ? `?${qs}` : ''}`);
   }
 
-  async getSession(id: string): Promise<Session> {
-    return this.request<Session>('GET', `/sessions/${id}`);
+  async getSession(id: string): Promise<Pod> {
+    return this.request<Pod>('GET', `/pods/${id}`);
   }
 
   async sendMessage(id: string, message: string): Promise<void> {
-    await this.request<void>('POST', `/sessions/${id}/message`, { message });
+    await this.request<void>('POST', `/pods/${id}/message`, { message });
   }
 
   async getValidations(
     id: string,
   ): Promise<Array<{ id: string; attempt: number; result: ValidationResult; createdAt: string }>> {
-    return this.request('GET', `/sessions/${id}/validations`);
+    return this.request('GET', `/pods/${id}/validations`);
   }
 
   async triggerValidation(id: string): Promise<void> {
-    await this.request<void>('POST', `/sessions/${id}/validate`);
+    await this.request<void>('POST', `/pods/${id}/validate`);
   }
 
   async approveSession(id: string, opts?: { squash?: boolean }): Promise<void> {
-    await this.request<void>('POST', `/sessions/${id}/approve`, opts);
+    await this.request<void>('POST', `/pods/${id}/approve`, opts);
   }
 
   async rejectSession(id: string, feedback: string): Promise<void> {
-    await this.request<void>('POST', `/sessions/${id}/reject`, { feedback });
+    await this.request<void>('POST', `/pods/${id}/reject`, { feedback });
   }
 
   async pauseSession(id: string): Promise<void> {
-    await this.request<void>('POST', `/sessions/${id}/pause`);
+    await this.request<void>('POST', `/pods/${id}/pause`);
   }
 
   async nudgeSession(id: string, message: string): Promise<void> {
-    await this.request<void>('POST', `/sessions/${id}/nudge`, { message });
+    await this.request<void>('POST', `/pods/${id}/nudge`, { message });
   }
 
   async killSession(id: string): Promise<void> {
-    await this.request<void>('POST', `/sessions/${id}/kill`);
+    await this.request<void>('POST', `/pods/${id}/kill`);
   }
 
   async completeSession(
@@ -113,24 +113,24 @@ export class AutopodClient {
       ok: boolean;
       pushError?: string;
       promotedTo?: 'pr' | 'branch' | 'artifact' | 'none';
-    }>('POST', `/sessions/${id}/complete`, options ?? undefined);
+    }>('POST', `/pods/${id}/complete`, options ?? undefined);
   }
 
   async promoteSession(
     id: string,
     targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
   ): Promise<{ ok: boolean; promotedTo: string }> {
-    return this.request<{ ok: boolean; promotedTo: string }>('POST', `/sessions/${id}/promote`, {
+    return this.request<{ ok: boolean; promotedTo: string }>('POST', `/pods/${id}/promote`, {
       targetOutput,
     });
   }
 
   async injectCredential(id: string, service: 'github' | 'ado'): Promise<void> {
-    await this.request<void>('POST', `/sessions/${id}/inject-credential`, { service });
+    await this.request<void>('POST', `/pods/${id}/inject-credential`, { service });
   }
 
   async deleteSession(id: string): Promise<void> {
-    await this.request<void>('DELETE', `/sessions/${id}`);
+    await this.request<void>('DELETE', `/pods/${id}`);
   }
 
   async createHistoryWorkspace(params: {
@@ -138,28 +138,28 @@ export class AutopodClient {
     since?: string;
     limit?: number;
     failuresOnly?: boolean;
-  }): Promise<Session> {
-    return this.request<Session>('POST', '/sessions/history-workspace', params);
+  }): Promise<Pod> {
+    return this.request<Pod>('POST', '/pods/history-workspace', params);
   }
 
   async getSessionLogs(id: string, buildLogs?: boolean): Promise<string> {
     const params = buildLogs ? '?build=true' : '';
-    return this.request<string>('GET', `/sessions/${id}/logs${params}`);
+    return this.request<string>('GET', `/pods/${id}/logs${params}`);
   }
 
   async getReportToken(id: string): Promise<{ token: string | null; reportUrl: string }> {
     return this.request<{ token: string | null; reportUrl: string }>(
       'GET',
-      `/sessions/${id}/report/token`,
+      `/pods/${id}/report/token`,
     );
   }
 
   async startPreview(id: string): Promise<{ previewUrl: string }> {
-    return this.request<{ previewUrl: string }>('POST', `/sessions/${id}/preview`);
+    return this.request<{ previewUrl: string }>('POST', `/pods/${id}/preview`);
   }
 
   async stopPreview(id: string): Promise<void> {
-    await this.request<void>('DELETE', `/sessions/${id}/preview`);
+    await this.request<void>('DELETE', `/pods/${id}/preview`);
   }
 
   // Profiles
@@ -215,25 +215,25 @@ export class AutopodClient {
     await this.request<void>('DELETE', `/scheduled-jobs/${id}`);
   }
 
-  async runScheduledJobCatchup(id: string): Promise<Session> {
-    return this.request<Session>('POST', `/scheduled-jobs/${id}/catchup`);
+  async runScheduledJobCatchup(id: string): Promise<Pod> {
+    return this.request<Pod>('POST', `/scheduled-jobs/${id}/catchup`);
   }
 
   async skipScheduledJobCatchup(id: string): Promise<void> {
     await this.request<void>('DELETE', `/scheduled-jobs/${id}/catchup`);
   }
 
-  async triggerScheduledJob(id: string): Promise<Session> {
-    return this.request<Session>('POST', `/scheduled-jobs/${id}/trigger`);
+  async triggerScheduledJob(id: string): Promise<Pod> {
+    return this.request<Pod>('POST', `/scheduled-jobs/${id}/trigger`);
   }
 
   // Bulk
   async approveAllValidated(): Promise<{ approved: string[] }> {
-    return this.request<{ approved: string[] }>('POST', '/sessions/approve-all');
+    return this.request<{ approved: string[] }>('POST', '/pods/approve-all');
   }
 
   async killAllFailed(): Promise<{ killed: string[] }> {
-    return this.request<{ killed: string[] }>('POST', '/sessions/kill-failed');
+    return this.request<{ killed: string[] }>('POST', '/pods/kill-failed');
   }
 
   async stopDaemon(): Promise<void> {
@@ -328,7 +328,7 @@ export class AutopodClient {
     response: Awaited<ReturnType<typeof fetch>>,
     path: string,
   ): Promise<never> {
-    let errorBody: { message?: string; code?: string; from?: SessionStatus; to?: SessionStatus } =
+    let errorBody: { message?: string; code?: string; from?: PodStatus; to?: PodStatus } =
       {};
     try {
       errorBody = (await response.json()) as typeof errorBody;
@@ -348,15 +348,15 @@ export class AutopodClient {
           const name = path.split('/profiles/')[1]?.split('/')[0] ?? 'unknown';
           throw new ProfileNotFoundError(name);
         }
-        if (path.includes('/sessions/')) {
-          const id = path.split('/sessions/')[1]?.split('/')[0] ?? 'unknown';
-          throw new SessionNotFoundError(id);
+        if (path.includes('/pods/')) {
+          const id = path.split('/pods/')[1]?.split('/')[0] ?? 'unknown';
+          throw new PodNotFoundError(id);
         }
         throw new AutopodError(message, 'NOT_FOUND', 404);
       }
       case 409: {
         if (errorBody.from && errorBody.to) {
-          const id = path.split('/sessions/')[1]?.split('/')[0] ?? 'unknown';
+          const id = path.split('/pods/')[1]?.split('/')[0] ?? 'unknown';
           throw new InvalidStateTransitionError(id, errorBody.from, errorBody.to);
         }
         throw new AutopodError(message, 'CONFLICT', 409);

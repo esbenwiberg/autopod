@@ -1,4 +1,4 @@
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export interface ValidateInBrowserInput {
   url: string;
@@ -29,9 +29,9 @@ export function isLocalhostUrl(url: string): boolean {
 }
 
 export async function validateInBrowser(
-  sessionId: string,
+  podId: string,
   input: ValidateInBrowserInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
 ): Promise<string> {
   if (!isLocalhostUrl(input.url)) {
     throw new Error(
@@ -48,36 +48,36 @@ export async function validateInBrowser(
   // Try host-side execution first — this avoids network isolation issues since
   // the browser runs on the daemon host where external resources (CDN, fonts,
   // client-side APIs) are reachable.
-  const hostResult = await tryHostExecution(sessionId, input, bridge, timeout);
+  const hostResult = await tryHostExecution(podId, input, bridge, timeout);
   if (hostResult) return hostResult;
 
   // Fall back to in-container execution
-  return runInContainer(sessionId, input, bridge, timeout);
+  return runInContainer(podId, input, bridge, timeout);
 }
 
 // ── Host-side execution ────────────────────────────────────────────────────
 
 async function tryHostExecution(
-  sessionId: string,
+  podId: string,
   input: ValidateInBrowserInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
   timeout: number,
 ): Promise<string | null> {
-  const previewUrl = bridge.getPreviewUrl(sessionId);
-  const hostScreenshotDir = bridge.getHostScreenshotDir(sessionId);
+  const previewUrl = bridge.getPreviewUrl(podId);
+  const hostScreenshotDir = bridge.getHostScreenshotDir(podId);
   if (!previewUrl || !hostScreenshotDir) return null;
 
   // Rewrite container-local URL to host-accessible URL
   const hostUrl = rewriteUrlToHost(input.url, previewUrl);
 
   const script = await generateBrowserScript(
-    sessionId,
+    podId,
     { ...input, url: hostUrl },
     bridge,
     hostScreenshotDir,
   );
 
-  const execResult = await bridge.runBrowserOnHost(sessionId, script, timeout);
+  const execResult = await bridge.runBrowserOnHost(podId, script, timeout);
   if (!execResult) return null;
 
   // If the script crashed before writing result markers (e.g. ERR_CONNECTION_REFUSED on the
@@ -110,19 +110,19 @@ async function tryHostExecution(
 // ── In-container execution (fallback) ──────────────────────────────────────
 
 async function runInContainer(
-  sessionId: string,
+  podId: string,
   input: ValidateInBrowserInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
   timeout: number,
 ): Promise<string> {
-  const script = await generateBrowserScript(sessionId, input, bridge, CONTAINER_SCREENSHOT_DIR);
+  const script = await generateBrowserScript(podId, input, bridge, CONTAINER_SCREENSHOT_DIR);
 
-  await bridge.writeFileInContainer(sessionId, CONTAINER_SCRIPT_PATH, script);
-  await bridge.execInContainer(sessionId, ['mkdir', '-p', CONTAINER_SCREENSHOT_DIR], {
+  await bridge.writeFileInContainer(podId, CONTAINER_SCRIPT_PATH, script);
+  await bridge.execInContainer(podId, ['mkdir', '-p', CONTAINER_SCREENSHOT_DIR], {
     timeout: 5_000,
   });
 
-  const execResult = await bridge.execInContainer(sessionId, ['node', CONTAINER_SCRIPT_PATH], {
+  const execResult = await bridge.execInContainer(podId, ['node', CONTAINER_SCRIPT_PATH], {
     cwd: '/workspace',
     timeout,
   });
@@ -133,7 +133,7 @@ async function runInContainer(
   for (let i = 0; i < results.length; i++) {
     try {
       const b64 = await bridge.execInContainer(
-        sessionId,
+        podId,
         ['sh', '-c', `base64 -w0 ${CONTAINER_SCREENSHOT_DIR}/check-${i}.png 2>/dev/null`],
         { timeout: 10_000 },
       );
@@ -154,9 +154,9 @@ async function runInContainer(
 // ── Script generation ──────────────────────────────────────────────────────
 
 async function generateBrowserScript(
-  sessionId: string,
+  podId: string,
   input: ValidateInBrowserInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
   screenshotDir: string,
 ): Promise<string> {
   const checkList = input.checks.map((check, i) => `Check ${i + 1}: ${check}`).join('\n');
@@ -185,7 +185,7 @@ Requirements:
 
 Respond ONLY with the script code. No markdown fences, no explanation.`;
 
-  const rawScript = await bridge.callReviewerModel(sessionId, prompt);
+  const rawScript = await bridge.callReviewerModel(podId, prompt);
   return stripMarkdownFences(rawScript);
 }
 

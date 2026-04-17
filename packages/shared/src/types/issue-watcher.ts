@@ -8,7 +8,7 @@ export interface WatchedIssue {
   issueUrl: string;
   issueTitle: string;
   status: WatchedIssueStatus;
-  sessionId: string | null;
+  podId: string | null;
   triggerLabel: string;
   createdAt: string;
   updatedAt: string;

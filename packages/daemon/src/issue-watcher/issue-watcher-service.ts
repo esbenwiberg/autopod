@@ -1,8 +1,8 @@
-import type { CreateSessionRequest, Profile, Session, SystemEvent } from '@autopod/shared';
+import type { CreatePodRequest, Profile, Pod, SystemEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ProfileStore } from '../profiles/profile-store.js';
-import type { EventBus } from '../sessions/event-bus.js';
-import type { SessionManager } from '../sessions/session-manager.js';
+import type { EventBus } from '../pods/event-bus.js';
+import type { PodManager } from '../pods/pod-manager.js';
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
 import { createIssueClient } from './issue-client.js';
 import type { IssueWatcherRepository } from './issue-watcher-repository.js';
@@ -17,7 +17,7 @@ export interface IssueWatcherService {
 
 export interface IssueWatcherServiceDependencies {
   profileStore: ProfileStore;
-  sessionManager: SessionManager;
+  podManager: PodManager;
   eventBus: EventBus;
   issueWatcherRepo: IssueWatcherRepository;
   logger: Logger;
@@ -31,7 +31,7 @@ export function createIssueWatcherService(
 ): IssueWatcherService {
   const {
     profileStore,
-    sessionManager,
+    podManager,
     eventBus,
     issueWatcherRepo,
     logger: parentLogger,
@@ -125,9 +125,9 @@ export function createIssueWatcherService(
       return;
     }
 
-    // Build session request
+    // Build pod request
     const task = `${candidate.title}\n\n${candidate.body}`;
-    const request: CreateSessionRequest = {
+    const request: CreatePodRequest = {
       profileName: target.profileName,
       task,
       branchPrefix: `issue-${candidate.id}/`,
@@ -135,18 +135,18 @@ export function createIssueWatcherService(
       outputMode: target.outputMode,
     };
 
-    let session: Session;
+    let pod: Pod;
     try {
-      session = sessionManager.createSession(request, ISSUE_WATCHER_USER_ID);
+      pod = podManager.createSession(request, ISSUE_WATCHER_USER_ID);
     } catch (err) {
       logger.error(
         { err, issueId: candidate.id, profile: target.profileName },
-        'Failed to create session from issue',
+        'Failed to create pod from issue',
       );
       try {
         await client.addComment(
           candidate.id,
-          `Failed to create autopod session: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to create autopod pod: ${err instanceof Error ? err.message : String(err)}`,
         );
       } catch {
         // best-effort
@@ -162,7 +162,7 @@ export function createIssueWatcherService(
       issueUrl: candidate.url,
       issueTitle: candidate.title,
       status: 'in_progress',
-      sessionId: session.id,
+      podId: pod.id,
       triggerLabel: candidate.triggerLabel,
     });
 
@@ -179,7 +179,7 @@ export function createIssueWatcherService(
     try {
       await client.addComment(
         candidate.id,
-        `autopod session \`${session.id}\` started for this issue.`,
+        `autopod pod \`${pod.id}\` started for this issue.`,
       );
     } catch (err) {
       logger.warn({ err, issueId: candidate.id }, 'Failed to post status comment on issue');
@@ -192,16 +192,16 @@ export function createIssueWatcherService(
       profileName: target.profileName,
       issueUrl: candidate.url,
       issueTitle: candidate.title,
-      sessionId: session.id,
+      podId: pod.id,
     });
 
     logger.info(
       {
         issueId: candidate.id,
-        sessionId: session.id,
+        podId: pod.id,
         profile: target.profileName,
       },
-      'Issue picked up and session created',
+      'Issue picked up and pod created',
     );
   }
 
@@ -272,14 +272,14 @@ export function createIssueWatcherService(
   }
 
   function handleSessionEvent(event: SystemEvent): void {
-    if (event.type !== 'session.status_changed') return;
+    if (event.type !== 'pod.status_changed') return;
 
-    const { sessionId, newStatus } = event;
+    const { podId, newStatus } = event;
     if (newStatus !== 'complete' && newStatus !== 'failed' && newStatus !== 'killed') {
       return;
     }
 
-    const tracked = issueWatcherRepo.findBySessionId(sessionId);
+    const tracked = issueWatcherRepo.findBySessionId(podId);
     if (!tracked) return;
 
     // Fire-and-forget label + comment updates
@@ -294,7 +294,7 @@ export function createIssueWatcherService(
           await client.addLabel(tracked.issueId, `${prefix}:done`);
           await client.addComment(
             tracked.issueId,
-            `autopod session \`${sessionId}\` completed successfully.`,
+            `autopod pod \`${podId}\` completed successfully.`,
           );
           issueWatcherRepo.updateStatus(tracked.id, 'done');
         } else {
@@ -302,7 +302,7 @@ export function createIssueWatcherService(
           await client.addLabel(tracked.issueId, `${prefix}:failed`);
           await client.addComment(
             tracked.issueId,
-            `autopod session \`${sessionId}\` ${newStatus}.`,
+            `autopod pod \`${podId}\` ${newStatus}.`,
           );
           issueWatcherRepo.updateStatus(tracked.id, 'failed');
         }
@@ -312,23 +312,23 @@ export function createIssueWatcherService(
           timestamp: new Date().toISOString(),
           profileName: tracked.profileName,
           issueUrl: tracked.issueUrl,
-          sessionId,
+          podId,
           outcome: newStatus === 'complete' ? 'done' : 'failed',
         });
       } catch (err) {
         logger.error(
-          { err, sessionId, issueId: tracked.issueId },
-          'Failed to update issue on session completion',
+          { err, podId, issueId: tracked.issueId },
+          'Failed to update issue on pod completion',
         );
       }
     })();
   }
 
   function handleEscalationEvent(event: SystemEvent): void {
-    if (event.type !== 'session.escalation_created') return;
+    if (event.type !== 'pod.escalation_created') return;
     if (event.escalation.type !== 'ask_human') return;
 
-    const tracked = issueWatcherRepo.findBySessionId(event.sessionId);
+    const tracked = issueWatcherRepo.findBySessionId(event.podId);
     if (!tracked) return;
 
     void (async () => {
@@ -336,11 +336,11 @@ export function createIssueWatcherService(
         const profile = profileStore.get(tracked.profileName);
         const client = issueClientFactory(profile);
         const payload = event.escalation.payload as { question?: string };
-        const question = payload.question ?? 'Session needs human input.';
-        await client.addComment(tracked.issueId, `**Session needs input:**\n\n${question}`);
+        const question = payload.question ?? 'Pod needs human input.';
+        await client.addComment(tracked.issueId, `**Pod needs input:**\n\n${question}`);
       } catch (err) {
         logger.error(
-          { err, sessionId: event.sessionId },
+          { err, podId: event.podId },
           'Failed to post escalation comment on issue',
         );
       }
@@ -349,7 +349,7 @@ export function createIssueWatcherService(
 
   return {
     start() {
-      // Subscribe to session events for completion tracking
+      // Subscribe to pod events for completion tracking
       unsubscribe = eventBus.subscribe((event) => {
         handleSessionEvent(event);
         handleEscalationEvent(event);

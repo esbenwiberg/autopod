@@ -2,12 +2,12 @@ import SwiftUI
 
 /// History analysis dashboard — failure patterns, rework stats, and workspace launcher.
 public struct HistoryView: View {
-    public let sessions: [Session]
-    public let actions: SessionActions
+    public let pods: [Pod]
+    public let actions: PodActions
     public let profileNames: [String]
 
-    public init(sessions: [Session], actions: SessionActions, profileNames: [String]) {
-        self.sessions = sessions
+    public init(pods: [Pod], actions: PodActions, profileNames: [String]) {
+        self.pods = pods
         self.actions = actions
         self.profileNames = profileNames
     }
@@ -18,9 +18,9 @@ public struct HistoryView: View {
 
     // MARK: - Computed stats
 
-    private var workerSessions: [Session] { sessions.filter { !$0.isWorkspace } }
+    private var workerSessions: [Pod] { pods.filter { !$0.isWorkspace } }
 
-    private var failedSessions: [Session] {
+    private var failedSessions: [Pod] {
         workerSessions.filter { [.failed, .killed, .reviewRequired].contains($0.status) }
     }
 
@@ -55,7 +55,7 @@ public struct HistoryView: View {
         }
     }
 
-    private var recentFailures: [Session] {
+    private var recentFailures: [Pod] {
         Array(
             failedSessions
                 .sorted { $0.startedAt > $1.startedAt }
@@ -92,7 +92,7 @@ public struct HistoryView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("History")
                     .font(.title2.weight(.semibold))
-                Text("Investigate patterns across past sessions")
+                Text("Investigate patterns across past pods")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -111,7 +111,7 @@ public struct HistoryView: View {
         return HStack(spacing: 0) {
             heroStat(
                 value: "\(totalWorker)",
-                label: "Total Sessions",
+                label: "Total Pods",
                 icon: "square.stack.3d.up"
             );
             Spacer();
@@ -184,7 +184,7 @@ public struct HistoryView: View {
             }
 
             HStack(spacing: 16) {
-                statPill(label: "Sessions", value: "\(stat.totalSessions)")
+                statPill(label: "Pods", value: "\(stat.totalSessions)")
                 statPill(label: "Failed", value: "\(stat.failedCount)", color: stat.failedCount > 0 ? .red : .secondary)
                 statPill(label: "Avg Cost", value: String(format: "$%.2f", stat.avgCost))
                 statPill(label: "Avg Attempts", value: String(format: "%.1f", stat.avgValidationAttempts))
@@ -229,27 +229,27 @@ public struct HistoryView: View {
             Text("Recent Failures")
                 .font(.subheadline.weight(.semibold))
 
-            ForEach(recentFailures) { session in
+            ForEach(recentFailures) { pod in
                 HStack(spacing: 10) {
                     Circle()
-                        .fill(session.status == .failed ? Color.red : session.status == .reviewRequired ? Color.orange : Color.gray)
+                        .fill(pod.status == .failed ? Color.red : pod.status == .reviewRequired ? Color.orange : Color.gray)
                         .frame(width: 7, height: 7)
 
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            Text(session.id)
+                            Text(pod.id)
                                 .font(.system(.caption, design: .monospaced).weight(.medium))
-                            Text(session.profileName)
+                            Text(pod.profileName)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        if let error = session.errorSummary {
+                        if let error = pod.errorSummary {
                             Text(error)
                                 .font(.caption2)
                                 .foregroundStyle(.red.opacity(0.8))
                                 .lineLimit(2)
                         } else {
-                            Text(session.task)
+                            Text(pod.task)
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
@@ -258,13 +258,13 @@ public struct HistoryView: View {
 
                     Spacer()
 
-                    if let attempts = session.attempts {
+                    if let attempts = pod.attempts {
                         Text("\(attempts.current)/\(attempts.max)")
                             .font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(String(format: "$%.2f", session.costUsd))
+                    Text(String(format: "$%.2f", pod.costUsd))
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -283,7 +283,7 @@ public struct HistoryView: View {
                 .font(.subheadline.weight(.semibold))
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("Launch an interactive workspace pod pre-loaded with a SQLite database of your session history. Use Claude Code or sqlite3 to investigate patterns.")
+                Text("Launch an interactive workspace pod pre-loaded with a SQLite database of your pod history. Use Claude Code or sqlite3 to investigate patterns.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -296,7 +296,7 @@ public struct HistoryView: View {
                     }
                     .frame(width: 180)
 
-                    Picker("Sessions", selection: $sessionLimit) {
+                    Picker("Pods", selection: $sessionLimit) {
                         Text("Last 50").tag(50)
                         Text("Last 100").tag(100)
                         Text("Last 200").tag(200)
@@ -348,7 +348,7 @@ private struct ProfileHistoryStat: Identifiable {
 
 #Preview("History") {
     HistoryView(
-        sessions: MockData.all,
+        pods: MockData.all,
         actions: .preview,
         profileNames: ["my-app", "webapp", "backend"]
     )

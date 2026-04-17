@@ -518,7 +518,7 @@ describe('enforceRequirementsStatus', () => {
 
 describe('buildReviewPrompt', () => {
   const baseConfig = {
-    sessionId: 'sess-1',
+    podId: 'sess-1',
     containerId: 'c1',
     previewUrl: 'http://localhost:3000',
     buildCommand: 'npm run build',

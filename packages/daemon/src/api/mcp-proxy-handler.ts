@@ -18,8 +18,8 @@ function isPrivateUrl(rawUrl: string): boolean {
 }
 
 export interface McpProxyConfig {
-  /** Map of sessionId → injected MCP servers for that session */
-  getServersForSession: (sessionId: string) => InjectedMcpServer[];
+  /** Map of podId → injected MCP servers for that pod */
+  getServersForPod: (podId: string) => InjectedMcpServer[];
   /** Content processing config (PII + quarantine) */
   contentProcessing?: ProcessContentConfig;
   logger: Logger;
@@ -28,7 +28,7 @@ export interface McpProxyConfig {
 /**
  * MCP proxy handler: routes agent MCP calls through the daemon.
  *
- * The agent calls http://daemon:3100/mcp-proxy/{serverName}/{sessionId}
+ * The agent calls http://daemon:3100/mcp-proxy/{serverName}/{podId}
  * instead of the real MCP server URL. The daemon:
  * 1. Looks up the real URL + auth headers from the injected server config
  * 2. Forwards the request to the real MCP server
@@ -38,33 +38,33 @@ export interface McpProxyConfig {
  * The agent never sees the real MCP server URL or auth headers.
  */
 export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): void {
-  const { getServersForSession, contentProcessing, logger } = config;
+  const { getServersForPod, contentProcessing, logger } = config;
   const log = logger.child({ component: 'mcp-proxy' });
 
   // Proxy all methods (MCP uses POST for JSON-RPC, GET for SSE).
-  // Requires the session-scoped HMAC token so a pod on session A cannot
-  // impersonate session B and abuse session B's injected MCP credentials.
+  // Requires the pod-scoped HMAC token so a pod on pod A cannot
+  // impersonate pod B and abuse pod B's injected MCP credentials.
   app.all(
-    '/mcp-proxy/:serverName/:sessionId',
-    { config: { auth: 'session-token' } },
+    '/mcp-proxy/:serverName/:podId',
+    { config: { auth: 'pod-token' } },
     async (request, reply) => {
-      const { serverName, sessionId } = request.params as { serverName: string; sessionId: string };
+      const { serverName, podId } = request.params as { serverName: string; podId: string };
 
-      // Find the injected server for this session
-      const servers = getServersForSession(sessionId);
+      // Find the injected server for this pod
+      const servers = getServersForPod(podId);
       const server = servers.find((s) => s.name === serverName);
 
       if (!server) {
-        log.warn({ sessionId, serverName }, 'MCP proxy: server not found');
+        log.warn({ podId, serverName }, 'MCP proxy: server not found');
         return reply
           .status(404)
-          .send({ error: `MCP server '${serverName}' not found for session` });
+          .send({ error: `MCP server '${serverName}' not found for pod` });
       }
 
       // SSRF guard: reject requests targeting private/loopback addresses.
       if (isPrivateUrl(server.url)) {
         log.warn(
-          { sessionId, serverName, url: server.url },
+          { podId, serverName, url: server.url },
           'MCP proxy: blocked SSRF attempt to private address',
         );
         return reply
@@ -72,7 +72,7 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
           .send({ error: `MCP server '${serverName}' URL resolves to a private address` });
       }
 
-      log.debug({ sessionId, serverName, method: request.method }, 'Proxying MCP request');
+      log.debug({ podId, serverName, method: request.method }, 'Proxying MCP request');
 
       try {
         // Forward the request to the real MCP server
@@ -114,7 +114,7 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
             processedText = result.text;
 
             if (result.quarantined) {
-              log.warn({ sessionId, serverName }, 'MCP proxy: response quarantined');
+              log.warn({ podId, serverName }, 'MCP proxy: response quarantined');
             }
           }
 
@@ -129,7 +129,7 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        log.error({ err, sessionId, serverName }, 'MCP proxy: request failed');
+        log.error({ err, podId, serverName }, 'MCP proxy: request failed');
         return reply.status(502).send({ error: `MCP proxy error: ${message}` });
       }
     },
@@ -138,18 +138,18 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
 
 /**
  * Rewrite injected MCP server URLs to point to the daemon proxy.
- * Called during session provisioning.
+ * Called during pod provisioning.
  */
 export function rewriteMcpUrls(
   servers: InjectedMcpServer[],
-  sessionId: string,
+  podId: string,
   proxyBaseUrl: string,
 ): InjectedMcpServer[] {
   return servers.map((server) => ({
     ...server,
     // Store original URL internally (the proxy handler uses the original from config)
     // Rewrite the URL the agent sees to point to our proxy
-    url: `${proxyBaseUrl}/mcp-proxy/${encodeURIComponent(server.name)}/${sessionId}`,
+    url: `${proxyBaseUrl}/mcp-proxy/${encodeURIComponent(server.name)}/${podId}`,
     // Strip auth headers — the proxy injects them, agent doesn't need them
     headers: undefined,
   }));

@@ -16,7 +16,7 @@ import { createServer } from './api/server.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { loadOrCreateKey } from './crypto/credentials-cipher.js';
-import { createSessionTokenIssuer } from './crypto/session-tokens.js';
+import { createPodTokenIssuer } from './crypto/pod-tokens.js';
 import { createDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrate.js';
 import type { AuthModule } from './interfaces/index.js';
@@ -45,12 +45,12 @@ import {
   createNudgeRepository,
   createPendingOverrideRepository,
   createProgressEventRepository,
-  createSessionManager,
-  createSessionQueue,
-  createSessionRepository,
+  createPodManager,
+  createPodQueue,
+  createPodRepository,
   createValidationRepository,
-} from './sessions/index.js';
-import { createSessionBridge } from './sessions/session-bridge-impl.js';
+} from './pods/index.js';
+import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
@@ -94,13 +94,13 @@ const actionRegistry = createActionRegistry(logger);
 const secretsKeyPath = path.join(os.homedir(), '.autopod', 'secrets.key');
 const credentialsCipher = loadOrCreateKey(secretsKeyPath);
 
-// Session token issuer (HMAC-based, derived from secrets.key).
-// Declared early so it can be passed to createSessionManager for container authentication.
-const sessionTokenIssuer = createSessionTokenIssuer(secretsKeyPath);
+// Pod token issuer (HMAC-based, derived from secrets.key).
+// Declared early so it can be passed to createPodManager for container authentication.
+const sessionTokenIssuer = createPodTokenIssuer(secretsKeyPath);
 
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
-const sessionRepo = createSessionRepository(db);
+const podRepo = createPodRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
 const nudgeRepo = createNudgeRepository(db);
@@ -179,7 +179,7 @@ const worktreeManager = new LocalWorktreeManager({ logger });
 
 const MOCK_DOCKER = process.env.AUTOPOD_MOCK_DOCKER === 'true';
 
-// Docker is required for real sessions — all agent work runs inside containers.
+// Docker is required for real pods — all agent work runs inside containers.
 // Set AUTOPOD_MOCK_DOCKER=true to skip Docker entirely (API/health-check dev mode).
 const Dockerode = (await import('dockerode')).default;
 type DockerodeInstance = InstanceType<typeof Dockerode>;
@@ -227,14 +227,14 @@ const runtimeRegistry = createRuntimeRegistry([
 const hostBrowserRunner = createHostBrowserRunner(logger);
 const validationEngine = createLocalValidationEngine(containerManager, logger, hostBrowserRunner);
 
-// Session queue + manager (circular dep resolved via closure)
-// biome-ignore lint/style/useConst: assigned after sessionQueue to break circular dependency
-let sessionManager: ReturnType<typeof createSessionManager>;
+// Pod queue + manager (circular dep resolved via closure)
+// biome-ignore lint/style/useConst: assigned after podQueue to break circular dependency
+let podManager: ReturnType<typeof createPodManager>;
 
-const sessionQueue = createSessionQueue(
+const podQueue = createPodQueue(
   MAX_CONCURRENCY,
-  async (sessionId) => {
-    await sessionManager.processSession(sessionId);
+  async (podId) => {
+    await podManager.processPod(podId);
   },
   logger,
 );
@@ -327,11 +327,11 @@ function prManagerFactory(
   return ghPrManager;
 }
 
-// Pending MCP ask_human requests — created before sessionManager so both can share the map
-const pendingRequestsBySession = new Map<string, PendingRequests>();
+// Pending MCP ask_human requests — created before podManager so both can share the map
+const pendingRequestsByPod = new Map<string, PendingRequests>();
 
-sessionManager = createSessionManager({
-  sessionRepo,
+podManager = createPodManager({
+  podRepo,
   escalationRepo,
   nudgeRepo,
   validationRepo,
@@ -347,13 +347,14 @@ sessionManager = createSessionManager({
   networkManager,
   prManagerFactory,
   actionEngine: actionRegistry,
-  enqueueSession: (id) => sessionQueue.enqueue(id),
+  enqueueSession: (id) => podQueue.enqueue(id),
   mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? 'host.docker.internal'}:${PORT}`,
   daemonConfig: {
     mcpServers: JSON.parse(process.env.DAEMON_MCP_SERVERS ?? '[]'),
     claudeMdSections: JSON.parse(process.env.DAEMON_CLAUDE_MD_SECTIONS ?? '[]'),
+    skills: JSON.parse(process.env.DAEMON_SKILLS ?? '[]'),
   },
-  pendingRequestsBySession,
+  pendingRequestsByPod,
   sessionTokenIssuer,
   memoryRepo,
   pendingOverrideRepo,
@@ -380,16 +381,16 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
 const scheduledJobRepo = createScheduledJobRepository(db);
 const scheduledJobManager = createScheduledJobManager({
   scheduledJobRepo,
-  sessionManager,
+  podManager,
   eventBus,
   logger,
 });
 const scheduledJobScheduler = createScheduledJobScheduler(scheduledJobManager, logger);
 
-// Session bridge for MCP escalation
-const sessionBridge = createSessionBridge({
-  sessionManager,
-  sessionRepo,
+// Pod bridge for MCP escalation
+const podBridge = createSessionBridge({
+  podManager,
+  podRepo,
   eventBus,
   progressEventRepo,
   escalationRepo,
@@ -398,7 +399,7 @@ const sessionBridge = createSessionBridge({
   memoryRepo,
   containerManagerFactory,
   makeActionEngine,
-  pendingRequestsBySession,
+  pendingRequestsByPod,
   logger,
   hostBrowserRunner,
 });
@@ -409,10 +410,10 @@ const notificationConfig: NotificationConfig = TEAMS_WEBHOOK_URL
       teams: {
         webhookUrl: TEAMS_WEBHOOK_URL,
         enabledEvents: [
-          'session_validated',
-          'session_failed',
-          'session_needs_input',
-          'session_error',
+          'pod_validated',
+          'pod_failed',
+          'pod_needs_input',
+          'pod_error',
         ],
       },
     }
@@ -423,7 +424,7 @@ const notificationService = createNotificationService({
   config: notificationConfig,
   teamsAdapter: createTeamsAdapter(TEAMS_WEBHOOK_URL ?? '', logger),
   rateLimiter: createRateLimiter(),
-  sessionLookup: sessionManager,
+  sessionLookup: podManager,
   logger,
 });
 notificationService.start();
@@ -439,7 +440,7 @@ const ISSUE_WATCHER_POLL_INTERVAL = Number.parseInt(
 );
 const issueWatcherService = createIssueWatcherService({
   profileStore,
-  sessionManager,
+  podManager,
   eventBus,
   issueWatcherRepo,
   logger,
@@ -450,16 +451,16 @@ issueWatcherService.start();
 // Server
 const app = await createServer({
   authModule,
-  sessionManager,
+  podManager,
   profileStore,
   eventBus,
   eventRepo,
-  sessionBridge,
-  pendingRequestsBySession,
+  podBridge,
+  pendingRequestsByPod,
   containerManagerFactory,
   docker,
   db,
-  sessionQueue,
+  podQueue,
   maxConcurrency: MAX_CONCURRENCY,
   imageBuilder,
   actionRegistry,
@@ -485,44 +486,44 @@ try {
 // Start scheduled job scheduler AFTER server is listening
 scheduledJobScheduler.start();
 
-// Reconcile ACI sessions after startup (non-blocking — errors are logged, not fatal)
+// Reconcile ACI pods after startup (non-blocking — errors are logged, not fatal)
 if (aciContainerManager) {
-  const { reconcileAciSessions } = await import('./sessions/reconciler.js');
+  const { reconcileAciSessions } = await import('./pods/reconciler.js');
   reconcileAciSessions({
-    sessionRepo,
+    podRepo,
     eventBus,
     aciContainerManager,
-    onReconnected: async (sessionId, _containerId) => {
-      // Re-trigger completion handling for reconnected sessions
-      await sessionManager.handleCompletion(sessionId);
+    onReconnected: async (podId, _containerId) => {
+      // Re-trigger completion handling for reconnected pods
+      await podManager.handleCompletion(podId);
     },
     logger,
   }).catch((err) => {
-    logger.error({ err }, 'ACI session reconciliation failed');
+    logger.error({ err }, 'ACI pod reconciliation failed');
   });
 }
 
-// Reconcile local sessions (non-blocking — errors logged, not fatal)
+// Reconcile local pods (non-blocking — errors logged, not fatal)
 {
-  const { reconcileLocalSessions } = await import('./sessions/local-reconciler.js');
+  const { reconcileLocalSessions } = await import('./pods/local-reconciler.js');
   reconcileLocalSessions({
-    sessionRepo,
+    podRepo,
     eventBus,
     containerManager,
-    enqueueSession: (id) => sessionQueue.enqueue(id),
+    enqueueSession: (id) => podQueue.enqueue(id),
     validationRepo,
     logger,
   })
     .then((result) => {
       if (result.recovered.length > 0) {
-        logger.info({ recovered: result.recovered }, 'Local sessions recovered');
+        logger.info({ recovered: result.recovered }, 'Local pods recovered');
       }
       if (result.killed.length > 0) {
-        logger.warn({ killed: result.killed }, 'Unrecoverable local sessions killed');
+        logger.warn({ killed: result.killed }, 'Unrecoverable local pods killed');
       }
     })
     .catch((err) => {
-      logger.error({ err }, 'Local session reconciliation failed');
+      logger.error({ err }, 'Local pod reconciliation failed');
     });
 }
 
@@ -540,8 +541,8 @@ async function shutdown(signal: string) {
   // Stop scheduled job scheduler
   scheduledJobScheduler.stop();
 
-  // Drain session queue
-  await sessionQueue.drain();
+  // Drain pod queue
+  await podQueue.drain();
 
   // Close database
   db.close();

@@ -4,7 +4,7 @@ import {
   mergeClaudeMdSections,
   mergeMcpServers,
   mergeSkills,
-} from '../sessions/injection-merger.js';
+} from '../pods/injection-merger.js';
 
 const MAX_INHERITANCE_DEPTH = 5;
 

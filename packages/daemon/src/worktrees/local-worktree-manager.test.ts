@@ -711,7 +711,7 @@ describe('LocalWorktreeManager', () => {
 
       const result = await manager.create({
         repoUrl: 'https://github.com/org/repo.git',
-        branch: 'autopod/forked-session',
+        branch: 'autopod/forked-pod',
         baseBranch: 'autopod/parent-branch',
       });
 
@@ -720,7 +720,7 @@ describe('LocalWorktreeManager', () => {
       expect(worktreeAddCmd).toBeDefined();
       // Should use the local ref, not refs/remotes/origin/...
       expect(worktreeAddCmd).toContain('refs/heads/autopod/parent-branch');
-      expect(result.worktreePath).toContain('autopod_forked-session');
+      expect(result.worktreePath).toContain('autopod_forked-pod');
     });
 
     it('throws when baseBranch not found on remote or locally', async () => {
@@ -744,7 +744,7 @@ describe('LocalWorktreeManager', () => {
       await expect(
         manager.create({
           repoUrl: 'https://github.com/org/repo.git',
-          branch: 'autopod/new-session',
+          branch: 'autopod/new-pod',
           baseBranch: 'gone-branch',
         }),
       ).rejects.toThrow('baseBranch "gone-branch" not found on remote or locally');

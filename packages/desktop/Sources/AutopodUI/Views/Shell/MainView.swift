@@ -3,13 +3,13 @@ import SwiftUI
 
 /// Root view — three-column layout: Sidebar | Fleet/List | Detail
 public struct MainView: View {
-    public var sessions: [Session]
+    public var pods: [Pod]
     public var scheduledJobs: [ScheduledJob]
     public var isConnected: Bool
     public var connectionLabel: String
     public var connectionState: String
     public var isLoading: Bool
-    public var actions: SessionActions
+    public var actions: PodActions
     public var profileNames: [String]
     public var selectedSessionEvents: [AgentEvent]
     public var isLoadingLogs: Bool
@@ -50,14 +50,14 @@ public struct MainView: View {
     @Binding public var selectedSessionId: String?
 
     public init(
-        sessions: [Session] = MockData.all,
+        pods: [Pod] = MockData.all,
         scheduledJobs: [ScheduledJob] = [],
         selectedSessionId: Binding<String?> = .constant(nil),
         isConnected: Bool = true,
         connectionLabel: String = "localhost:3000",
         connectionState: String = "Connected",
         isLoading: Bool = false,
-        actions: SessionActions = .preview,
+        actions: PodActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
         selectedSessionEvents: [AgentEvent] = [],
         isLoadingLogs: Bool = false,
@@ -91,7 +91,7 @@ public struct MainView: View {
         onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
         onLoadMemories: (() async -> Void)? = nil
     ) {
-        self.sessions = sessions
+        self.pods = pods
         self.scheduledJobs = scheduledJobs
         self._selectedSessionId = selectedSessionId
         self.isConnected = isConnected
@@ -142,42 +142,42 @@ public struct MainView: View {
     @State private var selectedFeature: FeatureCategory?
     @State private var requestedDetailTab: DetailTab?
 
-    private var selectedSession: Session? {
-        sessions.first { $0.id == selectedSessionId }
+    private var selectedSession: Pod? {
+        pods.first { $0.id == selectedSessionId }
     }
 
     /// Actions with `attachTerminal` wired to navigate + connect.
-    private var wiredActions: SessionActions {
+    private var wiredActions: PodActions {
         var a = actions
-        a.attachTerminal = { [onTerminalConnect] sessionId in
-            let wasAlreadySelected = selectedSessionId == sessionId
-            selectedSessionId = sessionId
+        a.attachTerminal = { [onTerminalConnect] podId in
+            let wasAlreadySelected = selectedSessionId == podId
+            selectedSessionId = podId
             if wasAlreadySelected {
                 requestedDetailTab = .terminal
             } else {
                 // DetailPanelView is freshly created — delay so onChange can observe the change.
                 DispatchQueue.main.async { requestedDetailTab = .terminal }
             }
-            onTerminalConnect?(sessionId)
+            onTerminalConnect?(podId)
         }
         return a
     }
 
-    private var filteredSessions: [Session] {
-        let filtered: [Session] = switch sidebarSelection {
-        case .attention:      sessions.filter { $0.status.needsAttention }
-        case .active:         sessions.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
-        case .running:        sessions.filter { $0.status.isActive && !$0.isWorkspace }
-        case .workspaces:     sessions.filter { $0.isWorkspace }
-        case .completed:      sessions.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
-        case .all:            sessions
+    private var filteredSessions: [Pod] {
+        let filtered: [Pod] = switch sidebarSelection {
+        case .attention:      pods.filter { $0.status.needsAttention }
+        case .active:         pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
+        case .running:        pods.filter { $0.status.isActive && !$0.isWorkspace }
+        case .workspaces:     pods.filter { $0.isWorkspace }
+        case .completed:      pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
+        case .all:            pods
         case .analytics:        []
         case .history:          []
         case .memory:           []
         case .scheduledJobs:    []
         case .featureOverview:  []
         case .salesPitch:       []
-        case .profile(let p):   sessions.filter { $0.profileName == p }
+        case .profile(let p):   pods.filter { $0.profileName == p }
         }
         return filtered.sorted { a, b in
             switch sortOrder {
@@ -190,7 +190,7 @@ public struct MainView: View {
     public var body: some View {
         NavigationSplitView {
             SidebarView(
-                sessions: sessions,
+                pods: pods,
                 selection: $sidebarSelection,
                 showCreateSheet: $showCreateSheet,
                 isConnected: isConnected,
@@ -202,10 +202,10 @@ public struct MainView: View {
             )
         } content: {
             if sidebarSelection == .analytics {
-                AnalyticsView(sessions: sessions)
+                AnalyticsView(pods: pods)
                     .frame(minWidth: 600)
             } else if sidebarSelection == .history {
-                HistoryView(sessions: sessions, actions: wiredActions, profileNames: profileNames)
+                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames)
                     .frame(minWidth: 600)
             } else if sidebarSelection == .memory {
                 MemoryManagementView(
@@ -218,8 +218,8 @@ public struct MainView: View {
                     onCreateMemory: onCreateMemory,
                     scopeNameLookup: { scope, id in
                         switch scope {
-                        case .session:
-                            guard let s = sessions.first(where: { $0.id == id }) else { return id }
+                        case .pod:
+                            guard let s = pods.first(where: { $0.id == id }) else { return id }
                             let firstLine = s.task
                                 .split(whereSeparator: \.isNewline)
                                 .first
@@ -294,19 +294,19 @@ public struct MainView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else if let session = selectedSession {
+            } else if let pod = selectedSession {
                 DetailPanelView(
-                    session: session,
+                    pod: pod,
                     events: selectedSessionEvents,
                     actions: wiredActions,
-                    diffString: sessionDiffs[session.id],
+                    diffString: sessionDiffs[pod.id],
                     terminalState: terminalState,
                     terminalDataPipe: terminalDataPipe,
                     onTerminalSendData: onTerminalSendData,
                     onTerminalResize: onTerminalResize,
-                    onTerminalConnect: { onTerminalConnect?(session.id) },
+                    onTerminalConnect: { onTerminalConnect?(pod.id) },
                     onTerminalDisconnect: onTerminalDisconnect,
-                    onRefreshDiff: { onRefreshDiff?(session.id) },
+                    onRefreshDiff: { onRefreshDiff?(pod.id) },
                     loadFiles: loadFiles,
                     loadContent: loadContent,
                     isLoadingLogs: isLoadingLogs,
@@ -338,7 +338,7 @@ public struct MainView: View {
                 VStack {
                     CommandPalette(
                         isPresented: $showCommandPalette,
-                        sessions: sessions,
+                        pods: pods,
                         actions: actions,
                         onSelectSession: { id in
                             selectedSessionId = id
@@ -401,23 +401,23 @@ public struct MainView: View {
 
     @ViewBuilder
     private var contentArea: some View {
-        if isLoading && sessions.isEmpty {
+        if isLoading && pods.isEmpty {
             VStack(spacing: 10) {
                 ProgressView()
-                Text("Loading sessions…")
+                Text("Loading pods…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if sessions.isEmpty {
+        } else if pods.isEmpty {
             VStack(spacing: 10) {
                 Image(systemName: "tray")
                     .font(.system(size: 32))
                     .foregroundStyle(.tertiary)
-                Text("No sessions")
+                Text("No pods")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text("Create a session to get started")
+                Text("Create a pod to get started")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -439,9 +439,9 @@ public struct MainView: View {
                 alignment: .leading,
                 spacing: 10
             ) {
-                ForEach(filteredSessions) { session in
-                    SessionCardFinal(session: session, actions: wiredActions, density: cardDensity, isSelected: selectedSessionId == session.id)
-                        .onTapGesture { selectedSessionId = session.id }
+                ForEach(filteredSessions) { pod in
+                    SessionCardFinal(pod: pod, actions: wiredActions, density: cardDensity, isSelected: selectedSessionId == pod.id)
+                        .onTapGesture { selectedSessionId = pod.id }
                 }
             }
             .padding(16)
@@ -450,9 +450,9 @@ public struct MainView: View {
     }
 
     private var sessionList: some View {
-        List(filteredSessions, selection: $selectedSessionId) { session in
-            SessionListRow(session: session)
-                .tag(session.id)
+        List(filteredSessions, selection: $selectedSessionId) { pod in
+            SessionListRow(pod: pod)
+                .tag(pod.id)
         }
         .listStyle(.inset)
     }
@@ -464,7 +464,7 @@ public struct MainView: View {
             Image(systemName: "rectangle.on.rectangle.slash")
                 .font(.system(size: 36))
                 .foregroundStyle(.tertiary)
-            Text("Select a session")
+            Text("Select a pod")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -486,24 +486,24 @@ enum SortOrder: String, CaseIterable {
     case lastActive = "Last Active"
 }
 
-// MARK: - Session list row (compact list view)
+// MARK: - Pod list row (compact list view)
 
 struct SessionListRow: View {
-    let session: Session
+    let pod: Pod
 
     var body: some View {
         HStack(spacing: 10) {
-            StatusDot(status: session.status)
+            StatusDot(status: pod.status)
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.id)
+                Text(pod.id)
                     .font(.system(.callout, design: .monospaced).weight(.medium))
                     .lineLimit(1)
-                Text(session.profileName)
+                Text(pod.profileName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if let diff = session.diffStats {
+            if let diff = pod.diffStats {
                 HStack(spacing: 3) {
                     Text("+\(diff.added)")
                         .foregroundStyle(.green)
@@ -512,7 +512,7 @@ struct SessionListRow: View {
                 }
                 .font(.system(.caption2, design: .monospaced))
             }
-            Text(session.duration)
+            Text(pod.duration)
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.tertiary)
         }

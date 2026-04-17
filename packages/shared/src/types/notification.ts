@@ -2,21 +2,21 @@ import type { EscalationRequest } from './escalation.js';
 import type { ValidationResult } from './validation.js';
 
 export type NotificationType =
-  | 'session_validated'
-  | 'session_failed'
-  | 'session_needs_input'
-  | 'session_error';
+  | 'pod_validated'
+  | 'pod_failed'
+  | 'pod_needs_input'
+  | 'pod_error';
 
 export interface NotificationPayload {
   type: NotificationType;
-  sessionId: string;
+  podId: string;
   profileName: string;
   task: string;
   timestamp: string;
 }
 
-export interface SessionValidatedNotification extends NotificationPayload {
-  type: 'session_validated';
+export interface PodValidatedNotification extends NotificationPayload {
+  type: 'pod_validated';
   previewUrl: string | null;
   prUrl: string | null;
   /** Validation screenshots as base64 PNGs (page path → base64 data) */
@@ -27,20 +27,20 @@ export interface SessionValidatedNotification extends NotificationPayload {
   duration: number;
 }
 
-export interface SessionFailedNotification extends NotificationPayload {
-  type: 'session_failed';
+export interface PodFailedNotification extends NotificationPayload {
+  type: 'pod_failed';
   reason: string;
   validationResult: ValidationResult | null;
   screenshotUrl: string | null;
 }
 
-export interface SessionNeedsInputNotification extends NotificationPayload {
-  type: 'session_needs_input';
+export interface PodNeedsInputNotification extends NotificationPayload {
+  type: 'pod_needs_input';
   escalation: EscalationRequest;
 }
 
-export interface SessionErrorNotification extends NotificationPayload {
-  type: 'session_error';
+export interface PodErrorNotification extends NotificationPayload {
+  type: 'pod_error';
   error: string;
   fatal: boolean;
 }

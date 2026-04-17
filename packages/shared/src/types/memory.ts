@@ -1,9 +1,9 @@
-export type MemoryScope = 'global' | 'profile' | 'session';
+export type MemoryScope = 'global' | 'profile' | 'pod';
 
 export interface MemoryEntry {
   id: string;
   scope: MemoryScope;
-  /** null = global, profileName = profile, sessionId = session */
+  /** null = global, profileName = profile, podId = pod */
   scopeId: string | null;
   /** Path-like key, e.g. "/conventions/commits.md" */
   path: string;
@@ -13,7 +13,7 @@ export interface MemoryEntry {
   rationale: string | null;
   version: number;
   approved: boolean;
-  createdBySessionId: string | null;
+  createdByPodId: string | null;
   createdAt: string;
   updatedAt: string;
 }

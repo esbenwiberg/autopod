@@ -2,7 +2,7 @@ import type { Readable } from 'node:stream';
 
 export interface ContainerSpawnConfig {
   image: string;
-  sessionId: string;
+  podId: string;
   env: Record<string, string>;
   ports?: { container: number; host: number }[];
   volumes?: { host: string; container: string }[];
@@ -43,7 +43,7 @@ export interface ContainerManager {
   stop(containerId: string): Promise<void>;
   /** Start a previously stopped container. Idempotent — swallows "already running". */
   start(containerId: string): Promise<void>;
-  writeFile(containerId: string, path: string, content: string): Promise<void>;
+  writeFile(containerId: string, path: string, content: string | Buffer): Promise<void>;
   readFile(containerId: string, path: string): Promise<string>;
   /**
    * Extract a directory from a container (works on stopped containers) to a host path.

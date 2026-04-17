@@ -1,4 +1,4 @@
-import type { SessionBridge } from '@autopod/escalation-mcp';
+import type { PodBridge } from '@autopod/escalation-mcp';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import websocket from '@fastify/websocket';
 import type Database from 'better-sqlite3';
@@ -8,7 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { build as buildPrettyStream } from 'pino-pretty';
 import type { ActionRegistry } from '../actions/action-registry.js';
-import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
+import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
 import type { IssueWatcherRepository } from '../issue-watcher/issue-watcher-repository.js';
@@ -20,9 +20,9 @@ import type {
   EventRepository,
   MemoryRepository,
   PendingOverrideRepository,
-  SessionManager,
-  SessionQueue,
-} from '../sessions/index.js';
+  PodManager,
+  PodQueue,
+} from '../pods/index.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
 import { mcpProxyHandler } from './mcp-proxy-handler.js';
@@ -39,27 +39,27 @@ import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryRoutes } from './routes/memory.js';
 import { profileRoutes } from './routes/profiles.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
-import { sessionRoutes } from './routes/sessions.js';
+import { podRoutes } from './routes/pods.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { websocketHandler } from './websocket.js';
 import './types.js';
 
 export interface ServerDependencies {
   authModule: AuthModule;
-  sessionManager: SessionManager;
+  podManager: PodManager;
   profileStore: ProfileStore;
   eventBus: EventBus;
   eventRepo: EventRepository;
-  sessionBridge: SessionBridge;
-  pendingRequestsBySession: Map<string, PendingRequests>;
+  podBridge: PodBridge;
+  pendingRequestsByPod: Map<string, PendingRequests>;
   containerManagerFactory?: ContainerManagerFactory;
   docker?: Dockerode;
   db?: Database.Database;
-  sessionQueue?: SessionQueue;
+  podQueue?: PodQueue;
   maxConcurrency?: number;
   imageBuilder?: ImageBuilder;
   actionRegistry?: ActionRegistry;
-  sessionTokenIssuer?: SessionTokenIssuer;
+  sessionTokenIssuer?: PodTokenIssuer;
   memoryRepo?: MemoryRepository;
   pendingOverrideRepo?: PendingOverrideRepository;
   scheduledJobManager?: ScheduledJobManager;
@@ -71,7 +71,7 @@ export interface ServerDependencies {
 
 export async function createServer(deps: ServerDependencies): Promise<FastifyInstance> {
   // Fail closed in production: MCP escalation and proxy endpoints rely on the
-  // session-token issuer to isolate pods from one another. Missing it would
+  // pod-token issuer to isolate pods from one another. Missing it would
   // silently downgrade to user-token-only auth, which a containerised agent
   // cannot present — effectively locking itself out or (worse) opening the
   // door if a future refactor adds `auth: false`.
@@ -109,21 +109,21 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     onShutdown: deps.onShutdown,
     docker: deps.docker,
     db: deps.db,
-    sessionQueue: deps.sessionQueue,
+    podQueue: deps.podQueue,
     maxConcurrency: deps.maxConcurrency,
   });
-  sessionRoutes(
+  podRoutes(
     app,
-    deps.sessionManager,
+    deps.podManager,
     deps.sessionTokenIssuer,
     deps.eventRepo,
     deps.pendingOverrideRepo,
   );
-  historyRoutes(app, deps.sessionManager);
+  historyRoutes(app, deps.podManager);
   profileRoutes(
     app,
     deps.profileStore,
-    (profileName) => deps.sessionManager.refreshNetworkPolicy(profileName),
+    (profileName) => deps.podManager.refreshNetworkPolicy(profileName),
     deps.imageBuilder,
   );
 
@@ -149,17 +149,17 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
 
   // Diff routes (requires container manager)
   if (deps.containerManagerFactory) {
-    diffRoutes(app, deps.sessionManager, deps.containerManagerFactory, deps.profileStore);
+    diffRoutes(app, deps.podManager, deps.containerManagerFactory, deps.profileStore);
   }
 
-  // Files routes — browse/read files from session worktree (markdown viewer, etc.)
-  filesRoutes(app, deps.sessionManager);
+  // Files routes — browse/read files from pod worktree (markdown viewer, etc.)
+  filesRoutes(app, deps.podManager);
 
   // Terminal WebSocket (requires docker instance)
   if (deps.containerManagerFactory && deps.docker) {
     terminalRoutes(
       app,
-      deps.sessionManager,
+      deps.podManager,
       deps.containerManagerFactory,
       deps.authModule,
       deps.docker,
@@ -172,17 +172,17 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   // MCP handler for escalation tools
   mcpHandler(
     app,
-    deps.sessionBridge,
-    deps.pendingRequestsBySession,
+    deps.podBridge,
+    deps.pendingRequestsByPod,
     app.log as unknown as import('pino').Logger,
     deps.sessionTokenIssuer,
   );
 
   // MCP proxy handler — forwards agent requests to injected profile MCP servers,
   // stamping the real auth headers server-side so the agent never sees them.
-  // Auth is enforced at the route level (session-token, matches path sessionId).
+  // Auth is enforced at the route level (pod-token, matches path podId).
   mcpProxyHandler(app, {
-    getServersForSession: (sessionId) => deps.sessionManager.getInjectedMcpServers(sessionId),
+    getServersForPod: (podId) => deps.podManager.getInjectedMcpServers(podId),
     logger: app.log as unknown as import('pino').Logger,
   });
 

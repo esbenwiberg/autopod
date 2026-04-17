@@ -1,4 +1,4 @@
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export interface ReportProgressInput {
   phase: string;
@@ -8,12 +8,12 @@ export interface ReportProgressInput {
 }
 
 export async function reportProgress(
-  sessionId: string,
+  podId: string,
   input: ReportProgressInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
 ): Promise<string> {
   bridge.reportProgress(
-    sessionId,
+    podId,
     input.phase,
     input.description,
     input.currentPhase,

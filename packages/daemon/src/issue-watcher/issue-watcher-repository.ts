@@ -5,7 +5,7 @@ export interface IssueWatcherRepository {
   create(issue: Omit<WatchedIssue, 'id' | 'createdAt' | 'updatedAt'>): WatchedIssue;
   exists(provider: string, issueId: string, profileName: string): boolean;
   updateStatus(id: number, status: WatchedIssueStatus): void;
-  findBySessionId(sessionId: string): WatchedIssue | null;
+  findBySessionId(podId: string): WatchedIssue | null;
   list(filters?: {
     profileName?: string;
     status?: WatchedIssueStatus;
@@ -21,7 +21,7 @@ function rowToWatchedIssue(row: Record<string, unknown>): WatchedIssue {
     issueUrl: row.issue_url as string,
     issueTitle: row.issue_title as string,
     status: row.status as WatchedIssueStatus,
-    sessionId: (row.session_id as string) ?? null,
+    podId: (row.pod_id as string) ?? null,
     triggerLabel: row.trigger_label as string,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
@@ -35,10 +35,10 @@ export function createIssueWatcherRepository(db: Database.Database): IssueWatche
         .prepare(
           `INSERT INTO watched_issues (
             profile_name, provider, issue_id, issue_url, issue_title,
-            status, session_id, trigger_label
+            status, pod_id, trigger_label
           ) VALUES (
             @profileName, @provider, @issueId, @issueUrl, @issueTitle,
-            @status, @sessionId, @triggerLabel
+            @status, @podId, @triggerLabel
           )`,
         )
         .run({
@@ -48,7 +48,7 @@ export function createIssueWatcherRepository(db: Database.Database): IssueWatche
           issueUrl: issue.issueUrl,
           issueTitle: issue.issueTitle,
           status: issue.status,
-          sessionId: issue.sessionId,
+          podId: issue.podId,
           triggerLabel: issue.triggerLabel,
         });
 
@@ -73,8 +73,8 @@ export function createIssueWatcherRepository(db: Database.Database): IssueWatche
       ).run(status, id);
     },
 
-    findBySessionId(sessionId) {
-      const row = db.prepare('SELECT * FROM watched_issues WHERE session_id = ?').get(sessionId) as
+    findBySessionId(podId) {
+      const row = db.prepare('SELECT * FROM watched_issues WHERE pod_id = ?').get(podId) as
         | Record<string, unknown>
         | undefined;
       return row ? rowToWatchedIssue(row) : null;

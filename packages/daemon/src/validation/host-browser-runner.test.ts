@@ -9,7 +9,7 @@ const logger = pino({ level: 'silent' });
 
 describe('HostBrowserRunner', () => {
   const runner = createHostBrowserRunner(logger);
-  const testSessionId = 'test-session-hbr';
+  const testSessionId = 'test-pod-hbr';
 
   afterEach(async () => {
     await runner.cleanup(testSessionId);
@@ -20,7 +20,7 @@ describe('HostBrowserRunner', () => {
       const script = `console.log('hello from host');`;
       const result = await runner.runScript(script, {
         timeout: 10_000,
-        sessionId: testSessionId,
+        podId: testSessionId,
       });
 
       expect(result.exitCode).toBe(0);
@@ -31,7 +31,7 @@ describe('HostBrowserRunner', () => {
       const script = `console.error('oops');`;
       const result = await runner.runScript(script, {
         timeout: 10_000,
-        sessionId: testSessionId,
+        podId: testSessionId,
       });
 
       expect(result.exitCode).toBe(0);
@@ -42,7 +42,7 @@ describe('HostBrowserRunner', () => {
       const script = 'process.exit(1);';
       const result = await runner.runScript(script, {
         timeout: 10_000,
-        sessionId: testSessionId,
+        podId: testSessionId,
       });
 
       expect(result.exitCode).toBe(1);
@@ -51,20 +51,20 @@ describe('HostBrowserRunner', () => {
     it('rejects on timeout', async () => {
       const script = 'await new Promise(r => setTimeout(r, 30000));';
       await expect(
-        runner.runScript(script, { timeout: 500, sessionId: testSessionId }),
+        runner.runScript(script, { timeout: 500, podId: testSessionId }),
       ).rejects.toThrow('timed out');
     });
   });
 
   describe('screenshotDir', () => {
-    it('returns a session-scoped directory under os.tmpdir()', () => {
-      const dir = runner.screenshotDir('my-session');
+    it('returns a pod-scoped directory under os.tmpdir()', () => {
+      const dir = runner.screenshotDir('my-pod');
       expect(dir).toContain('autopod-browser');
-      expect(dir).toContain('my-session');
+      expect(dir).toContain('my-pod');
       expect(dir).toContain('screenshots');
     });
 
-    it('returns different dirs for different sessions', () => {
+    it('returns different dirs for different pods', () => {
       expect(runner.screenshotDir('a')).not.toBe(runner.screenshotDir('b'));
     });
   });
@@ -86,7 +86,7 @@ describe('HostBrowserRunner', () => {
   });
 
   describe('cleanup', () => {
-    it('removes the session temp directory', async () => {
+    it('removes the pod temp directory', async () => {
       const dir = runner.screenshotDir(testSessionId);
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, 'test.txt'), 'data');
@@ -98,7 +98,7 @@ describe('HostBrowserRunner', () => {
     });
 
     it('does not throw if directory does not exist', async () => {
-      await expect(runner.cleanup('nonexistent-session')).resolves.not.toThrow();
+      await expect(runner.cleanup('nonexistent-pod')).resolves.not.toThrow();
     });
   });
 });

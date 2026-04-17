@@ -3,13 +3,13 @@ import Foundation
 // MARK: - Memory (mirrors packages/shared/src/types/memory.ts)
 
 public enum MemoryScope: String, CaseIterable, Sendable, Codable {
-    case global, profile, session
+    case global, profile, pod
 
     public var label: String {
         switch self {
         case .global:  "Global"
         case .profile: "Profile"
-        case .session: "Session"
+        case .pod: "Pod"
         }
     }
 }

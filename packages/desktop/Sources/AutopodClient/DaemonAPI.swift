@@ -5,14 +5,14 @@ import Foundation
 public actor DaemonAPI {
   public let baseURL: URL
   public let token: String
-  private let session: URLSession
+  private let pod: URLSession
   private let decoder: JSONDecoder
   private let encoder: JSONEncoder
 
   public init(baseURL: URL, token: String) {
     self.baseURL = baseURL
     self.token = token
-    self.session = URLSession.shared
+    self.pod = URLSession.shared
     self.decoder = JSONDecoder()
     self.encoder = JSONEncoder()
   }
@@ -29,153 +29,153 @@ public actor DaemonAPI {
     return res.version
   }
 
-  // MARK: - Sessions
+  // MARK: - Pods
 
-  public func listSessions(
+  public func listPods(
     profileName: String? = nil,
     status: String? = nil
   ) async throws -> [SessionResponse] {
     var query: [String: String] = [:]
     if let p = profileName { query["profileName"] = p }
     if let s = status { query["status"] = s }
-    return try await request("GET", "/sessions", query: query)
+    return try await request("GET", "/pods", query: query)
   }
 
-  public func getSession(_ id: String) async throws -> SessionResponse {
-    try await request("GET", "/sessions/\(id)")
+  public func getPod(_ id: String) async throws -> SessionResponse {
+    try await request("GET", "/pods/\(id)")
   }
 
   public func getSessionStats(profileName: String? = nil) async throws -> [String: Int] {
     var query: [String: String] = [:]
     if let p = profileName { query["profile"] = p }
-    let res: SessionStatsResponse = try await request("GET", "/sessions/stats", query: query)
+    let res: SessionStatsResponse = try await request("GET", "/pods/stats", query: query)
     return res.counts
   }
 
-  public func createSession(_ body: CreateSessionRequest) async throws -> SessionResponse {
-    try await request("POST", "/sessions", body: try encode(body))
+  public func createPod(_ body: CreateSessionRequest) async throws -> SessionResponse {
+    try await request("POST", "/pods", body: try encode(body))
   }
 
-  public func approveSession(_ id: String, squash: Bool? = nil) async throws {
+  public func approvePod(_ id: String, squash: Bool? = nil) async throws {
     let body = try squash.map { try encode(ApproveBody(squash: $0)) }
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/approve", body: body)
+    let _: OkResponse = try await request("POST", "/pods/\(id)/approve", body: body)
   }
 
-  public func rejectSession(_ id: String, feedback: String? = nil) async throws {
+  public func rejectPod(_ id: String, feedback: String? = nil) async throws {
     let body = try feedback.map { try encode(RejectBody(feedback: $0)) }
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/reject", body: body)
+    let _: OkResponse = try await request("POST", "/pods/\(id)/reject", body: body)
   }
 
   public func sendMessage(_ id: String, message: String) async throws {
     let _: OkResponse = try await request(
-      "POST", "/sessions/\(id)/message",
+      "POST", "/pods/\(id)/message",
       body: try encode(MessageBody(message: message))
     )
   }
 
   public func nudgeSession(_ id: String, message: String = "Please refocus on the task.") async throws {
     let _: OkResponse = try await request(
-      "POST", "/sessions/\(id)/nudge",
+      "POST", "/pods/\(id)/nudge",
       body: try encode(MessageBody(message: message))
     )
   }
 
-  public func killSession(_ id: String) async throws {
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/kill")
+  public func killPod(_ id: String) async throws {
+    let _: OkResponse = try await request("POST", "/pods/\(id)/kill")
   }
 
   public func completeSession(_ id: String, promoteTo: String? = nil) async throws {
     let body = try promoteTo.map { try encode(CompleteBody(promoteTo: $0)) }
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/complete", body: body)
+    let _: OkResponse = try await request("POST", "/pods/\(id)/complete", body: body)
   }
 
-  /// Promote an interactive session to agent-driven (in-place, same session ID).
+  /// Promote an interactive pod to agent-driven (in-place, same pod ID).
   /// `targetOutput` must be one of `pr`, `branch`, `artifact`, `none`. Defaults to `pr` daemon-side.
   public func promoteSession(_ id: String, targetOutput: String? = nil) async throws {
     let body = try targetOutput.map { try encode(PromoteBody(targetOutput: $0)) }
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/promote", body: body)
+    let _: OkResponse = try await request("POST", "/pods/\(id)/promote", body: body)
   }
 
   public func triggerValidation(_ id: String) async throws {
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/validate")
+    let _: OkResponse = try await request("POST", "/pods/\(id)/validate")
   }
 
   public func startPreview(_ id: String) async throws -> String {
-    let res: PreviewResponse = try await request("POST", "/sessions/\(id)/preview")
+    let res: PreviewResponse = try await request("POST", "/pods/\(id)/preview")
     return res.previewUrl
   }
 
   public func revalidateSession(_ id: String) async throws -> RevalidateResponse {
-    try await request("POST", "/sessions/\(id)/revalidate")
+    try await request("POST", "/pods/\(id)/revalidate")
   }
 
   public func fixManually(_ id: String) async throws -> SessionResponse {
-    try await request("POST", "/sessions/\(id)/fix-manually")
+    try await request("POST", "/pods/\(id)/fix-manually")
   }
 
   public func pauseSession(_ id: String) async throws {
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/pause")
+    let _: OkResponse = try await request("POST", "/pods/\(id)/pause")
   }
 
   public func extendAttempts(_ id: String, additionalAttempts: Int) async throws {
     let _: OkResponse = try await request(
-      "POST", "/sessions/\(id)/extend-attempts",
+      "POST", "/pods/\(id)/extend-attempts",
       body: try encode(ExtendAttemptsBody(additionalAttempts: additionalAttempts))
     )
   }
 
   public func extendPrAttempts(_ id: String, additionalAttempts: Int) async throws {
     let _: OkResponse = try await request(
-      "POST", "/sessions/\(id)/extend-pr-attempts",
+      "POST", "/pods/\(id)/extend-pr-attempts",
       body: try encode(ExtendAttemptsBody(additionalAttempts: additionalAttempts))
     )
   }
 
   public func spawnFixSession(_ id: String) async throws {
-    let _: OkResponse = try await request("POST", "/sessions/\(id)/spawn-fix")
+    let _: OkResponse = try await request("POST", "/pods/\(id)/spawn-fix")
   }
 
-  public func deleteSession(_ id: String) async throws {
-    let _: EmptyResponse = try await request("DELETE", "/sessions/\(id)")
+  public func deletePod(_ id: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/pods/\(id)")
   }
 
   public func approveAllValidated() async throws -> [String] {
-    let results: [SessionSummaryResponse] = try await request("POST", "/sessions/approve-all")
+    let results: [SessionSummaryResponse] = try await request("POST", "/pods/approve-all")
     return results.map(\.id)
   }
 
   public func killAllFailed() async throws -> [String] {
-    let results: [SessionSummaryResponse] = try await request("POST", "/sessions/kill-failed")
+    let results: [SessionSummaryResponse] = try await request("POST", "/pods/kill-failed")
     return results.map(\.id)
   }
 
   public func getValidationHistory(_ id: String) async throws -> [ValidationResponse] {
-    try await request("GET", "/sessions/\(id)/validations")
+    try await request("GET", "/pods/\(id)/validations")
   }
 
   public func getSessionEvents(_ id: String) async throws -> [AgentEventResponse] {
-    try await request("GET", "/sessions/\(id)/events")
+    try await request("GET", "/pods/\(id)/events")
   }
 
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
-    try await request("GET", "/sessions/\(id)/diff")
+    try await request("GET", "/pods/\(id)/diff")
   }
 
   // MARK: - Files (worktree browser)
 
   public func listSessionFiles(_ id: String, ext: String = "md") async throws -> [SessionFileEntry] {
     let res: SessionFilesResponse = try await request(
-      "GET", "/sessions/\(id)/files", query: ["ext": ext]
+      "GET", "/pods/\(id)/files", query: ["ext": ext]
     )
     return res.files
   }
 
   public func getSessionFileContent(_ id: String, path: String) async throws -> SessionFileContent {
-    try await request("GET", "/sessions/\(id)/files/content", query: ["path": path])
+    try await request("GET", "/pods/\(id)/files/content", query: ["path": path])
   }
 
   public func getReportToken(_ id: String) async throws -> (token: String?, reportUrl: String) {
-    let res: ReportTokenResponse = try await request("GET", "/sessions/\(id)/report/token")
+    let res: ReportTokenResponse = try await request("GET", "/pods/\(id)/report/token")
     return (res.token, res.reportUrl)
   }
 
@@ -228,7 +228,7 @@ public actor DaemonAPI {
     failuresOnly: Bool? = nil
   ) async throws -> SessionResponse {
     try await request(
-      "POST", "/sessions/history-workspace",
+      "POST", "/pods/history-workspace",
       body: try encode(
         HistoryWorkspaceBody(
           profileName: profileName,
@@ -323,12 +323,12 @@ public actor DaemonAPI {
 
   // MARK: - Validation
 
-  public func interruptValidation(sessionId: String) async throws {
-    let _: EmptyResponse = try await request("POST", "/sessions/\(sessionId)/interrupt-validation")
+  public func interruptValidation(podId: String) async throws {
+    let _: EmptyResponse = try await request("POST", "/pods/\(podId)/interrupt-validation")
   }
 
   public func addValidationOverride(
-    sessionId: String,
+    podId: String,
     findingId: String,
     description: String,
     action: String,
@@ -343,7 +343,7 @@ public actor DaemonAPI {
     if let reason = reason { dict["reason"] = reason }
     if let guidance = guidance { dict["guidance"] = guidance }
     let body = try JSONSerialization.data(withJSONObject: dict)
-    let _: EmptyResponse = try await request("POST", "/sessions/\(sessionId)/validation-overrides", body: body)
+    let _: EmptyResponse = try await request("POST", "/pods/\(podId)/validation-overrides", body: body)
   }
 
   // MARK: - Internal request helper
@@ -380,7 +380,7 @@ public actor DaemonAPI {
     let data: Data
     let response: URLResponse
     do {
-      (data, response) = try await session.data(for: req)
+      (data, response) = try await pod.data(for: req)
     } catch {
       throw DaemonError.networkError(error.localizedDescription)
     }

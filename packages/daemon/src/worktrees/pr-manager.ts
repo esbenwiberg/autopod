@@ -36,7 +36,7 @@ export class GhPrManager implements PrManager {
     const title = buildPrTitle(config.task);
     const body = buildPrBody({
       task: config.task,
-      sessionId: config.sessionId,
+      podId: config.podId,
       profileName: config.profileName,
       validationResult: config.validationResult,
       filesChanged: config.filesChanged,
@@ -48,7 +48,7 @@ export class GhPrManager implements PrManager {
     });
 
     this.logger.info(
-      { sessionId: config.sessionId, branch: config.branch, baseBranch: config.baseBranch },
+      { podId: config.podId, branch: config.branch, baseBranch: config.baseBranch },
       'Creating pull request',
     );
 
@@ -72,10 +72,10 @@ export class GhPrManager implements PrManager {
       });
 
       const prUrl = stdout.trim();
-      this.logger.info({ sessionId: config.sessionId, prUrl }, 'Pull request created');
+      this.logger.info({ podId: config.podId, prUrl }, 'Pull request created');
       return prUrl;
     } catch (err) {
-      this.logger.error({ err, sessionId: config.sessionId }, 'Failed to create pull request');
+      this.logger.error({ err, podId: config.podId }, 'Failed to create pull request');
       throw err;
     }
   }
@@ -264,7 +264,7 @@ export class GitHubApiPrManager implements PrManager {
     const title = buildPrTitle(config.task);
     const body = buildPrBody({
       task: config.task,
-      sessionId: config.sessionId,
+      podId: config.podId,
       profileName: config.profileName,
       validationResult: config.validationResult,
       filesChanged: config.filesChanged,
@@ -276,7 +276,7 @@ export class GitHubApiPrManager implements PrManager {
     });
 
     this.logger.info(
-      { sessionId: config.sessionId, branch: config.branch, baseBranch: config.baseBranch },
+      { podId: config.podId, branch: config.branch, baseBranch: config.baseBranch },
       'Creating pull request via GitHub API',
     );
 
@@ -292,7 +292,7 @@ export class GitHubApiPrManager implements PrManager {
     }
 
     const data = (await response.json()) as { html_url: string };
-    this.logger.info({ sessionId: config.sessionId, prUrl: data.html_url }, 'Pull request created');
+    this.logger.info({ podId: config.podId, prUrl: data.html_url }, 'Pull request created');
     return data.html_url;
   }
 

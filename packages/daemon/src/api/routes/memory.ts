@@ -1,7 +1,7 @@
 import type { MemoryScope } from '@autopod/shared';
 import { generateId } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
-import type { MemoryRepository } from '../../sessions/memory-repository.js';
+import type { MemoryRepository } from '../../pods/memory-repository.js';
 
 export interface MemoryDeps {
   memoryRepo: MemoryRepository;
@@ -46,7 +46,8 @@ export function memoryRoutes(app: FastifyInstance, deps: MemoryDeps): void {
       path: body.path,
       content: body.content,
       approved: true,
-      createdBySessionId: null,
+      rationale: null,
+      createdByPodId: null,
     });
     return reply.status(201).send(entry);
   });

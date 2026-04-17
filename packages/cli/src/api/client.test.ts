@@ -3,7 +3,7 @@ import {
   AutopodError,
   InvalidStateTransitionError,
   ProfileNotFoundError,
-  SessionNotFoundError,
+  PodNotFoundError,
   ValidationError,
 } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,15 +49,15 @@ describe('AutopodClient', () => {
   });
 
   describe('createSession', () => {
-    it('sends POST to /sessions', async () => {
-      const session = { id: 'abc12345', profileName: 'test', task: 'do stuff', status: 'queued' };
-      mockFetch.mockResolvedValueOnce(jsonResponse(session));
+    it('sends POST to /pods', async () => {
+      const pod = { id: 'abc12345', profileName: 'test', task: 'do stuff', status: 'queued' };
+      mockFetch.mockResolvedValueOnce(jsonResponse(pod));
 
       const result = await client.createSession({ profileName: 'test', task: 'do stuff' });
 
-      expect(result).toEqual(session);
+      expect(result).toEqual(pod);
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3100/sessions',
+        'http://localhost:3100/pods',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
@@ -69,36 +69,36 @@ describe('AutopodClient', () => {
   });
 
   describe('listSessions', () => {
-    it('sends GET to /sessions with query params', async () => {
+    it('sends GET to /pods with query params', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse([]));
 
       await client.listSessions({ status: 'running', profile: 'myproj' });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3100/sessions?status=running&profile=myproj',
+        'http://localhost:3100/pods?status=running&profile=myproj',
         expect.objectContaining({ method: 'GET' }),
       );
     });
 
-    it('sends GET to /sessions without query params', async () => {
+    it('sends GET to /pods without query params', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse([]));
 
       await client.listSessions();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3100/sessions',
+        'http://localhost:3100/pods',
         expect.objectContaining({ method: 'GET' }),
       );
     });
   });
 
   describe('getSession', () => {
-    it('fetches a single session', async () => {
-      const session = { id: 'abc12345', status: 'running' };
-      mockFetch.mockResolvedValueOnce(jsonResponse(session));
+    it('fetches a single pod', async () => {
+      const pod = { id: 'abc12345', status: 'running' };
+      mockFetch.mockResolvedValueOnce(jsonResponse(pod));
 
       const result = await client.getSession('abc12345');
-      expect(result).toEqual(session);
+      expect(result).toEqual(pod);
     });
   });
 
@@ -109,7 +109,7 @@ describe('AutopodClient', () => {
       await client.sendMessage('abc12345', 'hello');
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3100/sessions/abc12345/message',
+        'http://localhost:3100/pods/abc12345/message',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ message: 'hello' }),
@@ -125,7 +125,7 @@ describe('AutopodClient', () => {
       await client.approveSession('abc12345', { squash: true });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3100/sessions/abc12345/approve',
+        'http://localhost:3100/pods/abc12345/approve',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ squash: true }),
@@ -186,9 +186,9 @@ describe('AutopodClient', () => {
       await expect(client.listSessions()).rejects.toThrow(AuthError);
     });
 
-    it('maps 404 on sessions to SessionNotFoundError', async () => {
+    it('maps 404 on pods to PodNotFoundError', async () => {
       mockFetch.mockResolvedValueOnce(errorResponse(404, { message: 'not found' }));
-      await expect(client.getSession('abc')).rejects.toThrow(SessionNotFoundError);
+      await expect(client.getSession('abc')).rejects.toThrow(PodNotFoundError);
     });
 
     it('maps 404 on profiles to ProfileNotFoundError', async () => {
@@ -223,15 +223,15 @@ describe('AutopodClient', () => {
 
   describe('token refresh on 401', () => {
     it('retries once on 401 with fresh token', async () => {
-      const session = { id: 'abc', status: 'running' };
+      const pod = { id: 'abc', status: 'running' };
       mockFetch
         .mockResolvedValueOnce(errorResponse(401, { message: 'expired' }))
-        .mockResolvedValueOnce(jsonResponse(session));
+        .mockResolvedValueOnce(jsonResponse(pod));
 
       getToken.mockResolvedValueOnce('old-token').mockResolvedValueOnce('new-token');
 
       const result = await client.getSession('abc');
-      expect(result).toEqual(session);
+      expect(result).toEqual(pod);
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });

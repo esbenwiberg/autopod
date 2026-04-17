@@ -11,10 +11,10 @@ const CREDENTIALS_PATH = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
  * Read back OAuth credentials from the container after agent execution.
  *
  * Claude Code rotates refresh tokens during use. If we don't persist the
- * updated tokens, the next session will fail to authenticate.
+ * updated tokens, the next pod will fail to authenticate.
  *
  * Uses optimistic locking: only overwrites if the new token has a later
- * expiry than what's currently stored (guards against concurrent session stomps).
+ * expiry than what's currently stored (guards against concurrent pod stomps).
  */
 export async function persistRefreshedCredentials(
   containerId: string,

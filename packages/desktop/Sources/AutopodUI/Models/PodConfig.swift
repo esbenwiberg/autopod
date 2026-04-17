@@ -51,7 +51,7 @@ public struct PodConfig: Sendable, Equatable {
     public var output: OutputTarget
     /// Run full build/smoke/review before completing.
     public var validate: Bool
-    /// Allow promoting this session to a different mode later.
+    /// Allow promoting this pod to a different mode later.
     public var promotable: Bool
 
     public init(
@@ -87,7 +87,7 @@ public struct PodConfig: Sendable, Equatable {
         return .pr
     }
 
-    /// Whether this session is promotable to a different agent mode from its current state.
+    /// Whether this pod is promotable to a different agent mode from its current state.
     public var isPromotable: Bool {
         agentMode == .interactive && promotable
     }

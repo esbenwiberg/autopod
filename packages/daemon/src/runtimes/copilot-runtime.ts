@@ -40,7 +40,7 @@ export class CopilotRuntime implements Runtime {
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
     // Persist config so resume() can replay a fresh spawn with correction message
-    this.lastSpawnConfigs.set(config.sessionId, config);
+    this.lastSpawnConfigs.set(config.podId, config);
 
     // Write config files before spawning
     await this.writeConfigFiles(config);
@@ -48,11 +48,11 @@ export class CopilotRuntime implements Runtime {
     const args = this.buildSpawnArgs(config);
     const env = this.buildEnv(config);
     const copilotModel = config.env.COPILOT_MODEL ?? null;
-    if (copilotModel) this.lastModels.set(config.sessionId, copilotModel);
+    if (copilotModel) this.lastModels.set(config.podId, copilotModel);
 
     this.logger.info({
       component: 'copilot-runtime',
-      sessionId: config.sessionId,
+      podId: config.podId,
       containerId: config.containerId,
       args,
       msg: 'Spawning copilot in container',
@@ -64,7 +64,7 @@ export class CopilotRuntime implements Runtime {
       { cwd: config.workDir, env },
     );
 
-    this.handles.set(config.sessionId, handle);
+    this.handles.set(config.podId, handle);
 
     // Accumulate stderr into a promise so we catch it even if it arrives after stdout ends
     const stderrPromise = new Promise<string>((resolve) => {
@@ -77,13 +77,13 @@ export class CopilotRuntime implements Runtime {
     try {
       for await (const event of CopilotStreamParser.parse(
         handle.stdout,
-        config.sessionId,
+        config.podId,
         this.logger,
       )) {
         yield event;
       }
     } finally {
-      this.handles.delete(config.sessionId);
+      this.handles.delete(config.podId);
     }
 
     const [exitCode, stderrText] = await Promise.all([handle.exitCode, stderrPromise]);
@@ -92,7 +92,7 @@ export class CopilotRuntime implements Runtime {
       this.logger.warn(
         {
           component: 'copilot-runtime',
-          sessionId: config.sessionId,
+          podId: config.podId,
           stderr: stderrText.slice(0, 1000),
         },
         'copilot stderr',
@@ -111,33 +111,33 @@ export class CopilotRuntime implements Runtime {
   }
 
   async *resume(
-    sessionId: string,
+    podId: string,
     message: string,
     containerId: string,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
-    const lastConfig = this.lastSpawnConfigs.get(sessionId);
+    const lastConfig = this.lastSpawnConfigs.get(podId);
 
     if (!lastConfig) {
       this.logger.warn(
-        { component: 'copilot-runtime', sessionId },
+        { component: 'copilot-runtime', podId },
         'Resume called with no prior spawn config — cannot respawn',
       );
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: 'Copilot resume failed: no prior spawn config found for session',
+        message: 'Copilot resume failed: no prior spawn config found for pod',
         fatal: true,
       };
       return;
     }
 
     this.logger.info(
-      { component: 'copilot-runtime', sessionId },
-      'Resume: respawning copilot with correction message (no session continuity)',
+      { component: 'copilot-runtime', podId },
+      'Resume: respawning copilot with correction message (no pod continuity)',
     );
 
-    // Copilot has no session ID mechanism — respawn with the correction/continuation
+    // Copilot has no pod ID mechanism — respawn with the correction/continuation
     // message as the new task. Reuse stored MCP servers and instructions (already written
     // to container); pass fresh env if provided (token rotation).
     yield* this.spawn({
@@ -148,29 +148,29 @@ export class CopilotRuntime implements Runtime {
     });
   }
 
-  async abort(sessionId: string): Promise<void> {
-    const handle = this.handles.get(sessionId);
+  async abort(podId: string): Promise<void> {
+    const handle = this.handles.get(podId);
     if (!handle) {
       this.logger.warn({
         component: 'copilot-runtime',
-        sessionId,
+        podId,
         msg: 'No exec handle found to abort',
       });
       return;
     }
 
     await handle.kill();
-    this.handles.delete(sessionId);
-    this.lastModels.delete(sessionId);
-    this.lastSpawnConfigs.delete(sessionId);
+    this.handles.delete(podId);
+    this.lastModels.delete(podId);
+    this.lastSpawnConfigs.delete(podId);
   }
 
-  async suspend(sessionId: string): Promise<void> {
-    const handle = this.handles.get(sessionId);
+  async suspend(podId: string): Promise<void> {
+    const handle = this.handles.get(podId);
     if (!handle) {
       this.logger.warn({
         component: 'copilot-runtime',
-        sessionId,
+        podId,
         msg: 'No exec handle found to suspend',
       });
       return;
@@ -178,12 +178,12 @@ export class CopilotRuntime implements Runtime {
 
     this.logger.info({
       component: 'copilot-runtime',
-      sessionId,
-      msg: 'Suspending copilot session (no session continuity — will respawn on resume)',
+      podId,
+      msg: 'Suspending copilot pod (no pod continuity — will respawn on resume)',
     });
 
     await handle.kill();
-    this.handles.delete(sessionId);
+    this.handles.delete(podId);
     // Keep lastSpawnConfigs entry so resume() can respawn after suspension
   }
 

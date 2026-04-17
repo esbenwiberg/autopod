@@ -1,6 +1,6 @@
 import Foundation
 
-/// Response from GET /sessions/:id/diff
+/// Response from GET /pods/:id/diff
 public struct DiffApiResponse: Codable, Sendable {
   public let files: [DiffApiFile]
   public let stats: DiffApiStats

@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@autopod/shared';
+import type { PodStatus } from '@autopod/shared';
 import chalk from 'chalk';
 
 interface StatusStyle {
@@ -7,7 +7,7 @@ interface StatusStyle {
   label: string;
 }
 
-const STATUS_MAP: Record<SessionStatus, StatusStyle> = {
+const STATUS_MAP: Record<PodStatus, StatusStyle> = {
   queued: { color: chalk.dim, symbol: '○', label: 'Queued' },
   provisioning: { color: chalk.dim, symbol: '◌', label: 'Provisioning' },
   running: { color: chalk.cyan, symbol: '◉', label: 'Running' },
@@ -25,11 +25,11 @@ const STATUS_MAP: Record<SessionStatus, StatusStyle> = {
   killed: { color: chalk.dim.red, symbol: '✗', label: 'Killed' },
 };
 
-export function getStatusStyle(status: SessionStatus): StatusStyle {
+export function getStatusStyle(status: PodStatus): StatusStyle {
   return STATUS_MAP[status] ?? { color: chalk.white, symbol: '?', label: status };
 }
 
-export function formatStatus(status: SessionStatus): string {
+export function formatStatus(status: PodStatus): string {
   const style = getStatusStyle(status);
   return style.color(`${style.symbol} ${style.label}`);
 }

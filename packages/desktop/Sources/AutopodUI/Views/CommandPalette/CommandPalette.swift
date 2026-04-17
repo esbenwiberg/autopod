@@ -3,18 +3,18 @@ import SwiftUI
 /// Spotlight-style command palette triggered by Cmd+K.
 public struct CommandPalette: View {
   @Binding public var isPresented: Bool
-  public let sessions: [Session]
-  public var actions: SessionActions
+  public let pods: [Pod]
+  public var actions: PodActions
   public var onSelectSession: ((String) -> Void)?
 
   public init(
     isPresented: Binding<Bool>,
-    sessions: [Session] = [],
-    actions: SessionActions = .preview,
+    pods: [Pod] = [],
+    actions: PodActions = .preview,
     onSelectSession: ((String) -> Void)? = nil
   ) {
     self._isPresented = isPresented
-    self.sessions = sessions
+    self.pods = pods
     self.actions = actions
     self.onSelectSession = onSelectSession
   }
@@ -27,20 +27,20 @@ public struct CommandPalette: View {
 
     var items: [PaletteItem] = []
 
-    // Sessions matching query
-    let matchingSessions = sessions.filter { session in
-      q.isEmpty || session.branch.lowercased().contains(q)
-        || session.profileName.lowercased().contains(q)
-        || session.status.label.lowercased().contains(q)
+    // Pods matching query
+    let matchingSessions = pods.filter { pod in
+      q.isEmpty || pod.branch.lowercased().contains(q)
+        || pod.profileName.lowercased().contains(q)
+        || pod.status.label.lowercased().contains(q)
     }.prefix(6)
 
-    for session in matchingSessions {
-      items.append(.session(session))
+    for pod in matchingSessions {
+      items.append(.pod(pod))
     }
 
     // Actions (always shown, filtered by query)
     let actionItems: [(String, String, () -> Void)] = [
-      ("New Session", "plus.circle", { }),
+      ("New Pod", "plus.circle", { }),
       ("Approve All Validated", "checkmark.circle", { Task { await actions.approveAll() }; isPresented = false }),
       ("Kill All Failed", "xmark.circle", { Task { await actions.killAllFailed() }; isPresented = false }),
     ]
@@ -101,14 +101,14 @@ public struct CommandPalette: View {
   private func paletteRow(_ item: PaletteItem, isSelected: Bool) -> some View {
     HStack(spacing: 10) {
       switch item {
-      case .session(let session):
+      case .pod(let pod):
         Circle()
-          .fill(session.status.color)
+          .fill(pod.status.color)
           .frame(width: 8, height: 8)
         VStack(alignment: .leading, spacing: 1) {
-          Text(session.branch)
+          Text(pod.branch)
             .font(.system(.callout, design: .monospaced))
-          Text("\(session.profileName) — \(session.status.label)")
+          Text("\(pod.profileName) — \(pod.status.label)")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -136,8 +136,8 @@ public struct CommandPalette: View {
 
   private func executeItem(_ item: PaletteItem) {
     switch item {
-    case .session(let session):
-      onSelectSession?(session.id)
+    case .pod(let pod):
+      onSelectSession?(pod.id)
       isPresented = false
     case .action(_, _, let action):
       action()
@@ -148,6 +148,6 @@ public struct CommandPalette: View {
 // MARK: - Palette item
 
 private enum PaletteItem {
-  case session(Session)
+  case pod(Pod)
   case action(name: String, icon: String, action: () -> Void)
 }

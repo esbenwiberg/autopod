@@ -57,7 +57,7 @@ describe('CodexRuntime', () => {
       const runtime = new CodexRuntime(logger, cm);
       // biome-ignore lint/suspicious/noExplicitAny: accessing private method in test
       const args = (runtime as any).buildSpawnArgs({
-        sessionId: 'abc123',
+        podId: 'abc123',
         task: 'Fix the bug',
         model: 'o3-mini',
         workDir: '/workspace',
@@ -83,7 +83,7 @@ describe('CodexRuntime', () => {
 
       const events = [];
       for await (const event of runtime.spawn({
-        sessionId: 'test-sess',
+        podId: 'test-sess',
         task: 'Do the thing',
         model: 'o3-mini',
         workDir: '/workspace',
@@ -116,7 +116,7 @@ describe('CodexRuntime', () => {
 
       const events = [];
       for await (const event of runtime.spawn({
-        sessionId: 'test-sess',
+        podId: 'test-sess',
         task: 'Fail',
         model: 'o3-mini',
         workDir: '/workspace',
@@ -145,7 +145,7 @@ describe('CodexRuntime', () => {
       }, 10);
 
       for await (const _ of runtime.spawn({
-        sessionId: 'track-test',
+        podId: 'track-test',
         task: 'test',
         model: 'o3-mini',
         workDir: '/workspace',
@@ -194,7 +194,7 @@ describe('CodexRuntime', () => {
   });
 
   describe('abort', () => {
-    it('calls handle.kill() for the tracked session', async () => {
+    it('calls handle.kill() for the tracked pod', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new CodexRuntime(logger, cm);

@@ -1,8 +1,8 @@
-import type { SessionStatus } from '@autopod/shared';
+import type { PodStatus } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { formatDuration, formatDurationFromDates, formatStatus, getStatusStyle } from './colors.js';
 
-const ALL_STATUSES: SessionStatus[] = [
+const ALL_STATUSES: PodStatus[] = [
   'queued',
   'provisioning',
   'running',

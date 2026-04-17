@@ -1,8 +1,8 @@
-import type { Profile, Session, SystemEvent } from '@autopod/shared';
+import type { Profile, Pod, SystemEvent } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEventBus } from '../sessions/event-bus.js';
-import { createEventRepository } from '../sessions/event-repository.js';
+import { createEventBus } from '../pods/event-bus.js';
+import { createEventRepository } from '../pods/event-repository.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
 import { createIssueWatcherRepository } from './issue-watcher-repository.js';
@@ -19,7 +19,7 @@ function createMockIssueClient(candidates: WatchedIssueCandidate[] = []): IssueC
 
 function insertTestSession(db: Database.Database, id: string) {
   db.prepare(
-    `INSERT INTO sessions (id, profile_name, task, status, model, runtime, branch, user_id)
+    `INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
      VALUES (?, 'test-profile', 'test task', 'queued', 'opus', 'claude', 'test-branch', 'test-user')`,
   ).run(id);
 }
@@ -30,7 +30,7 @@ function createMockSessionManager(db: Database.Database) {
     createSession: vi.fn().mockImplementation(() => {
       const id = `sess-${nextId++}`;
       insertTestSession(db, id);
-      return { id, status: 'queued' } as unknown as Session;
+      return { id, status: 'queued' } as unknown as Pod;
     }),
     refreshNetworkPolicy: vi.fn(),
   };
@@ -117,7 +117,7 @@ describe('IssueWatcherService', () => {
       // biome-ignore lint/suspicious/noExplicitAny: mock objects for testing
       profileStore: mockProfileStore as any,
       // biome-ignore lint/suspicious/noExplicitAny: mock objects for testing
-      sessionManager: mockSessionManager as any,
+      podManager: mockSessionManager as any,
       eventBus,
       issueWatcherRepo,
       logger,
@@ -128,7 +128,7 @@ describe('IssueWatcherService', () => {
     return { service, eventBus, issueWatcherRepo, client };
   }
 
-  it('picks up an issue and creates a session', async () => {
+  it('picks up an issue and creates a pod', async () => {
     const candidates: WatchedIssueCandidate[] = [
       {
         id: '42',
@@ -148,7 +148,7 @@ describe('IssueWatcherService', () => {
     await new Promise((r) => setTimeout(r, 50));
     service.stop();
 
-    // Session should have been created
+    // Pod should have been created
     expect(mockSessionManager.createSession).toHaveBeenCalledTimes(1);
     const createCall = mockSessionManager.createSession.mock.calls[0];
     expect(createCall[0].profileName).toBe('test-profile');
@@ -166,7 +166,7 @@ describe('IssueWatcherService', () => {
     // Should be tracked in the repo
     const tracked = issueWatcherRepo.list();
     expect(tracked).toHaveLength(1);
-    expect(tracked[0].sessionId).toBe('sess-1');
+    expect(tracked[0].podId).toBe('sess-1');
     expect(tracked[0].status).toBe('in_progress');
   });
 
@@ -184,7 +184,7 @@ describe('IssueWatcherService', () => {
 
     const { service, issueWatcherRepo } = createService(candidates);
 
-    // Insert a session row so the FK constraint is satisfied
+    // Insert a pod row so the FK constraint is satisfied
     insertTestSession(db, 'existing-sess');
 
     // Pre-insert the tracked issue
@@ -195,7 +195,7 @@ describe('IssueWatcherService', () => {
       issueUrl: 'https://github.com/org/repo/issues/42',
       issueTitle: 'Fix login bug',
       status: 'in_progress',
-      sessionId: 'existing-sess',
+      podId: 'existing-sess',
       triggerLabel: 'autopod',
     });
 
@@ -228,7 +228,7 @@ describe('IssueWatcherService', () => {
     expect(mockSessionManager.createSession).not.toHaveBeenCalled();
   });
 
-  it('handles session completion by swapping labels', async () => {
+  it('handles pod completion by swapping labels', async () => {
     const candidates: WatchedIssueCandidate[] = [
       {
         id: '42',
@@ -249,11 +249,11 @@ describe('IssueWatcherService', () => {
     (client.removeLabel as ReturnType<typeof vi.fn>).mockClear();
     (client.addComment as ReturnType<typeof vi.fn>).mockClear();
 
-    // Simulate session completion
+    // Simulate pod completion
     eventBus.emit({
-      type: 'session.status_changed',
+      type: 'pod.status_changed',
       timestamp: new Date().toISOString(),
-      sessionId: 'sess-1',
+      podId: 'sess-1',
       previousStatus: 'running',
       newStatus: 'complete',
     } as SystemEvent);
@@ -269,7 +269,7 @@ describe('IssueWatcherService', () => {
     );
   });
 
-  it('handles session failure by adding failed label', async () => {
+  it('handles pod failure by adding failed label', async () => {
     const candidates: WatchedIssueCandidate[] = [
       {
         id: '42',
@@ -289,9 +289,9 @@ describe('IssueWatcherService', () => {
     (client.removeLabel as ReturnType<typeof vi.fn>).mockClear();
 
     eventBus.emit({
-      type: 'session.status_changed',
+      type: 'pod.status_changed',
       timestamp: new Date().toISOString(),
-      sessionId: 'sess-1',
+      podId: 'sess-1',
       previousStatus: 'running',
       newStatus: 'failed',
     } as SystemEvent);

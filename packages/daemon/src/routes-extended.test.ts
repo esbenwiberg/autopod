@@ -2,20 +2,20 @@
  * Extended integration tests for routes not covered in integration.test.ts.
  *
  * Covers:
- * - GET /sessions/stats
- * - POST /sessions/:id/message
- * - POST /sessions/:id/nudge
- * - GET /sessions/:id/validations
- * - GET /sessions/:id/report/token
- * - POST /sessions/:id/approve (error path — only valid from validated state)
- * - POST /sessions/:id/reject (error path)
- * - POST /sessions/approve-all
- * - POST /sessions/kill-failed
- * - POST /sessions/:id/pause
- * - DELETE /sessions/:id
- * - GET /sessions/:id/diff (with container manager)
+ * - GET /pods/stats
+ * - POST /pods/:id/message
+ * - POST /pods/:id/nudge
+ * - GET /pods/:id/validations
+ * - GET /pods/:id/report/token
+ * - POST /pods/:id/approve (error path — only valid from validated state)
+ * - POST /pods/:id/reject (error path)
+ * - POST /pods/approve-all
+ * - POST /pods/kill-failed
+ * - POST /pods/:id/pause
+ * - DELETE /pods/:id
+ * - GET /pods/:id/diff (with container manager)
  * - POST /shutdown (when onShutdown is provided)
- * - GET /sessions filtered by status / profile
+ * - GET /pods filtered by status / profile
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,11 +31,11 @@ import {
   createEscalationRepository,
   createEventBus,
   createEventRepository,
-  createSessionManager,
-  createSessionQueue,
-  createSessionRepository,
-} from './sessions/index.js';
-import { createNudgeRepository } from './sessions/nudge-repository.js';
+  createPodManager,
+  createPodQueue,
+  createPodRepository,
+} from './pods/index.js';
+import { createNudgeRepository } from './pods/nudge-repository.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
 const MIGRATION_FILES = fs
@@ -122,7 +122,7 @@ describe('Extended Route Tests', () => {
     containerManager = createMockContainerManager();
 
     const profileStore = createProfileStore(db);
-    const sessionRepo = createSessionRepository(db);
+    const podRepo = createPodRepository(db);
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
@@ -175,7 +175,7 @@ describe('Extended Route Tests', () => {
 
     const validationEngine = {
       validate: vi.fn().mockResolvedValue({
-        sessionId: 'test',
+        podId: 'test',
         attempt: 1,
         timestamp: new Date().toISOString(),
         smoke: {
@@ -195,19 +195,19 @@ describe('Extended Route Tests', () => {
       }),
     };
 
-    // biome-ignore lint/style/useConst: assigned after sessionQueue to break circular dependency
-    let sessionManager: ReturnType<typeof createSessionManager>;
+    // biome-ignore lint/style/useConst: assigned after podQueue to break circular dependency
+    let podManager: ReturnType<typeof createPodManager>;
 
-    const sessionQueue = createSessionQueue(
+    const podQueue = createPodQueue(
       2,
-      async (sessionId) => {
-        await sessionManager.processSession(sessionId);
+      async (podId) => {
+        await podManager.processPod(podId);
       },
       logger,
     );
 
-    sessionManager = createSessionManager({
-      sessionRepo,
+    podManager = createPodManager({
+      podRepo,
       escalationRepo,
       nudgeRepo,
       profileStore,
@@ -216,13 +216,13 @@ describe('Extended Route Tests', () => {
       worktreeManager,
       runtimeRegistry,
       validationEngine,
-      enqueueSession: (id) => sessionQueue.enqueue(id),
+      enqueueSession: (id) => podQueue.enqueue(id),
       mcpBaseUrl: 'http://localhost:3100',
       daemonConfig: { mcpServers: [], claudeMdSections: [] },
       logger,
     });
 
-    const sessionBridge = {
+    const podBridge = {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
@@ -243,18 +243,18 @@ describe('Extended Route Tests', () => {
 
     app = await createServer({
       authModule,
-      sessionManager,
+      podManager,
       profileStore,
       eventBus,
       eventRepo,
-      sessionBridge,
-      pendingRequestsBySession: new Map(),
+      podBridge,
+      pendingRequestsByPod: new Map(),
       containerManagerFactory: { get: vi.fn(() => containerManager) },
       logLevel: 'silent',
       prettyLog: false,
     });
 
-    // Create a profile so session endpoints work
+    // Create a profile so pod endpoints work
     await app.inject({
       method: 'POST',
       url: '/profiles',
@@ -269,22 +269,22 @@ describe('Extended Route Tests', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Session stats
+  // Pod stats
   // -------------------------------------------------------------------------
 
-  describe('GET /sessions/stats', () => {
-    it('returns session counts grouped by status', async () => {
-      // Create a session first
+  describe('GET /pods/stats', () => {
+    it('returns pod counts grouped by status', async () => {
+      // Create a pod first
       await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task 1' },
       });
 
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions/stats',
+        url: '/pods/stats',
         headers: authHeaders,
       });
 
@@ -296,7 +296,7 @@ describe('Extended Route Tests', () => {
     it('accepts a profile query param', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions/stats?profile=test-app',
+        url: '/pods/stats?profile=test-app',
         headers: authHeaders,
       });
 
@@ -305,30 +305,30 @@ describe('Extended Route Tests', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Session filter by status
+  // Pod filter by status
   // -------------------------------------------------------------------------
 
-  describe('GET /sessions with filters', () => {
-    it('filters sessions by profile name', async () => {
+  describe('GET /pods with filters', () => {
+    it('filters pods by profile name', async () => {
       await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
 
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions?profileName=test-app',
+        url: '/pods?profileName=test-app',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(200);
     });
 
-    it('filters sessions by status', async () => {
+    it('filters pods by status', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions?status=queued',
+        url: '/pods?status=queued',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(200);
@@ -339,24 +339,24 @@ describe('Extended Route Tests', () => {
   // Send message
   // -------------------------------------------------------------------------
 
-  describe('POST /sessions/:id/message', () => {
-    it('sends a message to a paused session', async () => {
+  describe('POST /pods/:id/message', () => {
+    it('sends a message to a paused pod', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
-      // Wait for session to reach a terminal state before forcing to paused,
+      // Wait for pod to reach a terminal state before forcing to paused,
       // which avoids the background queue racing and overwriting our state.
       await new Promise((r) => setTimeout(r, 100));
-      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('paused', sessionId);
+      db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('paused', podId);
 
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/message`,
+        url: `/pods/${podId}/message`,
         headers: authHeaders,
         payload: { message: 'please continue' },
       });
@@ -365,10 +365,10 @@ describe('Extended Route Tests', () => {
       expect(res.json().ok).toBe(true);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/nonexistent/message',
+        url: '/pods/nonexistent/message',
         headers: authHeaders,
         payload: { message: 'hello' },
       });
@@ -378,15 +378,15 @@ describe('Extended Route Tests', () => {
     it('returns 400 for invalid message payload', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/message`,
+        url: `/pods/${podId}/message`,
         headers: authHeaders,
         payload: { invalid: 'payload' },
       });
@@ -398,23 +398,23 @@ describe('Extended Route Tests', () => {
   // Nudge
   // -------------------------------------------------------------------------
 
-  describe('POST /sessions/:id/nudge', () => {
-    it('queues a nudge message for a running session', async () => {
+  describe('POST /pods/:id/nudge', () => {
+    it('queues a nudge message for a running pod', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       // Wait for background processing to settle before forcing to running state
       await new Promise((r) => setTimeout(r, 100));
-      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('running', sessionId);
+      db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('running', podId);
 
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/nudge`,
+        url: `/pods/${podId}/nudge`,
         headers: authHeaders,
         payload: { message: 'soft nudge' },
       });
@@ -423,10 +423,10 @@ describe('Extended Route Tests', () => {
       expect(res.json().ok).toBe(true);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/nonexistent/nudge',
+        url: '/pods/nonexistent/nudge',
         headers: authHeaders,
         payload: { message: 'nudge' },
       });
@@ -438,29 +438,29 @@ describe('Extended Route Tests', () => {
   // Validations history
   // -------------------------------------------------------------------------
 
-  describe('GET /sessions/:id/validations', () => {
-    it('returns empty array for new session', async () => {
+  describe('GET /pods/:id/validations', () => {
+    it('returns empty array for new pod', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'GET',
-        url: `/sessions/${sessionId}/validations`,
+        url: `/pods/${podId}/validations`,
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(200);
       expect(Array.isArray(res.json())).toBe(true);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions/nonexistent/validations',
+        url: '/pods/nonexistent/validations',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(404);
@@ -471,31 +471,31 @@ describe('Extended Route Tests', () => {
   // Report token
   // -------------------------------------------------------------------------
 
-  describe('GET /sessions/:id/report/token', () => {
-    it('returns null token when no session token issuer is configured', async () => {
+  describe('GET /pods/:id/report/token', () => {
+    it('returns null token when no pod token issuer is configured', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'GET',
-        url: `/sessions/${sessionId}/report/token`,
+        url: `/pods/${podId}/report/token`,
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.token).toBeNull();
-      expect(body.reportUrl).toContain(sessionId);
+      expect(body.reportUrl).toContain(podId);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions/nonexistent/report/token',
+        url: '/pods/nonexistent/report/token',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(404);
@@ -506,30 +506,30 @@ describe('Extended Route Tests', () => {
   // Approve
   // -------------------------------------------------------------------------
 
-  describe('POST /sessions/:id/approve', () => {
-    it('returns 409 when session is not in validated state', async () => {
+  describe('POST /pods/:id/approve', () => {
+    it('returns 409 when pod is not in validated state', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       // queued → not approvable
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/approve`,
+        url: `/pods/${podId}/approve`,
         headers: authHeaders,
         payload: {},
       });
       expect(res.statusCode).toBe(409);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/nonexistent/approve',
+        url: '/pods/nonexistent/approve',
         headers: authHeaders,
         payload: {},
       });
@@ -541,29 +541,29 @@ describe('Extended Route Tests', () => {
   // Reject
   // -------------------------------------------------------------------------
 
-  describe('POST /sessions/:id/reject', () => {
-    it('returns 409 when session is not in validated state', async () => {
+  describe('POST /pods/:id/reject', () => {
+    it('returns 409 when pod is not in validated state', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/reject`,
+        url: `/pods/${podId}/reject`,
         headers: authHeaders,
         payload: { feedback: 'not good enough' },
       });
       expect(res.statusCode).toBe(409);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/nonexistent/reject',
+        url: '/pods/nonexistent/reject',
         headers: authHeaders,
         payload: {},
       });
@@ -575,11 +575,11 @@ describe('Extended Route Tests', () => {
   // Approve-all
   // -------------------------------------------------------------------------
 
-  describe('POST /sessions/approve-all', () => {
-    it('returns the result of approving all validated sessions', async () => {
+  describe('POST /pods/approve-all', () => {
+    it('returns the result of approving all validated pods', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/approve-all',
+        url: '/pods/approve-all',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(200);
@@ -590,11 +590,11 @@ describe('Extended Route Tests', () => {
   // Kill-failed
   // -------------------------------------------------------------------------
 
-  describe('POST /sessions/kill-failed', () => {
-    it('returns the result of killing all failed sessions', async () => {
+  describe('POST /pods/kill-failed', () => {
+    it('returns the result of killing all failed pods', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/kill-failed',
+        url: '/pods/kill-failed',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(200);
@@ -605,32 +605,32 @@ describe('Extended Route Tests', () => {
   // Pause
   // -------------------------------------------------------------------------
 
-  describe('POST /sessions/:id/pause', () => {
-    it('returns 409 when session is not pausable', async () => {
+  describe('POST /pods/:id/pause', () => {
+    it('returns 409 when pod is not pausable', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
-      // Force to a terminal state so the session is definitively not pausable,
+      // Force to a terminal state so the pod is definitively not pausable,
       // avoiding a race condition where async processing transitions it to 'running'.
-      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('complete', sessionId);
+      db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('complete', podId);
 
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/pause`,
+        url: `/pods/${podId}/pause`,
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(409);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/nonexistent/pause',
+        url: '/pods/nonexistent/pause',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(404);
@@ -638,34 +638,34 @@ describe('Extended Route Tests', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Delete session
+  // Delete pod
   // -------------------------------------------------------------------------
 
-  describe('DELETE /sessions/:id', () => {
-    it('deletes a terminal session and returns 204', async () => {
+  describe('DELETE /pods/:id', () => {
+    it('deletes a terminal pod and returns 204', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task to delete' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       // Force to a terminal state so deletion is allowed
-      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('killed', sessionId);
+      db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('killed', podId);
 
       const res = await app.inject({
         method: 'DELETE',
-        url: `/sessions/${sessionId}`,
+        url: `/pods/${podId}`,
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(204);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'DELETE',
-        url: '/sessions/nonexistent',
+        url: '/pods/nonexistent',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(404);
@@ -676,19 +676,19 @@ describe('Extended Route Tests', () => {
   // Diff route
   // -------------------------------------------------------------------------
 
-  describe('GET /sessions/:id/diff', () => {
-    it('returns empty diff for session with no container', async () => {
+  describe('GET /pods/:id/diff', () => {
+    it('returns empty diff for pod with no container', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'GET',
-        url: `/sessions/${sessionId}/diff`,
+        url: `/pods/${podId}/diff`,
         headers: authHeaders,
       });
 
@@ -701,17 +701,17 @@ describe('Extended Route Tests', () => {
     it('returns diff when container has a git diff', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
-      // Add a containerId to the session
-      db.prepare('UPDATE sessions SET container_id = ?, status = ? WHERE id = ?').run(
+      // Add a containerId to the pod
+      db.prepare('UPDATE pods SET container_id = ?, status = ? WHERE id = ?').run(
         'container-123',
         'running',
-        sessionId,
+        podId,
       );
 
       const unifiedDiff = [
@@ -738,7 +738,7 @@ describe('Extended Route Tests', () => {
 
       const res = await app.inject({
         method: 'GET',
-        url: `/sessions/${sessionId}/diff`,
+        url: `/pods/${podId}/diff`,
         headers: authHeaders,
       });
 
@@ -748,10 +748,10 @@ describe('Extended Route Tests', () => {
       expect(body.stats.changed).toBeGreaterThanOrEqual(1);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions/nonexistent/diff',
+        url: '/pods/nonexistent/diff',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(404);
@@ -762,29 +762,29 @@ describe('Extended Route Tests', () => {
   // Validate trigger
   // -------------------------------------------------------------------------
 
-  describe('POST /sessions/:id/validate', () => {
-    it('returns 409 when session cannot be validated from current state', async () => {
+  describe('POST /pods/:id/validate', () => {
+    it('returns 409 when pod cannot be validated from current state', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: authHeaders,
         payload: { profileName: 'test-app', task: 'Task' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/validate`,
+        url: `/pods/${podId}/validate`,
         headers: authHeaders,
       });
       // queued → not in a state that can be force-validated
       expect([200, 409]).toContain(res.statusCode);
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/nonexistent/validate',
+        url: '/pods/nonexistent/validate',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(404);
@@ -802,16 +802,16 @@ describe('Extended Route Tests', () => {
       // Create a second server with a shutdown hook
       const db2 = createTestDb();
       const profileStore2 = createProfileStore(db2);
-      const sessionRepo2 = createSessionRepository(db2);
+      const sessionRepo2 = createPodRepository(db2);
       const eventRepo2 = createEventRepository(db2);
       const escalationRepo2 = createEscalationRepository(db2);
       const eventBus2 = createEventBus(eventRepo2, logger);
 
       // biome-ignore lint/style/useConst: assigned after sq2 to break circular dependency
-      let sm2: ReturnType<typeof createSessionManager>;
-      const sq2 = createSessionQueue(1, async (id) => sm2.processSession(id), logger);
-      sm2 = createSessionManager({
-        sessionRepo: sessionRepo2,
+      let sm2: ReturnType<typeof createPodManager>;
+      const sq2 = createPodQueue(1, async (id) => sm2.processPod(id), logger);
+      sm2 = createPodManager({
+        podRepo: sessionRepo2,
         escalationRepo: escalationRepo2,
         profileStore: profileStore2,
         eventBus: eventBus2,
@@ -836,11 +836,11 @@ describe('Extended Route Tests', () => {
 
       const app2 = await createServer({
         authModule: createMockAuthModule(),
-        sessionManager: sm2,
+        podManager: sm2,
         profileStore: profileStore2,
         eventBus: eventBus2,
         eventRepo: eventRepo2,
-        sessionBridge: {
+        podBridge: {
           createEscalation: vi.fn(),
           resolveEscalation: vi.fn(),
           getAiEscalationCount: vi.fn().mockReturnValue(0),
@@ -858,7 +858,7 @@ describe('Extended Route Tests', () => {
           writeFileInContainer: vi.fn(),
           execInContainer: vi.fn(),
         },
-        pendingRequestsBySession: new Map(),
+        pendingRequestsByPod: new Map(),
         logLevel: 'silent',
         prettyLog: false,
         onShutdown,
@@ -890,7 +890,7 @@ describe('Extended Route Tests', () => {
     it('returns 401 when no authorization header is provided', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions',
+        url: '/pods',
       });
       expect(res.statusCode).toBe(401);
     });

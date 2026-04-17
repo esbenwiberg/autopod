@@ -1,7 +1,7 @@
 import Foundation
 
 /// WebSocket adapter for interactive terminal I/O.
-/// Connects to WS /sessions/:id/terminal on the daemon.
+/// Connects to WS /pods/:id/terminal on the daemon.
 /// Binary frames for stdin/stdout, JSON control frames for resize.
 /// Auto-reconnects on unexpected disconnects with exponential backoff.
 public actor TerminalSocket {
@@ -33,7 +33,7 @@ public actor TerminalSocket {
 
   private let baseURL: URL
   private let token: String
-  private let session: URLSession
+  private let pod: URLSession
   private let onData: @Sendable (Data) -> Void
   private let onStateChange: @Sendable (State) -> Void
 
@@ -45,22 +45,22 @@ public actor TerminalSocket {
   ) {
     self.baseURL = baseURL
     self.token = token
-    self.session = URLSession.shared
+    self.pod = URLSession.shared
     self.onData = onData
     self.onStateChange = onStateChange
   }
 
   // MARK: - Connect
 
-  public func connect(sessionId: String, cols: Int, rows: Int) {
+  public func connect(podId: String, cols: Int, rows: Int) {
     cancelAll()
-    lastSessionId = sessionId
+    lastSessionId = podId
     lastCols = cols
     lastRows = rows
-    doConnect(sessionId: sessionId, cols: cols, rows: rows)
+    doConnect(podId: podId, cols: cols, rows: rows)
   }
 
-  private func doConnect(sessionId: String, cols: Int, rows: Int) {
+  private func doConnect(podId: String, cols: Int, rows: Int) {
     // Kill previous connection before opening a new one. Critical during
     // reconnect: scheduleReconnect() calls doConnect() without cancelAll(),
     // so without this cleanup the old WebSocket and receive loop stay alive,
@@ -76,7 +76,7 @@ public actor TerminalSocket {
     setState(.connecting)
 
     var components = URLComponents(
-      url: baseURL.appendingPathComponent("sessions/\(sessionId)/terminal"),
+      url: baseURL.appendingPathComponent("pods/\(podId)/terminal"),
       resolvingAgainstBaseURL: false
     )!
     components.queryItems = [
@@ -92,7 +92,7 @@ public actor TerminalSocket {
       return
     }
 
-    let ws = session.webSocketTask(with: url)
+    let ws = pod.webSocketTask(with: url)
     webSocketTask = ws
     ws.resume()
 
@@ -177,7 +177,7 @@ public actor TerminalSocket {
   }
 
   private func scheduleReconnect() {
-    guard let sessionId = lastSessionId else {
+    guard let podId = lastSessionId else {
       setState(.error("Connection lost"))
       return
     }
@@ -193,7 +193,7 @@ public actor TerminalSocket {
         guard !Task.isCancelled else { return }
         let cols = await self.lastCols
         let rows = await self.lastRows
-        await self.doConnect(sessionId: sessionId, cols: cols, rows: rows)
+        await self.doConnect(podId: podId, cols: cols, rows: rows)
         // Wait up to 3s for the connection to prove itself alive (first
         // successful receive flips state to .connected).
         for _ in 0..<6 {

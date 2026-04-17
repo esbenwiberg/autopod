@@ -2,7 +2,7 @@ import Foundation
 import AutopodClient
 import AutopodUI
 
-/// Bridges the WebSocket event stream into SessionStore updates.
+/// Bridges the WebSocket event stream into PodStore updates.
 /// Owns the EventSocket lifecycle and dispatches events.
 @Observable
 @MainActor
@@ -19,14 +19,14 @@ public final class EventStream {
   public private(set) var connectionState: String = "Disconnected"
   public private(set) var recentEvents: [AgentEvent] = []
 
-  /// Per-session event buffers (keyed by session ID)
+  /// Per-pod event buffers (keyed by pod ID)
   public private(set) var sessionEvents: [String: [AgentEvent]] = [:]
 
-  /// Load state for the historical REST fetch (keyed by session ID)
+  /// Load state for the historical REST fetch (keyed by pod ID)
   public private(set) var historicalLoadState: [String: HistoricalLoadState] = [:]
 
   private var eventSocket: EventSocket?
-  private let sessionStore: SessionStore
+  private let podStore: PodStore
   private weak var memoryStore: MemoryStore?
   private weak var scheduledJobStore: ScheduledJobStore?
   private var eventIdCounter = 0
@@ -42,11 +42,11 @@ public final class EventStream {
   // MARK: - Init
 
   public init(
-    sessionStore: SessionStore,
+    podStore: PodStore,
     memoryStore: MemoryStore? = nil,
     scheduledJobStore: ScheduledJobStore? = nil
   ) {
-    self.sessionStore = sessionStore
+    self.podStore = podStore
     self.memoryStore = memoryStore
     self.scheduledJobStore = scheduledJobStore
   }
@@ -88,37 +88,37 @@ public final class EventStream {
     connectionState = "Disconnected"
   }
 
-  /// Subscribe to a specific session's events (when detail panel opens)
-  public func subscribeToSession(_ sessionId: String) {
+  /// Subscribe to a specific pod's events (when detail panel opens)
+  public func subscribeToSession(_ podId: String) {
     Task {
-      await eventSocket?.subscribe(sessionId: sessionId)
+      await eventSocket?.subscribe(podId: podId)
     }
   }
 
-  /// Unsubscribe from a session (when navigating away)
-  public func unsubscribeFromSession(_ sessionId: String) {
+  /// Unsubscribe from a pod (when navigating away)
+  public func unsubscribeFromSession(_ podId: String) {
     Task {
-      await eventSocket?.unsubscribe(sessionId: sessionId)
+      await eventSocket?.unsubscribe(podId: podId)
     }
   }
 
-  /// Load historical agent events for a session from the daemon REST API.
+  /// Load historical agent events for a pod from the daemon REST API.
   /// Always refetches; reconciles by preserving any live (positive-ID) events
   /// already in the buffer so a stale partial WS buffer doesn't suppress the backfill.
-  public func loadHistoricalEvents(sessionId: String, api: DaemonAPI) {
-    historicalLoadState[sessionId] = .loading
+  public func loadHistoricalEvents(podId: String, api: DaemonAPI) {
+    historicalLoadState[podId] = .loading
     Task {
       do {
-        let events = try await api.getSessionEvents(sessionId)
+        let events = try await api.getSessionEvents(podId)
         let mapped = events.enumerated().map { (i, e) in
           // Use negative IDs so they never collide with the live eventIdCounter (which starts at 1)
           mapAgentEvent(e, id: -(events.count - i))
         }
-        let liveEvents = (sessionEvents[sessionId] ?? []).filter { $0.id > 0 }
-        sessionEvents[sessionId] = mapped + liveEvents
-        historicalLoadState[sessionId] = .loaded
+        let liveEvents = (sessionEvents[podId] ?? []).filter { $0.id > 0 }
+        sessionEvents[podId] = mapped + liveEvents
+        historicalLoadState[podId] = .loaded
       } catch {
-        historicalLoadState[sessionId] = .failed(error.localizedDescription)
+        historicalLoadState[podId] = .failed(error.localizedDescription)
       }
     }
   }
@@ -130,121 +130,121 @@ public final class EventStream {
 
     switch event {
     case .sessionCreated(let summary):
-      // Refresh from REST to get full session data
-      Task { await sessionStore.refreshSession(summary.id) }
-      // If refresh fails, at least show the session exists
+      // Refresh from REST to get full pod data
+      Task { await podStore.refreshSession(summary.id) }
+      // If refresh fails, at least show the pod exists
       // (refreshSession handles the upsert)
 
-    case .statusChanged(let sessionId, _, let newStatus):
-      if let status = SessionStatus(rawValue: newStatus) {
-        sessionStore.updateStatus(sessionId, to: status)
+    case .statusChanged(let podId, _, let newStatus):
+      if let status = PodStatus(rawValue: newStatus) {
+        podStore.updateStatus(podId, to: status)
       }
       // Full refresh to pick up any other changed fields
-      Task { await sessionStore.refreshSession(sessionId) }
+      Task { await podStore.refreshSession(podId) }
       // Reload diff when entering states that imply code changes exist
       let diffStates: Set<String> = ["validating", "validated", "approved", "merging", "complete"]
       if diffStates.contains(newStatus) {
-        Task { await sessionStore.loadDiff(sessionId) }
+        Task { await podStore.loadDiff(podId) }
       }
 
-    case .agentActivity(let sessionId, let agentEvent):
-      handleAgentActivity(sessionId: sessionId, event: agentEvent)
+    case .agentActivity(let podId, let agentEvent):
+      handleAgentActivity(podId: podId, event: agentEvent)
 
-    case .validationStarted(let sessionId, let attempt):
-      sessionStore.updateStatus(sessionId, to: .validating)
-      sessionStore.initValidationProgress(sessionId, attempt: attempt)
+    case .validationStarted(let podId, let attempt):
+      podStore.updateStatus(podId, to: .validating)
+      podStore.initValidationProgress(podId, attempt: attempt)
 
-    case .validationPhaseStarted(let sessionId, let phase):
-      sessionStore.markValidationPhaseStarted(sessionId, phase: phase)
+    case .validationPhaseStarted(let podId, let phase):
+      podStore.markValidationPhaseStarted(podId, phase: phase)
 
-    case .validationPhaseCompleted(let sessionId, let phase, let result):
-      sessionStore.markValidationPhaseCompleted(sessionId, phase: phase, result: result)
+    case .validationPhaseCompleted(let podId, let phase, let result):
+      podStore.markValidationPhaseCompleted(podId, phase: phase, result: result)
 
-    case .validationCompleted(let sessionId, let result):
+    case .validationCompleted(let podId, let result):
       let passed = result.overall == "pass"
       let checks = ValidationChecks(
         smoke: result.smoke.status == "pass",
-        tests: SessionMapper.mapTriState(result.test?.status),
-        review: SessionMapper.mapTriState(result.taskReview?.status),
+        tests: PodMapper.mapTriState(result.test?.status),
+        review: PodMapper.mapTriState(result.taskReview?.status),
         reviewSkipReason: result.reviewSkipReason
       )
-      sessionStore.setValidationChecks(sessionId, checks: checks)
+      podStore.setValidationChecks(podId, checks: checks)
       // Notification
-      if let session = sessionStore.sessions.first(where: { $0.id == sessionId }) {
-        NotificationService.shared.notifyValidationComplete(session: session, passed: passed)
+      if let pod = podStore.pods.first(where: { $0.id == podId }) {
+        NotificationService.shared.notifyValidationComplete(pod: pod, passed: passed)
       }
       // Full refresh for status change + reload diff (now available post-validation)
-      Task { await sessionStore.refreshSession(sessionId) }
-      Task { await sessionStore.loadDiff(sessionId) }
+      Task { await podStore.refreshSession(podId) }
+      Task { await podStore.loadDiff(podId) }
 
-    case .escalationCreated(let sessionId, let escalation):
+    case .escalationCreated(let podId, let escalation):
       let question = escalation.payload.question ?? escalation.payload.description ?? "Input needed"
       let options: [String]? = {
         guard let opts = escalation.payload.options, !opts.isEmpty else { return nil }
         return opts
       }()
-      sessionStore.setEscalation(sessionId, question: question, options: options)
-      sessionStore.updateStatus(sessionId, to: .awaitingInput)
+      podStore.setEscalation(podId, question: question, options: options)
+      podStore.updateStatus(podId, to: .awaitingInput)
       // Notification
-      if let session = sessionStore.sessions.first(where: { $0.id == sessionId }) {
-        NotificationService.shared.notifyEscalation(session: session, question: question)
+      if let pod = podStore.pods.first(where: { $0.id == podId }) {
+        NotificationService.shared.notifyEscalation(pod: pod, question: question)
       }
 
-    case .escalationResolved(let sessionId, _):
-      sessionStore.setEscalation(sessionId, question: nil)
-      sessionStore.updateStatus(sessionId, to: .running)
+    case .escalationResolved(let podId, _):
+      podStore.setEscalation(podId, question: nil)
+      podStore.updateStatus(podId, to: .running)
 
-    case .sessionCompleted(let sessionId, let finalStatus, _):
-      if let status = SessionStatus(rawValue: finalStatus) {
-        sessionStore.updateStatus(sessionId, to: status)
+    case .sessionCompleted(let podId, let finalStatus, _):
+      if let status = PodStatus(rawValue: finalStatus) {
+        podStore.updateStatus(podId, to: status)
       }
       // Notification
-      if let session = sessionStore.sessions.first(where: { $0.id == sessionId }) {
+      if let pod = podStore.pods.first(where: { $0.id == podId }) {
         if finalStatus == "complete" {
-          NotificationService.shared.notifySessionComplete(session: session)
+          NotificationService.shared.notifySessionComplete(pod: pod)
         }
       }
       // Full refresh for final state
-      Task { await sessionStore.refreshSession(sessionId) }
+      Task { await podStore.refreshSession(podId) }
 
     case .memorySuggestionCreated(_, let entry):
       memoryStore?.handleSuggestionCreated(entry)
 
-    case .validationOverrideQueued(let sessionId, _):
-      // Refresh session so pending overrides count updates in the UI
-      Task { await sessionStore.refreshSession(sessionId) }
+    case .validationOverrideQueued(let podId, _):
+      // Refresh pod so pending overrides count updates in the UI
+      Task { await podStore.refreshSession(podId) }
 
     case .scheduledJobCatchupRequested(let jobId, let jobName, let lastRunAt):
       scheduledJobStore?.markCatchupPending(jobId)
       NotificationService.shared.notifyMissedJob(jobId: jobId, jobName: jobName, lastRunAt: lastRunAt)
 
-    case .scheduledJobFired(let jobId, _, let sessionId):
+    case .scheduledJobFired(let jobId, _, let podId):
       Task { await scheduledJobStore?.refreshJob(jobId) }
-      Task { await sessionStore.refreshSession(sessionId) }
+      Task { await podStore.refreshSession(podId) }
     }
   }
 
-  private func handleAgentActivity(sessionId: String, event: AgentEventResponse) {
+  private func handleAgentActivity(podId: String, event: AgentEventResponse) {
     // Build UI-level AgentEvent
     eventIdCounter += 1
     let uiEvent = mapAgentEvent(event, id: eventIdCounter)
 
     // Buffer events for throttled flush (avoids per-event @Observable mutations)
     pendingGlobalEvents.append(uiEvent)
-    pendingSessionEvents.append((sessionId, uiEvent))
+    pendingSessionEvents.append((podId, uiEvent))
     scheduleFlush()
 
     // Update card activity with human-readable summary for overview-worthy events only
     if uiEvent.type.isOverviewWorthy {
-      sessionStore.updateActivity(sessionId, activity: uiEvent.summary)
+      podStore.updateActivity(podId, activity: uiEvent.summary)
     }
 
-    // Update session fields based on event type
+    // Update pod fields based on event type
     switch event.type {
     case "plan":
       if let summary = event.summary {
-        sessionStore.updatePlan(
-          sessionId,
+        podStore.updatePlan(
+          podId,
           plan: SessionPlan(summary: summary, steps: event.steps ?? [])
         )
       }
@@ -252,15 +252,15 @@ public final class EventStream {
     case "progress":
       if let current = event.currentPhase, let total = event.totalPhases,
          let desc = event.description {
-        sessionStore.updatePhase(
-          sessionId,
+        podStore.updatePhase(
+          podId,
           phase: PhaseProgress(current: current, total: total, description: desc)
         )
       }
 
     case "error":
       if let msg = event.message {
-        sessionStore.setError(sessionId, summary: msg)
+        podStore.setError(podId, summary: msg)
       }
 
     case "task_summary":
@@ -268,8 +268,8 @@ public final class EventStream {
         let deviations = (event.deviations ?? []).map {
           DeviationItem(step: $0.step, planned: $0.planned, actual: $0.actual, reason: $0.reason)
         }
-        sessionStore.updateTaskSummary(
-          sessionId,
+        podStore.updateTaskSummary(
+          podId,
           summary: TaskSummary(actualSummary: actualSummary, deviations: deviations)
         )
       }
@@ -277,7 +277,7 @@ public final class EventStream {
     case "complete":
       if let input = event.totalInputTokens, let output = event.totalOutputTokens,
          let cost = event.costUsd {
-        sessionStore.updateTokens(sessionId, input: input, output: output, cost: cost)
+        podStore.updateTokens(podId, input: input, output: output, cost: cost)
       }
 
     default:
@@ -305,14 +305,14 @@ public final class EventStream {
       recentEvents.removeFirst(recentEvents.count - Self.globalEventCap)
     }
 
-    // Batch-apply per-session events
-    for (sessionId, event) in pendingSessionEvents {
-      var buffer = sessionEvents[sessionId, default: []]
+    // Batch-apply per-pod events
+    for (podId, event) in pendingSessionEvents {
+      var buffer = sessionEvents[podId, default: []]
       buffer.append(event)
       if buffer.count > Self.sessionEventCap {
         buffer.removeFirst(buffer.count - Self.sessionEventCap)
       }
-      sessionEvents[sessionId] = buffer
+      sessionEvents[podId] = buffer
     }
 
     pendingGlobalEvents.removeAll()
@@ -325,7 +325,7 @@ public final class EventStream {
     if type == .toolUse && response.tool == "tool_result" {
       type = .toolResult
     }
-    let date = SessionMapper.parseDate(response.timestamp)
+    let date = PodMapper.parseDate(response.timestamp)
 
     let summary: String = {
       switch response.type {

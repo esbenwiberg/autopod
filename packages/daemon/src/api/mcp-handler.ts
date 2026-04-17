@@ -1,70 +1,70 @@
-import type { SessionBridge } from '@autopod/escalation-mcp';
+import type { PodBridge } from '@autopod/escalation-mcp';
 import { type PendingRequests, createEscalationMcpServer } from '@autopod/escalation-mcp';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
-import type { SessionTokenIssuer } from '../crypto/session-tokens.js';
+import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 
 export function mcpHandler(
   app: FastifyInstance,
-  bridge: SessionBridge,
-  pendingRequestsBySession: Map<string, PendingRequests>,
+  bridge: PodBridge,
+  pendingRequestsByPod: Map<string, PendingRequests>,
   logger: Logger,
-  sessionTokenIssuer?: SessionTokenIssuer,
+  sessionTokenIssuer?: PodTokenIssuer,
 ): void {
-  // Only pendingRequests is stored per session — the McpServer is created fresh per
+  // Only pendingRequests is stored per pod — the McpServer is created fresh per
   // HTTP request to avoid the "Already connected to a transport" error from the MCP SDK,
   // which caches the transport reference on the server instance and does not reset it
   // when the transport is closed.
   const pendingRequestsPerSession = new Map<string, PendingRequests>();
 
-  function getOrCreatePendingRequests(sessionId: string): PendingRequests {
-    let pendingRequests = pendingRequestsPerSession.get(sessionId);
+  function getOrCreatePendingRequests(podId: string): PendingRequests {
+    let pendingRequests = pendingRequestsPerSession.get(podId);
     if (pendingRequests) return pendingRequests;
 
     const { pendingRequests: created } = createEscalationMcpServer({
-      sessionId,
+      podId,
       bridge,
-      availableActions: bridge.getAvailableActions(sessionId),
+      availableActions: bridge.getAvailableActions(podId),
     });
 
     pendingRequests = created;
-    pendingRequestsPerSession.set(sessionId, pendingRequests);
-    pendingRequestsBySession.set(sessionId, pendingRequests);
+    pendingRequestsPerSession.set(podId, pendingRequests);
+    pendingRequestsByPod.set(podId, pendingRequests);
     return pendingRequests;
   }
 
-  // Handle all MCP requests at /mcp/:sessionId
+  // Handle all MCP requests at /mcp/:podId
   // A fresh McpServer + transport is created per request so the server instance is
   // never in an "already connected" state. The pendingRequests object is reused across
   // requests to preserve in-flight ask_human / report_blocker state.
   //
-  // The endpoint always requires a session-scoped Bearer token (HMAC, injected into
+  // The endpoint always requires a pod-scoped Bearer token (HMAC, injected into
   // the container environment during provisioning). This prevents any caller who
-  // knows a sessionId from invoking escalation tools for sessions they don't own.
+  // knows a podId from invoking escalation tools for pods they don't own.
   //
   // If sessionTokenIssuer is absent, the auth plugin falls through to user-token
   // verification — so requests still fail closed when neither credential is valid.
   if (!sessionTokenIssuer) {
     logger.warn(
-      'mcpHandler: sessionTokenIssuer not configured — /mcp/:sessionId will only accept user tokens',
+      'mcpHandler: sessionTokenIssuer not configured — /mcp/:podId will only accept user tokens',
     );
   }
-  app.all('/mcp/:sessionId', { config: { auth: 'session-token' } }, async (request, reply) => {
-    const { sessionId } = request.params as { sessionId: string };
+  app.all('/mcp/:podId', { config: { auth: 'pod-token' } }, async (request, reply) => {
+    const { podId } = request.params as { podId: string };
 
     let pendingRequests: PendingRequests;
     try {
-      pendingRequests = getOrCreatePendingRequests(sessionId);
+      pendingRequests = getOrCreatePendingRequests(podId);
     } catch (err) {
-      logger.error({ err, sessionId }, 'Failed to create MCP session');
+      logger.error({ err, podId }, 'Failed to create MCP pod');
       reply.status(500).send({ error: 'MCP_SESSION_ERROR', message: String(err) });
       return;
     }
 
-    const availableActions = bridge.getAvailableActions(sessionId);
+    const availableActions = bridge.getAvailableActions(podId);
     const { server } = createEscalationMcpServer({
-      sessionId,
+      podId,
       bridge,
       availableActions,
       pendingRequests,
@@ -74,7 +74,7 @@ export function mcpHandler(
     try {
       await server.connect(transport);
     } catch (err) {
-      logger.error({ err, sessionId }, 'Failed to connect MCP transport');
+      logger.error({ err, podId }, 'Failed to connect MCP transport');
       reply.status(500).send({ error: 'MCP_CONNECT_ERROR', message: String(err) });
       return;
     }
@@ -85,10 +85,10 @@ export function mcpHandler(
       reply.hijack();
       await transport.handleRequest(request.raw, reply.raw, request.body);
     } catch (err) {
-      logger.error({ err, sessionId }, 'MCP handleRequest error');
+      logger.error({ err, podId }, 'MCP handleRequest error');
     } finally {
       await transport.close().catch((err) => {
-        logger.debug({ err, sessionId }, 'MCP transport close error (non-fatal)');
+        logger.debug({ err, podId }, 'MCP transport close error (non-fatal)');
       });
     }
   });

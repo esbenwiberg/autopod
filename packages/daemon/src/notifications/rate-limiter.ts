@@ -15,9 +15,9 @@ const DEFAULT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const DEFAULT_COOLDOWN_MS = 30 * 1000; // 30 seconds
 
 export interface RateLimiter {
-  canSend(sessionId: string): { allowed: boolean; reason?: string };
-  recordSent(sessionId: string): void;
-  reset(sessionId: string): void;
+  canSend(podId: string): { allowed: boolean; reason?: string };
+  recordSent(podId: string): void;
+  reset(podId: string): void;
 }
 
 export function createRateLimiter(options?: RateLimiterOptions): RateLimiter {
@@ -27,13 +27,13 @@ export function createRateLimiter(options?: RateLimiterOptions): RateLimiter {
 
   const states = new Map<string, SessionRateState>();
 
-  function getState(sessionId: string): SessionRateState {
+  function getState(podId: string): SessionRateState {
     const now = Date.now();
-    let state = states.get(sessionId);
+    let state = states.get(podId);
 
     if (!state) {
       state = { count: 0, windowStart: now, lastSentAt: 0 };
-      states.set(sessionId, state);
+      states.set(podId, state);
       return state;
     }
 
@@ -47,9 +47,9 @@ export function createRateLimiter(options?: RateLimiterOptions): RateLimiter {
   }
 
   return {
-    canSend(sessionId: string): { allowed: boolean; reason?: string } {
+    canSend(podId: string): { allowed: boolean; reason?: string } {
       const now = Date.now();
-      const state = getState(sessionId);
+      const state = getState(podId);
 
       if (state.count >= maxPerSession) {
         return {
@@ -69,14 +69,14 @@ export function createRateLimiter(options?: RateLimiterOptions): RateLimiter {
       return { allowed: true };
     },
 
-    recordSent(sessionId: string): void {
-      const state = getState(sessionId);
+    recordSent(podId: string): void {
+      const state = getState(podId);
       state.count++;
       state.lastSentAt = Date.now();
     },
 
-    reset(sessionId: string): void {
-      states.delete(sessionId);
+    reset(podId: string): void {
+      states.delete(podId);
     },
   };
 }

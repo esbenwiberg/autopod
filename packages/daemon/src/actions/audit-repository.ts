@@ -3,14 +3,14 @@ import type Database from 'better-sqlite3';
 
 export interface ActionAuditRepository {
   insert(entry: Omit<ActionAuditEntry, 'id' | 'createdAt'>): void;
-  listBySession(sessionId: string, limit?: number): ActionAuditEntry[];
-  countBySession(sessionId: string): number;
+  listBySession(podId: string, limit?: number): ActionAuditEntry[];
+  countBySession(podId: string): number;
 }
 
 function rowToAuditEntry(row: Record<string, unknown>): ActionAuditEntry {
   return {
     id: row.id as number,
-    sessionId: row.session_id as string,
+    podId: row.pod_id as string,
     actionName: row.action_name as string,
     params: JSON.parse(row.params as string) as Record<string, unknown>,
     responseSummary: (row.response_summary as string) ?? null,
@@ -24,10 +24,10 @@ export function createActionAuditRepository(db: Database.Database): ActionAuditR
   return {
     insert(entry: Omit<ActionAuditEntry, 'id' | 'createdAt'>): void {
       db.prepare(
-        `INSERT INTO action_audit (session_id, action_name, params, response_summary, pii_detected, quarantine_score)
-         VALUES (@sessionId, @actionName, @params, @responseSummary, @piiDetected, @quarantineScore)`,
+        `INSERT INTO action_audit (pod_id, action_name, params, response_summary, pii_detected, quarantine_score)
+         VALUES (@podId, @actionName, @params, @responseSummary, @piiDetected, @quarantineScore)`,
       ).run({
-        sessionId: entry.sessionId,
+        podId: entry.podId,
         actionName: entry.actionName,
         params: JSON.stringify(entry.params),
         responseSummary: entry.responseSummary,
@@ -36,19 +36,19 @@ export function createActionAuditRepository(db: Database.Database): ActionAuditR
       });
     },
 
-    listBySession(sessionId: string, limit = 50): ActionAuditEntry[] {
+    listBySession(podId: string, limit = 50): ActionAuditEntry[] {
       const rows = db
         .prepare(
-          'SELECT * FROM action_audit WHERE session_id = @sessionId ORDER BY created_at DESC LIMIT @limit',
+          'SELECT * FROM action_audit WHERE pod_id = @podId ORDER BY created_at DESC LIMIT @limit',
         )
-        .all({ sessionId, limit }) as Record<string, unknown>[];
+        .all({ podId, limit }) as Record<string, unknown>[];
       return rows.map(rowToAuditEntry);
     },
 
-    countBySession(sessionId: string): number {
+    countBySession(podId: string): number {
       const row = db
-        .prepare('SELECT COUNT(*) as count FROM action_audit WHERE session_id = @sessionId')
-        .get({ sessionId }) as { count: number };
+        .prepare('SELECT COUNT(*) as count FROM action_audit WHERE pod_id = @podId')
+        .get({ podId }) as { count: number };
       return row.count;
     },
   };

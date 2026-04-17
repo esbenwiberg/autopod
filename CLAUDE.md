@@ -39,11 +39,11 @@ daemon ← validator, escalation-mcp
 | Package | Purpose |
 |---------|---------|
 | `shared` | Types, errors, constants, sanitization. Zero heavy deps. |
-| `daemon` | Fastify server, session orchestration, SQLite, Docker/ACI container management |
+| `daemon` | Fastify server, pod orchestration, SQLite, Docker/ACI container management |
 | `cli` | Commander CLI |
 | `validator` | Playwright smoke test script generation + result parsing (types only — execution lives in daemon) |
 | `escalation-mcp` | MCP server injected into agent containers for escalation, actions, and browser self-validation |
-| `desktop` | macOS native app (Swift/Xcode) for session monitoring and management |
+| `desktop` | macOS native app (Swift/Xcode) for pod monitoring and management |
 
 ## Package Details
 
@@ -52,7 +52,7 @@ daemon ← validator, escalation-mcp
 Zero-dependency package providing the type backbone for the entire system.
 
 **Types** (`src/types/`):
-- `session.ts` — `SessionStatus`, `Session`, `CreateSessionRequest`, workspace pod types
+- `pod.ts` — `PodStatus`, `Pod`, `CreatePodRequest`, workspace pod types
 - `profile.ts` — `Profile`, `StackTemplate`, `ExecutionTarget` (docker/aci), `NetworkPolicy`, `PrivateRegistry`
 - `runtime.ts` — `RuntimeType` (claude/codex/copilot), `AgentEvent` union types for streaming
 - `actions.ts` — Action definitions (`ActionDefinition`, `AuditEntry`) and audit trail types
@@ -64,18 +64,18 @@ Zero-dependency package providing the type backbone for the entire system.
 - `model-provider.ts` — Credential shapes for Anthropic, Max, Foundry
 
 **Key exports**:
-- `src/errors.ts` — `AutopodError`, `AuthError`, `SessionNotFoundError`, etc.
-- `src/constants.ts` — `SESSION_ID_LENGTH=8`, `CONTAINER_USER='autopod'`, `VALID_STATUS_TRANSITIONS`
+- `src/errors.ts` — `AutopodError`, `AuthError`, `PodNotFoundError`, etc.
+- `src/constants.ts` — `POD_ID_LENGTH=8`, `CONTAINER_USER='autopod'`, `VALID_STATUS_TRANSITIONS`
 - `src/sanitize/` — PII/injection pattern detection and quarantine (processor, patterns, quarantine)
 
 ### @autopod/daemon
 
 The backend server (~176 TS/SQL files). All heavy lifting lives here.
 
-**Session Management** (`src/sessions/`):
-- `session-manager.ts` — Central orchestrator, `processSession()` loop (~2000 lines)
+**Pod Management** (`src/pods/`):
+- `pod-manager.ts` — Central orchestrator, `processPod()` loop (~2000 lines)
 - `state-machine.ts` — `validateTransition()`, enforces allowed state transitions
-- `session-repository.ts` — SQLite-backed CRUD for sessions
+- `pod-repository.ts` — SQLite-backed CRUD for pods
 - `event-bus.ts` — Event publish/subscribe for WebSocket streaming
 - `escalation-repository.ts` — Tracks in-flight and resolved escalations
 - `validation-repository.ts` — Stores smoke/build/review results
@@ -103,7 +103,7 @@ The backend server (~176 TS/SQL files). All heavy lifting lives here.
 
 **API & Routes** (`src/api/`):
 - `server.ts` — Fastify app factory (registers plugins + routes)
-- `routes/sessions.ts` — Create, list, get, update sessions
+- `routes/pods.ts` — Create, list, get, update pods
 - `routes/profiles.ts` — Profile CRUD
 - `routes/health.ts` — `GET /health`, `GET /version`
 - `routes/diff.ts` — Git diff retrieval
@@ -128,14 +128,14 @@ The backend server (~176 TS/SQL files). All heavy lifting lives here.
 - `local-worktree-manager.ts` — Git worktree operations (create, checkout, push)
 - `pr-manager.ts` — `GitHubApiPrManager` — creates + merges GitHub PRs
 - `ado-pr-manager.ts` — Azure DevOps PR management
-- `pr-body-builder.ts` — Generates PR description from session + validation data
+- `pr-body-builder.ts` — Generates PR description from pod + validation data
 
 **Validation** (`src/validation/`):
 - `local-validation-engine.ts` — Orchestrates Playwright smoke tests inside containers
 
 **Security** (`src/crypto/`):
 - `credentials-cipher.ts` — AES-256 encryption for stored credentials
-- `session-tokens.ts` — HMAC-based session token issuance + validation
+- `pod-tokens.ts` — HMAC-based pod token issuance + validation
 
 **Images** (`src/images/`):
 - `dockerfile-generator.ts` — Dynamic Dockerfile generation per profile/stack
@@ -154,7 +154,7 @@ Commander-based CLI.
 
 **Commands** (`src/commands/`):
 - `auth.ts` — Login/logout via MSAL (Azure AD)
-- `session.ts` — Create, list, inspect, kill sessions
+- `pod.ts` — Create, list, inspect, kill pods
 - `profile.ts` — Profile CRUD
 - `daemon.ts` — Health check + version
 - `workspace.ts` — Workspace pod operations
@@ -185,8 +185,8 @@ MCP server injected into agent containers. Provides tools for agents to interact
 
 **Key files**:
 - `src/server.ts` — `createEscalationMcpServer()` factory
-- `src/session-bridge.ts` — `SessionBridge` interface (links MCP to daemon internals)
-- `src/session-bridge-impl.ts` — Bridge implementation
+- `src/pod-bridge.ts` — `PodBridge` interface (links MCP to daemon internals)
+- `src/pod-bridge-impl.ts` — Bridge implementation
 - `src/pending-requests.ts` — Async escalation request tracking
 
 ### @autopod/validator
@@ -198,7 +198,7 @@ Thin package for Playwright test script generation and result parsing. Execution
 
 ### packages/desktop
 
-macOS native app (Swift/Xcode) for session monitoring and management. Not part of the pnpm workspace — build with Xcode or `xcodebuild`.
+macOS native app (Swift/Xcode) for pod monitoring and management. Not part of the pnpm workspace — build with Xcode or `xcodebuild`.
 
 ## Build System
 
@@ -218,14 +218,14 @@ macOS native app (Swift/Xcode) for session monitoring and management. Not part o
 - `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`
 - Each package extends the base config with its own paths
 
-## Session Lifecycle (the core flow)
+## Pod Lifecycle (the core flow)
 
 ```
 queued → provisioning → running → validating → validated → approved → merging → complete
                                      ↓                        ↓             ↓
                                    failed ←──── retry ────── rejected  merge_pending
                                                                              ↓
-                                                                   fix session spawned on CI failure
+                                                                   fix pod spawned on CI failure
                                                                    or CHANGES_REQUESTED review comments
                                                                    (up to maxPrFixAttempts, default 3)
 
@@ -238,14 +238,14 @@ queued → provisioning → running (interactive — no agent) → complete (aut
 ```
 
 Key code paths:
-- `packages/daemon/src/sessions/session-manager.ts:processSession()` — main orchestration loop
-- `packages/daemon/src/sessions/session-manager.ts:startMergePolling()` — polls PR status every 60s; spawns fix sessions on actionable failures via `maybeSpawnFixSession()`
+- `packages/daemon/src/pods/pod-manager.ts:processPod()` — main orchestration loop
+- `packages/daemon/src/pods/pod-manager.ts:startMergePolling()` — polls PR status every 60s; spawns fix pods on actionable failures via `maybeSpawnFixPod()`
 - `packages/daemon/src/containers/docker-container-manager.ts` — Docker operations
 - `packages/daemon/src/containers/docker-network-manager.ts` — network isolation + iptables
-- `packages/daemon/src/sessions/state-machine.ts` — transition validation
-- `packages/daemon/src/sessions/registry-injector.ts` — `.npmrc` / `NuGet.config` generation
-- `packages/daemon/src/sessions/skill-resolver.ts` — skill content resolution
-- `packages/daemon/src/sessions/system-instructions-generator.ts` — container CLAUDE.md builder
+- `packages/daemon/src/pods/state-machine.ts` — transition validation
+- `packages/daemon/src/pods/registry-injector.ts` — `.npmrc` / `NuGet.config` generation
+- `packages/daemon/src/pods/skill-resolver.ts` — skill content resolution
+- `packages/daemon/src/pods/system-instructions-generator.ts` — container CLAUDE.md builder
 
 ## Testing Patterns
 
@@ -260,7 +260,7 @@ When Docker is available, `scripts/docker-validate.sh` runs real container smoke
 
 ### Integration tests
 - `packages/daemon/src/integration.test.ts` — Fastify HTTP endpoints with `app.inject()`
-- `packages/daemon/src/sessions/session-lifecycle.e2e.test.ts` — full state machine traversal with mocked infra
+- `packages/daemon/src/pods/pod-lifecycle.e2e.test.ts` — full state machine traversal with mocked infra
 
 ### Runtime stream parser tests
 Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has a
@@ -279,7 +279,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `NODE_ENV` | — | yes (prod) | If `production`, auth is enforced |
 | `ENTRA_CLIENT_ID` | — | yes* | Azure AD app ID (*placeholders OK in dev) |
 | `ENTRA_TENANT_ID` | — | yes* | Azure AD tenant ID |
-| `MAX_CONCURRENCY` | `3` | no | Session queue concurrency |
+| `MAX_CONCURRENCY` | `3` | no | Pod queue concurrency |
 | `TEAMS_WEBHOOK_URL` | — | no | Teams notification webhook |
 | `ACR_REGISTRY_URL` | — | no | Azure Container Registry for image warming |
 | `AZURE_SUBSCRIPTION_ID` | — | no | Required for ACI execution target |
@@ -311,7 +311,7 @@ In dev mode (`NODE_ENV !== 'production'`), auth is stubbed to accept all tokens.
 ## Security Architecture
 
 - **Credential encryption** — AES-256 via `credentials-cipher.ts`; key stored at `~/.autopod/secrets.key`
-- **Session tokens** — HMAC-based short-lived tokens issued by `session-tokens.ts`
+- **Pod tokens** — HMAC-based short-lived tokens issued by `pod-tokens.ts`
 - **Network isolation** — iptables firewall per container (`docker-network-manager.ts`):
   - `allow-all` — unrestricted outbound
   - `deny-all` — no outbound

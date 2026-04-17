@@ -2,10 +2,10 @@ import type {
   AskHumanPayload,
   NotificationPayload,
   ReportBlockerPayload,
-  SessionErrorNotification,
-  SessionFailedNotification,
-  SessionNeedsInputNotification,
-  SessionValidatedNotification,
+  PodErrorNotification,
+  PodFailedNotification,
+  PodNeedsInputNotification,
+  PodValidatedNotification,
 } from '@autopod/shared';
 
 export interface AdaptiveCardElement {
@@ -102,17 +102,17 @@ function baseCard(body: AdaptiveCardElement[], actions?: AdaptiveCardAction[]): 
 
 // --- Card Builders ---
 
-export function buildValidatedCard(notification: SessionValidatedNotification): AdaptiveCard {
+export function buildValidatedCard(notification: PodValidatedNotification): AdaptiveCard {
   const facts = [
     { title: 'Profile', value: notification.profileName },
     { title: 'Duration', value: formatDuration(notification.duration) },
     { title: 'Files Changed', value: String(notification.filesChanged) },
     { title: 'Lines', value: `+${notification.linesAdded} / -${notification.linesRemoved}` },
-    { title: 'Session', value: notification.sessionId },
+    { title: 'Pod', value: notification.podId },
   ];
 
   const body: AdaptiveCardElement[] = [
-    headerBlock('Session Validated', 'good'),
+    headerBlock('Pod Validated', 'good'),
     taskTitle(notification),
     sessionFacts(facts),
   ];
@@ -136,8 +136,8 @@ export function buildValidatedCard(notification: SessionValidatedNotification): 
     }
   }
 
-  body.push(cliHint(`ap diff ${notification.sessionId}`));
-  body.push(cliHint(`ap approve ${notification.sessionId}`));
+  body.push(cliHint(`ap diff ${notification.podId}`));
+  body.push(cliHint(`ap approve ${notification.podId}`));
 
   const actions: AdaptiveCardAction[] = [];
   if (notification.prUrl) {
@@ -150,7 +150,7 @@ export function buildValidatedCard(notification: SessionValidatedNotification): 
   return baseCard(body, actions);
 }
 
-export function buildFailedCard(notification: SessionFailedNotification): AdaptiveCard {
+export function buildFailedCard(notification: PodFailedNotification): AdaptiveCard {
   const body: AdaptiveCardElement[] = [
     headerBlock('Validation Failed', 'attention'),
     taskTitle(notification),
@@ -167,17 +167,17 @@ export function buildFailedCard(notification: SessionFailedNotification): Adapti
       sessionFacts([
         { title: 'Attempt', value: String(notification.validationResult.attempt) },
         { title: 'Profile', value: notification.profileName },
-        { title: 'Session', value: notification.sessionId },
+        { title: 'Pod', value: notification.podId },
       ]),
     );
   }
 
-  body.push(cliHint(`ap reject ${notification.sessionId}`));
+  body.push(cliHint(`ap reject ${notification.podId}`));
 
   return baseCard(body);
 }
 
-export function buildNeedsInputCard(notification: SessionNeedsInputNotification): AdaptiveCard {
+export function buildNeedsInputCard(notification: PodNeedsInputNotification): AdaptiveCard {
   const escalation = notification.escalation;
   const body: AdaptiveCardElement[] = [
     headerBlock('Human Input Needed', 'warning'),
@@ -220,19 +220,19 @@ export function buildNeedsInputCard(notification: SessionNeedsInputNotification)
   body.push(
     sessionFacts([
       { title: 'Profile', value: notification.profileName },
-      { title: 'Session', value: notification.sessionId },
+      { title: 'Pod', value: notification.podId },
       { title: 'Type', value: escalation.type },
     ]),
   );
 
-  body.push(cliHint(`ap tell ${notification.sessionId} "<response>"`));
+  body.push(cliHint(`ap tell ${notification.podId} "<response>"`));
 
   return baseCard(body);
 }
 
-export function buildErrorCard(notification: SessionErrorNotification): AdaptiveCard {
+export function buildErrorCard(notification: PodErrorNotification): AdaptiveCard {
   const body: AdaptiveCardElement[] = [
-    headerBlock(notification.fatal ? 'Fatal Error' : 'Session Error', 'attention'),
+    headerBlock(notification.fatal ? 'Fatal Error' : 'Pod Error', 'attention'),
     taskTitle(notification),
     {
       type: 'TextBlock',
@@ -242,7 +242,7 @@ export function buildErrorCard(notification: SessionErrorNotification): Adaptive
     },
     sessionFacts([
       { title: 'Profile', value: notification.profileName },
-      { title: 'Session', value: notification.sessionId },
+      { title: 'Pod', value: notification.podId },
       { title: 'Fatal', value: notification.fatal ? 'Yes' : 'No' },
     ]),
   ];

@@ -9,9 +9,9 @@ export interface CreatePrConfig {
   branch: string;
   /** Target branch to merge into (--base) */
   baseBranch: string;
-  /** Session ID for reference */
-  sessionId: string;
-  /** Task description from the session */
+  /** Pod ID for reference */
+  podId: string;
+  /** Task description from the pod */
   task: string;
   /** Profile name */
   profileName: string;

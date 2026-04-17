@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Terminal tab — real xterm-compatible terminal via SwiftTerm.
 public struct TerminalTab: View {
-  public let session: Session
+  public let pod: Pod
   public var terminalState: String
   public var dataPipe: TerminalDataPipe?
   public var onSendData: (([UInt8]) -> Void)?
@@ -12,7 +12,7 @@ public struct TerminalTab: View {
   public var isSelected: Bool
 
   public init(
-    session: Session,
+    pod: Pod,
     terminalState: String = "disconnected",
     dataPipe: TerminalDataPipe? = nil,
     onSendData: (([UInt8]) -> Void)? = nil,
@@ -21,7 +21,7 @@ public struct TerminalTab: View {
     onDisconnect: (() -> Void)? = nil,
     isSelected: Bool = false
   ) {
-    self.session = session
+    self.pod = pod
     self.terminalState = terminalState
     self.dataPipe = dataPipe
     self.onSendData = onSendData
@@ -32,7 +32,7 @@ public struct TerminalTab: View {
   }
 
   private var isActive: Bool {
-    session.status == .running || session.status == .paused || session.status == .awaitingInput
+    pod.status == .running || pod.status == .paused || pod.status == .awaitingInput
   }
 
   private var isConnected: Bool { terminalState == "connected" }
@@ -94,7 +94,7 @@ public struct TerminalTab: View {
         Text("Container not running")
           .font(.subheadline)
           .foregroundStyle(.secondary)
-        Text("Terminal is available for running sessions only")
+        Text("Terminal is available for running pods only")
           .font(.caption)
           .foregroundStyle(.tertiary)
       }
@@ -143,6 +143,6 @@ public struct TerminalTab: View {
 }
 
 #Preview("Terminal — not running") {
-  TerminalTab(session: MockData.complete, isSelected: true)
+  TerminalTab(pod: MockData.complete, isSelected: true)
     .frame(width: 500, height: 400)
 }

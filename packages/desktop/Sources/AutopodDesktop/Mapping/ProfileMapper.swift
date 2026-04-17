@@ -121,8 +121,8 @@ public enum ProfileMapper {
       },
       providerCredentialsType: response.providerCredentials?.provider,
       version: response.version,
-      createdAt: SessionMapper.parseDate(response.createdAt),
-      updatedAt: SessionMapper.parseDate(response.updatedAt)
+      createdAt: PodMapper.parseDate(response.createdAt),
+      updatedAt: PodMapper.parseDate(response.updatedAt)
     )
   }
 

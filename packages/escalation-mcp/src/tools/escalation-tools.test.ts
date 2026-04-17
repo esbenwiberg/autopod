@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PendingRequests } from '../pending-requests.js';
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 import { askAi } from './ask-ai.js';
 import { askHuman } from './ask-human.js';
 import { checkMessages } from './check-messages.js';
@@ -12,7 +12,7 @@ import { reportProgress } from './report-progress.js';
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function makeBridge(overrides: Partial<SessionBridge> = {}): SessionBridge {
+function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
   return {
     createEscalation: vi.fn(),
     resolveEscalation: vi.fn(),
@@ -60,7 +60,7 @@ describe('askAi', () => {
 
     expect(bridge.createEscalation).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         type: 'ask_ai',
         payload: expect.objectContaining({
           question: 'Help me',
@@ -160,7 +160,7 @@ describe('askHuman', () => {
 
     expect(bridge.createEscalation).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         type: 'ask_human',
         payload: expect.objectContaining({
           question: 'What next?',
@@ -295,7 +295,7 @@ describe('reportBlocker', () => {
 
     expect(bridge.createEscalation).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         type: 'report_blocker',
         payload: expect.objectContaining({ description: 'Stuck' }),
       }),
@@ -406,11 +406,11 @@ describe('checkMessages', () => {
     expect(parsed.message).toBe('please stop');
   });
 
-  it('calls consumeMessages with the session ID', async () => {
+  it('calls consumeMessages with the pod ID', async () => {
     const bridge = makeBridge();
 
-    await checkMessages('my-session', bridge);
+    await checkMessages('my-pod', bridge);
 
-    expect(bridge.consumeMessages).toHaveBeenCalledWith('my-session');
+    expect(bridge.consumeMessages).toHaveBeenCalledWith('my-pod');
   });
 });

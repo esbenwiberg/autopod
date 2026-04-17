@@ -1,14 +1,14 @@
-import type { Session } from '@autopod/shared';
+import type { Pod } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../../interfaces/index.js';
-import type { ContainerManagerFactory, SessionManager } from '../../sessions/session-manager.js';
+import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 
 /**
  * WebSocket terminal endpoint — interactive shell into running containers.
  *
- * WS /sessions/:sessionId/terminal?token=<token>&cols=80&rows=24
+ * WS /pods/:podId/terminal?token=<token>&cols=80&rows=24
  *
  * - Auth via token query param (same as /events)
  * - Creates Docker exec with Tty: true, AttachStdin: true
@@ -18,21 +18,21 @@ import type { ContainerManagerFactory, SessionManager } from '../../sessions/ses
  */
 export function terminalRoutes(
   app: FastifyInstance,
-  sessionManager: SessionManager,
+  podManager: PodManager,
   containerManagerFactory: ContainerManagerFactory,
   authModule: AuthModule,
   docker: Dockerode,
 ): void {
-  // Track active terminal connections per session. Multiple simultaneous tmux
+  // Track active terminal connections per pod. Multiple simultaneous tmux
   // clients cause duplicated/amplified output — "last writer wins" evicts the
   // old connection when a new one arrives (the new one is the reconnect).
   const activeTerminals = new Map<string, WebSocket>();
 
   app.get(
-    '/sessions/:sessionId/terminal',
+    '/pods/:podId/terminal',
     { websocket: true, config: { auth: false } },
     (socket: WebSocket, request) => {
-      const { sessionId } = request.params as { sessionId: string };
+      const { podId } = request.params as { podId: string };
       const url = new URL(request.url, 'http://localhost');
       const token = url.searchParams.get('token');
       const cols = Number.parseInt(url.searchParams.get('cols') ?? '80', 10);
@@ -50,53 +50,53 @@ export function terminalRoutes(
         return;
       }
 
-      // Get session and container
-      let session: Session;
+      // Get pod and container
+      let pod: Pod;
       try {
-        session = sessionManager.getSession(sessionId);
+        pod = podManager.getSession(podId);
       } catch {
-        socket.close(4004, 'Session not found');
+        socket.close(4004, 'Pod not found');
         return;
       }
 
-      if (!session.containerId) {
-        socket.close(4004, 'No container for session');
+      if (!pod.containerId) {
+        socket.close(4004, 'No container for pod');
         return;
       }
 
       if (
-        session.status !== 'running' &&
-        session.status !== 'paused' &&
-        session.status !== 'awaiting_input'
+        pod.status !== 'running' &&
+        pod.status !== 'paused' &&
+        pod.status !== 'awaiting_input'
       ) {
-        socket.close(4004, `Container not active (status: ${session.status})`);
+        socket.close(4004, `Container not active (status: ${pod.status})`);
         return;
       }
 
-      const containerId = session.containerId;
+      const containerId = pod.containerId;
       const container = docker.getContainer(containerId);
 
-      // Evict any existing terminal connection for this session — two tmux
-      // clients on the same session cause output duplication / feedback loops.
-      const existing = activeTerminals.get(sessionId);
+      // Evict any existing terminal connection for this pod — two tmux
+      // clients on the same pod cause output duplication / feedback loops.
+      const existing = activeTerminals.get(podId);
       if (existing) {
-        request.log.info({ sessionId }, 'Evicting previous terminal connection');
+        request.log.info({ podId }, 'Evicting previous terminal connection');
         existing.close(4000, 'Superseded by new connection');
       }
-      activeTerminals.set(sessionId, socket);
+      activeTerminals.set(podId, socket);
 
       // Create exec with TTY
       const startTerminal = async () => {
         try {
-          // Use tmux if available — `new-session -A -s main` creates or reattaches
-          // to a persistent session named "main". This means WebSocket reconnects
+          // Use tmux if available — `new-pod -A -s main` creates or reattaches
+          // to a persistent pod named "main". This means WebSocket reconnects
           // pick up right where the user left off instead of losing shell state.
           // Falls back to plain bash if tmux isn't installed.
           const exec = await container.exec({
             Cmd: [
               '/bin/sh',
               '-c',
-              'command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s main \\; set -g mouse on || exec /bin/bash -l',
+              'command -v tmux >/dev/null 2>&1 && exec tmux new-pod -A -s main \\; set -g mouse on || exec /bin/bash -l',
             ],
             AttachStdin: true,
             AttachStdout: true,
@@ -129,7 +129,7 @@ export function terminalRoutes(
           });
 
           stream.on('error', (err: Error) => {
-            request.log.error({ err, sessionId }, 'Terminal stream error');
+            request.log.error({ err, podId }, 'Terminal stream error');
             socket.close(1011, 'Stream error');
           });
 
@@ -155,7 +155,7 @@ export function terminalRoutes(
                   const w = Math.max(1, Math.min(msg.cols, 500));
                   const h = Math.max(1, Math.min(msg.rows, 500));
                   exec.resize({ h, w }).catch((err: Error) => {
-                    request.log.warn({ err, sessionId }, 'Terminal resize failed');
+                    request.log.warn({ err, podId }, 'Terminal resize failed');
                   });
                   return;
                 }
@@ -172,8 +172,8 @@ export function terminalRoutes(
           socket.on('close', () => {
             // Only remove tracking if WE are still the active connection —
             // a late close from an evicted socket must not remove the new one.
-            if (activeTerminals.get(sessionId) === socket) {
-              activeTerminals.delete(sessionId);
+            if (activeTerminals.get(podId) === socket) {
+              activeTerminals.delete(podId);
             }
             // Client disconnected — kill the exec stream
             try {
@@ -187,12 +187,12 @@ export function terminalRoutes(
           });
 
           socket.on('error', (err: Error) => {
-            request.log.error({ err, sessionId }, 'Terminal WebSocket error');
+            request.log.error({ err, podId }, 'Terminal WebSocket error');
           });
 
-          request.log.info({ sessionId, containerId, cols, rows }, 'Terminal session started');
+          request.log.info({ podId, containerId, cols, rows }, 'Terminal pod started');
         } catch (err) {
-          request.log.error({ err, sessionId }, 'Failed to start terminal');
+          request.log.error({ err, podId }, 'Failed to start terminal');
           socket.close(1011, 'Failed to start terminal');
         }
       };

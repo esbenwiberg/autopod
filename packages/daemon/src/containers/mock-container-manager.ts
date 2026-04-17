@@ -15,6 +15,7 @@ export function createDevMockContainerManager(): ContainerManager {
     refreshFirewall: async () => {},
     writeFile: async () => {},
     readFile: async () => '',
+    extractDirectoryFromContainer: async () => {},
     getStatus: async () => 'running' as const,
     execInContainer: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
     execStreaming: async () => {

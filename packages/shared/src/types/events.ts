@@ -1,7 +1,7 @@
 import type { EscalationRequest, EscalationResponse } from './escalation.js';
 import type { MemoryEntry } from './memory.js';
+import type { PodStatus, PodSummary } from './pod.js';
 import type { AgentEvent } from './runtime.js';
-import type { SessionStatus, SessionSummary } from './session.js';
 import type {
   AcValidationResult,
   BuildResult,
@@ -15,8 +15,8 @@ import type {
 export type ValidationPhase = 'build' | 'test' | 'health' | 'pages' | 'ac' | 'review';
 
 export type SystemEvent =
-  | SessionCreatedEvent
-  | SessionStatusChangedEvent
+  | PodCreatedEvent
+  | PodStatusChangedEvent
   | AgentActivityEvent
   | ValidationStartedEvent
   | ValidationCompletedEvent
@@ -24,7 +24,7 @@ export type SystemEvent =
   | ValidationPhaseCompletedEvent
   | EscalationCreatedEvent
   | EscalationResolvedEvent
-  | SessionCompletedEvent
+  | PodCompletedEvent
   | MemorySuggestionCreatedEvent
   | ValidationOverrideQueuedEvent
   | TokenBudgetWarningEvent
@@ -35,52 +35,52 @@ export type SystemEvent =
   | IssueWatcherCompletedEvent
   | IssueWatcherErrorEvent;
 
-export interface SessionCreatedEvent {
-  type: 'session.created';
+export interface PodCreatedEvent {
+  type: 'pod.created';
   timestamp: string;
-  session: SessionSummary;
+  pod: PodSummary;
 }
 
-export interface SessionStatusChangedEvent {
-  type: 'session.status_changed';
+export interface PodStatusChangedEvent {
+  type: 'pod.status_changed';
   timestamp: string;
-  sessionId: string;
-  previousStatus: SessionStatus;
-  newStatus: SessionStatus;
+  podId: string;
+  previousStatus: PodStatus;
+  newStatus: PodStatus;
 }
 
 export interface AgentActivityEvent {
-  type: 'session.agent_activity';
+  type: 'pod.agent_activity';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   event: AgentEvent;
 }
 
 export interface ValidationStartedEvent {
-  type: 'session.validation_started';
+  type: 'pod.validation_started';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   attempt: number;
 }
 
 export interface ValidationCompletedEvent {
-  type: 'session.validation_completed';
+  type: 'pod.validation_completed';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   result: ValidationResult;
 }
 
 export interface ValidationPhaseStartedEvent {
-  type: 'session.validation_phase_started';
+  type: 'pod.validation_phase_started';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   phase: ValidationPhase;
 }
 
 export interface ValidationPhaseCompletedEvent {
-  type: 'session.validation_phase_completed';
+  type: 'pod.validation_phase_completed';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   phase: ValidationPhase;
   /** Phase outcome — separate from "status" to avoid JSON key collisions with other events */
   phaseStatus: 'pass' | 'fail' | 'skip';
@@ -99,55 +99,55 @@ export interface ValidationPhaseCompletedEvent {
 }
 
 export interface EscalationCreatedEvent {
-  type: 'session.escalation_created';
+  type: 'pod.escalation_created';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   escalation: EscalationRequest;
 }
 
 export interface EscalationResolvedEvent {
-  type: 'session.escalation_resolved';
+  type: 'pod.escalation_resolved';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   escalationId: string;
   response: EscalationResponse;
 }
 
-export interface SessionCompletedEvent {
-  type: 'session.completed';
+export interface PodCompletedEvent {
+  type: 'pod.completed';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   finalStatus: 'complete' | 'killed';
-  summary: SessionSummary;
+  summary: PodSummary;
 }
 
 export interface MemorySuggestionCreatedEvent {
   type: 'memory.suggestion_created';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   memoryEntry: MemoryEntry;
 }
 
 export interface ValidationOverrideQueuedEvent {
   type: 'validation.override_queued';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   override: ValidationOverride;
 }
 
 export interface TokenBudgetWarningEvent {
-  type: 'session.token_budget_warning';
+  type: 'pod.token_budget_warning';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   tokensUsed: number;
   tokenBudget: number;
   percentUsed: number;
 }
 
 export interface TokenBudgetExceededEvent {
-  type: 'session.token_budget_exceeded';
+  type: 'pod.token_budget_exceeded';
   timestamp: string;
-  sessionId: string;
+  podId: string;
   tokensUsed: number;
   tokenBudget: number;
   budgetExtensionsUsed: number;
@@ -167,7 +167,7 @@ export interface ScheduledJobFiredEvent {
   timestamp: string;
   jobId: string;
   jobName: string;
-  sessionId: string;
+  podId: string;
 }
 
 export interface IssueWatcherPickedUpEvent {
@@ -176,7 +176,7 @@ export interface IssueWatcherPickedUpEvent {
   profileName: string;
   issueUrl: string;
   issueTitle: string;
-  sessionId: string;
+  podId: string;
 }
 
 export interface IssueWatcherCompletedEvent {
@@ -184,7 +184,7 @@ export interface IssueWatcherCompletedEvent {
   timestamp: string;
   profileName: string;
   issueUrl: string;
-  sessionId: string;
+  podId: string;
   outcome: 'done' | 'failed';
 }
 

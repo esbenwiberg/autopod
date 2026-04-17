@@ -8,7 +8,7 @@ export type EscalationType =
 
 export interface EscalationRequest {
   id: string;
-  sessionId: string;
+  podId: string;
   type: EscalationType;
   timestamp: string;
   payload:

@@ -86,7 +86,7 @@ describe('healthRoutes', () => {
       healthRoutes(appWithDeps, {
         docker: mockDocker,
         db,
-        sessionQueue: mockQueue,
+        podQueue: mockQueue,
         maxConcurrency: 5,
       });
       await appWithDeps.ready();

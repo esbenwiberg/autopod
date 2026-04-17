@@ -347,7 +347,7 @@ public struct FeatureDetailPanelView: View {
         }
     }
 
-    // MARK: - Session state diagram
+    // MARK: - Pod state diagram
 
     private var sessionStateDiagram: some View {
         let mainFlow: [(String, String, Color)] = [
@@ -444,7 +444,7 @@ public struct FeatureDetailPanelView: View {
 
     private var runtimeStreamDiagram: some View {
         VStack(spacing: 6) {
-            runtimeRow("Claude", "NDJSON (stream-json)", "Session persist + resume", .blue)
+            runtimeRow("Claude", "NDJSON (stream-json)", "Pod persist + resume", .blue)
             runtimeRow("Codex", "JSONL (--json)", "Fresh spawn per resume", .cyan)
             runtimeRow("Copilot", "Plain text lines", "Re-spawn with correction", .gray)
         }
@@ -477,12 +477,12 @@ public struct FeatureDetailPanelView: View {
     private var monitoringEventDiagram: some View {
         VStack(spacing: 6) {
             let events: [(String, String, Color)] = [
-                ("plus.circle", "session.created", .green),
+                ("plus.circle", "pod.created", .green),
                 ("arrow.triangle.swap", "status_changed", .blue),
                 ("cpu", "agent_activity", .cyan),
                 ("checkmark.shield", "validation.*", .purple),
                 ("bubble.left.fill", "escalation.*", .orange),
-                ("flag.checkered", "session.completed", .green),
+                ("flag.checkered", "pod.completed", .green),
             ]
             FeatureFlowLayout(spacing: 4) {
                 ForEach(events, id: \.1) { icon, name, color in
@@ -512,9 +512,9 @@ public struct FeatureDetailPanelView: View {
     private var memoryStoreDiagram: some View {
         VStack(spacing: 6) {
             let scopes: [(String, String, String, Color)] = [
-                ("globe", "Global", "user.md · persists across all sessions", .mint),
-                ("person.fill", "Profile", "profile.md · shared across profile sessions", .teal),
-                ("doc.fill", "Session", "session.md · ephemeral, injected at start", .cyan),
+                ("globe", "Global", "user.md · persists across all pods", .mint),
+                ("person.fill", "Profile", "profile.md · shared across profile pods", .teal),
+                ("doc.fill", "Pod", "pod.md · ephemeral, injected at start", .cyan),
             ]
             ForEach(scopes, id: \.1) { icon, scope, detail, color in
                 HStack(spacing: 6) {

@@ -16,7 +16,7 @@ import { createGitHubHandler } from './handlers/github-handler.js';
 import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
 
 export interface ActionEngine {
-  /** Execute an action for a session */
+  /** Execute an action for a pod */
   execute(request: ActionRequest, policy: ActionPolicy): Promise<ActionResponse>;
   /** Get all available action definitions for a policy */
   getAvailableActions(policy: ActionPolicy): ActionDefinition[];
@@ -45,12 +45,12 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
 
   return {
     async execute(request: ActionRequest, policy: ActionPolicy): Promise<ActionResponse> {
-      const { sessionId, actionName, params } = request;
+      const { podId, actionName, params } = request;
 
       // 1. Resolve the action definition
       const action = registry.getAction(actionName, policy);
       if (!action) {
-        log.warn({ sessionId, actionName }, 'Action not found or not enabled');
+        log.warn({ podId, actionName }, 'Action not found or not enabled');
         return {
           success: false,
           error: `Action '${actionName}' not found or not enabled for this profile`,
@@ -79,7 +79,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
           // allowedResources is set but the action carries no repo/org identifier —
           // deny to prevent bypassing resource restrictions via resource-agnostic params.
           log.warn(
-            { sessionId, actionName },
+            { podId, actionName },
             'allowedResources set but action has no repo/org param — denying',
           );
           return {
@@ -124,10 +124,10 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
         rawData = await handler.execute(action, resolvedParams);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        log.error({ err, sessionId, actionName }, 'Action handler failed');
+        log.error({ err, podId, actionName }, 'Action handler failed');
 
         auditRepo.insert({
-          sessionId,
+          podId,
           actionName,
           params: sanitizeParamsForAudit(resolvedParams),
           responseSummary: `ERROR: ${message.slice(0, 200)}`,
@@ -157,7 +157,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
 
       // 7. Audit log
       auditRepo.insert({
-        sessionId,
+        podId,
         actionName,
         params: sanitizeParamsForAudit(resolvedParams),
         responseSummary: summarizeResponse(processedData),
@@ -165,7 +165,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
         quarantineScore: threatScore,
       });
 
-      log.info({ sessionId, actionName, sanitized, quarantined, threatScore }, 'Action executed');
+      log.info({ podId, actionName, sanitized, quarantined, threatScore }, 'Action executed');
 
       return { success: true, data: processedData, sanitized, quarantined };
     },

@@ -1,11 +1,11 @@
 import AutopodClient
 import SwiftUI
 
-/// Detail panel — shown when a session is selected. Tabbed: Overview, Logs, Diff, Validation.
+/// Detail panel — shown when a pod is selected. Tabbed: Overview, Logs, Diff, Validation.
 public struct DetailPanelView: View {
-    public let session: Session
+    public let pod: Pod
     public let events: [AgentEvent]
-    public var actions: SessionActions
+    public var actions: PodActions
     public var diffString: String?
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
@@ -22,7 +22,7 @@ public struct DetailPanelView: View {
     @Binding public var requestedTab: DetailTab?
 
     public init(
-        session: Session, events: [AgentEvent], actions: SessionActions = .preview,
+        pod: Pod, events: [AgentEvent], actions: PodActions = .preview,
         diffString: String? = nil,
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
@@ -38,7 +38,7 @@ public struct DetailPanelView: View {
         onReloadLogs: (() -> Void)? = nil,
         requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
-        self.session = session; self.events = events; self.actions = actions
+        self.pod = pod; self.events = events; self.actions = actions
         self.diffString = diffString
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
@@ -58,13 +58,13 @@ public struct DetailPanelView: View {
     @State private var selectedTab: DetailTab = .overview
     @State private var isTaskExpanded: Bool = false
 
-    private var isTerminalAvailable: Bool { session.pod.agentMode == .interactive }
-    private var isMarkdownAvailable: Bool { session.pod.agentMode == .interactive || session.pod.output == .artifact }
+    private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
+    private var isMarkdownAvailable: Bool { pod.pod.agentMode == .interactive || pod.pod.output == .artifact }
     @State private var showPromoteMenu: Bool = false
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Session header
+            // Pod header
             detailHeader
 
             // Tab bar
@@ -76,24 +76,24 @@ public struct DetailPanelView: View {
             // SwiftTerm NSView (and its scrollback buffer) isn't destroyed.
             ZStack {
                 switch selectedTab {
-                case .overview:   OverviewTab(session: session, events: events, actions: actions)
+                case .overview:   OverviewTab(pod: pod, events: events, actions: actions)
                 case .logs:       LogStreamView(
                     events: events,
-                    sessionBranch: session.branch,
+                    sessionBranch: pod.branch,
                     isLoading: isLoadingLogs,
                     loadError: logsLoadError,
                     onReload: onReloadLogs
                 )
-                case .diff:       DiffTab(session: session, diffString: diffString, onRefresh: onRefreshDiff)
-                case .validation: ValidationTab(session: session, actions: actions)
-                case .summary:    SummaryTab(session: session)
+                case .diff:       DiffTab(pod: pod, diffString: diffString, onRefresh: onRefreshDiff)
+                case .validation: ValidationTab(pod: pod, actions: actions)
+                case .summary:    SummaryTab(pod: pod)
                 case .terminal:   EmptyView()
-                case .markdown:   MarkdownTab(session: session, loadFiles: loadFiles, loadContent: loadContent)
+                case .markdown:   MarkdownTab(pod: pod, loadFiles: loadFiles, loadContent: loadContent)
                 }
 
                 if isTerminalAvailable {
                     TerminalTab(
-                        session: session,
+                        pod: pod,
                         terminalState: terminalState,
                         dataPipe: terminalDataPipe,
                         onSendData: onTerminalSendData,
@@ -110,7 +110,7 @@ public struct DetailPanelView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            if session.pod.output == .artifact {
+            if pod.pod.output == .artifact {
                 selectedTab = .markdown
             }
         }
@@ -122,12 +122,12 @@ public struct DetailPanelView: View {
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
-        .alert("Resume session", isPresented: $showResumeInput) {
+        .alert("Resume pod", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
             Button("Resume") {
                 let message = resumeInputText.isEmpty ? "Continue where you left off." : resumeInputText
                 resumeInputText = ""
-                Task { await actions.reply(session.id, message) }
+                Task { await actions.reply(pod.id, message) }
             }
             Button("Cancel", role: .cancel) {
                 resumeInputText = ""
@@ -142,19 +142,19 @@ public struct DetailPanelView: View {
     private var detailHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                StatusDot(status: session.status)
+                StatusDot(status: pod.status)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(session.id)
+                    Text(pod.id)
                         .font(.system(.title3, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(session.status == .complete ? .green : session.status == .killed ? .red.opacity(0.6) : .primary)
+                        .foregroundStyle(pod.status == .complete ? .green : pod.status == .killed ? .red.opacity(0.6) : .primary)
                     HStack(spacing: 6) {
-                        Text(session.profileName)
+                        Text(pod.profileName)
                         Text("·")
                             .foregroundStyle(.quaternary)
-                        Text(session.model)
+                        Text(pod.model)
                         Text("·")
                             .foregroundStyle(.quaternary)
-                        Text(session.duration)
+                        Text(pod.duration)
                             .contentTransition(.numericText())
                     }
                     .font(.caption)
@@ -164,8 +164,8 @@ public struct DetailPanelView: View {
                 headerActions
             }
 
-            if !session.task.isEmpty {
-                Text(session.task)
+            if !pod.task.isEmpty {
+                Text(pod.task)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(isTaskExpanded ? nil : 2)
@@ -182,23 +182,23 @@ public struct DetailPanelView: View {
     @ViewBuilder
     private var headerActions: some View {
         HStack(spacing: 6) {
-            switch session.status {
+            switch pod.status {
             case .running:
-                if session.pod.agentMode == .interactive {
+                if pod.pod.agentMode == .interactive {
                     Menu {
                         Button("Complete (push branch)") {
-                            Task { await actions.complete(session.id) }
+                            Task { await actions.complete(pod.id) }
                         }
-                        if session.isPromotable {
+                        if pod.isPromotable {
                             Divider()
                             Button("Hand off → Open PR") {
-                                Task { await actions.promote(session.id, "pr") }
+                                Task { await actions.promote(pod.id, "pr") }
                             }
                             Button("Hand off → Branch only") {
-                                Task { await actions.promote(session.id, "branch") }
+                                Task { await actions.promote(pod.id, "branch") }
                             }
                             Button("Hand off → Artifact") {
-                                Task { await actions.promote(session.id, "artifact") }
+                                Task { await actions.promote(pod.id, "artifact") }
                             }
                         }
                     } label: {
@@ -216,7 +216,7 @@ public struct DetailPanelView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     Button {
-                        Task { await actions.pause(session.id) }
+                        Task { await actions.pause(pod.id) }
                     } label: {
                         Label("Pause", systemImage: "pause.circle")
                     }
@@ -225,7 +225,7 @@ public struct DetailPanelView: View {
                     .tint(.yellow)
                 }
                 Button {
-                    Task { await actions.kill(session.id) }
+                    Task { await actions.kill(pod.id) }
                 } label: {
                     Label("Kill", systemImage: "xmark.circle")
                 }
@@ -243,7 +243,7 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
                 .tint(.green)
                 Button {
-                    Task { await actions.kill(session.id) }
+                    Task { await actions.kill(pod.id) }
                 } label: {
                     Label("Kill", systemImage: "xmark.circle")
                 }
@@ -256,10 +256,10 @@ public struct DetailPanelView: View {
                 EmptyView()
 
             case .validated:
-                if session.validationChecks?.allPassed != false {
+                if pod.validationChecks?.allPassed != false {
                     // All checks passed (or no checks yet) — approve is primary
                     Button {
-                        Task { await actions.approve(session.id) }
+                        Task { await actions.approve(pod.id) }
                     } label: {
                         Label("Approve", systemImage: "checkmark")
                     }
@@ -274,7 +274,7 @@ public struct DetailPanelView: View {
                 } else {
                     // Validation failed — rework/fix actions are primary
                     Button {
-                        Task { await actions.rework(session.id) }
+                        Task { await actions.rework(pod.id) }
                     } label: {
                         Label("Rework", systemImage: "arrow.clockwise")
                     }
@@ -282,7 +282,7 @@ public struct DetailPanelView: View {
                     .controlSize(.small)
                     .tint(.orange)
                     Button {
-                        Task { await actions.fixManually(session.id) }
+                        Task { await actions.fixManually(pod.id) }
                     } label: {
                         Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                     }
@@ -290,7 +290,7 @@ public struct DetailPanelView: View {
                     .controlSize(.small)
                     forkButton
                     Button {
-                        Task { await actions.approve(session.id) }
+                        Task { await actions.approve(pod.id) }
                     } label: {
                         Label("Approve Anyway", systemImage: "checkmark")
                     }
@@ -300,7 +300,7 @@ public struct DetailPanelView: View {
 
             case .reviewRequired:
                 Button {
-                    Task { await actions.extendAttempts(session.id, 2) }
+                    Task { await actions.extendAttempts(pod.id, 2) }
                 } label: {
                     Label("Extend Attempts", systemImage: "arrow.clockwise")
                 }
@@ -308,7 +308,7 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
                 .tint(.orange)
                 Button {
-                    Task { await actions.fixManually(session.id) }
+                    Task { await actions.fixManually(pod.id) }
                 } label: {
                     Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                 }
@@ -316,7 +316,7 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
                 forkButton
                 Button {
-                    Task { await actions.kill(session.id) }
+                    Task { await actions.kill(pod.id) }
                 } label: {
                     Label("Kill", systemImage: "xmark.circle")
                 }
@@ -326,16 +326,16 @@ public struct DetailPanelView: View {
 
             case .mergePending:
                 Button {
-                    Task { await actions.spawnFix(session.id) }
+                    Task { await actions.spawnFix(pod.id) }
                 } label: {
                     Label("Spawn Fix", systemImage: "hammer.circle")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.orange)
-                .help("Manually spawn a fix session for the failing PR checks")
+                .help("Manually spawn a fix pod for the failing PR checks")
                 Button {
-                    Task { await actions.kill(session.id) }
+                    Task { await actions.kill(pod.id) }
                 } label: {
                     Label("Kill", systemImage: "xmark.circle")
                 }
@@ -345,7 +345,7 @@ public struct DetailPanelView: View {
 
             case .failed:
                 Button {
-                    Task { await actions.rework(session.id) }
+                    Task { await actions.rework(pod.id) }
                 } label: {
                     Label("Rework", systemImage: "arrow.clockwise")
                 }
@@ -353,16 +353,16 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
                 .tint(.red)
                 Button {
-                    Task { await actions.fixManually(session.id) }
+                    Task { await actions.fixManually(pod.id) }
                 } label: {
                     Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 forkButton
-                if session.latestActivity?.contains("PR fix attempts") == true {
+                if pod.latestActivity?.contains("PR fix attempts") == true {
                     Button {
-                        Task { await actions.extendPrAttempts(session.id, 3) }
+                        Task { await actions.extendPrAttempts(pod.id, 3) }
                     } label: {
                         Label("Extend PR Attempts", systemImage: "arrow.clockwise.circle")
                     }
@@ -373,7 +373,7 @@ public struct DetailPanelView: View {
 
             case .killed:
                 Button {
-                    Task { await actions.rework(session.id) }
+                    Task { await actions.rework(pod.id) }
                 } label: {
                     Label("Rework", systemImage: "arrow.clockwise")
                 }
@@ -390,7 +390,7 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
 
             default:
-                if session.isTerminal {
+                if pod.isTerminal {
                     forkButton
                     Button(role: .destructive) {
                         showDeleteConfirmation = true
@@ -402,12 +402,12 @@ public struct DetailPanelView: View {
                 }
             }
         }
-        .confirmationDialog("Delete session \(session.id)?", isPresented: $showDeleteConfirmation) {
+        .confirmationDialog("Delete pod \(pod.id)?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
-                Task { await actions.delete(session.id) }
+                Task { await actions.delete(pod.id) }
             }
         } message: {
-            Text("This will permanently remove the session record.")
+            Text("This will permanently remove the pod record.")
         }
     }
 
@@ -445,7 +445,7 @@ public struct DetailPanelView: View {
                         : nudgeInputText
                     nudgeInputText = ""
                     showNudgeInput = false
-                    Task { await actions.nudge(session.id, message) }
+                    Task { await actions.nudge(pod.id, message) }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -457,7 +457,7 @@ public struct DetailPanelView: View {
 
     private var rejectFeedbackSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Reject session")
+            Text("Reject pod")
                 .font(.headline)
             Text("Tell the agent what to fix. Leave blank for a generic rejection.")
                 .font(.subheadline)
@@ -481,7 +481,7 @@ public struct DetailPanelView: View {
                         : rejectFeedbackText
                     rejectFeedbackText = ""
                     showRejectFeedback = false
-                    Task { await actions.reject(session.id, feedback) }
+                    Task { await actions.reject(pod.id, feedback) }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
@@ -494,13 +494,13 @@ public struct DetailPanelView: View {
 
     private var forkButton: some View {
         Button {
-            Task { await actions.fork(session.id) }
+            Task { await actions.fork(pod.id) }
         } label: {
             Label("Fork", systemImage: "arrow.triangle.branch")
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .help("Create a new session with the same config, starting from this session's branch")
+        .help("Create a new pod with the same config, starting from this pod's branch")
     }
 
     // MARK: - Tab bar
@@ -511,8 +511,8 @@ public struct DetailPanelView: View {
                 let isSelected = selectedTab == tab
                 let isDisabled = (tab == .terminal && !isTerminalAvailable) || (tab == .markdown && !isMarkdownAvailable)
                 let disabledHelp: String = {
-                    if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace sessions" }
-                    if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer is only available for workspace and artifact sessions" }
+                    if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace pods" }
+                    if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer is only available for workspace and artifact pods" }
                     return ""
                 }()
                 Button {
@@ -580,16 +580,16 @@ public enum DetailTab: CaseIterable {
 // MARK: - Previews
 
 #Preview("Detail — running") {
-    DetailPanelView(session: MockData.running, events: MockEvents.running)
+    DetailPanelView(pod: MockData.running, events: MockEvents.running)
         .frame(width: 600, height: 500)
 }
 
 #Preview("Detail — awaiting input") {
-    DetailPanelView(session: MockData.awaitingInput, events: MockEvents.awaitingInput)
+    DetailPanelView(pod: MockData.awaitingInput, events: MockEvents.awaitingInput)
         .frame(width: 600, height: 500)
 }
 
 #Preview("Detail — failed") {
-    DetailPanelView(session: MockData.failed, events: MockEvents.failed)
+    DetailPanelView(pod: MockData.failed, events: MockEvents.failed)
         .frame(width: 600, height: 500)
 }

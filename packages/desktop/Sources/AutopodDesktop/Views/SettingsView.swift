@@ -246,8 +246,8 @@ public struct SettingsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Escalation (agent needs input)", isOn: $notifyEscalation)
                 Toggle("Validation complete", isOn: $notifyValidation)
-                Toggle("Session failed", isOn: $notifyFailure)
-                Toggle("Session complete", isOn: $notifyCompletion)
+                Toggle("Pod failed", isOn: $notifyFailure)
+                Toggle("Pod complete", isOn: $notifyCompletion)
             }
             .padding(12)
             .background(
@@ -278,7 +278,7 @@ public struct SettingsView: View {
                 .foregroundStyle(.blue)
             Text("Autopod Desktop")
                 .font(.title3.weight(.semibold))
-            Text("Native macOS client for orchestrating Autopod sessions.")
+            Text("Native macOS client for orchestrating Autopod pods.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

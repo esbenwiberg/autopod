@@ -151,18 +151,18 @@ export const actionPolicySchema = z
 // ─── Output Mode (legacy) ───────────────────────────────────────
 export const outputModeSchema = z.enum(['pr', 'artifact', 'workspace']);
 
-// ─── Pod Config (orthogonal axes) ───────────────────────────────
+// ─── Pod Options (orthogonal axes) ──────────────────────────────
 export const agentModeSchema = z.enum(['auto', 'interactive']);
 export const outputTargetSchema = z.enum(['pr', 'branch', 'artifact', 'none']);
 
-export const podConfigSchema = z.object({
+export const podOptionsSchema = z.object({
   agentMode: agentModeSchema,
   output: outputTargetSchema,
   validate: z.boolean().optional(),
   promotable: z.boolean().optional(),
 });
 
-export const partialPodConfigSchema = z.object({
+export const partialPodOptionsSchema = z.object({
   agentMode: agentModeSchema.optional(),
   output: outputTargetSchema.optional(),
   validate: z.boolean().optional(),

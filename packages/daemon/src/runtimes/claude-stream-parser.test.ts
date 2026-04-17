@@ -2,23 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
 
 // Actual event shapes captured from `claude --output-format stream-json --verbose`
-const SESSION_ID = 'test-session';
+const POD_ID = 'test-pod';
 
 function fakeLogger() {
   return { debug: () => {}, info: () => {}, warn: () => {} } as unknown as import('pino').Logger;
 }
 
 describe('ClaudeStreamParser.mapEvent', () => {
-  it('maps system init to Claude session initialized status', () => {
+  it('maps system init to Claude pod initialized status', () => {
     const event = {
       type: 'system',
       subtype: 'init',
-      session_id: 'abc-123',
+      pod_id: 'abc-123',
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'status',
-      message: 'Claude session initialized (abc-123)',
+      message: 'Claude pod initialized (abc-123)',
     });
   });
 
@@ -30,7 +30,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
         content: [{ type: 'text', text: 'Hello from Claude' }],
       },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({ type: 'status', message: 'Hello from Claude' });
   });
 
@@ -42,7 +42,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
         content: [{ type: 'thinking', thinking: 'Let me think...' }],
       },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toBeNull();
   });
 
@@ -61,7 +61,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
         ],
       },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'tool_use',
       tool: 'Bash',
@@ -83,7 +83,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
         ],
       },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'file_change',
       path: '/workspace/src/foo.ts',
@@ -105,7 +105,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
         ],
       },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({ type: 'file_change', action: 'create' });
   });
 
@@ -125,7 +125,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
       },
       tool_use_result: { stdout: 'hello\n', stderr: '', interrupted: false },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'tool_use',
       tool: 'tool_result',
@@ -151,7 +151,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
       },
       // no tool_use_result — forces fallback to content
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'tool_use',
       tool: 'tool_result',
@@ -168,25 +168,25 @@ describe('ClaudeStreamParser.mapEvent', () => {
         content: [{ type: 'text', text: 'some user message' }],
       },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toBeNull();
   });
 
   it('maps result event to complete', () => {
     const event = { type: 'result', subtype: 'success', result: 'Done!' };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({ type: 'complete', result: 'Done!' });
   });
 
   it('extracts costUsd from total_cost_usd in result event', () => {
     const event = { type: 'result', subtype: 'success', result: 'Done!', total_cost_usd: 0.0234 };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({ type: 'complete', result: 'Done!', costUsd: 0.0234 });
   });
 
   it('leaves costUsd undefined when total_cost_usd is absent', () => {
     const event = { type: 'result', subtype: 'success', result: 'Done!' };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({ type: 'complete' });
     expect((result as { costUsd?: number }).costUsd).toBeUndefined();
   });
@@ -200,7 +200,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
       input_tokens: 1234,
       output_tokens: 567,
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'complete',
       costUsd: 0.05,
@@ -222,7 +222,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
         cache_read_input_tokens: 0,
       },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'complete',
       costUsd: 0.05,
@@ -241,13 +241,13 @@ describe('ClaudeStreamParser.mapEvent', () => {
       output_tokens: 222,
       usage: { input_tokens: 8000, output_tokens: 3000 },
     };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({ totalInputTokens: 8000, totalOutputTokens: 3000 });
   });
 
   it('leaves totalInputTokens and totalOutputTokens undefined when absent from result event', () => {
     const event = { type: 'result', subtype: 'success', result: 'Done!', total_cost_usd: 0.01 };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({ type: 'complete', costUsd: 0.01 });
     type CompleteEvent = { totalInputTokens?: number; totalOutputTokens?: number };
     expect((result as CompleteEvent).totalInputTokens).toBeUndefined();
@@ -256,19 +256,19 @@ describe('ClaudeStreamParser.mapEvent', () => {
 
   it('maps error event to fatal error', () => {
     const event = { type: 'error', error: { message: 'rate limit' } };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({ type: 'error', message: 'rate limit', fatal: true });
   });
 
   it('returns null for unknown event types', () => {
     const event = { type: 'rate_limit_event' };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toBeNull();
   });
 
   it('returns null for assistant with no content', () => {
     const event = { type: 'assistant', message: { role: 'assistant', content: [] } };
-    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toBeNull();
   });
 });

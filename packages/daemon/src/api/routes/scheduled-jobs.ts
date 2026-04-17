@@ -57,9 +57,9 @@ export function scheduledJobRoutes(
   // POST /scheduled-jobs/:id/catchup — run missed job now
   app.post('/scheduled-jobs/:id/catchup', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const session = await scheduledJobManager.runCatchup(id);
+    const pod = await scheduledJobManager.runCatchup(id);
     reply.status(201);
-    return session;
+    return pod;
   });
 
   // DELETE /scheduled-jobs/:id/catchup — skip missed job
@@ -69,11 +69,11 @@ export function scheduledJobRoutes(
     reply.status(204);
   });
 
-  // POST /scheduled-jobs/:id/trigger — fire a session immediately (ignores schedule)
+  // POST /scheduled-jobs/:id/trigger — fire a pod immediately (ignores schedule)
   app.post('/scheduled-jobs/:id/trigger', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const session = await scheduledJobManager.trigger(id);
+    const pod = await scheduledJobManager.trigger(id);
     reply.status(201);
-    return session;
+    return pod;
   });
 }

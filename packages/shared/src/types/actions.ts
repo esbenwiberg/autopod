@@ -98,7 +98,7 @@ export type OutputMode = 'pr' | 'artifact' | 'workspace';
 
 // ─── Runtime types (action engine request/response) ─────────────
 export interface ActionRequest {
-  sessionId: string;
+  podId: string;
   actionName: string;
   params: Record<string, unknown>;
   /** Set by MCP layer after human approval — bypasses requiresApproval check in engine */
@@ -116,7 +116,7 @@ export interface ActionResponse {
 // ─── Audit ──────────────────────────────────────────────────────
 export interface ActionAuditEntry {
   id: number;
-  sessionId: string;
+  podId: string;
   actionName: string;
   params: Record<string, unknown>;
   responseSummary: string | null;
