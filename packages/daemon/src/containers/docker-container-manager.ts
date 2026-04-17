@@ -27,7 +27,7 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {
-    const containerName = `autopod-${config.sessionId}`;
+    const containerName = `autopod-${config.podId}`;
     const env = Object.entries(config.env).map(([k, v]) => `${k}=${v}`);
 
     // Build port bindings and exposed ports
@@ -196,12 +196,12 @@ export class DockerContainerManager implements ContainerManager {
     }
   }
 
-  async writeFile(containerId: string, filePath: string, content: string): Promise<void> {
+  async writeFile(containerId: string, filePath: string, content: string | Buffer): Promise<void> {
     const container = this.docker.getContainer(containerId);
 
     // Build a tar archive with the single file, including parent directory entries.
     // uid/gid 1000 = autopod user — without this Docker extracts as root and the
-    // process can't create new files in those directories (config updates, session state).
+    // process can't create new files in those directories (config updates, pod state).
     const pack = tar.pack();
     const normalizedPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
     const parts = normalizedPath.split('/');

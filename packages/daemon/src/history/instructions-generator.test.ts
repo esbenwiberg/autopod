@@ -9,7 +9,7 @@ describe('instructions-generator', () => {
       totalCost: 23.45,
     });
 
-    expect(result).toContain('47 sessions');
+    expect(result).toContain('47 pods');
     expect(result).toContain('15 failed');
     expect(result).toContain('31.9%');
     expect(result).toContain('$23.45');
@@ -41,14 +41,14 @@ describe('instructions-generator', () => {
     expect(result).toContain('token waste');
   });
 
-  it('handles zero sessions gracefully', () => {
+  it('handles zero pods gracefully', () => {
     const result = generateHistoryInstructions({
       totalSessions: 0,
       byStatus: {},
       totalCost: 0,
     });
 
-    expect(result).toContain('0 sessions');
+    expect(result).toContain('0 pods');
     expect(result).toContain('0.0%');
   });
 });

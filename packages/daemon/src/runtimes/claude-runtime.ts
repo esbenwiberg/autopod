@@ -18,9 +18,9 @@ export class ClaudeRuntime implements Runtime {
   readonly type = 'claude' as const;
 
   private handles = new Map<string, StreamingExecResult>();
-  /** Maps autopod sessionId → Claude CLI session_id for resume support. */
+  /** Maps autopod podId → Claude CLI pod_id for resume support. */
   private claudeSessionIds = new Map<string, string>();
-  /** Maps autopod sessionId → MCP servers so resume() can re-write the config into the new container. */
+  /** Maps autopod podId → MCP servers so resume() can re-write the config into the new container. */
   private mcpServersBySession = new Map<string, SpawnConfig['mcpServers']>();
   private logger: Logger;
   private containerManager: ContainerManager;
@@ -35,13 +35,13 @@ export class ClaudeRuntime implements Runtime {
     // via --mcp-config <path>. Passing inline JSON breaks due to shell escaping
     // inside containerManager.execStreaming().
     await this.writeMcpConfig(config.containerId, config.mcpServers);
-    this.mcpServersBySession.set(config.sessionId, config.mcpServers);
+    this.mcpServersBySession.set(config.podId, config.mcpServers);
 
     const args = this.buildSpawnArgs(config);
 
     this.logger.info({
       component: 'claude-runtime',
-      sessionId: config.sessionId,
+      podId: config.podId,
       containerId: config.containerId,
       args,
       msg: 'Spawning claude in container',
@@ -53,7 +53,7 @@ export class ClaudeRuntime implements Runtime {
       { cwd: config.workDir, env: config.env },
     );
 
-    this.handles.set(config.sessionId, handle);
+    this.handles.set(config.podId, handle);
 
     // Emit stderr lines in real-time as error events so they appear in the TUI immediately
     const stderrEvents: AgentEvent[] = [];
@@ -61,7 +61,7 @@ export class ClaudeRuntime implements Runtime {
       const text = chunk.toString('utf-8').trim();
       if (!text) return;
       this.logger.warn(
-        { component: 'claude-runtime', sessionId: config.sessionId, stderr: text.slice(0, 500) },
+        { component: 'claude-runtime', podId: config.podId, stderr: text.slice(0, 500) },
         'claude stderr',
       );
       stderrEvents.push({
@@ -75,17 +75,17 @@ export class ClaudeRuntime implements Runtime {
     try {
       for await (const event of ClaudeStreamParser.parse(
         handle.stdout,
-        config.sessionId,
+        config.podId,
         this.logger,
       )) {
         // Flush any stderr events that arrived before the next stdout event
         for (const e of stderrEvents.splice(0)) yield e;
 
-        // Capture Claude's session ID from init events for resume support
-        if (event.type === 'status' && event.message.includes('Claude session initialized')) {
+        // Capture Claude's pod ID from init events for resume support
+        if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
           if (match?.[1]) {
-            this.claudeSessionIds.set(config.sessionId, match[1]);
+            this.claudeSessionIds.set(config.podId, match[1]);
           }
         }
         yield event;
@@ -93,7 +93,7 @@ export class ClaudeRuntime implements Runtime {
       // Flush any remaining stderr events after stdout closes
       for (const e of stderrEvents.splice(0)) yield e;
     } finally {
-      this.handles.delete(config.sessionId);
+      this.handles.delete(config.podId);
     }
 
     // Check exit code after stream is consumed
@@ -109,25 +109,25 @@ export class ClaudeRuntime implements Runtime {
   }
 
   async *resume(
-    sessionId: string,
+    podId: string,
     message: string,
     containerId: string,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
-    const claudeSessionId = this.claudeSessionIds.get(sessionId);
+    const claudeSessionId = this.claudeSessionIds.get(podId);
     // Re-write the MCP config into the (potentially new) container before launching Claude.
     // Without this, recovery spawns a fresh container that never has the config file, causing
     // Claude to error immediately and exit — which then breaks smoke-test execs with 409.
-    const mcpServers = this.mcpServersBySession.get(sessionId);
+    const mcpServers = this.mcpServersBySession.get(podId);
     await this.writeMcpConfig(containerId, mcpServers);
     const args = this.buildResumeArgs(message, claudeSessionId, mcpServers);
 
     this.logger.info({
       component: 'claude-runtime',
-      sessionId,
+      podId,
       containerId,
       claudeSessionId,
-      msg: 'Resuming claude session in container',
+      msg: 'Resuming claude pod in container',
     });
 
     const handle = await this.containerManager.execStreaming(containerId, ['claude', ...args], {
@@ -135,14 +135,14 @@ export class ClaudeRuntime implements Runtime {
       ...(env ? { env } : {}),
     });
 
-    this.handles.set(sessionId, handle);
+    this.handles.set(podId, handle);
 
     const stderrEvents: AgentEvent[] = [];
     handle.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8').trim();
       if (!text) return;
       this.logger.warn(
-        { component: 'claude-runtime', sessionId, stderr: text.slice(0, 500) },
+        { component: 'claude-runtime', podId, stderr: text.slice(0, 500) },
         'claude stderr',
       );
       stderrEvents.push({
@@ -154,46 +154,46 @@ export class ClaudeRuntime implements Runtime {
     });
 
     try {
-      for await (const event of ClaudeStreamParser.parse(handle.stdout, sessionId, this.logger)) {
+      for await (const event of ClaudeStreamParser.parse(handle.stdout, podId, this.logger)) {
         for (const e of stderrEvents.splice(0)) yield e;
-        // Update Claude session ID on resume too
-        if (event.type === 'status' && event.message.includes('Claude session initialized')) {
+        // Update Claude pod ID on resume too
+        if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
           if (match?.[1]) {
-            this.claudeSessionIds.set(sessionId, match[1]);
+            this.claudeSessionIds.set(podId, match[1]);
           }
         }
         yield event;
       }
       for (const e of stderrEvents.splice(0)) yield e;
     } finally {
-      this.handles.delete(sessionId);
+      this.handles.delete(podId);
     }
   }
 
-  async abort(sessionId: string): Promise<void> {
-    const handle = this.handles.get(sessionId);
+  async abort(podId: string): Promise<void> {
+    const handle = this.handles.get(podId);
     if (!handle) {
       this.logger.warn({
         component: 'claude-runtime',
-        sessionId,
+        podId,
         msg: 'No exec handle found to abort',
       });
       return;
     }
 
     await handle.kill();
-    this.handles.delete(sessionId);
-    this.claudeSessionIds.delete(sessionId);
-    this.mcpServersBySession.delete(sessionId);
+    this.handles.delete(podId);
+    this.claudeSessionIds.delete(podId);
+    this.mcpServersBySession.delete(podId);
   }
 
-  async suspend(sessionId: string): Promise<void> {
-    const handle = this.handles.get(sessionId);
+  async suspend(podId: string): Promise<void> {
+    const handle = this.handles.get(podId);
     if (!handle) {
       this.logger.warn({
         component: 'claude-runtime',
-        sessionId,
+        podId,
         msg: 'No exec handle found to suspend',
       });
       return;
@@ -201,22 +201,22 @@ export class ClaudeRuntime implements Runtime {
 
     this.logger.info({
       component: 'claude-runtime',
-      sessionId,
-      claudeSessionId: this.claudeSessionIds.get(sessionId),
-      msg: 'Suspending claude session (preserving session ID for resume)',
+      podId,
+      claudeSessionId: this.claudeSessionIds.get(podId),
+      msg: 'Suspending claude pod (preserving pod ID for resume)',
     });
 
     await handle.kill();
-    this.handles.delete(sessionId);
+    this.handles.delete(podId);
     // NOTE: claudeSessionIds is NOT deleted — that's the whole point of suspend vs abort
   }
 
-  getClaudeSessionId(sessionId: string): string | undefined {
-    return this.claudeSessionIds.get(sessionId);
+  getClaudeSessionId(podId: string): string | undefined {
+    return this.claudeSessionIds.get(podId);
   }
 
-  setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
-    this.claudeSessionIds.set(sessionId, claudeSessionId);
+  setClaudeSessionId(podId: string, claudeSessionId: string): void {
+    this.claudeSessionIds.set(podId, claudeSessionId);
   }
 
   /** Write MCP server config to a JSON file inside the container. */
@@ -269,8 +269,8 @@ export class ClaudeRuntime implements Runtime {
       args.push('--debug');
     }
 
-    // Deterministic session ID for tracking
-    args.push('--session-id', randomUUID());
+    // Deterministic pod ID for tracking
+    args.push('--pod-id', randomUUID());
 
     // Inject autopod system instructions without overwriting the repo's CLAUDE.md
     args.push('--append-system-prompt-file', AUTOPOD_INSTRUCTIONS_PATH);

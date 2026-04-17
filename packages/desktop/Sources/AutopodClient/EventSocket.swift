@@ -23,7 +23,7 @@ public actor EventSocket {
 
   private let baseURL: URL
   private let token: String
-  private let session: URLSession
+  private let pod: URLSession
   private let onEvent: @Sendable (RawSystemEvent) -> Void
   private let onStateChange: @Sendable (State) -> Void
 
@@ -40,7 +40,7 @@ public actor EventSocket {
   ) {
     self.baseURL = baseURL
     self.token = token
-    self.session = URLSession.shared
+    self.pod = URLSession.shared
     self.onEvent = onEvent
     self.onStateChange = onStateChange
   }
@@ -68,12 +68,12 @@ public actor EventSocket {
     send(["type": "subscribe_all"])
   }
 
-  public func subscribe(sessionId: String) {
-    send(["type": "subscribe", "sessionId": sessionId])
+  public func subscribe(podId: String) {
+    send(["type": "subscribe", "podId": podId])
   }
 
-  public func unsubscribe(sessionId: String) {
-    send(["type": "unsubscribe", "sessionId": sessionId])
+  public func unsubscribe(podId: String) {
+    send(["type": "unsubscribe", "podId": podId])
   }
 
   // MARK: - Internal
@@ -91,7 +91,7 @@ public actor EventSocket {
       return
     }
 
-    let ws = session.webSocketTask(with: url)
+    let ws = pod.webSocketTask(with: url)
     webSocketTask = ws
     ws.resume()
 

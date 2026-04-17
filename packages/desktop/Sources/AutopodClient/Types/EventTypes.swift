@@ -10,22 +10,22 @@ public struct RawSystemEvent: Codable, Sendable {
   // swiftlint:disable:next identifier_name
   public let _eventId: Int?
 
-  // session.created
-  public let session: SessionSummaryResponse?
+  // pod.created
+  public let pod: SessionSummaryResponse?
 
-  // session.status_changed
-  public let sessionId: String?
+  // pod.status_changed
+  public let podId: String?
   public let previousStatus: String?
   public let newStatus: String?
 
-  // session.agent_activity
+  // pod.agent_activity
   public let event: AgentEventResponse?
 
-  // session.validation_started / completed
+  // pod.validation_started / completed
   public let attempt: Int?
   public let result: ValidationResponse?
 
-  // session.validation_phase_started / session.validation_phase_completed
+  // pod.validation_phase_started / pod.validation_phase_completed
   public let phase: String?
   public let phaseStatus: String?
   // Phase-specific results (only one is set per validation_phase_completed event):
@@ -36,14 +36,14 @@ public struct RawSystemEvent: Codable, Sendable {
   public let acResult: AcValidationResponse?
   public let reviewResult: TaskReviewResponse?
 
-  // session.escalation_created
+  // pod.escalation_created
   public let escalation: EscalationResponse?
 
-  // session.escalation_resolved
+  // pod.escalation_resolved
   public let escalationId: String?
   public let response: EscalationReply?
 
-  // session.completed
+  // pod.completed
   public let finalStatus: String?
   public let summary: SessionSummaryResponse?
 
@@ -83,7 +83,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
 
 // MARK: - ValidationPhaseResult
 
-/// Carries the per-phase result data from a session.validation_phase_completed event.
+/// Carries the per-phase result data from a pod.validation_phase_completed event.
 /// Exactly one result field is populated, matching the phase.
 public struct ValidationPhaseResult: Sendable {
   public let phaseStatus: String  // "pass" | "fail" | "skip"
@@ -109,75 +109,75 @@ public struct ValidationPhaseResult: Sendable {
 
 public enum SystemEvent: Sendable {
   case sessionCreated(SessionSummaryResponse)
-  case statusChanged(sessionId: String, from: String, to: String)
-  case agentActivity(sessionId: String, event: AgentEventResponse)
-  case validationStarted(sessionId: String, attempt: Int)
-  case validationCompleted(sessionId: String, result: ValidationResponse)
-  case validationPhaseStarted(sessionId: String, phase: ValidationPhase)
-  case validationPhaseCompleted(sessionId: String, phase: ValidationPhase, result: ValidationPhaseResult)
-  case escalationCreated(sessionId: String, escalation: EscalationResponse)
-  case escalationResolved(sessionId: String, escalationId: String)
-  case sessionCompleted(sessionId: String, finalStatus: String, summary: SessionSummaryResponse)
-  case memorySuggestionCreated(sessionId: String, entry: MemoryEntry)
-  case validationOverrideQueued(sessionId: String, override: ValidationOverrideEntry)
+  case statusChanged(podId: String, from: String, to: String)
+  case agentActivity(podId: String, event: AgentEventResponse)
+  case validationStarted(podId: String, attempt: Int)
+  case validationCompleted(podId: String, result: ValidationResponse)
+  case validationPhaseStarted(podId: String, phase: ValidationPhase)
+  case validationPhaseCompleted(podId: String, phase: ValidationPhase, result: ValidationPhaseResult)
+  case escalationCreated(podId: String, escalation: EscalationResponse)
+  case escalationResolved(podId: String, escalationId: String)
+  case sessionCompleted(podId: String, finalStatus: String, summary: SessionSummaryResponse)
+  case memorySuggestionCreated(podId: String, entry: MemoryEntry)
+  case validationOverrideQueued(podId: String, override: ValidationOverrideEntry)
   case scheduledJobCatchupRequested(jobId: String, jobName: String, lastRunAt: String?)
-  case scheduledJobFired(jobId: String, jobName: String, sessionId: String)
+  case scheduledJobFired(jobId: String, jobName: String, podId: String)
 
   public var eventId: Int? { nil }  // Set externally from _eventId
 
   public static func parse(_ raw: RawSystemEvent) -> SystemEvent? {
     switch raw.type {
-    case "session.created":
-      guard let session = raw.session else { return nil }
-      return .sessionCreated(session)
+    case "pod.created":
+      guard let pod = raw.pod else { return nil }
+      return .sessionCreated(pod)
 
-    case "session.status_changed":
-      guard let id = raw.sessionId, let from = raw.previousStatus, let to = raw.newStatus
+    case "pod.status_changed":
+      guard let id = raw.podId, let from = raw.previousStatus, let to = raw.newStatus
       else { return nil }
-      return .statusChanged(sessionId: id, from: from, to: to)
+      return .statusChanged(podId: id, from: from, to: to)
 
-    case "session.agent_activity":
-      guard let id = raw.sessionId, let event = raw.event else { return nil }
-      return .agentActivity(sessionId: id, event: event)
+    case "pod.agent_activity":
+      guard let id = raw.podId, let event = raw.event else { return nil }
+      return .agentActivity(podId: id, event: event)
 
-    case "session.validation_started":
-      guard let id = raw.sessionId, let attempt = raw.attempt else { return nil }
-      return .validationStarted(sessionId: id, attempt: attempt)
+    case "pod.validation_started":
+      guard let id = raw.podId, let attempt = raw.attempt else { return nil }
+      return .validationStarted(podId: id, attempt: attempt)
 
-    case "session.validation_completed":
-      guard let id = raw.sessionId, let result = raw.result else { return nil }
-      return .validationCompleted(sessionId: id, result: result)
+    case "pod.validation_completed":
+      guard let id = raw.podId, let result = raw.result else { return nil }
+      return .validationCompleted(podId: id, result: result)
 
-    case "session.validation_phase_started":
-      guard let id = raw.sessionId, let phaseStr = raw.phase,
+    case "pod.validation_phase_started":
+      guard let id = raw.podId, let phaseStr = raw.phase,
             let phase = ValidationPhase(rawValue: phaseStr) else { return nil }
-      return .validationPhaseStarted(sessionId: id, phase: phase)
+      return .validationPhaseStarted(podId: id, phase: phase)
 
-    case "session.validation_phase_completed":
-      guard let id = raw.sessionId, let phaseStr = raw.phase,
+    case "pod.validation_phase_completed":
+      guard let id = raw.podId, let phaseStr = raw.phase,
             let phase = ValidationPhase(rawValue: phaseStr) else { return nil }
-      return .validationPhaseCompleted(sessionId: id, phase: phase, result: ValidationPhaseResult(from: raw))
+      return .validationPhaseCompleted(podId: id, phase: phase, result: ValidationPhaseResult(from: raw))
 
-    case "session.escalation_created":
-      guard let id = raw.sessionId, let escalation = raw.escalation else { return nil }
-      return .escalationCreated(sessionId: id, escalation: escalation)
+    case "pod.escalation_created":
+      guard let id = raw.podId, let escalation = raw.escalation else { return nil }
+      return .escalationCreated(podId: id, escalation: escalation)
 
-    case "session.escalation_resolved":
-      guard let id = raw.sessionId, let escId = raw.escalationId else { return nil }
-      return .escalationResolved(sessionId: id, escalationId: escId)
+    case "pod.escalation_resolved":
+      guard let id = raw.podId, let escId = raw.escalationId else { return nil }
+      return .escalationResolved(podId: id, escalationId: escId)
 
-    case "session.completed":
-      guard let id = raw.sessionId, let status = raw.finalStatus, let summary = raw.summary
+    case "pod.completed":
+      guard let id = raw.podId, let status = raw.finalStatus, let summary = raw.summary
       else { return nil }
-      return .sessionCompleted(sessionId: id, finalStatus: status, summary: summary)
+      return .sessionCompleted(podId: id, finalStatus: status, summary: summary)
 
     case "memory.suggestion_created":
-      guard let id = raw.sessionId, let entry = raw.memoryEntry else { return nil }
-      return .memorySuggestionCreated(sessionId: id, entry: entry)
+      guard let id = raw.podId, let entry = raw.memoryEntry else { return nil }
+      return .memorySuggestionCreated(podId: id, entry: entry)
 
     case "validation.override_queued":
-      guard let id = raw.sessionId, let ov = raw.override else { return nil }
-      return .validationOverrideQueued(sessionId: id, override: ov)
+      guard let id = raw.podId, let ov = raw.override else { return nil }
+      return .validationOverrideQueued(podId: id, override: ov)
 
     case "scheduled_job.catchup_requested":
       guard let jobId = raw.jobId else { return nil }
@@ -188,11 +188,11 @@ public enum SystemEvent: Sendable {
       )
 
     case "scheduled_job.fired":
-      guard let jobId = raw.jobId, let sessionId = raw.sessionId else { return nil }
+      guard let jobId = raw.jobId, let podId = raw.podId else { return nil }
       return .scheduledJobFired(
         jobId: jobId,
         jobName: raw.jobName ?? jobId,
-        sessionId: sessionId
+        podId: podId
       )
 
     default:

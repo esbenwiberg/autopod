@@ -2,13 +2,13 @@ import { AutopodError, generateId } from '@autopod/shared';
 import type {
   CreateScheduledJobRequest,
   ScheduledJob,
-  Session,
+  Pod,
   UpdateScheduledJobRequest,
 } from '@autopod/shared';
 import cronParser from 'cron-parser';
 import type { Logger } from 'pino';
-import type { EventBus } from '../sessions/event-bus.js';
-import type { SessionManager } from '../sessions/session-manager.js';
+import type { EventBus } from '../pods/event-bus.js';
+import type { PodManager } from '../pods/pod-manager.js';
 import type { ScheduledJobRepository } from './scheduled-job-repository.js';
 
 // cron-parser is CommonJS — use default import then destructure
@@ -18,7 +18,7 @@ export const SCHEDULER_USER_ID = 'scheduler';
 
 export interface ScheduledJobManagerDeps {
   scheduledJobRepo: ScheduledJobRepository;
-  sessionManager: SessionManager;
+  podManager: PodManager;
   eventBus: EventBus;
   logger: Logger;
 }
@@ -29,9 +29,9 @@ export interface ScheduledJobManager {
   get(id: string): ScheduledJob;
   update(id: string, req: UpdateScheduledJobRequest): ScheduledJob;
   delete(id: string): void;
-  runCatchup(id: string): Promise<Session>;
+  runCatchup(id: string): Promise<Pod>;
   skipCatchup(id: string): void;
-  trigger(id: string): Promise<Session>;
+  trigger(id: string): Promise<Pod>;
   reconcileMissedJobs(): void;
   tick(): Promise<void>;
 }
@@ -50,10 +50,10 @@ function validateCronExpression(cronExpression: string): void {
 }
 
 export function createScheduledJobManager(deps: ScheduledJobManagerDeps): ScheduledJobManager {
-  const { scheduledJobRepo, sessionManager, eventBus, logger } = deps;
+  const { scheduledJobRepo, podManager, eventBus, logger } = deps;
 
-  async function fireJob(job: ScheduledJob): Promise<Session> {
-    return sessionManager.createSession(
+  async function fireJob(job: ScheduledJob): Promise<Pod> {
+    return podManager.createSession(
       {
         profileName: job.profileName,
         task: job.task,
@@ -78,7 +78,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         enabled: req.enabled ?? true,
         nextRunAt,
         lastRunAt: null,
-        lastSessionId: null,
+        lastPodId: null,
         catchupPending: false,
       });
     },
@@ -116,7 +116,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       scheduledJobRepo.delete(id);
     },
 
-    async runCatchup(id: string): Promise<Session> {
+    async runCatchup(id: string): Promise<Pod> {
       const job = scheduledJobRepo.getOrThrow(id);
 
       if (!job.catchupPending) {
@@ -126,23 +126,23 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       const activeCount = scheduledJobRepo.countActiveSessionsForJob(id);
       if (activeCount > 0) {
         throw new AutopodError(
-          `Job "${id}" has an active session — cannot run catch-up until it completes`,
+          `Job "${id}" has an active pod — cannot run catch-up until it completes`,
           'ACTIVE_SESSION',
           400,
         );
       }
 
-      const session = await fireJob(job);
+      const pod = await fireJob(job);
       const now = new Date().toISOString();
 
       scheduledJobRepo.update(id, {
         catchupPending: false,
         lastRunAt: now,
-        lastSessionId: session.id,
+        lastPodId: pod.id,
         nextRunAt: computeNextRunAt(job.cronExpression),
       });
 
-      return session;
+      return pod;
     },
 
     skipCatchup(id: string): void {
@@ -158,24 +158,24 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       });
     },
 
-    async trigger(id: string): Promise<Session> {
+    async trigger(id: string): Promise<Pod> {
       const job = scheduledJobRepo.getOrThrow(id);
 
       const activeCount = scheduledJobRepo.countActiveSessionsForJob(id);
       if (activeCount > 0) {
         throw new AutopodError(
-          `Job "${id}" has an active session — cannot trigger until it completes`,
+          `Job "${id}" has an active pod — cannot trigger until it completes`,
           'ACTIVE_SESSION',
           400,
         );
       }
 
-      const session = await fireJob(job);
+      const pod = await fireJob(job);
       const now = new Date().toISOString();
 
       scheduledJobRepo.update(id, {
         lastRunAt: now,
-        lastSessionId: session.id,
+        lastPodId: pod.id,
         nextRunAt: computeNextRunAt(job.cronExpression),
       });
 
@@ -184,10 +184,10 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         timestamp: now,
         jobId: job.id,
         jobName: job.name,
-        sessionId: session.id,
+        podId: pod.id,
       });
 
-      return session;
+      return pod;
     },
 
     reconcileMissedJobs(): void {
@@ -222,16 +222,16 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         try {
           const activeCount = scheduledJobRepo.countActiveSessionsForJob(job.id);
           if (activeCount > 0) {
-            logger.debug({ jobId: job.id }, 'Skipping scheduled job fire — active session exists');
+            logger.debug({ jobId: job.id }, 'Skipping scheduled job fire — active pod exists');
             continue;
           }
 
-          const session = await fireJob(job);
+          const pod = await fireJob(job);
           const now = new Date().toISOString();
 
           scheduledJobRepo.update(job.id, {
             lastRunAt: now,
-            lastSessionId: session.id,
+            lastPodId: pod.id,
             nextRunAt: computeNextRunAt(job.cronExpression),
           });
 
@@ -240,10 +240,10 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
             timestamp: now,
             jobId: job.id,
             jobName: job.name,
-            sessionId: session.id,
+            podId: pod.id,
           });
 
-          logger.info({ jobId: job.id, sessionId: session.id }, 'Scheduled job fired');
+          logger.info({ jobId: job.id, podId: pod.id }, 'Scheduled job fired');
         } catch (err) {
           logger.error({ err, jobId: job.id }, 'Scheduled job tick error — continuing');
         }

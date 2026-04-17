@@ -1,7 +1,7 @@
 import { generateId } from '@autopod/shared';
 import type { ActionDefinition, EscalationRequest } from '@autopod/shared';
 import type { PendingRequests } from '../pending-requests.js';
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 const APPROVAL_KEYWORDS = ['approved', 'approve', 'yes', 'proceed', 'go ahead', 'confirmed'];
 
@@ -16,16 +16,16 @@ function isApproved(response: string): boolean {
  * until the human approves or rejects — then executes or returns error.
  */
 export async function executeAction(
-  sessionId: string,
+  podId: string,
   actionName: string,
   params: Record<string, unknown>,
-  bridge: SessionBridge,
+  bridge: PodBridge,
   pendingRequests: PendingRequests,
 ): Promise<string> {
   // Check if this action requires human approval before execution
-  if (bridge.actionRequiresApproval(sessionId, actionName)) {
+  if (bridge.actionRequiresApproval(podId, actionName)) {
     const approvalResult = await requestApproval(
-      sessionId,
+      podId,
       actionName,
       params,
       bridge,
@@ -36,26 +36,26 @@ export async function executeAction(
     }
 
     // Approved — execute with skipApprovalCheck to bypass engine's defense-in-depth guard
-    const response = await bridge.executeAction(sessionId, actionName, params, {
+    const response = await bridge.executeAction(podId, actionName, params, {
       skipApprovalCheck: true,
     });
     return formatResponse(response);
   }
 
   // No approval required — execute directly
-  const response = await bridge.executeAction(sessionId, actionName, params);
+  const response = await bridge.executeAction(podId, actionName, params);
   return formatResponse(response);
 }
 
 async function requestApproval(
-  sessionId: string,
+  podId: string,
   actionName: string,
   params: Record<string, unknown>,
-  bridge: SessionBridge,
+  bridge: PodBridge,
   pendingRequests: PendingRequests,
 ): Promise<{ approved: boolean; message: string }> {
   const escalationId = generateId();
-  const timeoutMs = bridge.getHumanResponseTimeout(sessionId) * 1000;
+  const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
 
   const paramSummary = Object.entries(params)
     .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)
@@ -63,7 +63,7 @@ async function requestApproval(
 
   const escalation: EscalationRequest = {
     id: escalationId,
-    sessionId,
+    podId,
     type: 'action_approval',
     timestamp: new Date().toISOString(),
     payload: {

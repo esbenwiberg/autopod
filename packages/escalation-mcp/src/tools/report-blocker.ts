@@ -1,7 +1,7 @@
 import { generateId } from '@autopod/shared';
 import type { EscalationRequest } from '@autopod/shared';
 import type { PendingRequests } from '../pending-requests.js';
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export interface ReportBlockerInput {
   description: string;
@@ -10,18 +10,18 @@ export interface ReportBlockerInput {
 }
 
 export async function reportBlocker(
-  sessionId: string,
+  podId: string,
   input: ReportBlockerInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
   pendingRequests: PendingRequests,
 ): Promise<string> {
   const escalationId = generateId();
-  const autoPauseThreshold = bridge.getAutoPauseThreshold(sessionId);
-  const currentCount = bridge.getAiEscalationCount(sessionId);
+  const autoPauseThreshold = bridge.getAutoPauseThreshold(podId);
+  const currentCount = bridge.getAiEscalationCount(podId);
 
   const escalation: EscalationRequest = {
     id: escalationId,
-    sessionId,
+    podId,
     type: 'report_blocker',
     timestamp: new Date().toISOString(),
     payload: {
@@ -33,11 +33,11 @@ export async function reportBlocker(
   };
 
   bridge.createEscalation(escalation);
-  bridge.incrementEscalationCount(sessionId);
+  bridge.incrementEscalationCount(podId);
 
   if (currentCount + 1 >= autoPauseThreshold) {
     // Block and wait for human
-    const timeoutMs = bridge.getHumanResponseTimeout(sessionId) * 1000;
+    const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
     const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);
     return response;
   }

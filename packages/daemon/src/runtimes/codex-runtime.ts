@@ -26,7 +26,7 @@ export class CodexRuntime implements Runtime {
 
     this.logger.info({
       component: 'codex-runtime',
-      sessionId: config.sessionId,
+      podId: config.podId,
       containerId: config.containerId,
       args,
       msg: 'Spawning codex in container',
@@ -38,12 +38,12 @@ export class CodexRuntime implements Runtime {
       { cwd: config.workDir, env: config.env },
     );
 
-    this.handles.set(config.sessionId, handle);
+    this.handles.set(config.podId, handle);
 
     try {
-      yield* CodexStreamParser.parse(handle.stdout, config.sessionId, this.logger);
+      yield* CodexStreamParser.parse(handle.stdout, config.podId, this.logger);
     } finally {
-      this.handles.delete(config.sessionId);
+      this.handles.delete(config.podId);
     }
 
     // Check exit code after stream is consumed
@@ -59,18 +59,18 @@ export class CodexRuntime implements Runtime {
   }
 
   async *resume(
-    sessionId: string,
+    podId: string,
     message: string,
     containerId: string,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
-    // Codex CLI doesn't have native session resumption.
+    // Codex CLI doesn't have native pod resumption.
     // We pass the message as a follow-up task in full-auto mode.
     const args = ['exec', message, '--full-auto', '--json'];
 
     this.logger.info({
       component: 'codex-runtime',
-      sessionId,
+      podId,
       containerId,
       msg: 'Resuming codex with follow-up message in container',
     });
@@ -80,36 +80,36 @@ export class CodexRuntime implements Runtime {
       ...(env ? { env } : {}),
     });
 
-    this.handles.set(sessionId, handle);
+    this.handles.set(podId, handle);
 
     try {
-      yield* CodexStreamParser.parse(handle.stdout, sessionId, this.logger);
+      yield* CodexStreamParser.parse(handle.stdout, podId, this.logger);
     } finally {
-      this.handles.delete(sessionId);
+      this.handles.delete(podId);
     }
   }
 
-  async abort(sessionId: string): Promise<void> {
-    const handle = this.handles.get(sessionId);
+  async abort(podId: string): Promise<void> {
+    const handle = this.handles.get(podId);
     if (!handle) {
       this.logger.warn({
         component: 'codex-runtime',
-        sessionId,
+        podId,
         msg: 'No exec handle found to abort',
       });
       return;
     }
 
     await handle.kill();
-    this.handles.delete(sessionId);
+    this.handles.delete(podId);
   }
 
-  async suspend(sessionId: string): Promise<void> {
-    const handle = this.handles.get(sessionId);
+  async suspend(podId: string): Promise<void> {
+    const handle = this.handles.get(podId);
     if (!handle) {
       this.logger.warn({
         component: 'codex-runtime',
-        sessionId,
+        podId,
         msg: 'No exec handle found to suspend',
       });
       return;
@@ -117,12 +117,12 @@ export class CodexRuntime implements Runtime {
 
     this.logger.info({
       component: 'codex-runtime',
-      sessionId,
-      msg: 'Suspending codex session',
+      podId,
+      msg: 'Suspending codex pod',
     });
 
     await handle.kill();
-    this.handles.delete(sessionId);
+    this.handles.delete(podId);
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {

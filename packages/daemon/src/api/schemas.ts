@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const SessionParamsSchema = z.object({
-  sessionId: z.string().min(1),
+  podId: z.string().min(1),
 });
 
 export const ProfileParamsSchema = z.object({

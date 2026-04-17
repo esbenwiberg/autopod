@@ -13,7 +13,7 @@ const EXIT_CODES: Record<string, number> = {
 const SUGGESTIONS: Record<string, string> = {
   AUTH_ERROR: 'Try: ap login',
   FORBIDDEN: 'You do not have permission for this action.',
-  SESSION_NOT_FOUND: 'Check the session ID with: ap ls',
+  SESSION_NOT_FOUND: 'Check the pod ID with: ap ls',
   PROFILE_NOT_FOUND: 'Check available profiles with: ap profile ls',
   VALIDATION_ERROR: 'Check input and try again.',
   DAEMON_UNREACHABLE: 'Try: ap connect <url>',

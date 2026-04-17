@@ -1,7 +1,7 @@
 import Foundation
 
 public enum MockData: Sendable {
-    public static let all: [Session] = [
+    public static let all: [Pod] = [
         awaitingInput, validated, validatedFailed, failed,
         running, runningEarly, validating,
         workspaceActive, workspaceComplete,
@@ -9,7 +9,7 @@ public enum MockData: Sendable {
         queued, provisioning, merging, complete, killed,
     ]
 
-    public static let awaitingInput = Session(
+    public static let awaitingInput = Pod(
         status: .awaitingInput, branch: "feat/oauth", profileName: "my-app", model: "claude-opus",
         startedAt: .minutesAgo(5),
         diffStats: DiffStats(added: 34, removed: 8, files: 4),
@@ -17,7 +17,7 @@ public enum MockData: Sendable {
         latestActivity: "Paused at auth strategy decision"
     )
 
-    public static let validated = Session(
+    public static let validated = Pod(
         status: .validated, branch: "feat/cart", profileName: "webapp", model: "claude-opus",
         startedAt: .minutesAgo(12),
         diffStats: DiffStats(added: 142, removed: 38, files: 8),
@@ -25,7 +25,7 @@ public enum MockData: Sendable {
         containerUrl: URL(string: "http://localhost:3001")
     )
 
-    public static let validatedFailed = Session(
+    public static let validatedFailed = Pod(
         status: .validated, branch: "fix/auth-flow", profileName: "webapp", model: "claude-sonnet",
         startedAt: .minutesAgo(18),
         diffStats: DiffStats(added: 55, removed: 12, files: 5),
@@ -60,13 +60,13 @@ public enum MockData: Sendable {
             ],
             requirementsCheck: [
                 RequirementCheckDetail(criterion: "OAuth callback handles errors", met: false, note: "No error handling in callback route"),
-                RequirementCheckDetail(criterion: "Session middleware preserved", met: true, note: "Fully met"),
+                RequirementCheckDetail(criterion: "Pod middleware preserved", met: true, note: "Fully met"),
             ]
         ),
         attempts: AttemptInfo(current: 1, max: 3)
     )
 
-    public static let failed = Session(
+    public static let failed = Pod(
         status: .failed, branch: "fix/perf", profileName: "backend", model: "claude-opus",
         startedAt: .minutesAgo(11),
         diffStats: DiffStats(added: 22, removed: 5, files: 3),
@@ -74,7 +74,7 @@ public enum MockData: Sendable {
         attempts: AttemptInfo(current: 2, max: 3)
     )
 
-    public static let running = Session(
+    public static let running = Pod(
         status: .running, branch: "refactor/api", profileName: "backend", model: "claude-opus",
         startedAt: .minutesAgo(8),
         diffStats: DiffStats(added: 89, removed: 12, files: 5),
@@ -92,7 +92,7 @@ public enum MockData: Sendable {
         latestActivity: "Modified routes/users.ts"
     )
 
-    public static let runningEarly = Session(
+    public static let runningEarly = Pod(
         status: .running, branch: "feat/dashboard", profileName: "webapp", model: "claude-sonnet",
         startedAt: .minutesAgo(3),
         diffStats: DiffStats(added: 23, removed: 4, files: 3),
@@ -100,7 +100,7 @@ public enum MockData: Sendable {
         latestActivity: "Reading src/pages/index.tsx"
     )
 
-    public static let validating = Session(
+    public static let validating = Pod(
         status: .validating, branch: "fix/n+1", profileName: "backend", model: "claude-sonnet",
         startedAt: .minutesAgo(15),
         diffStats: DiffStats(added: 45, removed: 31, files: 6),
@@ -110,7 +110,7 @@ public enum MockData: Sendable {
 
     // MARK: - Workspace pods
 
-    public static let workspaceActive = Session(
+    public static let workspaceActive = Pod(
         status: .running, outputMode: .workspace, branch: "plan/auth-redesign",
         profileName: "my-app", model: "—",
         startedAt: .minutesAgo(25),
@@ -119,7 +119,7 @@ public enum MockData: Sendable {
         latestActivity: "Interactive — user attached"
     )
 
-    public static let workspaceComplete = Session(
+    public static let workspaceComplete = Pod(
         status: .complete, outputMode: .workspace, branch: "plan/migrate-db",
         profileName: "backend", model: "—",
         startedAt: .minutesAgo(60),
@@ -128,7 +128,7 @@ public enum MockData: Sendable {
     )
 
     // Worker spawned from a workspace branch
-    public static let workerFromWorkspace = Session(
+    public static let workerFromWorkspace = Pod(
         status: .running, outputMode: .pr, branch: "feat/auth-redesign",
         profileName: "my-app", model: "claude-opus",
         startedAt: .minutesAgo(6),
@@ -137,7 +137,7 @@ public enum MockData: Sendable {
         acceptanceCriteria: [
             "Users can sign in with Google OAuth",
             "OAuth tokens are stored encrypted at rest",
-            "Existing session middleware is preserved",
+            "Existing pod middleware is preserved",
         ],
         diffStats: DiffStats(added: 56, removed: 8, files: 6),
         phase: PhaseProgress(current: 5, total: 10, description: "Implementing OAuth callback"),
@@ -146,24 +146,24 @@ public enum MockData: Sendable {
 
     // MARK: - Other states
 
-    public static let queued = Session(
+    public static let queued = Pod(
         status: .queued, branch: "feat/i18n", profileName: "webapp", model: "claude-opus",
         startedAt: .minutesAgo(1),
         queuePosition: 2
     )
 
-    public static let provisioning = Session(
+    public static let provisioning = Pod(
         status: .provisioning, branch: "fix/css-grid", profileName: "webapp", model: "claude-sonnet",
         startedAt: .minutesAgo(0)
     )
 
-    public static let merging = Session(
+    public static let merging = Pod(
         status: .merging, branch: "feat/search", profileName: "backend", model: "claude-opus",
         startedAt: .minutesAgo(20),
         diffStats: DiffStats(added: 210, removed: 44, files: 12)
     )
 
-    public static let mergePending = Session(
+    public static let mergePending = Pod(
         status: .mergePending, branch: "feat/search", profileName: "backend", model: "claude-opus",
         startedAt: .minutesAgo(22),
         diffStats: DiffStats(added: 210, removed: 44, files: 12),
@@ -171,14 +171,14 @@ public enum MockData: Sendable {
         latestActivity: "Checks: CI build (in_progress); Review required"
     )
 
-    public static let complete = Session(
+    public static let complete = Pod(
         status: .complete, branch: "fix/login", profileName: "my-app", model: "claude-opus",
         startedAt: .minutesAgo(45),
         diffStats: DiffStats(added: 67, removed: 22, files: 5),
         prUrl: URL(string: "https://github.com/org/my-app/pull/143")
     )
 
-    public static let killed = Session(
+    public static let killed = Pod(
         status: .killed, branch: "feat/payments", profileName: "backend", model: "claude-opus",
         startedAt: .minutesAgo(30),
         errorSummary: "Killed by user"

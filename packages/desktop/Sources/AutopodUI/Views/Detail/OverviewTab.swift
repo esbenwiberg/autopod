@@ -1,11 +1,11 @@
 import AutopodClient
 import SwiftUI
 
-/// Overview tab — session metadata, escalation, plan progress, activity feed.
+/// Overview tab — pod metadata, escalation, plan progress, activity feed.
 struct OverviewTab: View {
-    let session: Session
+    let pod: Pod
     let events: [AgentEvent]
-    var actions: SessionActions = .preview
+    var actions: PodActions = .preview
     var pendingMemories: [MemoryEntry] = []
     var onApproveMemory: (String) -> Void = { _ in }
     var onRejectMemory: (String) -> Void = { _ in }
@@ -16,8 +16,8 @@ struct OverviewTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 // Escalation card (if pending)
-                if session.status == .awaitingInput, let question = session.escalationQuestion {
-                    if session.escalationType == "action_approval" {
+                if pod.status == .awaitingInput, let question = pod.escalationQuestion {
+                    if pod.escalationType == "action_approval" {
                         actionApprovalCard(question)
                     } else {
                         escalationCard(question)
@@ -25,7 +25,7 @@ struct OverviewTab: View {
                 }
 
                 // Progress
-                if let phase = session.phase {
+                if let phase = pod.phase {
                     progressSection(phase)
                 }
 
@@ -40,23 +40,23 @@ struct OverviewTab: View {
                 // Metrics row
                 metricsRow
 
-                // Commit activity (running/paused or any session with commits)
-                if session.commitCount > 0 || session.status == .running || session.status == .paused {
+                // Commit activity (running/paused or any pod with commits)
+                if pod.commitCount > 0 || pod.status == .running || pod.status == .paused {
                     commitSection
                 }
 
                 // Validation summary (if available)
-                if let checks = session.validationChecks {
+                if let checks = pod.validationChecks {
                     validationSummary(checks)
                 }
 
                 // Error / review required
-                if session.status == .failed || session.status == .reviewRequired {
+                if pod.status == .failed || pod.status == .reviewRequired {
                     errorSection
                 }
 
-                // Session chain
-                if session.linkedSessionId != nil {
+                // Pod chain
+                if pod.linkedSessionId != nil {
                     chainSection
                 }
 
@@ -82,7 +82,7 @@ struct OverviewTab: View {
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let options = session.escalationOptions, !options.isEmpty {
+            if let options = pod.escalationOptions, !options.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(options, id: \.self) { option in
                         Button {
@@ -295,10 +295,10 @@ struct OverviewTab: View {
             Image(systemName: "person.text.rectangle")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            Text(session.profileName)
+            Text(pod.profileName)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
-            if let version = session.profileSnapshot?.version {
+            if let version = pod.profileSnapshot?.version {
                 Text("v\(version)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -310,7 +310,7 @@ struct OverviewTab: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            Text(session.branch)
+            Text(pod.branch)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -326,20 +326,20 @@ struct OverviewTab: View {
     private var metricsRow: some View {
         let metrics: [(icon: String, value: String, label: String, color: Color)] = {
             var items: [(String, String, String, Color)] = [
-                ("clock", session.duration, "Duration", .primary),
+                ("clock", pod.duration, "Duration", .primary),
             ]
-            if let diff = session.diffStats {
+            if let diff = pod.diffStats {
                 items.append(("doc.text", "\(diff.files)", "Files", .primary))
                 items.append(("plus", "\(diff.added)", "Added", .green))
                 items.append(("minus", "\(diff.removed)", "Removed", .red))
             }
             items.append(("wrench", "\(events.filter { $0.type == .toolUse }.count)", "Tool calls", .primary))
-            if session.inputTokens > 0 || session.costUsd > 0 || session.status == .running || session.status == .paused {
-                items.append(("arrow.up.circle", formatTokens(session.inputTokens), "In tokens", session.inputTokens > 0 ? .primary : .secondary))
-                items.append(("arrow.down.circle", formatTokens(session.outputTokens), "Out tokens", session.outputTokens > 0 ? .primary : .secondary))
-                let costKnown = session.costUsd > 0
-                let costInProgress = session.status == .running || session.status == .paused
-                let costDisplay = (!costKnown && costInProgress) ? "—" : String(format: "$%.3f", session.costUsd)
+            if pod.inputTokens > 0 || pod.costUsd > 0 || pod.status == .running || pod.status == .paused {
+                items.append(("arrow.up.circle", formatTokens(pod.inputTokens), "In tokens", pod.inputTokens > 0 ? .primary : .secondary))
+                items.append(("arrow.down.circle", formatTokens(pod.outputTokens), "Out tokens", pod.outputTokens > 0 ? .primary : .secondary))
+                let costKnown = pod.costUsd > 0
+                let costInProgress = pod.status == .running || pod.status == .paused
+                let costDisplay = (!costKnown && costInProgress) ? "—" : String(format: "$%.3f", pod.costUsd)
                 items.append(("dollarsign.circle", costDisplay, "Cost", costKnown ? .primary : .secondary))
             }
             return items
@@ -383,13 +383,13 @@ struct OverviewTab: View {
     // MARK: - Commits
 
     private var commitSection: some View {
-        let elapsed = Date().timeIntervalSince(session.startedAt)
+        let elapsed = Date().timeIntervalSince(pod.startedAt)
         let elapsedMins = elapsed / 60
-        let pace: String? = elapsedMins > 0 && session.commitCount > 0
-            ? String(format: "%.1f/hr", Double(session.commitCount) / elapsedMins * 60)
+        let pace: String? = elapsedMins > 0 && pod.commitCount > 0
+            ? String(format: "%.1f/hr", Double(pod.commitCount) / elapsedMins * 60)
             : nil
-        let isStale = elapsedMins >= 30 && session.commitCount == 0
-            && (session.status == .running || session.status == .paused)
+        let isStale = elapsedMins >= 30 && pod.commitCount == 0
+            && (pod.status == .running || pod.status == .paused)
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -407,22 +407,22 @@ struct OverviewTab: View {
 
             // Dot timeline — up to 12 dots
             let maxDots = 12
-            let filled = min(session.commitCount, maxDots)
+            let filled = min(pod.commitCount, maxDots)
             HStack(spacing: 3) {
                 ForEach(0..<maxDots, id: \.self) { i in
                     Circle()
                         .fill(i < filled ? Color.green : Color(nsColor: .separatorColor))
                         .frame(width: 8, height: 8)
                 }
-                if session.commitCount > maxDots {
-                    Text("+\(session.commitCount - maxDots)")
+                if pod.commitCount > maxDots {
+                    Text("+\(pod.commitCount - maxDots)")
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("\(session.commitCount) commit\(session.commitCount == 1 ? "" : "s")")
+                Text("\(pod.commitCount) commit\(pod.commitCount == 1 ? "" : "s")")
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(session.commitCount > 0 ? .primary : .secondary)
+                    .foregroundStyle(pod.commitCount > 0 ? .primary : .secondary)
             }
 
             if isStale {
@@ -487,7 +487,7 @@ struct OverviewTab: View {
     // MARK: - Error
 
     private var errorSection: some View {
-        let isReview = session.status == .reviewRequired
+        let isReview = pod.status == .reviewRequired
         let accentColor: Color = isReview ? .orange : .red
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -501,12 +501,12 @@ struct OverviewTab: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            if let err = session.errorSummary {
+            if let err = pod.errorSummary {
                 Text(err)
                     .font(.system(.callout, design: .monospaced))
                     .foregroundStyle(accentColor)
             }
-            if let a = session.attempts {
+            if let a = pod.attempts {
                 Text("Attempt \(a.current) of \(a.max)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -521,20 +521,20 @@ struct OverviewTab: View {
         )
     }
 
-    // MARK: - Session chain
+    // MARK: - Pod chain
 
     private var chainSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "link")
                     .foregroundStyle(.purple)
-                Text("Session Chain")
+                Text("Pod Chain")
                     .font(.system(.subheadline).weight(.semibold))
             }
 
-            if let linked = session.linkedSessionId {
+            if let linked = pod.linkedSessionId {
                 VStack(alignment: .leading, spacing: 0) {
-                    if session.isWorkspace {
+                    if pod.isWorkspace {
                         // This workspace fixes a worker
                         chainNode(
                             id: linked,
@@ -546,9 +546,9 @@ struct OverviewTab: View {
                         )
                         chainConnector()
                         chainNode(
-                            id: session.id,
+                            id: pod.id,
                             label: "Fix (workspace)",
-                            detail: session.status.label,
+                            detail: pod.status.label,
                             icon: "wrench.and.screwdriver",
                             color: .blue,
                             isCurrent: true
@@ -574,11 +574,11 @@ struct OverviewTab: View {
                         )
                         chainConnector()
                         chainNode(
-                            id: session.id,
+                            id: pod.id,
                             label: "Worker",
-                            detail: session.status.label,
+                            detail: pod.status.label,
                             icon: "gearshape",
-                            color: session.status.color,
+                            color: pod.status.color,
                             isCurrent: true
                         )
                     }
@@ -684,33 +684,33 @@ struct OverviewTab: View {
         let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         replyText = ""
-        Task { await actions.reply(session.id, text) }
+        Task { await actions.reply(pod.id, text) }
     }
 }
 
 // MARK: - Previews
 
 #Preview("Overview — running") {
-    OverviewTab(session: MockData.running, events: MockEvents.running)
+    OverviewTab(pod: MockData.running, events: MockEvents.running)
         .frame(width: 550, height: 600)
 }
 
 #Preview("Overview — awaiting input") {
-    OverviewTab(session: MockData.awaitingInput, events: MockEvents.awaitingInput)
+    OverviewTab(pod: MockData.awaitingInput, events: MockEvents.awaitingInput)
         .frame(width: 550, height: 500)
 }
 
 #Preview("Overview — validated") {
-    OverviewTab(session: MockData.validated, events: MockEvents.running)
+    OverviewTab(pod: MockData.validated, events: MockEvents.running)
         .frame(width: 550, height: 500)
 }
 
 #Preview("Overview — failed") {
-    OverviewTab(session: MockData.failed, events: MockEvents.failed)
+    OverviewTab(pod: MockData.failed, events: MockEvents.failed)
         .frame(width: 550, height: 500)
 }
 
 #Preview("Overview — worker with ACs") {
-    OverviewTab(session: MockData.workerFromWorkspace, events: MockEvents.running)
+    OverviewTab(pod: MockData.workerFromWorkspace, events: MockEvents.running)
         .frame(width: 550, height: 600)
 }

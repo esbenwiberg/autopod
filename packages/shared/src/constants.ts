@@ -1,6 +1,6 @@
-import type { SessionStatus } from './types/session.js';
+import type { PodStatus } from './types/pod.js';
 
-export const SESSION_ID_LENGTH = 8;
+export const POD_ID_LENGTH = 8;
 export const DEFAULT_MAX_VALIDATION_ATTEMPTS = 3;
 export const DEFAULT_MAX_PR_FIX_ATTEMPTS = 3;
 export const DEFAULT_HEALTH_TIMEOUT = 120;
@@ -33,7 +33,7 @@ export const CONTAINER_HOME_DIR = '/home/autopod';
  */
 export const AUTOPOD_INSTRUCTIONS_PATH = '/home/autopod/.autopod/system-instructions.md';
 
-export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
+export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   queued: ['provisioning', 'killing'],
   provisioning: ['running', 'killing'],
   running: ['awaiting_input', 'validating', 'paused', 'handoff', 'killing', 'complete', 'failed'],
@@ -47,8 +47,8 @@ export const VALID_STATUS_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = 
   merging: ['complete', 'merge_pending'],
   merge_pending: ['complete', 'failed', 'killing'],
   complete: [],
-  // handoff re-enters orchestration: interactive session has been stopped and
-  // is being provisioned again with a new pod config (agentMode: 'auto').
+  // handoff re-enters orchestration: interactive pod has been stopped and
+  // is being provisioned again with a new pod options (agentMode: 'auto').
   handoff: ['provisioning', 'killing'],
   killing: ['killed'],
   killed: ['validating', 'queued'],

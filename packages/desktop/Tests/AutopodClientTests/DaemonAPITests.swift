@@ -61,14 +61,14 @@ import Testing
   }
   """.data(using: .utf8)!
 
-  let session = try JSONDecoder().decode(SessionResponse.self, from: json)
-  #expect(session.id == "feat-oauth-a1b2")
-  #expect(session.status == "running")
-  #expect(session.plan?.steps.count == 2)
-  #expect(session.progress?.currentPhase == 3)
-  #expect(session.acceptanceCriteria?.first == "Users can sign in with Google")
-  #expect(session.costUsd == 0.42)
-  #expect(session.commitCount == 2)
+  let pod = try JSONDecoder().decode(SessionResponse.self, from: json)
+  #expect(pod.id == "feat-oauth-a1b2")
+  #expect(pod.status == "running")
+  #expect(pod.plan?.steps.count == 2)
+  #expect(pod.progress?.currentPhase == 3)
+  #expect(pod.acceptanceCriteria?.first == "Users can sign in with Google")
+  #expect(pod.costUsd == 0.42)
+  #expect(pod.commitCount == 2)
 }
 
 @Test func profileResponseDecodes() throws {
@@ -132,7 +132,7 @@ import Testing
 @Test func validationResponseDecodes() throws {
   let json = """
   {
-    "sessionId": "test-1",
+    "podId": "test-1",
     "attempt": 1,
     "timestamp": "2026-04-01T09:10:00Z",
     "smoke": {
@@ -175,10 +175,10 @@ import Testing
 @Test func systemEventParses() throws {
   let json = """
   {
-    "type": "session.status_changed",
+    "type": "pod.status_changed",
     "timestamp": "2026-04-01T09:05:00Z",
     "_eventId": 42,
-    "sessionId": "test-1",
+    "podId": "test-1",
     "previousStatus": "running",
     "newStatus": "validating"
   }

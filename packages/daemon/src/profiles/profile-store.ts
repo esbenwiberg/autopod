@@ -8,7 +8,7 @@ import type {
   NetworkPolicy,
   OutputTarget,
   PimActivationConfig,
-  PodConfig,
+  PodOptions,
   PrivateRegistry,
   Profile,
   ProviderCredentials,
@@ -20,7 +20,7 @@ import {
   ProfileNotFoundError,
   createProfileSchema,
   escalationConfigSchema,
-  outputModeFromPod,
+  outputModeFromPodOptions,
   updateProfileSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -41,11 +41,11 @@ export interface ProfileStore {
 }
 
 /**
- * Reconstruct the profile-level PodConfig override from row columns.
+ * Reconstruct the profile-level PodOptions override from row columns.
  * Returns null when no new-style columns are set (i.e. the profile has no
- * pod default — session creation will fall back to built-in defaults).
+ * pod default — pod creation will fall back to built-in defaults).
  */
-function readProfilePodFromRow(row: Record<string, unknown>): PodConfig | null {
+function readProfilePodFromRow(row: Record<string, unknown>): PodOptions | null {
   const agentMode = row.agent_mode as AgentMode | null | undefined;
   const output = row.output_target as OutputTarget | null | undefined;
   if (!agentMode && !output) return null;
@@ -225,7 +225,7 @@ export function createProfileStore(
 
       // When a pod config is provided, prefer it; otherwise fall back to
       // legacy outputMode. We always write both so legacy readers keep working.
-      const legacyOutputMode = parsed.pod ? outputModeFromPod(parsed.pod) : parsed.outputMode;
+      const legacyOutputMode = parsed.pod ? outputModeFromPodOptions(parsed.pod) : parsed.outputMode;
 
       db.prepare(`
         INSERT INTO profiles (
@@ -468,7 +468,7 @@ export function createProfileStore(
         // Also sync the legacy column if the caller didn't explicitly set it.
         if (parsed.outputMode === undefined && parsed.pod) {
           setClauses.push('output_mode = @outputMode');
-          fieldMap.outputMode = outputModeFromPod(parsed.pod);
+          fieldMap.outputMode = outputModeFromPodOptions(parsed.pod);
         }
       }
       if (parsed.modelProvider !== undefined) {
@@ -580,15 +580,15 @@ export function createProfileStore(
       // Verify profile exists
       fetchRaw(name);
 
-      // Check for active sessions
+      // Check for active pods
       const activeCount = db
         .prepare(
-          `SELECT COUNT(*) as count FROM sessions WHERE profile_name = ? AND status NOT IN ('complete', 'killed')`,
+          `SELECT COUNT(*) as count FROM pods WHERE profile_name = ? AND status NOT IN ('complete', 'killed')`,
         )
         .get(name) as { count: number };
 
       if (activeCount.count > 0) {
-        throw new AutopodError('Cannot delete profile with active sessions', 'PROFILE_IN_USE', 409);
+        throw new AutopodError('Cannot delete profile with active pods', 'PROFILE_IN_USE', 409);
       }
 
       // Check if other profiles extend this one
@@ -604,9 +604,9 @@ export function createProfileStore(
         );
       }
 
-      // Clean up completed/killed sessions before deleting (FK constraint)
+      // Clean up completed/killed pods before deleting (FK constraint)
       db.prepare(
-        `DELETE FROM sessions WHERE profile_name = ? AND status IN ('complete', 'killed')`,
+        `DELETE FROM pods WHERE profile_name = ? AND status IN ('complete', 'killed')`,
       ).run(name);
 
       db.prepare('DELETE FROM profiles WHERE name = ?').run(name);

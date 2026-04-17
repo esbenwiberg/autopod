@@ -1,4 +1,4 @@
-import { SessionNotFoundError } from '@autopod/shared';
+import { PodNotFoundError } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
 import { resolveSessionId } from './id-resolver.js';
@@ -32,12 +32,12 @@ describe('resolveSessionId', () => {
     expect(result).toBe('abcd1234');
   });
 
-  it('throws SessionNotFoundError when no match', async () => {
+  it('throws PodNotFoundError when no match', async () => {
     (mockClient.listSessions as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       { id: 'efgh5678' },
     ]);
 
-    await expect(resolveSessionId(mockClient, 'xyz')).rejects.toThrow(SessionNotFoundError);
+    await expect(resolveSessionId(mockClient, 'xyz')).rejects.toThrow(PodNotFoundError);
   });
 
   it('throws on ambiguous matches', async () => {

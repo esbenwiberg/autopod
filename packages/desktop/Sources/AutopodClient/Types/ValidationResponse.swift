@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Validation result (mirrors packages/shared/src/types/validation.ts)
 
 public struct ValidationResponse: Codable, Sendable {
-  public let sessionId: String
+  public let podId: String
   public let attempt: Int
   public let timestamp: String
   public let smoke: SmokeResultResponse

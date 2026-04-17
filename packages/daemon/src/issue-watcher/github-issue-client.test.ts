@@ -168,13 +168,13 @@ describe('GitHubIssueClient', () => {
     it('posts comment body', async () => {
       mockFetch.mockResolvedValue({ ok: true });
 
-      await client.addComment('42', 'Session started.');
+      await client.addComment('42', 'Pod started.');
 
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.github.com/repos/org/app/issues/42/comments',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ body: 'Session started.' }),
+          body: JSON.stringify({ body: 'Pod started.' }),
         }),
       );
     });

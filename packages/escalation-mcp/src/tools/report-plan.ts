@@ -1,4 +1,4 @@
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export interface ReportPlanInput {
   summary: string;
@@ -6,10 +6,10 @@ export interface ReportPlanInput {
 }
 
 export async function reportPlan(
-  sessionId: string,
+  podId: string,
   input: ReportPlanInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
 ): Promise<string> {
-  bridge.reportPlan(sessionId, input.summary, input.steps);
+  bridge.reportPlan(podId, input.summary, input.steps);
   return `Plan registered with ${input.steps.length} steps. Proceed with implementation.`;
 }

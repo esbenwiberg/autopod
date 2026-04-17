@@ -121,12 +121,12 @@ public enum DiffParser {
 // MARK: - Diff tab view
 
 public struct DiffTab: View {
-  public let session: Session
+  public let pod: Pod
   public let diffString: String?
   public var onRefresh: (() -> Void)?
 
-  public init(session: Session, diffString: String? = nil, onRefresh: (() -> Void)? = nil) {
-    self.session = session
+  public init(pod: Pod, diffString: String? = nil, onRefresh: (() -> Void)? = nil) {
+    self.pod = pod
     self.diffString = diffString
     self.onRefresh = onRefresh
   }
@@ -150,7 +150,7 @@ public struct DiffTab: View {
         Text("No diff available")
           .font(.subheadline)
           .foregroundStyle(.secondary)
-        if session.status.isActive {
+        if pod.status.isActive {
           Text("Diff will be available after validation")
             .font(.caption)
             .foregroundStyle(.tertiary)
@@ -281,7 +281,7 @@ public struct DiffTab: View {
 }
 
 #Preview("Diff tab") {
-  DiffTab(session: MockData.validated, diffString: """
+  DiffTab(pod: MockData.validated, diffString: """
   diff --git a/src/auth/google.ts b/src/auth/google.ts
   new file mode 100644
   --- /dev/null

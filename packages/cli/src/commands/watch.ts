@@ -72,7 +72,7 @@ export function registerWatchCommands(program: Command, getClient: () => Autopod
           `${statusColor(`[${issue.status}]`)} ${chalk.bold(issue.issueTitle)} ` +
             `${chalk.dim(`(${issue.provider} #${issue.issueId})`)}`,
         );
-        console.log(`  Profile: ${issue.profileName}  Session: ${issue.sessionId ?? 'n/a'}`);
+        console.log(`  Profile: ${issue.profileName}  Pod: ${issue.podId ?? 'n/a'}`);
         console.log(`  ${chalk.dim(issue.issueUrl)}`);
         console.log();
       }

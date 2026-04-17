@@ -85,8 +85,8 @@ describe('DockerContainerManager', () => {
   describe('spawn()', () => {
     const baseConfig = {
       image: 'node:22-alpine',
-      sessionId: 'sess-abc',
-      env: { SESSION_ID: 'sess-abc', PORT: '3000' },
+      podId: 'sess-abc',
+      env: { POD_ID: 'sess-abc', PORT: '3000' },
     };
 
     it('creates and starts a container with correct name', async () => {
@@ -108,7 +108,7 @@ describe('DockerContainerManager', () => {
       await manager.spawn(baseConfig);
 
       const createCall = docker.createContainer.mock.calls[0]?.[0];
-      expect(createCall.Env).toEqual(expect.arrayContaining(['SESSION_ID=sess-abc', 'PORT=3000']));
+      expect(createCall.Env).toEqual(expect.arrayContaining(['POD_ID=sess-abc', 'PORT=3000']));
     });
 
     it('configures port bindings when ports provided', async () => {
@@ -575,9 +575,9 @@ describe('DockerContainerManager', () => {
 
       await manager.spawn({
         image: 'autopod-node22:latest',
-        sessionId: 'sess-xyz',
+        podId: 'sess-xyz',
         env: {
-          SESSION_ID: 'sess-xyz',
+          POD_ID: 'sess-xyz',
           PORT: '3000',
           ANTHROPIC_API_KEY: 'sk-test',
         },
@@ -596,7 +596,7 @@ describe('DockerContainerManager', () => {
       expect(createCall.WorkingDir).toBe('/workspace');
 
       // Env vars
-      expect(createCall.Env).toContain('SESSION_ID=sess-xyz');
+      expect(createCall.Env).toContain('POD_ID=sess-xyz');
       expect(createCall.Env).toContain('PORT=3000');
       expect(createCall.Env).toContain('ANTHROPIC_API_KEY=sk-test');
 

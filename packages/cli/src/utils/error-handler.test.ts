@@ -2,7 +2,7 @@ import {
   AuthError,
   AutopodError,
   ProfileNotFoundError,
-  SessionNotFoundError,
+  PodNotFoundError,
   ValidationError,
 } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
@@ -18,8 +18,8 @@ describe('getExitCode', () => {
     expect(getExitCode(new AutopodError('nope', 'FORBIDDEN', 403))).toBe(2);
   });
 
-  it('returns 3 for SessionNotFoundError', () => {
-    expect(getExitCode(new SessionNotFoundError('abc'))).toBe(3);
+  it('returns 3 for PodNotFoundError', () => {
+    expect(getExitCode(new PodNotFoundError('abc'))).toBe(3);
   });
 
   it('returns 3 for ProfileNotFoundError', () => {

@@ -11,7 +11,7 @@ import type { Logger } from 'pino';
  */
 async function* parse(
   stream: Readable,
-  sessionId: string,
+  podId: string,
   logger: Logger,
 ): AsyncIterable<AgentEvent> {
   const rl = createInterface({ input: stream });
@@ -24,7 +24,7 @@ async function* parse(
     hasOutput = true;
     logger.debug({
       component: 'copilot-stream-parser',
-      sessionId,
+      podId,
       line: trimmed.slice(0, 200),
       msg: 'Copilot output line',
     });

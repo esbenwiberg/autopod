@@ -19,17 +19,17 @@ export interface HostBrowserRunner {
   /** Execute a Playwright script on the host. Returns stdout/stderr/exitCode. */
   runScript(
     script: string,
-    opts: { timeout: number; sessionId: string },
+    opts: { timeout: number; podId: string },
   ): Promise<BrowserRunResult>;
 
   /** Read a screenshot from the host filesystem as base64. */
   readScreenshot(path: string): Promise<string>;
 
-  /** Remove all temp files for a session. */
-  cleanup(sessionId: string): Promise<void>;
+  /** Remove all temp files for a pod. */
+  cleanup(podId: string): Promise<void>;
 
-  /** Get the session-scoped screenshot directory on the host. */
-  screenshotDir(sessionId: string): string;
+  /** Get the pod-scoped screenshot directory on the host. */
+  screenshotDir(podId: string): string;
 }
 
 /**
@@ -62,12 +62,12 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
   // time. Child processes spawned with this cwd can `import 'playwright'`.
   const pwCwd = resolvePlaywrightCwd();
 
-  function sessionDir(sessionId: string): string {
-    return join(baseDir, sessionId);
+  function sessionDir(podId: string): string {
+    return join(baseDir, podId);
   }
 
-  function screenshotDir(sessionId: string): string {
-    return join(sessionDir(sessionId), 'screenshots');
+  function screenshotDir(podId: string): string {
+    return join(sessionDir(podId), 'screenshots');
   }
 
   function childSpawnOpts(): { env: NodeJS.ProcessEnv; cwd?: string } {
@@ -109,17 +109,17 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
 
     async runScript(
       script: string,
-      opts: { timeout: number; sessionId: string },
+      opts: { timeout: number; podId: string },
     ): Promise<BrowserRunResult> {
-      const dir = sessionDir(opts.sessionId);
-      const ssDir = screenshotDir(opts.sessionId);
+      const dir = sessionDir(opts.podId);
+      const ssDir = screenshotDir(opts.podId);
       await mkdir(ssDir, { recursive: true });
 
       const scriptPath = join(dir, `${randomUUID()}.mjs`);
       await writeFile(scriptPath, script, 'utf-8');
 
       log.info(
-        { sessionId: opts.sessionId, scriptPath, timeout: opts.timeout },
+        { podId: opts.podId, scriptPath, timeout: opts.timeout },
         'Running Playwright script on host',
       );
 
@@ -129,7 +129,7 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
       });
 
       log.info(
-        { sessionId: opts.sessionId, exitCode: result.exitCode },
+        { podId: opts.podId, exitCode: result.exitCode },
         'Host Playwright script finished',
       );
 
@@ -141,9 +141,9 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
       return buf.toString('base64');
     },
 
-    async cleanup(sessionId: string): Promise<void> {
+    async cleanup(podId: string): Promise<void> {
       try {
-        await rm(sessionDir(sessionId), { recursive: true, force: true });
+        await rm(sessionDir(podId), { recursive: true, force: true });
       } catch {
         // Best-effort cleanup
       }

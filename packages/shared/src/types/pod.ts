@@ -1,96 +1,165 @@
 import type { OutputMode } from './actions.js';
+import type { EscalationRequest } from './escalation.js';
+import type { PodOptions } from './pod-options.js';
+import type { ExecutionTarget, PimGroupConfig, Profile } from './profile.js';
+import type { RuntimeType } from './runtime.js';
+import type { TaskSummary } from './task-summary.js';
+import type { ValidationOverride, ValidationResult } from './validation.js';
 
-/**
- * How the session is driven.
- *
- * - `auto`        — an AI agent runs the orchestration loop until the task
- *                   reports complete.
- * - `interactive` — the container stays alive with no agent; a human attaches
- *                   and drives it directly. Completion is triggered by
- *                   `completeSession()` (aka `ap complete`).
- */
-export type AgentMode = 'auto' | 'interactive';
+export interface ReferenceRepo {
+  url: string;
+  mountPath: string; // derived from last URL segment at pod creation time
+}
 
-/**
- * Where the session's output goes.
- *
- * - `pr`       — push the branch and open a pull request. Requires `repoUrl`.
- * - `branch`   — push the branch to origin only, no PR.
- * - `artifact` — extract `/workspace` from the container to the data dir.
- * - `none`     — ephemeral; nothing leaves the container.
- */
-export type OutputTarget = 'pr' | 'branch' | 'artifact' | 'none';
+export type PodStatus =
+  | 'queued'
+  | 'provisioning'
+  | 'running'
+  | 'awaiting_input'
+  | 'validating'
+  | 'validated'
+  | 'failed'
+  | 'review_required'
+  | 'approved'
+  | 'merging'
+  | 'merge_pending'
+  | 'complete'
+  | 'paused'
+  | 'handoff'
+  | 'killing'
+  | 'killed';
 
-/**
- * Orthogonal axes describing what a session is.
- *
- * Replaces the single `OutputMode` enum, which conflated agent presence,
- * output destination, and validation into one value.
- */
-export interface PodConfig {
-  agentMode: AgentMode;
-  output: OutputTarget;
+export interface Pod {
+  id: string;
+  profileName: string;
+  task: string;
+  status: PodStatus;
+  model: string;
+  runtime: RuntimeType;
+  executionTarget: ExecutionTarget;
+  branch: string;
+  containerId: string | null;
+  worktreePath: string | null;
+  validationAttempts: number;
+  maxValidationAttempts: number;
+  lastValidationResult: ValidationResult | null;
+  lastCorrectionMessage: string | null;
+  pendingEscalation: EscalationRequest | null;
+  escalationCount: number;
+  skipValidation: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+  userId: string;
+  filesChanged: number;
+  linesAdded: number;
+  linesRemoved: number;
+  previewUrl: string | null;
+  prUrl: string | null;
+  mergeBlockReason: string | null;
+  plan: { summary: string; steps: string[] } | null;
+  progress: {
+    phase: string;
+    description: string;
+    currentPhase: number;
+    totalPhases: number;
+  } | null;
+  acceptanceCriteria: string[] | null;
+  claudeSessionId: string | null;
   /**
-   * Run the full build/smoke/review pipeline before completing.
-   * Defaults: `output='pr'` → true; all others → false.
+   * Orthogonal axes describing how this pod is driven and where its output
+   * goes. Replaces the legacy `outputMode` enum.
    */
-  validate?: boolean;
+  options: PodOptions;
   /**
-   * Allow this session to be promoted to a different mode later
-   * (e.g. interactive → auto via `ap complete --pr`). Default true.
+   * @deprecated Mirrors `options` for wire/storage back-compat. New code should
+   * read `options` directly. Kept in sync by the pod repository.
    */
-  promotable?: boolean;
+  outputMode: OutputMode;
+  baseBranch: string | null;
+  acFrom: string | null;
+  recoveryWorktreePath: string | null;
+  reworkReason: string | null;
+  lastHeartbeatAt: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  commitCount: number;
+  lastCommitAt: string | null;
+  startCommitSha: string | null;
+  linkedPodId: string | null;
+  taskSummary: TaskSummary | null;
+  validationOverrides: ValidationOverride[] | null;
+  pimGroups: PimGroupConfig[] | null;
+  /** Snapshot of the resolved profile config at pod creation time (after inheritance). */
+  profileSnapshot: Profile | null;
+  prFixAttempts: number;
+  maxPrFixAttempts: number;
+  fixPodId: string | null;
+  /** Token budget for this pod (input + output). null = no budget. Inherited from profile at creation. */
+  tokenBudget: number | null;
+  /** Number of times the user has approved a budget extension for this pod. */
+  budgetExtensionsUsed: number;
+  /** Why the pod is paused. 'budget' = waiting for budget approval, 'manual' = user-paused mid-run. */
+  pauseReason: 'budget' | 'manual' | null;
+  /** Reference repos cloned read-only into the container for research pods. */
+  referenceRepos: ReferenceRepo[] | null;
+  /** Shared PAT for authenticating against all reference repos (plaintext). */
+  referenceRepoPat: string | null;
+  /** Host path where /workspace was extracted on pod completion (artifact mode). */
+  artifactsPath: string | null;
+  /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
+  scheduledJobId: string | null;
 }
 
-/**
- * Resolve a full `PodConfig` from the legacy `OutputMode` string.
- * Used by the DB migration backfill and as a compatibility layer for callers
- * that still pass `outputMode`.
- */
-export function podConfigFromOutputMode(mode: OutputMode): PodConfig {
-  switch (mode) {
-    case 'pr':
-      return { agentMode: 'auto', output: 'pr', validate: true, promotable: false };
-    case 'artifact':
-      return { agentMode: 'auto', output: 'artifact', validate: false, promotable: false };
-    case 'workspace':
-      return { agentMode: 'interactive', output: 'branch', validate: false, promotable: true };
-  }
+export interface CreatePodRequest {
+  profileName: string;
+  task: string;
+  model?: string;
+  runtime?: RuntimeType;
+  executionTarget?: ExecutionTarget;
+  branch?: string;
+  /** Override the profile's branch prefix for this pod (e.g. 'hotfix/'). Ignored when branch is set. */
+  branchPrefix?: string;
+  skipValidation?: boolean;
+  acceptanceCriteria?: string[];
+  /**
+   * Per-pod override of the profile's pod options. Each field is
+   * independently overridable — `{agentMode:'interactive'}` keeps the
+   * profile's `output` choice.
+   */
+  options?: Partial<PodOptions>;
+  /**
+   * @deprecated Prefer `options`. When set, resolves to the corresponding
+   * `PodOptions` via `podOptionsFromOutputMode()`. Ignored if `options` is set.
+   */
+  outputMode?: OutputMode;
+  baseBranch?: string;
+  acFrom?: string;
+  linkedPodId?: string;
+  /** PIM groups to activate for the duration of this pod */
+  pimGroups?: PimGroupConfig[];
+  /** Existing PR URL to carry forward (used for fix pods — skips PR creation) */
+  prUrl?: string | null;
+  /** Override the profile's token budget for this pod. null = inherit from profile. */
+  tokenBudget?: number | null;
+  /** Reference repos to clone read-only into the container. Mount paths are derived automatically. */
+  referenceRepos?: { url: string }[];
+  /** Shared PAT for authenticating against all reference repos (optional). */
+  referenceRepoPat?: string;
+  /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
+  scheduledJobId?: string | null;
 }
 
-/**
- * Derive a legacy `OutputMode` for wire back-compat. The legacy enum can't
- * express the full axis space — e.g. `{interactive, pr}` has no legacy peer —
- * so this returns the closest match.
- */
-export function outputModeFromPod(pod: PodConfig): OutputMode {
-  if (pod.agentMode === 'interactive') return 'workspace';
-  if (pod.output === 'artifact') return 'artifact';
-  return 'pr';
-}
-
-/**
- * Merge a partial session override onto a profile default, producing a
- * concrete `PodConfig` with all defaults filled in.
- */
-export function resolvePodConfig(
-  profileDefault: PodConfig | null | undefined,
-  override: Partial<PodConfig> | null | undefined,
-): PodConfig {
-  const base: PodConfig = profileDefault ?? {
-    agentMode: 'auto',
-    output: 'pr',
-    validate: true,
-    promotable: false,
-  };
-  const merged: PodConfig = {
-    agentMode: override?.agentMode ?? base.agentMode,
-    output: override?.output ?? base.output,
-    validate: override?.validate ?? base.validate,
-    promotable: override?.promotable ?? base.promotable,
-  };
-  // Apply axis-implied defaults when validate/promotable weren't explicitly set.
-  if (merged.validate === undefined) merged.validate = merged.output === 'pr';
-  if (merged.promotable === undefined) merged.promotable = merged.agentMode === 'interactive';
-  return merged;
+export interface PodSummary {
+  id: string;
+  profileName: string;
+  task: string;
+  status: PodStatus;
+  model: string;
+  runtime: RuntimeType;
+  duration: number | null;
+  filesChanged: number;
+  createdAt: string;
 }

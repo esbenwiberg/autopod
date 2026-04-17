@@ -2,18 +2,18 @@ import type {
   EscalationCreatedEvent,
   NotificationType,
   ProcessContentConfig,
-  Session,
-  SessionErrorNotification,
-  SessionFailedNotification,
-  SessionNeedsInputNotification,
-  SessionStatusChangedEvent,
-  SessionValidatedNotification,
+  Pod,
+  PodErrorNotification,
+  PodFailedNotification,
+  PodNeedsInputNotification,
+  PodStatusChangedEvent,
+  PodValidatedNotification,
   SystemEvent,
   ValidationCompletedEvent,
 } from '@autopod/shared';
 import { sanitize } from '@autopod/shared';
 import type { Logger } from 'pino';
-import type { EventBus } from '../sessions/event-bus.js';
+import type { EventBus } from '../pods/event-bus.js';
 import {
   buildErrorCard,
   buildFailedCard,
@@ -25,7 +25,7 @@ import type { TeamsAdapter } from './teams-adapter.js';
 import type { NotificationConfig } from './types.js';
 
 export interface SessionLookup {
-  getSession(sessionId: string): Session;
+  getSession(podId: string): Pod;
 }
 
 export interface NotificationService {
@@ -68,67 +68,67 @@ export function createNotificationService(deps: {
   }
 
   function canSendForSession(
-    sessionId: string,
+    podId: string,
     notificationType: NotificationType,
     profileName: string,
   ): boolean {
     if (!isEventEnabled(notificationType, profileName)) {
-      logger.debug({ sessionId, notificationType }, 'Notification type not enabled');
+      logger.debug({ podId, notificationType }, 'Notification type not enabled');
       return false;
     }
 
-    const rateCheck = rateLimiter.canSend(sessionId);
+    const rateCheck = rateLimiter.canSend(podId);
     if (!rateCheck.allowed) {
-      logger.debug({ sessionId, reason: rateCheck.reason }, 'Rate limited');
+      logger.debug({ podId, reason: rateCheck.reason }, 'Rate limited');
       return false;
     }
 
     return true;
   }
 
-  function getSessionSafe(sessionId: string): Session | null {
+  function getSessionSafe(podId: string): Pod | null {
     try {
-      return sessionLookup.getSession(sessionId);
+      return sessionLookup.getSession(podId);
     } catch {
-      logger.warn({ sessionId }, 'Could not look up session for notification');
+      logger.warn({ podId }, 'Could not look up pod for notification');
       return null;
     }
   }
 
   async function handleValidationCompleted(event: ValidationCompletedEvent): Promise<void> {
-    const session = getSessionSafe(event.sessionId);
-    if (!session) return;
+    const pod = getSessionSafe(event.podId);
+    if (!pod) return;
 
     if (event.result.overall === 'pass') {
-      const notificationType: NotificationType = 'session_validated';
-      if (!canSendForSession(event.sessionId, notificationType, session.profileName)) return;
+      const notificationType: NotificationType = 'pod_validated';
+      if (!canSendForSession(event.podId, notificationType, pod.profileName)) return;
 
       // Extract screenshots from page results for Teams card
       const screenshots = event.result.smoke.pages
         .filter((p) => p.screenshotBase64)
         .map((p) => ({ pagePath: p.path, base64: p.screenshotBase64 ?? '' }));
 
-      const notification: SessionValidatedNotification = {
+      const notification: PodValidatedNotification = {
         type: notificationType,
-        sessionId: session.id,
-        profileName: session.profileName,
-        task: sanitizeText(session.task),
+        podId: pod.id,
+        profileName: pod.profileName,
+        task: sanitizeText(pod.task),
         timestamp: event.timestamp,
-        previewUrl: session.previewUrl,
-        prUrl: session.prUrl,
+        previewUrl: pod.previewUrl,
+        prUrl: pod.prUrl,
         screenshots,
-        filesChanged: session.filesChanged,
-        linesAdded: session.linesAdded,
-        linesRemoved: session.linesRemoved,
+        filesChanged: pod.filesChanged,
+        linesAdded: pod.linesAdded,
+        linesRemoved: pod.linesRemoved,
         duration: event.result.duration,
       };
 
       const card = buildValidatedCard(notification);
-      rateLimiter.recordSent(event.sessionId);
+      rateLimiter.recordSent(event.podId);
       await teamsAdapter.send(card);
     } else {
-      const notificationType: NotificationType = 'session_failed';
-      if (!canSendForSession(event.sessionId, notificationType, session.profileName)) return;
+      const notificationType: NotificationType = 'pod_failed';
+      if (!canSendForSession(event.podId, notificationType, pod.profileName)) return;
 
       const reason =
         (event.result.taskReview?.reasoning ?? event.result.smoke.build.status === 'fail')
@@ -137,11 +137,11 @@ export function createNotificationService(deps: {
             ? 'Health check failed'
             : 'Validation failed';
 
-      const notification: SessionFailedNotification = {
+      const notification: PodFailedNotification = {
         type: notificationType,
-        sessionId: session.id,
-        profileName: session.profileName,
-        task: sanitizeText(session.task),
+        podId: pod.id,
+        profileName: pod.profileName,
+        task: sanitizeText(pod.task),
         timestamp: event.timestamp,
         reason: sanitizeText(reason),
         validationResult: event.result,
@@ -149,7 +149,7 @@ export function createNotificationService(deps: {
       };
 
       const card = buildFailedCard(notification);
-      rateLimiter.recordSent(event.sessionId);
+      rateLimiter.recordSent(event.podId);
       await teamsAdapter.send(card);
     }
   }
@@ -158,47 +158,47 @@ export function createNotificationService(deps: {
     // Only notify for human-relevant escalations, not AI-to-AI
     if (event.escalation.type === 'ask_ai') return;
 
-    const session = getSessionSafe(event.sessionId);
-    if (!session) return;
+    const pod = getSessionSafe(event.podId);
+    if (!pod) return;
 
-    const notificationType: NotificationType = 'session_needs_input';
-    if (!canSendForSession(event.sessionId, notificationType, session.profileName)) return;
+    const notificationType: NotificationType = 'pod_needs_input';
+    if (!canSendForSession(event.podId, notificationType, pod.profileName)) return;
 
-    const notification: SessionNeedsInputNotification = {
+    const notification: PodNeedsInputNotification = {
       type: notificationType,
-      sessionId: session.id,
-      profileName: session.profileName,
-      task: sanitizeText(session.task),
+      podId: pod.id,
+      profileName: pod.profileName,
+      task: sanitizeText(pod.task),
       timestamp: event.timestamp,
       escalation: event.escalation,
     };
 
     const card = buildNeedsInputCard(notification);
-    rateLimiter.recordSent(event.sessionId);
+    rateLimiter.recordSent(event.podId);
     await teamsAdapter.send(card);
   }
 
-  async function handleStatusChanged(event: SessionStatusChangedEvent): Promise<void> {
+  async function handleStatusChanged(event: PodStatusChangedEvent): Promise<void> {
     if (event.newStatus !== 'failed' && event.newStatus !== 'review_required') return;
 
-    const session = getSessionSafe(event.sessionId);
-    if (!session) return;
+    const pod = getSessionSafe(event.podId);
+    if (!pod) return;
 
-    const notificationType: NotificationType = 'session_error';
-    if (!canSendForSession(event.sessionId, notificationType, session.profileName)) return;
+    const notificationType: NotificationType = 'pod_error';
+    if (!canSendForSession(event.podId, notificationType, pod.profileName)) return;
 
-    const notification: SessionErrorNotification = {
+    const notification: PodErrorNotification = {
       type: notificationType,
-      sessionId: session.id,
-      profileName: session.profileName,
-      task: sanitizeText(session.task),
+      podId: pod.id,
+      profileName: pod.profileName,
+      task: sanitizeText(pod.task),
       timestamp: event.timestamp,
-      error: 'Session entered failed state',
+      error: 'Pod entered failed state',
       fatal: true,
     };
 
     const card = buildErrorCard(notification);
-    rateLimiter.recordSent(event.sessionId);
+    rateLimiter.recordSent(event.podId);
     await teamsAdapter.send(card);
   }
 
@@ -206,16 +206,16 @@ export function createNotificationService(deps: {
     // Fire-and-forget: wrap all sends in try/catch
     const promise = (async () => {
       switch (event.type) {
-        case 'session.validation_completed':
+        case 'pod.validation_completed':
           await handleValidationCompleted(event);
           break;
-        case 'session.escalation_created':
+        case 'pod.escalation_created':
           await handleEscalationCreated(event);
           break;
-        case 'session.status_changed':
+        case 'pod.status_changed':
           await handleStatusChanged(event);
           break;
-        // session.completed could be handled here if needed
+        // pod.completed could be handled here if needed
         default:
           break;
       }

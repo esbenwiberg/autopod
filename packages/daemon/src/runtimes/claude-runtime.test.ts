@@ -74,7 +74,7 @@ describe('ClaudeRuntime', () => {
       const args = (
         runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
       ).buildSpawnArgs({
-        sessionId: 'abc',
+        podId: 'abc',
         task: 'Add a test',
         model: 'claude-opus-4-5',
         workDir: '/workspace',
@@ -103,7 +103,7 @@ describe('ClaudeRuntime', () => {
         (
           runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
         ).buildSpawnArgs({
-          sessionId: 'abc',
+          podId: 'abc',
           task: 'task',
           model,
           workDir: '/workspace',
@@ -121,7 +121,7 @@ describe('ClaudeRuntime', () => {
       expect(buildArgs('claude-opus-4-6')).toContain('claude-opus-4-6');
     });
 
-    it('includes --session-id flag', () => {
+    it('includes --pod-id flag', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -129,7 +129,7 @@ describe('ClaudeRuntime', () => {
       const args = (
         runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
       ).buildSpawnArgs({
-        sessionId: 'abc',
+        podId: 'abc',
         task: 'task',
         model: 'opus',
         workDir: '/workspace',
@@ -137,7 +137,7 @@ describe('ClaudeRuntime', () => {
         env: {},
       });
 
-      expect(args).toContain('--session-id');
+      expect(args).toContain('--pod-id');
     });
 
     it('includes --debug when AUTOPOD_DEBUG_AGENT=1', () => {
@@ -149,7 +149,7 @@ describe('ClaudeRuntime', () => {
       const args = (
         runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
       ).buildSpawnArgs({
-        sessionId: 'abc',
+        podId: 'abc',
         task: 'task',
         model: 'opus',
         workDir: '/workspace',
@@ -168,7 +168,7 @@ describe('ClaudeRuntime', () => {
       const args = (
         runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
       ).buildSpawnArgs({
-        sessionId: 'abc',
+        podId: 'abc',
         task: 'task',
         model: 'opus',
         workDir: '/workspace',
@@ -187,7 +187,7 @@ describe('ClaudeRuntime', () => {
       const args = (
         runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
       ).buildSpawnArgs({
-        sessionId: 'abc',
+        podId: 'abc',
         task: 'task',
         model: 'opus',
         workDir: '/workspace',
@@ -209,7 +209,7 @@ describe('ClaudeRuntime', () => {
       const args = (
         runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
       ).buildSpawnArgs({
-        sessionId: 'abc',
+        podId: 'abc',
         task: 'task',
         model: 'opus',
         workDir: '/workspace',
@@ -272,7 +272,7 @@ describe('ClaudeRuntime', () => {
           writeMcpConfig: (config: SpawnConfig) => Promise<void>;
         }
       ).writeMcpConfig({
-        sessionId: 'abc',
+        podId: 'abc',
         task: 'task',
         model: 'opus',
         workDir: '/workspace',
@@ -297,10 +297,10 @@ describe('ClaudeRuntime', () => {
 
       const args = (
         runtime as unknown as { buildResumeArgs: (msg: string, id?: string) => string[] }
-      ).buildResumeArgs('Continue please', 'claude-session-xyz');
+      ).buildResumeArgs('Continue please', 'claude-pod-xyz');
 
       expect(args).toContain('--resume');
-      expect(args).toContain('claude-session-xyz');
+      expect(args).toContain('claude-pod-xyz');
       expect(args).toContain('--append-system-prompt-file');
       expect(args).toContain('/home/autopod/.autopod/system-instructions.md');
     });
@@ -343,7 +343,7 @@ describe('ClaudeRuntime', () => {
 
       const events = [];
       for await (const event of runtime.spawn({
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         task: 'Do the thing',
         model: 'opus',
         workDir: '/workspace',
@@ -372,7 +372,7 @@ describe('ClaudeRuntime', () => {
 
       const events = [];
       for await (const event of runtime.spawn({
-        sessionId: 'sess-fail',
+        podId: 'sess-fail',
         task: 'Fail',
         model: 'opus',
         workDir: '/workspace',
@@ -399,7 +399,7 @@ describe('ClaudeRuntime', () => {
 
       const events = [];
       for await (const event of runtime.spawn({
-        sessionId: 'sess-ok',
+        podId: 'sess-ok',
         task: 'Success',
         model: 'opus',
         workDir: '/workspace',
@@ -433,7 +433,7 @@ describe('ClaudeRuntime', () => {
 
       const events = [];
       for await (const event of runtime.spawn({
-        sessionId: 'sess-stderr',
+        podId: 'sess-stderr',
         task: 'Task',
         model: 'opus',
         workDir: '/workspace',
@@ -449,7 +449,7 @@ describe('ClaudeRuntime', () => {
       expect(stderrEvent).toBeDefined();
     });
 
-    it('extracts and stores Claude session ID from init event', async () => {
+    it('extracts and stores Claude pod ID from init event', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -458,13 +458,13 @@ describe('ClaudeRuntime', () => {
         emitLine(handle.stdout as PassThrough, {
           type: 'system',
           subtype: 'init',
-          session_id: 'claude-sess-abc123',
+          pod_id: 'claude-sess-abc123',
         });
         handle.finish(0);
       }, 10);
 
       for await (const _ of runtime.spawn({
-        sessionId: 'sess-id-track',
+        podId: 'sess-id-track',
         task: 'Task',
         model: 'opus',
         workDir: '/workspace',
@@ -487,7 +487,7 @@ describe('ClaudeRuntime', () => {
       }, 10);
 
       for await (const _ of runtime.spawn({
-        sessionId: 'track-sess',
+        podId: 'track-sess',
         task: 'Task',
         model: 'opus',
         workDir: '/workspace',
@@ -510,12 +510,12 @@ describe('ClaudeRuntime', () => {
   // ---------------------------------------------------------------------------
 
   describe('resume', () => {
-    it('calls execStreaming with --resume when a claude session ID is known', async () => {
+    it('calls execStreaming with --resume when a claude pod ID is known', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      // Pre-set a Claude session ID
+      // Pre-set a Claude pod ID
       runtime.setClaudeSessionId('sess-1', 'claude-internal-xyz');
 
       setTimeout(() => {
@@ -531,7 +531,7 @@ describe('ClaudeRuntime', () => {
       expect(calledArgs).toContain('claude-internal-xyz');
     });
 
-    it('calls execStreaming without --resume when no claude session ID is known', async () => {
+    it('calls execStreaming without --resume when no claude pod ID is known', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -574,7 +574,7 @@ describe('ClaudeRuntime', () => {
   // ---------------------------------------------------------------------------
 
   describe('abort', () => {
-    it('calls handle.kill() and cleans up both session and claude session IDs', async () => {
+    it('calls handle.kill() and cleans up both pod and claude pod IDs', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -609,7 +609,7 @@ describe('ClaudeRuntime', () => {
   // ---------------------------------------------------------------------------
 
   describe('suspend', () => {
-    it('kills the handle but preserves the claude session ID for resume', async () => {
+    it('kills the handle but preserves the claude pod ID for resume', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -626,7 +626,7 @@ describe('ClaudeRuntime', () => {
       expect(
         (runtime as unknown as { handles: Map<string, StreamingExecResult> }).handles.has('sess-1'),
       ).toBe(false);
-      // Session ID preserved (unlike abort)
+      // Pod ID preserved (unlike abort)
       expect(runtime.getClaudeSessionId('sess-1')).toBe('claude-preserve-me');
     });
 
@@ -645,16 +645,16 @@ describe('ClaudeRuntime', () => {
   // ---------------------------------------------------------------------------
 
   describe('setClaudeSessionId / getClaudeSessionId', () => {
-    it('stores and retrieves a claude session ID', () => {
+    it('stores and retrieves a claude pod ID', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
 
-      runtime.setClaudeSessionId('my-session', 'claude-abc');
-      expect(runtime.getClaudeSessionId('my-session')).toBe('claude-abc');
+      runtime.setClaudeSessionId('my-pod', 'claude-abc');
+      expect(runtime.getClaudeSessionId('my-pod')).toBe('claude-abc');
     });
 
-    it('returns undefined for unknown sessions', () => {
+    it('returns undefined for unknown pods', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);

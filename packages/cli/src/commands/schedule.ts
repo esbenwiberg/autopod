@@ -108,7 +108,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
         `${chalk.bold('Next run:')}     ${formatNextRun(job.nextRunAt)} (${job.nextRunAt})`,
       );
       console.log(`${chalk.bold('Last run:')}     ${formatRelativeAgo(job.lastRunAt)}`);
-      console.log(`${chalk.bold('Last session:')} ${job.lastSessionId ?? '-'}`);
+      console.log(`${chalk.bold('Last pod:')} ${job.lastPodId ?? '-'}`);
       console.log(`${chalk.bold('Status:')}       ${formatJobStatus(job)}`);
       console.log(`${chalk.bold('Task:')}         ${job.task}`);
     });
@@ -149,9 +149,9 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
     .description('Manually trigger a run now (ignores schedule)')
     .action(async (id: string) => {
       const client = getClient();
-      const session = await client.triggerScheduledJob(id);
-      console.log(chalk.green(`Session ${chalk.bold(session.id)} started.`));
-      console.log(chalk.dim(`Track progress: ap status ${session.id.slice(0, 8)}`));
+      const pod = await client.triggerScheduledJob(id);
+      console.log(chalk.green(`Pod ${chalk.bold(pod.id)} started.`));
+      console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
     });
 
   // ap schedule catchup
@@ -175,8 +175,8 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
         );
 
         if (run) {
-          const session = await client.runScheduledJobCatchup(job.id);
-          console.log(chalk.green(`Session ${chalk.bold(session.id)} started.`));
+          const pod = await client.runScheduledJobCatchup(job.id);
+          console.log(chalk.green(`Pod ${chalk.bold(pod.id)} started.`));
         } else {
           await client.skipScheduledJobCatchup(job.id);
           console.log('Skipped.');

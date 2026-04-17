@@ -37,7 +37,7 @@ interface ClaudeToolUseResult {
 interface ClaudeStreamEvent {
   type: string;
   subtype?: string;
-  session_id?: string;
+  pod_id?: string;
   message?: ClaudeStreamMessage;
   tool_use_result?: ClaudeToolUseResult;
   result?: string;
@@ -56,7 +56,7 @@ const FILE_CHANGE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 export class ClaudeStreamParser {
   static async *parse(
     stream: Readable,
-    sessionId: string,
+    podId: string,
     logger: Logger,
   ): AsyncIterable<AgentEvent> {
     const rl = createInterface({ input: stream });
@@ -72,7 +72,7 @@ export class ClaudeStreamParser {
         // Non-JSON line — emit as a visible status event so it shows up in the TUI
         logger.info({
           component: 'claude-stream-parser',
-          sessionId,
+          podId,
           raw: trimmed.slice(0, 500),
           msg: 'Non-JSON stdout line from claude',
         });
@@ -84,7 +84,7 @@ export class ClaudeStreamParser {
         continue;
       }
 
-      const mapped = ClaudeStreamParser.mapEvent(event, sessionId, logger);
+      const mapped = ClaudeStreamParser.mapEvent(event, podId, logger);
       if (mapped) yield mapped;
     }
   }
@@ -93,14 +93,14 @@ export class ClaudeStreamParser {
    * Map a Claude stream-json event to an AgentEvent.
    *
    * Event mapping:
-   * - system (subtype init)    → AgentStatusEvent (captures session_id)
+   * - system (subtype init)    → AgentStatusEvent (captures pod_id)
    * - assistant (text content) → AgentStatusEvent
    * - assistant (tool_use)     → AgentFileChangeEvent or AgentToolUseEvent
    * - tool_result              → AgentToolUseEvent with output
    * - result                   → AgentCompleteEvent
    * - error                    → AgentErrorEvent
    */
-  static mapEvent(event: ClaudeStreamEvent, sessionId: string, logger?: Logger): AgentEvent | null {
+  static mapEvent(event: ClaudeStreamEvent, podId: string, logger?: Logger): AgentEvent | null {
     const ts = new Date().toISOString();
 
     switch (event.type) {
@@ -109,7 +109,7 @@ export class ClaudeStreamParser {
           return {
             type: 'status',
             timestamp: ts,
-            message: `Claude session initialized${event.session_id ? ` (${event.session_id})` : ''}`,
+            message: `Claude pod initialized${event.pod_id ? ` (${event.pod_id})` : ''}`,
           };
         }
         return null;
@@ -216,7 +216,7 @@ export class ClaudeStreamParser {
       default: {
         logger?.debug({
           component: 'claude-stream-parser',
-          sessionId,
+          podId,
           msg: `Unknown Claude event type: ${event.type}`,
         });
         return null;

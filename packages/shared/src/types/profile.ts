@@ -1,7 +1,7 @@
 import type { ActionPolicy, OutputMode } from './actions.js';
 import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from './injection.js';
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
-import type { PodConfig } from './pod.js';
+import type { PodOptions } from './pod-options.js';
 import type { RuntimeType } from './runtime.js';
 
 export type ExecutionTarget = 'local' | 'aci';
@@ -51,7 +51,7 @@ export interface Profile {
    * built-in defaults (`{auto, pr}`). Per-session overrides shallow-merge
    * over this.
    */
-  pod: PodConfig | null;
+  pod: PodOptions | null;
   /**
    * @deprecated Mirrors `pod` for wire/storage back-compat. New code should
    * read `pod` directly. Kept in sync by the profile store.

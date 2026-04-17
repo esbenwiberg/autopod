@@ -1,7 +1,7 @@
 import { generateId } from '@autopod/shared';
 import type { EscalationRequest } from '@autopod/shared';
 import type { PendingRequests } from '../pending-requests.js';
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export interface RequestCredentialInput {
   service: 'github' | 'ado';
@@ -9,17 +9,17 @@ export interface RequestCredentialInput {
 }
 
 export async function requestCredential(
-  sessionId: string,
+  podId: string,
   input: RequestCredentialInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
   pendingRequests: PendingRequests,
 ): Promise<string> {
   const escalationId = generateId();
-  const timeoutMs = bridge.getHumanResponseTimeout(sessionId) * 1000;
+  const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
 
   const escalation: EscalationRequest = {
     id: escalationId,
-    sessionId,
+    podId,
     type: 'request_credential',
     timestamp: new Date().toISOString(),
     payload: {
@@ -30,7 +30,7 @@ export async function requestCredential(
   };
 
   bridge.createEscalation(escalation);
-  bridge.incrementEscalationCount(sessionId);
+  bridge.incrementEscalationCount(podId);
 
   try {
     return await pendingRequests.waitForResponse(escalationId, timeoutMs);

@@ -5,7 +5,7 @@ import { applyOverrides } from './override-applicator.js';
 
 function makeBaseResult(overrides?: Partial<ValidationResult>): ValidationResult {
   return {
-    sessionId: 'test-123',
+    podId: 'test-123',
     attempt: 1,
     timestamp: new Date().toISOString(),
     overall: 'fail',

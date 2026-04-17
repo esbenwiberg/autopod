@@ -2,7 +2,7 @@ import type { PageAssertion } from './profile.js';
 import type { DeviationsAssessment } from './task-summary.js';
 
 export interface ValidationResult {
-  sessionId: string;
+  podId: string;
   attempt: number;
   timestamp: string;
   smoke: SmokeResult;

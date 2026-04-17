@@ -1,9 +1,9 @@
-import type { Session, ValidationResult } from '@autopod/shared';
+import type { Pod, ValidationResult } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import type { StoredValidation } from '../sessions/validation-repository.js';
+import type { StoredValidation } from '../pods/validation-repository.js';
 import { generateValidationReport } from './report-generator.js';
 
-function createTestSession(overrides: Partial<Session> = {}): Session {
+function createTestSession(overrides: Partial<Pod> = {}): Pod {
   return {
     id: 'sess-001',
     profileName: 'test-app',
@@ -41,7 +41,7 @@ function createTestSession(overrides: Partial<Session> = {}): Session {
 
 function createPassingResult(attempt: number): ValidationResult {
   return {
-    sessionId: 'sess-001',
+    podId: 'sess-001',
     attempt,
     timestamp: '2026-03-26T10:05:00Z',
     smoke: {
@@ -84,7 +84,7 @@ function createPassingResult(attempt: number): ValidationResult {
 
 function createFailingResult(attempt: number): ValidationResult {
   return {
-    sessionId: 'sess-001',
+    podId: 'sess-001',
     attempt,
     timestamp: '2026-03-26T10:03:00Z',
     smoke: {
@@ -137,7 +137,7 @@ function toStoredValidation(result: ValidationResult): StoredValidation {
   }
   return {
     id: `val-${result.attempt}`,
-    sessionId: result.sessionId,
+    podId: result.podId,
     attempt: result.attempt,
     result,
     screenshots,
@@ -146,9 +146,9 @@ function toStoredValidation(result: ValidationResult): StoredValidation {
 }
 
 describe('generateValidationReport', () => {
-  it('generates valid HTML with session header', () => {
-    const session = createTestSession();
-    const html = generateValidationReport(session, []);
+  it('generates valid HTML with pod header', () => {
+    const pod = createTestSession();
+    const html = generateValidationReport(pod, []);
 
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('sess-001');
@@ -247,15 +247,15 @@ describe('generateValidationReport', () => {
   });
 
   it('handles partial data — no PR URL', () => {
-    const session = createTestSession({ prUrl: null });
-    const html = generateValidationReport(session, []);
+    const pod = createTestSession({ prUrl: null });
+    const html = generateValidationReport(pod, []);
 
     expect(html).not.toContain('Pull Request');
   });
 
   it('escapes HTML in user-provided content', () => {
-    const session = createTestSession({ task: '<script>alert("xss")</script>' });
-    const html = generateValidationReport(session, []);
+    const pod = createTestSession({ task: '<script>alert("xss")</script>' });
+    const html = generateValidationReport(pod, []);
 
     expect(html).not.toContain('<script>alert');
     expect(html).toContain('&lt;script&gt;alert');

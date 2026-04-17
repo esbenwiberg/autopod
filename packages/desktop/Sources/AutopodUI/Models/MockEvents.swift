@@ -2,7 +2,7 @@ import Foundation
 
 public enum MockEvents: Sendable {
 
-    /// Simulates a typical running session's event log
+    /// Simulates a typical running pod's event log
     public static let running: [AgentEvent] = {
         let base = Date().addingTimeInterval(-8 * 60)
         var events: [AgentEvent] = []
@@ -16,7 +16,7 @@ public enum MockEvents: Sendable {
             id += 1
         }
 
-        add(0,    .status,     "Session started", "Transitioning from queued → provisioning")
+        add(0,    .status,     "Pod started", "Transitioning from queued → provisioning")
         add(3,    .status,     "Container ready", "Transitioning from provisioning → running")
         add(5,    .progress,   "Phase 1/10: Understanding the codebase")
         add(8,    .toolUse,    "Read src/routes/index.ts", "Read 142 lines", toolName: "Read")
@@ -57,7 +57,7 @@ public enum MockEvents: Sendable {
         return events
     }()
 
-    /// Simulates a failed session's event log
+    /// Simulates a failed pod's event log
     public static let failed: [AgentEvent] = {
         let base = Date().addingTimeInterval(-11 * 60)
         var events: [AgentEvent] = []
@@ -71,7 +71,7 @@ public enum MockEvents: Sendable {
             id += 1
         }
 
-        add(0,    .status,     "Session started")
+        add(0,    .status,     "Pod started")
         add(5,    .status,     "Container ready")
         add(10,   .progress,      "Phase 1/10: Understanding the codebase")
         add(20,   .toolUse,    "Read src/utils/perf.ts", "Read 210 lines")
@@ -86,16 +86,16 @@ public enum MockEvents: Sendable {
         add(125,  .toolUse,    "Edit src/utils/perf.ts", "Attempt 1 fix: added toJSON method")
         add(130,  .toolUse,    "Bash: npm run build", "Build started...")
         add(145,  .error,      "Build failed — tsc exit 1", "src/utils/perf.ts:52 — Cannot read property 'cache' of undefined. Initialization order issue.")
-        add(150,  .status,     "Session failed", "Transitioning from running → failed (attempt 2 of 3)")
+        add(150,  .status,     "Pod failed", "Transitioning from running → failed (attempt 2 of 3)")
 
         return events
     }()
 
-    /// Short log for an awaiting_input session
+    /// Short log for an awaiting_input pod
     public static let awaitingInput: [AgentEvent] = {
         let base = Date().addingTimeInterval(-5 * 60)
         return [
-            AgentEvent(id: 200, timestamp: base, type: .status, summary: "Session started"),
+            AgentEvent(id: 200, timestamp: base, type: .status, summary: "Pod started"),
             AgentEvent(id: 201, timestamp: base.addingTimeInterval(4), type: .status, summary: "Container ready"),
             AgentEvent(id: 202, timestamp: base.addingTimeInterval(10), type: .progress, summary: "Phase 1/10: Understanding requirements"),
             AgentEvent(id: 203, timestamp: base.addingTimeInterval(20), type: .toolUse, summary: "Read src/auth/config.ts", detail: "Read 45 lines"),

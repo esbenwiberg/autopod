@@ -22,7 +22,7 @@ export function registerResearchCommands(program: Command, getClient: () => Auto
       const client = getClient();
       const referenceRepos = opts.repo.length ? opts.repo.map((url) => ({ url })) : undefined;
 
-      const session = await withSpinner('Creating research session…', () =>
+      const pod = await withSpinner('Creating research pod…', () =>
         client.createSession({
           profileName: profile,
           task,
@@ -32,16 +32,16 @@ export function registerResearchCommands(program: Command, getClient: () => Auto
         }),
       );
 
-      console.log(chalk.green(`Research pod ${chalk.bold(session.id)} created.`));
-      console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
-      console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
-      if (session.referenceRepos?.length) {
+      console.log(chalk.green(`Research pod ${chalk.bold(pod.id)} created.`));
+      console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
+      console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
+      if (pod.referenceRepos?.length) {
         console.log(
-          `${chalk.bold('Repos:')}    ${session.referenceRepos.map((r: { mountPath: string }) => r.mountPath).join(', ')}`,
+          `${chalk.bold('Repos:')}    ${pod.referenceRepos.map((r: { mountPath: string }) => r.mountPath).join(', ')}`,
         );
       }
       console.log();
-      console.log(chalk.dim(`Watch progress:  ap logs ${session.id.slice(0, 8)}`));
-      console.log(chalk.dim('Browse artifacts: open desktop app → session → Markdown tab'));
+      console.log(chalk.dim(`Watch progress:  ap logs ${pod.id.slice(0, 8)}`));
+      console.log(chalk.dim('Browse artifacts: open desktop app → pod → Markdown tab'));
     });
 }

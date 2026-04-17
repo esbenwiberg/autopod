@@ -2,7 +2,7 @@ import Foundation
 import UserNotifications
 import AutopodUI
 
-/// Sends native macOS notifications for session events.
+/// Sends native macOS notifications for pod events.
 @MainActor
 public final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Sendable {
   public static let shared = NotificationService()
@@ -26,42 +26,42 @@ public final class NotificationService: NSObject, UNUserNotificationCenterDelega
     _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
   }
 
-  public func notifyEscalation(session: Session, question: String) {
+  public func notifyEscalation(pod: Pod, question: String) {
     let content = UNMutableNotificationContent()
     content.title = "Agent needs input"
-    content.subtitle = session.branch
+    content.subtitle = pod.branch
     content.body = question
     content.sound = .default
     content.categoryIdentifier = "ESCALATION"
-    post(id: "escalation-\(session.id)", content: content)
+    post(id: "escalation-\(pod.id)", content: content)
   }
 
-  public func notifyValidationComplete(session: Session, passed: Bool) {
+  public func notifyValidationComplete(pod: Pod, passed: Bool) {
     let content = UNMutableNotificationContent()
     content.title = passed ? "Validation passed" : "Validation failed"
-    content.subtitle = session.branch
+    content.subtitle = pod.branch
     content.body = passed ? "Ready for review" : "Check the validation results"
     content.sound = .default
     content.categoryIdentifier = passed ? "VALIDATION_PASS" : "VALIDATION_FAIL"
-    post(id: "validation-\(session.id)", content: content)
+    post(id: "validation-\(pod.id)", content: content)
   }
 
-  public func notifySessionFailed(session: Session, error: String) {
+  public func notifySessionFailed(pod: Pod, error: String) {
     let content = UNMutableNotificationContent()
-    content.title = "Session failed"
-    content.subtitle = session.branch
+    content.title = "Pod failed"
+    content.subtitle = pod.branch
     content.body = error
     content.sound = .default
-    post(id: "failed-\(session.id)", content: content)
+    post(id: "failed-\(pod.id)", content: content)
   }
 
-  public func notifySessionComplete(session: Session) {
+  public func notifySessionComplete(pod: Pod) {
     let content = UNMutableNotificationContent()
-    content.title = "Session complete"
-    content.subtitle = session.branch
-    content.body = session.prUrl.map { "PR: \($0.absoluteString)" } ?? "Done"
+    content.title = "Pod complete"
+    content.subtitle = pod.branch
+    content.body = pod.prUrl.map { "PR: \($0.absoluteString)" } ?? "Done"
     content.sound = .default
-    post(id: "complete-\(session.id)", content: content)
+    post(id: "complete-\(pod.id)", content: content)
   }
 
   public func notifyMissedJob(jobId: String, jobName: String, lastRunAt: String?) {

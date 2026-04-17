@@ -152,7 +152,7 @@ async function findEligibilitySchedule(
 
 /** Checks if a role is already active (for deactivate or skip-duplicate logic).
  * Returns { roleAssignmentScheduleId, principalId } if active, null if not.
- * principalId comes from the API response (real AAD OID) — never trust session.userId. */
+ * principalId comes from the API response (real AAD OID) — never trust pod.userId. */
 async function findActiveAssignment(
   token: string,
   fullRoleDefId: string,
@@ -390,7 +390,7 @@ export function createPimClient(
       }
 
       // Step 1: find eligible assignment (tenant-root URL, asTarget(), no principalId filter)
-      // principalId from the result is the real AAD OID — don't trust session.userId in dev mode.
+      // principalId from the result is the real AAD OID — don't trust pod.userId in dev mode.
       const {
         eligibilityScheduleId,
         scope: apiScope,
@@ -471,7 +471,7 @@ export function createPimClient(
             `The role may not be currently active.`,
         );
       }
-      // Use principalId from API result (real AAD OID) — never trust session.userId in dev mode.
+      // Use principalId from API result (real AAD OID) — never trust pod.userId in dev mode.
       const resolvedPrincipalId = activeAssignment.principalId;
 
       const requestName = crypto.randomUUID();
@@ -514,8 +514,8 @@ export function createAzurePimHandler(config: HandlerConfig): ActionHandler {
     handlerType: 'azure-pim',
 
     async execute(action: ActionDefinition, params: Record<string, unknown>): Promise<unknown> {
-      // principal_id and duration are injected by the session bridge for agent calls,
-      // or passed directly from session-manager for workspace pod auto-activation.
+      // principal_id and duration are injected by the pod bridge for agent calls,
+      // or passed directly from pod-manager for workspace pod auto-activation.
       const client = createPimClient(getSecret, log);
 
       switch (action.name) {
@@ -524,7 +524,7 @@ export function createAzurePimHandler(config: HandlerConfig): ActionHandler {
           const principalId = params.principal_id as string;
           const duration = (params.duration as string | undefined) ?? 'PT8H';
           const justification =
-            (params.justification as string | undefined) ?? 'Agent session access';
+            (params.justification as string | undefined) ?? 'Agent pod access';
           log.debug({ groupId, principalId }, 'Activating PIM group');
           return client.activate(groupId, principalId, duration, justification);
         }
@@ -548,7 +548,7 @@ export function createAzurePimHandler(config: HandlerConfig): ActionHandler {
           const principalId = params.principal_id as string;
           const duration = (params.duration as string | undefined) ?? 'PT8H';
           const justification =
-            (params.justification as string | undefined) ?? 'Agent session access';
+            (params.justification as string | undefined) ?? 'Agent pod access';
           log.debug({ scope, roleDefinitionId, principalId }, 'Activating PIM RBAC role');
           return client.activateRbacRole(
             scope,

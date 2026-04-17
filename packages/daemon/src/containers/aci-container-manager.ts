@@ -84,7 +84,7 @@ export class AciContainerManager implements ContainerManager {
    * giving us a real interactive stream just like Docker exec.
    */
   async spawn(config: ContainerSpawnConfig): Promise<string> {
-    const containerGroupName = `autopod-${config.sessionId}`;
+    const containerGroupName = `autopod-${config.podId}`;
     const imageName = this.resolveImage(config.image);
 
     const env = Object.entries(config.env).map(([name, value]) => ({
@@ -176,7 +176,7 @@ export class AciContainerManager implements ContainerManager {
     }
   }
 
-  async writeFile(containerId: string, filePath: string, content: string): Promise<void> {
+  async writeFile(containerId: string, filePath: string, content: string | Buffer): Promise<void> {
     // Write file via exec — base64 encode to avoid shell escaping issues
     const b64 = Buffer.from(content).toString('base64');
     const dir = filePath.substring(0, filePath.lastIndexOf('/'));
@@ -245,7 +245,7 @@ export class AciContainerManager implements ContainerManager {
       },
     );
 
-    // ACI exec returns a websocket URL for interactive sessions.
+    // ACI exec returns a websocket URL for interactive pods.
     // For non-interactive exec, we use logs instead.
     // Fall back to capturing output via a wrapper approach.
     this.logger.debug({ containerId, command }, 'ACI exec completed');

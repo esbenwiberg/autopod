@@ -12,10 +12,10 @@ import {
   createEscalationRepository,
   createEventBus,
   createEventRepository,
-  createSessionManager,
-  createSessionQueue,
-  createSessionRepository,
-} from './sessions/index.js';
+  createPodManager,
+  createPodQueue,
+  createPodRepository,
+} from './pods/index.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
 const MIGRATION_FILES = fs
@@ -83,7 +83,7 @@ describe('Integration', () => {
     db = createTestDb();
 
     const profileStore = createProfileStore(db);
-    const sessionRepo = createSessionRepository(db);
+    const podRepo = createPodRepository(db);
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
@@ -146,7 +146,7 @@ describe('Integration', () => {
 
     const validationEngine = {
       validate: vi.fn().mockResolvedValue({
-        sessionId: 'test',
+        podId: 'test',
         attempt: 1,
         timestamp: new Date().toISOString(),
         smoke: {
@@ -166,19 +166,19 @@ describe('Integration', () => {
       }),
     };
 
-    // biome-ignore lint/style/useConst: assigned after sessionQueue to break circular dependency
-    let sessionManager: ReturnType<typeof createSessionManager>;
+    // biome-ignore lint/style/useConst: assigned after podQueue to break circular dependency
+    let podManager: ReturnType<typeof createPodManager>;
 
-    const sessionQueue = createSessionQueue(
+    const podQueue = createPodQueue(
       2,
-      async (sessionId) => {
-        await sessionManager.processSession(sessionId);
+      async (podId) => {
+        await podManager.processPod(podId);
       },
       logger,
     );
 
-    sessionManager = createSessionManager({
-      sessionRepo,
+    podManager = createPodManager({
+      podRepo,
       escalationRepo,
       profileStore,
       eventBus,
@@ -186,14 +186,14 @@ describe('Integration', () => {
       worktreeManager,
       runtimeRegistry,
       validationEngine,
-      enqueueSession: (id) => sessionQueue.enqueue(id),
+      enqueueSession: (id) => podQueue.enqueue(id),
       mcpBaseUrl: 'http://localhost:3100',
       daemonConfig: { mcpServers: [], claudeMdSections: [] },
       logger,
     });
 
     // Stub bridge for MCP (not testing MCP transport in integration)
-    const sessionBridge = {
+    const podBridge = {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
@@ -207,12 +207,12 @@ describe('Integration', () => {
 
     app = await createServer({
       authModule,
-      sessionManager,
+      podManager,
       profileStore,
       eventBus,
       eventRepo,
-      sessionBridge,
-      pendingRequestsBySession: new Map(),
+      podBridge,
+      pendingRequestsByPod: new Map(),
       logLevel: 'silent',
       prettyLog: false,
     });
@@ -344,10 +344,10 @@ describe('Integration', () => {
       });
     });
 
-    it('POST /sessions creates a session', async () => {
+    it('POST /pods creates a pod', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: { profileName: 'test-app', task: 'Add a button' },
       });
@@ -356,57 +356,57 @@ describe('Integration', () => {
       expect(res.json().status).toBe('queued');
     });
 
-    it('GET /sessions lists sessions', async () => {
+    it('GET /pods lists pods', async () => {
       await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: { profileName: 'test-app', task: 'Task 1' },
       });
 
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().length).toBeGreaterThanOrEqual(1);
     });
 
-    it('GET /sessions/:sessionId returns session details', async () => {
+    it('GET /pods/:podId returns pod details', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: { profileName: 'test-app', task: 'Task 1' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'GET',
-        url: `/sessions/${sessionId}`,
+        url: `/pods/${podId}`,
         headers: { authorization: 'Bearer test-token' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().id).toBe(sessionId);
+      expect(res.json().id).toBe(podId);
     });
 
-    it('POST /sessions/:sessionId/kill kills a session', async () => {
+    it('POST /pods/:podId/kill kills a pod', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: { profileName: 'test-app', task: 'Task to kill' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       // Wait a tick for the queue to potentially process
       await new Promise((r) => setTimeout(r, 50));
 
-      // Check current status — session may have been processed already
+      // Check current status — pod may have been processed already
       const getRes = await app.inject({
         method: 'GET',
-        url: `/sessions/${sessionId}`,
+        url: `/pods/${podId}`,
         headers: { authorization: 'Bearer test-token' },
       });
       const status = getRes.json().status;
@@ -420,19 +420,19 @@ describe('Integration', () => {
       // If it's in a killable state, kill it
       const killRes = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/kill`,
+        url: `/pods/${podId}/kill`,
         headers: { authorization: 'Bearer test-token' },
       });
 
       if (killRes.statusCode === 200) {
         const afterKill = await app.inject({
           method: 'GET',
-          url: `/sessions/${sessionId}`,
+          url: `/pods/${podId}`,
           headers: { authorization: 'Bearer test-token' },
         });
         expect(afterKill.json().status).toBe('killed');
       } else {
-        // Session already transitioned to a non-killable state (validated, approved, etc.)
+        // Pod already transitioned to a non-killable state (validated, approved, etc.)
         expect([200, 409]).toContain(killRes.statusCode);
       }
     });
@@ -448,31 +448,31 @@ describe('Integration', () => {
       });
     });
 
-    it('GET /sessions/:sessionId/report returns HTML', async () => {
+    it('GET /pods/:podId/report returns HTML', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: { profileName: 'test-app', task: 'Build a widget' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'GET',
-        url: `/sessions/${sessionId}/report`,
+        url: `/pods/${podId}/report`,
         headers: { authorization: 'Bearer test-token' },
       });
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toContain('text/html');
       expect(res.body).toContain('<!DOCTYPE html>');
       expect(res.body).toContain('Build a widget');
-      expect(res.body).toContain(sessionId);
+      expect(res.body).toContain(podId);
     });
 
-    it('GET /sessions/:sessionId/report returns 404 for nonexistent session', async () => {
+    it('GET /pods/:podId/report returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions/nonexistent/report',
+        url: '/pods/nonexistent/report',
         headers: { authorization: 'Bearer test-token' },
       });
       expect(res.statusCode).toBe(404);
@@ -489,46 +489,46 @@ describe('Integration', () => {
       });
     });
 
-    it('POST /sessions/:sessionId/preview returns 409 when session has no container', async () => {
+    it('POST /pods/:podId/preview returns 409 when pod has no container', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: { profileName: 'test-app', task: 'Preview test' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
-      // Freshly created session has no containerId yet
+      // Freshly created pod has no containerId yet
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${sessionId}/preview`,
+        url: `/pods/${podId}/preview`,
         headers: { authorization: 'Bearer test-token' },
       });
-      // May be 409 (no container) or 200 (if session was already processed fast enough)
+      // May be 409 (no container) or 200 (if pod was already processed fast enough)
       expect([200, 409]).toContain(res.statusCode);
     });
 
-    it('DELETE /sessions/:sessionId/preview returns 409 when session has no container', async () => {
+    it('DELETE /pods/:podId/preview returns 409 when pod has no container', async () => {
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: { profileName: 'test-app', task: 'Preview stop test' },
       });
-      const sessionId = createRes.json().id;
+      const podId = createRes.json().id;
 
       const res = await app.inject({
         method: 'DELETE',
-        url: `/sessions/${sessionId}/preview`,
+        url: `/pods/${podId}/preview`,
         headers: { authorization: 'Bearer test-token' },
       });
       expect([200, 409]).toContain(res.statusCode);
     });
 
-    it('POST /sessions/:sessionId/preview returns 404 for nonexistent session', async () => {
+    it('POST /pods/:podId/preview returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions/nonexistent/preview',
+        url: '/pods/nonexistent/preview',
         headers: { authorization: 'Bearer test-token' },
       });
       expect(res.statusCode).toBe(404);
@@ -546,10 +546,10 @@ describe('Integration', () => {
       expect(res.json().error).toBe('PROFILE_NOT_FOUND');
     });
 
-    it('returns 404 for nonexistent session', async () => {
+    it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/sessions/nonexistent',
+        url: '/pods/nonexistent',
         headers: { authorization: 'Bearer test-token' },
       });
       expect(res.statusCode).toBe(404);
@@ -575,7 +575,7 @@ describe('Integration', () => {
   });
 
   describe('Workspace Sessions', () => {
-    it('POST /sessions creates a workspace session', async () => {
+    it('POST /pods creates a workspace pod', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -585,22 +585,22 @@ describe('Integration', () => {
 
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: {
           profileName: 'test-app',
-          task: 'Workspace session',
+          task: 'Workspace pod',
           outputMode: 'workspace',
         },
       });
 
       expect(res.statusCode).toBe(201);
-      const session = res.json();
-      expect(session.outputMode).toBe('workspace');
-      expect(session.status).toBe('queued');
+      const pod = res.json();
+      expect(pod.outputMode).toBe('workspace');
+      expect(pod.status).toBe('queued');
     });
 
-    it('POST /sessions rejects workspace + ACI execution target', async () => {
+    it('POST /pods rejects workspace + ACI execution target', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -610,11 +610,11 @@ describe('Integration', () => {
 
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: {
           profileName: 'test-app',
-          task: 'Workspace session',
+          task: 'Workspace pod',
           outputMode: 'workspace',
           executionTarget: 'aci',
         },
@@ -624,7 +624,7 @@ describe('Integration', () => {
       expect(res.json().error).toContain('local');
     });
 
-    it('POST /sessions rejects deny-all network policy with cloud-backed runtime', async () => {
+    it('POST /pods rejects deny-all network policy with cloud-backed runtime', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -642,7 +642,7 @@ describe('Integration', () => {
 
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: {
           profileName: 'deny-all-profile',
@@ -655,7 +655,7 @@ describe('Integration', () => {
       expect(res.json().error).toContain('restricted');
     });
 
-    it('POST /sessions allows deny-all network policy for workspace sessions', async () => {
+    it('POST /pods allows deny-all network policy for workspace pods', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -673,7 +673,7 @@ describe('Integration', () => {
 
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: {
           profileName: 'deny-all-workspace',
@@ -685,7 +685,7 @@ describe('Integration', () => {
       expect(res.statusCode).toBe(201);
     });
 
-    it('POST /sessions/:id/complete rejects non-workspace sessions', async () => {
+    it('POST /pods/:id/complete rejects non-workspace pods', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -695,28 +695,28 @@ describe('Integration', () => {
 
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: {
           profileName: 'test-app',
-          task: 'Normal PR session',
+          task: 'Normal PR pod',
         },
       });
-      const session = createRes.json();
+      const pod = createRes.json();
 
       // Force to running state for the test
-      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('running', session.id);
+      db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('running', pod.id);
 
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${session.id}/complete`,
+        url: `/pods/${pod.id}/complete`,
         headers: { authorization: 'Bearer test-token' },
       });
 
       expect(res.statusCode).toBe(400);
     });
 
-    it('POST /sessions/:id/complete transitions workspace session to complete', async () => {
+    it('POST /pods/:id/complete transitions workspace pod to complete', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -726,42 +726,42 @@ describe('Integration', () => {
 
       const createRes = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: {
           profileName: 'test-app',
-          task: 'Workspace session',
+          task: 'Workspace pod',
           outputMode: 'workspace',
         },
       });
-      const session = createRes.json();
+      const pod = createRes.json();
 
       // Force to running state with worktree path
-      db.prepare('UPDATE sessions SET status = ?, worktree_path = ? WHERE id = ?').run(
+      db.prepare('UPDATE pods SET status = ?, worktree_path = ? WHERE id = ?').run(
         'running',
         '/tmp/worktree/test',
-        session.id,
+        pod.id,
       );
 
       const res = await app.inject({
         method: 'POST',
-        url: `/sessions/${session.id}/complete`,
+        url: `/pods/${pod.id}/complete`,
         headers: { authorization: 'Bearer test-token' },
       });
 
       expect(res.statusCode).toBe(200);
       expect(res.json().ok).toBe(true);
 
-      // Verify session is now complete
+      // Verify pod is now complete
       const getRes = await app.inject({
         method: 'GET',
-        url: `/sessions/${session.id}`,
+        url: `/pods/${pod.id}`,
         headers: { authorization: 'Bearer test-token' },
       });
       expect(getRes.json().status).toBe('complete');
     });
 
-    it('POST /sessions accepts baseBranch and acFrom parameters', async () => {
+    it('POST /pods accepts baseBranch and acFrom parameters', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -771,7 +771,7 @@ describe('Integration', () => {
 
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: {
           profileName: 'test-app',
@@ -782,12 +782,12 @@ describe('Integration', () => {
       });
 
       expect(res.statusCode).toBe(201);
-      const session = res.json();
-      expect(session.baseBranch).toBe('feat/plan-auth');
-      expect(session.acFrom).toBe('specs/auth/acceptance-criteria.md');
+      const pod = res.json();
+      expect(pod.baseBranch).toBe('feat/plan-auth');
+      expect(pod.acFrom).toBe('specs/auth/acceptance-criteria.md');
     });
 
-    it('POST /sessions rejects acFrom with path traversal', async () => {
+    it('POST /pods rejects acFrom with path traversal', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -797,11 +797,11 @@ describe('Integration', () => {
 
       const res = await app.inject({
         method: 'POST',
-        url: '/sessions',
+        url: '/pods',
         headers: { authorization: 'Bearer test-token' },
         payload: {
           profileName: 'test-app',
-          task: 'Evil session',
+          task: 'Evil pod',
           acFrom: '../../etc/passwd',
         },
       });

@@ -2,7 +2,7 @@ import Foundation
 import AutopodClient
 import AutopodUI
 
-/// Manages terminal WebSocket connections for session detail views.
+/// Manages terminal WebSocket connections for pod detail views.
 /// Feeds raw PTY bytes into a TerminalDataPipe for SwiftTerm rendering.
 @Observable
 @MainActor
@@ -21,16 +21,16 @@ public final class TerminalManager {
     self.token = token
   }
 
-  public func connect(sessionId: String, cols: Int = 120, rows: Int = 40) {
+  public func connect(podId: String, cols: Int = 120, rows: Int = 40) {
     // Guard against double-connect: multiple code paths can trigger connect
-    // for the same session (e.g. attachTerminal action + tab onChange). Two
-    // simultaneous connections to the same tmux session cause doubled output
+    // for the same pod (e.g. attachTerminal action + tab onChange). Two
+    // simultaneous connections to the same tmux pod cause doubled output
     // because tmux sends data to both attached clients.
-    if connectedSessionId == sessionId && (state == "connected" || state == "connecting") {
+    if connectedSessionId == podId && (state == "connected" || state == "connecting") {
       return
     }
     disconnect()
-    connectedSessionId = sessionId
+    connectedSessionId = podId
 
     let pipe = dataPipe
     let sock = TerminalSocket(
@@ -56,7 +56,7 @@ public final class TerminalManager {
     socket = sock
 
     Task {
-      await sock.connect(sessionId: sessionId, cols: cols, rows: rows)
+      await sock.connect(podId: podId, cols: cols, rows: rows)
     }
   }
 

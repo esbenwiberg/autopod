@@ -2,18 +2,18 @@ import AutopodClient
 import MarkdownUI
 import SwiftUI
 
-/// Markdown file viewer — browse and render .md files from a session's worktree.
+/// Markdown file viewer — browse and render .md files from a pod's worktree.
 public struct MarkdownTab: View {
-  public let session: Session
+  public let pod: Pod
   public var loadFiles: ((String) async throws -> [SessionFileEntry])?
   public var loadContent: ((String, String) async throws -> SessionFileContent)?
 
   public init(
-    session: Session,
+    pod: Pod,
     loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
     loadContent: ((String, String) async throws -> SessionFileContent)? = nil
   ) {
-    self.session = session
+    self.pod = pod
     self.loadFiles = loadFiles
     self.loadContent = loadContent
   }
@@ -39,7 +39,7 @@ public struct MarkdownTab: View {
 
       renderedPane
     }
-    .task(id: session.id) {
+    .task(id: pod.id) {
       await refreshFiles()
     }
   }
@@ -170,7 +170,7 @@ public struct MarkdownTab: View {
     errorMessage = nil
     defer { isLoadingList = false }
     do {
-      files = try await loadFiles(session.id)
+      files = try await loadFiles(pod.id)
       // Drop selection if the file is gone
       if let sel = selectedPath, !files.contains(where: { $0.path == sel }) {
         selectedPath = nil
@@ -187,7 +187,7 @@ public struct MarkdownTab: View {
     errorMessage = nil
     defer { isLoadingContent = false }
     do {
-      let result = try await loadContent(session.id, path)
+      let result = try await loadContent(pod.id, path)
       content = result.content
     } catch {
       errorMessage = "Failed to load \(path): \(error.localizedDescription)"
@@ -197,6 +197,6 @@ public struct MarkdownTab: View {
 }
 
 #Preview("Markdown tab — empty") {
-  MarkdownTab(session: MockData.running)
+  MarkdownTab(pod: MockData.running)
     .frame(width: 800, height: 500)
 }

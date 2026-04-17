@@ -41,7 +41,7 @@ describe('GhPrManager', () => {
       worktreePath: '/tmp/worktree',
       branch: 'autopod/abc123',
       baseBranch: 'main',
-      sessionId: 'abc123',
+      podId: 'abc123',
       task: 'Add dark mode',
       profileName: 'my-app',
       validationResult: null,

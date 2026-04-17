@@ -84,7 +84,7 @@ export function generateDockerfile(options: DockerfileOptions): string {
     );
   }
 
-  // Clean up registry config from image (session provisioning re-injects at runtime)
+  // Clean up registry config from image (pod provisioning re-injects at runtime)
   if (npmRegs.length > 0 || nugetRegs.length > 0) {
     const filesToRemove = [
       ...(npmRegs.length > 0 ? ['/workspace/.npmrc'] : []),
@@ -92,7 +92,7 @@ export function generateDockerfile(options: DockerfileOptions): string {
     ].join(' ');
     lines.push(
       '',
-      '# Remove registry config from image (re-injected at session start)',
+      '# Remove registry config from image (re-injected at pod start)',
       `RUN rm -f ${filesToRemove}`,
     );
   }

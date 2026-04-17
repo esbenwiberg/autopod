@@ -8,9 +8,9 @@ import SwiftUI
 ///   2. `checks`   (full result, from REST refresh after completion)
 ///   3. Neither → empty state with all chips in "not started"
 public struct ValidationTab: View {
-  public let session: Session
+  public let pod: Pod
   public let checks: ValidationChecks?
-  public var actions: SessionActions
+  public var actions: PodActions
 
   @State private var selectedPhase: ValidationPhase? = nil
   @State private var expandedBuildOutput = false
@@ -22,15 +22,15 @@ public struct ValidationTab: View {
   @State private var overrideReason: String = ""
   @State private var overrideGuidance: String = ""
 
-  public init(session: Session, checks: ValidationChecks? = nil, actions: SessionActions = .preview) {
-    self.session = session
-    self.checks = checks ?? session.validationChecks
+  public init(pod: Pod, checks: ValidationChecks? = nil, actions: PodActions = .preview) {
+    self.pod = pod
+    self.checks = checks ?? pod.validationChecks
     self.actions = actions
   }
 
   // MARK: - Derived state
 
-  private var progress: ValidationProgress? { session.validationProgress }
+  private var progress: ValidationProgress? { pod.validationProgress }
 
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
   private var displayPhase: ValidationPhase? { selectedPhase ?? progress?.activePhase }
@@ -127,7 +127,7 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var headerView: some View {
     HStack(spacing: 12) {
-      if let attempts = session.attempts {
+      if let attempts = pod.attempts {
         Text("Attempt \(attempts.current) of \(attempts.max)")
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -137,12 +137,12 @@ public struct ValidationTab: View {
           .foregroundStyle(.secondary)
       }
       Spacer()
-      if session.containerUrl != nil,
-         session.status == .validated || session.status == .validating {
+      if pod.containerUrl != nil,
+         pod.status == .validated || pod.status == .validating {
         Button {
           isOpeningApp = true
           Task {
-            await actions.openLiveApp(session.id)
+            await actions.openLiveApp(pod.id)
             isOpeningApp = false
           }
         } label: {
@@ -159,11 +159,11 @@ public struct ValidationTab: View {
         .controlSize(.small)
         .disabled(isOpeningApp)
       }
-      if session.status == .validating {
+      if pod.status == .validating {
         Button {
           isInterrupting = true
           Task {
-            await actions.interruptValidation(session.id)
+            await actions.interruptValidation(pod.id)
             isInterrupting = false
           }
         } label: {
@@ -224,15 +224,15 @@ public struct ValidationTab: View {
         Text("No validation results yet")
           .font(.subheadline)
           .foregroundStyle(.secondary)
-        if session.status == .validating {
+        if pod.status == .validating {
           ProgressView("Validating…").font(.caption)
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .padding(.top, 40)
     } else {
-      // AC list always visible at top (regardless of selected phase) for sessions with criteria
-      if let criteria = session.acceptanceCriteria, !criteria.isEmpty {
+      // AC list always visible at top (regardless of selected phase) for pods with criteria
+      if let criteria = pod.acceptanceCriteria, !criteria.isEmpty {
         acListSection(criteria: criteria, acChecks: progress?.acChecks ?? checks?.acChecks)
       }
       // Prompt to click a chip
@@ -393,7 +393,7 @@ public struct ValidationTab: View {
   private var acDetail: some View {
     let status = phaseStatus(.ac)
     let acChecks: [AcCheckDetail]? = progress?.acChecks ?? checks?.acChecks
-    let criteria = session.acceptanceCriteria
+    let criteria = pod.acceptanceCriteria
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "All criteria verified",
@@ -611,7 +611,7 @@ public struct ValidationTab: View {
           let reason = overrideReason.isEmpty ? nil : overrideReason
           let guidance = overrideGuidance.isEmpty ? nil : overrideGuidance
           overridePopoverFindingId = nil
-          Task { await actions.addValidationOverride(session.id, fid, desc, action, reason, guidance) }
+          Task { await actions.addValidationOverride(pod.id, fid, desc, action, reason, guidance) }
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
@@ -630,7 +630,7 @@ public struct ValidationTab: View {
       initiallyExpanded: acChecks?.contains(where: { !$0.passed }) == true
     ) {
       VStack(alignment: .leading, spacing: 6) {
-        if let source = session.acFrom {
+        if let source = pod.acFrom {
           HStack(spacing: 3) {
             Image(systemName: "doc.text").font(.system(size: 9))
             Text(source).font(.system(.caption2, design: .monospaced))
@@ -817,7 +817,7 @@ private struct CollapsibleSection<Content: View>: View {
 
 #Preview("Validation — passed") {
   ValidationTab(
-    session: MockData.validated,
+    pod: MockData.validated,
     checks: ValidationChecks(smoke: true, tests: true, review: true)
   )
   .frame(width: 500, height: 500)
@@ -825,14 +825,14 @@ private struct CollapsibleSection<Content: View>: View {
 
 #Preview("Validation — failed") {
   ValidationTab(
-    session: MockData.validatedFailed
+    pod: MockData.validatedFailed
   )
   .frame(width: 500, height: 700)
 }
 
 #Preview("Validation — skipped") {
   ValidationTab(
-    session: MockData.validated,
+    pod: MockData.validated,
     checks: ValidationChecks(
       smoke: false, tests: nil, review: nil,
       buildOutput: "error: Module 'foo' not found\nexit code 1"

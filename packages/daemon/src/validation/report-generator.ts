@@ -1,22 +1,22 @@
-import type { Session } from '@autopod/shared';
-import type { StoredValidation } from '../sessions/validation-repository.js';
+import type { Pod } from '@autopod/shared';
+import type { StoredValidation } from '../pods/validation-repository.js';
 
 /**
- * Generates a self-contained HTML validation report for a session.
+ * Generates a self-contained HTML validation report for a pod.
  * Tailwind CDN for styling, no external dependencies.
  */
 export function generateValidationReport(
-  session: Session,
+  pod: Pod,
   validations: StoredValidation[],
-  /** Session-scoped auth token — passed to preview API calls */
-  sessionToken?: string,
+  /** Pod-scoped auth token — passed to preview API calls */
+  podToken?: string,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Validation Report — ${escapeHtml(session.id)}</title>
+  <title>Validation Report — ${escapeHtml(pod.id)}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .tab-content { display: none; }
@@ -27,8 +27,8 @@ export function generateValidationReport(
 </head>
 <body class="bg-gray-50 text-gray-900 min-h-screen">
   <div class="max-w-5xl mx-auto px-4 py-8">
-    ${renderHeader(session)}
-    ${renderPreviewSection(session)}
+    ${renderHeader(pod)}
+    ${renderPreviewSection(pod)}
     ${renderAttemptTimeline(validations)}
     ${validations.length === 0 ? renderNoValidations() : validations.map((v, i) => renderAttempt(v, i, validations.length)).join('\n')}
   </div>
@@ -45,7 +45,7 @@ export function generateValidationReport(
     ${validations.length > 0 ? `showTab(${validations[validations.length - 1].attempt});` : ''}
 
     // ── Preview controls ──
-    var _sessionToken = ${sessionToken ? `'${escapeHtml(sessionToken)}'` : 'null'};
+    var _sessionToken = ${podToken ? `'${escapeHtml(podToken)}'` : 'null'};
     function _previewUrl(path) {
       var url = window.location.origin + path;
       if (_sessionToken) url += (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(_sessionToken);
@@ -58,7 +58,7 @@ export function generateValidationReport(
       if (btn) btn.disabled = true;
       if (btn) btn.textContent = 'Starting…';
       try {
-        const res = await fetch(_previewUrl('/sessions/${escapeHtml(session.id)}/preview'), { method: 'POST' });
+        const res = await fetch(_previewUrl('/pods/${escapeHtml(pod.id)}/preview'), { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed to start preview');
         if (status) status.innerHTML = 'Preview running at <a href="' + data.previewUrl + '" target="_blank" class="text-blue-600 underline">' + data.previewUrl + '</a>';
@@ -79,7 +79,7 @@ export function generateValidationReport(
       if (btn) btn.disabled = true;
       if (btn) btn.textContent = 'Stopping…';
       try {
-        const res = await fetch(_previewUrl('/sessions/${escapeHtml(session.id)}/preview'), { method: 'DELETE' });
+        const res = await fetch(_previewUrl('/pods/${escapeHtml(pod.id)}/preview'), { method: 'DELETE' });
         if (!res.ok) { const data = await res.json(); throw new Error(data.message || 'Failed to stop preview'); }
         if (status) status.textContent = 'Preview stopped';
         if (btn) btn.textContent = 'Stop Preview';
@@ -96,13 +96,13 @@ export function generateValidationReport(
 </html>`;
 }
 
-function renderHeader(session: Session): string {
+function renderHeader(pod: Pod): string {
   const statusColor =
-    session.status === 'complete' || session.status === 'approved'
+    pod.status === 'complete' || pod.status === 'approved'
       ? 'green'
-      : session.status === 'failed' || session.status === 'killed'
+      : pod.status === 'failed' || pod.status === 'killed'
         ? 'red'
-        : session.status === 'validated'
+        : pod.status === 'validated'
           ? 'blue'
           : 'yellow';
 
@@ -111,60 +111,60 @@ function renderHeader(session: Session): string {
       <h1 class="text-2xl font-bold mb-4">Validation Report</h1>
       <div class="bg-white rounded-lg shadow p-6 grid grid-cols-2 gap-4 text-sm">
         <div>
-          <span class="text-gray-500">Session</span>
-          <p class="font-mono text-xs">${escapeHtml(session.id)}</p>
+          <span class="text-gray-500">Pod</span>
+          <p class="font-mono text-xs">${escapeHtml(pod.id)}</p>
         </div>
         <div>
           <span class="text-gray-500">Status</span>
-          <p><span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-${statusColor}-100 text-${statusColor}-800">${escapeHtml(session.status)}</span></p>
+          <p><span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-${statusColor}-100 text-${statusColor}-800">${escapeHtml(pod.status)}</span></p>
         </div>
         <div class="col-span-2">
           <span class="text-gray-500">Task</span>
-          <p class="font-medium">${escapeHtml(session.task)}</p>
+          <p class="font-medium">${escapeHtml(pod.task)}</p>
         </div>
         <div>
           <span class="text-gray-500">Profile</span>
-          <p>${escapeHtml(session.profileName)}</p>
+          <p>${escapeHtml(pod.profileName)}</p>
         </div>
         <div>
           <span class="text-gray-500">Branch</span>
-          <p class="font-mono text-xs">${escapeHtml(session.branch)}</p>
+          <p class="font-mono text-xs">${escapeHtml(pod.branch)}</p>
         </div>
         ${
-          session.prUrl
+          pod.prUrl
             ? `
         <div>
           <span class="text-gray-500">Pull Request</span>
-          <p><a href="${escapeHtml(session.prUrl)}" class="text-blue-600 underline" target="_blank">${escapeHtml(session.prUrl)}</a></p>
+          <p><a href="${escapeHtml(pod.prUrl)}" class="text-blue-600 underline" target="_blank">${escapeHtml(pod.prUrl)}</a></p>
         </div>`
             : ''
         }
         <div>
           <span class="text-gray-500">Created</span>
-          <p>${escapeHtml(session.createdAt)}</p>
+          <p>${escapeHtml(pod.createdAt)}</p>
         </div>
         ${
-          session.completedAt
+          pod.completedAt
             ? `
         <div>
           <span class="text-gray-500">Completed</span>
-          <p>${escapeHtml(session.completedAt)}</p>
+          <p>${escapeHtml(pod.completedAt)}</p>
         </div>`
             : ''
         }
         <div>
           <span class="text-gray-500">Changes</span>
-          <p>${session.filesChanged} files, <span class="text-green-600">+${session.linesAdded}</span> / <span class="text-red-600">-${session.linesRemoved}</span></p>
+          <p>${pod.filesChanged} files, <span class="text-green-600">+${pod.linesAdded}</span> / <span class="text-red-600">-${pod.linesRemoved}</span></p>
         </div>
       </div>
     </header>`;
 }
 
-function renderPreviewSection(session: Session): string {
-  // Only show preview controls for sessions that have a container and are post-validation
-  if (!session.containerId || !session.previewUrl) return '';
+function renderPreviewSection(pod: Pod): string {
+  // Only show preview controls for pods that have a container and are post-validation
+  if (!pod.containerId || !pod.previewUrl) return '';
   const postValidationStatuses = ['validated', 'failed', 'approved', 'complete', 'killed'];
-  if (!postValidationStatuses.includes(session.status)) return '';
+  if (!postValidationStatuses.includes(pod.status)) return '';
 
   return `
     <section class="mb-6">
@@ -213,7 +213,7 @@ function renderNoValidations(): string {
   return `
     <div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">
       <p class="text-lg">No validation attempts yet.</p>
-      <p class="text-sm mt-1">Validation results will appear here once the session reaches the validation phase.</p>
+      <p class="text-sm mt-1">Validation results will appear here once the pod reaches the validation phase.</p>
     </div>`;
 }
 

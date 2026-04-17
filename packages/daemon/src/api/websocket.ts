@@ -2,12 +2,12 @@ import type { SystemEvent } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../interfaces/index.js';
-import type { EventBus, EventRepository } from '../sessions/index.js';
+import type { EventBus, EventRepository } from '../pods/index.js';
 
 interface WsClient {
   ws: WebSocket;
   userId: string;
-  subscriptions: Set<string>; // session IDs or '*' for all
+  subscriptions: Set<string>; // pod IDs or '*' for all
   unsubscribers: Map<string, () => void>;
 }
 
@@ -63,22 +63,22 @@ export function websocketHandler(
       try {
         const msg = JSON.parse(data.toString());
 
-        if (msg.type === 'subscribe' && msg.sessionId) {
-          // Only register a session-scoped subscription if the client doesn't already
+        if (msg.type === 'subscribe' && msg.podId) {
+          // Only register a pod-scoped subscription if the client doesn't already
           // have a global subscription — otherwise the same event gets delivered twice
-          // (once via global, once via session-scoped).
+          // (once via global, once via pod-scoped).
           if (!client.subscriptions.has('*')) {
-            const unsub = eventBus.subscribeToSession(msg.sessionId, sendEvent);
-            client.unsubscribers.set(msg.sessionId, unsub);
+            const unsub = eventBus.subscribeToSession(msg.podId, sendEvent);
+            client.unsubscribers.set(msg.podId, unsub);
           }
-          client.subscriptions.add(msg.sessionId);
-          socket.send(JSON.stringify({ type: 'subscribed', sessionId: msg.sessionId }));
-        } else if (msg.type === 'unsubscribe' && msg.sessionId) {
-          const unsub = client.unsubscribers.get(msg.sessionId);
+          client.subscriptions.add(msg.podId);
+          socket.send(JSON.stringify({ type: 'subscribed', podId: msg.podId }));
+        } else if (msg.type === 'unsubscribe' && msg.podId) {
+          const unsub = client.unsubscribers.get(msg.podId);
           if (unsub) unsub();
-          client.subscriptions.delete(msg.sessionId);
-          client.unsubscribers.delete(msg.sessionId);
-          socket.send(JSON.stringify({ type: 'unsubscribed', sessionId: msg.sessionId }));
+          client.subscriptions.delete(msg.podId);
+          client.unsubscribers.delete(msg.podId);
+          socket.send(JSON.stringify({ type: 'unsubscribed', podId: msg.podId }));
         } else if (msg.type === 'subscribe_all') {
           const unsub = eventBus.subscribe(sendEvent);
           client.subscriptions.add('*');

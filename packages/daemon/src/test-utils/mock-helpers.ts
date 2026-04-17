@@ -21,16 +21,16 @@ import type {
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
-import { createEscalationRepository } from '../sessions/escalation-repository.js';
-import type { EscalationRepository } from '../sessions/escalation-repository.js';
-import { createEventBus } from '../sessions/event-bus.js';
-import type { EventBus } from '../sessions/event-bus.js';
-import { createEventRepository } from '../sessions/event-repository.js';
-import { createNudgeRepository } from '../sessions/nudge-repository.js';
-import type { NudgeRepository } from '../sessions/nudge-repository.js';
-import type { SessionManagerDependencies } from '../sessions/session-manager.js';
-import { createSessionRepository } from '../sessions/session-repository.js';
-import type { SessionRepository } from '../sessions/session-repository.js';
+import { createEscalationRepository } from '../pods/escalation-repository.js';
+import type { EscalationRepository } from '../pods/escalation-repository.js';
+import { createEventBus } from '../pods/event-bus.js';
+import type { EventBus } from '../pods/event-bus.js';
+import { createEventRepository } from '../pods/event-repository.js';
+import { createNudgeRepository } from '../pods/nudge-repository.js';
+import type { NudgeRepository } from '../pods/nudge-repository.js';
+import type { PodManagerDependencies } from '../pods/pod-manager.js';
+import { createPodRepository } from '../pods/pod-repository.js';
+import type { PodRepository } from '../pods/pod-repository.js';
 
 export const logger = pino({ level: 'silent' });
 
@@ -121,6 +121,7 @@ export function createMockRuntime(overrides?: {
     spawn: overrides?.spawn ?? vi.fn(async function* () {} as () => AsyncIterable<AgentEvent>),
     resume: overrides?.resume ?? vi.fn(async function* () {} as () => AsyncIterable<AgentEvent>),
     abort: vi.fn(async () => {}),
+    suspend: vi.fn(async () => {}),
   };
 }
 
@@ -130,6 +131,7 @@ export function createMockContainerManager(): ContainerManager {
     kill: vi.fn(async () => {}),
     stop: vi.fn(async () => {}),
     start: vi.fn(async () => {}),
+    refreshFirewall: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
     readFile: vi.fn(async () => ''),
     extractDirectoryFromContainer: vi.fn(async () => {}),
@@ -163,9 +165,9 @@ export function createMockRuntimeRegistry(runtime: Runtime): RuntimeRegistry {
   };
 }
 
-export function createPassingValidationResult(sessionId: string, attempt = 1): ValidationResult {
+export function createPassingValidationResult(podId: string, attempt = 1): ValidationResult {
   return {
-    sessionId,
+    podId,
     attempt,
     timestamp: new Date().toISOString(),
     smoke: {
@@ -180,9 +182,9 @@ export function createPassingValidationResult(sessionId: string, attempt = 1): V
   };
 }
 
-export function createFailingValidationResult(sessionId: string, attempt = 1): ValidationResult {
+export function createFailingValidationResult(podId: string, attempt = 1): ValidationResult {
   return {
-    sessionId,
+    podId,
     attempt,
     timestamp: new Date().toISOString(),
     smoke: {
@@ -198,10 +200,10 @@ export function createFailingValidationResult(sessionId: string, attempt = 1): V
 }
 
 export function createMockValidationEngine(
-  resultFactory?: (config: { sessionId: string; attempt: number }) => ValidationResult,
+  resultFactory?: (config: { podId: string; attempt: number }) => ValidationResult,
 ): ValidationEngine {
-  const defaultFactory = (config: { sessionId: string; attempt: number }) =>
-    createPassingValidationResult(config.sessionId, config.attempt);
+  const defaultFactory = (config: { podId: string; attempt: number }) =>
+    createPassingValidationResult(config.podId, config.attempt);
 
   return {
     validate: vi.fn(async (config) => (resultFactory ?? defaultFactory)(config)),
@@ -288,7 +290,7 @@ export function insertTestScheduledJob(
     enabled: overrides.enabled ?? true,
     nextRunAt: overrides.nextRunAt ?? futureDate,
     lastRunAt: overrides.lastRunAt ?? null,
-    lastSessionId: overrides.lastSessionId ?? null,
+    lastPodId: overrides.lastPodId ?? null,
     catchupPending: overrides.catchupPending ?? false,
   });
 }
@@ -320,7 +322,7 @@ export function completeWithTokensEvent(
 }
 
 export function escalationEvent(
-  sessionId: string,
+  podId: string,
   question = 'What should I do?',
 ): AgentEscalationEvent {
   return {
@@ -329,7 +331,7 @@ export function escalationEvent(
     escalationType: 'ask_human',
     payload: {
       id: `esc-${Date.now()}`,
-      sessionId,
+      podId,
       type: 'ask_human',
       timestamp: new Date().toISOString(),
       payload: { question },
@@ -344,7 +346,7 @@ export function escalationEvent(
 
 export interface TestContext {
   db: Database.Database;
-  sessionRepo: SessionRepository;
+  podRepo: PodRepository;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   eventBus: EventBus;
@@ -355,18 +357,18 @@ export interface TestContext {
   validationEngine: ValidationEngine;
   runtime: Runtime;
   enqueuedSessions: string[];
-  deps: SessionManagerDependencies;
+  deps: PodManagerDependencies;
 }
 
 export function createTestContext(opts?: {
-  validationResultFactory?: (config: { sessionId: string; attempt: number }) => ValidationResult;
+  validationResultFactory?: (config: { podId: string; attempt: number }) => ValidationResult;
   runtime?: Runtime;
   maxValidationAttempts?: number;
 }): TestContext {
   const db = createTestDb();
   insertTestProfile(db, { maxValidationAttempts: opts?.maxValidationAttempts });
 
-  const sessionRepo = createSessionRepository(db);
+  const podRepo = createPodRepository(db);
   const eventRepo = createEventRepository(db);
   const escalationRepo = createEscalationRepository(db);
   const nudgeRepo = createNudgeRepository(db);
@@ -381,8 +383,8 @@ export function createTestContext(opts?: {
 
   const enqueuedSessions: string[] = [];
 
-  const deps: SessionManagerDependencies = {
-    sessionRepo,
+  const deps: PodManagerDependencies = {
+    podRepo,
     escalationRepo,
     nudgeRepo,
     profileStore,
@@ -394,12 +396,13 @@ export function createTestContext(opts?: {
     enqueueSession: (id) => enqueuedSessions.push(id),
     mcpBaseUrl: 'http://localhost:8080',
     daemonConfig: { mcpServers: [], claudeMdSections: [], skills: [] },
+    getSecret: () => undefined,
     logger,
   };
 
   return {
     db,
-    sessionRepo,
+    podRepo,
     escalationRepo,
     nudgeRepo,
     eventBus,

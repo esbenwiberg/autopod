@@ -313,7 +313,7 @@ public struct SalesPitchView: View {
                 icon: "lock.shield",
                 color: .red,
                 title: "Isolation by Default",
-                body: "Every session runs in its own container on an isolated network. Per-pod iptables firewall. Non-root user. No shared state between sessions — ever.",
+                body: "Every pod runs in its own container on an isolated network. Per-pod iptables firewall. Non-root user. No shared state between pods — ever.",
                 tags: ["iptables", "Net Isolation", "Non-root"]
             ),
             SellingPoint(
@@ -355,8 +355,8 @@ public struct SalesPitchView: View {
                 icon: "brain",
                 color: .mint,
                 title: "Agents That Learn",
-                body: "Agents suggest persistent knowledge — team conventions, known gotchas, recurring patterns — scoped globally, per-profile, or per-session. Humans approve. Approved memories are injected into future sessions automatically.",
-                tags: ["Global Memory", "Profile Memory", "Session"]
+                body: "Agents suggest persistent knowledge — team conventions, known gotchas, recurring patterns — scoped globally, per-profile, or per-pod. Humans approve. Approved memories are injected into future pods automatically.",
+                tags: ["Global Memory", "Profile Memory", "Pod"]
             ),
         ]
     }

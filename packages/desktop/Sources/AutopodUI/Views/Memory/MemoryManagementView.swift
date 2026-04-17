@@ -442,7 +442,7 @@ struct CreateMemorySheet: View {
                     // Scope ID (hidden for global)
                     if scope != .global {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(scope == .profile ? "Profile name" : "Session ID")
+                            Text(scope == .profile ? "Profile name" : "Pod ID")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             TextField(scope == .profile ? "my-app" : "abc12345", text: $scopeId)

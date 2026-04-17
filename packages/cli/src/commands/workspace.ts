@@ -4,7 +4,7 @@ import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
-import { resolveSessionId } from '../utils/id-resolver.js';
+import { resolvePodId } from '../utils/id-resolver.js';
 
 export function registerWorkspaceCommands(program: Command, getClient: () => AutopodClient): void {
   // ap workspace <profile> [description]
@@ -39,25 +39,25 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
             })
           : undefined;
 
-        const session = await withSpinner('Creating workspace session...', () =>
+        const pod = await withSpinner('Creating workspace pod...', () =>
           client.createSession({
             profileName: profile,
-            task: description ?? 'Workspace session',
+            task: description ?? 'Workspace pod',
             outputMode: 'workspace',
             branch: opts.branch,
             pimGroups,
           }),
         );
 
-        console.log(chalk.green(`Workspace ${chalk.bold(session.id)} created.`));
-        console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
-        console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
-        console.log(`${chalk.bold('Branch:')}   ${session.branch}`);
+        console.log(chalk.green(`Workspace ${chalk.bold(pod.id)} created.`));
+        console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
+        console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
+        console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
         console.log();
-        console.log(chalk.dim(`Enter the container:  ap attach ${session.id.slice(0, 8)}`));
+        console.log(chalk.dim(`Enter the container:  ap attach ${pod.id.slice(0, 8)}`));
         console.log(
           chalk.dim(
-            `Hand off to worker:   ap run ${profile} <task> --base-branch ${session.branch}`,
+            `Hand off to worker:   ap run ${profile} <task> --base-branch ${pod.branch}`,
           ),
         );
       },
@@ -69,24 +69,24 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
     .description('Attach to a running workspace pod via docker exec')
     .action(async (id: string) => {
       const client = getClient();
-      const resolvedId = await resolveSessionId(client, id);
-      const session = await client.getSession(resolvedId);
+      const resolvedId = await resolvePodId(client, id);
+      const pod = await client.getSession(resolvedId);
 
-      if (session.pod?.agentMode !== 'interactive' && session.outputMode !== 'workspace') {
-        console.error(chalk.red(`Session ${resolvedId} is not an interactive session.`));
+      if (pod.options?.agentMode !== 'interactive' && pod.outputMode !== 'workspace') {
+        console.error(chalk.red(`Pod ${resolvedId} is not an interactive pod.`));
         process.exit(1);
       }
 
-      if (session.status !== 'running') {
+      if (pod.status !== 'running') {
         console.error(
           chalk.red(
-            `Session ${resolvedId} is ${session.status} — can only attach to running sessions.`,
+            `Pod ${resolvedId} is ${pod.status} — can only attach to running pods.`,
           ),
         );
         process.exit(1);
       }
 
-      const containerName = `autopod-${session.id}`;
+      const containerName = `autopod-${pod.id}`;
       console.log(chalk.dim(`Attaching to ${containerName}…`));
       console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
 
@@ -119,7 +119,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
         }
       }
 
-      console.log(chalk.dim('Detached. Session is still running.'));
+      console.log(chalk.dim('Detached. Pod is still running.'));
       console.log(chalk.dim(`Re-attach:  ap attach ${resolvedId.slice(0, 8)}`));
       console.log(chalk.dim(`Complete:   ap complete ${resolvedId.slice(0, 8)}`));
     });
@@ -127,7 +127,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
   // ap complete <id>
   //
   // With no flag: push the branch and transition to `complete`.
-  // With --pr / --artifact / --none: promote the session in-place to an
+  // With --pr / --artifact / --none: promote the pod in-place to an
   // agent-driven run on the same ID (branch, events, token budget preserved).
   program
     .command('complete <id>')
@@ -137,18 +137,18 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
     .option('--none', 'Hand off to the agent ephemerally (no push)')
     .action(async (id: string, opts: { pr?: boolean; artifact?: boolean; none?: boolean }) => {
       const client = getClient();
-      const resolvedId = await resolveSessionId(client, id);
-      const session = await client.getSession(resolvedId);
+      const resolvedId = await resolvePodId(client, id);
+      const pod = await client.getSession(resolvedId);
 
-      if (session.pod?.agentMode !== 'interactive' && session.outputMode !== 'workspace') {
-        console.error(chalk.red(`Session ${resolvedId} is not an interactive session.`));
+      if (pod.options?.agentMode !== 'interactive' && pod.outputMode !== 'workspace') {
+        console.error(chalk.red(`Pod ${resolvedId} is not an interactive pod.`));
         process.exit(1);
       }
 
-      if (session.status !== 'running') {
+      if (pod.status !== 'running') {
         console.error(
           chalk.red(
-            `Session ${resolvedId} is ${session.status} — can only complete running sessions.`,
+            `Pod ${resolvedId} is ${pod.status} — can only complete running pods.`,
           ),
         );
         process.exit(1);
@@ -169,13 +169,13 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
       console.log();
       const completion = await withSpinner(
-        promoteTo ? `Promoting session to ${promoteTo}…` : 'Completing session…',
+        promoteTo ? `Promoting pod to ${promoteTo}…` : 'Completing pod…',
         () => client.completeSession(resolvedId, promoteTo ? { promoteTo } : undefined),
       );
 
       if (completion.promotedTo) {
         console.log(
-          chalk.green(`Session handed off. Agent will take over in ${completion.promotedTo} mode.`),
+          chalk.green(`Pod handed off. Agent will take over in ${completion.promotedTo} mode.`),
         );
         console.log(chalk.dim(`Track progress: ap status ${resolvedId.slice(0, 8)}`));
         return;
@@ -183,11 +183,11 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
       if (completion.pushError) {
         console.log(
-          chalk.yellow(`Session complete, but branch push failed: ${completion.pushError}`),
+          chalk.yellow(`Pod complete, but branch push failed: ${completion.pushError}`),
         );
         console.log(chalk.dim('You can push manually from the worktree.'));
       } else {
-        console.log(chalk.green('Session complete. Branch pushed to origin.'));
+        console.log(chalk.green('Pod complete. Branch pushed to origin.'));
       }
     });
 
@@ -202,7 +202,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       }
 
       const client = getClient();
-      const resolvedId = await resolveSessionId(client, id);
+      const resolvedId = await resolvePodId(client, id);
 
       // Wait up to 60s for the container to reach 'running' before injecting
       const WAIT_TIMEOUT_MS = 60_000;
@@ -211,20 +211,20 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
       await withSpinner(`Injecting ${service} credentials…`, async () => {
         while (true) {
-          const session = await client.getSession(resolvedId);
-          if (session.status === 'running') break;
+          const pod = await client.getSession(resolvedId);
+          if (pod.status === 'running') break;
 
           const terminalStates = ['complete', 'killed', 'failed'];
-          if (terminalStates.includes(session.status)) {
+          if (terminalStates.includes(pod.status)) {
             const err = new Error(
-              `Session ${resolvedId.slice(0, 8)} is ${session.status} — cannot inject credentials.`,
+              `Pod ${resolvedId.slice(0, 8)} is ${pod.status} — cannot inject credentials.`,
             );
             throw err;
           }
 
           if (Date.now() >= deadline) {
             throw new Error(
-              `Session ${resolvedId.slice(0, 8)} is still ${session.status} after ${WAIT_TIMEOUT_MS / 1000}s — container may have failed to start.`,
+              `Pod ${resolvedId.slice(0, 8)} is still ${pod.status} after ${WAIT_TIMEOUT_MS / 1000}s — container may have failed to start.`,
             );
           }
 
@@ -236,7 +236,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
       console.log(
         chalk.green(
-          `Done. ${service} credentials injected into session ${resolvedId.slice(0, 8)}.`,
+          `Done. ${service} credentials injected into pod ${resolvedId.slice(0, 8)}.`,
         ),
       );
       console.log(

@@ -15,7 +15,7 @@ const mockJob = {
   enabled: true,
   nextRunAt: '2025-04-21T09:00:00.000Z',
   lastRunAt: null,
-  lastSessionId: null,
+  lastPodId: null,
   catchupPending: false,
   createdAt: '2025-04-14T00:00:00.000Z',
   updatedAt: '2025-04-14T00:00:00.000Z',
@@ -190,7 +190,7 @@ describe('scheduled-jobs routes', () => {
   });
 
   describe('POST /scheduled-jobs/:id/catchup', () => {
-    it('returns 201 with session', async () => {
+    it('returns 201 with pod', async () => {
       vi.mocked(manager.runCatchup).mockResolvedValueOnce(mockSession as never);
 
       const res = await app.inject({
@@ -215,9 +215,9 @@ describe('scheduled-jobs routes', () => {
       expect(res.statusCode).toBe(409);
     });
 
-    it('returns 400 when active session exists', async () => {
+    it('returns 400 when active pod exists', async () => {
       vi.mocked(manager.runCatchup).mockRejectedValueOnce(
-        new AutopodError('Active session', 'ACTIVE_SESSION', 400),
+        new AutopodError('Active pod', 'ACTIVE_SESSION', 400),
       );
 
       const res = await app.inject({
@@ -241,7 +241,7 @@ describe('scheduled-jobs routes', () => {
   });
 
   describe('POST /scheduled-jobs/:id/trigger', () => {
-    it('returns 201 with session', async () => {
+    it('returns 201 with pod', async () => {
       vi.mocked(manager.trigger).mockResolvedValueOnce(mockSession as never);
 
       const res = await app.inject({

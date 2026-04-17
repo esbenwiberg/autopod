@@ -9,7 +9,7 @@ export interface ScreenshotRef {
 
 export interface PrBodyConfig {
   task: string;
-  sessionId: string;
+  podId: string;
   profileName: string;
   validationResult: ValidationResult | null;
   filesChanged: number;
@@ -39,7 +39,7 @@ export function buildPrTitle(task: string): string {
 export function buildPrBody(config: PrBodyConfig): string {
   const {
     task,
-    sessionId,
+    podId,
     profileName,
     validationResult,
     filesChanged,
@@ -197,7 +197,7 @@ export function buildPrBody(config: PrBodyConfig): string {
   }
 
   sections.push(
-    `---\n🤖 Created by [autopod](https://github.com/esbenwiberg/autopod) · session \`${sessionId}\` · profile \`${profileName}\``,
+    `---\n🤖 Created by [autopod](https://github.com/esbenwiberg/autopod) · pod \`${podId}\` · profile \`${profileName}\``,
   );
 
   return sections.join('\n\n');

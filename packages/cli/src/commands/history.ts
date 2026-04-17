@@ -41,16 +41,16 @@ export function registerHistoryCommands(program: Command, getClient: () => Autop
   program
     .command('history <profile>')
     .description(
-      'Create a history analysis workspace — an interactive container with session history data',
+      'Create a history analysis workspace — an interactive container with pod history data',
     )
-    .option('--since <duration>', 'Only include sessions since (e.g. 7d, 30d, 2w, 2026-01-01)')
-    .option('--failures', 'Only include failed/killed sessions')
-    .option('--limit <n>', 'Max sessions to include (default: 100)', (v) => Number.parseInt(v, 10))
+    .option('--since <duration>', 'Only include pods since (e.g. 7d, 30d, 2w, 2026-01-01)')
+    .option('--failures', 'Only include failed/killed pods')
+    .option('--limit <n>', 'Max pods to include (default: 100)', (v) => Number.parseInt(v, 10))
     .action(
       async (profile: string, opts: { since?: string; failures?: boolean; limit?: number }) => {
         const client = getClient();
 
-        const session = await withSpinner('Creating history workspace...', () =>
+        const pod = await withSpinner('Creating history workspace...', () =>
           client.createHistoryWorkspace({
             profileName: profile,
             since: opts.since ? parseSince(opts.since) : undefined,
@@ -59,16 +59,16 @@ export function registerHistoryCommands(program: Command, getClient: () => Autop
           }),
         );
 
-        console.log(chalk.green(`History workspace ${chalk.bold(session.id)} created.`));
-        console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
-        console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
-        console.log(`${chalk.bold('Branch:')}   ${session.branch}`);
+        console.log(chalk.green(`History workspace ${chalk.bold(pod.id)} created.`));
+        console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
+        console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
+        console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
         console.log();
         console.log(chalk.bold('Enter the container:'));
-        console.log(`  ${chalk.cyan(`ap attach ${session.id.slice(0, 8)}`)}`);
+        console.log(`  ${chalk.cyan(`ap attach ${pod.id.slice(0, 8)}`)}`);
         console.log();
         console.log(chalk.dim('Inside the container:'));
-        console.log(chalk.dim('  /history/history.db         SQLite database with session data'));
+        console.log(chalk.dim('  /history/history.db         SQLite database with pod data'));
         console.log(chalk.dim('  /history/summary.md         Overview and stats'));
         console.log(chalk.dim('  /history/analysis-guide.md  Example queries and analysis tips'));
         console.log(chalk.dim('  /workspace/CLAUDE.md        Instructions for Claude Code'));

@@ -1,13 +1,13 @@
 import type {
   EscalationCreatedEvent,
-  Session,
-  SessionStatusChangedEvent,
+  Pod,
+  PodStatusChangedEvent,
   SystemEvent,
   ValidationCompletedEvent,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EventBus } from '../sessions/event-bus.js';
+import type { EventBus } from '../pods/event-bus.js';
 import type { SessionLookup } from './notification-service.js';
 import { createNotificationService } from './notification-service.js';
 import type { RateLimiter } from './rate-limiter.js';
@@ -50,7 +50,7 @@ function createMockEventBus(): EventBus & { emit: (event: SystemEvent) => number
   };
 }
 
-function createMockSession(overrides?: Partial<Session>): Session {
+function createMockSession(overrides?: Partial<Pod>): Pod {
   return {
     id: 'sess-123',
     profileName: 'my-app',
@@ -103,10 +103,10 @@ describe('NotificationService', () => {
       teams: {
         webhookUrl: 'https://webhook.example.com',
         enabledEvents: [
-          'session_validated',
-          'session_failed',
-          'session_needs_input',
-          'session_error',
+          'pod_validated',
+          'pod_failed',
+          'pod_needs_input',
+          'pod_error',
         ],
       },
     };
@@ -147,11 +147,11 @@ describe('NotificationService', () => {
 
       // Emitting after stop should not send
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         result: {
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           attempt: 1,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {
@@ -181,11 +181,11 @@ describe('NotificationService', () => {
       service.start();
 
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         result: {
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           attempt: 1,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {
@@ -220,11 +220,11 @@ describe('NotificationService', () => {
       service.start();
 
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         result: {
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           attempt: 2,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {
@@ -260,12 +260,12 @@ describe('NotificationService', () => {
       service.start();
 
       const event: EscalationCreatedEvent = {
-        type: 'session.escalation_created',
+        type: 'pod.escalation_created',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         escalation: {
           id: 'esc-1',
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           type: 'ask_human',
           timestamp: '2026-01-01T00:00:00.000Z',
           payload: { question: 'Which approach?' },
@@ -287,12 +287,12 @@ describe('NotificationService', () => {
       service.start();
 
       const event: EscalationCreatedEvent = {
-        type: 'session.escalation_created',
+        type: 'pod.escalation_created',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         escalation: {
           id: 'esc-1',
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           type: 'ask_ai',
           timestamp: '2026-01-01T00:00:00.000Z',
           payload: { question: 'What is the pattern?', domain: 'react' },
@@ -311,12 +311,12 @@ describe('NotificationService', () => {
       service.start();
 
       const event: EscalationCreatedEvent = {
-        type: 'session.escalation_created',
+        type: 'pod.escalation_created',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         escalation: {
           id: 'esc-2',
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           type: 'report_blocker',
           timestamp: '2026-01-01T00:00:00.000Z',
           payload: { description: 'Blocked', attempted: [], needs: 'Access' },
@@ -336,10 +336,10 @@ describe('NotificationService', () => {
       const service = createService();
       service.start();
 
-      const event: SessionStatusChangedEvent = {
-        type: 'session.status_changed',
+      const event: PodStatusChangedEvent = {
+        type: 'pod.status_changed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         previousStatus: 'running',
         newStatus: 'failed',
       };
@@ -357,10 +357,10 @@ describe('NotificationService', () => {
       const service = createService();
       service.start();
 
-      const event: SessionStatusChangedEvent = {
-        type: 'session.status_changed',
+      const event: PodStatusChangedEvent = {
+        type: 'pod.status_changed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         previousStatus: 'queued',
         newStatus: 'running',
       };
@@ -376,18 +376,18 @@ describe('NotificationService', () => {
       config = {
         teams: {
           webhookUrl: 'https://webhook.example.com',
-          enabledEvents: ['session_validated'], // only validated
+          enabledEvents: ['pod_validated'], // only validated
         },
       };
 
       const service = createService();
       service.start();
 
-      // Emit a status_changed → failed, which maps to session_error (not enabled)
-      const event: SessionStatusChangedEvent = {
-        type: 'session.status_changed',
+      // Emit a status_changed → failed, which maps to pod_error (not enabled)
+      const event: PodStatusChangedEvent = {
+        type: 'pod.status_changed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         previousStatus: 'running',
         newStatus: 'failed',
       };
@@ -401,7 +401,7 @@ describe('NotificationService', () => {
       config = {
         teams: {
           webhookUrl: 'https://webhook.example.com',
-          enabledEvents: ['session_validated'],
+          enabledEvents: ['pod_validated'],
           profileOverrides: {
             'my-app': { enabled: false },
           },
@@ -412,11 +412,11 @@ describe('NotificationService', () => {
       service.start();
 
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         result: {
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           attempt: 1,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {
@@ -445,9 +445,9 @@ describe('NotificationService', () => {
       config = {
         teams: {
           webhookUrl: 'https://webhook.example.com',
-          enabledEvents: ['session_validated', 'session_error'],
+          enabledEvents: ['pod_validated', 'pod_error'],
           profileOverrides: {
-            'my-app': { enabled: true, events: ['session_error'] }, // only errors for this profile
+            'my-app': { enabled: true, events: ['pod_error'] }, // only errors for this profile
           },
         },
       };
@@ -455,13 +455,13 @@ describe('NotificationService', () => {
       const service = createService();
       service.start();
 
-      // Emit validated — should NOT send because profile override only allows session_error
+      // Emit validated — should NOT send because profile override only allows pod_error
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         result: {
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           attempt: 1,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {
@@ -498,11 +498,11 @@ describe('NotificationService', () => {
       service.start();
 
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         result: {
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           attempt: 1,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {
@@ -532,11 +532,11 @@ describe('NotificationService', () => {
       service.start();
 
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         result: {
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           attempt: 1,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {
@@ -571,11 +571,11 @@ describe('NotificationService', () => {
       service.start();
 
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-123',
+        podId: 'sess-123',
         result: {
-          sessionId: 'sess-123',
+          podId: 'sess-123',
           attempt: 1,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {
@@ -606,20 +606,20 @@ describe('NotificationService', () => {
       });
     });
 
-    it('handles session lookup failure gracefully', async () => {
+    it('handles pod lookup failure gracefully', async () => {
       vi.mocked(sessionLookup.getSession).mockImplementation(() => {
-        throw new Error('Session not found');
+        throw new Error('Pod not found');
       });
 
       const service = createService();
       service.start();
 
       const event: ValidationCompletedEvent = {
-        type: 'session.validation_completed',
+        type: 'pod.validation_completed',
         timestamp: '2026-01-01T00:00:00.000Z',
-        sessionId: 'sess-missing',
+        podId: 'sess-missing',
         result: {
-          sessionId: 'sess-missing',
+          podId: 'sess-missing',
           attempt: 1,
           timestamp: '2026-01-01T00:00:00.000Z',
           smoke: {

@@ -1,7 +1,7 @@
 import { generateId } from '@autopod/shared';
 import type { EscalationRequest } from '@autopod/shared';
 import type { PendingRequests } from '../pending-requests.js';
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export interface AskHumanInput {
   question: string;
@@ -10,17 +10,17 @@ export interface AskHumanInput {
 }
 
 export async function askHuman(
-  sessionId: string,
+  podId: string,
   input: AskHumanInput,
-  bridge: SessionBridge,
+  bridge: PodBridge,
   pendingRequests: PendingRequests,
 ): Promise<string> {
   const escalationId = generateId();
-  const timeoutMs = bridge.getHumanResponseTimeout(sessionId) * 1000;
+  const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
 
   const escalation: EscalationRequest = {
     id: escalationId,
-    sessionId,
+    podId,
     type: 'ask_human',
     timestamp: new Date().toISOString(),
     payload: {
@@ -32,7 +32,7 @@ export async function askHuman(
   };
 
   bridge.createEscalation(escalation);
-  bridge.incrementEscalationCount(sessionId);
+  bridge.incrementEscalationCount(podId);
 
   try {
     const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);

@@ -1,8 +1,8 @@
 import SwiftUI
 
 public struct StatusDot: View {
-    public let status: SessionStatus
-    public init(status: SessionStatus) { self.status = status }
+    public let status: PodStatus
+    public init(status: PodStatus) { self.status = status }
 
     @State private var pulse = false
     @State private var rotation = 0.0
@@ -78,7 +78,7 @@ public struct StatusDot: View {
 #Preview("All status dots") {
     HStack(spacing: 16) {
         ForEach([
-            SessionStatus.queued,
+            PodStatus.queued,
             .provisioning,
             .running,
             .awaitingInput,

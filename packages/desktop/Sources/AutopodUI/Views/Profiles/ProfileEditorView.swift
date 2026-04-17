@@ -63,7 +63,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .buildRun:
             "Commands executed inside the container to build, test, and run the application."
         case .agent:
-            "AI model and runtime configuration for code generation sessions."
+            "AI model and runtime configuration for code generation pods."
         case .providers:
             "AI model provider and code platform — where PRs are created, which service the Issue Watcher monitors, and OAuth credentials."
         case .escalation:
@@ -75,7 +75,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .actions:
             "Control plane actions the agent can execute — GitHub, ADO, Azure, and custom HTTP."
         case .issueWatcher:
-            "Automatically pick up GitHub Issues or ADO Work Items by label and create sessions. Ideal for mobile-triggered workflows."
+            "Automatically pick up GitHub Issues or ADO Work Items by label and create pods. Ideal for mobile-triggered workflows."
         case .validation:
             "Smoke test pages loaded after the app starts to verify correctness."
         case .credentials:
@@ -83,7 +83,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .injections:
             "Additional tools, documentation, and commands injected into agent containers."
         case .memory:
-            "Persistent memory entries injected into agent sessions for this profile. Agents can suggest new memories via memory_suggest."
+            "Persistent memory entries injected into agent pods for this profile. Agents can suggest new memories via memory_suggest."
         }
     }
 
@@ -434,7 +434,7 @@ public struct ProfileEditorView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 160)
             }
-            fieldRow("Branch Prefix", help: "Prefix for auto-generated session branch names. e.g. 'autopod/' → 'autopod/abc12345'. Set per-session to override.") {
+            fieldRow("Branch Prefix", help: "Prefix for auto-generated pod branch names. e.g. 'autopod/' → 'autopod/abc12345'. Set per-pod to override.") {
                 TextField("autopod/", text: $profile.branchPrefix)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.callout, design: .monospaced))
@@ -475,7 +475,7 @@ public struct ProfileEditorView: View {
             }
         }
         HStack(spacing: 24) {
-            fieldRow("Output", help: "Where session output goes — PR opens a pull request, Branch pushes only, Artifact extracts /workspace, Ephemeral discards everything.") {
+            fieldRow("Output", help: "Where pod output goes — PR opens a pull request, Branch pushes only, Artifact extracts /workspace, Ephemeral discards everything.") {
                 Picker("", selection: $profile.pod.output) {
                     ForEach(OutputTarget.allCases, id: \.self) { t in
                         Text(t.label).tag(t)
@@ -489,7 +489,7 @@ public struct ProfileEditorView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
             }
-            fieldRow("Promotable", help: "Allow promoting this session to agent-driven mid-flight (interactive → auto).") {
+            fieldRow("Promotable", help: "Allow promoting this pod to agent-driven mid-flight (interactive → auto).") {
                 Toggle("Allow promotion", isOn: $profile.pod.promotable)
                     .toggleStyle(.switch)
                     .labelsHidden()
@@ -505,7 +505,7 @@ public struct ProfileEditorView: View {
             .frame(width: 280)
         }
 
-        fieldRow("Worker Profile", help: "Profile to use when launching worker sessions from a workspace pod using this profile.") {
+        fieldRow("Worker Profile", help: "Profile to use when launching worker pods from a workspace pod using this profile.") {
             TextField("Worker profile name (optional)", text: Binding(
                 get: { profile.workerProfile ?? "" },
                 set: { profile.workerProfile = $0.isEmpty ? nil : $0 }
@@ -639,7 +639,7 @@ public struct ProfileEditorView: View {
                     .labelsHidden()
                     .frame(width: 130)
                 }
-                fieldRow("Max Calls", help: "Maximum number of AI consultations per session before forcing human escalation.") {
+                fieldRow("Max Calls", help: "Maximum number of AI consultations per pod before forcing human escalation.") {
                     Stepper("\(profile.escalationAskAiMaxCalls)", value: $profile.escalationAskAiMaxCalls, in: 1...20)
                         .frame(width: 110)
                 }
@@ -666,7 +666,7 @@ public struct ProfileEditorView: View {
             .foregroundStyle(.secondary)
 
         HStack(spacing: 24) {
-            fieldRow("Auto-pause After", help: "Number of escalation attempts before the session is automatically paused. Prevents runaway loops.") {
+            fieldRow("Auto-pause After", help: "Number of escalation attempts before the pod is automatically paused. Prevents runaway loops.") {
                 Stepper("\(profile.escalationAutoPauseAfter)", value: $profile.escalationAutoPauseAfter, in: 1...20)
                     .frame(width: 110)
             }
@@ -711,13 +711,13 @@ public struct ProfileEditorView: View {
         )) {
             HStack(spacing: 4) {
                 Text("Enable token budget")
-                HelpBadge(text: "Limit the total tokens (input + output) consumed per session. Useful for cost control.")
+                HelpBadge(text: "Limit the total tokens (input + output) consumed per pod. Useful for cost control.")
             }
         }
 
         if profile.tokenBudget != nil {
             HStack(spacing: 24) {
-                fieldRow("Budget (tokens)", help: "Maximum total tokens allowed per session. null = unlimited.") {
+                fieldRow("Budget (tokens)", help: "Maximum total tokens allowed per pod. null = unlimited.") {
                     TextField("500000", value: Binding(
                         get: { profile.tokenBudget ?? 500_000 },
                         set: { profile.tokenBudget = $0 }
@@ -745,7 +745,7 @@ public struct ProfileEditorView: View {
                             .frame(width: 36)
                     }
                 }
-                fieldRow("Max Extensions", help: "How many times a human can approve budget extensions per session. Leave empty for unlimited.") {
+                fieldRow("Max Extensions", help: "How many times a human can approve budget extensions per pod. Leave empty for unlimited.") {
                     HStack(spacing: 6) {
                         TextField("∞", value: Binding(
                             get: { profile.maxBudgetExtensions ?? 0 },
@@ -1031,14 +1031,14 @@ public struct ProfileEditorView: View {
         Toggle(isOn: $profile.issueWatcherEnabled) {
             HStack(spacing: 4) {
                 Text("Enable issue watcher")
-                HelpBadge(text: "When enabled, polls for GitHub Issues or ADO Work Items with a matching label prefix and automatically creates sessions. Label an issue from your phone to trigger a session.")
+                HelpBadge(text: "When enabled, polls for GitHub Issues or ADO Work Items with a matching label prefix and automatically creates pods. Label an issue from your phone to trigger a pod.")
             }
         }
 
         if profile.issueWatcherEnabled {
             Divider().padding(.vertical, 4)
 
-            fieldRow("Label Prefix", help: "The label prefix to watch for. Issues labeled with this prefix (or '<prefix>:<profile>') will trigger sessions. Must be lowercase alphanumeric with hyphens.") {
+            fieldRow("Label Prefix", help: "The label prefix to watch for. Issues labeled with this prefix (or '<prefix>:<profile>') will trigger pods. Must be lowercase alphanumeric with hyphens.") {
                 TextField("autopod", text: $profile.issueWatcherLabelPrefix)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
@@ -1066,9 +1066,9 @@ public struct ProfileEditorView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 lifecycleRow("autopod", "Trigger — picked up by watcher")
-                lifecycleRow("autopod:in-progress", "Session running")
-                lifecycleRow("autopod:done", "Session completed successfully")
-                lifecycleRow("autopod:failed", "Session failed")
+                lifecycleRow("autopod:in-progress", "Pod running")
+                lifecycleRow("autopod:done", "Pod completed successfully")
+                lifecycleRow("autopod:failed", "Pod failed")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -1120,7 +1120,7 @@ public struct ProfileEditorView: View {
 
         Divider().padding(.vertical, 4)
 
-        fieldRow("Max Attempts", help: "How many times the agent can retry after a failed smoke test before the session is marked failed.") {
+        fieldRow("Max Attempts", help: "How many times the agent can retry after a failed smoke test before the pod is marked failed.") {
             Stepper("\(profile.maxValidationAttempts)", value: $profile.maxValidationAttempts, in: 1...10)
                 .frame(width: 120)
         }
@@ -1509,7 +1509,7 @@ private struct ActionsSection: View {
 
                             Toggle("Disabled", isOn: $override.disabled)
                                 .toggleStyle(.checkbox)
-                                .help("Completely disable this action for sessions using this profile")
+                                .help("Completely disable this action for pods using this profile")
                                 .frame(width: 70)
 
                             Button {

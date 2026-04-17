@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
-import { registerSessionCommands } from './session.js';
+import { registerPodCommands } from './pod.js';
 
 // Mock ora to avoid TTY issues in tests
 vi.mock('ora', () => ({
@@ -79,7 +79,7 @@ function createMockClient() {
   } as unknown as AutopodClient;
 }
 
-describe('session commands', () => {
+describe('pod commands', () => {
   let program: Command;
   let mockClient: AutopodClient;
 
@@ -88,7 +88,7 @@ describe('session commands', () => {
     program = new Command();
     program.exitOverride(); // Throw instead of process.exit
     mockClient = createMockClient();
-    registerSessionCommands(program, () => mockClient);
+    registerPodCommands(program, () => mockClient);
   });
 
   it('registers run command that calls createSession', async () => {

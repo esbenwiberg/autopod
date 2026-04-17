@@ -358,12 +358,12 @@ struct LogEventRow: View {
 
 // MARK: - Previews
 
-#Preview("Full log — running session") {
+#Preview("Full log — running pod") {
     LogStreamView(events: MockEvents.running, sessionBranch: "refactor/api")
         .frame(width: 700, height: 500)
 }
 
-#Preview("Full log — failed session") {
+#Preview("Full log — failed pod") {
     LogStreamView(events: MockEvents.failed, sessionBranch: "fix/perf")
         .frame(width: 700, height: 400)
 }

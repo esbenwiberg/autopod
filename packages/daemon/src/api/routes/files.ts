@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import type { SessionManager } from '../../sessions/session-manager.js';
+import type { PodManager } from '../../pods/pod-manager.js';
 
 interface FileEntry {
   path: string;
@@ -38,17 +38,17 @@ const SKIP_DIRS = new Set([
   'obj',
 ]);
 
-export function filesRoutes(app: FastifyInstance, sessionManager: SessionManager): void {
-  // GET /sessions/:sessionId/files — list files in the session worktree filtered by extension.
-  app.get('/sessions/:sessionId/files', async (request, reply) => {
-    const { sessionId } = request.params as { sessionId: string };
+export function filesRoutes(app: FastifyInstance, podManager: PodManager): void {
+  // GET /pods/:podId/files — list files in the pod worktree filtered by extension.
+  app.get('/pods/:podId/files', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
     const query = request.query as { ext?: string };
-    const session = sessionManager.getSession(sessionId);
+    const pod = podManager.getSession(podId);
 
-    const rootPath = session.worktreePath ?? session.artifactsPath;
+    const rootPath = pod.worktreePath ?? pod.artifactsPath;
     if (!rootPath) {
       reply.status(404);
-      return { error: 'No files available for this session' };
+      return { error: 'No files available for this pod' };
     }
 
     const extensions = parseExtensions(query.ext);
@@ -59,16 +59,16 @@ export function filesRoutes(app: FastifyInstance, sessionManager: SessionManager
     return { files } satisfies ListResponse;
   });
 
-  // GET /sessions/:sessionId/files/content?path=... — read a file from the session worktree.
-  app.get('/sessions/:sessionId/files/content', async (request, reply) => {
-    const { sessionId } = request.params as { sessionId: string };
+  // GET /pods/:podId/files/content?path=... — read a file from the pod worktree.
+  app.get('/pods/:podId/files/content', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
     const query = request.query as { path?: string };
-    const session = sessionManager.getSession(sessionId);
+    const pod = podManager.getSession(podId);
 
-    const rootPath = session.worktreePath ?? session.artifactsPath;
+    const rootPath = pod.worktreePath ?? pod.artifactsPath;
     if (!rootPath) {
       reply.status(404);
-      return { error: 'No files available for this session' };
+      return { error: 'No files available for this pod' };
     }
 
     const relPath = query.path;
@@ -82,7 +82,7 @@ export function filesRoutes(app: FastifyInstance, sessionManager: SessionManager
     // Path-traversal guard — resolved must stay under the root.
     if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
       reply.status(400);
-      return { error: 'path escapes the session root' };
+      return { error: 'path escapes the pod root' };
     }
 
     let stats: Awaited<ReturnType<typeof stat>>;

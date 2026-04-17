@@ -67,7 +67,7 @@ describe('buildProviderEnv', () => {
       process.env.ANTHROPIC_API_KEY = 'sk-ant-test123';
       const profile = makeProfile();
 
-      const result = await buildProviderEnv(profile, 'session-1', logger);
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.ANTHROPIC_API_KEY).toBe('sk-ant-test123');
       expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
@@ -78,7 +78,7 @@ describe('buildProviderEnv', () => {
       process.env.ANTHROPIC_API_KEY = undefined;
       const profile = makeProfile();
 
-      const result = await buildProviderEnv(profile, 'session-1', logger);
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
       expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
@@ -88,7 +88,7 @@ describe('buildProviderEnv', () => {
       process.env.ANTHROPIC_API_KEY = 'sk-ant-explicit';
       const profile = makeProfile({ modelProvider: 'anthropic' });
 
-      const result = await buildProviderEnv(profile, 'session-1', logger);
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.ANTHROPIC_API_KEY).toBe('sk-ant-explicit');
     });
@@ -107,7 +107,7 @@ describe('buildProviderEnv', () => {
         },
       });
 
-      const result = await buildProviderEnv(profile, 'session-1', logger);
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
 
       // Should NOT have ANTHROPIC_API_KEY (forces OAuth path)
       expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
@@ -143,7 +143,7 @@ describe('buildProviderEnv', () => {
         providerCredentials: null,
       });
 
-      await expect(buildProviderEnv(profile, 'session-1', logger)).rejects.toThrow(
+      await expect(buildProviderEnv(profile, 'pod-1', logger)).rejects.toThrow(
         'missing or mismatched providerCredentials',
       );
     });
@@ -158,7 +158,7 @@ describe('buildProviderEnv', () => {
         },
       });
 
-      await expect(buildProviderEnv(profile, 'session-1', logger)).rejects.toThrow(
+      await expect(buildProviderEnv(profile, 'pod-1', logger)).rejects.toThrow(
         'missing or mismatched providerCredentials',
       );
     });
@@ -176,7 +176,7 @@ describe('buildProviderEnv', () => {
         },
       });
 
-      const result = await buildProviderEnv(profile, 'session-1', logger);
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBe('1');
       expect(result.env.ANTHROPIC_BASE_URL).toBe('https://foundry.azure.com/v1');
@@ -197,7 +197,7 @@ describe('buildProviderEnv', () => {
         },
       });
 
-      const result = await buildProviderEnv(profile, 'session-1', logger);
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBe('1');
       expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
@@ -209,7 +209,7 @@ describe('buildProviderEnv', () => {
         providerCredentials: null,
       });
 
-      await expect(buildProviderEnv(profile, 'session-1', logger)).rejects.toThrow(
+      await expect(buildProviderEnv(profile, 'pod-1', logger)).rejects.toThrow(
         'missing or mismatched providerCredentials',
       );
     });

@@ -6,7 +6,7 @@ import type { IssueWatcherRepository } from './issue-watcher-repository.js';
 
 function insertTestSession(db: Database.Database, id: string) {
   db.prepare(
-    `INSERT INTO sessions (id, profile_name, task, status, model, runtime, branch, user_id)
+    `INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
      VALUES (?, 'test-profile', 'test task', 'queued', 'opus', 'claude', 'test-branch', 'test-user')`,
   ).run(id);
 }
@@ -29,7 +29,7 @@ describe('IssueWatcherRepository', () => {
       issueUrl: 'https://github.com/org/repo/issues/42',
       issueTitle: 'Fix login bug',
       status: 'in_progress',
-      sessionId: null,
+      podId: null,
       triggerLabel: 'autopod',
     });
 
@@ -50,7 +50,7 @@ describe('IssueWatcherRepository', () => {
       issueUrl: 'https://github.com/org/repo/issues/42',
       issueTitle: 'Fix login bug',
       status: 'in_progress',
-      sessionId: null,
+      podId: null,
       triggerLabel: 'autopod',
     });
 
@@ -67,7 +67,7 @@ describe('IssueWatcherRepository', () => {
       issueUrl: 'https://github.com/org/repo/issues/42',
       issueTitle: 'Fix login bug',
       status: 'in_progress',
-      sessionId: null,
+      podId: null,
       triggerLabel: 'autopod',
     });
 
@@ -79,7 +79,7 @@ describe('IssueWatcherRepository', () => {
         issueUrl: 'https://github.com/org/repo/issues/42',
         issueTitle: 'Duplicate',
         status: 'in_progress',
-        sessionId: null,
+        podId: null,
         triggerLabel: 'autopod',
       }),
     ).toThrow();
@@ -94,7 +94,7 @@ describe('IssueWatcherRepository', () => {
       issueUrl: 'https://github.com/org/repo/issues/42',
       issueTitle: 'Fix login bug',
       status: 'in_progress',
-      sessionId: 'sess-123',
+      podId: 'sess-123',
       triggerLabel: 'autopod',
     });
 
@@ -116,7 +116,7 @@ describe('IssueWatcherRepository', () => {
       issueUrl: 'https://github.com/org/repo/issues/42',
       issueTitle: 'Fix login bug',
       status: 'in_progress',
-      sessionId: 'sess-abc',
+      podId: 'sess-abc',
       triggerLabel: 'autopod',
     });
 
@@ -133,7 +133,7 @@ describe('IssueWatcherRepository', () => {
       issueUrl: 'https://github.com/org/repo/issues/1',
       issueTitle: 'Issue 1',
       status: 'in_progress',
-      sessionId: null,
+      podId: null,
       triggerLabel: 'autopod',
     });
     repo.create({
@@ -143,7 +143,7 @@ describe('IssueWatcherRepository', () => {
       issueUrl: 'https://github.com/org/repo/issues/2',
       issueTitle: 'Issue 2',
       status: 'done',
-      sessionId: null,
+      podId: null,
       triggerLabel: 'autopod',
     });
 
@@ -161,7 +161,7 @@ describe('IssueWatcherRepository', () => {
       issueUrl: 'https://github.com/org/repo/issues/42',
       issueTitle: 'Fix login bug',
       status: 'in_progress',
-      sessionId: null,
+      podId: null,
       triggerLabel: 'autopod',
     });
 

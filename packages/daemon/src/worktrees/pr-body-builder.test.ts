@@ -31,7 +31,7 @@ describe('buildPrTitle', () => {
 describe('buildPrBody', () => {
   const baseConfig: PrBodyConfig = {
     task: 'Add dark mode toggle to the settings page',
-    sessionId: 'abc12345',
+    podId: 'abc12345',
     profileName: 'my-app',
     validationResult: null,
     filesChanged: 5,
@@ -106,7 +106,7 @@ describe('buildPrBody', () => {
 
   it('includes validation results table when present', () => {
     const result: ValidationResult = {
-      sessionId: 'abc12345',
+      podId: 'abc12345',
       attempt: 1,
       timestamp: '2026-01-01T00:00:00.000Z',
       smoke: {
@@ -138,7 +138,7 @@ describe('buildPrBody', () => {
 
   it('wraps AI review reasoning in details block', () => {
     const result: ValidationResult = {
-      sessionId: 'abc12345',
+      podId: 'abc12345',
       attempt: 1,
       timestamp: '2026-01-01T00:00:00.000Z',
       smoke: {
@@ -167,7 +167,7 @@ describe('buildPrBody', () => {
 
   it('shows failure icons for failed phases', () => {
     const result: ValidationResult = {
-      sessionId: 'abc12345',
+      podId: 'abc12345',
       attempt: 2,
       timestamp: '2026-01-01T00:00:00.000Z',
       smoke: {
@@ -188,7 +188,7 @@ describe('buildPrBody', () => {
 
   it('includes page validation results', () => {
     const result: ValidationResult = {
-      sessionId: 'abc12345',
+      podId: 'abc12345',
       attempt: 1,
       timestamp: '2026-01-01T00:00:00.000Z',
       smoke: {
@@ -224,7 +224,7 @@ describe('buildPrBody', () => {
 
   it('surfaces AI issues in Concerns section', () => {
     const result: ValidationResult = {
-      sessionId: 'abc12345',
+      podId: 'abc12345',
       attempt: 1,
       timestamp: '2026-01-01T00:00:00.000Z',
       smoke: {
@@ -255,7 +255,7 @@ describe('buildPrBody', () => {
 
   it('omits Concerns section when no issues or bad deviations', () => {
     const result: ValidationResult = {
-      sessionId: 'abc12345',
+      podId: 'abc12345',
       attempt: 1,
       timestamp: '2026-01-01T00:00:00.000Z',
       smoke: {
@@ -282,7 +282,7 @@ describe('buildPrBody', () => {
 
   it('renders Review Checklist as GitHub checkboxes', () => {
     const result: ValidationResult = {
-      sessionId: 'abc12345',
+      podId: 'abc12345',
       attempt: 1,
       timestamp: '2026-01-01T00:00:00.000Z',
       smoke: {
@@ -336,7 +336,7 @@ describe('buildPrBody', () => {
 
   it('adds Verdict column to deviations table when deviationsAssessment is present', () => {
     const result: ValidationResult = {
-      sessionId: 'abc12345',
+      podId: 'abc12345',
       attempt: 1,
       timestamp: '2026-01-01T00:00:00.000Z',
       smoke: {

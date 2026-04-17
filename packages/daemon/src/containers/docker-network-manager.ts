@@ -88,7 +88,7 @@ export class DockerNetworkManager {
   }
 
   /**
-   * Compute the effective allowlist for a session, merging defaults,
+   * Compute the effective allowlist for a pod, merging defaults,
    * profile policy, daemon gateway, and MCP server hosts.
    *
    * Wildcard entries (e.g. `*.blob.core.windows.net`) are preserved so that

@@ -58,13 +58,13 @@ describe('ScheduledJobRepository', () => {
     expect(() => repo.getOrThrow(job.id)).toThrow();
   });
 
-  it('delete nullifies scheduled_job_id on sessions before removing', () => {
+  it('delete nullifies scheduled_job_id on pods before removing', () => {
     const repo = createScheduledJobRepository(db);
     const job = insertTestScheduledJob(db);
 
-    // Insert a session linked to this job
+    // Insert a pod linked to this job
     db.prepare(`
-      INSERT INTO sessions (
+      INSERT INTO pods (
         id, profile_name, task, status, model, runtime, execution_target, branch,
         user_id, max_validation_attempts, skip_validation, acceptance_criteria,
         output_mode, scheduled_job_id
@@ -78,9 +78,9 @@ describe('ScheduledJobRepository', () => {
     expect(() => repo.delete(job.id)).not.toThrow();
     expect(() => repo.getOrThrow(job.id)).toThrow();
 
-    // Session should still exist but scheduled_job_id should be null
+    // Pod should still exist but scheduled_job_id should be null
     const sess = db
-      .prepare('SELECT scheduled_job_id FROM sessions WHERE id = ?')
+      .prepare('SELECT scheduled_job_id FROM pods WHERE id = ?')
       .get('linked-sess') as { scheduled_job_id: string | null };
     expect(sess.scheduled_job_id).toBeNull();
   });
@@ -144,13 +144,13 @@ describe('ScheduledJobRepository', () => {
     expect(pending.map((j) => j.id)).not.toContain('not-pending');
   });
 
-  it('countActiveSessionsForJob counts non-terminal sessions', () => {
+  it('countActiveSessionsForJob counts non-terminal pods', () => {
     const repo = createScheduledJobRepository(db);
     const job = insertTestScheduledJob(db);
 
-    // Insert a running session linked to this job
+    // Insert a running pod linked to this job
     db.prepare(`
-      INSERT INTO sessions (
+      INSERT INTO pods (
         id, profile_name, task, status, model, runtime, execution_target, branch,
         user_id, max_validation_attempts, skip_validation, acceptance_criteria,
         output_mode, scheduled_job_id
@@ -160,9 +160,9 @@ describe('ScheduledJobRepository', () => {
       )
     `).run(job.id);
 
-    // Insert a complete session linked to this job
+    // Insert a complete pod linked to this job
     db.prepare(`
-      INSERT INTO sessions (
+      INSERT INTO pods (
         id, profile_name, task, status, model, runtime, execution_target, branch,
         user_id, max_validation_attempts, skip_validation, acceptance_criteria,
         output_mode, scheduled_job_id
@@ -175,7 +175,7 @@ describe('ScheduledJobRepository', () => {
     expect(repo.countActiveSessionsForJob(job.id)).toBe(1);
   });
 
-  it('countActiveSessionsForJob returns 0 when no active sessions', () => {
+  it('countActiveSessionsForJob returns 0 when no active pods', () => {
     const repo = createScheduledJobRepository(db);
     const job = insertTestScheduledJob(db);
     expect(repo.countActiveSessionsForJob(job.id)).toBe(0);

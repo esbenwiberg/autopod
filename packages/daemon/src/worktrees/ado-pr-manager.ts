@@ -143,7 +143,7 @@ export class AdoPrManager implements PrManager {
     const title = buildPrTitle(config.task);
     const description = buildPrBody({
       task: config.task,
-      sessionId: config.sessionId,
+      podId: config.podId,
       profileName: config.profileName,
       validationResult: config.validationResult,
       filesChanged: config.filesChanged,
@@ -156,7 +156,7 @@ export class AdoPrManager implements PrManager {
     });
 
     this.logger.info(
-      { sessionId: config.sessionId, branch: config.branch, baseBranch: config.baseBranch },
+      { podId: config.podId, branch: config.branch, baseBranch: config.baseBranch },
       'Creating ADO pull request',
     );
 
@@ -182,7 +182,7 @@ export class AdoPrManager implements PrManager {
       `${this.orgUrl}/${encodeURIComponent(this.project)}/_git/${encodeURIComponent(this.repoName)}/pullrequest/${pr.pullRequestId}`;
 
     this.logger.info(
-      { sessionId: config.sessionId, prUrl, prId: pr.pullRequestId },
+      { podId: config.podId, prUrl, prId: pr.pullRequestId },
       'ADO pull request created',
     );
     return prUrl;
@@ -265,7 +265,7 @@ export class AdoPrManager implements PrManager {
     //
     // The /statuses endpoint does NOT carry required/optional metadata.  Optional
     // checks left in a queued/pending state would cause the old code to treat CI
-    // as "still running" indefinitely, preventing fix sessions from ever spawning.
+    // as "still running" indefinitely, preventing fix pods from ever spawning.
     const reasons: string[] = [];
     const ciFailures: CiFailureDetail[] = [];
     try {
@@ -290,9 +290,9 @@ export class AdoPrManager implements PrManager {
         }>;
       };
 
-      // Only required (blocking) policies drive fix-session decisions.
+      // Only required (blocking) policies drive fix-pod decisions.
       // Optional policies can stay queued indefinitely and must not suppress
-      // fix sessions that are needed for genuinely failing required checks.
+      // fix pods that are needed for genuinely failing required checks.
       const required = evaluations.value.filter((e) => e.configuration.isBlocking);
 
       const inFlightRequired = required.filter(
@@ -338,7 +338,7 @@ export class AdoPrManager implements PrManager {
         // Log at warn so operators can see why auto-detection failed — fall through with empty ciFailures
         this.logger.warn(
           { err: evalErr, prUrl: config.prUrl },
-          'ADO policy evaluations fetch failed — fix sessions may not auto-spawn',
+          'ADO policy evaluations fetch failed — fix pods may not auto-spawn',
         );
       }
     }

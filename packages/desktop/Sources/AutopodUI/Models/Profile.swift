@@ -73,7 +73,7 @@ public struct Profile: Identifiable, Sendable {
     // Pod config (orthogonal axes) + back-compat single-enum legacy output mode
     public var pod: PodConfig
     public var extendsProfile: String?
-    /// Profile to use when spawning worker sessions from a workspace using this profile
+    /// Profile to use when spawning worker pods from a workspace using this profile
     public var workerProfile: String?
 
     // Warm image (read-only, set by daemon)

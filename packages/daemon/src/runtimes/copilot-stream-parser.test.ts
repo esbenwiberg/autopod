@@ -10,7 +10,7 @@ async function collect(lines: string[]) {
   const events = [];
 
   const parsePromise = (async () => {
-    for await (const event of CopilotStreamParser.parse(stream, 'test-session', logger)) {
+    for await (const event of CopilotStreamParser.parse(stream, 'test-pod', logger)) {
       events.push(event);
     }
   })();

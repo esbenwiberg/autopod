@@ -85,7 +85,7 @@ describe('AciContainerManager', () => {
       const manager = createManager();
       const containerId = await manager.spawn({
         image: 'node22',
-        sessionId: 'sess-abc',
+        podId: 'sess-abc',
         env: { MY_VAR: 'value' },
       });
 
@@ -112,7 +112,7 @@ describe('AciContainerManager', () => {
       mockBeginCreateOrUpdateAndWait.mockResolvedValue({ provisioningState: 'Succeeded' });
 
       const manager = createManager();
-      await manager.spawn({ image: 'node22', sessionId: 'sess-1', env: {} });
+      await manager.spawn({ image: 'node22', podId: 'sess-1', env: {} });
 
       const call = mockBeginCreateOrUpdateAndWait.mock.calls[0]?.[2];
       expect(call.containers[0].image).toBe('myregistry.azurecr.io/autopod-node22:latest');
@@ -124,7 +124,7 @@ describe('AciContainerManager', () => {
       const manager = createManager();
       await manager.spawn({
         image: 'myregistry.azurecr.io/custom/image:v1',
-        sessionId: 'sess-1',
+        podId: 'sess-1',
         env: {},
       });
 
@@ -136,7 +136,7 @@ describe('AciContainerManager', () => {
       mockBeginCreateOrUpdateAndWait.mockResolvedValue({ provisioningState: 'Succeeded' });
 
       const manager = createManager();
-      await manager.spawn({ image: 'node22', sessionId: 'sess-1', env: {} });
+      await manager.spawn({ image: 'node22', podId: 'sess-1', env: {} });
 
       const call = mockBeginCreateOrUpdateAndWait.mock.calls[0]?.[2];
       expect(call.imageRegistryCredentials).toEqual([
@@ -152,7 +152,7 @@ describe('AciContainerManager', () => {
       mockBeginCreateOrUpdateAndWait.mockResolvedValue({ provisioningState: 'Succeeded' });
 
       const manager = createManager();
-      await manager.spawn({ image: 'node22', sessionId: 'sess-1', env: {} });
+      await manager.spawn({ image: 'node22', podId: 'sess-1', env: {} });
 
       const call = mockBeginCreateOrUpdateAndWait.mock.calls[0]?.[2];
       expect(call.containers[0].resources.requests).toEqual({ cpu: 2, memoryInGB: 4 });

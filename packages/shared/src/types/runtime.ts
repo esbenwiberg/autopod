@@ -4,17 +4,17 @@ export interface Runtime {
   type: RuntimeType;
   spawn(config: SpawnConfig): AsyncIterable<AgentEvent>;
   resume(
-    sessionId: string,
+    podId: string,
     message: string,
     containerId: string,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent>;
-  abort(sessionId: string): Promise<void>;
-  suspend(sessionId: string): Promise<void>;
+  abort(podId: string): Promise<void>;
+  suspend(podId: string): Promise<void>;
 }
 
 export interface SpawnConfig {
-  sessionId: string;
+  podId: string;
   task: string;
   model: string;
   workDir: string;

@@ -56,7 +56,7 @@ describe('CopilotRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new CopilotRuntime(logger, cm);
       const args = (runtime as { buildSpawnArgs: (c: unknown) => string[] }).buildSpawnArgs({
-        sessionId: 'abc123',
+        podId: 'abc123',
         task: 'Fix the bug',
         model: 'claude-sonnet-4-5',
         workDir: '/workspace',
@@ -87,7 +87,7 @@ describe('CopilotRuntime', () => {
 
       const events = [];
       for await (const event of runtime.spawn({
-        sessionId: 'test-sess',
+        podId: 'test-sess',
         task: 'Do the thing',
         model: 'claude-sonnet-4-5',
         workDir: '/workspace',
@@ -119,7 +119,7 @@ describe('CopilotRuntime', () => {
       }, 10);
 
       for await (const _ of runtime.spawn({
-        sessionId: 'env-test',
+        podId: 'env-test',
         task: 'test',
         model: 'sonnet',
         workDir: '/workspace',
@@ -148,7 +148,7 @@ describe('CopilotRuntime', () => {
       }, 10);
 
       for await (const _ of runtime.spawn({
-        sessionId: 'mcp-test',
+        podId: 'mcp-test',
         task: 'test',
         model: 'sonnet',
         workDir: '/workspace',
@@ -176,7 +176,7 @@ describe('CopilotRuntime', () => {
       }, 10);
 
       for await (const _ of runtime.spawn({
-        sessionId: 'instr-test',
+        podId: 'instr-test',
         task: 'test',
         model: 'sonnet',
         workDir: '/workspace',
@@ -205,7 +205,7 @@ describe('CopilotRuntime', () => {
 
       const events = [];
       for await (const event of runtime.spawn({
-        sessionId: 'fail-test',
+        podId: 'fail-test',
         task: 'fail',
         model: 'sonnet',
         workDir: '/workspace',
@@ -233,7 +233,7 @@ describe('CopilotRuntime', () => {
       }, 10);
 
       for await (const _ of runtime.spawn({
-        sessionId: 'track-test',
+        podId: 'track-test',
         task: 'test',
         model: 'sonnet',
         workDir: '/workspace',
@@ -274,7 +274,7 @@ describe('CopilotRuntime', () => {
       }, 10);
 
       for await (const _ of runtime.spawn({
-        sessionId: 'sess-resume',
+        podId: 'sess-resume',
         task: 'Original task',
         model: 'sonnet',
         workDir: '/workspace',
@@ -309,7 +309,7 @@ describe('CopilotRuntime', () => {
   });
 
   describe('abort', () => {
-    it('calls handle.kill() for the tracked session', async () => {
+    it('calls handle.kill() for the tracked pod', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new CopilotRuntime(logger, cm);

@@ -256,27 +256,27 @@ describe('ProfileStore', () => {
       expect(() => store.delete('nonexistent')).toThrow(ProfileNotFoundError);
     });
 
-    it('should throw when active sessions reference the profile', () => {
+    it('should throw when active pods reference the profile', () => {
       store.create(validInput);
 
-      // Insert a session in running state referencing this profile
+      // Insert a pod in running state referencing this profile
       db.prepare(`
-        INSERT INTO sessions (id, profile_name, task, status, model, runtime, branch, user_id)
+        INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
         VALUES ('sess1', 'my-app', 'do stuff', 'running', 'opus', 'claude', 'main', 'user1')
       `).run();
 
-      expect(() => store.delete('my-app')).toThrow('active sessions');
+      expect(() => store.delete('my-app')).toThrow('active pods');
     });
 
-    it('should allow delete when sessions are complete or killed', () => {
+    it('should allow delete when pods are complete or killed', () => {
       store.create(validInput);
 
       db.prepare(`
-        INSERT INTO sessions (id, profile_name, task, status, model, runtime, branch, user_id)
+        INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
         VALUES ('sess1', 'my-app', 'do stuff', 'complete', 'opus', 'claude', 'main', 'user1')
       `).run();
 
-      // completed sessions should be auto-cleaned and not block deletion
+      // completed pods should be auto-cleaned and not block deletion
       expect(() => store.delete('my-app')).not.toThrow();
       expect(store.exists('my-app')).toBe(false);
     });

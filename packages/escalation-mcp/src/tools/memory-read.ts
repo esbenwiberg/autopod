@@ -1,11 +1,11 @@
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export async function memoryRead(
-  sessionId: string,
+  podId: string,
   input: { id: string },
-  bridge: SessionBridge,
+  bridge: PodBridge,
 ): Promise<string> {
-  const entry = bridge.readMemory(sessionId, input.id);
+  const entry = bridge.readMemory(podId, input.id);
   const whyLine = entry.rationale ? `**Why:** ${entry.rationale}\n\n` : '';
   return `## ${entry.path}\n\n${whyLine}${entry.content}\n\n---\n_Scope: ${entry.scope}, version: ${entry.version}_`;
 }

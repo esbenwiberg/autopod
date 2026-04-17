@@ -183,7 +183,7 @@ export function createLocalValidationEngine(
         if (healthResult.status === 'pass' && config.startCommand) {
           stopMonitor = startAppStabilityMonitor(config.previewUrl + config.healthPath, () => {
             log?.warn(
-              { sessionId: config.sessionId, url: config.previewUrl + config.healthPath },
+              { podId: config.podId, url: config.previewUrl + config.healthPath },
               'App became unreachable after health check passed — aborting validation',
             );
             crashController.abort();
@@ -288,7 +288,7 @@ export function createLocalValidationEngine(
         const duration = Date.now() - startTime;
 
         return {
-          sessionId: config.sessionId,
+          podId: config.podId,
           attempt: config.attempt,
           timestamp: new Date().toISOString(),
           smoke: {
@@ -307,7 +307,7 @@ export function createLocalValidationEngine(
       } catch (err) {
         if (err instanceof ValidationInterruptedError) {
           const reason = crashController.signal.aborted ? 'app-crashed' : 'user';
-          log?.info({ sessionId: config.sessionId, reason }, 'Validation interrupted');
+          log?.info({ podId: config.podId, reason }, 'Validation interrupted');
           return makeInterruptedResult(config, startTime, err.message);
         }
         throw err;
@@ -325,7 +325,7 @@ function makeInterruptedResult(
   reason = 'Validation interrupted by user',
 ): ValidationResult {
   return {
-    sessionId: config.sessionId,
+    podId: config.podId,
     attempt: config.attempt,
     timestamp: new Date().toISOString(),
     smoke: {
@@ -613,7 +613,7 @@ async function runPageValidationOnHost(
   config: ValidationEngineConfig,
   log?: Logger,
 ): Promise<PageResult[] | null> {
-  const screenshotDir = hostBrowserRunner.screenshotDir(config.sessionId);
+  const screenshotDir = hostBrowserRunner.screenshotDir(config.podId);
 
   const script = generateValidationScript({
     baseUrl: config.previewUrl,
@@ -626,7 +626,7 @@ async function runPageValidationOnHost(
   try {
     const result = await hostBrowserRunner.runScript(script, {
       timeout: config.smokePages.length * 45_000,
-      sessionId: config.sessionId,
+      podId: config.podId,
     });
 
     const pages = parsePageResults(result.stdout);
@@ -1454,7 +1454,7 @@ async function executeAcChecks(
       mode === 'host' ? config.previewUrl : (config.containerBaseUrl ?? config.previewUrl);
     const screenshotDir =
       mode === 'host'
-        ? `${hostBrowserRunner?.screenshotDir(config.sessionId)}/ac`
+        ? `${hostBrowserRunner?.screenshotDir(config.podId)}/ac`
         : '/tmp/autopod-ac-screenshots';
     const prompt = buildAcScriptPrompt(instructions, baseUrl, screenshotDir, mode);
     const { stdout } = await runClaudeCli({
@@ -1479,7 +1479,7 @@ async function executeAcChecks(
       if (hostResult !== null) return hostResult;
       // Host Playwright produced no markers — fall back to container with a freshly generated script
       log?.warn(
-        { sessionId: config.sessionId },
+        { podId: config.podId },
         'Host AC checks failed — falling back to container',
       );
       const containerScript = await generateScript('container');
@@ -1520,11 +1520,11 @@ async function executeAcOnHost(
   timeout: number,
   log?: Logger,
 ): Promise<AcCheckResult[] | null> {
-  const screenshotDir = `${hostBrowserRunner.screenshotDir(config.sessionId)}/ac`;
+  const screenshotDir = `${hostBrowserRunner.screenshotDir(config.podId)}/ac`;
 
   const result = await hostBrowserRunner.runScript(script, {
     timeout,
-    sessionId: config.sessionId,
+    podId: config.podId,
   });
 
   // If the script crashed before writing markers (e.g. Chromium couldn't reach the host port),
@@ -1534,7 +1534,7 @@ async function executeAcOnHost(
     result.stdout.includes('__AUTOPOD_AC_RESULTS_END__');
   if (!hasMarkers) {
     log?.warn(
-      { sessionId: config.sessionId, stderr: result.stderr.slice(0, 500) },
+      { podId: config.podId, stderr: result.stderr.slice(0, 500) },
       'Host AC browser script produced no result markers — falling back to container',
     );
     return null;

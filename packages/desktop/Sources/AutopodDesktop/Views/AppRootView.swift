@@ -5,7 +5,7 @@ import AutopodClient
 /// Root view that bridges stores into AutopodUI views.
 public struct AppRootView: View {
   public let connectionManager: ConnectionManager
-  public let sessionStore: SessionStore
+  public let podStore: PodStore
   public let profileStore: ProfileStore
   public let memoryStore: MemoryStore
   public let scheduledJobStore: ScheduledJobStore
@@ -16,7 +16,7 @@ public struct AppRootView: View {
 
   public init(
     connectionManager: ConnectionManager,
-    sessionStore: SessionStore,
+    podStore: PodStore,
     profileStore: ProfileStore,
     memoryStore: MemoryStore,
     scheduledJobStore: ScheduledJobStore,
@@ -26,7 +26,7 @@ public struct AppRootView: View {
     showSetup: Binding<Bool>
   ) {
     self.connectionManager = connectionManager
-    self.sessionStore = sessionStore
+    self.podStore = podStore
     self.profileStore = profileStore
     self.memoryStore = memoryStore
     self.scheduledJobStore = scheduledJobStore
@@ -39,20 +39,20 @@ public struct AppRootView: View {
   @State private var showError = false
   @State private var showSettings = false
 
-  /// Only read events for the selected session — avoids observing the entire dictionary
+  /// Only read events for the selected pod — avoids observing the entire dictionary
   /// and triggering full view recomputation on every agent event.
   private var selectedSessionEvents: [AgentEvent] {
-    guard let id = sessionStore.selectedSessionId else { return [] }
+    guard let id = podStore.selectedSessionId else { return [] }
     return eventStream?.sessionEvents[id] ?? []
   }
 
   private var selectedSessionIsLoadingLogs: Bool {
-    guard let id = sessionStore.selectedSessionId else { return false }
+    guard let id = podStore.selectedSessionId else { return false }
     return eventStream?.historicalLoadState[id] == .some(.loading)
   }
 
   private var selectedSessionLogsError: String? {
-    guard let id = sessionStore.selectedSessionId,
+    guard let id = podStore.selectedSessionId,
           let state = eventStream?.historicalLoadState[id] else { return nil }
     if case .failed(let msg) = state { return msg }
     return nil
@@ -60,50 +60,50 @@ public struct AppRootView: View {
 
   public var body: some View {
     MainView(
-      sessions: sessionStore.sessions,
+      pods: podStore.pods,
       scheduledJobs: scheduledJobStore.jobs,
       selectedSessionId: Binding(
-        get: { sessionStore.selectedSessionId },
-        set: { sessionStore.selectedSessionId = $0 }
+        get: { podStore.selectedSessionId },
+        set: { podStore.selectedSessionId = $0 }
       ),
       isConnected: connectionManager.isConnected,
       connectionLabel: connectionManager.connectionLabel,
       connectionState: connectionManager.state.label,
-      isLoading: sessionStore.isLoading,
+      isLoading: podStore.isLoading,
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
       selectedSessionEvents: selectedSessionEvents,
       isLoadingLogs: selectedSessionIsLoadingLogs,
       logsLoadError: selectedSessionLogsError,
       onReloadLogs: {
-        guard let id = sessionStore.selectedSessionId, let api = connectionManager.api else { return }
-        eventStream?.loadHistoricalEvents(sessionId: id, api: api)
+        guard let id = podStore.selectedSessionId, let api = connectionManager.api else { return }
+        eventStream?.loadHistoricalEvents(podId: id, api: api)
       },
-      sessionDiffs: sessionStore.sessionDiffs,
+      sessionDiffs: podStore.sessionDiffs,
       terminalState: terminalManager?.state ?? "disconnected",
       terminalDataPipe: terminalManager?.dataPipe,
       onTerminalSendData: { bytes in terminalManager?.sendData(bytes) },
       onTerminalResize: { cols, rows in terminalManager?.resize(cols: cols, rows: rows) },
-      onTerminalConnect: { sessionId in terminalManager?.connect(sessionId: sessionId) },
+      onTerminalConnect: { podId in terminalManager?.connect(podId: podId) },
       onTerminalDisconnect: { terminalManager?.disconnect() },
       onRefresh: {
-        await sessionStore.loadSessions()
+        await podStore.loadSessions()
         await profileStore.loadProfiles()
       },
-      onSelectSession: { sessionId in
-        if let prev = sessionStore.selectedSessionId {
+      onSelectSession: { podId in
+        if let prev = podStore.selectedSessionId {
           eventStream?.unsubscribeFromSession(prev)
         }
-        if let id = sessionId {
+        if let id = podId {
           eventStream?.subscribeToSession(id)
-          Task { await sessionStore.loadDiff(id) }
+          Task { await podStore.loadDiff(id) }
           if let api = connectionManager.api {
-            eventStream?.loadHistoricalEvents(sessionId: id, api: api)
+            eventStream?.loadHistoricalEvents(podId: id, api: api)
           }
         }
       },
-      onRefreshDiff: { sessionId in
-        Task { await sessionStore.loadDiff(sessionId) }
+      onRefreshDiff: { podId in
+        Task { await podStore.loadDiff(podId) }
       },
       onShowSettings: {
         showSettings = true
@@ -133,12 +133,12 @@ public struct AppRootView: View {
       },
       onLoadMemories: { await memoryStore.loadMemories() }
     )
-    .task(id: sessionStore.selectedSessionId) {
-      // Fires on initial appear AND whenever the selected session changes.
-      // `.onChange` (used by onSelectSession) doesn't fire on mount, so a session
+    .task(id: podStore.selectedSessionId) {
+      // Fires on initial appear AND whenever the selected pod changes.
+      // `.onChange` (used by onSelectSession) doesn't fire on mount, so a pod
       // that's already selected at launch would never trigger the historical fetch.
-      guard let id = sessionStore.selectedSessionId, let api = connectionManager.api else { return }
-      eventStream?.loadHistoricalEvents(sessionId: id, api: api)
+      guard let id = podStore.selectedSessionId, let api = connectionManager.api else { return }
+      eventStream?.loadHistoricalEvents(podId: id, api: api)
     }
     .alert("Error", isPresented: $showError) {
       Button("OK") { actionHandler?.clearError() }

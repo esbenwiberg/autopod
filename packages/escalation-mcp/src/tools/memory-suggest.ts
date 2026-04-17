@@ -1,13 +1,13 @@
 import type { MemoryScope } from '@autopod/shared';
-import type { SessionBridge } from '../session-bridge.js';
+import type { PodBridge } from '../pod-bridge.js';
 
 export async function memorySuggest(
-  sessionId: string,
+  podId: string,
   input: { scope: MemoryScope; path: string; content: string; rationale?: string },
-  bridge: SessionBridge,
+  bridge: PodBridge,
 ): Promise<string> {
   const id = bridge.suggestMemory(
-    sessionId,
+    podId,
     input.scope,
     input.path,
     input.content,

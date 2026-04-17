@@ -40,7 +40,7 @@ function buildClaudeConfigFiles(): ContainerFile[] {
 }
 
 /**
- * Build provider-specific environment variables and credential files for a session.
+ * Build provider-specific environment variables and credential files for a pod.
  *
  * Returns env vars, files to write to the container, and whether post-exec
  * credential persistence is needed (for MAX/PRO token rotation).

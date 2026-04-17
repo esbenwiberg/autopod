@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import type { FastifyInstance } from 'fastify';
-import type { SessionQueue } from '../../sessions/index.js';
+import type { PodQueue } from '../../pods/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,12 +39,12 @@ export interface HealthDeps {
   onShutdown?: () => void;
   docker?: Dockerode;
   db?: Database.Database;
-  sessionQueue?: SessionQueue;
+  podQueue?: PodQueue;
   maxConcurrency?: number;
 }
 
 export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void {
-  const { onShutdown, docker, db, sessionQueue, maxConcurrency } = deps;
+  const { onShutdown, docker, db, podQueue, maxConcurrency } = deps;
 
   app.get('/health', { config: { auth: false } }, async (request, reply) => {
     const { detail } = request.query as { detail?: string };
@@ -97,8 +97,8 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
       }
     }
 
-    const activeSessions = sessionQueue?.processing ?? 0;
-    const queuedSessions = sessionQueue?.pending ?? 0;
+    const activeSessions = podQueue?.processing ?? 0;
+    const queuedSessions = podQueue?.pending ?? 0;
 
     return {
       status: 'ok',

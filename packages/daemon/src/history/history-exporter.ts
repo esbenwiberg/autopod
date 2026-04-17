@@ -3,17 +3,17 @@ import type {
   AgentErrorEvent,
   HistoryExportStats,
   HistoryQuery,
-  Session,
-  SessionStatus,
+  Pod,
+  PodStatus,
   ValidationResult,
 } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
-import type { EscalationRepository } from '../sessions/escalation-repository.js';
-import type { EventRepository } from '../sessions/event-repository.js';
-import type { ProgressEventRepository } from '../sessions/progress-event-repository.js';
-import type { SessionRepository } from '../sessions/session-repository.js';
-import type { ValidationRepository } from '../sessions/validation-repository.js';
+import type { EscalationRepository } from '../pods/escalation-repository.js';
+import type { EventRepository } from '../pods/event-repository.js';
+import type { ProgressEventRepository } from '../pods/progress-event-repository.js';
+import type { PodRepository } from '../pods/pod-repository.js';
+import type { ValidationRepository } from '../pods/validation-repository.js';
 
 export interface HistoryExportResult {
   dbBuffer: Buffer;
@@ -23,7 +23,7 @@ export interface HistoryExportResult {
 }
 
 interface ExporterDeps {
-  sessionRepo: SessionRepository;
+  podRepo: PodRepository;
   validationRepo: ValidationRepository;
   escalationRepo: EscalationRepository;
   eventRepo: EventRepository;
@@ -32,7 +32,7 @@ interface ExporterDeps {
 }
 
 const HISTORY_DB_SCHEMA = `
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS pods (
   id TEXT PRIMARY KEY,
   profile_name TEXT NOT NULL,
   task TEXT NOT NULL,
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS validations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
+  pod_id TEXT NOT NULL,
   attempt INTEGER NOT NULL,
   overall TEXT NOT NULL,
   failed_phases TEXT,
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS validations (
 
 CREATE TABLE IF NOT EXISTS escalations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
+  pod_id TEXT NOT NULL,
   type TEXT NOT NULL,
   question TEXT,
   response TEXT,
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS escalations (
 
 CREATE TABLE IF NOT EXISTS errors (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
+  pod_id TEXT NOT NULL,
   message TEXT NOT NULL,
   fatal INTEGER NOT NULL DEFAULT 0,
   timestamp TEXT NOT NULL
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS errors (
 
 CREATE TABLE IF NOT EXISTS progress_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
+  pod_id TEXT NOT NULL,
   phase TEXT NOT NULL,
   description TEXT NOT NULL,
   current_phase INTEGER NOT NULL,
@@ -99,10 +99,10 @@ CREATE TABLE IF NOT EXISTS progress_events (
 );
 `;
 
-function computeDurationSeconds(session: Session): number | null {
-  if (!session.startedAt) return null;
-  const end = session.completedAt ?? new Date().toISOString();
-  return Math.round((new Date(end).getTime() - new Date(session.startedAt).getTime()) / 1000);
+function computeDurationSeconds(pod: Pod): number | null {
+  if (!pod.startedAt) return null;
+  const end = pod.completedAt ?? new Date().toISOString();
+  return Math.round((new Date(end).getTime() - new Date(pod.startedAt).getTime()) / 1000);
 }
 
 function extractFailedPhases(result: ValidationResult): string[] {
@@ -140,25 +140,25 @@ function truncate(str: string, max: number): string {
 export function createHistoryExporter(deps: ExporterDeps) {
   return {
     export(query: HistoryQuery): HistoryExportResult {
-      // 1. Fetch sessions with filters
-      const allSessions = deps.sessionRepo.list({
+      // 1. Fetch pods with filters
+      const allSessions = deps.podRepo.list({
         profileName: query.profileName,
-        status: query.failuresOnly ? ('failed' as SessionStatus) : undefined,
+        status: query.failuresOnly ? ('failed' as PodStatus) : undefined,
       });
 
-      let sessions = allSessions;
+      let pods = allSessions;
 
       // Apply 'since' filter
       if (query.since) {
         const sinceDate = new Date(query.since).getTime();
-        sessions = sessions.filter((s) => new Date(s.createdAt).getTime() >= sinceDate);
+        pods = pods.filter((s) => new Date(s.createdAt).getTime() >= sinceDate);
       }
 
-      // Also include killed and review_required sessions when filtering failures
+      // Also include killed and review_required pods when filtering failures
       if (query.failuresOnly) {
-        const additionalStatuses: SessionStatus[] = ['killed', 'review_required'];
+        const additionalStatuses: PodStatus[] = ['killed', 'review_required'];
         for (const status of additionalStatuses) {
-          const extra = deps.sessionRepo
+          const extra = deps.podRepo
             .list({
               profileName: query.profileName,
               status,
@@ -167,20 +167,20 @@ export function createHistoryExporter(deps: ExporterDeps) {
               (s) =>
                 !query.since || new Date(s.createdAt).getTime() >= new Date(query.since).getTime(),
             );
-          sessions = [...sessions, ...extra];
+          pods = [...pods, ...extra];
         }
       }
 
       // Apply limit
       const limit = query.limit ?? 100;
-      sessions = sessions.slice(0, limit);
+      pods = pods.slice(0, limit);
 
       // 2. Create in-memory history DB
       const historyDb = new Database(':memory:');
       historyDb.exec(HISTORY_DB_SCHEMA);
 
       const insertSession = historyDb.prepare(`
-        INSERT INTO sessions (id, profile_name, task, status, model, runtime,
+        INSERT INTO pods (id, profile_name, task, status, model, runtime,
           validation_attempts, max_validation_attempts, rework_reason,
           input_tokens, output_tokens, cost_usd,
           files_changed, lines_added, lines_removed,
@@ -195,61 +195,61 @@ export function createHistoryExporter(deps: ExporterDeps) {
       `);
 
       const insertValidation = historyDb.prepare(`
-        INSERT INTO validations (session_id, attempt, overall, failed_phases, build_error,
+        INSERT INTO validations (pod_id, attempt, overall, failed_phases, build_error,
           review_issues, review_reasoning, created_at)
-        VALUES (@sessionId, @attempt, @overall, @failedPhases, @buildError,
+        VALUES (@podId, @attempt, @overall, @failedPhases, @buildError,
           @reviewIssues, @reviewReasoning, @createdAt)
       `);
 
       const insertEscalation = historyDb.prepare(`
-        INSERT INTO escalations (session_id, type, question, response, created_at, resolved_at)
-        VALUES (@sessionId, @type, @question, @response, @createdAt, @resolvedAt)
+        INSERT INTO escalations (pod_id, type, question, response, created_at, resolved_at)
+        VALUES (@podId, @type, @question, @response, @createdAt, @resolvedAt)
       `);
 
       const insertError = historyDb.prepare(`
-        INSERT INTO errors (session_id, message, fatal, timestamp)
-        VALUES (@sessionId, @message, @fatal, @timestamp)
+        INSERT INTO errors (pod_id, message, fatal, timestamp)
+        VALUES (@podId, @message, @fatal, @timestamp)
       `);
 
       const insertProgress = historyDb.prepare(`
-        INSERT INTO progress_events (session_id, phase, description, current_phase, total_phases, created_at)
-        VALUES (@sessionId, @phase, @description, @currentPhase, @totalPhases, @createdAt)
+        INSERT INTO progress_events (pod_id, phase, description, current_phase, total_phases, created_at)
+        VALUES (@podId, @phase, @description, @currentPhase, @totalPhases, @createdAt)
       `);
 
       // 3. Populate history DB
-      for (const session of sessions) {
+      for (const pod of pods) {
         insertSession.run({
-          id: session.id,
-          profileName: session.profileName,
-          task: truncate(session.task, 500),
-          status: session.status,
-          model: session.model,
-          runtime: session.runtime,
-          validationAttempts: session.validationAttempts,
-          maxValidationAttempts: session.maxValidationAttempts,
-          reworkReason: session.reworkReason,
-          inputTokens: session.inputTokens,
-          outputTokens: session.outputTokens,
-          costUsd: session.costUsd,
-          filesChanged: session.filesChanged,
-          linesAdded: session.linesAdded,
-          linesRemoved: session.linesRemoved,
-          durationSeconds: computeDurationSeconds(session),
-          plan: session.plan ? JSON.stringify(session.plan) : null,
-          taskSummary: session.taskSummary ? JSON.stringify(session.taskSummary) : null,
-          escalationCount: session.escalationCount,
-          commitCount: session.commitCount,
-          createdAt: session.createdAt,
-          startedAt: session.startedAt,
-          completedAt: session.completedAt,
+          id: pod.id,
+          profileName: pod.profileName,
+          task: truncate(pod.task, 500),
+          status: pod.status,
+          model: pod.model,
+          runtime: pod.runtime,
+          validationAttempts: pod.validationAttempts,
+          maxValidationAttempts: pod.maxValidationAttempts,
+          reworkReason: pod.reworkReason,
+          inputTokens: pod.inputTokens,
+          outputTokens: pod.outputTokens,
+          costUsd: pod.costUsd,
+          filesChanged: pod.filesChanged,
+          linesAdded: pod.linesAdded,
+          linesRemoved: pod.linesRemoved,
+          durationSeconds: computeDurationSeconds(pod),
+          plan: pod.plan ? JSON.stringify(pod.plan) : null,
+          taskSummary: pod.taskSummary ? JSON.stringify(pod.taskSummary) : null,
+          escalationCount: pod.escalationCount,
+          commitCount: pod.commitCount,
+          createdAt: pod.createdAt,
+          startedAt: pod.startedAt,
+          completedAt: pod.completedAt,
         });
 
         // Validations
-        const validations = deps.validationRepo.getForSession(session.id);
+        const validations = deps.validationRepo.getForSession(pod.id);
         for (const v of validations) {
           const failedPhases = extractFailedPhases(v.result);
           insertValidation.run({
-            sessionId: session.id,
+            podId: pod.id,
             attempt: v.attempt,
             overall: v.result.overall,
             failedPhases: failedPhases.length > 0 ? failedPhases.join(', ') : null,
@@ -265,7 +265,7 @@ export function createHistoryExporter(deps: ExporterDeps) {
         }
 
         // Escalations
-        const escalations = deps.escalationRepo.listBySession(session.id);
+        const escalations = deps.escalationRepo.listBySession(pod.id);
         for (const esc of escalations) {
           const question =
             'question' in esc.payload
@@ -274,7 +274,7 @@ export function createHistoryExporter(deps: ExporterDeps) {
                 ? (esc.payload as { description: string }).description
                 : '';
           insertEscalation.run({
-            sessionId: session.id,
+            podId: pod.id,
             type: esc.type,
             question: truncate(question, 500),
             response: esc.response ? truncate(JSON.stringify(esc.response), 500) : null,
@@ -284,14 +284,14 @@ export function createHistoryExporter(deps: ExporterDeps) {
         }
 
         // Errors (from event stream)
-        const events = deps.eventRepo.getForSession(session.id);
+        const events = deps.eventRepo.getForSession(pod.id);
         for (const evt of events) {
-          if (evt.type === 'session.agent_activity') {
+          if (evt.type === 'pod.agent_activity') {
             const activityEvent = evt.payload as AgentActivityEvent;
             if (activityEvent.event.type === 'error') {
               const errorEvent = activityEvent.event as AgentErrorEvent;
               insertError.run({
-                sessionId: session.id,
+                podId: pod.id,
                 message: truncate(errorEvent.message, 500),
                 fatal: errorEvent.fatal ? 1 : 0,
                 timestamp: errorEvent.timestamp,
@@ -301,10 +301,10 @@ export function createHistoryExporter(deps: ExporterDeps) {
         }
 
         // Progress events
-        const progressEvents = deps.progressEventRepo.listBySession(session.id);
+        const progressEvents = deps.progressEventRepo.listBySession(pod.id);
         for (const pe of progressEvents) {
           insertProgress.run({
-            sessionId: session.id,
+            podId: pod.id,
             phase: pe.phase,
             description: truncate(pe.description, 300),
             currentPhase: pe.currentPhase,
@@ -315,14 +315,14 @@ export function createHistoryExporter(deps: ExporterDeps) {
       }
 
       // 4. Compute stats
-      const stats = computeStats(sessions);
+      const stats = computeStats(pods);
 
       // 5. Serialize the in-memory DB to a buffer
       const dbBuffer = Buffer.from(historyDb.serialize());
       historyDb.close();
 
       // 6. Generate summary + analysis guide
-      const summary = generateSummary(sessions, stats);
+      const summary = generateSummary(pods, stats);
       const analysisGuide = generateAnalysisGuide();
 
       return { dbBuffer, summary, analysisGuide, stats };
@@ -330,23 +330,23 @@ export function createHistoryExporter(deps: ExporterDeps) {
   };
 }
 
-function computeStats(sessions: Session[]): HistoryExportStats {
+function computeStats(pods: Pod[]): HistoryExportStats {
   const byStatus: Record<string, number> = {};
   let totalCost = 0;
 
-  for (const s of sessions) {
+  for (const s of pods) {
     byStatus[s.status] = (byStatus[s.status] ?? 0) + 1;
     totalCost += s.costUsd;
   }
 
   return {
-    totalSessions: sessions.length,
+    totalSessions: pods.length,
     byStatus,
     totalCost,
   };
 }
 
-function generateSummary(sessions: Session[], stats: HistoryExportStats): string {
+function generateSummary(pods: Pod[], stats: HistoryExportStats): string {
   const failedCount = (stats.byStatus.failed ?? 0) + (stats.byStatus.killed ?? 0);
   const completeCount = stats.byStatus.complete ?? 0;
   const failureRate =
@@ -357,7 +357,7 @@ function generateSummary(sessions: Session[], stats: HistoryExportStats): string
     string,
     { total: number; failed: number; cost: number; valAttempts: number }
   >();
-  for (const s of sessions) {
+  for (const s of pods) {
     const p = profiles.get(s.profileName) ?? { total: 0, failed: 0, cost: 0, valAttempts: 0 };
     p.total++;
     if (s.status === 'failed' || s.status === 'killed' || s.status === 'review_required')
@@ -371,13 +371,13 @@ function generateSummary(sessions: Session[], stats: HistoryExportStats): string
   for (const [name, p] of profiles) {
     const avgVal = p.total > 0 ? (p.valAttempts / p.total).toFixed(1) : '0';
     const rate = p.total > 0 ? ((p.failed / p.total) * 100).toFixed(0) : '0';
-    profileSection += `- **${name}**: ${p.total} sessions, ${p.failed} failed (${rate}%), avg ${avgVal} validation attempts, $${p.cost.toFixed(2)} total cost\n`;
+    profileSection += `- **${name}**: ${p.total} pods, ${p.failed} failed (${rate}%), avg ${avgVal} validation attempts, $${p.cost.toFixed(2)} total cost\n`;
   }
 
-  return `# Session History Summary
+  return `# Pod History Summary
 
 ## Overview
-- **Total sessions**: ${stats.totalSessions}
+- **Total pods**: ${stats.totalSessions}
 - **Completed**: ${completeCount}
 - **Failed/Killed**: ${failedCount}
 - **Failure rate**: ${failureRate}%
@@ -406,11 +406,11 @@ function generateAnalysisGuide(): string {
 
 ## Database Schema
 
-### sessions
-Core session data — one row per pod run.
+### pods
+Core pod data — one row per pod run.
 | Column | Type | Description |
 |--------|------|-------------|
-| id | TEXT | Session ID |
+| id | TEXT | Pod ID |
 | profile_name | TEXT | Profile used |
 | task | TEXT | Task description |
 | status | TEXT | Final status (complete, failed, killed, etc.) |
@@ -433,10 +433,10 @@ Core session data — one row per pod run.
 | created_at | TEXT | ISO timestamp |
 
 ### validations
-One row per validation attempt per session.
+One row per validation attempt per pod.
 | Column | Type | Description |
 |--------|------|-------------|
-| session_id | TEXT | Links to sessions.id |
+| pod_id | TEXT | Links to pods.id |
 | attempt | INT | Attempt number (1, 2, 3...) |
 | overall | TEXT | 'pass' or 'fail' |
 | failed_phases | TEXT | Comma-separated: build, health, smoke:/path, review |
@@ -448,7 +448,7 @@ One row per validation attempt per session.
 Agent requests for human or AI help.
 | Column | Type | Description |
 |--------|------|-------------|
-| session_id | TEXT | Links to sessions.id |
+| pod_id | TEXT | Links to pods.id |
 | type | TEXT | ask_human, ask_ai, report_blocker |
 | question | TEXT | What the agent asked |
 | response | TEXT | Human/AI response |
@@ -458,7 +458,7 @@ Agent requests for human or AI help.
 Fatal and non-fatal errors from agent execution.
 | Column | Type | Description |
 |--------|------|-------------|
-| session_id | TEXT | Links to sessions.id |
+| pod_id | TEXT | Links to pods.id |
 | message | TEXT | Error message |
 | fatal | INT | 1 if fatal, 0 otherwise |
 | timestamp | TEXT | ISO timestamp |
@@ -467,7 +467,7 @@ Fatal and non-fatal errors from agent execution.
 Agent-reported phase transitions.
 | Column | Type | Description |
 |--------|------|-------------|
-| session_id | TEXT | Links to sessions.id |
+| pod_id | TEXT | Links to pods.id |
 | phase | TEXT | Phase name |
 | description | TEXT | What the agent is doing |
 | current_phase | INT | Current phase number |
@@ -483,7 +483,7 @@ SELECT profile_name,
   COUNT(*) as total,
   SUM(CASE WHEN status IN ('failed', 'killed', 'review_required') THEN 1 ELSE 0 END) as failures,
   ROUND(SUM(CASE WHEN status IN ('failed', 'killed', 'review_required') THEN 1.0 ELSE 0.0 END) / COUNT(*) * 100, 1) as failure_pct
-FROM sessions
+FROM pods
 GROUP BY profile_name
 ORDER BY failure_pct DESC;
 
@@ -497,7 +497,7 @@ LIMIT 10;
 
 -- Sessions that exhausted all validation attempts
 SELECT s.id, s.profile_name, s.task, s.validation_attempts, s.rework_reason
-FROM sessions s
+FROM pods s
 WHERE s.validation_attempts >= s.max_validation_attempts AND s.status IN ('failed', 'review_required');
 
 -- Most common failed phases
@@ -524,7 +524,7 @@ LIMIT 10;
 
 -- Sessions with most escalations
 SELECT s.id, s.profile_name, s.task, s.escalation_count
-FROM sessions s
+FROM pods s
 WHERE s.escalation_count > 0
 ORDER BY s.escalation_count DESC
 LIMIT 10;
@@ -533,24 +533,24 @@ LIMIT 10;
 ### Cost & Efficiency
 
 \`\`\`sql
--- Most expensive sessions
+-- Most expensive pods
 SELECT id, profile_name, task, cost_usd, status, validation_attempts
-FROM sessions
+FROM pods
 ORDER BY cost_usd DESC
 LIMIT 10;
 
 -- Average cost by outcome
 SELECT status,
-  COUNT(*) as sessions,
+  COUNT(*) as pods,
   ROUND(AVG(cost_usd), 2) as avg_cost,
   ROUND(SUM(cost_usd), 2) as total_cost
-FROM sessions
+FROM pods
 GROUP BY status
 ORDER BY avg_cost DESC;
 
--- Token waste: high-cost sessions that failed
+-- Token waste: high-cost pods that failed
 SELECT id, profile_name, task, cost_usd, validation_attempts, rework_reason
-FROM sessions
+FROM pods
 WHERE status IN ('failed', 'killed') AND cost_usd > 0
 ORDER BY cost_usd DESC;
 \`\`\`
@@ -561,15 +561,15 @@ ORDER BY cost_usd DESC;
 -- Sessions with multiple validation attempts
 SELECT s.id, s.profile_name, s.task, s.validation_attempts,
   GROUP_CONCAT(v.failed_phases, ' | ') as all_failures
-FROM sessions s
-JOIN validations v ON v.session_id = s.id AND v.overall = 'fail'
+FROM pods s
+JOIN validations v ON v.pod_id = s.id AND v.overall = 'fail'
 WHERE s.validation_attempts > 1
 GROUP BY s.id
 ORDER BY s.validation_attempts DESC;
 
 -- Common rework reasons
 SELECT rework_reason, COUNT(*) as occurrences
-FROM sessions
+FROM pods
 WHERE rework_reason IS NOT NULL
 GROUP BY rework_reason
 ORDER BY occurrences DESC;
@@ -581,12 +581,12 @@ ORDER BY occurrences DESC;
 -- Sessions with errors
 SELECT s.id, s.profile_name, e.message, e.fatal
 FROM errors e
-JOIN sessions s ON s.id = e.session_id
+JOIN pods s ON s.id = e.pod_id
 ORDER BY e.timestamp DESC;
 
 -- Task deviations (where agent deviated from plan)
 SELECT id, profile_name, task, task_summary
-FROM sessions
+FROM pods
 WHERE task_summary IS NOT NULL
   AND json_extract(task_summary, '$.deviations') IS NOT NULL
   AND json_array_length(json_extract(task_summary, '$.deviations')) > 0;
@@ -594,10 +594,10 @@ WHERE task_summary IS NOT NULL
 
 ## What to Look For
 
-1. **Recurring build errors**: Same error across multiple sessions → update CLAUDE.md with build fix guidance
+1. **Recurring build errors**: Same error across multiple pods → update CLAUDE.md with build fix guidance
 2. **Frequent escalations**: Same question asked repeatedly → document the answer in CLAUDE.md or create a skill
 3. **Validation rework loops**: Sessions that fail validation multiple times on the same issue → add clearer acceptance criteria
-4. **High-cost failures**: Expensive sessions that ultimately fail → investigate if task scope is too ambitious
+4. **High-cost failures**: Expensive pods that ultimately fail → investigate if task scope is too ambitious
 5. **Agent deviations**: Frequent plan deviations → improve task descriptions or system instructions
 6. **Profile-specific patterns**: One profile failing more than others → review its configuration
 
