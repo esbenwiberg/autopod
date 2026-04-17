@@ -209,6 +209,37 @@ describe('ClaudeStreamParser.mapEvent', () => {
     });
   });
 
+  it('extracts input_tokens and output_tokens from usage object in result event', () => {
+    const event = {
+      type: 'result',
+      subtype: 'success',
+      result: 'Done!',
+      total_cost_usd: 0.05,
+      usage: { input_tokens: 8000, output_tokens: 3000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    };
+    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    expect(result).toMatchObject({
+      type: 'complete',
+      costUsd: 0.05,
+      totalInputTokens: 8000,
+      totalOutputTokens: 3000,
+    });
+  });
+
+  it('prefers usage object over top-level token fields when both present', () => {
+    const event = {
+      type: 'result',
+      subtype: 'success',
+      result: 'Done!',
+      total_cost_usd: 0.05,
+      input_tokens: 111,
+      output_tokens: 222,
+      usage: { input_tokens: 8000, output_tokens: 3000 },
+    };
+    const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
+    expect(result).toMatchObject({ totalInputTokens: 8000, totalOutputTokens: 3000 });
+  });
+
   it('leaves totalInputTokens and totalOutputTokens undefined when absent from result event', () => {
     const event = { type: 'result', subtype: 'success', result: 'Done!', total_cost_usd: 0.01 };
     const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());

@@ -183,9 +183,17 @@ export class ClaudeStreamParser {
           (typeof event.result === 'string' ? event.result : null) ?? 'Claude agent completed';
         const costUsd = typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined;
         const totalInputTokens =
-          typeof event.input_tokens === 'number' ? event.input_tokens : undefined;
+          typeof event.usage?.input_tokens === 'number'
+            ? event.usage.input_tokens
+            : typeof event.input_tokens === 'number'
+              ? event.input_tokens
+              : undefined;
         const totalOutputTokens =
-          typeof event.output_tokens === 'number' ? event.output_tokens : undefined;
+          typeof event.usage?.output_tokens === 'number'
+            ? event.usage.output_tokens
+            : typeof event.output_tokens === 'number'
+              ? event.output_tokens
+              : undefined;
         return {
           type: 'complete',
           timestamp: ts,
