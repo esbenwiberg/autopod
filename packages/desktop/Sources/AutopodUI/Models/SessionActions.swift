@@ -15,8 +15,10 @@ public struct SessionActions: Sendable {
   public var rework: @MainActor @Sendable (String) async -> Void
   public var fixManually: @MainActor @Sendable (String) async -> String?
   public var revalidate: @MainActor @Sendable (String) async -> Void
-  public var createSession: @MainActor @Sendable (String, String, String?, String?, [String]?, String?, String?, [PimGroupRequest]?) async -> String?
-  // createSession params: profileName, task, model, outputMode, acceptanceCriteria, baseBranch, acFrom, pimGroups → returns session ID or nil
+  public var createSession: @MainActor @Sendable (String, String, String?, PodConfigRequest?, [String]?, String?, String?, [PimGroupRequest]?) async -> String?
+  // createSession params: profileName, task, model, pod, acceptanceCriteria, baseBranch, acFrom, pimGroups → returns session ID or nil
+  /// Promote an interactive session to agent-driven in place. `targetOutput` ∈ {pr, branch, artifact, none}.
+  public var promote: @MainActor @Sendable (String, String?) async -> Void
   public var attachTerminal: @MainActor @Sendable (String) -> Void
   public var approveAll: @MainActor @Sendable () async -> Void
   public var killAllFailed: @MainActor @Sendable () async -> Void
@@ -47,7 +49,8 @@ public struct SessionActions: Sendable {
     rework: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     fixManually: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     revalidate: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    createSession: @escaping @MainActor @Sendable (String, String, String?, String?, [String]?, String?, String?, [PimGroupRequest]?) async -> String? = { _, _, _, _, _, _, _, _ in nil },
+    createSession: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [String]?, String?, String?, [PimGroupRequest]?) async -> String? = { _, _, _, _, _, _, _, _ in nil },
+    promote: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
     killAllFailed: @escaping @MainActor @Sendable () async -> Void = {},
@@ -73,6 +76,7 @@ public struct SessionActions: Sendable {
     self.fixManually = fixManually
     self.revalidate = revalidate
     self.createSession = createSession
+    self.promote = promote
     self.attachTerminal = attachTerminal
     self.approveAll = approveAll
     self.killAllFailed = killAllFailed

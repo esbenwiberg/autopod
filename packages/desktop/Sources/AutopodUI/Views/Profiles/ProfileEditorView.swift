@@ -451,14 +451,48 @@ public struct ProfileEditorView: View {
                 .labelsHidden()
                 .frame(width: 220)
             }
-            fieldRow("Output Mode", help: "How the session delivers results — PR creates a pull request, Artifact collects output files, Workspace is interactive.") {
-                Picker("", selection: $profile.outputMode) {
-                    ForEach(OutputMode.allCases, id: \.self) { m in
+            fieldRow("Agent Mode", help: "Agent runs to completion (auto) or human drives an interactive container.") {
+                Picker("", selection: $profile.pod.agentMode) {
+                    ForEach(AgentMode.allCases, id: \.self) { m in
                         Text(m.label).tag(m)
                     }
                 }
                 .labelsHidden()
                 .frame(width: 180)
+                .onChange(of: profile.pod.agentMode) { _, newValue in
+                    if newValue == .interactive {
+                        if profile.pod.output == .pr { profile.pod.output = .branch }
+                        profile.pod.promotable = true
+                        profile.pod.validate = false
+                    } else {
+                        profile.pod.promotable = false
+                        if profile.pod.output == .branch || profile.pod.output == .none {
+                            profile.pod.output = .pr
+                        }
+                        profile.pod.validate = true
+                    }
+                }
+            }
+        }
+        HStack(spacing: 24) {
+            fieldRow("Output", help: "Where session output goes — PR opens a pull request, Branch pushes only, Artifact extracts /workspace, Ephemeral discards everything.") {
+                Picker("", selection: $profile.pod.output) {
+                    ForEach(OutputTarget.allCases, id: \.self) { t in
+                        Text(t.label).tag(t)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 180)
+            }
+            fieldRow("Validate", help: "Run the full build / smoke / review pipeline before completing.") {
+                Toggle("Run validation", isOn: $profile.pod.validate)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
+            fieldRow("Promotable", help: "Allow promoting this session to agent-driven mid-flight (interactive → auto).") {
+                Toggle("Allow promotion", isOn: $profile.pod.promotable)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
             }
         }
 

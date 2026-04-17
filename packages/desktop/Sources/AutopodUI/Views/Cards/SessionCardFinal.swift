@@ -103,7 +103,7 @@ public struct SessionCardFinal: View {
                         workerProfile,
                         task,
                         nil,
-                        "pr",
+                        PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
                         session.acceptanceCriteria,
                         session.branch,
                         session.acFrom,
@@ -148,11 +148,13 @@ public struct SessionCardFinal: View {
     }
 
     private var modeBadge: some View {
-        let label: String = switch session.outputMode {
-        case .pr:        "PR"
-        case .artifact:  "ART"
-        case .workspace: "WS"
+        let outputShort: String = switch session.pod.output {
+        case .pr:       "PR"
+        case .branch:   "BR"
+        case .artifact: "ART"
+        case .none:     "∅"
         }
+        let label = session.pod.agentMode == .interactive ? "INT·\(outputShort)" : outputShort
         return Text(label)
             .font(.system(.caption2).weight(.medium))
             .padding(.horizontal, 5)
@@ -178,6 +180,10 @@ public struct SessionCardFinal: View {
             Label("Interactive", systemImage: "terminal")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        case .handoff:
+            Label("Handing off to agent…", systemImage: "arrow.triangle.swap")
+                .font(.caption)
+                .foregroundStyle(.blue)
         case .complete:
             Label("Branch pushed", systemImage: "arrow.up.circle")
                 .font(.caption)

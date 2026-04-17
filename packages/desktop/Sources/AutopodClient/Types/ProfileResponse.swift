@@ -28,6 +28,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var networkPolicy: NetworkPolicyResponse?
   public var actionPolicy: ActionPolicyResponse?
   public var outputMode: String
+  public var pod: PodConfigResponse?
   public var modelProvider: String
   public var providerCredentials: ProviderCredentialsResponse?
   public var testCommand: String?

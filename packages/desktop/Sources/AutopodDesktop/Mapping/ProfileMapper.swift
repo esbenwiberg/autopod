@@ -85,7 +85,14 @@ public enum ProfileMapper {
       escalationAdvisorEnabled: response.escalation.advisor?.enabled ?? false,
       escalationAutoPauseAfter: response.escalation.autoPauseAfter,
       escalationHumanResponseTimeout: response.escalation.humanResponseTimeout,
-      outputMode: OutputMode(rawValue: response.outputMode) ?? .pr,
+      pod: {
+        if let p = response.pod {
+          let agent = AgentMode(rawValue: p.agentMode) ?? .auto
+          let output = OutputTarget(rawValue: p.output) ?? .pr
+          return PodConfig(agentMode: agent, output: output, validate: p.validate, promotable: p.promotable)
+        }
+        return PodConfig.fromLegacy(response.outputMode)
+      }(),
       extendsProfile: response.extends,
       workerProfile: response.workerProfile,
       warmImageTag: response.warmImageTag,
@@ -143,7 +150,13 @@ public enum ProfileMapper {
       "buildTimeout": profile.buildTimeout,
       "testTimeout": profile.testTimeout,
       "prProvider": profile.prProvider.rawValue,
-      "outputMode": profile.outputMode.rawValue,
+      "outputMode": profile.pod.legacyOutputMode.rawValue,
+      "pod": [
+        "agentMode": profile.pod.agentMode.rawValue,
+        "output": profile.pod.output.rawValue,
+        "validate": profile.pod.validate,
+        "promotable": profile.pod.promotable,
+      ] as [String: Any],
       "smokePages": profile.smokePages.map { ["path": $0.path] },
       "privateRegistries": profile.privateRegistries.map {
         var r: [String: Any] = ["type": $0.type.rawValue, "url": $0.url]

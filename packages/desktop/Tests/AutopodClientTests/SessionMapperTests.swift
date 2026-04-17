@@ -183,3 +183,62 @@ import AutopodUI
   #expect(session.outputMode == .workspace)
   #expect(session.containerUrl?.absoluteString == "http://localhost:3003")
 }
+
+@Test func mapsPodConfigFromResponse() throws {
+  // When `pod` is present, it wins over the legacy `outputMode` string.
+  let json = """
+  {
+    "id": "pod-test",
+    "profileName": "my-app",
+    "task": "Interactive session with PR output",
+    "status": "running",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/x",
+    "containerId": null,
+    "worktreePath": null,
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:00Z",
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:00:00Z",
+    "userId": "user-1",
+    "filesChanged": 0,
+    "linesAdded": 0,
+    "linesRemoved": 0,
+    "previewUrl": null,
+    "prUrl": null,
+    "plan": null,
+    "progress": null,
+    "acceptanceCriteria": null,
+    "claudeSessionId": null,
+    "outputMode": "workspace",
+    "pod": { "agentMode": "interactive", "output": "pr", "validate": false, "promotable": true },
+    "baseBranch": null,
+    "acFrom": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "commitCount": 0,
+    "lastCommitAt": null
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let session = SessionMapper.map(response)
+
+  #expect(session.pod.agentMode == .interactive)
+  #expect(session.pod.output == .pr)
+  #expect(session.pod.validate == false)
+  #expect(session.pod.promotable == true)
+  #expect(session.isWorkspace == true)
+  #expect(session.isPromotable == true)
+}

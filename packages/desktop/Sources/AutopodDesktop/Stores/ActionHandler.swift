@@ -34,13 +34,14 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createSession: { [weak self] profile, task, model, output, ac, base, acFrom, pimGroups in
+      createSession: { [weak self] profile, task, model, pod, ac, base, acFrom, pimGroups in
         await self?.createSession(
           profileName: profile, task: task, model: model,
-          outputMode: output, acceptanceCriteria: ac,
+          pod: pod, acceptanceCriteria: ac,
           baseBranch: base, acFrom: acFrom, pimGroups: pimGroups
         )
       },
+      promote: { [weak self] id, target in await self?.promoteSession(id, targetOutput: target) },
       approveAll: { [weak self] in await self?.approveAllValidated() },
       killAllFailed: { [weak self] in await self?.killAllFailed() },
       extendAttempts: { [weak self] id, count in await self?.extendAttempts(id, additionalAttempts: count) },
@@ -213,7 +214,7 @@ public final class ActionHandler {
 
   public func createSession(
     profileName: String, task: String, model: String?,
-    outputMode: String?, acceptanceCriteria: [String]?,
+    pod: PodConfigRequest?, acceptanceCriteria: [String]?,
     baseBranch: String?, acFrom: String?, pimGroups: [PimGroupRequest]? = nil
   ) async -> String? {
     pendingAction = "create"
@@ -222,7 +223,7 @@ public final class ActionHandler {
       task: task,
       model: model?.isEmpty == true ? nil : model,
       acceptanceCriteria: acceptanceCriteria?.filter { !$0.isEmpty },
-      outputMode: outputMode,
+      pod: pod,
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       acFrom: acFrom?.isEmpty == true ? nil : acFrom,
       pimGroups: pimGroups?.filter { !$0.groupId.isEmpty }
@@ -238,6 +239,17 @@ public final class ActionHandler {
       pendingAction = nil
       return nil
     }
+  }
+
+  public func promoteSession(_ sessionId: String, targetOutput: String?) async {
+    pendingAction = "promote-\(sessionId)"
+    do {
+      try await api.promoteSession(sessionId, targetOutput: targetOutput)
+      // Status will be updated via WebSocket event (running → handoff → provisioning → ...)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
   }
 
   public func approveAllValidated() async {
@@ -274,7 +286,12 @@ public final class ActionHandler {
       profileName: source.profileName,
       task: source.task,
       model: source.model,
-      outputMode: source.outputMode.rawValue,
+      pod: PodConfigRequest(
+        agentMode: source.pod.agentMode.rawValue,
+        output: source.pod.output.rawValue,
+        validate: source.pod.validate,
+        promotable: source.pod.promotable
+      ),
       acceptanceCriteria: source.acceptanceCriteria,
       baseBranch: source.branch,
       acFrom: source.acFrom

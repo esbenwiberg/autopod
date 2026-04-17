@@ -58,8 +58,9 @@ public struct DetailPanelView: View {
     @State private var selectedTab: DetailTab = .overview
     @State private var isTaskExpanded: Bool = false
 
-    private var isTerminalAvailable: Bool { session.isWorkspace }
-    private var isMarkdownAvailable: Bool { session.isWorkspace || session.outputMode == .artifact }
+    private var isTerminalAvailable: Bool { session.pod.agentMode == .interactive }
+    private var isMarkdownAvailable: Bool { session.pod.agentMode == .interactive || session.pod.output == .artifact }
+    @State private var showPromoteMenu: Bool = false
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -109,7 +110,7 @@ public struct DetailPanelView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            if session.outputMode == .artifact {
+            if session.pod.output == .artifact {
                 selectedTab = .markdown
             }
         }
@@ -183,13 +184,27 @@ public struct DetailPanelView: View {
         HStack(spacing: 6) {
             switch session.status {
             case .running:
-                if session.outputMode == .workspace {
-                    Button {
-                        Task { await actions.complete(session.id) }
+                if session.pod.agentMode == .interactive {
+                    Menu {
+                        Button("Complete (push branch)") {
+                            Task { await actions.complete(session.id) }
+                        }
+                        if session.isPromotable {
+                            Divider()
+                            Button("Hand off → Open PR") {
+                                Task { await actions.promote(session.id, "pr") }
+                            }
+                            Button("Hand off → Branch only") {
+                                Task { await actions.promote(session.id, "branch") }
+                            }
+                            Button("Hand off → Artifact") {
+                                Task { await actions.promote(session.id, "artifact") }
+                            }
+                        }
                     } label: {
                         Label("Complete", systemImage: "checkmark.circle")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .menuStyle(.borderedButton)
                     .controlSize(.small)
                     .tint(.green)
                 } else {

@@ -1,5 +1,54 @@
 import Foundation
 
+// MARK: - Pod config (mirrors packages/shared/src/types/pod.ts)
+
+/// Orthogonal pod configuration axes. Replaces the single `outputMode` enum.
+public struct PodConfigResponse: Codable, Sendable {
+  public var agentMode: String         // "auto" | "interactive"
+  public var output: String            // "pr" | "branch" | "artifact" | "none"
+  public var validate: Bool
+  public var promotable: Bool
+
+  public init(agentMode: String, output: String, validate: Bool, promotable: Bool) {
+    self.agentMode = agentMode
+    self.output = output
+    self.validate = validate
+    self.promotable = promotable
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    agentMode = try c.decode(String.self, forKey: .agentMode)
+    output = try c.decode(String.self, forKey: .output)
+    validate = try decodeBoolOrInt(c, key: .validate)
+    promotable = try decodeBoolOrInt(c, key: .promotable)
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case agentMode, output, validate, promotable
+  }
+}
+
+// Partial PodConfig for create/update requests — every field is optional.
+public struct PodConfigRequest: Codable, Sendable {
+  public var agentMode: String?
+  public var output: String?
+  public var validate: Bool?
+  public var promotable: Bool?
+
+  public init(
+    agentMode: String? = nil,
+    output: String? = nil,
+    validate: Bool? = nil,
+    promotable: Bool? = nil
+  ) {
+    self.agentMode = agentMode
+    self.output = output
+    self.validate = validate
+    self.promotable = promotable
+  }
+}
+
 // MARK: - Session response (mirrors packages/shared/src/types/session.ts)
 
 public struct SessionResponse: Codable, Sendable {
@@ -35,6 +84,7 @@ public struct SessionResponse: Codable, Sendable {
   public let acceptanceCriteria: [String]?
   public let claudeSessionId: String?
   public let outputMode: String
+  public let pod: PodConfigResponse?
   public let baseBranch: String?
   public let acFrom: String?
   public let recoveryWorktreePath: String?
@@ -132,6 +182,7 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var skipValidation: Bool?
   public var acceptanceCriteria: [String]?
   public var outputMode: String?
+  public var pod: PodConfigRequest?
   public var baseBranch: String?
   public var acFrom: String?
   public var linkedSessionId: String?
@@ -147,6 +198,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     skipValidation: Bool? = nil,
     acceptanceCriteria: [String]? = nil,
     outputMode: String? = nil,
+    pod: PodConfigRequest? = nil,
     baseBranch: String? = nil,
     acFrom: String? = nil,
     linkedSessionId: String? = nil,
@@ -161,10 +213,20 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.skipValidation = skipValidation
     self.acceptanceCriteria = acceptanceCriteria
     self.outputMode = outputMode
+    self.pod = pod
     self.baseBranch = baseBranch
     self.acFrom = acFrom
     self.linkedSessionId = linkedSessionId
     self.pimGroups = pimGroups
+  }
+}
+
+/// Body for the promotion endpoint — promotes an interactive session to agent-driven.
+public struct PromoteSessionRequest: Codable, Sendable {
+  public var output: String?   // "pr" | "branch" | "artifact" | "none"
+
+  public init(output: String? = nil) {
+    self.output = output
   }
 }
 
