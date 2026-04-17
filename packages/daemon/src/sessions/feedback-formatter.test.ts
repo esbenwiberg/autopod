@@ -182,7 +182,11 @@ describe('formatFeedback', () => {
         diff: '+const x = 1;',
         requirementsCheck: [
           { criterion: 'Scheduler runs on startup', met: true, note: 'Found in DI config' },
-          { criterion: 'ConsecutiveFailureCount increments on failure', met: false, note: 'No increment logic in diff' },
+          {
+            criterion: 'ConsecutiveFailureCount increments on failure',
+            met: false,
+            note: 'No increment logic in diff',
+          },
         ],
       };
       const output = formatFeedback({
@@ -208,9 +212,7 @@ describe('formatFeedback', () => {
         model: 'opus',
         screenshots: [],
         diff: '+const x = 1;',
-        requirementsCheck: [
-          { criterion: 'Scheduler runs on startup', met: true },
-        ],
+        requirementsCheck: [{ criterion: 'Scheduler runs on startup', met: true }],
       };
       const output = formatFeedback({
         type: 'validation_failure',
@@ -231,9 +233,7 @@ describe('formatFeedback', () => {
         model: 'opus',
         screenshots: [],
         diff: '+const x = 1;',
-        requirementsCheck: [
-          { criterion: 'Job runs exactly once', met: false },
-        ],
+        requirementsCheck: [{ criterion: 'Job runs exactly once', met: false }],
       };
       const output = formatFeedback({
         type: 'validation_failure',
@@ -254,9 +254,7 @@ describe('formatFeedback', () => {
         model: 'opus',
         screenshots: [],
         diff: '+const x = 1;',
-        requirementsCheck: [
-          { criterion: 'Job deduplication', met: false, note: 'Not in diff' },
-        ],
+        requirementsCheck: [{ criterion: 'Job deduplication', met: false, note: 'Not in diff' }],
       };
       const output = formatFeedback({
         type: 'validation_failure',

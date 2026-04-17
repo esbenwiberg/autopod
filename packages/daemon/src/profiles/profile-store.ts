@@ -1,11 +1,14 @@
 import type {
   ActionPolicy,
+  AgentMode,
   EscalationConfig,
   InjectedClaudeMdSection,
   InjectedMcpServer,
   InjectedSkill,
   NetworkPolicy,
+  OutputTarget,
   PimActivationConfig,
+  PodConfig,
   PrivateRegistry,
   Profile,
   ProviderCredentials,
@@ -17,6 +20,7 @@ import {
   ProfileNotFoundError,
   createProfileSchema,
   escalationConfigSchema,
+  outputModeFromPod,
   updateProfileSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -34,6 +38,26 @@ export interface ProfileStore {
   update(name: string, changes: Record<string, unknown>): Profile;
   delete(name: string): void;
   exists(name: string): boolean;
+}
+
+/**
+ * Reconstruct the profile-level PodConfig override from row columns.
+ * Returns null when no new-style columns are set (i.e. the profile has no
+ * pod default — session creation will fall back to built-in defaults).
+ */
+function readProfilePodFromRow(row: Record<string, unknown>): PodConfig | null {
+  const agentMode = row.agent_mode as AgentMode | null | undefined;
+  const output = row.output_target as OutputTarget | null | undefined;
+  if (!agentMode && !output) return null;
+  if (!agentMode || !output) return null;
+  return {
+    agentMode,
+    output,
+    validate:
+      row.validate !== null && row.validate !== undefined ? Boolean(row.validate) : undefined,
+    promotable:
+      row.promotable !== null && row.promotable !== undefined ? Boolean(row.promotable) : undefined,
+  };
 }
 
 /** Map a SQLite row (snake_case) to a Profile (camelCase). Defined outside factory for test-utils. */
@@ -76,6 +100,7 @@ export function rowToProfile(
     actionPolicy: row.action_policy
       ? (JSON.parse(row.action_policy as string) as ActionPolicy)
       : null,
+    pod: readProfilePodFromRow(row),
     outputMode: (row.output_mode as Profile['outputMode']) ?? 'pr',
     modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
     providerCredentials: decryptCreds(row.provider_credentials),
@@ -198,12 +223,17 @@ export function createProfileStore(
 
       const now = new Date().toISOString();
 
+      // When a pod config is provided, prefer it; otherwise fall back to
+      // legacy outputMode. We always write both so legacy readers keep working.
+      const legacyOutputMode = parsed.pod ? outputModeFromPod(parsed.pod) : parsed.outputMode;
+
       db.prepare(`
         INSERT INTO profiles (
           name, repo_url, default_branch, template, build_command, start_command,
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
+          agent_mode, output_target, validate, promotable,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
           private_registries, registry_pat, branch_prefix, container_memory_gb,
           build_timeout, test_timeout,
@@ -217,6 +247,7 @@ export function createProfileStore(
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
+          @agentMode, @outputTarget, @validate, @promotable,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
           @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout,
@@ -249,7 +280,11 @@ export function createProfileStore(
         skills: JSON.stringify(parsed.skills),
         networkPolicy: parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null,
         actionPolicy: parsed.actionPolicy ? JSON.stringify(parsed.actionPolicy) : null,
-        outputMode: parsed.outputMode,
+        outputMode: legacyOutputMode,
+        agentMode: parsed.pod?.agentMode ?? null,
+        outputTarget: parsed.pod?.output ?? null,
+        validate: parsed.pod?.validate === undefined ? null : parsed.pod.validate ? 1 : 0,
+        promotable: parsed.pod?.promotable === undefined ? null : parsed.pod.promotable ? 1 : 0,
         modelProvider: parsed.modelProvider,
         providerCredentials: encryptCreds(parsed.providerCredentials),
         testCommand: parsed.testCommand ?? null,
@@ -408,6 +443,33 @@ export function createProfileStore(
       if (parsed.outputMode !== undefined) {
         setClauses.push('output_mode = @outputMode');
         fieldMap.outputMode = parsed.outputMode;
+      }
+      if (parsed.pod !== undefined) {
+        setClauses.push(
+          'agent_mode = @agentMode',
+          'output_target = @outputTarget',
+          'validate = @validate',
+          'promotable = @promotable',
+        );
+        fieldMap.agentMode = parsed.pod?.agentMode ?? null;
+        fieldMap.outputTarget = parsed.pod?.output ?? null;
+        fieldMap.validate =
+          parsed.pod?.validate === undefined || parsed.pod === null
+            ? null
+            : parsed.pod.validate
+              ? 1
+              : 0;
+        fieldMap.promotable =
+          parsed.pod?.promotable === undefined || parsed.pod === null
+            ? null
+            : parsed.pod.promotable
+              ? 1
+              : 0;
+        // Also sync the legacy column if the caller didn't explicitly set it.
+        if (parsed.outputMode === undefined && parsed.pod) {
+          setClauses.push('output_mode = @outputMode');
+          fieldMap.outputMode = outputModeFromPod(parsed.pod);
+        }
       }
       if (parsed.modelProvider !== undefined) {
         setClauses.push('model_provider = @modelProvider');

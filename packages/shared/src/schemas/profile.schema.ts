@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { actionPolicySchema, outputModeSchema } from './action-definition.schema.js';
+import {
+  actionPolicySchema,
+  outputModeSchema,
+  podConfigSchema,
+} from './action-definition.schema.js';
 import {
   injectedClaudeMdSectionSchema,
   injectedMcpServerSchema,
@@ -155,6 +159,7 @@ export const createProfileSchema = z.object({
   skills: z.array(injectedSkillSchema).default([]),
   networkPolicy: networkPolicySchema.nullable().default(null),
   actionPolicy: actionPolicySchema.nullable().default(null),
+  pod: podConfigSchema.nullable().default(null),
   outputMode: outputModeSchema.default('pr'),
   modelProvider: modelProviderSchema.default('anthropic'),
   providerCredentials: providerCredentialsSchema.nullable().default(null),

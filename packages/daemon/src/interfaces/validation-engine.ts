@@ -55,7 +55,11 @@ export interface ValidationEngineConfig {
 
 export interface ValidationPhaseCallbacks {
   onPhaseStarted?: (phase: ValidationPhase) => void;
-  onPhaseCompleted?: (phase: ValidationPhase, status: 'pass' | 'fail' | 'skip', result: unknown) => void;
+  onPhaseCompleted?: (
+    phase: ValidationPhase,
+    status: 'pass' | 'fail' | 'skip',
+    result: unknown,
+  ) => void;
   onAcProgress?: (completed: number, total: number, latest: AcCheckResult) => void;
 }
 

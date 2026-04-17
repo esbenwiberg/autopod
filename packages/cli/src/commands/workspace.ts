@@ -72,8 +72,8 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       const resolvedId = await resolveSessionId(client, id);
       const session = await client.getSession(resolvedId);
 
-      if (session.outputMode !== 'workspace') {
-        console.error(chalk.red(`Session ${resolvedId} is not a workspace session.`));
+      if (session.pod?.agentMode !== 'interactive' && session.outputMode !== 'workspace') {
+        console.error(chalk.red(`Session ${resolvedId} is not an interactive session.`));
         process.exit(1);
       }
 
@@ -130,16 +130,23 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
     });
 
   // ap complete <id>
+  //
+  // With no flag: push the branch and transition to `complete`.
+  // With --pr / --artifact / --none: promote the session in-place to an
+  // agent-driven run on the same ID (branch, events, token budget preserved).
   program
     .command('complete <id>')
-    .description('Complete a workspace pod — sync changes and push branch to origin')
-    .action(async (id: string) => {
+    .description('Complete an interactive pod — push branch, or hand off to the agent')
+    .option('--pr', 'Hand off to the agent and open a PR when it finishes')
+    .option('--artifact', 'Hand off to the agent in artifact mode (no PR)')
+    .option('--none', 'Hand off to the agent ephemerally (no push)')
+    .action(async (id: string, opts: { pr?: boolean; artifact?: boolean; none?: boolean }) => {
       const client = getClient();
       const resolvedId = await resolveSessionId(client, id);
       const session = await client.getSession(resolvedId);
 
-      if (session.outputMode !== 'workspace') {
-        console.error(chalk.red(`Session ${resolvedId} is not a workspace session.`));
+      if (session.pod?.agentMode !== 'interactive' && session.outputMode !== 'workspace') {
+        console.error(chalk.red(`Session ${resolvedId} is not an interactive session.`));
         process.exit(1);
       }
 
@@ -152,10 +159,32 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
         process.exit(1);
       }
 
+      const promoteFlags = [opts.pr, opts.artifact, opts.none].filter(Boolean).length;
+      if (promoteFlags > 1) {
+        console.error(chalk.red('Choose at most one of --pr, --artifact, --none'));
+        process.exit(1);
+      }
+      const promoteTo = opts.pr
+        ? ('pr' as const)
+        : opts.artifact
+          ? ('artifact' as const)
+          : opts.none
+            ? ('none' as const)
+            : undefined;
+
       console.log();
-      const completion = await withSpinner('Completing workspace session...', () =>
-        client.completeSession(resolvedId),
+      const completion = await withSpinner(
+        promoteTo ? `Promoting session to ${promoteTo}…` : 'Completing session…',
+        () => client.completeSession(resolvedId, promoteTo ? { promoteTo } : undefined),
       );
+
+      if (completion.promotedTo) {
+        console.log(
+          chalk.green(`Session handed off. Agent will take over in ${completion.promotedTo} mode.`),
+        );
+        console.log(chalk.dim(`Track progress: ap status ${resolvedId.slice(0, 8)}`));
+        return;
+      }
 
       if (completion.pushError) {
         console.log(

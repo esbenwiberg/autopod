@@ -76,6 +76,100 @@ export function registerSessionCommands(program: Command, getClient: () => Autop
       },
     );
 
+  // ap start
+  //
+  // The unified session primitive. Replaces the (still-present) ap run / ap
+  // workspace / ap research trio. Flags let you pick any combination of the
+  // two orthogonal axes: who drives (agent vs human) and where output goes.
+  program
+    .command('start <profile> [task]')
+    .description('Start a session (unified). Flags pick the pod config.')
+    .option(
+      '--agent <mode>',
+      'Who drives the session: auto (default, runs the agent) or interactive',
+    )
+    .option('--output <target>', 'Where output goes: pr | branch | artifact | none')
+    .option('--validate', 'Run full validation pipeline before completing')
+    .option('--no-validate', 'Skip validation')
+    .option('-m, --model <model>', 'AI model to use')
+    .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
+    .option('-b, --branch <branch>', 'Target branch name')
+    .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
+    .option('--base-branch <branch>', 'Branch from a specific base')
+    .option('--ac-from <path>', 'Load acceptance criteria from a file in the repo')
+    .action(
+      async (
+        profile: string,
+        task: string | undefined,
+        opts: {
+          agent?: string;
+          output?: string;
+          validate?: boolean;
+          model?: string;
+          runtime?: string;
+          branch?: string;
+          branchPrefix?: string;
+          baseBranch?: string;
+          acFrom?: string;
+        },
+      ) => {
+        const client = getClient();
+        const agent = opts.agent as 'auto' | 'interactive' | undefined;
+        const output = opts.output as 'pr' | 'branch' | 'artifact' | 'none' | undefined;
+
+        if (agent && agent !== 'auto' && agent !== 'interactive') {
+          console.error(chalk.red(`--agent must be 'auto' or 'interactive'`));
+          process.exit(1);
+        }
+        if (output && !['pr', 'branch', 'artifact', 'none'].includes(output)) {
+          console.error(chalk.red('--output must be one of pr|branch|artifact|none'));
+          process.exit(1);
+        }
+
+        const pod =
+          agent || output || opts.validate !== undefined
+            ? {
+                ...(agent ? { agentMode: agent } : {}),
+                ...(output ? { output } : {}),
+                ...(opts.validate !== undefined ? { validate: opts.validate } : {}),
+              }
+            : undefined;
+
+        const isInteractive = agent === 'interactive';
+        if (!task && !isInteractive) {
+          console.error(chalk.red('task is required unless --agent interactive'));
+          process.exit(1);
+        }
+
+        const session = await withSpinner('Starting session…', () =>
+          client.createSession({
+            profileName: profile,
+            task: task ?? '',
+            model: opts.model,
+            runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            branch: opts.branch,
+            branchPrefix: opts.branchPrefix,
+            baseBranch: opts.baseBranch,
+            acFrom: opts.acFrom,
+            pod,
+          }),
+        );
+
+        console.log(chalk.green(`Session ${chalk.bold(session.id)} created.`));
+        console.log(`${chalk.bold('Profile:')}  ${session.profileName}`);
+        console.log(`${chalk.bold('Status:')}   ${formatStatus(session.status)}`);
+        console.log(`${chalk.bold('Branch:')}   ${session.branch}`);
+        console.log(
+          `${chalk.bold('Pod:')}      ${session.pod?.agentMode ?? 'auto'} → ${session.pod?.output ?? 'pr'}`,
+        );
+        if (session.pod?.agentMode === 'interactive') {
+          console.log(chalk.dim(`Attach: ap attach ${session.id.slice(0, 8)}`));
+        } else {
+          console.log(chalk.dim(`Track progress: ap status ${session.id.slice(0, 8)}`));
+        }
+      },
+    );
+
   // ap stats
   program
     .command('stats')

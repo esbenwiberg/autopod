@@ -354,7 +354,11 @@ describe('parseApiCheckSpecs', () => {
 
 describe('deduplicateAcsByBaseText', () => {
   it('passes through non-duplicate criteria unchanged', () => {
-    const acs = ['POST /jobs returns 201', 'GET /jobs returns 200', 'DELETE /jobs/{id} returns 204'];
+    const acs = [
+      'POST /jobs returns 201',
+      'GET /jobs returns 200',
+      'DELETE /jobs/{id} returns 204',
+    ];
     const { deduped } = deduplicateAcsByBaseText(acs);
     expect(deduped).toHaveLength(3);
     expect(deduped).toEqual(acs);
@@ -369,7 +373,8 @@ describe('deduplicateAcsByBaseText', () => {
 
   it('deduplicates when one AC is the other plus a parenthetical suffix', () => {
     const short = 'POST /jobs returns 201';
-    const long = 'POST /jobs returns 201 (HTTP status code is directly verifiable via a POST request)';
+    const long =
+      'POST /jobs returns 201 (HTTP status code is directly verifiable via a POST request)';
     const { deduped } = deduplicateAcsByBaseText([short, long]);
     expect(deduped).toHaveLength(1);
     // Keeps the longer (more informative) form
@@ -378,7 +383,8 @@ describe('deduplicateAcsByBaseText', () => {
 
   it('deduplicates and keeps longest when long form comes first', () => {
     const short = 'ConsecutiveFailureCount increments by 1 on each failure';
-    const long = 'ConsecutiveFailureCount increments by 1 on each failure (ConsecutiveFailureCount is a persisted job field verifiable via GET /api/schedule/jobs/{id} after induced failures.)';
+    const long =
+      'ConsecutiveFailureCount increments by 1 on each failure (ConsecutiveFailureCount is a persisted job field verifiable via GET /api/schedule/jobs/{id} after induced failures.)';
     const { deduped } = deduplicateAcsByBaseText([long, short]);
     expect(deduped).toHaveLength(1);
     expect(deduped[0]).toBe(long);
@@ -464,7 +470,11 @@ describe('enforceRequirementsStatus', () => {
       issues: [],
       requirementsCheck: [
         { criterion: 'Scheduler runs on startup', met: true },
-        { criterion: 'ConsecutiveFailureCount increments on failure', met: false, note: 'Not found in diff' },
+        {
+          criterion: 'ConsecutiveFailureCount increments on failure',
+          met: false,
+          note: 'Not found in diff',
+        },
       ],
     };
     const result = enforceRequirementsStatus(parsed);
@@ -534,10 +544,7 @@ describe('buildReviewPrompt', () => {
   it('renders AUTO-VERIFIED section for non-none ACs when noneAcCriteria is provided', () => {
     const config = {
       ...baseConfig,
-      acceptanceCriteria: [
-        'POST /api/jobs returns 201',
-        'Scheduler runs on startup',
-      ],
+      acceptanceCriteria: ['POST /api/jobs returns 201', 'Scheduler runs on startup'],
     };
     const noneAcs = ['Scheduler runs on startup'];
     const prompt = buildReviewPrompt(config, undefined, noneAcs);

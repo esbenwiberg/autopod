@@ -647,7 +647,11 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt', filesChanged: 1 });
+      ctx.sessionRepo.update(session.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        filesChanged: 1,
+      });
 
       await manager.approveSession(session.id);
 
@@ -671,7 +675,11 @@ describe('SessionManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.sessionRepo.update(session.id, { status: 'validated', worktreePath: '/tmp/wt', filesChanged: 1 });
+      ctx.sessionRepo.update(session.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        filesChanged: 1,
+      });
 
       await manager.approveSession(session.id);
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { partialPodConfigSchema } from './action-definition.schema.js';
 
 export const createSessionRequestSchema = z
   .object({
@@ -21,6 +22,7 @@ export const createSessionRequestSchema = z
       .optional(),
     skipValidation: z.boolean().optional(),
     acceptanceCriteria: z.array(z.string().min(1).max(2_000)).optional(),
+    pod: partialPodConfigSchema.optional(),
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),
     baseBranch: z
       .string()
@@ -48,10 +50,14 @@ export const createSessionRequestSchema = z
       )
       .optional(),
   })
-  .refine((data) => data.outputMode === 'workspace' || data.task.length > 0, {
-    message: 'task: String must contain at least 1 character(s)',
-    path: ['task'],
-  });
+  .refine(
+    (data) => {
+      const isInteractive =
+        data.pod?.agentMode === 'interactive' || data.outputMode === 'workspace';
+      return isInteractive || data.task.length > 0;
+    },
+    { message: 'task: String must contain at least 1 character(s)', path: ['task'] },
+  );
 
 export const sessionStatusSchema = z.enum([
   'queued',
@@ -61,10 +67,13 @@ export const sessionStatusSchema = z.enum([
   'validating',
   'validated',
   'failed',
+  'review_required',
   'approved',
   'merging',
+  'merge_pending',
   'complete',
   'paused',
+  'handoff',
   'killing',
   'killed',
 ]);

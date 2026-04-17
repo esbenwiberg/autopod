@@ -69,7 +69,10 @@ async function getArmToken(
     return cachedArmToken.token;
   } catch (err) {
     identityErr = err instanceof Error ? err.message : String(err);
-    log.debug({ err: identityErr }, 'DefaultAzureCredential failed for ARM, trying az CLI fallback');
+    log.debug(
+      { err: identityErr },
+      'DefaultAzureCredential failed for ARM, trying az CLI fallback',
+    );
   }
 
   // Azure CLI fallback (az account get-access-token)
@@ -104,7 +107,9 @@ async function findEligibilitySchedule(
   });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Failed to list role eligibility schedule instances ${response.status}: ${body.slice(0, 300)}`);
+    throw new Error(
+      `Failed to list role eligibility schedule instances ${response.status}: ${body.slice(0, 300)}`,
+    );
   }
   const data = (await readSafeJson(response)) as {
     value?: Array<{
@@ -130,8 +135,19 @@ async function findEligibilitySchedule(
     );
   }
   const scope = match.properties.scope ?? `/${normScope}`;
-  log.debug({ eligibilityScheduleId: match.properties.roleEligibilityScheduleId, scope, principalId: match.properties.principalId }, 'Found role eligibility schedule for SelfActivate');
-  return { eligibilityScheduleId: match.properties.roleEligibilityScheduleId, scope, principalId: match.properties.principalId };
+  log.debug(
+    {
+      eligibilityScheduleId: match.properties.roleEligibilityScheduleId,
+      scope,
+      principalId: match.properties.principalId,
+    },
+    'Found role eligibility schedule for SelfActivate',
+  );
+  return {
+    eligibilityScheduleId: match.properties.roleEligibilityScheduleId,
+    scope,
+    principalId: match.properties.principalId,
+  };
 }
 
 /** Checks if a role is already active (for deactivate or skip-duplicate logic).
@@ -152,7 +168,9 @@ async function findActiveAssignment(
   });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Failed to list role assignment schedule instances ${response.status}: ${body.slice(0, 300)}`);
+    throw new Error(
+      `Failed to list role assignment schedule instances ${response.status}: ${body.slice(0, 300)}`,
+    );
   }
   const data = (await readSafeJson(response)) as {
     value?: Array<{
@@ -174,8 +192,17 @@ async function findActiveAssignment(
   const exact = candidates.find((s) => norm(s.properties.scope ?? '') === norm(`/${normScope}`));
   const match = exact ?? candidates[0];
   if (!match) return null;
-  log.debug({ assignmentScheduleId: match.properties.roleAssignmentScheduleId, principalId: match.properties.principalId }, 'Found active role assignment');
-  return { roleAssignmentScheduleId: match.properties.roleAssignmentScheduleId, principalId: match.properties.principalId };
+  log.debug(
+    {
+      assignmentScheduleId: match.properties.roleAssignmentScheduleId,
+      principalId: match.properties.principalId,
+    },
+    'Found active role assignment',
+  );
+  return {
+    roleAssignmentScheduleId: match.properties.roleAssignmentScheduleId,
+    principalId: match.properties.principalId,
+  };
 }
 
 export interface PimClient {
@@ -194,7 +221,11 @@ export interface PimClient {
     duration: string,
     justification: string,
   ): Promise<unknown>;
-  deactivateRbacRole(scope: string, roleDefinitionId: string, principalId: string): Promise<unknown>;
+  deactivateRbacRole(
+    scope: string,
+    roleDefinitionId: string,
+    principalId: string,
+  ): Promise<unknown>;
 }
 
 async function getGraphToken(
@@ -225,7 +256,10 @@ async function getGraphToken(
     return cachedGraphToken.token;
   } catch (err) {
     identityErr = err instanceof Error ? err.message : String(err);
-    log.debug({ err: identityErr }, 'DefaultAzureCredential failed for Graph, trying az CLI fallback');
+    log.debug(
+      { err: identityErr },
+      'DefaultAzureCredential failed for Graph, trying az CLI fallback',
+    );
   }
 
   // Azure CLI fallback (az account get-access-token)
@@ -357,14 +391,19 @@ export function createPimClient(
 
       // Step 1: find eligible assignment (tenant-root URL, asTarget(), no principalId filter)
       // principalId from the result is the real AAD OID — don't trust session.userId in dev mode.
-      const { eligibilityScheduleId, scope: apiScope, principalId: resolvedPrincipalId } = await findEligibilitySchedule(
-        token, fullRoleDefId, normScope, log,
-      );
+      const {
+        eligibilityScheduleId,
+        scope: apiScope,
+        principalId: resolvedPrincipalId,
+      } = await findEligibilitySchedule(token, fullRoleDefId, normScope, log);
 
       // Step 2: bail early if already active
       const existing = await findActiveAssignment(token, fullRoleDefId, normScope, log);
       if (existing) {
-        log.info({ existingAssignmentId: existing.roleAssignmentScheduleId }, 'PIM RBAC role already active — skipping activation');
+        log.info(
+          { existingAssignmentId: existing.roleAssignmentScheduleId },
+          'PIM RBAC role already active — skipping activation',
+        );
         return { alreadyActive: true, roleAssignmentScheduleId: existing.roleAssignmentScheduleId };
       }
 
@@ -511,7 +550,13 @@ export function createAzurePimHandler(config: HandlerConfig): ActionHandler {
           const justification =
             (params.justification as string | undefined) ?? 'Agent session access';
           log.debug({ scope, roleDefinitionId, principalId }, 'Activating PIM RBAC role');
-          return client.activateRbacRole(scope, roleDefinitionId, principalId, duration, justification);
+          return client.activateRbacRole(
+            scope,
+            roleDefinitionId,
+            principalId,
+            duration,
+            justification,
+          );
         }
 
         case 'deactivate_pim_role': {

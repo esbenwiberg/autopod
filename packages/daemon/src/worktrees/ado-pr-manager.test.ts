@@ -30,9 +30,7 @@ function makeFetch(responses: Array<{ ok: boolean; body: unknown; status?: numbe
 
 describe('parseAdoRepoUrl', () => {
   it('parses dev.azure.com URL', () => {
-    const result = parseAdoRepoUrl(
-      'https://dev.azure.com/myorg/MyProject/_git/MyRepo',
-    );
+    const result = parseAdoRepoUrl('https://dev.azure.com/myorg/MyProject/_git/MyRepo');
     expect(result).toEqual({
       orgUrl: 'https://dev.azure.com/myorg',
       project: 'MyProject',
@@ -41,9 +39,7 @@ describe('parseAdoRepoUrl', () => {
   });
 
   it('parses visualstudio.com URL', () => {
-    const result = parseAdoRepoUrl(
-      'https://myorg.visualstudio.com/MyProject/_git/MyRepo',
-    );
+    const result = parseAdoRepoUrl('https://myorg.visualstudio.com/MyProject/_git/MyRepo');
     expect(result).toEqual({
       orgUrl: 'https://dev.azure.com/myorg',
       project: 'MyProject',
@@ -60,7 +56,11 @@ function policyEval(
   displayName: string,
   status: string,
   isBlocking: boolean,
-): { policyEvaluationId: string; status: string; configuration: { isBlocking: boolean; settings: { displayName: string } } } {
+): {
+  policyEvaluationId: string;
+  status: string;
+  configuration: { isBlocking: boolean; settings: { displayName: string } };
+} {
   return {
     policyEvaluationId: `eval-${displayName}`,
     status,
@@ -74,10 +74,7 @@ describe('AdoPrManager.getPrStatus', () => {
   });
 
   it('returns merged:true when PR is completed', async () => {
-    vi.stubGlobal(
-      'fetch',
-      makeFetch([{ ok: true, body: { status: 'completed' } }]),
-    );
+    vi.stubGlobal('fetch', makeFetch([{ ok: true, body: { status: 'completed' } }]));
     const manager = new AdoPrManager(BASE_CONFIG);
     const status = await manager.getPrStatus({ prUrl: PR_URL });
     expect(status).toEqual({
@@ -90,10 +87,7 @@ describe('AdoPrManager.getPrStatus', () => {
   });
 
   it('returns open:false when PR is abandoned', async () => {
-    vi.stubGlobal(
-      'fetch',
-      makeFetch([{ ok: true, body: { status: 'abandoned' } }]),
-    );
+    vi.stubGlobal('fetch', makeFetch([{ ok: true, body: { status: 'abandoned' } }]));
     const manager = new AdoPrManager(BASE_CONFIG);
     const status = await manager.getPrStatus({ prUrl: PR_URL });
     expect(status.merged).toBe(false);
@@ -192,8 +186,8 @@ describe('AdoPrManager.getPrStatus', () => {
           body: {
             value: [
               policyEval('teamplanner unit PR validation', 'rejected', true),
-              policyEval('AI Code Review', 'queued', false),      // optional — must not block
-              policyEval('Agent SDK Reviewer', 'queued', false),  // optional — must not block
+              policyEval('AI Code Review', 'queued', false), // optional — must not block
+              policyEval('Agent SDK Reviewer', 'queued', false), // optional — must not block
             ],
           },
         },
@@ -310,7 +304,13 @@ describe('AdoPrManager.getPrStatus', () => {
       'fetch',
       makeFetch([
         { ok: true, body: ACTIVE_PR },
-        { ok: false, status: 404, body: { message: "Artifact id '...' does not exist or you do not have permission to view it." } },
+        {
+          ok: false,
+          status: 404,
+          body: {
+            message: "Artifact id '...' does not exist or you do not have permission to view it.",
+          },
+        },
         { ok: true, body: { value: [] } }, // threads
       ]),
     );

@@ -1,5 +1,6 @@
 import type { OutputMode } from './actions.js';
 import type { EscalationRequest } from './escalation.js';
+import type { PodConfig } from './pod.js';
 import type { ExecutionTarget, PimGroupConfig, Profile } from './profile.js';
 import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
@@ -24,6 +25,7 @@ export type SessionStatus =
   | 'merge_pending'
   | 'complete'
   | 'paused'
+  | 'handoff'
   | 'killing'
   | 'killed';
 
@@ -65,6 +67,15 @@ export interface Session {
   } | null;
   acceptanceCriteria: string[] | null;
   claudeSessionId: string | null;
+  /**
+   * Orthogonal axes describing how this session is driven and where its output
+   * goes. Replaces the legacy `outputMode` enum.
+   */
+  pod: PodConfig;
+  /**
+   * @deprecated Mirrors `pod` for wire/storage back-compat. New code should
+   * read `pod` directly. Kept in sync by the session repository.
+   */
   outputMode: OutputMode;
   baseBranch: string | null;
   acFrom: string | null;
@@ -111,6 +122,16 @@ export interface CreateSessionRequest {
   branchPrefix?: string;
   skipValidation?: boolean;
   acceptanceCriteria?: string[];
+  /**
+   * Per-session override of the profile's pod config. Each field is
+   * independently overridable — `{agentMode:'interactive'}` keeps the
+   * profile's `output` choice.
+   */
+  pod?: Partial<PodConfig>;
+  /**
+   * @deprecated Prefer `pod`. When set, resolves to the corresponding
+   * `PodConfig` via `podConfigFromOutputMode()`. Ignored if `pod` is set.
+   */
   outputMode?: OutputMode;
   baseBranch?: string;
   acFrom?: string;

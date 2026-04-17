@@ -101,8 +101,28 @@ export class AutopodClient {
     await this.request<void>('POST', `/sessions/${id}/kill`);
   }
 
-  async completeSession(id: string): Promise<{ ok: boolean; pushError?: string }> {
-    return this.request<{ ok: boolean; pushError?: string }>('POST', `/sessions/${id}/complete`);
+  async completeSession(
+    id: string,
+    options?: { promoteTo?: 'pr' | 'branch' | 'artifact' | 'none' },
+  ): Promise<{
+    ok: boolean;
+    pushError?: string;
+    promotedTo?: 'pr' | 'branch' | 'artifact' | 'none';
+  }> {
+    return this.request<{
+      ok: boolean;
+      pushError?: string;
+      promotedTo?: 'pr' | 'branch' | 'artifact' | 'none';
+    }>('POST', `/sessions/${id}/complete`, options ?? undefined);
+  }
+
+  async promoteSession(
+    id: string,
+    targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
+  ): Promise<{ ok: boolean; promotedTo: string }> {
+    return this.request<{ ok: boolean; promotedTo: string }>('POST', `/sessions/${id}/promote`, {
+      targetOutput,
+    });
   }
 
   async injectCredential(id: string, service: 'github' | 'ado'): Promise<void> {

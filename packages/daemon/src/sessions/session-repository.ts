@@ -1,7 +1,10 @@
 import type {
+  AgentMode,
   ExecutionTarget,
   OutputMode,
+  OutputTarget,
   PimGroupConfig,
+  PodConfig,
   Profile,
   ReferenceRepo,
   Session,
@@ -9,7 +12,12 @@ import type {
   TaskSummary,
   ValidationOverride,
 } from '@autopod/shared';
-import { DEFAULT_MAX_PR_FIX_ATTEMPTS, SessionNotFoundError } from '@autopod/shared';
+import {
+  DEFAULT_MAX_PR_FIX_ATTEMPTS,
+  SessionNotFoundError,
+  outputModeFromPod,
+  podConfigFromOutputMode,
+} from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 export interface NewSession {
@@ -25,6 +33,9 @@ export interface NewSession {
   maxValidationAttempts: number;
   skipValidation: boolean;
   acceptanceCriteria?: string[] | null;
+  /** New-style pod config. If omitted, derived from `outputMode`. */
+  pod?: PodConfig;
+  /** Legacy field — still persisted for wire back-compat. */
   outputMode: OutputMode;
   baseBranch?: string | null;
   acFrom?: string | null;
@@ -96,6 +107,7 @@ export interface SessionUpdates {
   pauseReason?: 'budget' | 'manual' | null;
   referenceRepos?: ReferenceRepo[] | null;
   artifactsPath?: string | null;
+  pod?: PodConfig;
 }
 
 export interface SessionStats {
@@ -111,6 +123,24 @@ export interface SessionRepository {
   list(filters?: SessionFilters): Session[];
   countByStatusAndProfile(status: SessionStatus, profileName: string): number;
   getStats(filters?: { profileName?: string }): SessionStats;
+}
+
+/**
+ * Reconstruct the PodConfig from row columns. Falls back to deriving from the
+ * legacy `output_mode` when the new columns are NULL (older rows) or missing.
+ */
+function readPodFromRow(row: Record<string, unknown>): PodConfig {
+  const agentMode = row.agent_mode as AgentMode | undefined;
+  const output = row.output_target as OutputTarget | undefined;
+  if (agentMode && output) {
+    return {
+      agentMode,
+      output,
+      validate: row.validate !== undefined ? Boolean(row.validate) : output === 'pr',
+      promotable: row.promotable !== undefined ? Boolean(row.promotable) : false,
+    };
+  }
+  return podConfigFromOutputMode((row.output_mode as OutputMode | undefined) ?? 'pr');
 }
 
 /** Map a SQLite row (snake_case) to a Session (camelCase). */
@@ -152,6 +182,7 @@ function rowToSession(row: Record<string, unknown>): Session {
       ? JSON.parse(row.acceptance_criteria as string)
       : null,
     claudeSessionId: (row.claude_session_id as string) ?? null,
+    pod: readPodFromRow(row),
     outputMode: (row.output_mode as OutputMode) ?? 'pr',
     baseBranch: (row.base_branch as string) ?? null,
     acFrom: (row.ac_from as string) ?? null,
@@ -190,16 +221,23 @@ function rowToSession(row: Record<string, unknown>): Session {
 export function createSessionRepository(db: Database.Database): SessionRepository {
   return {
     insert(session: NewSession): void {
+      // Keep legacy output_mode and new pod columns in sync.
+      const pod: PodConfig = session.pod ?? podConfigFromOutputMode(session.outputMode);
+      const legacyOutputMode: OutputMode = session.pod
+        ? outputModeFromPod(pod)
+        : session.outputMode;
       db.prepare(`
         INSERT INTO sessions (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
-          output_mode, base_branch, ac_from, linked_session_id, pim_groups, pr_url,
+          output_mode, agent_mode, output_target, validate, promotable,
+          base_branch, ac_from, linked_session_id, pim_groups, pr_url,
           token_budget, reference_repos, reference_repo_pat, scheduled_job_id
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
-          @outputMode, @baseBranch, @acFrom, @linkedSessionId, @pimGroups, @prUrl,
+          @outputMode, @agentMode, @outputTarget, @validate, @promotable,
+          @baseBranch, @acFrom, @linkedSessionId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId
         )
       `).run({
@@ -217,7 +255,11 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         acceptanceCriteria: session.acceptanceCriteria
           ? JSON.stringify(session.acceptanceCriteria)
           : null,
-        outputMode: session.outputMode,
+        outputMode: legacyOutputMode,
+        agentMode: pod.agentMode,
+        outputTarget: pod.output,
+        validate: pod.validate ? 1 : 0,
+        promotable: pod.promotable ? 1 : 0,
         baseBranch: session.baseBranch ?? null,
         acFrom: session.acFrom ?? null,
         linkedSessionId: session.linkedSessionId ?? null,
@@ -419,6 +461,22 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         setClauses.push('artifacts_path = @artifactsPath');
         params.artifactsPath = changes.artifactsPath ?? null;
       }
+      if (changes.pod !== undefined) {
+        // Keep legacy output_mode synced with the new orthogonal columns so
+        // older readers (desktop client, etc.) continue to see a valid value.
+        setClauses.push(
+          'agent_mode = @agentMode',
+          'output_target = @outputTarget',
+          'validate = @validate',
+          'promotable = @promotable',
+          'output_mode = @outputMode',
+        );
+        params.agentMode = changes.pod.agentMode;
+        params.outputTarget = changes.pod.output;
+        params.validate = changes.pod.validate ? 1 : 0;
+        params.promotable = changes.pod.promotable ? 1 : 0;
+        params.outputMode = outputModeFromPod(changes.pod);
+      }
 
       if (setClauses.length === 0) return;
 
@@ -462,7 +520,9 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
       // Null out self-referential FKs from other sessions before deleting.
       // linked_session_id and fix_session_id were added without ON DELETE SET NULL
       // (SQLite can't ALTER COLUMN), so we nullify them at the application level.
-      db.prepare('UPDATE sessions SET linked_session_id = NULL WHERE linked_session_id = ?').run(id);
+      db.prepare('UPDATE sessions SET linked_session_id = NULL WHERE linked_session_id = ?').run(
+        id,
+      );
       db.prepare('UPDATE sessions SET fix_session_id = NULL WHERE fix_session_id = ?').run(id);
       const result = db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
       if (result.changes === 0) throw new SessionNotFoundError(id);
@@ -493,11 +553,13 @@ export function createSessionRepository(db: Database.Database): SessionRepositor
         'validating',
         'validated',
         'failed',
+        'review_required',
         'approved',
         'merging',
         'merge_pending',
         'complete',
         'paused',
+        'handoff',
         'killing',
         'killed',
       ];

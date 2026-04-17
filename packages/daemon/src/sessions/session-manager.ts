@@ -16,6 +16,7 @@ import type {
   InjectedMcpServer,
   NetworkPolicy,
   PageResult,
+  PodConfig,
   PrivateRegistry,
   Profile,
   ReferenceRepo,
@@ -35,6 +36,9 @@ import {
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
   generateId,
   generateSessionId,
+  outputModeFromPod,
+  podConfigFromOutputMode,
+  resolvePodConfig,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
@@ -86,6 +90,7 @@ import {
   canKill,
   canNudge,
   canPause,
+  canPromote,
   canReceiveMessage,
   isTerminalState,
   validateTransition,
@@ -339,7 +344,15 @@ export interface SessionManager {
   pauseSession(sessionId: string): Promise<void>;
   nudgeSession(sessionId: string, message: string): void;
   killSession(sessionId: string): Promise<void>;
-  completeSession(sessionId: string): Promise<{ pushError?: string }>;
+  completeSession(
+    sessionId: string,
+    options?: { promoteTo?: 'pr' | 'branch' | 'artifact' | 'none' },
+  ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }>;
+  /** Promote an interactive session to auto on the same session ID. */
+  promoteToAuto(
+    sessionId: string,
+    targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
+  ): Promise<void>;
   triggerValidation(sessionId: string, options?: { force?: boolean }): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
    *  Used after human fixes via a linked workspace pod. */
@@ -507,6 +520,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           userId: parent.userId,
           maxValidationAttempts: profile.maxValidationAttempts,
           skipValidation: false,
+          pod: parent.pod,
           outputMode: parent.outputMode,
           baseBranch: parent.baseBranch ?? null,
           linkedSessionId: parent.id,
@@ -1120,11 +1134,19 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       const runtime = request.runtime ?? profile.defaultRuntime;
       const executionTarget = request.executionTarget ?? profile.executionTarget;
       const skipValidation = request.skipValidation ?? false;
-      const outputMode = request.outputMode ?? profile.outputMode ?? 'pr';
 
-      // deny-all network policy blocks all outbound — incompatible with cloud-backed runtimes
+      // Resolve the effective PodConfig once, so both branch derivation and
+      // DB insertion use the exact same values.
+      const resolvedPod = resolvePodConfig(
+        profile.pod ?? (profile.outputMode ? podConfigFromOutputMode(profile.outputMode) : null),
+        request.pod ??
+          (request.outputMode ? podConfigFromOutputMode(request.outputMode) : undefined),
+      );
+
+      // deny-all network policy blocks all outbound — incompatible with cloud-backed runtimes.
+      // Interactive pods run without an AI agent, so they're unaffected.
       if (
-        outputMode !== 'workspace' &&
+        resolvedPod.agentMode !== 'interactive' &&
         profile.networkPolicy?.enabled &&
         profile.networkPolicy?.mode === 'deny-all'
       ) {
@@ -1138,17 +1160,21 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       // Derive referenceRepos with mountPath from URL last segment
       const derivedReferenceRepos: ReferenceRepo[] = (request.referenceRepos ?? []).map((r) => ({
         url: r.url,
-        mountPath: r.url.replace(/\.git$/, '').split('/').pop() ?? r.url,
+        mountPath:
+          r.url
+            .replace(/\.git$/, '')
+            .split('/')
+            .pop() ?? r.url,
       }));
 
       let id: string;
       for (let attempt = 0; attempt < 10; attempt++) {
         id = generateSessionId();
-        const effectiveOutputMode = request.outputMode ?? profile.outputMode ?? 'pr';
+        const effectiveOutputMode = outputModeFromPod(resolvedPod);
         let branch: string;
         if (request.branch) {
           branch = request.branch;
-        } else if (effectiveOutputMode === 'artifact') {
+        } else if (resolvedPod.output === 'artifact') {
           branch = `research/${id}`;
         } else {
           const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
@@ -1168,6 +1194,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             maxValidationAttempts: profile.maxValidationAttempts,
             skipValidation,
             acceptanceCriteria: request.acceptanceCriteria ?? null,
+            pod: resolvedPod,
             outputMode: effectiveOutputMode,
             baseBranch: request.baseBranch ?? null,
             acFrom: request.acFrom ?? null,
@@ -1176,9 +1203,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
               if (request.pimGroups != null) return request.pimGroups;
               // Fall back to profile-level pimActivations (group type only — stored as PimGroupConfig)
               const groupActivations = (profile.pimActivations ?? [])
-                .filter(
-                  (a): a is Extract<typeof a, { type: 'group' }> => a.type === 'group',
-                )
+                .filter((a): a is Extract<typeof a, { type: 'group' }> => a.type === 'group')
                 .map(({ groupId, displayName, duration, justification }) => ({
                   groupId,
                   displayName,
@@ -1516,8 +1541,8 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           { timeout: 5_000 },
         );
 
-        // Workspace sessions: container stays alive, no agent/validation/PR
-        if (session.outputMode === 'workspace') {
+        // Interactive sessions: container stays alive, no agent/validation/PR
+        if (session.pod.agentMode === 'interactive') {
           // Write provider credential files + Claude config (disclaimer ack, folder trust) so
           // interactive Claude Code in the terminal doesn't show onboarding/disclaimer/trust prompts.
           // Best-effort — missing/expired credentials are fine for workspace pods since the user
@@ -2098,7 +2123,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       }
 
       // Artifact sessions: extract /workspace, optionally push branch, skip validation entirely
-      if (session.outputMode === 'artifact') {
+      if (session.pod.output === 'artifact') {
         const profile = profileStore.get(session.profileName);
         const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
         const artifactsPath = path.join(dataDir, 'artifacts', sessionId);
@@ -2109,7 +2134,11 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           const cm = containerManagerFactory.get(session.executionTarget);
           try {
             emitActivityStatus(sessionId, 'Collecting artifacts…');
-            await cm.extractDirectoryFromContainer(session.containerId, '/workspace', artifactsPath);
+            await cm.extractDirectoryFromContainer(
+              session.containerId,
+              '/workspace',
+              artifactsPath,
+            );
             logger.info({ sessionId, artifactsPath }, 'Artifacts extracted from container');
           } catch (err) {
             logger.warn(
@@ -2794,12 +2823,115 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       logger.info({ sessionId }, 'Session killed');
     },
 
-    async completeSession(sessionId: string): Promise<{ pushError?: string }> {
+    /**
+     * Promote an interactive session to an agent-driven (`auto`) session on
+     * the same session ID. Keeps branch, event log, token budget, and
+     * escalation history. Used when the human hands off work to the agent
+     * via `ap complete <id> --pr` (or `--artifact`).
+     *
+     * Flow: sync `/workspace` back to host → stop interactive container →
+     * transition to `handoff` → swap the session's `pod` config → re-enqueue
+     * for `processSession()` which will pick up in the new mode.
+     */
+    async promoteToAuto(
+      sessionId: string,
+      targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
+    ): Promise<void> {
       const session = sessionRepo.getOrThrow(sessionId);
 
-      if (session.outputMode !== 'workspace') {
+      if (!canPromote(session.status, session.pod)) {
         throw new AutopodError(
-          'Only workspace sessions can be completed via this endpoint',
+          `Cannot promote session ${sessionId} in status '${session.status}' — must be an interactive, promotable, running session`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      const profile = profileStore.get(session.profileName);
+      if (targetOutput === 'pr' && !profile.repoUrl) {
+        throw new AutopodError(
+          `Cannot promote to 'pr' — profile '${profile.name}' has no repoUrl`,
+          'INVALID_CONFIGURATION',
+          400,
+        );
+      }
+
+      // Sync the human's work back to the host worktree so the agent picks
+      // up where they left off.
+      if (session.containerId && session.worktreePath) {
+        try {
+          const cm = containerManagerFactory.get(session.executionTarget);
+          await syncWorkspaceBack(session.containerId, session.worktreePath, cm);
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Failed to sync workspace back during promotion');
+        }
+      }
+
+      // Tear down the interactive container — processSession will spawn a
+      // fresh one for the agent phase.
+      if (session.containerId) {
+        try {
+          const cm = containerManagerFactory.get(session.executionTarget);
+          await cm.stop(session.containerId);
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'Failed to stop interactive container during promotion');
+        }
+      }
+
+      // Swap to the worker profile if one is configured — this lets the
+      // interactive profile keep a minimal setup and delegate the heavy
+      // agent config (model, validation, PR provider) to a sibling profile.
+      const targetProfileName = profile.workerProfile ?? session.profileName;
+      const targetProfile =
+        targetProfileName === session.profileName ? profile : profileStore.get(targetProfileName);
+
+      const newPod: PodConfig = {
+        agentMode: 'auto',
+        output: targetOutput,
+        validate: targetOutput === 'pr',
+        promotable: false,
+      };
+
+      transition(session, 'handoff', {
+        pod: newPod,
+        containerId: null,
+        // Reuse the existing worktree in recovery mode so the agent resumes
+        // on the human's in-flight work.
+        recoveryWorktreePath: session.worktreePath,
+      });
+
+      // If we're switching profiles for the worker phase, snapshot the new
+      // one so the agent runs under the right model/validation config.
+      if (targetProfile.name !== session.profileName) {
+        sessionRepo.update(sessionId, {
+          profileSnapshot: targetProfile,
+        });
+      }
+
+      eventBus.emit({
+        type: 'session.status_changed',
+        timestamp: new Date().toISOString(),
+        sessionId,
+        previousStatus: 'handoff',
+        newStatus: 'handoff',
+      });
+
+      enqueueSession(sessionId);
+      logger.info(
+        { sessionId, targetOutput, targetProfile: targetProfile.name },
+        'Session promoted interactive → auto',
+      );
+    },
+
+    async completeSession(
+      sessionId: string,
+      options?: { promoteTo?: 'pr' | 'branch' | 'artifact' | 'none' },
+    ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }> {
+      const session = sessionRepo.getOrThrow(sessionId);
+
+      if (session.pod.agentMode !== 'interactive') {
+        throw new AutopodError(
+          'Only interactive sessions can be completed via this endpoint',
           'INVALID_OUTPUT_MODE',
           400,
         );
@@ -2811,6 +2943,13 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           'INVALID_STATE',
           409,
         );
+      }
+
+      // If caller asked us to promote (e.g. `ap complete <id> --pr`), hand off
+      // into the agent-driven flow instead of just pushing + completing.
+      if (options?.promoteTo && options.promoteTo !== 'branch') {
+        await this.promoteToAuto(sessionId, options.promoteTo);
+        return { promotedTo: options.promoteTo };
       }
 
       // Sync workspace changes back to host worktree before pushing
@@ -2884,7 +3023,6 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
           logger.warn({ err, sessionId }, 'Failed to load PIM client for deactivation');
         }
       }
-
 
       eventBus.emit({
         type: 'session.completed',
@@ -3125,7 +3263,15 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
                 if (phase === 'build') {
                   eventBus.emit({ ...base, buildResult: phaseResult as BuildResult });
                 } else if (phase === 'test') {
-                  eventBus.emit({ ...base, testResult: phaseResult as { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string } });
+                  eventBus.emit({
+                    ...base,
+                    testResult: phaseResult as {
+                      status: 'pass' | 'fail' | 'skip';
+                      duration: number;
+                      stdout?: string;
+                      stderr?: string;
+                    },
+                  });
                 } else if (phase === 'health') {
                   eventBus.emit({ ...base, healthResult: phaseResult as HealthResult });
                 } else if (phase === 'pages') {
@@ -4091,7 +4237,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
       transition(session, 'merge_pending', {
         mergeBlockReason: 'Awaiting merge — PR fix attempts extended',
       });
-      emitActivityStatus(sessionId, `PR fix attempts extended to ${newMax} — resuming merge polling`);
+      emitActivityStatus(
+        sessionId,
+        `PR fix attempts extended to ${newMax} — resuming merge polling`,
+      );
       startMergePolling(sessionId);
       logger.info(
         { sessionId, oldMax: currentMax, newMax, additionalAttempts },
@@ -4185,11 +4334,7 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
         );
       }
       if (!session.prUrl) {
-        throw new AutopodError(
-          `Session ${sessionId} has no PR URL`,
-          'INVALID_STATE',
-          409,
-        );
+        throw new AutopodError(`Session ${sessionId} has no PR URL`, 'INVALID_STATE', 409);
       }
 
       // Bump maxPrFixAttempts if the current cap would block the spawn
@@ -4224,7 +4369,10 @@ export function createSessionManager(deps: SessionManagerDependencies): SessionM
             worktreePath: session.worktreePath ?? undefined,
           });
         } catch (err) {
-          logger.warn({ err, sessionId }, 'Manual spawn: failed to fetch PR status, using cached block reason');
+          logger.warn(
+            { err, sessionId },
+            'Manual spawn: failed to fetch PR status, using cached block reason',
+          );
         }
       }
 

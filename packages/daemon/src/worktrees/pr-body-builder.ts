@@ -105,8 +105,7 @@ export function buildPrBody(config: PrBodyConfig): string {
 
   // Deviations from Plan (table format)
   if (taskSummary && taskSummary.deviations.length > 0) {
-    const hasVerdicts =
-      deviationsAssessment && deviationsAssessment.disclosedDeviations.length > 0;
+    const hasVerdicts = deviationsAssessment && deviationsAssessment.disclosedDeviations.length > 0;
 
     const verdictMap = new Map<
       string,
@@ -133,9 +132,7 @@ export function buildPrBody(config: PrBodyConfig): string {
         const verdictCell = v
           ? `${v.verdict === 'justified' ? '✅' : v.verdict === 'questionable' ? '⚠️' : '❌'} ${v.verdict}`
           : '—';
-        lines.push(
-          `| ${d.step} | ${d.planned} | ${d.actual} | ${d.reason} | ${verdictCell} |`,
-        );
+        lines.push(`| ${d.step} | ${d.planned} | ${d.actual} | ${d.reason} | ${verdictCell} |`);
       } else {
         lines.push(`| ${d.step} | ${d.planned} | ${d.actual} | ${d.reason} |`);
       }
@@ -154,9 +151,7 @@ export function buildPrBody(config: PrBodyConfig): string {
     tableLines.push('| Phase | Status |');
     tableLines.push('|-------|--------|');
     tableLines.push(`| Build | ${icon(v.smoke.build.status)} ${v.smoke.build.status} |`);
-    tableLines.push(
-      `| Health check | ${icon(v.smoke.health.status)} ${v.smoke.health.status} |`,
-    );
+    tableLines.push(`| Health check | ${icon(v.smoke.health.status)} ${v.smoke.health.status} |`);
 
     if (v.smoke.pages.length > 0) {
       const passed = v.smoke.pages.filter((p: { status: string }) => p.status === 'pass').length;
@@ -183,7 +178,9 @@ export function buildPrBody(config: PrBodyConfig): string {
 
   // ── Meta ──────────────────────────────────────────────────────────────────
 
-  sections.push(`## Stats\n\n\`${filesChanged} files\` · \`+${linesAdded}\` / \`-${linesRemoved}\``);
+  sections.push(
+    `## Stats\n\n\`${filesChanged} files\` · \`+${linesAdded}\` / \`-${linesRemoved}\``,
+  );
 
   if (config.screenshots && config.screenshots.length > 0) {
     const imgs = config.screenshots.map((s) => {

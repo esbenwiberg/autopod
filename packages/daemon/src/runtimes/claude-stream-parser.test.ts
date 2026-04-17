@@ -215,7 +215,12 @@ describe('ClaudeStreamParser.mapEvent', () => {
       subtype: 'success',
       result: 'Done!',
       total_cost_usd: 0.05,
-      usage: { input_tokens: 8000, output_tokens: 3000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      usage: {
+        input_tokens: 8000,
+        output_tokens: 3000,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
     };
     const result = ClaudeStreamParser.mapEvent(event, SESSION_ID, fakeLogger());
     expect(result).toMatchObject({
