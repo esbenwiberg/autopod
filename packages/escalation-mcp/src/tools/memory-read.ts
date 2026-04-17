@@ -6,5 +6,6 @@ export async function memoryRead(
   bridge: SessionBridge,
 ): Promise<string> {
   const entry = bridge.readMemory(sessionId, input.id);
-  return `## ${entry.path}\n\n${entry.content}\n\n---\n_Scope: ${entry.scope}, version: ${entry.version}_`;
+  const whyLine = entry.rationale ? `**Why:** ${entry.rationale}\n\n` : '';
+  return `## ${entry.path}\n\n${whyLine}${entry.content}\n\n---\n_Scope: ${entry.scope}, version: ${entry.version}_`;
 }

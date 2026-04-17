@@ -28,6 +28,7 @@ function rowToMemoryEntry(row: Record<string, unknown>): MemoryEntry {
     path: row.path as string,
     content: row.content as string,
     contentSha256: row.content_sha256 as string,
+    rationale: (row.rationale as string) ?? null,
     version: row.version as number,
     approved: Boolean(row.approved),
     createdBySessionId: (row.created_by_session_id as string) ?? null,
@@ -78,8 +79,8 @@ export function createMemoryRepository(db: Database.Database): MemoryRepository 
       const contentSha256 = sha256(entry.content);
       db.prepare(
         `INSERT INTO memory_entries
-         (id, scope, scope_id, path, content, content_sha256, version, approved, created_by_session_id, created_at, updated_at)
-         VALUES (@id, @scope, @scopeId, @path, @content, @contentSha256, 1, @approved, @createdBySessionId, @now, @now)`,
+         (id, scope, scope_id, path, content, content_sha256, rationale, version, approved, created_by_session_id, created_at, updated_at)
+         VALUES (@id, @scope, @scopeId, @path, @content, @contentSha256, @rationale, 1, @approved, @createdBySessionId, @now, @now)`,
       ).run({
         id: entry.id,
         scope: entry.scope,
@@ -87,6 +88,7 @@ export function createMemoryRepository(db: Database.Database): MemoryRepository 
         path: entry.path,
         content: entry.content,
         contentSha256,
+        rationale: entry.rationale ?? null,
         approved: entry.approved ? 1 : 0,
         createdBySessionId: entry.createdBySessionId,
         now,

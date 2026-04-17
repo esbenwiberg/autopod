@@ -9,6 +9,8 @@ export interface MemoryEntry {
   path: string;
   content: string;
   contentSha256: string;
+  /** Optional one-sentence explanation of why the memory matters. Null for legacy entries. */
+  rationale: string | null;
   version: number;
   approved: boolean;
   createdBySessionId: string | null;

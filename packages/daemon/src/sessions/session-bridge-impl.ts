@@ -341,7 +341,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         const normScopeStr = (s: string) => (s.startsWith('/') ? s.slice(1) : s);
         const match = allowedRbac.find(
           (a) =>
-            normScopeStr(a.scope) === normScopeStr(scope) && a.roleDefinitionId === roleDefinitionId,
+            normScopeStr(a.scope) === normScopeStr(scope) &&
+            a.roleDefinitionId === roleDefinitionId,
         );
         if (!match) {
           return {
@@ -487,7 +488,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
       return memoryRepo.search(query, scope, scopeId);
     },
 
-    suggestMemory(sessionId: string, scope: MemoryScope, path: string, content: string): string {
+    suggestMemory(
+      sessionId: string,
+      scope: MemoryScope,
+      path: string,
+      content: string,
+      rationale?: string,
+    ): string {
       if (!memoryRepo) throw new Error('Memory store not available');
       // Rate-limit agent-sourced suggestions per session to curb approval-fatigue
       // prompt-injection attacks on the global/profile memory pool.
@@ -512,6 +519,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): SessionBri
         scopeId,
         path,
         content,
+        rationale: rationale ?? null,
         approved,
         createdBySessionId: sessionId,
       });

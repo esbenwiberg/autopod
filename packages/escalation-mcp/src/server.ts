@@ -138,7 +138,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       memoriesSuggested: z
         .boolean()
         .describe(
-          'Set true if you called memory_suggest at least once this session. Set false only if the task was purely mechanical with zero new observations.',
+          'Set true if you called memory_suggest this session. Set false if you had nothing worth capturing — filler suggestions are actively discouraged.',
         ),
     },
     async (input) => {
@@ -238,7 +238,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'memory_suggest',
-    'Suggest a new memory for human approval. Use to capture conventions, patterns, or session notes that should persist. A human will review and approve before it becomes active.',
+    'Suggest a memory for human approval. Only suggest if a future agent starting cold on this repo would benefit. Skip filler and restatements of CLAUDE.md. Include rationale explaining why the memory matters.',
     {
       scope: z
         .enum(['global', 'profile', 'session'])
@@ -246,9 +246,15 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       path: z
         .string()
         .describe(
-          'Path-like key for the memory, e.g. "/conventions/commits.md" or "/patterns/error-handling.md"',
+          'Path-like key for the memory, e.g. "/conventions/commits.md" or "/gotchas/azure-smb.md"',
         ),
-      content: z.string().describe('The memory content (markdown supported)'),
+      content: z.string().describe('The memory content (markdown supported, ≤400 chars preferred)'),
+      rationale: z
+        .string()
+        .optional()
+        .describe(
+          'One sentence on why a future agent needs this. Strongly recommended — suggestions without rationale are harder to approve and more likely to be rejected.',
+        ),
     },
     async (input) => {
       const response = await memorySuggest(sessionId, input, bridge);

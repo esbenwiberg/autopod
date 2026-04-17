@@ -343,14 +343,45 @@ export function generateSystemInstructions(
     '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
   );
   lines.push(
-    '5. **Capture knowledge**: Call `memory_suggest` at least once before finishing — this step is required. ' +
-      'Use scope `profile` for repo-specific patterns, `global` for universal ones, `session` for working notes. ' +
-      'There is always something worth noting. Good candidates:',
+    '5. **Capture knowledge for future agents**: Before finishing, call `memory_suggest` ' +
+      'if — and only if — you learned something a colleague starting cold on this repo would thank you for. ' +
+      "Skip it if you didn't. **Filler is worse than nothing** — an approval queue full of trivia gets ignored.",
   );
-  lines.push('   - Naming conventions, coding patterns, or idioms specific to this repo');
-  lines.push('   - Commands or workflows that work well (or that failed and why)');
-  lines.push('   - Architectural decisions or constraints you uncovered');
-  lines.push('   - Common pitfalls or debugging tips');
+  lines.push('');
+  lines.push('   **Strong candidates** (suggest these):');
+  lines.push(
+    '   - Gotchas that fail silently or surprise you (API quirks, env assumptions, race conditions)',
+  );
+  lines.push(
+    "   - Integration details that aren't obvious from reading the code (auth flows, required headers, ordering constraints)",
+  );
+  lines.push('   - Decision rationale — *why* a pattern exists, not just that it does');
+  lines.push(
+    "   - Debugging lessons — what looked broken but wasn't, or what looked fine but hid a bug",
+  );
+  lines.push(
+    '   - Workflow tricks that saved time (or the failed path you tried first, so the next agent skips it)',
+  );
+  lines.push(
+    '   - Cross-cutting patterns specific to this codebase (error handling, retries, logging conventions)',
+  );
+  lines.push('');
+  lines.push('   **Weak candidates** (skip these):');
+  lines.push('   - Restating what `CLAUDE.md` already says');
+  lines.push('   - Generic best practices any competent agent already knows');
+  lines.push('   - What command you ran — only the *non-obvious* outcome matters');
+  lines.push('');
+  lines.push(
+    '   **Always pass a `rationale`** — one sentence on why a future agent needs this. ' +
+      "If you can't articulate why it matters, don't suggest it. " +
+      'Reviewers read the rationale first; a suggestion without one is usually rejected.',
+  );
+  lines.push('');
+  lines.push(
+    '   **Format**: Compact (≤400 chars content). One concept per entry. Prose, not code blocks — ' +
+      'include only the non-obvious line(s). Scope: `profile` for repo-specific, `global` for universal, ' +
+      '`session` for working notes. Prefer updating an existing memory over creating a near-duplicate.',
+  );
   lines.push(
     '6. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
   );

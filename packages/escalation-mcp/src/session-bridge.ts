@@ -89,7 +89,13 @@ export interface SessionBridge {
    * Suggest a new memory (pending human approval).
    * Returns the new entry ID.
    */
-  suggestMemory(sessionId: string, scope: MemoryScope, path: string, content: string): string;
+  suggestMemory(
+    sessionId: string,
+    scope: MemoryScope,
+    path: string,
+    content: string,
+    rationale?: string,
+  ): string;
 
   /** Trigger revalidation on a linked failed worker session (pull + validate, no agent). */
   revalidateLinkedSession(

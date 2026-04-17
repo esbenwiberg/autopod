@@ -114,6 +114,34 @@ describe('session bridge — memory scope enforcement (F2a)', () => {
   });
 });
 
+describe('session bridge — memory_suggest rationale', () => {
+  beforeEach(() => {
+    __resetSuggestBudgetForTests();
+  });
+
+  it('persists rationale when provided', () => {
+    const bridge = buildBridge([{ id: 'sess-a', profileName: 'proj' }]);
+    const id = bridge.suggestMemory(
+      'sess-a',
+      'session',
+      '/notes/why.md',
+      'use --force-fresh flag',
+      'default caching hides the race condition we hit today',
+    );
+
+    const entry = bridge.readMemory('sess-a', id);
+    expect(entry.rationale).toBe('default caching hides the race condition we hit today');
+  });
+
+  it('defaults rationale to null when omitted', () => {
+    const bridge = buildBridge([{ id: 'sess-a', profileName: 'proj' }]);
+    const id = bridge.suggestMemory('sess-a', 'session', '/notes/x.md', 'content');
+
+    const entry = bridge.readMemory('sess-a', id);
+    expect(entry.rationale).toBeNull();
+  });
+});
+
 describe('session bridge — memory_suggest rate limit (F2b)', () => {
   beforeEach(() => {
     __resetSuggestBudgetForTests();
