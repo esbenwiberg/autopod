@@ -1,8 +1,8 @@
 import {
   AuthError,
   AutopodError,
-  ProfileNotFoundError,
   PodNotFoundError,
+  ProfileNotFoundError,
   ValidationError,
 } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';

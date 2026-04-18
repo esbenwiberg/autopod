@@ -7,7 +7,6 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './api/server.js';
 import type { AuthModule } from './interfaces/index.js';
-import { createProfileStore } from './profiles/index.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -16,6 +15,7 @@ import {
   createPodQueue,
   createPodRepository,
 } from './pods/index.js';
+import { createProfileStore } from './profiles/index.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
 const MIGRATION_FILES = fs
@@ -553,7 +553,7 @@ describe('Integration', () => {
         headers: { authorization: 'Bearer test-token' },
       });
       expect(res.statusCode).toBe(404);
-      expect(res.json().error).toBe('SESSION_NOT_FOUND');
+      expect(res.json().error).toBe('POD_NOT_FOUND');
     });
 
     it('returns 409 for duplicate profile', async () => {

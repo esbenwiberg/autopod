@@ -2,8 +2,8 @@ import {
   AuthError,
   AutopodError,
   InvalidStateTransitionError,
-  ProfileNotFoundError,
   PodNotFoundError,
+  ProfileNotFoundError,
   ValidationError,
 } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';

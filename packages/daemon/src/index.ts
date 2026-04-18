@@ -27,6 +27,20 @@ import {
   createTeamsAdapter,
 } from './notifications/index.js';
 import type { NotificationConfig } from './notifications/index.js';
+import {
+  createEscalationRepository,
+  createEventBus,
+  createEventRepository,
+  createMemoryRepository,
+  createNudgeRepository,
+  createPendingOverrideRepository,
+  createPodManager,
+  createPodQueue,
+  createPodRepository,
+  createProgressEventRepository,
+  createValidationRepository,
+} from './pods/index.js';
+import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { createProfileStore } from './profiles/index.js';
 import {
   ClaudeRuntime,
@@ -37,20 +51,6 @@ import {
 import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
-import {
-  createEscalationRepository,
-  createEventBus,
-  createEventRepository,
-  createMemoryRepository,
-  createNudgeRepository,
-  createPendingOverrideRepository,
-  createProgressEventRepository,
-  createPodManager,
-  createPodQueue,
-  createPodRepository,
-  createValidationRepository,
-} from './pods/index.js';
-import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
@@ -409,12 +409,7 @@ const notificationConfig: NotificationConfig = TEAMS_WEBHOOK_URL
   ? {
       teams: {
         webhookUrl: TEAMS_WEBHOOK_URL,
-        enabledEvents: [
-          'pod_validated',
-          'pod_failed',
-          'pod_needs_input',
-          'pod_error',
-        ],
+        enabledEvents: ['pod_validated', 'pod_failed', 'pod_needs_input', 'pod_error'],
       },
     }
   : {};

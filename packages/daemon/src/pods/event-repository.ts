@@ -20,12 +20,7 @@ function extractSessionId(event: SystemEvent): string | null {
   if ('podId' in event && typeof event.podId === 'string') {
     return event.podId;
   }
-  if (
-    'pod' in event &&
-    event.pod &&
-    typeof event.pod === 'object' &&
-    'id' in event.pod
-  ) {
+  if ('pod' in event && event.pod && typeof event.pod === 'object' && 'id' in event.pod) {
     return (event.pod as { id: string }).id;
   }
   return null;
@@ -46,9 +41,7 @@ export function createEventRepository(db: Database.Database): EventRepository {
     insert(event: SystemEvent): number {
       const podId = extractSessionId(event);
       const result = db
-        .prepare(
-          'INSERT INTO events (pod_id, type, payload) VALUES (@podId, @type, @payload)',
-        )
+        .prepare('INSERT INTO events (pod_id, type, payload) VALUES (@podId, @type, @payload)')
         .run({
           podId,
           type: event.type,

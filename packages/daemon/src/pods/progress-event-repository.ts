@@ -33,9 +33,7 @@ export function createProgressEventRepository(db: Database.Database): ProgressEv
 
     listBySession(podId): ProgressEventRecord[] {
       const rows = db
-        .prepare(
-          'SELECT * FROM session_progress_events WHERE pod_id = ? ORDER BY created_at ASC',
-        )
+        .prepare('SELECT * FROM session_progress_events WHERE pod_id = ? ORDER BY created_at ASC')
         .all(podId) as Record<string, unknown>[];
       return rows.map((row) => ({
         id: row.id as string,

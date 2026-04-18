@@ -54,11 +54,7 @@ const FILE_CHANGE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
  */
 // biome-ignore lint/complexity/noStaticOnlyClass: used as a namespace with static methods matching CodexStreamParser pattern
 export class ClaudeStreamParser {
-  static async *parse(
-    stream: Readable,
-    podId: string,
-    logger: Logger,
-  ): AsyncIterable<AgentEvent> {
+  static async *parse(stream: Readable, podId: string, logger: Logger): AsyncIterable<AgentEvent> {
     const rl = createInterface({ input: stream });
 
     for await (const line of rl) {

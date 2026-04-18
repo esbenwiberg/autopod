@@ -81,10 +81,7 @@ describe('E2E: happy path lifecycle', () => {
     const events: { type: string }[] = [];
     ctx.eventBus.subscribe((e) => events.push(e as { type: string }));
 
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Add tests' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Add tests' }, 'user-1');
     await manager.processPod(pod.id);
     await manager.approveSession(pod.id);
 
@@ -404,10 +401,7 @@ describe('E2E: max retries exhausted', () => {
     });
     const manager = createPodManager(ctx.deps);
 
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Extend me' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Extend me' }, 'user-1');
 
     await manager.processPod(pod.id);
 

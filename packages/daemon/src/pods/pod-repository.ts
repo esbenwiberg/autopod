@@ -4,11 +4,11 @@ import type {
   OutputMode,
   OutputTarget,
   PimGroupConfig,
+  Pod,
   PodOptions,
+  PodStatus,
   Profile,
   ReferenceRepo,
-  Pod,
-  PodStatus,
   TaskSummary,
   ValidationOverride,
 } from '@autopod/shared';
@@ -253,9 +253,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         userId: pod.userId,
         maxValidationAttempts: pod.maxValidationAttempts,
         skipValidation: pod.skipValidation ? 1 : 0,
-        acceptanceCriteria: pod.acceptanceCriteria
-          ? JSON.stringify(pod.acceptanceCriteria)
-          : null,
+        acceptanceCriteria: pod.acceptanceCriteria ? JSON.stringify(pod.acceptanceCriteria) : null,
         outputMode: legacyOutputMode,
         agentMode: podOpts.agentMode,
         outputTarget: podOpts.output,
@@ -521,9 +519,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       // Null out self-referential FKs from other pods before deleting.
       // linked_pod_id and fix_pod_id were added without ON DELETE SET NULL
       // (SQLite can't ALTER COLUMN), so we nullify them at the application level.
-      db.prepare('UPDATE pods SET linked_pod_id = NULL WHERE linked_pod_id = ?').run(
-        id,
-      );
+      db.prepare('UPDATE pods SET linked_pod_id = NULL WHERE linked_pod_id = ?').run(id);
       db.prepare('UPDATE pods SET fix_pod_id = NULL WHERE fix_pod_id = ?').run(id);
       const result = db.prepare('DELETE FROM pods WHERE id = ?').run(id);
       if (result.changes === 0) throw new PodNotFoundError(id);

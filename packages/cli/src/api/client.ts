@@ -2,18 +2,18 @@ import {
   AuthError,
   AutopodError,
   InvalidStateTransitionError,
-  ProfileNotFoundError,
   PodNotFoundError,
+  ProfileNotFoundError,
   ValidationError,
 } from '@autopod/shared';
 import type {
-  CreateScheduledJobRequest,
   CreatePodRequest,
+  CreateScheduledJobRequest,
   HistoryQuery,
-  Profile,
-  ScheduledJob,
   Pod,
   PodStatus,
+  Profile,
+  ScheduledJob,
   UpdateScheduledJobRequest,
   ValidationResult,
   WatchedIssue,
@@ -328,8 +328,7 @@ export class AutopodClient {
     response: Awaited<ReturnType<typeof fetch>>,
     path: string,
   ): Promise<never> {
-    let errorBody: { message?: string; code?: string; from?: PodStatus; to?: PodStatus } =
-      {};
+    let errorBody: { message?: string; code?: string; from?: PodStatus; to?: PodStatus } = {};
     try {
       errorBody = (await response.json()) as typeof errorBody;
     } catch {

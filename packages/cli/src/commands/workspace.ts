@@ -56,9 +56,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
         console.log();
         console.log(chalk.dim(`Enter the container:  ap attach ${pod.id.slice(0, 8)}`));
         console.log(
-          chalk.dim(
-            `Hand off to worker:   ap run ${profile} <task> --base-branch ${pod.branch}`,
-          ),
+          chalk.dim(`Hand off to worker:   ap run ${profile} <task> --base-branch ${pod.branch}`),
         );
       },
     );
@@ -79,9 +77,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
       if (pod.status !== 'running') {
         console.error(
-          chalk.red(
-            `Pod ${resolvedId} is ${pod.status} — can only attach to running pods.`,
-          ),
+          chalk.red(`Pod ${resolvedId} is ${pod.status} — can only attach to running pods.`),
         );
         process.exit(1);
       }
@@ -147,9 +143,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
       if (pod.status !== 'running') {
         console.error(
-          chalk.red(
-            `Pod ${resolvedId} is ${pod.status} — can only complete running pods.`,
-          ),
+          chalk.red(`Pod ${resolvedId} is ${pod.status} — can only complete running pods.`),
         );
         process.exit(1);
       }
@@ -182,9 +176,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       }
 
       if (completion.pushError) {
-        console.log(
-          chalk.yellow(`Pod complete, but branch push failed: ${completion.pushError}`),
-        );
+        console.log(chalk.yellow(`Pod complete, but branch push failed: ${completion.pushError}`));
         console.log(chalk.dim('You can push manually from the worktree.'));
       } else {
         console.log(chalk.green('Pod complete. Branch pushed to origin.'));
@@ -235,9 +227,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       });
 
       console.log(
-        chalk.green(
-          `Done. ${service} credentials injected into pod ${resolvedId.slice(0, 8)}.`,
-        ),
+        chalk.green(`Done. ${service} credentials injected into pod ${resolvedId.slice(0, 8)}.`),
       );
       console.log(
         chalk.dim(

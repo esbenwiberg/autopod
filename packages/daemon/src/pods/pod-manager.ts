@@ -16,13 +16,13 @@ import type {
   InjectedMcpServer,
   NetworkPolicy,
   PageResult,
+  Pod,
   PodOptions,
+  PodStatus,
   PrivateRegistry,
   Profile,
   ReferenceRepo,
   RequestCredentialPayload,
-  Pod,
-  PodStatus,
   TaskReviewResult,
   ValidationFinding,
   ValidationOverride,
@@ -68,12 +68,9 @@ import type { EventRepository } from './event-repository.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
-import {
-  buildContinuationPrompt,
-  buildRecoveryTask,
-  buildReworkTask,
-} from './recovery-context.js';
+import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import {
   CREDENTIAL_GUARD_HOOK,
   buildNuGetCredentialEnv,
@@ -82,7 +79,6 @@ import {
   validateRegistryFiles,
 } from './registry-injector.js';
 import { resolveSections } from './section-resolver.js';
-import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
   canKill,
@@ -115,11 +111,7 @@ const CONTAINER_APP_PORT = 3000;
  * Build the task string for a PR fix pod, injecting CI failure details and
  * review comments so the agent knows exactly what to fix.
  */
-function buildPrFixTask(
-  pod: Pod,
-  status: PrMergeStatus,
-  podRepo: PodRepository,
-): string {
+function buildPrFixTask(pod: Pod, status: PrMergeStatus, podRepo: PodRepository): string {
   const attempt = (pod.prFixAttempts ?? 0) + 1;
 
   // Resolve the root original task by following linkedPodId back to the source.
@@ -347,10 +339,7 @@ export interface PodManager {
     options?: { promoteTo?: 'pr' | 'branch' | 'artifact' | 'none' },
   ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }>;
   /** Promote an interactive pod to auto on the same pod ID. */
-  promoteToAuto(
-    podId: string,
-    targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
-  ): Promise<void>;
+  promoteToAuto(podId: string, targetOutput: 'pr' | 'branch' | 'artifact' | 'none'): Promise<void>;
   triggerValidation(podId: string, options?: { force?: boolean }): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
    *  Used after human fixes via a linked workspace pod. */
@@ -620,18 +609,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               status: 'complete',
               model: pod.model,
               runtime: pod.runtime,
-              duration: pod.startedAt
-                ? Date.now() - new Date(pod.startedAt).getTime()
-                : null,
+              duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
               filesChanged: pod.filesChanged,
               createdAt: pod.createdAt,
             },
           });
 
-          logger.info(
-            { podId, prUrl: pod.prUrl },
-            'Merge polling: PR merged — pod complete',
-          );
+          logger.info({ podId, prUrl: pod.prUrl }, 'Merge polling: PR merged — pod complete');
           stopMergePolling(podId);
           return;
         }
@@ -687,10 +671,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function resumeMergePolling(): void {
     const pendingSessions = podRepo.list({ status: 'merge_pending' as PodStatus });
     for (const pod of pendingSessions) {
-      logger.info(
-        { podId: pod.id, prUrl: pod.prUrl },
-        'Resuming merge polling after restart',
-      );
+      logger.info({ podId: pod.id, prUrl: pod.prUrl }, 'Resuming merge polling after restart');
       startMergePolling(pod.id);
     }
   }
@@ -708,11 +689,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const pod = podRepo.getOrThrow(podId);
         if (pod.startCommitSha || !pod.containerId) return;
         const cm = containerManagerFactory.get(pod.executionTarget);
-        const shaResult = await cm.execInContainer(
-          pod.containerId,
-          ['git', 'rev-parse', 'HEAD'],
-          { cwd: '/workspace', timeout: 5_000 },
-        );
+        const shaResult = await cm.execInContainer(pod.containerId, ['git', 'rev-parse', 'HEAD'], {
+          cwd: '/workspace',
+          timeout: 5_000,
+        });
         if (shaResult.exitCode === 0 && shaResult.stdout.trim()) {
           podRepo.update(podId, { startCommitSha: shaResult.stdout.trim() });
         }
@@ -900,7 +880,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     try {
       const gitlinkContent = await readFile(path.join(worktreePath, '.git'), 'utf8');
       const bareWtDir = gitlinkContent.replace(/^gitdir:\s*/m, '').trim();
-      await writeFile(path.join(bareWtDir, 'gitdir'), path.join(worktreePath, '.git') + '\n');
+      await writeFile(path.join(bareWtDir, 'gitdir'), `${path.join(worktreePath, '.git')}\n`);
     } catch (err) {
       logger.warn({ err, worktreePath }, 'Failed to restore worktree gitdir after sync');
     }
@@ -1072,10 +1052,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     containerId: string,
     podId: string,
   ): Promise<void> {
-    logger.info(
-      { podId, containerId },
-      'Installing az CLI via pip (bootstrap.pypa.io get-pip.py)',
-    );
+    logger.info({ podId, containerId }, 'Installing az CLI via pip (bootstrap.pypa.io get-pip.py)');
     const result = await cm.execInContainer(
       containerId,
       [
@@ -1106,11 +1083,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
   }
 
-  function transition(
-    pod: Pod,
-    to: PodStatus,
-    extraUpdates?: Partial<PodUpdates>,
-  ): Pod {
+  function transition(pod: Pod, to: PodStatus, extraUpdates?: Partial<PodUpdates>): Pod {
     validateTransition(pod.id, pod.status, to);
     const previousStatus = pod.status;
     const updates: PodUpdates = { status: to, ...extraUpdates };
@@ -1257,11 +1230,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return pod;
     },
 
-    createHistoryWorkspace(
-      profileName: string,
-      userId: string,
-      historyQuery: HistoryQuery,
-    ): Pod {
+    createHistoryWorkspace(profileName: string, userId: string, historyQuery: HistoryQuery): Pod {
       // Encode query params into the task field with a [history] prefix
       const queryJson = JSON.stringify(historyQuery);
       const task = `[history] History analysis workspace | ${queryJson}`;
@@ -1354,11 +1323,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Compute network isolation config (Docker only, opt-in via profile)
         let networkName: string | undefined;
         let firewallScript: string | undefined;
-        if (
-          networkManager &&
-          pod.executionTarget === 'local' &&
-          profile.networkPolicy?.enabled
-        ) {
+        if (networkManager && pod.executionTarget === 'local' && profile.networkPolicy?.enabled) {
           const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
           const gatewayIp = await networkManager.getGatewayIp();
           const netConfig = await networkManager.buildNetworkConfig(
@@ -1993,10 +1958,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 deviations: event.deviations,
               },
             });
-          } else if (
-            event.type === 'status' &&
-            event.message.includes('Claude pod initialized')
-          ) {
+          } else if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
             // Persist claude pod ID to DB for pause/resume survival across daemon restarts
             const match = event.message.match(/\(([^)]+)\)$/);
             if (match?.[1]) {
@@ -2061,10 +2023,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 });
 
                 if (policy === 'hard' || !canExtend) {
-                  emitActivityStatus(
-                    podId,
-                    'Token budget hard limit reached — failing pod',
-                  );
+                  emitActivityStatus(podId, 'Token budget hard limit reached — failing pod');
                   const s = podRepo.getOrThrow(podId);
                   if (s.status === 'running') {
                     transition(s, 'failed', { completedAt: new Date().toISOString() });
@@ -2132,11 +2091,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const cm = containerManagerFactory.get(pod.executionTarget);
           try {
             emitActivityStatus(podId, 'Collecting artifacts…');
-            await cm.extractDirectoryFromContainer(
-              pod.containerId,
-              '/workspace',
-              artifactsPath,
-            );
+            await cm.extractDirectoryFromContainer(pod.containerId, '/workspace', artifactsPath);
             logger.info({ podId, artifactsPath }, 'Artifacts extracted from container');
           } catch (err) {
             logger.warn(
@@ -2327,10 +2282,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const escalationId = pod.pendingEscalation.id;
         transition(pod, 'running', { pendingEscalation: null });
-        emitActivityStatus(
-          podId,
-          `Credential injected for ${payload.service} — resuming agent…`,
-        );
+        emitActivityStatus(podId, `Credential injected for ${payload.service} — resuming agent…`);
 
         deps.pendingRequestsByPod?.get(podId)?.resolve(escalationId, authMessage);
         return;
@@ -2387,12 +2339,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const resumeEnv = await getResumeEnv(pod);
             const runtime = runtimeRegistry.get(pod.runtime);
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
-            const events = runtime.resume(
-              podId,
-              correctionMessage,
-              pod.containerId,
-              resumeEnv,
-            );
+            const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
             await this.consumeAgentEvents(podId, events);
             await this.handleCompletion(podId);
           } catch (err) {
@@ -2540,10 +2487,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               return;
             }
           } catch (statusErr) {
-            logger.warn(
-              { err: statusErr, podId },
-              'Failed to check PR status after merge failure',
-            );
+            logger.warn({ err: statusErr, podId }, 'Failed to check PR status after merge failure');
           }
           emitActivityStatus(podId, 'PR merge failed — pod still completing');
         }
@@ -2595,10 +2539,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         } catch (err) {
           logger.error({ err, podId }, 'Failed to create/merge PR during approval');
-          emitActivityStatus(
-            podId,
-            'PR creation failed — branch is pushed but no PR was merged',
-          );
+          emitActivityStatus(podId, 'PR creation failed — branch is pushed but no PR was merged');
         }
       } else if (pod.worktreePath) {
         // Fallback: no PR manager configured — push branch directly
@@ -2699,10 +2640,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         throw err;
       }
 
-      logger.info(
-        { podId, reason, previousStatus },
-        'Pod rejected, resuming agent with feedback',
-      );
+      logger.info({ podId, reason, previousStatus }, 'Pod rejected, resuming agent with feedback');
     },
 
     async pauseSession(podId: string): Promise<void> {
@@ -3327,10 +3265,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 page.screenshotBase64 = ss.base64;
               }
             }
-            logger.info(
-              { podId, count: screenshots.length },
-              'Collected validation screenshots',
-            );
+            logger.info({ podId, count: screenshots.length }, 'Collected validation screenshots');
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to collect screenshots');
           }
@@ -3437,10 +3372,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               if (hoistedResult && hoistedResult.overall === 'pass') {
                 // Deeper review resolved the false positives — use the hoisted result
                 effectiveResult = hoistedResult;
-                emitActivityStatus(
-                  podId,
-                  'Deeper review tier passed — overriding Tier 1 result',
-                );
+                emitActivityStatus(podId, 'Deeper review tier passed — overriding Tier 1 result');
                 logger.info({ podId }, 'Auto-hoist resolved recurring findings');
                 // Update stored result with the hoisted one
                 podRepo.update(podId, { lastValidationResult: hoistedResult });
@@ -4197,10 +4129,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         { podId, oldMax: pod.maxValidationAttempts, newMax, additionalAttempts },
         'Extended validation attempts',
       );
-      emitActivityStatus(
-        podId,
-        `Validation attempts extended to ${newMax} — resuming validation`,
-      );
+      emitActivityStatus(podId, `Validation attempts extended to ${newMax} — resuming validation`);
       await this.triggerValidation(podId);
     },
 
@@ -4235,10 +4164,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       transition(pod, 'merge_pending', {
         mergeBlockReason: 'Awaiting merge — PR fix attempts extended',
       });
-      emitActivityStatus(
-        podId,
-        `PR fix attempts extended to ${newMax} — resuming merge polling`,
-      );
+      emitActivityStatus(podId, `PR fix attempts extended to ${newMax} — resuming merge polling`);
       startMergePolling(podId);
       logger.info(
         { podId, oldMax: currentMax, newMax, additionalAttempts },
@@ -4305,11 +4231,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
       if (!pod.containerId) {
-        throw new AutopodError(
-          `Pod ${podId} has no running container`,
-          'INVALID_STATE',
-          409,
-        );
+        throw new AutopodError(`Pod ${podId} has no running container`, 'INVALID_STATE', 409);
       }
       await performCredentialInjection(podId, service);
       emitActivityStatus(podId, `${service} credentials injected.`);

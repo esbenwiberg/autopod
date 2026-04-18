@@ -1,5 +1,5 @@
-import type { RuntimeType } from './types/runtime.js';
 import type { PodStatus } from './types/pod.js';
+import type { RuntimeType } from './types/runtime.js';
 
 export class AutopodError extends Error {
   constructor(
@@ -35,11 +35,7 @@ export class PodNotFoundError extends AutopodError {
 
 export class InvalidStateTransitionError extends AutopodError {
   constructor(podId: string, from: PodStatus, to: PodStatus) {
-    super(
-      `Cannot transition pod ${podId} from ${from} to ${to}`,
-      'INVALID_STATE_TRANSITION',
-      409,
-    );
+    super(`Cannot transition pod ${podId} from ${from} to ${to}`, 'INVALID_STATE_TRANSITION', 409);
     this.name = 'InvalidStateTransitionError';
   }
 }

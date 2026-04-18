@@ -1,9 +1,9 @@
 import { PodNotFoundError } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
-import { resolveSessionId } from './id-resolver.js';
+import { resolvePodId } from './id-resolver.js';
 
-describe('resolveSessionId', () => {
+describe('resolvePodId', () => {
   const mockClient = {
     listSessions: vi.fn(),
   } as unknown as AutopodClient;
@@ -13,13 +13,13 @@ describe('resolveSessionId', () => {
   });
 
   it('returns full ID when 8+ characters', async () => {
-    const result = await resolveSessionId(mockClient, 'abcd1234');
+    const result = await resolvePodId(mockClient, 'abcd1234');
     expect(result).toBe('abcd1234');
     expect(mockClient.listSessions).not.toHaveBeenCalled();
   });
 
   it('rejects IDs shorter than 3 characters', async () => {
-    await expect(resolveSessionId(mockClient, 'ab')).rejects.toThrow('at least 3 characters');
+    await expect(resolvePodId(mockClient, 'ab')).rejects.toThrow('at least 3 characters');
   });
 
   it('resolves partial ID to full ID', async () => {
@@ -28,7 +28,7 @@ describe('resolveSessionId', () => {
       { id: 'efgh5678' },
     ]);
 
-    const result = await resolveSessionId(mockClient, 'abc');
+    const result = await resolvePodId(mockClient, 'abc');
     expect(result).toBe('abcd1234');
   });
 
@@ -37,7 +37,7 @@ describe('resolveSessionId', () => {
       { id: 'efgh5678' },
     ]);
 
-    await expect(resolveSessionId(mockClient, 'xyz')).rejects.toThrow(PodNotFoundError);
+    await expect(resolvePodId(mockClient, 'xyz')).rejects.toThrow(PodNotFoundError);
   });
 
   it('throws on ambiguous matches', async () => {
@@ -46,6 +46,6 @@ describe('resolveSessionId', () => {
       { id: 'abce5678' },
     ]);
 
-    await expect(resolveSessionId(mockClient, 'abc')).rejects.toThrow('Ambiguous');
+    await expect(resolvePodId(mockClient, 'abc')).rejects.toThrow('Ambiguous');
   });
 });

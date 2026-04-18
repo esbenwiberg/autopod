@@ -84,10 +84,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   program
     .command('start <profile> [task]')
     .description('Start a pod (unified). Flags pick the pod config.')
-    .option(
-      '--agent <mode>',
-      'Who drives the pod: auto (default, runs the agent) or interactive',
-    )
+    .option('--agent <mode>', 'Who drives the pod: auto (default, runs the agent) or interactive')
     .option('--output <target>', 'Where output goes: pr | branch | artifact | none')
     .option('--validate', 'Run full validation pipeline before completing')
     .option('--no-validate', 'Skip validation')
@@ -421,9 +418,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           console.log(chalk.dim('No validated pods to approve.'));
         } else {
           console.log(
-            chalk.green(
-              `Approved ${result.approved.length} pod(s): ${result.approved.join(', ')}`,
-            ),
+            chalk.green(`Approved ${result.approved.length} pod(s): ${result.approved.join(', ')}`),
           );
         }
         return;
@@ -461,9 +456,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       const client = getClient();
 
       if (opts.allFailed) {
-        const result = await withSpinner('Killing failed pods...', () =>
-          client.killAllFailed(),
-        );
+        const result = await withSpinner('Killing failed pods...', () => client.killAllFailed());
         if (result.killed.length === 0) {
           console.log(chalk.dim('No failed pods to kill.'));
         } else {

@@ -30,7 +30,7 @@ exports[`Card Builder > buildErrorCard > matches snapshot 1`] = `
           "value": "my-app",
         },
         {
-          "title": "Session",
+          "title": "Pod",
           "value": "sess-abc123",
         },
         {
@@ -80,7 +80,7 @@ exports[`Card Builder > buildFailedCard > matches snapshot 1`] = `
           "value": "my-app",
         },
         {
-          "title": "Session",
+          "title": "Pod",
           "value": "sess-abc123",
         },
       ],
@@ -129,7 +129,7 @@ exports[`Card Builder > buildNeedsInputCard > matches snapshot 1`] = `
           "value": "my-app",
         },
         {
-          "title": "Session",
+          "title": "Pod",
           "value": "sess-abc123",
         },
         {
@@ -172,7 +172,7 @@ exports[`Card Builder > buildValidatedCard > matches snapshot 1`] = `
     {
       "color": "good",
       "size": "Medium",
-      "text": "Session Validated",
+      "text": "Pod Validated",
       "type": "TextBlock",
       "weight": "Bolder",
     },
@@ -201,7 +201,7 @@ exports[`Card Builder > buildValidatedCard > matches snapshot 1`] = `
           "value": "+120 / -30",
         },
         {
-          "title": "Session",
+          "title": "Pod",
           "value": "sess-abc123",
         },
       ],

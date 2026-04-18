@@ -294,7 +294,7 @@ describe('LocalWorktreeManager', () => {
     it('truncates diff at file boundaries when too long', async () => {
       // Two file hunks — first fits in 60 chars, second should be omitted
       const hunk1 = 'diff --git a/small.ts b/small.ts\n+small change\n';
-      const hunk2 = 'diff --git a/big.ts b/big.ts\n+' + 'x'.repeat(200) + '\n';
+      const hunk2 = `diff --git a/big.ts b/big.ts\n+${'x'.repeat(200)}\n`;
       setupExecFileMock({
         'merge-base': { stdout: 'abc1234\n' },
         'diff abc1234': { stdout: hunk1 + hunk2 },
@@ -782,7 +782,7 @@ describe('LocalWorktreeManager', () => {
 
 describe('truncateDiffAtFileBoundary', () => {
   const h1 = 'diff --git a/a.ts b/a.ts\n+line\n';
-  const h2 = 'diff --git a/b.ts b/b.ts\n+' + 'x'.repeat(200) + '\n';
+  const h2 = `diff --git a/b.ts b/b.ts\n+${'x'.repeat(200)}\n`;
   const h3 = 'diff --git a/c.ts b/c.ts\n+other\n';
 
   it('returns diff unchanged when under limit', () => {

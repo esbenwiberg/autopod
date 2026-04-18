@@ -1,10 +1,6 @@
 import type { EscalationConfig, Profile } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
-import {
-  mergeClaudeMdSections,
-  mergeMcpServers,
-  mergeSkills,
-} from '../pods/injection-merger.js';
+import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from '../pods/injection-merger.js';
 
 const MAX_INHERITANCE_DEPTH = 5;
 

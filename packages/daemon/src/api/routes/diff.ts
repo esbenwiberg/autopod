@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type { FastifyInstance } from 'fastify';
-import type { ProfileStore } from '../../profiles/index.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
+import type { ProfileStore } from '../../profiles/index.js';
 
 const execFileAsync = promisify(execFile);
 

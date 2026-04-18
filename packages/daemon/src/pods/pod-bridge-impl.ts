@@ -19,9 +19,9 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
-import type { ProgressEventRepository } from './progress-event-repository.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
+import type { ProgressEventRepository } from './progress-event-repository.js';
 
 export interface SessionBridgeDependencies {
   podManager: PodManager;
@@ -108,11 +108,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       return profile.escalation.askAi.model;
     },
 
-    async callReviewerModel(
-      podId: string,
-      question: string,
-      context?: string,
-    ): Promise<string> {
+    async callReviewerModel(podId: string, question: string, context?: string): Promise<string> {
       const model = this.getReviewerModel(podId);
       const pod = podManager.getSession(podId);
 
@@ -172,10 +168,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const pod = podManager.getSession(podId);
       // The pod manager tracks escalation count via pod updates
       // This is a no-op here since the pod manager handles it via consumeAgentEvents
-      logger.debug(
-        { podId, currentCount: pod.escalationCount },
-        'Escalation count incremented',
-      );
+      logger.debug({ podId, currentCount: pod.escalationCount }, 'Escalation count incremented');
     },
 
     reportPlan(podId: string, summary: string, steps: string[]): void {
@@ -452,8 +445,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     listMemories(podId: string, scope: MemoryScope): MemoryEntry[] {
       if (!memoryRepo) return [];
       const pod = podManager.getSession(podId);
-      const scopeId =
-        scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
+      const scopeId = scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
       return memoryRepo.list(scope, scopeId, true);
     },
 
@@ -465,11 +457,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       // pod's private pod-scoped entries or unapproved pending suggestions.
       const pod = podManager.getSession(podId);
       const expectedScopeId =
-        entry.scope === 'global'
-          ? null
-          : entry.scope === 'profile'
-            ? pod.profileName
-            : podId;
+        entry.scope === 'global' ? null : entry.scope === 'profile' ? pod.profileName : podId;
       if (entry.scopeId !== expectedScopeId) {
         throw new Error(`Memory ${id} is not readable from this pod`);
       }
@@ -483,8 +471,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     searchMemories(podId: string, scope: MemoryScope, query: string): MemoryEntry[] {
       if (!memoryRepo) return [];
       const pod = podManager.getSession(podId);
-      const scopeId =
-        scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
+      const scopeId = scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
       return memoryRepo.search(query, scope, scopeId);
     },
 
@@ -507,8 +494,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         }
       }
       const pod = podManager.getSession(podId);
-      const scopeId =
-        scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
+      const scopeId = scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
       const id = generateId(8);
       // Pod-scoped memories are ephemeral working notes — auto-approve to avoid
       // interrupting users for things that only affect a single pod run.

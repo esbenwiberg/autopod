@@ -625,11 +625,7 @@ export function truncateDiffAtFileBoundary(diff: string, maxLength: number): str
 
   if (omitted.length === 0) return diff;
 
-  const warning =
-    `\n⚠ DIFF TRUNCATED: ${omitted.length} file${omitted.length > 1 ? 's' : ''} omitted (diff exceeded ${maxLength} chars).\n` +
-    `Omitted files — use read_file / Read tools to inspect them:\n` +
-    omitted.map((f) => `  - ${f}`).join('\n') +
-    '\n';
+  const warning = `\n⚠ DIFF TRUNCATED: ${omitted.length} file${omitted.length > 1 ? 's' : ''} omitted (diff exceeded ${maxLength} chars).\nOmitted files — use read_file / Read tools to inspect them:\n${omitted.map((f) => `  - ${f}`).join('\n')}\n`;
 
   return included.join('') + warning;
 }

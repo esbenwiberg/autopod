@@ -12,8 +12,6 @@ import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
 import type { IssueWatcherRepository } from '../issue-watcher/issue-watcher-repository.js';
-import type { ProfileStore } from '../profiles/index.js';
-import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import type {
   ContainerManagerFactory,
   EventBus,
@@ -23,6 +21,8 @@ import type {
   PodManager,
   PodQueue,
 } from '../pods/index.js';
+import type { ProfileStore } from '../profiles/index.js';
+import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
 import { mcpProxyHandler } from './mcp-proxy-handler.js';
@@ -37,9 +37,9 @@ import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
 import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryRoutes } from './routes/memory.js';
+import { podRoutes } from './routes/pods.js';
 import { profileRoutes } from './routes/profiles.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
-import { podRoutes } from './routes/pods.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { websocketHandler } from './websocket.js';
 import './types.js';

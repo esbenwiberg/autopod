@@ -1,8 +1,8 @@
 import { AutopodError, generateId } from '@autopod/shared';
 import type {
   CreateScheduledJobRequest,
-  ScheduledJob,
   Pod,
+  ScheduledJob,
   UpdateScheduledJobRequest,
 } from '@autopod/shared';
 import cronParser from 'cron-parser';

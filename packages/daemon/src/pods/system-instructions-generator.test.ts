@@ -1,4 +1,4 @@
-import type { MemoryEntry, Profile, Pod } from '@autopod/shared';
+import type { MemoryEntry, Pod, Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import {
   generateSystemInstructions,

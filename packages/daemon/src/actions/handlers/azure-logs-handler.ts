@@ -66,7 +66,7 @@ export function createAzureLogsHandler(config: HandlerConfig): ActionHandler {
     // Azure RBAC propagation after PIM activation can take up to ~5 minutes.
     // Retry on InsufficientAccessError (403) with increasing backoff so agents
     // don't need to manually wait after activate_pim_role.
-    const PIM_RETRY_DELAYS_MS = [15_000, 30_000, 60_000, 60_000]; // max ~2.75 min
+    const PIM_RETRY_DELAYS_MS = [15_000, 30_000, 60_000, 60_000] as const; // max ~2.75 min
 
     for (let attempt = 0; ; attempt++) {
       // Re-acquire token on retries — cached token is fine but a fresh one avoids stale state
@@ -87,8 +87,8 @@ export function createAzureLogsHandler(config: HandlerConfig): ActionHandler {
         const isInsufficientAccess =
           response.status === 403 && body.includes('InsufficientAccessError');
 
-        if (isInsufficientAccess && attempt < PIM_RETRY_DELAYS_MS.length) {
-          const delayMs = PIM_RETRY_DELAYS_MS[attempt]!;
+        const delayMs = isInsufficientAccess ? PIM_RETRY_DELAYS_MS[attempt] : undefined;
+        if (delayMs !== undefined) {
           log.warn(
             { attempt: attempt + 1, delayMs },
             'Azure Monitor 403 InsufficientAccessError — likely PIM propagation delay, retrying',

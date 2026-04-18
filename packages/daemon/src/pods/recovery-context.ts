@@ -43,10 +43,7 @@ async function getUncommittedDiff(worktreePath: string): Promise<string> {
  * Build a continuation prompt for Claude --resume.
  * Gives the agent enough context to pick up where it left off.
  */
-export async function buildContinuationPrompt(
-  pod: Pod,
-  worktreePath: string,
-): Promise<string> {
+export async function buildContinuationPrompt(pod: Pod, worktreePath: string): Promise<string> {
   const gitLog = await getGitLog(worktreePath, 10);
   const uncommittedDiff = await getUncommittedDiff(worktreePath);
 

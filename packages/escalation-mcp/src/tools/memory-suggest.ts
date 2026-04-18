@@ -6,13 +6,7 @@ export async function memorySuggest(
   input: { scope: MemoryScope; path: string; content: string; rationale?: string },
   bridge: PodBridge,
 ): Promise<string> {
-  const id = bridge.suggestMemory(
-    podId,
-    input.scope,
-    input.path,
-    input.content,
-    input.rationale,
-  );
+  const id = bridge.suggestMemory(podId, input.scope, input.path, input.content, input.rationale);
   const rationaleNote = input.rationale
     ? ''
     : '\nNote: no rationale provided. Suggestions without rationale are harder to approve.';

@@ -58,8 +58,7 @@ function statusTransitions(events: SystemEvent[]): Array<{ from: string; to: str
   return (
     events
       .filter(
-        (e): e is SystemEvent & { type: 'pod.status_changed' } =>
-          e.type === 'pod.status_changed',
+        (e): e is SystemEvent & { type: 'pod.status_changed' } => e.type === 'pod.status_changed',
       )
       // biome-ignore lint/suspicious/noExplicitAny: accessing typed event fields via discriminated union cast
       .map((e) => ({ from: (e as any).previousStatus, to: (e as any).newStatus }))
@@ -366,10 +365,7 @@ describe('Pod Lifecycle E2E', () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
 
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Task' },
-        'user-1',
-      );
+      const pod = manager.createSession({ profileName: 'test-profile', task: 'Task' }, 'user-1');
 
       // Simulate provisioned state with container and worktree
       ctx.podRepo.update(pod.id, {
@@ -512,10 +508,7 @@ describe('Pod Lifecycle E2E', () => {
       );
       const manager = createPodManager(ctx.deps);
 
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Task' },
-        'user-1',
-      );
+      const pod = manager.createSession({ profileName: 'test-profile', task: 'Task' }, 'user-1');
 
       await manager.processPod(pod.id);
 
@@ -530,10 +523,7 @@ describe('Pod Lifecycle E2E', () => {
       );
       const manager = createPodManager(ctx.deps);
 
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Task' },
-        'user-1',
-      );
+      const pod = manager.createSession({ profileName: 'test-profile', task: 'Task' }, 'user-1');
 
       await manager.processPod(pod.id);
 
@@ -548,10 +538,7 @@ describe('Pod Lifecycle E2E', () => {
       );
       const manager = createPodManager(ctx.deps);
 
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Task' },
-        'user-1',
-      );
+      const pod = manager.createSession({ profileName: 'test-profile', task: 'Task' }, 'user-1');
       ctx.podRepo.update(pod.id, {
         status: 'running',
         containerId: 'ctr-1',
@@ -659,10 +646,7 @@ describe('Pod Lifecycle E2E', () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
 
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Task' },
-        'user-1',
-      );
+      const pod = manager.createSession({ profileName: 'test-profile', task: 'Task' }, 'user-1');
 
       // Move to running state
       ctx.podRepo.update(pod.id, { status: 'running' });

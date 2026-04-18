@@ -1,8 +1,8 @@
-import type { CreatePodRequest, Profile, Pod, SystemEvent } from '@autopod/shared';
+import type { CreatePodRequest, Pod, Profile, SystemEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
-import type { ProfileStore } from '../profiles/profile-store.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
+import type { ProfileStore } from '../profiles/profile-store.js';
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
 import { createIssueClient } from './issue-client.js';
 import type { IssueWatcherRepository } from './issue-watcher-repository.js';
@@ -177,10 +177,7 @@ export function createIssueWatcherService(
 
     // Post status comment
     try {
-      await client.addComment(
-        candidate.id,
-        `autopod pod \`${pod.id}\` started for this issue.`,
-      );
+      await client.addComment(candidate.id, `autopod pod \`${pod.id}\` started for this issue.`);
     } catch (err) {
       logger.warn({ err, issueId: candidate.id }, 'Failed to post status comment on issue');
     }
@@ -300,10 +297,7 @@ export function createIssueWatcherService(
         } else {
           await client.removeLabel(tracked.issueId, `${prefix}:in-progress`);
           await client.addLabel(tracked.issueId, `${prefix}:failed`);
-          await client.addComment(
-            tracked.issueId,
-            `autopod pod \`${podId}\` ${newStatus}.`,
-          );
+          await client.addComment(tracked.issueId, `autopod pod \`${podId}\` ${newStatus}.`);
           issueWatcherRepo.updateStatus(tracked.id, 'failed');
         }
 
@@ -339,10 +333,7 @@ export function createIssueWatcherService(
         const question = payload.question ?? 'Pod needs human input.';
         await client.addComment(tracked.issueId, `**Pod needs input:**\n\n${question}`);
       } catch (err) {
-        logger.error(
-          { err, podId: event.podId },
-          'Failed to post escalation comment on issue',
-        );
+        logger.error({ err, podId: event.podId }, 'Failed to post escalation comment on issue');
       }
     })();
   }

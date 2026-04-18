@@ -1,4 +1,4 @@
-import type { Profile, Pod, ValidationResult } from '@autopod/shared';
+import type { Pod, Profile, ValidationResult } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/index.js';
 import {

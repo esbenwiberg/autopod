@@ -56,9 +56,7 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
 
       if (!server) {
         log.warn({ podId, serverName }, 'MCP proxy: server not found');
-        return reply
-          .status(404)
-          .send({ error: `MCP server '${serverName}' not found for pod` });
+        return reply.status(404).send({ error: `MCP server '${serverName}' not found for pod` });
       }
 
       // SSRF guard: reject requests targeting private/loopback addresses.

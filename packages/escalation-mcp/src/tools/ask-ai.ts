@@ -8,11 +8,7 @@ export interface AskAiInput {
   domain?: string;
 }
 
-export async function askAi(
-  podId: string,
-  input: AskAiInput,
-  bridge: PodBridge,
-): Promise<string> {
+export async function askAi(podId: string, input: AskAiInput, bridge: PodBridge): Promise<string> {
   // Check rate limit
   const currentCount = bridge.getAiEscalationCount(podId);
   const maxCalls = bridge.getMaxAiCalls(podId);

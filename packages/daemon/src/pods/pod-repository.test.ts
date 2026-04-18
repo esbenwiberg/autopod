@@ -3,11 +3,7 @@ import path from 'node:path';
 import { PodNotFoundError } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  type NewPod,
-  type PodRepository,
-  createPodRepository,
-} from './pod-repository.js';
+import { type NewPod, type PodRepository, createPodRepository } from './pod-repository.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
 const MIGRATION_FILES = fs
@@ -24,6 +20,8 @@ function createTestDb(): Database.Database {
       .split(';')
       .map((s) => s.trim())
       .filter(Boolean);
+    const needsFkDisabled = /PRAGMA\s+foreign_keys\s*=\s*OFF/i.test(sql);
+    if (needsFkDisabled) db.pragma('foreign_keys = OFF');
     for (const stmt of statements) {
       try {
         db.exec(`${stmt};`);
@@ -32,6 +30,7 @@ function createTestDb(): Database.Database {
         if (!msg.includes('duplicate column name')) throw err;
       }
     }
+    if (needsFkDisabled) db.pragma('foreign_keys = ON');
   }
   return db;
 }
@@ -246,12 +245,8 @@ describe('PodRepository', () => {
       repo.insert(validSession);
       repo.insert({ ...validSession, id: 'sess-002', task: 'Second task' });
       // Force different timestamps so ordering is deterministic
-      db.prepare(
-        "UPDATE pods SET created_at = '2026-01-01T00:00:00' WHERE id = 'sess-001'",
-      ).run();
-      db.prepare(
-        "UPDATE pods SET created_at = '2026-01-02T00:00:00' WHERE id = 'sess-002'",
-      ).run();
+      db.prepare("UPDATE pods SET created_at = '2026-01-01T00:00:00' WHERE id = 'sess-001'").run();
+      db.prepare("UPDATE pods SET created_at = '2026-01-02T00:00:00' WHERE id = 'sess-002'").run();
 
       const pods = repo.list();
       expect(pods).toHaveLength(2);

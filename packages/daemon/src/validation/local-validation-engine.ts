@@ -1478,10 +1478,7 @@ async function executeAcChecks(
       );
       if (hostResult !== null) return hostResult;
       // Host Playwright produced no markers — fall back to container with a freshly generated script
-      log?.warn(
-        { podId: config.podId },
-        'Host AC checks failed — falling back to container',
-      );
+      log?.warn({ podId: config.podId }, 'Host AC checks failed — falling back to container');
       const containerScript = await generateScript('container');
       return await executeAcInContainer(
         containerManager,

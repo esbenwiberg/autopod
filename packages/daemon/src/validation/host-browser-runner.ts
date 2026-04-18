@@ -17,10 +17,7 @@ export interface HostBrowserRunner {
   isAvailable(): Promise<boolean>;
 
   /** Execute a Playwright script on the host. Returns stdout/stderr/exitCode. */
-  runScript(
-    script: string,
-    opts: { timeout: number; podId: string },
-  ): Promise<BrowserRunResult>;
+  runScript(script: string, opts: { timeout: number; podId: string }): Promise<BrowserRunResult>;
 
   /** Read a screenshot from the host filesystem as base64. */
   readScreenshot(path: string): Promise<string>;
@@ -128,10 +125,7 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
         ...childSpawnOpts(),
       });
 
-      log.info(
-        { podId: opts.podId, exitCode: result.exitCode },
-        'Host Playwright script finished',
-      );
+      log.info({ podId: opts.podId, exitCode: result.exitCode }, 'Host Playwright script finished');
 
       return result;
     },

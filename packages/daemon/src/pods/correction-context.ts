@@ -1,4 +1,4 @@
-import type { Profile, Pod, ValidationResult } from '@autopod/shared';
+import type { Pod, Profile, ValidationResult } from '@autopod/shared';
 import { MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/index.js';
 import { formatFeedback } from './feedback-formatter.js';
@@ -104,12 +104,7 @@ export async function buildCorrectionMessage(
   validationResult: ValidationResult,
   containerManager: ContainerManager,
 ): Promise<string> {
-  const context = await buildCorrectionContext(
-    pod,
-    profile,
-    validationResult,
-    containerManager,
-  );
+  const context = await buildCorrectionContext(pod, profile, validationResult, containerManager);
 
   const feedback = formatFeedback({
     type: 'validation_failure',

@@ -26,7 +26,6 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './api/server.js';
 import type { AuthModule } from './interfaces/index.js';
-import { createProfileStore } from './profiles/index.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -36,6 +35,7 @@ import {
   createPodRepository,
 } from './pods/index.js';
 import { createNudgeRepository } from './pods/nudge-repository.js';
+import { createProfileStore } from './profiles/index.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
 const MIGRATION_FILES = fs

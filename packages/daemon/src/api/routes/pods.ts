@@ -23,7 +23,8 @@ export function podRoutes(
     const body = createPodRequestSchema.parse(request.body);
 
     // Interactive pods are local-only — reject if execution target is not 'local'
-    const isInteractive = body.options?.agentMode === 'interactive' || body.outputMode === 'workspace';
+    const isInteractive =
+      body.options?.agentMode === 'interactive' || body.outputMode === 'workspace';
     if (isInteractive) {
       const resolvedTarget = body.executionTarget ?? 'local';
       if (resolvedTarget !== 'local') {
@@ -107,18 +108,14 @@ export function podRoutes(
   });
 
   // GET /pods/:podId/report — HTML validation report (pod-token auth)
-  app.get(
-    '/pods/:podId/report',
-    { config: { auth: 'pod-token' } },
-    async (request, reply) => {
-      const { podId } = request.params as { podId: string };
-      const queryToken = (request.query as Record<string, string>)?.token;
-      const pod = podManager.getSession(podId);
-      const validations = podManager.getValidationHistory(podId);
-      const html = generateValidationReport(pod, validations, queryToken);
-      reply.type('text/html').send(html);
-    },
-  );
+  app.get('/pods/:podId/report', { config: { auth: 'pod-token' } }, async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const queryToken = (request.query as Record<string, string>)?.token;
+    const pod = podManager.getSession(podId);
+    const validations = podManager.getValidationHistory(podId);
+    const html = generateValidationReport(pod, validations, queryToken);
+    reply.type('text/html').send(html);
+  });
 
   // GET /pods/:podId/report/token — generate a pod token for report access
   app.get('/pods/:podId/report/token', async (request) => {
@@ -306,25 +303,17 @@ export function podRoutes(
   });
 
   // POST /pods/:podId/preview — start preview (pod-token auth)
-  app.post(
-    '/pods/:podId/preview',
-    { config: { auth: 'pod-token' } },
-    async (request) => {
-      const { podId } = request.params as { podId: string };
-      return podManager.startPreview(podId);
-    },
-  );
+  app.post('/pods/:podId/preview', { config: { auth: 'pod-token' } }, async (request) => {
+    const { podId } = request.params as { podId: string };
+    return podManager.startPreview(podId);
+  });
 
   // DELETE /pods/:podId/preview — stop preview (pod-token auth)
-  app.delete(
-    '/pods/:podId/preview',
-    { config: { auth: 'pod-token' } },
-    async (request) => {
-      const { podId } = request.params as { podId: string };
-      await podManager.stopPreview(podId);
-      return { ok: true };
-    },
-  );
+  app.delete('/pods/:podId/preview', { config: { auth: 'pod-token' } }, async (request) => {
+    const { podId } = request.params as { podId: string };
+    await podManager.stopPreview(podId);
+    return { ok: true };
+  });
 
   // DELETE /pods/:podId — delete a terminal pod
   app.delete('/pods/:podId', async (request, reply) => {

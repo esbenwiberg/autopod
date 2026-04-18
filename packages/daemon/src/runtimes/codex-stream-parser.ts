@@ -119,11 +119,7 @@ function mapEvent(event: CodexEvent, podId: string, logger?: Logger): AgentEvent
  * Each line is a JSON object. Malformed lines and unknown event types are
  * logged and skipped — never fatal.
  */
-async function* parse(
-  stream: Readable,
-  podId: string,
-  logger: Logger,
-): AsyncIterable<AgentEvent> {
+async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIterable<AgentEvent> {
   const rl = createInterface({ input: stream });
 
   for await (const line of rl) {

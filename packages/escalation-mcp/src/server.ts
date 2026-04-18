@@ -276,8 +276,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
           text =
             'No new commits found on the branch. Make sure you have committed and pushed your changes before triggering revalidation.';
         } else if (result.result === 'pass') {
-          text =
-            'Revalidation PASSED! The linked worker pod has been transitioned to validated.';
+          text = 'Revalidation PASSED! The linked worker pod has been transitioned to validated.';
         } else {
           text =
             'Revalidation FAILED. The fixes did not resolve all issues. Check the validation results and try again.';

@@ -3,8 +3,8 @@ import type {
   InjectedMcpServer,
   InjectedSkill,
   MemoryEntry,
-  Profile,
   Pod,
+  Profile,
 } from '@autopod/shared';
 import { MAX_MEMORY_INDEX_ENTRIES } from '@autopod/shared';
 import type { ResolvedSection } from './section-resolver.js';

@@ -80,9 +80,7 @@ export function createEscalationRepository(db: Database.Database): EscalationRep
 
     countBySessionAndType(podId: string, type: EscalationType): number {
       const row = db
-        .prepare(
-          'SELECT COUNT(*) as count FROM escalations WHERE pod_id = @podId AND type = @type',
-        )
+        .prepare('SELECT COUNT(*) as count FROM escalations WHERE pod_id = @podId AND type = @type')
         .get({ podId, type }) as { count: number };
       return row.count;
     },

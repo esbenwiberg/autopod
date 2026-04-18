@@ -64,11 +64,7 @@ export function terminalRoutes(
         return;
       }
 
-      if (
-        pod.status !== 'running' &&
-        pod.status !== 'paused' &&
-        pod.status !== 'awaiting_input'
-      ) {
+      if (pod.status !== 'running' && pod.status !== 'paused' && pod.status !== 'awaiting_input') {
         socket.close(4004, `Container not active (status: ${pod.status})`);
         return;
       }

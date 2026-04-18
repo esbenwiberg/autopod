@@ -4,7 +4,7 @@ import chalk from 'chalk';
 const EXIT_CODES: Record<string, number> = {
   AUTH_ERROR: 2,
   FORBIDDEN: 2,
-  SESSION_NOT_FOUND: 3,
+  POD_NOT_FOUND: 3,
   PROFILE_NOT_FOUND: 3,
   VALIDATION_ERROR: 4,
   DAEMON_UNREACHABLE: 5,
@@ -13,7 +13,7 @@ const EXIT_CODES: Record<string, number> = {
 const SUGGESTIONS: Record<string, string> = {
   AUTH_ERROR: 'Try: ap login',
   FORBIDDEN: 'You do not have permission for this action.',
-  SESSION_NOT_FOUND: 'Check the pod ID with: ap ls',
+  POD_NOT_FOUND: 'Check the pod ID with: ap ls',
   PROFILE_NOT_FOUND: 'Check available profiles with: ap profile ls',
   VALIDATION_ERROR: 'Check input and try again.',
   DAEMON_UNREACHABLE: 'Try: ap connect <url>',

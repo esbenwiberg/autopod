@@ -102,12 +102,7 @@ describe('NotificationService', () => {
     config = {
       teams: {
         webhookUrl: 'https://webhook.example.com',
-        enabledEvents: [
-          'pod_validated',
-          'pod_failed',
-          'pod_needs_input',
-          'pod_error',
-        ],
+        enabledEvents: ['pod_validated', 'pod_failed', 'pod_needs_input', 'pod_error'],
       },
     };
   });

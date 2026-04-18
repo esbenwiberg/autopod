@@ -184,11 +184,7 @@ describe('buildReworkPrompt', () => {
     mockExecFileResults([{ stdout: '' }, { stdout: '' }]);
 
     const pod = makeSession();
-    const prompt = await buildReworkPrompt(
-      pod,
-      '/tmp/worktree/recovery',
-      'Pod was killed.',
-    );
+    const prompt = await buildReworkPrompt(pod, '/tmp/worktree/recovery', 'Pod was killed.');
 
     expect(prompt).toContain('No commits from the previous attempt.');
   });

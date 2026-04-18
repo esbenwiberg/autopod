@@ -17,9 +17,7 @@ describe('rewriteMcpUrls', () => {
     const result = rewriteMcpUrls(servers, POD_ID, PROXY_BASE);
 
     expect(result).toHaveLength(1);
-    expect(result[0].url).toBe(
-      `${PROXY_BASE}/mcp-proxy/${encodeURIComponent('github')}/${POD_ID}`,
-    );
+    expect(result[0].url).toBe(`${PROXY_BASE}/mcp-proxy/${encodeURIComponent('github')}/${POD_ID}`);
   });
 
   it('encodes server names with special characters', () => {

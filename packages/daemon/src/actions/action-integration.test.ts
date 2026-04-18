@@ -442,18 +442,9 @@ describe('Action Control Plane Integration', () => {
       };
 
       // Execute 3 times
-      await engine.execute(
-        { podId: 'sess-integration', actionName: 'ping', params: {} },
-        policy,
-      );
-      await engine.execute(
-        { podId: 'sess-integration', actionName: 'ping', params: {} },
-        policy,
-      );
-      await engine.execute(
-        { podId: 'sess-integration', actionName: 'ping', params: {} },
-        policy,
-      );
+      await engine.execute({ podId: 'sess-integration', actionName: 'ping', params: {} }, policy);
+      await engine.execute({ podId: 'sess-integration', actionName: 'ping', params: {} }, policy);
+      await engine.execute({ podId: 'sess-integration', actionName: 'ping', params: {} }, policy);
 
       // Verify audit trail
       const entries = auditRepo.listBySession('sess-integration');

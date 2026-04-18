@@ -52,20 +52,14 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
   switch (status) {
     case 'running': {
       // Container still running — reconnect log stream and resume event consumption
-      logger.info(
-        { podId: pod.id, containerId },
-        'ACI container still running, reconnecting',
-      );
+      logger.info({ podId: pod.id, containerId }, 'ACI container still running, reconnecting');
       await onReconnected(pod.id, containerId);
       break;
     }
 
     case 'stopped': {
       // Container finished — trigger completion handling
-      logger.info(
-        { podId: pod.id, containerId },
-        'ACI container stopped, triggering completion',
-      );
+      logger.info({ podId: pod.id, containerId }, 'ACI container stopped, triggering completion');
       // Mark as completing — the pod manager's handleCompletion will take over
       await onReconnected(pod.id, containerId);
       break;
@@ -73,10 +67,7 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
 
     case 'unknown': {
       // Container gone — mark pod as failed
-      logger.warn(
-        { podId: pod.id, containerId },
-        'ACI container not found, marking pod failed',
-      );
+      logger.warn({ podId: pod.id, containerId }, 'ACI container not found, marking pod failed');
       markSessionFailed(pod, podRepo, eventBus, logger);
       break;
     }

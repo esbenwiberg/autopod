@@ -19,8 +19,6 @@ import type {
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
-import type { ProfileStore } from '../profiles/index.js';
-import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
 import { createEscalationRepository } from '../pods/escalation-repository.js';
 import type { EscalationRepository } from '../pods/escalation-repository.js';
 import { createEventBus } from '../pods/event-bus.js';
@@ -31,6 +29,8 @@ import type { NudgeRepository } from '../pods/nudge-repository.js';
 import type { PodManagerDependencies } from '../pods/pod-manager.js';
 import { createPodRepository } from '../pods/pod-repository.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import type { ProfileStore } from '../profiles/index.js';
+import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
 
 export const logger = pino({ level: 'silent' });
 
@@ -56,6 +56,8 @@ export function createTestDb(): Database.Database {
       .split(';')
       .map((s) => s.trim())
       .filter(Boolean);
+    const needsFkDisabled = /PRAGMA\s+foreign_keys\s*=\s*OFF/i.test(sql);
+    if (needsFkDisabled) db.pragma('foreign_keys = OFF');
     for (const stmt of statements) {
       try {
         db.exec(`${stmt};`);
@@ -64,6 +66,7 @@ export function createTestDb(): Database.Database {
         if (!msg.includes('duplicate column name')) throw err;
       }
     }
+    if (needsFkDisabled) db.pragma('foreign_keys = ON');
   }
   return db;
 }

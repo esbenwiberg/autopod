@@ -30,14 +30,45 @@ ALTER TABLE nudge_messages RENAME COLUMN session_id TO pod_id;
 -- ── Child table: action_audit ─────────────────────────────────────────────────
 ALTER TABLE action_audit RENAME COLUMN session_id TO pod_id;
 
--- ── Child table: task_summaries ───────────────────────────────────────────────
-ALTER TABLE task_summaries RENAME COLUMN session_id TO pod_id;
+-- ── Child table: session_progress_events ──────────────────────────────────────
+ALTER TABLE session_progress_events RENAME COLUMN session_id TO pod_id;
 
 -- ── Child table: pending_validation_overrides ─────────────────────────────────
 ALTER TABLE pending_validation_overrides RENAME COLUMN session_id TO pod_id;
 
 -- ── Child table: memory_entries ───────────────────────────────────────────────
-ALTER TABLE memory_entries RENAME COLUMN created_by_session_id TO created_by_pod_id;
+-- Needs a full rebuild: the CHECK constraint embeds the 'session' scope literal,
+-- which SQLite can only change via table recreation. Also renames the
+-- created_by_session_id column in the same pass.
+CREATE TABLE memory_entries_new (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL CHECK(scope IN ('global','profile','pod')),
+  scope_id TEXT,
+  path TEXT NOT NULL,
+  content TEXT NOT NULL,
+  content_sha256 TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  approved INTEGER NOT NULL DEFAULT 0,
+  created_by_pod_id TEXT REFERENCES pods(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  rationale TEXT
+);
+
+INSERT INTO memory_entries_new (
+  id, scope, scope_id, path, content, content_sha256, version, approved,
+  created_by_pod_id, created_at, updated_at, rationale
+)
+SELECT
+  id,
+  CASE scope WHEN 'session' THEN 'pod' ELSE scope END,
+  scope_id, path, content, content_sha256, version, approved,
+  created_by_session_id, created_at, updated_at, rationale
+FROM memory_entries;
+
+DROP TABLE memory_entries;
+ALTER TABLE memory_entries_new RENAME TO memory_entries;
+CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_entries(scope, scope_id, approved);
 
 -- ── Child table: watched_issues ───────────────────────────────────────────────
 ALTER TABLE watched_issues RENAME COLUMN session_id TO pod_id;

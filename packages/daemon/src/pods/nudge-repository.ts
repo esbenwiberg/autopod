@@ -18,9 +18,11 @@ export interface NudgeRepository {
 export function createNudgeRepository(db: Database.Database): NudgeRepository {
   return {
     queue(podId: string, message: string): void {
-      db.prepare(
-        'INSERT INTO nudge_messages (pod_id, message, created_at) VALUES (?, ?, ?)',
-      ).run(podId, message, new Date().toISOString());
+      db.prepare('INSERT INTO nudge_messages (pod_id, message, created_at) VALUES (?, ?, ?)').run(
+        podId,
+        message,
+        new Date().toISOString(),
+      );
     },
 
     consumeNext(podId: string): { hasMessage: boolean; message?: string } {
@@ -42,9 +44,7 @@ export function createNudgeRepository(db: Database.Database): NudgeRepository {
 
     listPending(podId: string): NudgeMessage[] {
       const rows = db
-        .prepare(
-          'SELECT * FROM nudge_messages WHERE pod_id = ? AND consumed = 0 ORDER BY id ASC',
-        )
+        .prepare('SELECT * FROM nudge_messages WHERE pod_id = ? AND consumed = 0 ORDER BY id ASC')
         .all(podId) as Array<Record<string, unknown>>;
 
       return rows.map((row) => ({

@@ -225,7 +225,9 @@ export function createProfileStore(
 
       // When a pod config is provided, prefer it; otherwise fall back to
       // legacy outputMode. We always write both so legacy readers keep working.
-      const legacyOutputMode = parsed.pod ? outputModeFromPodOptions(parsed.pod) : parsed.outputMode;
+      const legacyOutputMode = parsed.pod
+        ? outputModeFromPodOptions(parsed.pod)
+        : parsed.outputMode;
 
       db.prepare(`
         INSERT INTO profiles (

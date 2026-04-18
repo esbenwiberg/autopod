@@ -1,4 +1,5 @@
 import SwiftUI
+import AutopodClient
 
 /// Controls card information density in the fleet grid.
 public enum CardDensity: String, CaseIterable {

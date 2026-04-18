@@ -1,11 +1,7 @@
 import type { PodOptions, PodStatus } from '@autopod/shared';
 import { InvalidStateTransitionError, VALID_STATUS_TRANSITIONS } from '@autopod/shared';
 
-export function validateTransition(
-  podId: string,
-  from: PodStatus,
-  to: PodStatus,
-): void {
+export function validateTransition(podId: string, from: PodStatus, to: PodStatus): void {
   const valid = VALID_STATUS_TRANSITIONS[from];
   if (!valid.includes(to)) {
     throw new InvalidStateTransitionError(podId, from, to);

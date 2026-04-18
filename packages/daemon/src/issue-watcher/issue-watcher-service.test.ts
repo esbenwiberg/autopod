@@ -1,4 +1,4 @@
-import type { Profile, Pod, SystemEvent } from '@autopod/shared';
+import type { Pod, Profile, SystemEvent } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEventBus } from '../pods/event-bus.js';

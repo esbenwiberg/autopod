@@ -68,10 +68,7 @@ describe('Token budget — createSession', () => {
     insertBudgetProfile(ctx.db, { tokenBudget: 50_000 });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
     expect(pod.tokenBudget).toBe(50_000);
   });
 
@@ -104,10 +101,7 @@ describe('Token budget — createSession', () => {
     // test-profile from createTestContext has no tokenBudget
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
     expect(pod.tokenBudget).toBeNull();
   });
 });
@@ -118,10 +112,7 @@ describe('Token budget — consumeAgentEvents', () => {
     insertBudgetProfile(ctx.db, { tokenBudget: 100_000 });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
     // consumeAgentEvents expects pod in 'running' state
     ctx.podRepo.update(pod.id, { status: 'running' });
 
@@ -148,10 +139,7 @@ describe('Token budget — consumeAgentEvents', () => {
     });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
     ctx.podRepo.update(pod.id, { status: 'running' });
 
     // 8500 tokens total > 8000 warn threshold, < 10000 limit
@@ -176,10 +164,7 @@ describe('Token budget — consumeAgentEvents', () => {
     });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
     ctx.podRepo.update(pod.id, { status: 'running' });
 
     // 6000 tokens total > 5000 budget
@@ -200,10 +185,7 @@ describe('Token budget — consumeAgentEvents', () => {
     insertBudgetProfile(ctx.db, { tokenBudget: 5_000, tokenBudgetPolicy: 'hard' });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
     ctx.podRepo.update(pod.id, { status: 'running' });
 
     async function* events() {
@@ -225,10 +207,7 @@ describe('Token budget — consumeAgentEvents', () => {
     });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
     ctx.podRepo.update(pod.id, { status: 'running' });
 
     async function* events() {
@@ -247,10 +226,7 @@ describe('Token budget — consumeAgentEvents', () => {
     insertBudgetProfile(ctx.db, { tokenBudget: 5_000 });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
     ctx.podRepo.update(pod.id, { status: 'running' });
 
     // completeEvent without token counts → should not pause
@@ -271,10 +247,7 @@ describe('Token budget — sendMessage approval', () => {
     insertBudgetProfile(ctx.db, { tokenBudget: 5_000, tokenBudgetPolicy: 'soft' });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
 
     // Manually put pod into budget-paused state
     ctx.podRepo.update(pod.id, {
@@ -300,10 +273,7 @@ describe('Token budget — sendMessage approval', () => {
     });
 
     const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Do stuff' },
-      'user-1',
-    );
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
 
     // Already used 1 extension
     ctx.podRepo.update(pod.id, {

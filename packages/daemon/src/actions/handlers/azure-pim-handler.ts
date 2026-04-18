@@ -84,8 +84,7 @@ async function getArmToken(
 
   cachedArmToken = null;
   throw new Error(
-    `Azure ARM auth failed — configure AZURE_ARM_TOKEN, ensure Managed Identity is available, or log in with 'az login'. ` +
-      `Identity error: ${identityErr}`,
+    `Azure ARM auth failed — configure AZURE_ARM_TOKEN, ensure Managed Identity is available, or log in with 'az login'. Identity error: ${identityErr}`,
   );
 }
 
@@ -130,8 +129,7 @@ async function findEligibilitySchedule(
   const match = exact ?? candidates[0];
   if (!match) {
     throw new Error(
-      `No eligible PIM role assignment found for role '${fullRoleDefId}' at scope '/${normScope}'. ` +
-        `Ensure this account has an eligible assignment in Azure PIM.`,
+      `No eligible PIM role assignment found for role '${fullRoleDefId}' at scope '/${normScope}'. Ensure this account has an eligible assignment in Azure PIM.`,
     );
   }
   const scope = match.properties.scope ?? `/${normScope}`;
@@ -271,8 +269,7 @@ async function getGraphToken(
 
   cachedGraphToken = null;
   throw new Error(
-    `Azure Graph auth failed — configure AZURE_GRAPH_TOKEN, ensure Managed Identity is available, or log in with 'az login'. ` +
-      `Identity error: ${identityErr}`,
+    `Azure Graph auth failed — configure AZURE_GRAPH_TOKEN, ensure Managed Identity is available, or log in with 'az login'. Identity error: ${identityErr}`,
   );
 }
 
@@ -467,8 +464,7 @@ export function createPimClient(
       const activeAssignment = await findActiveAssignment(token, fullRoleDefId, normScope, log);
       if (!activeAssignment) {
         throw new Error(
-          `No active PIM role assignment found for role '${fullRoleDefId}' at scope '/${normScope}'. ` +
-            `The role may not be currently active.`,
+          `No active PIM role assignment found for role '${fullRoleDefId}' at scope '/${normScope}'. The role may not be currently active.`,
         );
       }
       // Use principalId from API result (real AAD OID) — never trust pod.userId in dev mode.
@@ -523,8 +519,7 @@ export function createAzurePimHandler(config: HandlerConfig): ActionHandler {
           const groupId = params.group_id as string;
           const principalId = params.principal_id as string;
           const duration = (params.duration as string | undefined) ?? 'PT8H';
-          const justification =
-            (params.justification as string | undefined) ?? 'Agent pod access';
+          const justification = (params.justification as string | undefined) ?? 'Agent pod access';
           log.debug({ groupId, principalId }, 'Activating PIM group');
           return client.activate(groupId, principalId, duration, justification);
         }
@@ -547,8 +542,7 @@ export function createAzurePimHandler(config: HandlerConfig): ActionHandler {
           const roleDefinitionId = params.role_definition_id as string;
           const principalId = params.principal_id as string;
           const duration = (params.duration as string | undefined) ?? 'PT8H';
-          const justification =
-            (params.justification as string | undefined) ?? 'Agent pod access';
+          const justification = (params.justification as string | undefined) ?? 'Agent pod access';
           log.debug({ scope, roleDefinitionId, principalId }, 'Activating PIM RBAC role');
           return client.activateRbacRole(
             scope,
