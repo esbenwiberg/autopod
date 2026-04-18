@@ -139,7 +139,16 @@ export const createProfileSchema = z.object({
   repoUrl: z.string().url(),
   defaultBranch: z.string().default('main'),
   template: z
-    .enum(['node22', 'node22-pw', 'dotnet9', 'dotnet10', 'python312', 'custom'])
+    .enum([
+      'node22',
+      'node22-pw',
+      'dotnet9',
+      'dotnet10',
+      'python312',
+      'go124',
+      'go124-pw',
+      'custom',
+    ])
     .default('node22'),
   buildCommand: z.string().min(1),
   startCommand: z.string().min(1),

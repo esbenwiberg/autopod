@@ -505,7 +505,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             ]
         case .profileManagement:
             [
-                "6 stack templates: node22, node22-pw, dotnet9, dotnet10, python312, custom",
+                "8 stack templates: node22, node22-pw, dotnet9, dotnet10, python312, go124, go124-pw, custom",
                 "3 output modes: pr (full pipeline), artifact (research-output.md), workspace (interactive)",
                 "4 model providers: Anthropic (API key), MAX/PRO (OAuth + token refresh), Foundry (Azure endpoint), Copilot (GitHub token)",
                 "Execution targets: local (Docker socket) or aci (Azure Container Instances)",

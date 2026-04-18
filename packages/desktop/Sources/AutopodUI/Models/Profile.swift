@@ -215,7 +215,8 @@ public struct Profile: Identifiable, Sendable {
 // MARK: - Enums
 
 public enum StackTemplate: String, CaseIterable, Sendable {
-    case node22, node22Pw = "node22-pw", dotnet9, dotnet10, python312, custom
+    case node22, node22Pw = "node22-pw", dotnet9, dotnet10, python312, go124,
+         go124Pw = "go124-pw", custom
 
     public var label: String {
         switch self {
@@ -224,6 +225,8 @@ public enum StackTemplate: String, CaseIterable, Sendable {
         case .dotnet9:   ".NET 9"
         case .dotnet10:  ".NET 10"
         case .python312: "Python 3.12"
+        case .go124:     "Go 1.24"
+        case .go124Pw:   "Go 1.24 + Playwright"
         case .custom:    "Custom"
         }
     }

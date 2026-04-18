@@ -161,6 +161,7 @@ struct ProfileCard: View {
         case .node22, .node22Pw:  "n.circle"
         case .dotnet9, .dotnet10: "d.circle"
         case .python312:          "p.circle"
+        case .go124, .go124Pw:    "g.circle"
         case .custom:             "gearshape"
         }
     }

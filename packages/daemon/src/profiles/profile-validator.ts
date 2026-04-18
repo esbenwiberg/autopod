@@ -6,7 +6,16 @@ export interface ProfileValidationResult {
 }
 
 const KNOWN_RUNTIMES = ['claude', 'codex'];
-const VALID_TEMPLATES: StackTemplate[] = ['node22', 'node22-pw', 'dotnet9', 'python312', 'custom'];
+const VALID_TEMPLATES: StackTemplate[] = [
+  'node22',
+  'node22-pw',
+  'dotnet9',
+  'dotnet10',
+  'python312',
+  'go124',
+  'go124-pw',
+  'custom',
+];
 
 const DANGEROUS_PATTERNS = [/rm\s+-rf\s+\//, /\bsudo\b/, /curl\s.*\|\s*bash/, /wget\s.*\|\s*bash/];
 

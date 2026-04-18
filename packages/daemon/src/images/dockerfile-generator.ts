@@ -11,6 +11,8 @@ const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
   dotnet9: 'autopod-dotnet9:latest',
   dotnet10: 'autopod-dotnet10:latest',
   python312: 'autopod-python312:latest',
+  go124: 'autopod-go124:latest',
+  'go124-pw': 'autopod-go124-pw:latest',
   custom: 'autopod-node22:latest',
 };
 
@@ -116,6 +118,21 @@ export function getBaseImage(template: StackTemplate): string {
 export function getInstallCommand(profile: Profile): string {
   const cmd = profile.buildCommand;
   const isDotnet = profile.template === 'dotnet9' || profile.template === 'dotnet10';
+
+  const isGo = profile.template === 'go124' || profile.template === 'go124-pw';
+  if (isGo) {
+    // Mixed Go + JS: run go mod + JS install if build uses a Node pkg manager
+    if (cmd.includes('pnpm')) {
+      return 'go mod download && corepack enable pnpm && pnpm install --frozen-lockfile';
+    }
+    if (cmd.includes('yarn')) {
+      return 'go mod download && corepack enable yarn && yarn install --frozen-lockfile';
+    }
+    if (cmd.includes('npm')) {
+      return 'go mod download && npm ci';
+    }
+    return 'go mod download';
+  }
 
   if (isDotnet) {
     // Mixed dotnet+npm: run both restores if the build command also invokes npm/pnpm/yarn

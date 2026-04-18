@@ -54,6 +54,8 @@ describe('getBaseImage', () => {
     ['dotnet9', 'autopod-dotnet9:latest'],
     ['dotnet10', 'autopod-dotnet10:latest'],
     ['python312', 'autopod-python312:latest'],
+    ['go124', 'autopod-go124:latest'],
+    ['go124-pw', 'autopod-go124-pw:latest'],
     ['custom', 'autopod-node22:latest'],
   ] as const)('maps %s → %s', (template, expected) => {
     expect(getBaseImage(template)).toBe(expected);
@@ -99,6 +101,29 @@ describe('getInstallCommand', () => {
     expect(getInstallCommand(mockProfile({ buildCommand: 'pip install -e .' }))).toBe(
       'pip install -r requirements.txt',
     );
+  });
+
+  it('uses go mod download for go124', () => {
+    expect(
+      getInstallCommand(mockProfile({ template: 'go124', buildCommand: 'go build ./...' })),
+    ).toBe('go mod download');
+  });
+
+  it('mixes go + pnpm for go124-pw polyglot builds', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({
+          template: 'go124-pw',
+          buildCommand: 'go build ./... && pnpm --filter portal build',
+        }),
+      ),
+    ).toBe('go mod download && corepack enable pnpm && pnpm install --frozen-lockfile');
+  });
+
+  it('falls back to go mod download for go124-pw when build is pure Go', () => {
+    expect(
+      getInstallCommand(mockProfile({ template: 'go124-pw', buildCommand: 'go build ./...' })),
+    ).toBe('go mod download');
   });
 
   it('defaults to npm ci', () => {

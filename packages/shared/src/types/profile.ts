@@ -12,6 +12,8 @@ export type StackTemplate =
   | 'dotnet9'
   | 'dotnet10'
   | 'python312'
+  | 'go124'
+  | 'go124-pw'
   | 'custom';
 
 export interface Profile {
