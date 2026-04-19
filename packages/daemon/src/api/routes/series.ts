@@ -1,6 +1,16 @@
-import { type AcDefinition, AutopodError, generateId } from '@autopod/shared';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
+import {
+  type AcDefinition,
+  AutopodError,
+  generateId,
+  numericPrefix,
+  parseBriefs,
+} from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
+import type { WorktreeManager } from '../../interfaces/worktree-manager.js';
 import type { PodManager } from '../../pods/index.js';
+import type { ProfileStore } from '../../profiles/profile-store.js';
 
 interface ParsedBrief {
   title: string;
@@ -17,7 +27,23 @@ interface CreateSeriesRequest {
   prMode?: 'single' | 'stacked' | 'none';
 }
 
-export function seriesRoutes(app: FastifyInstance, podManager: PodManager): void {
+interface PreviewSeriesFolderRequest {
+  folderPath: string;
+}
+
+interface PreviewSeriesOnBranchRequest {
+  profileName: string;
+  branch: string;
+  /** Relative path in the repo, e.g. `specs/my-feature/briefs`. */
+  path: string;
+}
+
+export function seriesRoutes(
+  app: FastifyInstance,
+  podManager: PodManager,
+  profileStore: ProfileStore,
+  worktreeManager: WorktreeManager,
+): void {
   // POST /pods/series — create a series of pods from parsed briefs
   app.post('/pods/series', async (request, reply) => {
     const body = request.body as CreateSeriesRequest;
@@ -43,9 +69,12 @@ export function seriesRoutes(app: FastifyInstance, podManager: PodManager): void
       if (!brief) continue;
       const isLast = i === body.briefs.length - 1;
 
-      // Use the last listed dependency as the immediate predecessor (linear chain model)
-      const dependsOnTitle = brief.dependsOn[brief.dependsOn.length - 1];
-      const dependsOnPodId = dependsOnTitle ? (titleToId.get(dependsOnTitle) ?? null) : null;
+      // Resolve all parent titles to pod IDs — enables fan-in (a pod can wait
+      // on multiple parents). Unresolved titles are dropped rather than throwing
+      // so partial briefs don't break the whole series.
+      const dependsOnPodIds: string[] = brief.dependsOn
+        .map((t) => titleToId.get(t))
+        .filter((id): id is string => typeof id === 'string');
 
       const output: 'branch' | 'pr' =
         prMode === 'stacked' ? 'pr' : prMode === 'single' && isLast ? 'pr' : 'branch';
@@ -55,8 +84,8 @@ export function seriesRoutes(app: FastifyInstance, podManager: PodManager): void
           {
             profileName: body.profile,
             task: brief.task,
-            baseBranch: dependsOnPodId ? undefined : (body.baseBranch ?? undefined),
-            dependsOnPodId: dependsOnPodId ?? undefined,
+            baseBranch: dependsOnPodIds.length > 0 ? undefined : (body.baseBranch ?? undefined),
+            dependsOnPodIds: dependsOnPodIds.length > 0 ? dependsOnPodIds : undefined,
             seriesId,
             seriesName: body.seriesName,
             acceptanceCriteria: brief.acceptanceCriteria,
@@ -81,6 +110,126 @@ export function seriesRoutes(app: FastifyInstance, podManager: PodManager): void
       seriesName: body.seriesName,
       pods: created.map(({ title, pod }) => ({ title, ...pod })),
     };
+  });
+
+  // POST /pods/series/preview — parse a brief folder on the daemon host and
+  // return the DAG for the desktop's "Create Series" sheet. Read-only.
+  app.post('/pods/series/preview', async (request, reply) => {
+    const body = request.body as PreviewSeriesFolderRequest;
+    if (!body?.folderPath || typeof body.folderPath !== 'string') {
+      reply.status(400);
+      return { error: 'folderPath is required' };
+    }
+    if (!isAbsolute(body.folderPath)) {
+      reply.status(400);
+      return { error: 'folderPath must be an absolute path' };
+    }
+
+    const folderPath = resolve(body.folderPath);
+    let stat: ReturnType<typeof statSync>;
+    try {
+      stat = statSync(folderPath);
+    } catch {
+      reply.status(404);
+      return { error: `Folder not found: ${folderPath}` };
+    }
+    if (!stat.isDirectory()) {
+      reply.status(400);
+      return { error: `Not a directory: ${folderPath}` };
+    }
+
+    let filenames: string[];
+    try {
+      filenames = readdirSync(folderPath)
+        .filter((f) => extname(f) === '.md' && f !== 'context.md')
+        .sort((a, b) => numericPrefix(a) - numericPrefix(b));
+    } catch {
+      reply.status(400);
+      return { error: `Cannot read folder: ${folderPath}` };
+    }
+    if (filenames.length === 0) {
+      reply.status(400);
+      return { error: 'No .md brief files found (excluding context.md)' };
+    }
+
+    const briefFiles = filenames.map((filename) => ({
+      filename,
+      content: readFileSync(join(folderPath, filename), 'utf-8'),
+    }));
+
+    let sharedContext = '';
+    try {
+      sharedContext = readFileSync(join(folderPath, 'context.md'), 'utf-8').trim();
+    } catch {
+      // no shared context — fine
+    }
+
+    // Resolve context_files relative to the folder — keeps the preview
+    // self-contained and prevents arbitrary path reads outside the folder.
+    const loadContextFile = (p: string): string => {
+      if (isAbsolute(p) || p.includes('..')) return '';
+      try {
+        return readFileSync(resolve(folderPath, p), 'utf-8').trim();
+      } catch {
+        return '';
+      }
+    };
+
+    const briefs = parseBriefs(briefFiles, sharedContext, loadContextFile);
+    const folderBase = basename(folderPath);
+    const seriesName = folderBase === 'briefs' ? basename(resolve(folderPath, '..')) : folderBase;
+
+    return { seriesName, briefs };
+  });
+
+  // POST /pods/series/preview-branch — parse a brief folder directly from a
+  // git branch (no local checkout). Use when the plan folder lives on the
+  // branch (`/prep` output, or an interactive pod's worktree).
+  app.post('/pods/series/preview-branch', async (request, reply) => {
+    const body = request.body as PreviewSeriesOnBranchRequest;
+    if (!body?.profileName || !body?.branch || !body?.path) {
+      reply.status(400);
+      return { error: 'profileName, branch, and path are required' };
+    }
+
+    let profile: ReturnType<ProfileStore['get']>;
+    try {
+      profile = profileStore.get(body.profileName);
+    } catch {
+      reply.status(404);
+      return { error: `Profile not found: ${body.profileName}` };
+    }
+
+    if (!profile.repoUrl) {
+      reply.status(400);
+      return { error: 'Profile has no repoUrl — cannot read branch contents' };
+    }
+
+    try {
+      const contents = await worktreeManager.readBranchFolder({
+        repoUrl: profile.repoUrl,
+        branch: body.branch,
+        relPath: body.path,
+        pat: profile.adoPat ?? profile.githubPat ?? undefined,
+      });
+
+      if (contents.files.length === 0) {
+        reply.status(400);
+        return {
+          error: `No .md brief files found at ${body.path} on branch ${body.branch}`,
+        };
+      }
+
+      const briefs = parseBriefs(contents.files, contents.sharedContext);
+      const seriesName = body.path.split('/').filter(Boolean).pop() ?? body.branch;
+
+      return { seriesName, briefs };
+    } catch (err) {
+      reply.status(400);
+      return {
+        error: err instanceof Error ? err.message : 'Failed to read branch folder',
+      };
+    }
   });
 
   // GET /pods/series/:seriesId — all pods in a series with cost roll-up

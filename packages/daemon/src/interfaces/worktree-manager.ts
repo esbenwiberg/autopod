@@ -53,4 +53,25 @@ export interface WorktreeManager {
     maxCommits?: number,
     sinceCommit?: string,
   ): Promise<string>;
+  /**
+   * Read all `.md` files under a relative path on a given branch, without
+   * creating a full worktree. Used by the Create Series sheet to preview
+   * brief folders that live on the branch (produced by `/prep` or an
+   * interactive pod). The `pat` is used for the underlying fetch only.
+   */
+  readBranchFolder(params: {
+    repoUrl: string;
+    branch: string;
+    relPath: string;
+    pat?: string;
+  }): Promise<BranchFolderContents>;
+}
+
+export interface BranchFolderContents {
+  /** The relative path that was read (normalized). */
+  relPath: string;
+  /** Files under the path — only names ending in `.md`, recursive ONE level deep. */
+  files: Array<{ filename: string; content: string }>;
+  /** Contents of `context.md` at the path root, or '' if not present. */
+  sharedContext: string;
 }

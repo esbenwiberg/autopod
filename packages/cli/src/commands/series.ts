@@ -1,29 +1,11 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
-import type { AcDefinition } from '@autopod/shared';
+import { numericPrefix, parseBriefs } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import { parse as parseYaml } from 'yaml';
 import type { AutopodClient } from '../api/client.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
-
-interface BriefFrontmatter {
-  title?: string;
-  depends_on?: string[];
-  context_files?: string[];
-  handover_from?: string[];
-  acceptance_criteria?: AcDefinition[];
-}
-
-/** Extract YAML frontmatter + body from a markdown file. */
-function parseBriefFile(filePath: string): { frontmatter: BriefFrontmatter; body: string } {
-  const content = readFileSync(filePath, 'utf-8');
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-  if (!match) return { frontmatter: {}, body: content.trim() };
-  const frontmatter = (parseYaml(match[1] ?? '') ?? {}) as BriefFrontmatter;
-  return { frontmatter, body: (match[2] ?? '').trim() };
-}
 
 /** Infer series name from folder path: parent dir if folder is named 'briefs', else folder name. */
 function inferSeriesName(folderPath: string): string {
@@ -33,12 +15,6 @@ function inferSeriesName(folderPath: string): string {
     return basename(resolve(abs, '..'));
   }
   return name;
-}
-
-/** Numeric prefix from filename, e.g. "01-types.md" → 1. Returns Infinity if none. */
-function numericPrefix(filename: string): number {
-  const m = filename.match(/^(\d+)/);
-  return m ? Number.parseInt(m[1] ?? '0', 10) : Number.POSITIVE_INFINITY;
 }
 
 /** Read a context file relative to cwd and return its content, or '' on error. */
@@ -106,58 +82,11 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         const seriesName = opts.seriesName ?? inferSeriesName(folderPath);
         const prMode = opts.prMode as 'single' | 'stacked' | 'none';
 
-        // Single parse pass — avoids re-reading files during dependency resolution
-        type Parsed = { frontmatter: BriefFrontmatter; body: string; title: string };
-        const allParsed = new Map<string, Parsed>();
-        for (const file of files) {
-          const { frontmatter, body } = parseBriefFile(join(folderPath, file));
-          allParsed.set(file, {
-            frontmatter,
-            body,
-            title: frontmatter.title ?? file.replace(/^\d+-/, '').replace(/\.md$/, ''),
-          });
-        }
-
-        const briefs = files.map((file, i) => {
-          const { frontmatter, body, title } = allParsed.get(file) ?? {
-            frontmatter: {} as BriefFrontmatter,
-            body: '',
-            title: file,
-          };
-
-          // Prepend shared context then any explicit context_files
-          const contextParts: string[] = [];
-          if (sharedContext && !frontmatter.context_files) {
-            contextParts.push(sharedContext);
-          }
-          for (const cf of frontmatter.context_files ?? []) {
-            const cfContent = readContextFile(cf);
-            if (cfContent) contextParts.push(cfContent);
-          }
-          const task =
-            contextParts.length > 0 ? `${contextParts.join('\n\n')}\n\n---\n\n${body}` : body;
-
-          // Resolve depends_on to titles using the pre-parsed map (no re-reads)
-          const dependsOn = (frontmatter.depends_on ?? []).map((dep) => {
-            const depFile = files.find((f) => f.startsWith(dep) || f === `${dep}.md`);
-            return depFile ? (allParsed.get(depFile)?.title ?? dep) : dep;
-          });
-
-          // If no explicit depends_on, infer from numeric prefix (each brief depends on the previous)
-          const inferredDepsOn: string[] = (() => {
-            if (dependsOn.length > 0 || i === 0) return dependsOn;
-            const prevFile = files[i - 1];
-            const prevTitle = prevFile ? (allParsed.get(prevFile)?.title ?? '') : '';
-            return prevTitle ? [prevTitle] : dependsOn;
-          })();
-
-          return {
-            title,
-            task,
-            dependsOn: inferredDepsOn,
-            acceptanceCriteria: frontmatter.acceptance_criteria,
-          };
-        });
+        const briefFiles = files.map((filename) => ({
+          filename,
+          content: readFileSync(join(folderPath, filename), 'utf-8'),
+        }));
+        const briefs = parseBriefs(briefFiles, sharedContext, readContextFile);
 
         console.log(
           chalk.cyan(`\nCreating series "${seriesName}" with ${briefs.length} pods...\n`),

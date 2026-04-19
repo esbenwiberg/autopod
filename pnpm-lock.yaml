@@ -209,6 +209,9 @@ importers:
       unique-names-generator:
         specifier: ^4.7.1
         version: 4.7.1
+      yaml:
+        specifier: ^2.6.1
+        version: 2.8.2
       zod:
         specifier: ^3.24.1
         version: 3.25.76

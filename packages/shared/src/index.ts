@@ -268,3 +268,11 @@ export { generateId, generatePodId } from './id.js';
 
 // AC list parser
 export { parseAcList } from './parse-ac-list.js';
+
+// Series brief parsing (CLI + daemon share this)
+export type { BriefFrontmatter, ParsedBrief, BriefFile } from './series/parse-briefs.js';
+export {
+  parseBriefFrontmatter,
+  numericPrefix,
+  parseBriefs,
+} from './series/parse-briefs.js';

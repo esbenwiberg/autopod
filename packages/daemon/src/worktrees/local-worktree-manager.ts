@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
 import type {
+  BranchFolderContents,
   DiffStats,
   MergeBranchConfig,
   WorktreeCreateConfig,
@@ -475,6 +476,137 @@ export class LocalWorktreeManager implements WorktreeManager {
       'getCommitLog: could not resolve any range ref — returning empty',
     );
     return '';
+  }
+
+  /**
+   * Read `.md` files under `relPath` on `branch`, directly from the bare repo
+   * cache. Fetches the branch first so newly-pushed briefs are visible.
+   * Never creates a working tree — uses `git ls-tree` + `git show` which are
+   * both read-only and safe to call on the daemon's long-lived bare repo.
+   */
+  async readBranchFolder(params: {
+    repoUrl: string;
+    branch: string;
+    relPath: string;
+    pat?: string;
+  }): Promise<BranchFolderContents> {
+    const { repoUrl, branch, pat } = params;
+    // Normalize relPath: strip leading/trailing slashes, reject escape attempts.
+    const relPath = params.relPath.replace(/^\/+|\/+$/g, '');
+    if (!relPath || relPath.includes('..')) {
+      throw new Error(`Invalid relPath: ${params.relPath}`);
+    }
+
+    const cacheKey = this.sanitizeRepoUrl(repoUrl);
+    const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
+    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
+    if (pat) this.patCache.set(bareRepoPath, pat);
+
+    await fs.mkdir(this.cacheDir, { recursive: true });
+
+    // Serialize per-repo to avoid fetch races with other callers.
+    return await this.withRepoLock(cacheKey, async () => {
+      // Ensure bare repo exists.
+      if (!(await this.isBareRepoValid(bareRepoPath))) {
+        await fs.rm(bareRepoPath, { recursive: true, force: true });
+        this.logger.info({ repoUrl, bareRepoPath }, 'readBranchFolder: cloning bare repo');
+        try {
+          await execFileAsync('git', ['clone', '--bare', authUrl, bareRepoPath], {
+            env: GIT_ENV,
+          });
+        } catch (err) {
+          throw sanitizeGitError(err);
+        }
+        await execFileAsync('git', ['remote', 'set-url', 'origin', repoUrl], {
+          cwd: bareRepoPath,
+        });
+      }
+
+      // Fetch the branch. If the ref doesn't exist remotely, fall back to the
+      // local ref (mirrors the `create()` behaviour for pushed-only branches).
+      let treeRef = `refs/remotes/origin/${branch}`;
+      try {
+        await execFileAsync(
+          'git',
+          [
+            'fetch',
+            authUrl,
+            `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+            `+refs/heads/${branch}:refs/heads/${branch}`,
+          ],
+          { cwd: bareRepoPath, env: GIT_ENV },
+        );
+      } catch (fetchErr) {
+        this.logger.debug(
+          { err: sanitizeGitError(fetchErr), branch },
+          'readBranchFolder: remote fetch failed',
+        );
+        try {
+          await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branch}`], {
+            cwd: bareRepoPath,
+          });
+          treeRef = `refs/heads/${branch}`;
+        } catch {
+          throw new Error(`Branch "${branch}" not found on remote or locally`);
+        }
+      }
+
+      // List files under relPath on the branch. `git ls-tree --name-only` with
+      // a path ending in `/` forces tree-level listing; `-r` recurses into
+      // subdirs, but we filter to the top level to avoid picking up nested
+      // folders the user didn't mean to include.
+      let rawNames: string;
+      try {
+        const { stdout } = await execFileAsync(
+          'git',
+          ['ls-tree', '--name-only', treeRef, `${relPath}/`],
+          { cwd: bareRepoPath },
+        );
+        rawNames = stdout;
+      } catch (err) {
+        throw sanitizeGitError(err);
+      }
+
+      const entries = rawNames
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((full) => ({ full, base: full.split('/').pop() ?? full }));
+
+      const mdEntries = entries.filter((e) => e.base.endsWith('.md') && e.base !== 'context.md');
+
+      // Read each brief file.
+      const files: Array<{ filename: string; content: string }> = [];
+      for (const entry of mdEntries) {
+        try {
+          const { stdout } = await execFileAsync('git', ['show', `${treeRef}:${entry.full}`], {
+            cwd: bareRepoPath,
+            maxBuffer: 2 * 1024 * 1024,
+          });
+          files.push({ filename: entry.base, content: stdout });
+        } catch (err) {
+          this.logger.warn(
+            { err: sanitizeGitError(err), entry: entry.full },
+            'readBranchFolder: failed to read brief file',
+          );
+        }
+      }
+
+      // Read context.md at the folder root if present.
+      let sharedContext = '';
+      try {
+        const { stdout } = await execFileAsync(
+          'git',
+          ['show', `${treeRef}:${relPath}/context.md`],
+          { cwd: bareRepoPath, maxBuffer: 2 * 1024 * 1024 },
+        );
+        sharedContext = stdout.trim();
+      } catch {
+        // No context.md — that's fine.
+      }
+
+      return { relPath, files, sharedContext };
+    });
   }
 
   // --- Private helpers ---

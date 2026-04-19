@@ -448,6 +448,7 @@ const app = await createServer({
   authModule,
   podManager,
   profileStore,
+  worktreeManager,
   eventBus,
   eventRepo,
   podBridge,

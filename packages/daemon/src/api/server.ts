@@ -11,6 +11,7 @@ import type { ActionRegistry } from '../actions/action-registry.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
+import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { IssueWatcherRepository } from '../issue-watcher/issue-watcher-repository.js';
 import type {
   ContainerManagerFactory,
@@ -49,6 +50,7 @@ export interface ServerDependencies {
   authModule: AuthModule;
   podManager: PodManager;
   profileStore: ProfileStore;
+  worktreeManager?: WorktreeManager;
   eventBus: EventBus;
   eventRepo: EventRepository;
   podBridge: PodBridge;
@@ -120,7 +122,17 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.eventRepo,
     deps.pendingOverrideRepo,
   );
-  seriesRoutes(app, deps.podManager);
+  if (deps.worktreeManager) {
+    seriesRoutes(app, deps.podManager, deps.profileStore, deps.worktreeManager);
+  } else {
+    // Preview-branch endpoint is unavailable without a WorktreeManager (e.g.
+    // in tests that don't exercise it). Existing series endpoints still work.
+    seriesRoutes(app, deps.podManager, deps.profileStore, {
+      readBranchFolder: async () => {
+        throw new Error('WorktreeManager not configured — preview-branch unavailable');
+      },
+    } as unknown as WorktreeManager);
+  }
   historyRoutes(app, deps.podManager);
   profileRoutes(
     app,
