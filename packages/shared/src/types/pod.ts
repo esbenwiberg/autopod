@@ -112,7 +112,16 @@ export interface Pod {
   artifactsPath: string | null;
   /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
   scheduledJobId: string | null;
-  /** ID of the pod this pod depends on (null for independent pods). */
+  /**
+   * IDs of the pods this pod depends on. A pod is only enqueued once *all*
+   * listed parents reach `validated`. Empty array = no dependencies.
+   */
+  dependsOnPodIds: string[];
+  /**
+   * @deprecated Legacy single-parent mirror (= dependsOnPodIds[0] or null).
+   * New code should read `dependsOnPodIds`. Kept in sync by the repository
+   * until the follow-up migration removes the underlying DB column.
+   */
   dependsOnPodId: string | null;
   /** Series this pod belongs to (null for standalone pods). */
   seriesId: string | null;
@@ -159,7 +168,16 @@ export interface CreatePodRequest {
   referenceRepoPat?: string;
   /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
   scheduledJobId?: string | null;
-  /** ID of the pod this pod depends on — starts this pod when dependency reaches validated. */
+  /**
+   * IDs of the pods this pod depends on. The pod stays `queued` until *all*
+   * listed parents reach `validated`. Multi-parent enables fan-in (e.g. an
+   * integration pod waiting on both a frontend and a backend pod).
+   */
+  dependsOnPodIds?: string[];
+  /**
+   * @deprecated Prefer `dependsOnPodIds`. When provided, it is upgraded to a
+   * single-element array. Ignored if `dependsOnPodIds` is also set.
+   */
   dependsOnPodId?: string | null;
   /** Series this pod belongs to. */
   seriesId?: string | null;

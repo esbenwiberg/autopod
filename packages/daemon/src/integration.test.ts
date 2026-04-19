@@ -7,6 +7,7 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './api/server.js';
 import type { AuthModule } from './interfaces/index.js';
+import type { WorktreeManager } from './interfaces/worktree-manager.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -112,6 +113,11 @@ describe('Integration', () => {
       mergeBranch: vi.fn().mockResolvedValue(undefined),
       commitFiles: vi.fn().mockResolvedValue(undefined),
       pushBranch: vi.fn().mockResolvedValue(undefined),
+      readBranchFolder: vi.fn().mockResolvedValue({
+        relPath: '',
+        files: [],
+        sharedContext: '',
+      }),
     };
 
     const runtimeRegistry = {
@@ -209,6 +215,7 @@ describe('Integration', () => {
       authModule,
       podManager,
       profileStore,
+      worktreeManager: worktreeManager as unknown as WorktreeManager,
       eventBus,
       eventRepo,
       podBridge,
@@ -954,6 +961,69 @@ describe('Integration', () => {
       expect(second.dependsOnPodId).toBe(firstPod.id);
       expect(second.seriesId).toBe('my-series-123');
       expect(second.seriesName).toBe('my-series');
+    });
+
+    it('POST /pods accepts dependsOnPodIds array for fan-in dependencies', async () => {
+      const parentAResponse = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'parent A' },
+      });
+      const parentA = parentAResponse.json();
+      const parentBResponse = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'parent B' },
+      });
+      const parentB = parentBResponse.json();
+
+      const childResponse = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'integration pod waiting on both parents',
+          dependsOnPodIds: [parentA.id, parentB.id],
+          seriesId: 'fanin-test',
+          seriesName: 'fanin-test',
+        },
+      });
+      expect(childResponse.statusCode).toBe(201);
+      const child = childResponse.json();
+      expect(child.dependsOnPodIds).toEqual([parentA.id, parentB.id]);
+      // Child stays queued until both parents validate.
+      expect(child.status).toBe('queued');
+      // Legacy single-parent mirror is set to the first parent.
+      expect(child.dependsOnPodId).toBe(parentA.id);
+    });
+
+    it('POST /pods/series supports fan-in briefs (child.dependsOn = [a, b])', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'diamond',
+          profile: 'test-app',
+          briefs: [
+            { title: '01-base', task: 'Base task', dependsOn: [] },
+            { title: '02-a', task: 'Branch A', dependsOn: ['01-base'] },
+            { title: '02-b', task: 'Branch B', dependsOn: ['01-base'] },
+            { title: '03-merge', task: 'Merge branches', dependsOn: ['02-a', '02-b'] },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.pods).toHaveLength(4);
+      const [base, a, b, merge] = body.pods;
+      expect(base.dependsOnPodIds).toEqual([]);
+      expect(a.dependsOnPodIds).toEqual([base.id]);
+      expect(b.dependsOnPodIds).toEqual([base.id]);
+      expect(merge.dependsOnPodIds).toEqual([a.id, b.id]);
     });
 
     it('POST /pods/series accepts structured AcDefinition acceptance criteria', async () => {

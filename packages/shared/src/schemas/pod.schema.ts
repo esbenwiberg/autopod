@@ -49,6 +49,7 @@ export const createPodRequestSchema = z
       .optional(),
     linkedPodId: z.string().min(1).max(64).optional(),
     dependsOnPodId: z.string().min(1).max(64).optional(),
+    dependsOnPodIds: z.array(z.string().min(1).max(64)).max(32).optional(),
     seriesId: z.string().min(1).max(64).optional(),
     seriesName: z.string().min(1).max(128).optional(),
     pimGroups: z

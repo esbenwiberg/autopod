@@ -314,4 +314,85 @@ describe('PodRepository', () => {
       expect(repo.countByStatusAndProfile('queued', 'nonexistent')).toBe(0);
     });
   });
+
+  describe('series dependencies (fan-in / fan-out)', () => {
+    it('stores and reads a single-parent dependency through the array column', () => {
+      repo.insert({ ...validSession, id: 'parent' });
+      repo.insert({
+        ...validSession,
+        id: 'child',
+        branch: 'feature/child',
+        dependsOnPodIds: ['parent'],
+        seriesId: 's1',
+      });
+      const child = repo.getOrThrow('child');
+      expect(child.dependsOnPodIds).toEqual(['parent']);
+      // Legacy column is kept in sync for back-compat readers.
+      expect(child.dependsOnPodId).toBe('parent');
+    });
+
+    it('stores and reads a multi-parent (fan-in) dependency', () => {
+      repo.insert({ ...validSession, id: 'parent-a' });
+      repo.insert({ ...validSession, id: 'parent-b', branch: 'feature/b' });
+      repo.insert({
+        ...validSession,
+        id: 'child',
+        branch: 'feature/child',
+        dependsOnPodIds: ['parent-a', 'parent-b'],
+        seriesId: 's1',
+      });
+      const child = repo.getOrThrow('child');
+      expect(child.dependsOnPodIds).toEqual(['parent-a', 'parent-b']);
+    });
+
+    it('getPodsDependingOn finds both single-parent and fan-in children', () => {
+      repo.insert({ ...validSession, id: 'parent-a' });
+      repo.insert({ ...validSession, id: 'parent-b', branch: 'feature/b' });
+      repo.insert({
+        ...validSession,
+        id: 'single-child',
+        branch: 'feature/single',
+        dependsOnPodIds: ['parent-a'],
+      });
+      repo.insert({
+        ...validSession,
+        id: 'fanin-child',
+        branch: 'feature/fanin',
+        dependsOnPodIds: ['parent-a', 'parent-b'],
+      });
+      const aChildren = repo.getPodsDependingOn('parent-a');
+      expect(aChildren.map((p) => p.id).sort()).toEqual(['fanin-child', 'single-child']);
+      const bChildren = repo.getPodsDependingOn('parent-b');
+      expect(bChildren.map((p) => p.id)).toEqual(['fanin-child']);
+    });
+
+    it('falls back to legacy depends_on_pod_id column for rows written before migration 048', () => {
+      repo.insert({ ...validSession, id: 'parent' });
+      // Simulate a pre-migration-048 row: only the legacy column is populated.
+      db.prepare(
+        `INSERT INTO pods (id, profile_name, task, status, model, runtime, execution_target, branch,
+           user_id, max_validation_attempts, skip_validation, output_mode, depends_on_pod_id)
+         VALUES ('legacy-child', 'test-app', 'legacy', 'queued', 'opus', 'claude', 'local',
+           'feature/legacy', 'user-1', 3, 0, 'pr', 'parent')`,
+      ).run();
+      const child = repo.getOrThrow('legacy-child');
+      expect(child.dependsOnPodIds).toEqual(['parent']);
+      expect(repo.getPodsDependingOn('parent').map((p) => p.id)).toContain('legacy-child');
+    });
+
+    it('delete removes the deleted pod from every fan-in array', () => {
+      repo.insert({ ...validSession, id: 'parent-a' });
+      repo.insert({ ...validSession, id: 'parent-b', branch: 'feature/b' });
+      repo.insert({
+        ...validSession,
+        id: 'child',
+        branch: 'feature/child',
+        dependsOnPodIds: ['parent-a', 'parent-b'],
+      });
+      // parent-a is referenced by FK in depends_on_pod_id, so null that first.
+      repo.delete('parent-a');
+      const child = repo.getOrThrow('child');
+      expect(child.dependsOnPodIds).toEqual(['parent-b']);
+    });
+  });
 });

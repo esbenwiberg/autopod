@@ -52,7 +52,9 @@ export interface NewPod {
   referenceRepoPat?: string | null;
   /** ID of the scheduled job that spawned this pod. */
   scheduledJobId?: string | null;
-  /** ID of the pod this pod depends on. */
+  /** IDs of the pods this pod depends on (fan-in supported). */
+  dependsOnPodIds?: string[] | null;
+  /** @deprecated Legacy single-parent mirror; use `dependsOnPodIds`. */
   dependsOnPodId?: string | null;
   /** Series this pod belongs to. */
   seriesId?: string | null;
@@ -140,6 +142,27 @@ export interface PodRepository {
  * Normalize acceptance_criteria from DB — supports both old string[] (legacy)
  * and new AcDefinition[] (structured). Strings are wrapped as type:'none'.
  */
+/**
+ * Parse the depends_on_pod_ids JSON array column, falling back to the legacy
+ * single-value depends_on_pod_id column for rows that predate migration 048.
+ */
+function parseDependsOnPodIds(rawArray: unknown, rawSingle: unknown): string[] {
+  if (rawArray) {
+    try {
+      const parsed = JSON.parse(rawArray as string) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((x): x is string => typeof x === 'string' && x.length > 0);
+      }
+    } catch {
+      // fall through to legacy
+    }
+  }
+  if (typeof rawSingle === 'string' && rawSingle.length > 0) {
+    return [rawSingle];
+  }
+  return [];
+}
+
 function parseAcceptanceCriteria(raw: unknown): AcDefinition[] | null {
   if (!raw) return null;
   try {
@@ -249,6 +272,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     referenceRepoPat: (row.reference_repo_pat as string) ?? null,
     artifactsPath: (row.artifacts_path as string) ?? null,
     scheduledJobId: (row.scheduled_job_id as string) ?? null,
+    dependsOnPodIds: parseDependsOnPodIds(row.depends_on_pod_ids, row.depends_on_pod_id),
     dependsOnPodId: (row.depends_on_pod_id as string) ?? null,
     seriesId: (row.series_id as string) ?? null,
     seriesName: (row.series_name as string) ?? null,
@@ -264,6 +288,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
       const legacyOutputMode: OutputMode = pod.options
         ? outputModeFromPodOptions(podOpts)
         : pod.outputMode;
+      // Normalize legacy single-parent input into the array form; keep the old
+      // column in sync as depends_on_pod_ids[0] for back-compat readers.
+      const depIds: string[] =
+        pod.dependsOnPodIds && pod.dependsOnPodIds.length > 0
+          ? pod.dependsOnPodIds
+          : pod.dependsOnPodId
+            ? [pod.dependsOnPodId]
+            : [];
       db.prepare(`
         INSERT INTO pods (
           id, profile_name, task, status, model, runtime, execution_target, branch,
@@ -271,14 +303,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
           output_mode, agent_mode, output_target, validate, promotable,
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, reference_repo_pat, scheduled_job_id,
-          depends_on_pod_id, series_id, series_name
+          depends_on_pod_id, depends_on_pod_ids, series_id, series_name
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId,
-          @dependsOnPodId, @seriesId, @seriesName
+          @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName
         )
       `).run({
         id: pod.id,
@@ -307,7 +339,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
         referenceRepos: pod.referenceRepos ? JSON.stringify(pod.referenceRepos) : null,
         referenceRepoPat: pod.referenceRepoPat ?? null,
         scheduledJobId: pod.scheduledJobId ?? null,
-        dependsOnPodId: pod.dependsOnPodId ?? null,
+        dependsOnPodId: depIds[0] ?? null,
+        dependsOnPodIds: depIds.length > 0 ? JSON.stringify(depIds) : null,
         seriesId: pod.seriesId ?? null,
         seriesName: pod.seriesName ?? null,
       });
@@ -572,6 +605,18 @@ export function createPodRepository(db: Database.Database): PodRepository {
       db.prepare('UPDATE pods SET linked_pod_id = NULL WHERE linked_pod_id = ?').run(id);
       db.prepare('UPDATE pods SET fix_pod_id = NULL WHERE fix_pod_id = ?').run(id);
       db.prepare('UPDATE pods SET depends_on_pod_id = NULL WHERE depends_on_pod_id = ?').run(id);
+      // Remove the deleted pod from any dependsOnPodIds arrays.
+      db.prepare(
+        `UPDATE pods
+         SET depends_on_pod_ids = (
+           SELECT json_group_array(value) FROM json_each(depends_on_pod_ids)
+           WHERE value != ?
+         )
+         WHERE depends_on_pod_ids IS NOT NULL
+           AND EXISTS (
+             SELECT 1 FROM json_each(depends_on_pod_ids) WHERE json_each.value = ?
+           )`,
+      ).run(id, id);
       const result = db.prepare('DELETE FROM pods WHERE id = ?').run(id);
       if (result.changes === 0) throw new PodNotFoundError(id);
     },
@@ -626,9 +671,20 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     getPodsDependingOn(podId: string): Pod[] {
+      // Match either the legacy single column or membership in the new JSON
+      // array. Using EXISTS on json_each handles fan-in (multi-parent) rows.
       const rows = db
-        .prepare('SELECT * FROM pods WHERE depends_on_pod_id = ? ORDER BY created_at ASC')
-        .all(podId) as Record<string, unknown>[];
+        .prepare(
+          `SELECT * FROM pods
+           WHERE depends_on_pod_id = ?
+              OR (depends_on_pod_ids IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM json_each(depends_on_pod_ids)
+                    WHERE json_each.value = ?
+                  ))
+           ORDER BY created_at ASC`,
+        )
+        .all(podId, podId) as Record<string, unknown>[];
       return rows.map(rowToSession);
     },
 

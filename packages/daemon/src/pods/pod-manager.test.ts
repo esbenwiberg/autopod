@@ -154,6 +154,11 @@ function createMockWorktreeManager(): WorktreeManager {
     commitFiles: vi.fn(async () => {}),
     pushBranch: vi.fn(async () => {}),
     getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
+    readBranchFolder: vi.fn(async ({ relPath }) => ({
+      relPath,
+      files: [],
+      sharedContext: '',
+    })),
   };
 }
 

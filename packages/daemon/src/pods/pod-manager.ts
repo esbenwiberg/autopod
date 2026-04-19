@@ -1103,20 +1103,63 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return podRepo.getOrThrow(pod.id);
   }
 
-  /** After a pod reaches `validated`, enqueue any pods that depend on it. */
+  /**
+   * After a pod reaches `validated`, enqueue any dependents whose *all*
+   * parents have now reached a completed-success state. Single-parent pods
+   * fire immediately; multi-parent (fan-in) pods wait for the last holdout.
+   *
+   * The dependent pod stacks on its first parent's branch — this matches the
+   * linear-chain mental model. Commits from other parents reach the child via
+   * handover files or the eventual PR merge, not the worktree.
+   */
   function maybeTriggerDependents(completedPod: Pod): void {
     const dependents = podRepo.getPodsDependingOn(completedPod.id);
     for (const dep of dependents) {
       if (dep.status !== 'queued') continue;
+
+      const parentIds =
+        dep.dependsOnPodIds.length > 0
+          ? dep.dependsOnPodIds
+          : dep.dependsOnPodId
+            ? [dep.dependsOnPodId]
+            : [];
+      if (parentIds.length === 0) continue;
+
+      const parentsReady = parentIds.every((pid) => {
+        if (pid === completedPod.id) return true;
+        try {
+          return podRepo.getOrThrow(pid).status === 'validated';
+        } catch {
+          // Missing parent — treat as not ready rather than crashing.
+          return false;
+        }
+      });
+      if (!parentsReady) {
+        logger.debug(
+          {
+            podId: dep.id,
+            parentIds,
+            waitingOn: parentIds.filter((pid) => pid !== completedPod.id),
+          },
+          'Series: dependent pod still waiting on other parents',
+        );
+        continue;
+      }
+
+      // Use the first parent's branch as the base — the primary stacking path.
+      const firstParentId = parentIds[0];
+      const baseBranch = firstParentId
+        ? firstParentId === completedPod.id
+          ? completedPod.branch
+          : podRepo.getOrThrow(firstParentId).branch
+        : completedPod.branch;
+
       podRepo.update(dep.id, {
-        baseBranch: completedPod.branch,
+        baseBranch,
         dependencyStartedAt: new Date().toISOString(),
       });
       enqueueSession(dep.id);
-      logger.info(
-        { podId: dep.id, dependsOnPodId: completedPod.id },
-        'Series: dependent pod enqueued',
-      );
+      logger.info({ podId: dep.id, parentIds, baseBranch }, 'Series: dependent pod enqueued');
     }
   }
 
@@ -1241,6 +1284,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             referenceRepos: derivedReferenceRepos.length > 0 ? derivedReferenceRepos : null,
             referenceRepoPat: request.referenceRepoPat ?? null,
             scheduledJobId: request.scheduledJobId ?? null,
+            dependsOnPodIds:
+              request.dependsOnPodIds && request.dependsOnPodIds.length > 0
+                ? request.dependsOnPodIds
+                : request.dependsOnPodId
+                  ? [request.dependsOnPodId]
+                  : null,
             dependsOnPodId: request.dependsOnPodId ?? null,
             seriesId: request.seriesId ?? null,
             seriesName: request.seriesName ?? null,
@@ -1278,9 +1327,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         },
       });
 
-      // Dependent pods must not start until their predecessor reaches `validated`;
-      // maybeTriggerDependents() will enqueue them at that point.
-      if (!request.dependsOnPodId) {
+      // Dependent pods must not start until their predecessors reach `validated`;
+      // maybeTriggerDependents() will enqueue them at that point. A pod counts
+      // as dependent if either the new multi-parent array or the legacy single
+      // field is populated.
+      const hasDeps = (request.dependsOnPodIds?.length ?? 0) > 0 || !!request.dependsOnPodId;
+      if (!hasDeps) {
         enqueueSession(id);
       }
       logger.info({ podId: id, profile: request.profileName }, 'Pod created');
