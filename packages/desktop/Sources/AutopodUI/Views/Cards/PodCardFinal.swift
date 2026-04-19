@@ -28,9 +28,24 @@ public struct SessionCardFinal: View {
     public var actions: PodActions
     public var density: CardDensity
     public var isSelected: Bool
+    /// Called when the user picks "Spawn follow-up" from the card's context
+    /// menu / footer button. Host (e.g. MainView) opens the SpawnDependentSheet.
+    public var onSpawnFollowUp: ((Pod) -> Void)?
+    /// Called when the user picks "Launch series from here" on an interactive
+    /// pod. Host opens the CreateSeriesSheet with baseBranch pre-filled.
+    public var onLaunchSeriesFromPod: ((Pod) -> Void)?
 
-    public init(pod: Pod, actions: PodActions = .preview, density: CardDensity = .detailed, isSelected: Bool = false) {
+    public init(
+        pod: Pod,
+        actions: PodActions = .preview,
+        density: CardDensity = .detailed,
+        isSelected: Bool = false,
+        onSpawnFollowUp: ((Pod) -> Void)? = nil,
+        onLaunchSeriesFromPod: ((Pod) -> Void)? = nil
+    ) {
         self.pod = pod; self.actions = actions; self.density = density; self.isSelected = isSelected
+        self.onSpawnFollowUp = onSpawnFollowUp
+        self.onLaunchSeriesFromPod = onLaunchSeriesFromPod
     }
 
     @State private var isHovered = false
@@ -78,6 +93,22 @@ public struct SessionCardFinal: View {
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .animation(.easeOut(duration: 0.15), value: isSelected)
         .onHover { isHovered = $0 }
+        .contextMenu {
+            if let onSpawnFollowUp, !pod.isTerminal {
+                Button {
+                    onSpawnFollowUp(pod)
+                } label: {
+                    Label("Spawn follow-up pod", systemImage: "arrow.branch")
+                }
+            }
+            if let onLaunchSeriesFromPod, pod.isWorkspace, !pod.isTerminal {
+                Button {
+                    onLaunchSeriesFromPod(pod)
+                } label: {
+                    Label("Launch series from here", systemImage: "rectangle.3.group.fill")
+                }
+            }
+        }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
         .alert("Resume pod", isPresented: $showResumeInput) {
@@ -132,6 +163,9 @@ public struct SessionCardFinal: View {
                     .font(.system(.callout, design: .monospaced).weight(.medium))
                     .foregroundStyle(pod.status == .complete ? .green : pod.status == .killed ? .red.opacity(0.6) : .primary)
                     .lineLimit(1)
+                if pod.seriesId != nil {
+                    seriesChip
+                }
                 Spacer()
                 modeBadge
                 statusBadge
@@ -146,6 +180,21 @@ public struct SessionCardFinal: View {
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    private var seriesChip: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "rectangle.3.group.fill")
+                .font(.system(size: 9))
+            Text(pod.seriesName ?? "series")
+                .lineLimit(1)
+        }
+        .font(.system(.caption2).weight(.medium))
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(Color.accentColor.opacity(0.12))
+        .foregroundStyle(Color.accentColor)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private var modeBadge: some View {
@@ -390,6 +439,18 @@ public struct SessionCardFinal: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .help("Create a worker pod starting from this workspace's branch")
+
+                    if let onLaunchSeriesFromPod {
+                        Button {
+                            onLaunchSeriesFromPod(pod)
+                        } label: {
+                            Label("Launch Series", systemImage: "rectangle.3.group.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Launch a pod series stacked on this interactive pod's branch")
+                    }
                 }
 
                 if pod.linkedSessionId != nil {

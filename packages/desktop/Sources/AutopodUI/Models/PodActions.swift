@@ -15,7 +15,7 @@ public struct PodActions: Sendable {
   public var rework: @MainActor @Sendable (String) async -> Void
   public var fixManually: @MainActor @Sendable (String) async -> String?
   public var revalidate: @MainActor @Sendable (String) async -> Void
-  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, [String]?, String?, String?, [PimGroupRequest]?) async -> String?
+  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, [PimGroupRequest]?) async -> String?
   // createPod params: profileName, task, model, pod, acceptanceCriteria, baseBranch, acFrom, pimGroups → returns pod ID or nil
   /// Promote an interactive pod to agent-driven in place. `targetOutput` ∈ {pr, branch, artifact, none}.
   public var promote: @MainActor @Sendable (String, String?) async -> Void
@@ -37,6 +37,25 @@ public struct PodActions: Sendable {
   public var addValidationOverride: @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void
   /// Manually force-spawn a fix pod for a merge_pending pod, bypassing auto-detection guards
   public var spawnFix: @MainActor @Sendable (String) async -> Void
+  /// Ask the daemon to parse a local brief folder and return the DAG preview.
+  public var previewSeriesFolder: @MainActor @Sendable (String) async -> SeriesPreviewResponse?
+  /// Ask the daemon to parse a brief folder on a git branch.
+  public var previewSeriesOnBranch: @MainActor @Sendable (
+    _ profileName: String, _ branch: String, _ path: String
+  ) async -> SeriesPreviewResponse?
+  /// Launch a pod series. Returns the seriesId on success.
+  public var createSeries: @MainActor @Sendable (CreateSeriesRequest) async -> String?
+  /// Spawn a new pod that depends on the given parent pod IDs, optionally
+  /// attaching it to an existing series. Returns the new pod id.
+  public var spawnDependent: @MainActor @Sendable (
+    _ profileName: String,
+    _ task: String,
+    _ dependsOnPodIds: [String],
+    _ seriesId: String?,
+    _ seriesName: String?,
+    _ acceptanceCriteria: [AcDefinition]?,
+    _ baseBranch: String?
+  ) async -> String?
 
   public init(
     approve: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -49,7 +68,7 @@ public struct PodActions: Sendable {
     rework: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     fixManually: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     revalidate: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [String]?, String?, String?, [PimGroupRequest]?) async -> String? = { _, _, _, _, _, _, _, _ in nil },
+    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, [PimGroupRequest]?) async -> String? = { _, _, _, _, _, _, _, _ in nil },
     promote: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
@@ -63,7 +82,11 @@ public struct PodActions: Sendable {
     workerProfileForProfile: @escaping @MainActor @Sendable (String) -> String? = { _ in nil },
     interruptValidation: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
-    spawnFix: @escaping @MainActor @Sendable (String) async -> Void = { _ in }
+    spawnFix: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
+    previewSeriesOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> SeriesPreviewResponse? = { _, _, _ in nil },
+    createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
+    spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, [AcDefinition]?, String?) async -> String? = { _, _, _, _, _, _, _ in nil }
   ) {
     self.approve = approve
     self.reject = reject
@@ -90,6 +113,10 @@ public struct PodActions: Sendable {
     self.interruptValidation = interruptValidation
     self.addValidationOverride = addValidationOverride
     self.spawnFix = spawnFix
+    self.previewSeriesFolder = previewSeriesFolder
+    self.previewSeriesOnBranch = previewSeriesOnBranch
+    self.createSeries = createSeries
+    self.spawnDependent = spawnDependent
   }
 
   /// No-op instance for previews

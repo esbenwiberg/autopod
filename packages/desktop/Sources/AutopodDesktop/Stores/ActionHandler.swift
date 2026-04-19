@@ -59,7 +59,27 @@ public final class ActionHandler {
       addValidationOverride: { [weak self] id, fid, desc, action, reason, guidance in
         await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
       },
-      spawnFix: { [weak self] id in await self?.spawnFixSession(id) }
+      spawnFix: { [weak self] id in await self?.spawnFixSession(id) },
+      previewSeriesFolder: { [weak self] path in
+        await self?.previewSeriesFolder(path: path) ?? nil
+      },
+      previewSeriesOnBranch: { [weak self] profile, branch, path in
+        await self?.previewSeriesOnBranch(profileName: profile, branch: branch, path: path) ?? nil
+      },
+      createSeries: { [weak self] request in
+        await self?.createSeries(request) ?? nil
+      },
+      spawnDependent: { [weak self] profile, task, parents, seriesId, seriesName, ac, base in
+        await self?.spawnDependent(
+          profileName: profile,
+          task: task,
+          dependsOnPodIds: parents,
+          seriesId: seriesId,
+          seriesName: seriesName,
+          acceptanceCriteria: ac,
+          baseBranch: base
+        ) ?? nil
+      }
     )
   }
 
@@ -214,7 +234,7 @@ public final class ActionHandler {
 
   public func createPod(
     profileName: String, task: String, model: String?,
-    pod: PodConfigRequest?, acceptanceCriteria: [String]?,
+    pod: PodConfigRequest?, acceptanceCriteria: [AcDefinition]?,
     baseBranch: String?, acFrom: String?, pimGroups: [PimGroupRequest]? = nil
   ) async -> String? {
     pendingAction = "create"
@@ -222,7 +242,7 @@ public final class ActionHandler {
       profileName: profileName,
       task: task,
       model: model?.isEmpty == true ? nil : model,
-      acceptanceCriteria: acceptanceCriteria?.filter { !$0.isEmpty },
+      acceptanceCriteria: acceptanceCriteria?.filter { !$0.test.isEmpty },
       pod: pod,
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       acFrom: acFrom?.isEmpty == true ? nil : acFrom,
@@ -369,5 +389,76 @@ public final class ActionHandler {
 
   public func clearError() {
     lastError = nil
+  }
+
+  // MARK: - Series
+
+  public func previewSeriesFolder(path: String) async -> SeriesPreviewResponse? {
+    do {
+      return try await api.previewSeriesFolder(path: path)
+    } catch {
+      lastError = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func previewSeriesOnBranch(
+    profileName: String, branch: String, path: String
+  ) async -> SeriesPreviewResponse? {
+    do {
+      return try await api.previewSeriesOnBranch(
+        profileName: profileName, branch: branch, path: path
+      )
+    } catch {
+      lastError = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func createSeries(_ request: CreateSeriesRequest) async -> String? {
+    pendingAction = "create-series"
+    defer { pendingAction = nil }
+    do {
+      let response = try await api.createSeries(request)
+      for pod in PodMapper.map(response.pods) {
+        podStore.upsertSession(pod)
+      }
+      return response.seriesId
+    } catch {
+      lastError = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func spawnDependent(
+    profileName: String,
+    task: String,
+    dependsOnPodIds: [String],
+    seriesId: String?,
+    seriesName: String?,
+    acceptanceCriteria: [AcDefinition]?,
+    baseBranch: String?
+  ) async -> String? {
+    pendingAction = "spawn-dependent"
+    defer { pendingAction = nil }
+    let req = CreateSessionRequest(
+      profileName: profileName,
+      task: task,
+      acceptanceCriteria: acceptanceCriteria?.filter { !$0.test.isEmpty },
+      pod: PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
+      baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
+      dependsOnPodIds: dependsOnPodIds,
+      seriesId: seriesId,
+      seriesName: seriesName
+    )
+    do {
+      let response = try await api.createPod(req)
+      let pod = PodMapper.map(response)
+      podStore.upsertSession(pod)
+      return response.id
+    } catch {
+      lastError = error.localizedDescription
+      return nil
+    }
   }
 }

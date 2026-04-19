@@ -135,7 +135,13 @@ public struct MainView: View {
 
     @State private var sidebarSelection: SidebarItem = .attention
     @State private var showCreateSheet = false
+    @State private var showCreateSeriesSheet = false
     @State private var showCommandPalette = false
+    @State private var pipelineExpanded = true
+    @State private var spawnFollowUpInitiator: Pod?
+    /// When set, the Create Series sheet opens pre-filled with this pod's
+    /// branch as baseBranch (launching a series from an interactive pod).
+    @State private var seriesFromPod: Pod?
     @State private var viewMode: ViewMode = .cards
     @State private var cardDensity: CardDensity = .detailed
     @State private var sortOrder: SortOrder = .created
@@ -178,6 +184,8 @@ public struct MainView: View {
         case .featureOverview:  []
         case .salesPitch:       []
         case .profile(let p):   pods.filter { $0.profileName == p }
+        case .series(let id):   pods.filter { $0.seriesId == id }
+        case .seriesAll:        pods.filter { $0.seriesId != nil }
         }
         return filtered.sorted { a, b in
             switch sortOrder {
@@ -193,6 +201,7 @@ public struct MainView: View {
                 pods: pods,
                 selection: $sidebarSelection,
                 showCreateSheet: $showCreateSheet,
+                showCreateSeriesSheet: $showCreateSeriesSheet,
                 isConnected: isConnected,
                 connectionLabel: connectionLabel,
                 pendingMemoryCount: pendingMemoryCount,
@@ -257,6 +266,10 @@ public struct MainView: View {
                 VStack(spacing: 0) {
                     contentToolbar
                     Divider()
+                    if case .series(let seriesId) = sidebarSelection {
+                        seriesPipelineHeader(seriesId: seriesId)
+                        Divider()
+                    }
                     contentArea
                 }
                 .frame(minWidth: 500)
@@ -299,6 +312,8 @@ public struct MainView: View {
                     pod: pod,
                     events: selectedSessionEvents,
                     actions: wiredActions,
+                    seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
+                    onSelectPod: { selectedSessionId = $0 },
                     diffString: sessionDiffs[pod.id],
                     terminalState: terminalState,
                     terminalDataPipe: terminalDataPipe,
@@ -324,6 +339,47 @@ public struct MainView: View {
                 isPresented: $showCreateSheet,
                 actions: actions,
                 profileNames: profileNames
+            )
+        }
+        .sheet(isPresented: $showCreateSeriesSheet) {
+            CreateSeriesSheet(
+                isPresented: $showCreateSeriesSheet,
+                actions: actions,
+                profileNames: profileNames,
+                onSeriesCreated: { seriesId in
+                    sidebarSelection = .series(seriesId)
+                }
+            )
+        }
+        .sheet(item: $seriesFromPod) { initiator in
+            CreateSeriesSheet(
+                isPresented: Binding(
+                    get: { seriesFromPod != nil },
+                    set: { if !$0 { seriesFromPod = nil } }
+                ),
+                actions: actions,
+                profileNames: profileNames,
+                initialBaseBranch: initiator.branch,
+                initialProfile: initiator.profileName,
+                onSeriesCreated: { seriesId in
+                    seriesFromPod = nil
+                    sidebarSelection = .series(seriesId)
+                }
+            )
+        }
+        .sheet(item: $spawnFollowUpInitiator) { initiator in
+            SpawnDependentSheet(
+                isPresented: Binding(
+                    get: { spawnFollowUpInitiator != nil },
+                    set: { if !$0 { spawnFollowUpInitiator = nil } }
+                ),
+                initiator: initiator,
+                candidatePods: pods,
+                actions: actions,
+                profileNames: profileNames,
+                onPodCreated: { newId in
+                    selectedSessionId = newId
+                }
             )
         }
         .onChange(of: selectedSessionId) { _, newId in
@@ -397,6 +453,43 @@ public struct MainView: View {
         .padding(.vertical, 10)
     }
 
+    // MARK: - Series pipeline (above the fleet grid when a series is selected)
+
+    @ViewBuilder
+    private func seriesPipelineHeader(seriesId: String) -> some View {
+        let seriesPods = pods.filter { $0.seriesId == seriesId }
+        if !seriesPods.isEmpty {
+            DisclosureGroup(isExpanded: $pipelineExpanded) {
+                SeriesPipelineView(
+                    pods: seriesPods,
+                    selectedPodId: selectedSessionId,
+                    onSelectPod: { selectedSessionId = $0 }
+                )
+                .frame(minHeight: 180, maxHeight: 360)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "rectangle.3.group.fill")
+                        .foregroundStyle(Color.accentColor)
+                    Text(seriesPods.first?.seriesName ?? seriesId)
+                        .font(.system(.subheadline).weight(.semibold))
+                    Text("pipeline")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(seriesPods.count) pods")
+                        .font(.system(.caption2).weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.1))
+                        .foregroundStyle(Color.accentColor)
+                        .clipShape(Capsule())
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+    }
+
     // MARK: - Content area (cards or list)
 
     @ViewBuilder
@@ -440,8 +533,15 @@ public struct MainView: View {
                 spacing: 10
             ) {
                 ForEach(filteredSessions) { pod in
-                    SessionCardFinal(pod: pod, actions: wiredActions, density: cardDensity, isSelected: selectedSessionId == pod.id)
-                        .onTapGesture { selectedSessionId = pod.id }
+                    SessionCardFinal(
+                        pod: pod,
+                        actions: wiredActions,
+                        density: cardDensity,
+                        isSelected: selectedSessionId == pod.id,
+                        onSpawnFollowUp: { spawnFollowUpInitiator = $0 },
+                        onLaunchSeriesFromPod: { seriesFromPod = $0 }
+                    )
+                    .onTapGesture { selectedSessionId = pod.id }
                 }
             }
             .padding(16)

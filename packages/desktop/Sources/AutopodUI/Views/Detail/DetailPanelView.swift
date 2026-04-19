@@ -6,6 +6,11 @@ public struct DetailPanelView: View {
     public let pod: Pod
     public let events: [AgentEvent]
     public var actions: PodActions
+    /// All pods in the currently-selected pod's series, for the Series tab.
+    /// Empty when the pod is standalone.
+    public var seriesPods: [Pod]
+    /// Callback invoked when a node is tapped in the Series tab's pipeline view.
+    public var onSelectPod: ((String) -> Void)?
     public var diffString: String?
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
@@ -23,6 +28,8 @@ public struct DetailPanelView: View {
 
     public init(
         pod: Pod, events: [AgentEvent], actions: PodActions = .preview,
+        seriesPods: [Pod] = [],
+        onSelectPod: ((String) -> Void)? = nil,
         diffString: String? = nil,
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
@@ -39,6 +46,8 @@ public struct DetailPanelView: View {
         requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
         self.pod = pod; self.events = events; self.actions = actions
+        self.seriesPods = seriesPods
+        self.onSelectPod = onSelectPod
         self.diffString = diffString
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
@@ -89,6 +98,12 @@ public struct DetailPanelView: View {
                 case .summary:    SummaryTab(pod: pod)
                 case .terminal:   EmptyView()
                 case .markdown:   MarkdownTab(pod: pod, loadFiles: loadFiles, loadContent: loadContent)
+                case .series:
+                    SeriesPipelineView(
+                        pods: seriesPods,
+                        selectedPodId: pod.id,
+                        onSelectPod: { onSelectPod?($0) }
+                    )
                 }
 
                 if isTerminalAvailable {
@@ -505,9 +520,18 @@ public struct DetailPanelView: View {
 
     // MARK: - Tab bar
 
+    private var visibleTabs: [DetailTab] {
+        DetailTab.allCases.filter { tab in
+            switch tab {
+            case .series: return pod.seriesId != nil
+            default: return true
+            }
+        }
+    }
+
     private var tabBar: some View {
         HStack(spacing: 4) {
-            ForEach(DetailTab.allCases, id: \.self) { tab in
+            ForEach(visibleTabs, id: \.self) { tab in
                 let isSelected = selectedTab == tab
                 let isDisabled = (tab == .terminal && !isTerminalAvailable) || (tab == .markdown && !isMarkdownAvailable)
                 let disabledHelp: String = {
@@ -550,7 +574,7 @@ public struct DetailPanelView: View {
 // MARK: - Tab enum
 
 public enum DetailTab: CaseIterable {
-    case overview, logs, diff, terminal, markdown, validation, summary
+    case overview, logs, diff, terminal, markdown, validation, summary, series
 
     var label: String {
         switch self {
@@ -561,6 +585,7 @@ public enum DetailTab: CaseIterable {
         case .markdown:    "Markdown"
         case .validation:  "Validation"
         case .summary:     "Summary"
+        case .series:      "Series"
         }
     }
 
@@ -573,6 +598,7 @@ public enum DetailTab: CaseIterable {
         case .markdown:    "doc.richtext"
         case .validation:  "checkmark.seal"
         case .summary:     "doc.text.below.ecg"
+        case .series:      "rectangle.3.group.fill"
         }
     }
 }

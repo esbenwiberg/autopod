@@ -5,6 +5,7 @@ public struct SidebarView: View {
     public let pods: [Pod]
     @Binding public var selection: SidebarItem
     @Binding public var showCreateSheet: Bool
+    @Binding public var showCreateSeriesSheet: Bool
     public var isConnected: Bool
     public var connectionLabel: String
     public var pendingMemoryCount: Int
@@ -16,6 +17,7 @@ public struct SidebarView: View {
         pods: [Pod],
         selection: Binding<SidebarItem>,
         showCreateSheet: Binding<Bool>,
+        showCreateSeriesSheet: Binding<Bool> = .constant(false),
         isConnected: Bool = true,
         connectionLabel: String = "localhost:3000",
         pendingMemoryCount: Int = 0,
@@ -26,6 +28,7 @@ public struct SidebarView: View {
         self.pods = pods
         self._selection = selection
         self._showCreateSheet = showCreateSheet
+        self._showCreateSeriesSheet = showCreateSeriesSheet
         self.isConnected = isConnected
         self.connectionLabel = connectionLabel
         self.pendingMemoryCount = pendingMemoryCount
@@ -39,7 +42,29 @@ public struct SidebarView: View {
     private var runningCount: Int { pods.filter { $0.status.isActive && !$0.isWorkspace }.count }
     private var workspaceCount: Int { pods.filter { $0.isWorkspace }.count }
     private var completedCount: Int { pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }.count }
+    private var seriesPodCount: Int { pods.filter { $0.seriesId != nil }.count }
     private var profiles: [String] { Array(Set(pods.map(\.profileName))).sorted() }
+
+    /// Distinct series, sorted by earliest-pod creation time so newer series
+    /// appear first.
+    private var seriesList: [(id: String, name: String, count: Int)] {
+        var byId: [String: (name: String, count: Int, earliest: Date)] = [:]
+        for pod in pods {
+            guard let id = pod.seriesId else { continue }
+            let name = pod.seriesName ?? id
+            if var existing = byId[id] {
+                existing.count += 1
+                if pod.startedAt < existing.earliest { existing.earliest = pod.startedAt }
+                byId[id] = existing
+            } else {
+                byId[id] = (name: name, count: 1, earliest: pod.startedAt)
+            }
+        }
+        return byId
+            .map { (id: $0.key, name: $0.value.name, count: $0.value.count, earliest: $0.value.earliest) }
+            .sorted { $0.earliest > $1.earliest }
+            .map { (id: $0.id, name: $0.name, count: $0.count) }
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,15 +73,28 @@ public struct SidebarView: View {
 
             Divider().padding(.bottom, 8)
 
-            // New pod button
-            Button {
-                showCreateSheet = true
-            } label: {
-                Label("New Pod", systemImage: "plus.circle.fill")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            // New pod + new series
+            HStack(spacing: 6) {
+                Button {
+                    showCreateSheet = true
+                } label: {
+                    Label("New Pod", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+
+                Button {
+                    showCreateSeriesSheet = true
+                } label: {
+                    Image(systemName: "rectangle.3.group.fill")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 28, height: 22)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .help("New Series — launch a dependency chain of pods from a brief folder")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
 
@@ -67,12 +105,37 @@ public struct SidebarView: View {
                     sidebarRow(.active, icon: "bolt.circle.fill", color: .blue, badge: activeCount)
                     sidebarRow(.running, icon: "play.circle.fill", color: .secondary, badge: runningCount)
                     sidebarRow(.workspaces, icon: "terminal.fill", color: .secondary, badge: workspaceCount)
+                    sidebarRow(.seriesAll, icon: "rectangle.3.group.fill", color: .accentColor, badge: seriesPodCount)
                     sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
                     sidebarRow(.all, icon: "square.grid.2x2", color: .secondary, badge: pods.count)
                     sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
                     sidebarRow(.history, icon: "clock.arrow.circlepath", color: .secondary, badge: 0)
                     sidebarRow(.memory, icon: "brain", color: .purple, badge: pendingMemoryCount)
                     sidebarRow(.scheduledJobs, icon: "clock.badge.checkmark", color: catchupPendingCount > 0 ? .orange : .secondary, badge: catchupPendingCount > 0 ? catchupPendingCount : scheduledJobCount)
+                }
+
+                if !seriesList.isEmpty {
+                    Section("Series") {
+                        ForEach(seriesList, id: \.id) { entry in
+                            Label {
+                                HStack {
+                                    Text(entry.name).lineLimit(1)
+                                    Spacer()
+                                    Text("\(entry.count)")
+                                        .font(.system(.caption2).weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 1)
+                                        .background(Color.accentColor.opacity(0.12))
+                                        .foregroundStyle(Color.accentColor)
+                                        .clipShape(Capsule())
+                                }
+                            } icon: {
+                                Image(systemName: "rectangle.3.group.fill")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                            .tag(SidebarItem.series(entry.id))
+                        }
+                    }
                 }
 
                 Section("Profiles") {
@@ -204,12 +267,18 @@ public enum SidebarItem: Hashable {
     case active
     case running
     case workspaces
+    /// All pods that belong to any series — rollup view that makes the series
+    /// entry point permanent even when no individual series has pods yet.
+    case seriesAll
     case completed
     case all
     case analytics
     case history
     case memory
     case profile(String)
+    /// A pod series identified by its seriesId. Label is looked up from the
+    /// pod list at render time so the sidebar can show the human-readable name.
+    case series(String)
     case featureOverview
     case salesPitch
     case scheduledJobs
@@ -219,13 +288,15 @@ public enum SidebarItem: Hashable {
         case .attention: "Attention"
         case .active: "Active"
         case .running: "Running"
-        case .workspaces: "Workspaces"
+        case .workspaces: "Interactive"
+        case .seriesAll: "Series"
         case .completed: "Completed"
         case .all: "All Pods"
         case .analytics: "Analytics"
         case .history: "History"
         case .memory: "Memory"
         case .profile(let name): name
+        case .series(let id): id
         case .featureOverview: "How it Works"
         case .salesPitch: "Why Autopod"
         case .scheduledJobs: "Scheduled Jobs"
