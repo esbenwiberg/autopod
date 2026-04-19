@@ -183,15 +183,25 @@ describe('generateSystemInstructions', () => {
       makeProfile(),
       makeSession({
         acceptanceCriteria: [
-          'Settings page has a dark mode toggle',
-          'Toggle persists after refresh',
+          {
+            type: 'web',
+            test: 'Settings page has a dark mode toggle',
+            pass: 'toggle visible',
+            fail: 'no toggle',
+          },
+          {
+            type: 'none',
+            test: 'Toggle persists after refresh',
+            pass: 'value retained',
+            fail: 'value lost',
+          },
         ],
       }),
       'http://localhost:8080/mcp/x',
     );
     expect(md).toContain('## Acceptance Criteria');
-    expect(md).toContain('- Settings page has a dark mode toggle');
-    expect(md).toContain('- Toggle persists after refresh');
+    expect(md).toContain('- [browser] Settings page has a dark mode toggle');
+    expect(md).toContain('- [code] Toggle persists after refresh');
     expect(md).toContain('independently verify');
   });
 
@@ -226,7 +236,9 @@ describe('generateSystemInstructions', () => {
     const md = generateSystemInstructions(
       makeProfile(),
       makeSession({
-        acceptanceCriteria: ['Page loads without errors'],
+        acceptanceCriteria: [
+          { type: 'none', test: 'Page loads without errors', pass: 'exit 0', fail: 'any error' },
+        ],
       }),
       'http://localhost:8080/mcp/x',
     );
