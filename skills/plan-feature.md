@@ -150,6 +150,8 @@ handover_from:
 
 Task instructions in plain prose. What to build, not how.
 Constraints and non-goals. Exact file pointers.
+
+Before finishing, run `/simplify` on all files you changed.
 ```
 
 ### Acceptance criteria types
@@ -171,6 +173,7 @@ Constraints and non-goals. Exact file pointers.
 - `fail`: observable failure (build error, non-200, element missing)
 - No judgment calls — "looks correct" is not a pass condition
 - Every brief must have at least one `none` AC gating on build + tests passing
+- Every brief must have a `none` AC for `/simplify` passing (run it, address findings, build still passes)
 
 ---
 
