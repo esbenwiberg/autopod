@@ -1,3 +1,4 @@
+import type { AcDefinition } from './ac.js';
 import type { OutputMode } from './actions.js';
 import type { EscalationRequest } from './escalation.js';
 import type { PodOptions } from './pod-options.js';
@@ -65,7 +66,7 @@ export interface Pod {
     currentPhase: number;
     totalPhases: number;
   } | null;
-  acceptanceCriteria: string[] | null;
+  acceptanceCriteria: AcDefinition[] | null;
   claudeSessionId: string | null;
   /**
    * Orthogonal axes describing how this pod is driven and where its output
@@ -111,6 +112,14 @@ export interface Pod {
   artifactsPath: string | null;
   /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
   scheduledJobId: string | null;
+  /** ID of the pod this pod depends on (null for independent pods). */
+  dependsOnPodId: string | null;
+  /** Series this pod belongs to (null for standalone pods). */
+  seriesId: string | null;
+  /** Human-readable series name (null for standalone pods). */
+  seriesName: string | null;
+  /** When the dependency pod reached validated and this pod was enqueued. */
+  dependencyStartedAt: string | null;
 }
 
 export interface CreatePodRequest {
@@ -123,7 +132,7 @@ export interface CreatePodRequest {
   /** Override the profile's branch prefix for this pod (e.g. 'hotfix/'). Ignored when branch is set. */
   branchPrefix?: string;
   skipValidation?: boolean;
-  acceptanceCriteria?: string[];
+  acceptanceCriteria?: AcDefinition[];
   /**
    * Per-pod override of the profile's pod options. Each field is
    * independently overridable — `{agentMode:'interactive'}` keeps the
@@ -150,6 +159,12 @@ export interface CreatePodRequest {
   referenceRepoPat?: string;
   /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
   scheduledJobId?: string | null;
+  /** ID of the pod this pod depends on — starts this pod when dependency reaches validated. */
+  dependsOnPodId?: string | null;
+  /** Series this pod belongs to. */
+  seriesId?: string | null;
+  /** Human-readable series name. */
+  seriesName?: string | null;
 }
 
 export interface PodSummary {

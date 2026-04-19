@@ -1,6 +1,15 @@
 import { z } from 'zod';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
 
+export const acTypeSchema = z.enum(['none', 'api', 'web']);
+
+export const acDefinitionSchema = z.object({
+  type: acTypeSchema,
+  test: z.string().min(1).max(2_000),
+  pass: z.string().min(1).max(1_000),
+  fail: z.string().min(1).max(1_000),
+});
+
 export const createPodRequestSchema = z
   .object({
     profileName: z.string().min(1).max(64),
@@ -21,7 +30,7 @@ export const createPodRequestSchema = z
       .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch prefix contains invalid characters')
       .optional(),
     skipValidation: z.boolean().optional(),
-    acceptanceCriteria: z.array(z.string().min(1).max(2_000)).optional(),
+    acceptanceCriteria: z.array(acDefinitionSchema).optional(),
     options: partialPodOptionsSchema.optional(),
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),
     baseBranch: z
@@ -39,6 +48,9 @@ export const createPodRequestSchema = z
       })
       .optional(),
     linkedPodId: z.string().min(1).max(16).optional(),
+    dependsOnPodId: z.string().min(1).max(16).optional(),
+    seriesId: z.string().min(1).max(64).optional(),
+    seriesName: z.string().min(1).max(128).optional(),
     pimGroups: z
       .array(
         z.object({

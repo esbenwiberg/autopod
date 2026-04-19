@@ -1756,7 +1756,10 @@ describe('PodManager', () => {
         await manager.processPod(pod.id);
 
         const updated = manager.getSession(pod.id);
-        expect(updated.acceptanceCriteria).toEqual(['Login works', 'Logout works']);
+        expect(updated.acceptanceCriteria).toEqual([
+          { type: 'none', test: 'Login works', pass: 'criterion satisfied', fail: 'criterion not satisfied' },
+          { type: 'none', test: 'Logout works', pass: 'criterion satisfied', fail: 'criterion not satisfied' },
+        ]);
 
         // Cleanup
         await fs.rm(`${tmpPath}/specs`, { recursive: true, force: true });

@@ -1,4 +1,5 @@
 import type {
+  AcDefinition,
   AgentMode,
   ExecutionTarget,
   OutputMode,
@@ -32,7 +33,7 @@ export interface NewPod {
   userId: string;
   maxValidationAttempts: number;
   skipValidation: boolean;
-  acceptanceCriteria?: string[] | null;
+  acceptanceCriteria?: AcDefinition[] | null;
   /** New-style pod options. If omitted, derived from `outputMode`. */
   options?: PodOptions;
   /** Legacy field — still persisted for wire back-compat. */
@@ -51,6 +52,12 @@ export interface NewPod {
   referenceRepoPat?: string | null;
   /** ID of the scheduled job that spawned this pod. */
   scheduledJobId?: string | null;
+  /** ID of the pod this pod depends on. */
+  dependsOnPodId?: string | null;
+  /** Series this pod belongs to. */
+  seriesId?: string | null;
+  /** Human-readable series name. */
+  seriesName?: string | null;
 }
 
 export interface PodFilters {
@@ -85,7 +92,7 @@ export interface PodUpdates {
     totalPhases: number;
   } | null;
   claudeSessionId?: string | null;
-  acceptanceCriteria?: string[] | null;
+  acceptanceCriteria?: AcDefinition[] | null;
   recoveryWorktreePath?: string | null;
   reworkReason?: string | null;
   lastHeartbeatAt?: string | null;
@@ -108,6 +115,8 @@ export interface PodUpdates {
   referenceRepos?: ReferenceRepo[] | null;
   artifactsPath?: string | null;
   options?: PodOptions;
+  dependencyStartedAt?: string | null;
+  baseBranch?: string | null;
 }
 
 export interface PodStats {
@@ -123,6 +132,28 @@ export interface PodRepository {
   list(filters?: PodFilters): Pod[];
   countByStatusAndProfile(status: PodStatus, profileName: string): number;
   getStats(filters?: { profileName?: string }): PodStats;
+  getPodsDependingOn(podId: string): Pod[];
+  getPodsBySeries(seriesId: string): Pod[];
+}
+
+/**
+ * Normalize acceptance_criteria from DB — supports both old string[] (legacy)
+ * and new AcDefinition[] (structured). Strings are wrapped as type:'none'.
+ */
+function parseAcceptanceCriteria(raw: unknown): AcDefinition[] | null {
+  if (!raw) return null;
+  const parsed = JSON.parse(raw as string) as unknown[];
+  return parsed.map((item) => {
+    if (typeof item === 'string') {
+      return {
+        type: 'none' as const,
+        test: item,
+        pass: 'criterion satisfied',
+        fail: 'criterion not satisfied',
+      };
+    }
+    return item as AcDefinition;
+  });
 }
 
 /**
@@ -178,9 +209,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     mergeBlockReason: (row.merge_block_reason as string) ?? null,
     plan: row.plan ? JSON.parse(row.plan as string) : null,
     progress: row.progress ? JSON.parse(row.progress as string) : null,
-    acceptanceCriteria: row.acceptance_criteria
-      ? JSON.parse(row.acceptance_criteria as string)
-      : null,
+    acceptanceCriteria: parseAcceptanceCriteria(row.acceptance_criteria),
     claudeSessionId: (row.claude_session_id as string) ?? null,
     options: readPodFromRow(row),
     outputMode: (row.output_mode as OutputMode) ?? 'pr',
@@ -216,6 +245,10 @@ function rowToSession(row: Record<string, unknown>): Pod {
     referenceRepoPat: (row.reference_repo_pat as string) ?? null,
     artifactsPath: (row.artifacts_path as string) ?? null,
     scheduledJobId: (row.scheduled_job_id as string) ?? null,
+    dependsOnPodId: (row.depends_on_pod_id as string) ?? null,
+    seriesId: (row.series_id as string) ?? null,
+    seriesName: (row.series_name as string) ?? null,
+    dependencyStartedAt: (row.dependency_started_at as string) ?? null,
   };
 }
 
@@ -233,13 +266,15 @@ export function createPodRepository(db: Database.Database): PodRepository {
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
           output_mode, agent_mode, output_target, validate, promotable,
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
-          token_budget, reference_repos, reference_repo_pat, scheduled_job_id
+          token_budget, reference_repos, reference_repo_pat, scheduled_job_id,
+          depends_on_pod_id, series_id, series_name
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
-          @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId
+          @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId,
+          @dependsOnPodId, @seriesId, @seriesName
         )
       `).run({
         id: pod.id,
@@ -268,6 +303,9 @@ export function createPodRepository(db: Database.Database): PodRepository {
         referenceRepos: pod.referenceRepos ? JSON.stringify(pod.referenceRepos) : null,
         referenceRepoPat: pod.referenceRepoPat ?? null,
         scheduledJobId: pod.scheduledJobId ?? null,
+        dependsOnPodId: pod.dependsOnPodId ?? null,
+        seriesId: pod.seriesId ?? null,
+        seriesName: pod.seriesName ?? null,
       });
     },
 
@@ -460,6 +498,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('artifacts_path = @artifactsPath');
         params.artifactsPath = changes.artifactsPath ?? null;
       }
+      if (changes.dependencyStartedAt !== undefined) {
+        setClauses.push('dependency_started_at = @dependencyStartedAt');
+        params.dependencyStartedAt = changes.dependencyStartedAt ?? null;
+      }
+      if (changes.baseBranch !== undefined) {
+        setClauses.push('base_branch = @baseBranch');
+        params.baseBranch = changes.baseBranch ?? null;
+      }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so
         // older readers (desktop client, etc.) continue to see a valid value.
@@ -517,10 +563,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
     delete(id: string): void {
       // Null out self-referential FKs from other pods before deleting.
-      // linked_pod_id and fix_pod_id were added without ON DELETE SET NULL
-      // (SQLite can't ALTER COLUMN), so we nullify them at the application level.
+      // These were added without ON DELETE SET NULL (SQLite can't ALTER COLUMN),
+      // so we nullify them at the application level.
       db.prepare('UPDATE pods SET linked_pod_id = NULL WHERE linked_pod_id = ?').run(id);
       db.prepare('UPDATE pods SET fix_pod_id = NULL WHERE fix_pod_id = ?').run(id);
+      db.prepare('UPDATE pods SET depends_on_pod_id = NULL WHERE depends_on_pod_id = ?').run(id);
       const result = db.prepare('DELETE FROM pods WHERE id = ?').run(id);
       if (result.changes === 0) throw new PodNotFoundError(id);
     },
@@ -572,6 +619,20 @@ export function createPodRepository(db: Database.Database): PodRepository {
       }
 
       return { total, byStatus };
+    },
+
+    getPodsDependingOn(podId: string): Pod[] {
+      const rows = db
+        .prepare('SELECT * FROM pods WHERE depends_on_pod_id = ? ORDER BY created_at ASC')
+        .all(podId) as Record<string, unknown>[];
+      return rows.map(rowToSession);
+    },
+
+    getPodsBySeries(seriesId: string): Pod[] {
+      const rows = db
+        .prepare('SELECT * FROM pods WHERE series_id = ? ORDER BY created_at ASC')
+        .all(seriesId) as Record<string, unknown>[];
+      return rows.map(rowToSession);
     },
   };
 }

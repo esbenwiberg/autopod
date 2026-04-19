@@ -40,6 +40,7 @@ import { memoryRoutes } from './routes/memory.js';
 import { podRoutes } from './routes/pods.js';
 import { profileRoutes } from './routes/profiles.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
+import { seriesRoutes } from './routes/series.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { websocketHandler } from './websocket.js';
 import './types.js';
@@ -119,6 +120,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.eventRepo,
     deps.pendingOverrideRepo,
   );
+  seriesRoutes(app, deps.podManager);
   historyRoutes(app, deps.podManager);
   profileRoutes(
     app,

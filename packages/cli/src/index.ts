@@ -8,6 +8,7 @@ import { registerPodCommands } from './commands/pod.js';
 import { registerProfileCommands } from './commands/profile.js';
 import { registerResearchCommands } from './commands/research.js';
 import { registerScheduleCommands } from './commands/schedule.js';
+import { registerSeriesCommands } from './commands/series.js';
 import { registerValidateCommands } from './commands/validate.js';
 import { registerWatchCommands } from './commands/watch.js';
 import { registerWorkspaceCommands } from './commands/workspace.js';
@@ -48,6 +49,7 @@ registerResearchCommands(program, getClient);
 registerHistoryCommands(program, getClient);
 registerValidateCommands(program, getClient);
 registerScheduleCommands(program, getClient);
+registerSeriesCommands(program, getClient);
 registerWatchCommands(program, getClient);
 
 // Parse and handle errors

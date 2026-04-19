@@ -7,6 +7,7 @@ import {
   ValidationError,
 } from '@autopod/shared';
 import type {
+  AcDefinition,
   CreatePodRequest,
   CreateScheduledJobRequest,
   HistoryQuery,
@@ -18,6 +19,27 @@ import type {
   ValidationResult,
   WatchedIssue,
 } from '@autopod/shared';
+
+export interface CreateSeriesRequest {
+  seriesName: string;
+  briefs: Array<{
+    title: string;
+    task: string;
+    dependsOn: string[];
+    acceptanceCriteria?: AcDefinition[];
+  }>;
+  profile: string;
+  baseBranch?: string;
+  prMode?: 'single' | 'stacked' | 'none';
+}
+
+export interface SeriesResponse {
+  seriesId: string;
+  seriesName: string;
+  pods: Pod[];
+  tokenUsageSummary: { inputTokens: number; outputTokens: number; costUsd: number };
+  statusCounts: Record<string, number>;
+}
 import { fetch } from 'undici';
 
 export class DaemonUnreachableError extends AutopodError {
@@ -44,6 +66,15 @@ export class AutopodClient {
   // Sessions
   async createSession(req: CreatePodRequest): Promise<Pod> {
     return this.request<Pod>('POST', '/pods', req);
+  }
+
+  // Series
+  async createSeries(req: CreateSeriesRequest): Promise<SeriesResponse> {
+    return this.request<SeriesResponse>('POST', '/pods/series', req);
+  }
+
+  async getSeries(seriesId: string): Promise<SeriesResponse> {
+    return this.request<SeriesResponse>('GET', `/pods/series/${seriesId}`);
   }
 
   async listSessions(filters?: { status?: string; profile?: string }): Promise<Pod[]> {

@@ -386,6 +386,8 @@ export interface PodManager {
    * Bumps maxPrFixAttempts if the current cap would otherwise block spawn.
    */
   spawnFixSession(podId: string): Promise<void>;
+  /** Return all pods belonging to a series, ordered by creation time. */
+  getSeriesPods(seriesId: string): Pod[];
 }
 
 export function createPodManager(deps: PodManagerDependencies): PodManager {
@@ -1095,7 +1097,53 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       previousStatus,
       newStatus: to,
     });
+    if (to === 'failed' || to === 'killed') {
+      failDependents(pod.id);
+    }
     return podRepo.getOrThrow(pod.id);
+  }
+
+  /** After a pod reaches `validated`, enqueue any pods that depend on it. */
+  function maybeTriggerDependents(completedPod: Pod): void {
+    const dependents = podRepo.getPodsDependingOn(completedPod.id);
+    for (const dep of dependents) {
+      if (dep.status !== 'queued') continue;
+      podRepo.update(dep.id, {
+        baseBranch: completedPod.branch,
+        dependencyStartedAt: new Date().toISOString(),
+      });
+      enqueueSession(dep.id);
+      logger.info(
+        { podId: dep.id, dependsOnPodId: completedPod.id },
+        'Series: dependent pod enqueued',
+      );
+    }
+  }
+
+  /** When a pod fails or is killed, cascade failure to all queued dependents. */
+  function failDependents(failedPodId: string): void {
+    const dependents = podRepo.getPodsDependingOn(failedPodId);
+    for (const dep of dependents) {
+      if (dep.status !== 'queued') continue;
+      podRepo.update(dep.id, {
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        mergeBlockReason: `dependency pod ${failedPodId} failed`,
+      });
+      eventBus.emit({
+        type: 'pod.status_changed',
+        timestamp: new Date().toISOString(),
+        podId: dep.id,
+        previousStatus: 'queued',
+        newStatus: 'failed',
+      });
+      logger.info(
+        { podId: dep.id, failedPodId },
+        'Series: dependent pod failed due to dependency failure',
+      );
+      // Cascade further down the chain
+      failDependents(dep.id);
+    }
   }
 
   return {
@@ -1191,6 +1239,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             referenceRepos: derivedReferenceRepos.length > 0 ? derivedReferenceRepos : null,
             referenceRepoPat: request.referenceRepoPat ?? null,
             scheduledJobId: request.scheduledJobId ?? null,
+            dependsOnPodId: request.dependsOnPodId ?? null,
+            seriesId: request.seriesId ?? null,
+            seriesName: request.seriesName ?? null,
           });
           break;
         } catch (err: unknown) {
@@ -1225,7 +1276,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         },
       });
 
-      enqueueSession(id);
+      // Only enqueue immediately if there's no dependency.
+      // Pods with dependsOnPodId stay queued until maybeTriggerDependents fires.
+      if (!request.dependsOnPodId) {
+        enqueueSession(id);
+      }
       logger.info({ podId: id, profile: request.profileName }, 'Pod created');
       return pod;
     },
@@ -2212,7 +2267,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
         transition(refreshed, 'validating');
         const s2 = podRepo.getOrThrow(podId);
-        transition(s2, 'validated');
+        const skippedPod = transition(s2, 'validated');
+        maybeTriggerDependents(skippedPod);
         return;
       }
 
@@ -3520,7 +3576,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           podRepo.update(podId, { lastCorrectionMessage: null });
-          transition(s2, 'validated', { prUrl });
+          const validatedPod = transition(s2, 'validated', { prUrl });
+          maybeTriggerDependents(validatedPod);
 
           // Stop the container (not remove) so it can be restarted for preview
           if (s2.containerId) {
@@ -3821,7 +3878,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
 
-          transition(s2, 'validated', { prUrl });
+          const revalidatedPod = transition(s2, 'validated', { prUrl });
+          maybeTriggerDependents(revalidatedPod);
 
           // Stop the container
           if (s2.containerId) {
@@ -4071,6 +4129,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     getSessionStats(filters?) {
       return podRepo.getStats(filters);
+    },
+
+    getSeriesPods(seriesId: string): Pod[] {
+      return podRepo.getPodsBySeries(seriesId);
     },
 
     getValidationHistory(podId: string) {

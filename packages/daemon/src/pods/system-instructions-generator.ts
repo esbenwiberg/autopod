@@ -221,7 +221,7 @@ export function generateSystemInstructions(
     const hasWebUi = profile.hasWebUi ?? true;
     if (hasWebUi) {
       lines.push(
-        'Your changes must satisfy these criteria. The system will independently verify each one after you commit — criteria may be checked via browser, HTTP request, or diff review depending on their type:',
+        'Your changes must satisfy these criteria. The system will independently verify each one after you commit — criteria are checked via browser, HTTP request, or code review depending on their type:',
       );
     } else {
       lines.push(
@@ -232,7 +232,14 @@ export function generateSystemInstructions(
     // Acceptance criteria are user-supplied — wrap in boundary markers.
     lines.push('<!-- BEGIN USER ACCEPTANCE CRITERIA -->');
     for (const ac of pod.acceptanceCriteria) {
-      lines.push(`- ${ac}`);
+      if (typeof ac === 'string') {
+        lines.push(`- ${ac}`);
+      } else {
+        const typeLabel = ac.type === 'web' ? 'browser' : ac.type === 'api' ? 'API' : 'code';
+        lines.push(`- [${typeLabel}] ${ac.test}`);
+        lines.push(`  - Pass: ${ac.pass}`);
+        lines.push(`  - Fail: ${ac.fail}`);
+      }
     }
     lines.push('<!-- END USER ACCEPTANCE CRITERIA -->');
     lines.push('');
@@ -262,6 +269,29 @@ export function generateSystemInstructions(
       );
       lines.push('');
     }
+  }
+
+  if (pod.seriesId) {
+    lines.push('## Series Handover Protocol');
+    lines.push('');
+    lines.push(
+      `This pod is part of series **${pod.seriesName ?? pod.seriesId}**. The next pod in the series will stack its branch on top of yours and read your handover file.`,
+    );
+    lines.push('');
+    if (pod.dependsOnPodId) {
+      lines.push(
+        `Before starting, read the handover file from the previous pod in this series: \`specs/${pod.seriesId}/handovers/\` — look for the most recent \`.md\` file committed there.`,
+      );
+      lines.push('');
+    }
+    lines.push(
+      `Before finishing, write a handover summary to \`specs/${pod.seriesId}/handovers/${pod.id}.md\` and commit it. Include:`,
+    );
+    lines.push('- What you built and any deviations from the brief');
+    lines.push('- Interfaces or contracts you changed that downstream pods must know about');
+    lines.push('- Files you own that the next pod should NOT modify without good reason');
+    lines.push('- Any discovered constraints or landmines');
+    lines.push('');
   }
 
   if (profile.customInstructions) {

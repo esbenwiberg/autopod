@@ -1,4 +1,6 @@
 // Types
+export type { AcType, AcDefinition } from './types/ac.js';
+
 export type {
   PodStatus,
   Pod,
@@ -201,6 +203,8 @@ export {
   createPodRequestSchema,
   podStatusSchema,
   sendMessageSchema,
+  acDefinitionSchema,
+  acTypeSchema,
 } from './schemas/pod.schema.js';
 
 export {

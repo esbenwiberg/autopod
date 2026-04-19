@@ -809,4 +809,182 @@ describe('Integration', () => {
       expect(res.statusCode).toBe(400);
     });
   });
+
+  describe('Series', () => {
+    beforeEach(async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+    });
+
+    it('POST /pods/series creates pods with seriesId and dependency chain', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'auth-refactor',
+          profile: 'test-app',
+          prMode: 'single',
+          briefs: [
+            { title: '01-types', task: 'Implement auth types', dependsOn: [] },
+            { title: '02-backend', task: 'Implement auth backend', dependsOn: ['01-types'] },
+            { title: '03-frontend', task: 'Implement auth frontend', dependsOn: ['02-backend'] },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.seriesId).toBeTruthy();
+      expect(body.seriesName).toBe('auth-refactor');
+      expect(body.pods).toHaveLength(3);
+
+      // All pods share the same seriesId
+      for (const pod of body.pods) {
+        expect(pod.seriesId).toBe(body.seriesId);
+        expect(pod.seriesName).toBe('auth-refactor');
+      }
+
+      // Dependency chain: pod 2 depends on pod 1, pod 3 depends on pod 2
+      expect(body.pods[0].dependsOnPodId).toBeNull();
+      expect(body.pods[1].dependsOnPodId).toBe(body.pods[0].id);
+      expect(body.pods[2].dependsOnPodId).toBe(body.pods[1].id);
+    });
+
+    it('POST /pods/series sets output:branch for intermediate pods in single mode', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'feature-x',
+          profile: 'test-app',
+          prMode: 'single',
+          briefs: [
+            { title: '01-a', task: 'Task A', dependsOn: [] },
+            { title: '02-b', task: 'Task B', dependsOn: ['01-a'] },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const { pods } = res.json();
+      expect(pods[0].options.output).toBe('branch');
+      expect(pods[1].options.output).toBe('pr');
+    });
+
+    it('GET /pods/series/:id returns pods and cost roll-up', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'cost-test',
+          profile: 'test-app',
+          briefs: [
+            { title: 'step-1', task: 'Step 1', dependsOn: [] },
+            { title: 'step-2', task: 'Step 2', dependsOn: ['step-1'] },
+          ],
+        },
+      });
+      const { seriesId } = createRes.json();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/pods/series/${seriesId}`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.seriesId).toBe(seriesId);
+      expect(body.pods).toHaveLength(2);
+      expect(body.tokenUsageSummary).toMatchObject({
+        inputTokens: expect.any(Number),
+        outputTokens: expect.any(Number),
+        costUsd: expect.any(Number),
+      });
+      // step-1 is immediately enqueued (no dep) and gets processed by mock runtime → validated
+      // step-2 waits for step-1 to complete (has dependsOnPodId) → still queued
+      expect(body.statusCounts).toMatchObject({ validated: 1, queued: 1 });
+    });
+
+    it('GET /pods/series/:id returns 404 for unknown series', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/series/nonexistent-series-id',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('POST /pods with dependsOnPodId and seriesId stores fields correctly', async () => {
+      // Create a standalone pod first
+      const firstRes = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'First pod in chain' },
+      });
+      const firstPod = firstRes.json();
+
+      // Create a dependent pod
+      const secondRes = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'Second pod in chain',
+          dependsOnPodId: firstPod.id,
+          seriesId: 'my-series-123',
+          seriesName: 'my-series',
+        },
+      });
+
+      expect(secondRes.statusCode).toBe(201);
+      const second = secondRes.json();
+      expect(second.dependsOnPodId).toBe(firstPod.id);
+      expect(second.seriesId).toBe('my-series-123');
+      expect(second.seriesName).toBe('my-series');
+    });
+
+    it('POST /pods/series accepts structured AcDefinition acceptance criteria', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'ac-test',
+          profile: 'test-app',
+          briefs: [
+            {
+              title: 'with-acs',
+              task: 'Task with ACs',
+              dependsOn: [],
+              acceptanceCriteria: [
+                { type: 'none', test: 'npx pnpm build', pass: 'exit 0', fail: 'any error' },
+                {
+                  type: 'api',
+                  test: 'GET /health',
+                  pass: '200 ok',
+                  fail: 'non-200',
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.pods[0].acceptanceCriteria).toHaveLength(2);
+      expect(body.pods[0].acceptanceCriteria[0].type).toBe('none');
+      expect(body.pods[0].acceptanceCriteria[1].type).toBe('api');
+    });
+  });
 });
