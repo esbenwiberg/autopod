@@ -1120,7 +1120,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
-  /** When a pod fails or is killed, cascade failure to all queued dependents. */
+  // Uses podRepo.update() directly instead of transition() to avoid a circular call:
+  // transition() calls failDependents() when a pod reaches 'failed', so calling transition()
+  // here would recurse. Direct update is safe because queued pods have no in-progress work.
   function failDependents(failedPodId: string): void {
     const dependents = podRepo.getPodsDependingOn(failedPodId);
     for (const dep of dependents) {
@@ -1276,8 +1278,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         },
       });
 
-      // Only enqueue immediately if there's no dependency.
-      // Pods with dependsOnPodId stay queued until maybeTriggerDependents fires.
+      // Dependent pods must not start until their predecessor reaches `validated`;
+      // maybeTriggerDependents() will enqueue them at that point.
       if (!request.dependsOnPodId) {
         enqueueSession(id);
       }

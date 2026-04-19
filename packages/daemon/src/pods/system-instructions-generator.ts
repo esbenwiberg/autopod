@@ -232,14 +232,10 @@ export function generateSystemInstructions(
     // Acceptance criteria are user-supplied — wrap in boundary markers.
     lines.push('<!-- BEGIN USER ACCEPTANCE CRITERIA -->');
     for (const ac of pod.acceptanceCriteria) {
-      if (typeof ac === 'string') {
-        lines.push(`- ${ac}`);
-      } else {
-        const typeLabel = ac.type === 'web' ? 'browser' : ac.type === 'api' ? 'API' : 'code';
-        lines.push(`- [${typeLabel}] ${ac.test}`);
-        lines.push(`  - Pass: ${ac.pass}`);
-        lines.push(`  - Fail: ${ac.fail}`);
-      }
+      const typeLabel = ac.type === 'web' ? 'browser' : ac.type === 'api' ? 'API' : 'code';
+      lines.push(`- [${typeLabel}] ${ac.test}`);
+      lines.push(`  - Pass: ${ac.pass}`);
+      lines.push(`  - Fail: ${ac.fail}`);
     }
     lines.push('<!-- END USER ACCEPTANCE CRITERIA -->');
     lines.push('');

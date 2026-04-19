@@ -142,18 +142,22 @@ export interface PodRepository {
  */
 function parseAcceptanceCriteria(raw: unknown): AcDefinition[] | null {
   if (!raw) return null;
-  const parsed = JSON.parse(raw as string) as unknown[];
-  return parsed.map((item) => {
-    if (typeof item === 'string') {
-      return {
-        type: 'none' as const,
-        test: item,
-        pass: 'criterion satisfied',
-        fail: 'criterion not satisfied',
-      };
-    }
-    return item as AcDefinition;
-  });
+  try {
+    const parsed = JSON.parse(raw as string) as unknown[];
+    return parsed.map((item) => {
+      if (typeof item === 'string') {
+        return {
+          type: 'none' as const,
+          test: item,
+          pass: 'criterion satisfied',
+          fail: 'criterion not satisfied',
+        };
+      }
+      return item as AcDefinition;
+    });
+  } catch {
+    return null;
+  }
 }
 
 /**

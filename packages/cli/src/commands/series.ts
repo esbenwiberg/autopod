@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import type { AcDefinition } from '@autopod/shared';
 import chalk from 'chalk';
@@ -106,11 +106,24 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         const seriesName = opts.seriesName ?? inferSeriesName(folderPath);
         const prMode = opts.prMode as 'single' | 'stacked' | 'none';
 
-        // Parse briefs
-        const briefs = files.map((file) => {
-          const filePath = join(folderPath, file);
-          const { frontmatter, body } = parseBriefFile(filePath);
-          const title = frontmatter.title ?? file.replace(/^\d+-/, '').replace(/\.md$/, '');
+        // Single parse pass — avoids re-reading files during dependency resolution
+        type Parsed = { frontmatter: BriefFrontmatter; body: string; title: string };
+        const allParsed = new Map<string, Parsed>();
+        for (const file of files) {
+          const { frontmatter, body } = parseBriefFile(join(folderPath, file));
+          allParsed.set(file, {
+            frontmatter,
+            body,
+            title: frontmatter.title ?? file.replace(/^\d+-/, '').replace(/\.md$/, ''),
+          });
+        }
+
+        const briefs = files.map((file, i) => {
+          const { frontmatter, body, title } = allParsed.get(file) ?? {
+            frontmatter: {} as BriefFrontmatter,
+            body: '',
+            title: file,
+          };
 
           // Prepend shared context then any explicit context_files
           const contextParts: string[] = [];
@@ -124,27 +137,19 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
           const task =
             contextParts.length > 0 ? `${contextParts.join('\n\n')}\n\n---\n\n${body}` : body;
 
-          // Resolve depends_on to titles
+          // Resolve depends_on to titles using the pre-parsed map (no re-reads)
           const dependsOn = (frontmatter.depends_on ?? []).map((dep) => {
-            // dep may be a filename without .md or a prefix number
             const depFile = files.find((f) => f.startsWith(dep) || f === `${dep}.md`);
-            if (depFile) {
-              const { frontmatter: df } = parseBriefFile(join(folderPath, depFile));
-              return df.title ?? depFile.replace(/^\d+-/, '').replace(/\.md$/, '');
-            }
-            return dep;
+            return depFile ? (allParsed.get(depFile)?.title ?? dep) : dep;
           });
 
           // If no explicit depends_on, infer from numeric prefix (each brief depends on the previous)
-          const briefIndex = files.indexOf(file);
-          const inferredDepsOn: string[] =
-            dependsOn.length === 0 && briefIndex > 0
-              ? (() => {
-                  const prevFile = files[briefIndex - 1] ?? '';
-                  const { frontmatter: pf } = parseBriefFile(join(folderPath, prevFile));
-                  return [pf.title ?? prevFile.replace(/^\d+-/, '').replace(/\.md$/, '')];
-                })()
-              : dependsOn;
+          const inferredDepsOn: string[] = (() => {
+            if (dependsOn.length > 0 || i === 0) return dependsOn;
+            const prevFile = files[i - 1];
+            const prevTitle = prevFile ? (allParsed.get(prevFile)?.title ?? '') : '';
+            return prevTitle ? [prevTitle] : dependsOn;
+          })();
 
           return {
             title,

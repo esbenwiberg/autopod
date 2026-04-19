@@ -47,8 +47,8 @@ export const createPodRequestSchema = z
         message: 'acFrom must be a relative path without ".." segments',
       })
       .optional(),
-    linkedPodId: z.string().min(1).max(16).optional(),
-    dependsOnPodId: z.string().min(1).max(16).optional(),
+    linkedPodId: z.string().min(1).max(64).optional(),
+    dependsOnPodId: z.string().min(1).max(64).optional(),
     seriesId: z.string().min(1).max(64).optional(),
     seriesName: z.string().min(1).max(128).optional(),
     pimGroups: z

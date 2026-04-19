@@ -35,17 +35,18 @@ export function seriesRoutes(app: FastifyInstance, podManager: PodManager): void
     // Briefs must be ordered such that each brief's dependsOn references only
     // earlier briefs (numeric-prefix ordering from ap series create guarantees this).
     const titleToId = new Map<string, string>();
-    const created: Array<{ id: string; title: string }> = [];
+    const created: Array<{ title: string; pod: ReturnType<(typeof podManager)['createSession']> }> =
+      [];
 
     for (let i = 0; i < body.briefs.length; i++) {
       const brief = body.briefs[i];
       if (!brief) continue;
       const isLast = i === body.briefs.length - 1;
 
+      // Use the last listed dependency as the immediate predecessor (linear chain model)
       const dependsOnTitle = brief.dependsOn[brief.dependsOn.length - 1];
       const dependsOnPodId = dependsOnTitle ? (titleToId.get(dependsOnTitle) ?? null) : null;
 
-      // PR mode controls per-pod output target
       const output: 'branch' | 'pr' =
         prMode === 'stacked' ? 'pr' : prMode === 'single' && isLast ? 'pr' : 'branch';
 
@@ -64,7 +65,7 @@ export function seriesRoutes(app: FastifyInstance, podManager: PodManager): void
           userId,
         );
         titleToId.set(brief.title, pod.id);
-        created.push({ id: pod.id, title: brief.title });
+        created.push({ title: brief.title, pod });
       } catch (err) {
         if (err instanceof AutopodError) {
           reply.status(err.statusCode ?? 400);
@@ -78,7 +79,7 @@ export function seriesRoutes(app: FastifyInstance, podManager: PodManager): void
     return {
       seriesId,
       seriesName: body.seriesName,
-      pods: created.map(({ id, title }) => ({ id, title, ...podManager.getSession(id) })),
+      pods: created.map(({ title, pod }) => ({ title, ...pod })),
     };
   });
 
