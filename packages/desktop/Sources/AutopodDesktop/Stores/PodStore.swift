@@ -17,6 +17,12 @@ public final class PodStore {
   /// Cached diff strings keyed by pod ID
   public private(set) var sessionDiffs: [String: String] = [:]
 
+  /// Cached series responses keyed by series ID. Populated via `loadSeries`;
+  /// individual pod updates stream in through the normal event bus and the
+  /// pipeline view filters `pods` by seriesId at render time, so this cache
+  /// is only authoritative for series-level metadata (tokenUsageSummary, etc.).
+  public private(set) var seriesCache: [String: SeriesResponse] = [:]
+
   public init() {}
 
   // MARK: - Computed groupings
@@ -79,6 +85,30 @@ public final class PodStore {
       }
     } catch {
       // Silent refresh failure — don't overwrite existing data
+    }
+  }
+
+  // MARK: - Series
+
+  /// Fetch and cache the full series response (metadata + cost roll-up). Pod
+  /// statuses are already live in `pods` via the WebSocket stream, so callers
+  /// should read pods from `pods.filter { $0.seriesId == id }` rather than
+  /// from the cached response.
+  @discardableResult
+  public func loadSeries(_ seriesId: String) async -> SeriesResponse? {
+    guard let api else { return nil }
+    do {
+      let response = try await api.getSeries(seriesId)
+      seriesCache[seriesId] = response
+      // Upsert any pods in the response that aren't yet in our local store.
+      for pod in PodMapper.map(response.pods) {
+        if !pods.contains(where: { $0.id == pod.id }) {
+          pods.append(pod)
+        }
+      }
+      return response
+    } catch {
+      return nil
     }
   }
 

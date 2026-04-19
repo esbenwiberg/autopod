@@ -216,7 +216,12 @@ public enum PodMapper {
       commitCount: response.commitCount,
       taskSummary: taskSummary,
       linkedSessionId: response.linkedSessionId,
-      profileSnapshot: response.profileSnapshot.map { ProfileMapper.map($0) }
+      profileSnapshot: response.profileSnapshot.map { ProfileMapper.map($0) },
+      seriesId: response.seriesId,
+      seriesName: response.seriesName,
+      dependsOnPodIds: response.dependsOnPodIds
+        ?? (response.dependsOnPodId.map { [$0] } ?? []),
+      dependencyStartedAt: response.dependencyStartedAt.map { parseDate($0) }
     )
   }
 

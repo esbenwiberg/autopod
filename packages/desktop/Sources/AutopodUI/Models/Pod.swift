@@ -433,7 +433,7 @@ public struct Pod: Identifiable, Sendable {
     /// Path to AC file loaded from repo (workspace handoff)
     public var acFrom: String?
     /// Acceptance criteria (loaded from acFrom or manual input)
-    public var acceptanceCriteria: [String]?
+    public var acceptanceCriteria: [AcDefinition]?
 
     public var diffStats: DiffStats?
     public var escalationQuestion: String?
@@ -465,6 +465,18 @@ public struct Pod: Identifiable, Sendable {
 
     /// Snapshot of the resolved profile config at pod creation time
     public var profileSnapshot: Profile?
+
+    // MARK: - Series (pod dependency DAG)
+
+    /// Series this pod belongs to, or nil for standalone pods.
+    public var seriesId: String?
+    /// Human-readable series name (shared across all pods in a series).
+    public var seriesName: String?
+    /// Pod IDs this pod depends on. Fan-in supported: a pod is only enqueued
+    /// when *all* listed parents reach `validated`.
+    public var dependsOnPodIds: [String]
+    /// When the dependency gate opened and this pod moved from queued to enqueued.
+    public var dependencyStartedAt: Date?
 
     /// Backward-compat convenience derived from `pod`.
     public var outputMode: OutputMode { pod.legacyOutputMode }
@@ -507,7 +519,7 @@ public struct Pod: Identifiable, Sendable {
         updatedAt: Date = Date(),
         baseBranch: String? = nil,
         acFrom: String? = nil,
-        acceptanceCriteria: [String]? = nil,
+        acceptanceCriteria: [AcDefinition]? = nil,
         diffStats: DiffStats? = nil,
         escalationQuestion: String? = nil,
         escalationOptions: [String]? = nil,
@@ -528,7 +540,11 @@ public struct Pod: Identifiable, Sendable {
         commitCount: Int = 0,
         taskSummary: TaskSummary? = nil,
         linkedSessionId: String? = nil,
-        profileSnapshot: Profile? = nil
+        profileSnapshot: Profile? = nil,
+        seriesId: String? = nil,
+        seriesName: String? = nil,
+        dependsOnPodIds: [String] = [],
+        dependencyStartedAt: Date? = nil
     ) {
         self.id = id; self.status = status; self.pod = pod
         self.branch = branch; self.profileName = profileName; self.task = task
@@ -545,6 +561,9 @@ public struct Pod: Identifiable, Sendable {
         self.costUsd = costUsd; self.commitCount = commitCount
         self.taskSummary = taskSummary; self.linkedSessionId = linkedSessionId
         self.profileSnapshot = profileSnapshot
+        self.seriesId = seriesId; self.seriesName = seriesName
+        self.dependsOnPodIds = dependsOnPodIds
+        self.dependencyStartedAt = dependencyStartedAt
     }
 
     /// Back-compat init that takes a legacy `OutputMode` and derives a `PodConfig`.
@@ -560,7 +579,7 @@ public struct Pod: Identifiable, Sendable {
         updatedAt: Date = Date(),
         baseBranch: String? = nil,
         acFrom: String? = nil,
-        acceptanceCriteria: [String]? = nil,
+        acceptanceCriteria: [AcDefinition]? = nil,
         diffStats: DiffStats? = nil,
         escalationQuestion: String? = nil,
         escalationOptions: [String]? = nil,
@@ -581,7 +600,11 @@ public struct Pod: Identifiable, Sendable {
         commitCount: Int = 0,
         taskSummary: TaskSummary? = nil,
         linkedSessionId: String? = nil,
-        profileSnapshot: Profile? = nil
+        profileSnapshot: Profile? = nil,
+        seriesId: String? = nil,
+        seriesName: String? = nil,
+        dependsOnPodIds: [String] = [],
+        dependencyStartedAt: Date? = nil
     ) {
         self.init(
             id: id, status: status,
@@ -600,7 +623,10 @@ public struct Pod: Identifiable, Sendable {
             inputTokens: inputTokens, outputTokens: outputTokens,
             costUsd: costUsd, commitCount: commitCount,
             taskSummary: taskSummary, linkedSessionId: linkedSessionId,
-            profileSnapshot: profileSnapshot
+            profileSnapshot: profileSnapshot,
+            seriesId: seriesId, seriesName: seriesName,
+            dependsOnPodIds: dependsOnPodIds,
+            dependencyStartedAt: dependencyStartedAt
         )
     }
 }

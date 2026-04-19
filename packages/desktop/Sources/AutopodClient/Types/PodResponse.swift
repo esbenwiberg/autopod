@@ -81,7 +81,7 @@ public struct SessionResponse: Codable, Sendable {
   public let mergeBlockReason: String?
   public let plan: PlanResponse?
   public let progress: ProgressResponse?
-  public let acceptanceCriteria: [String]?
+  public let acceptanceCriteria: [AcDefinition]?
   public let claudeSessionId: String?
   public let outputMode: String
   public let pod: PodConfigResponse?
@@ -98,6 +98,12 @@ public struct SessionResponse: Codable, Sendable {
   public let taskSummary: TaskSummaryResponse?
   public let lastCorrectionMessage: String?
   public let profileSnapshot: ProfileResponse?
+  // Series fields (optional for back-compat with pre-#88 responses).
+  public let dependsOnPodId: String?
+  public let dependsOnPodIds: [String]?
+  public let seriesId: String?
+  public let seriesName: String?
+  public let dependencyStartedAt: String?
 }
 
 public struct DeviationResponse: Codable, Sendable {
@@ -180,13 +186,17 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var executionTarget: String?
   public var branch: String?
   public var skipValidation: Bool?
-  public var acceptanceCriteria: [String]?
+  public var acceptanceCriteria: [AcDefinition]?
   public var outputMode: String?
   public var pod: PodConfigRequest?
   public var baseBranch: String?
   public var acFrom: String?
   public var linkedSessionId: String?
   public var pimGroups: [PimGroupRequest]?
+  // Series fields — populated when spawning a follow-up pod or launching a series.
+  public var dependsOnPodIds: [String]?
+  public var seriesId: String?
+  public var seriesName: String?
 
   public init(
     profileName: String,
@@ -196,13 +206,16 @@ public struct CreateSessionRequest: Codable, Sendable {
     executionTarget: String? = nil,
     branch: String? = nil,
     skipValidation: Bool? = nil,
-    acceptanceCriteria: [String]? = nil,
+    acceptanceCriteria: [AcDefinition]? = nil,
     outputMode: String? = nil,
     pod: PodConfigRequest? = nil,
     baseBranch: String? = nil,
     acFrom: String? = nil,
     linkedSessionId: String? = nil,
-    pimGroups: [PimGroupRequest]? = nil
+    pimGroups: [PimGroupRequest]? = nil,
+    dependsOnPodIds: [String]? = nil,
+    seriesId: String? = nil,
+    seriesName: String? = nil
   ) {
     self.profileName = profileName
     self.task = task
@@ -218,6 +231,77 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.acFrom = acFrom
     self.linkedSessionId = linkedSessionId
     self.pimGroups = pimGroups
+    self.dependsOnPodIds = dependsOnPodIds
+    self.seriesId = seriesId
+    self.seriesName = seriesName
+  }
+
+  // Backend zod schema names the pod-config field `options`; the Swift
+  // struct keeps the local name `pod` for readability. Remap on the wire.
+  private enum CodingKeys: String, CodingKey {
+    case profileName, task, model, runtime, executionTarget, branch
+    case skipValidation, acceptanceCriteria, outputMode
+    case pod = "options"
+    case baseBranch, acFrom, linkedSessionId, pimGroups
+    case dependsOnPodIds, seriesId, seriesName
+  }
+}
+
+// MARK: - Series types
+
+public struct TokenUsageSummary: Codable, Sendable {
+  public let inputTokens: Int
+  public let outputTokens: Int
+  public let costUsd: Double
+}
+
+public struct SeriesResponse: Codable, Sendable {
+  public let seriesId: String
+  public let seriesName: String
+  public let pods: [SessionResponse]
+  public let tokenUsageSummary: TokenUsageSummary
+  public let statusCounts: [String: Int]
+}
+
+/// A single parsed brief returned from `POST /pods/series/preview`. Titles are
+/// used as node identifiers in the DAG; `dependsOn` references other brief
+/// titles. `acceptanceCriteria` is left untyped (we render as-is in the preview).
+public struct ParsedBriefResponse: Codable, Sendable {
+  public let title: String
+  public let task: String
+  public let dependsOn: [String]
+
+  public init(title: String, task: String, dependsOn: [String]) {
+    self.title = title
+    self.task = task
+    self.dependsOn = dependsOn
+  }
+}
+
+public struct SeriesPreviewResponse: Codable, Sendable {
+  public let seriesName: String
+  public let briefs: [ParsedBriefResponse]
+}
+
+public struct CreateSeriesRequest: Codable, Sendable {
+  public var seriesName: String
+  public var briefs: [ParsedBriefResponse]
+  public var profile: String
+  public var baseBranch: String?
+  public var prMode: String?   // "single" | "stacked" | "none"
+
+  public init(
+    seriesName: String,
+    briefs: [ParsedBriefResponse],
+    profile: String,
+    baseBranch: String? = nil,
+    prMode: String? = nil
+  ) {
+    self.seriesName = seriesName
+    self.briefs = briefs
+    self.profile = profile
+    self.baseBranch = baseBranch
+    self.prMode = prMode
   }
 }
 

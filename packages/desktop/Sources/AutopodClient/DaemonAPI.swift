@@ -179,6 +179,39 @@ public actor DaemonAPI {
     return (res.token, res.reportUrl)
   }
 
+  // MARK: - Series
+
+  public func getSeries(_ seriesId: String) async throws -> SeriesResponse {
+    try await request("GET", "/pods/series/\(seriesId)")
+  }
+
+  public func createSeries(_ body: CreateSeriesRequest) async throws -> SeriesResponse {
+    try await request("POST", "/pods/series", body: try encode(body))
+  }
+
+  /// Ask the daemon to parse a local brief folder and return the DAG preview.
+  /// The folder path is resolved on the daemon host — the desktop app and
+  /// daemon must share a filesystem (i.e. daemon running locally).
+  public func previewSeriesFolder(path: String) async throws -> SeriesPreviewResponse {
+    let body = try JSONSerialization.data(withJSONObject: ["folderPath": path])
+    return try await request("POST", "/pods/series/preview", body: body)
+  }
+
+  /// Parse a brief folder living on a git branch (produced by `/prep` or an
+  /// interactive pod). Reads the files directly from the profile's bare repo.
+  public func previewSeriesOnBranch(
+    profileName: String,
+    branch: String,
+    path: String
+  ) async throws -> SeriesPreviewResponse {
+    let body = try JSONSerialization.data(withJSONObject: [
+      "profileName": profileName,
+      "branch": branch,
+      "path": path,
+    ])
+    return try await request("POST", "/pods/series/preview-branch", body: body)
+  }
+
   // MARK: - Profiles
 
   public func listProfiles() async throws -> [ProfileResponse] {
