@@ -623,7 +623,7 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
-  private func acListSection(criteria: [String], acChecks: [AcCheckDetail]?) -> some View {
+  private func acListSection(criteria: [AcDefinition], acChecks: [AcCheckDetail]?) -> some View {
     CollapsibleSection(
       title: "Acceptance Criteria (\(criteria.count))",
       icon: "checklist",
@@ -640,7 +640,7 @@ public struct ValidationTab: View {
         ForEach(Array(criteria.enumerated()), id: \.offset) { idx, criterion in
           let result: AcCheckDetail? = {
             guard let acChecks else { return nil }
-            return acChecks.first(where: { $0.criterion == criterion })
+            return acChecks.first(where: { $0.criterion == criterion.test })
                 ?? (idx < acChecks.count ? acChecks[idx] : nil)
           }()
           HStack(alignment: .top, spacing: 8) {
@@ -656,13 +656,30 @@ public struct ValidationTab: View {
                 .padding(.top, 1)
             }
             VStack(alignment: .leading, spacing: 3) {
-              Text(criterion).font(.callout)
-              if let type = result?.validationType { triageBadge(type) }
+              Text(criterion.test).font(.callout)
+              HStack(spacing: 6) {
+                if criterion.type != .none { acTypeBadge(criterion.type) }
+                if let type = result?.validationType { triageBadge(type) }
+              }
             }
           }
         }
       }
     }
+  }
+
+  private func acTypeBadge(_ type: AcDefinition.AcType) -> some View {
+    let color: Color = switch type {
+    case .web: .blue
+    case .api: .orange
+    case .none: .secondary
+    }
+    return Text(type.label.lowercased())
+      .font(.system(.caption2, design: .monospaced))
+      .padding(.horizontal, 5).padding(.vertical, 2)
+      .background(color.opacity(0.12))
+      .foregroundStyle(color)
+      .clipShape(Capsule())
   }
 
   private func triageBadge(_ type: String) -> some View {

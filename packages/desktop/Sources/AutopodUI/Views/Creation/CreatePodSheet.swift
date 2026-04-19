@@ -24,7 +24,7 @@ public struct CreateSessionSheet: View {
     @State private var validate: Bool = true
     @State private var baseBranch = ""
     @State private var acFromPath = ""
-    @State private var criteria: [String] = [""]
+    @State private var criteria: [AcDefinition] = [AcDefinition()]
     @State private var showBulkImport = false
     @State private var bulkText = ""
     @State private var pimGroups: [PimGroupRequest] = []
@@ -241,7 +241,7 @@ public struct CreateSessionSheet: View {
                                     Button("Import") {
                                         let parsed = Self.parseAcList(bulkText)
                                         if !parsed.isEmpty {
-                                            criteria = parsed
+                                            criteria = parsed.map { AcDefinition.fromString($0) }
                                         }
                                         bulkText = ""
                                         showBulkImport = false
@@ -256,33 +256,12 @@ public struct CreateSessionSheet: View {
                                     .controlSize(.small)
                                 }
                             } else {
-                                ForEach(criteria.indices, id: \.self) { index in
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "checkmark.square")
-                                            .foregroundStyle(.tertiary)
-                                            .font(.system(size: 12))
-                                        TextField("Criterion \(index + 1)", text: $criteria[index])
-                                            .textFieldStyle(.plain)
-                                            .font(.callout)
-                                        if criteria.count > 1 {
-                                            Button {
-                                                criteria.remove(at: index)
-                                            } label: {
-                                                Image(systemName: "minus.circle")
-                                                    .foregroundStyle(.red.opacity(0.6))
-                                                    .font(.system(size: 12))
-                                            }
-                                            .buttonStyle(.borderless)
-                                        }
-                                    }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(Color(nsColor: .controlBackgroundColor))
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                ForEach($criteria) { $c in
+                                    criterionRow($c)
                                 }
                                 HStack(spacing: 12) {
                                     Button {
-                                        criteria.append("")
+                                        criteria.append(AcDefinition())
                                     } label: {
                                         Label("Add criterion", systemImage: "plus")
                                             .font(.caption)
@@ -394,7 +373,7 @@ public struct CreateSessionSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(isInteractive ? "Create Workspace" : "Create Pod") {
                     Task {
-                        let ac = criteria.filter { !$0.isEmpty }
+                        let ac = criteria.filter { !$0.test.trimmingCharacters(in: .whitespaces).isEmpty }
                         let model = modelText.trimmingCharacters(in: .whitespacesAndNewlines)
                         let pim = pimGroups.filter { !$0.groupId.isEmpty }
                         let pod = PodConfigRequest(
@@ -421,6 +400,58 @@ public struct CreateSessionSheet: View {
         }
         .frame(minWidth: 480, maxWidth: 480, minHeight: 580)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func criterionRow(_ binding: Binding<AcDefinition>) -> some View {
+        let c = binding.wrappedValue
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                // Type picker
+                Picker("", selection: binding.type) {
+                    ForEach(AcDefinition.AcType.allCases, id: \.self) { t in
+                        Text(t.label).tag(t)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 90)
+                .controlSize(.small)
+
+                // Test / description
+                TextField(c.type == .none ? "Describe the criterion" : c.type == .api ? "curl / endpoint to probe" : "page path or selector to check", text: binding.test)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+
+                if criteria.count > 1, let idx = criteria.firstIndex(where: { $0.id == c.id }) {
+                    Button {
+                        criteria.remove(at: idx)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .foregroundStyle(.red.opacity(0.6))
+                            .font(.system(size: 12))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            if c.type != .none {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark").foregroundStyle(.green).font(.system(size: 9))
+                    TextField("Pass condition", text: binding.pass)
+                        .textFieldStyle(.plain)
+                        .font(.caption)
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: "xmark").foregroundStyle(.red).font(.system(size: 9))
+                    TextField("Fail condition", text: binding.fail)
+                        .textFieldStyle(.plain)
+                        .font(.caption)
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     /// Parse a newline-separated list, stripping common prefixes (`- `, `1. `, `a) `, etc.).
