@@ -166,6 +166,21 @@ export function podRoutes(
     return { ok: true, maxPrFixAttempts: pod.maxPrFixAttempts };
   });
 
+  // POST /pods/:podId/retry-pr — retry PR creation for a complete pod with no PR
+  app.post('/pods/:podId/retry-pr', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    try {
+      await podManager.retryCreatePr(podId);
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message };
+      }
+      throw err;
+    }
+  });
+
   // POST /pods/:podId/spawn-fix — manually force-spawn a fix pod for merge_pending
   app.post('/pods/:podId/spawn-fix', async (request, reply) => {
     const { podId } = request.params as { podId: string };

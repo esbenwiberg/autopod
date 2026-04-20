@@ -135,6 +135,10 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/spawn-fix")
   }
 
+  public func retryCreatePr(_ id: String) async throws {
+    let _: OkResponse = try await request("POST", "/pods/\(id)/retry-pr")
+  }
+
   public func deletePod(_ id: String) async throws {
     let _: EmptyResponse = try await request("DELETE", "/pods/\(id)")
   }

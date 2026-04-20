@@ -38,6 +38,8 @@ public struct PodActions: Sendable {
   public var addValidationOverride: @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void
   /// Manually force-spawn a fix pod for a merge_pending pod, bypassing auto-detection guards
   public var spawnFix: @MainActor @Sendable (String) async -> Void
+  /// Retry PR creation for a complete pod whose PR was never successfully created
+  public var retryCreatePr: @MainActor @Sendable (String) async -> Void
   /// Ask the daemon to parse a local brief folder and return the DAG preview.
   public var previewSeriesFolder: @MainActor @Sendable (String) async -> SeriesPreviewResponse?
   /// Ask the daemon to parse a brief folder on a git branch.
@@ -89,6 +91,7 @@ public struct PodActions: Sendable {
     interruptValidation: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
     spawnFix: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
     previewSeriesOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> SeriesPreviewResponse? = { _, _, _ in nil },
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
@@ -121,6 +124,7 @@ public struct PodActions: Sendable {
     self.interruptValidation = interruptValidation
     self.addValidationOverride = addValidationOverride
     self.spawnFix = spawnFix
+    self.retryCreatePr = retryCreatePr
     self.previewSeriesFolder = previewSeriesFolder
     self.previewSeriesOnBranch = previewSeriesOnBranch
     self.lastPreviewError = lastPreviewError

@@ -386,6 +386,11 @@ export interface PodManager {
    * Bumps maxPrFixAttempts if the current cap would otherwise block spawn.
    */
   spawnFixSession(podId: string): Promise<void>;
+  /**
+   * Retry PR creation for a complete pod whose PR was never successfully created.
+   * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
+   */
+  retryCreatePr(podId: string): Promise<void>;
   /** Return all pods belonging to a series, ordered by creation time. */
   getSeriesPods(seriesId: string): Pod[];
   /**
@@ -1539,6 +1544,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               'BARE_WT=$(sed "s/^gitdir: //" /workspace/.git) && echo "/workspace/.git" > "${BARE_WT}/gitdir"',
             ],
             { timeout: 5_000 },
+          );
+          // Restore any tracked files missing from the working tree (M/D status).
+          // syncWorkspaceBack() clears + re-copies the host bind-mount; if it dies mid-flight
+          // (OOM, Docker crash, Azure SMB error) the host worktree loses files while the git
+          // index still references them. Recovery mode then copies that partial tree into the
+          // container. `git restore .` is idempotent — a no-op when the tree is clean.
+          await containerManager.execInContainer(
+            containerId,
+            ['git', '-C', '/workspace', 'restore', '.'],
+            { timeout: 30_000 },
           );
         }
 
@@ -4509,6 +4524,63 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       await maybeSpawnFixSession(podId, status);
       logger.info({ podId }, 'Manual fix pod spawn triggered');
+    },
+
+    async retryCreatePr(podId: string): Promise<void> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.status !== 'complete') {
+        throw new AutopodError(
+          `Cannot retry PR creation for ${podId} in status ${pod.status} — only complete pods`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (pod.prUrl) {
+        throw new AutopodError(
+          `Pod ${podId} already has a PR: ${pod.prUrl}`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!pod.worktreePath) {
+        throw new AutopodError(
+          `Pod ${podId} has no worktree — cannot create PR`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      const profile = profileStore.get(pod.profileName);
+      const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+      if (!prManager) {
+        throw new AutopodError(
+          `No PR manager configured for profile ${pod.profileName}`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      emitActivityStatus(podId, 'Retrying PR creation…');
+      const baseBranch = profile.defaultBranch ?? 'main';
+      const newPrUrl = await prManager.createPr({
+        worktreePath: pod.worktreePath,
+        repoUrl: profile.repoUrl ?? undefined,
+        branch: pod.branch,
+        baseBranch,
+        podId,
+        task: pod.task,
+        profileName: pod.profileName,
+        validationResult: null,
+        filesChanged: pod.filesChanged,
+        linesAdded: pod.linesAdded,
+        linesRemoved: pod.linesRemoved,
+        previewUrl: pod.previewUrl,
+        screenshots: [],
+        taskSummary: pod.taskSummary ?? undefined,
+      });
+      podRepo.update(podId, { prUrl: newPrUrl });
+      emitActivityStatus(podId, `PR created: ${newPrUrl}`);
+      logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
     },
   };
 }

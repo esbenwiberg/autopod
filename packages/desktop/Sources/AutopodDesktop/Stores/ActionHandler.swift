@@ -64,6 +64,7 @@ public final class ActionHandler {
         await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
       },
       spawnFix: { [weak self] id in await self?.spawnFixSession(id) },
+      retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       previewSeriesFolder: { [weak self] path in
         await self?.previewSeriesFolder(path: path) ?? nil
       },
@@ -231,6 +232,17 @@ public final class ActionHandler {
     do {
       try await api.spawnFixSession(podId)
       // Fix pod will appear via WebSocket pod.created event
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func retryCreatePr(_ podId: String) async {
+    pendingAction = "retry-pr-\(podId)"
+    do {
+      try await api.retryCreatePr(podId)
+      // prUrl update will arrive via WebSocket pod.updated event
     } catch {
       lastError = error.localizedDescription
     }

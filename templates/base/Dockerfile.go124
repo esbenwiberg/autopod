@@ -41,6 +41,12 @@ ENV GOPATH=/home/autopod/go
 ENV GOCACHE=/home/autopod/.cache/go-build
 ENV GOMODCACHE=/home/autopod/go/pkg/mod
 ENV PATH=${GOPATH}/bin:${PATH}
+# Disable go.work (workspace requires Go 1.26; image ships 1.24)
+# Disable proxy/sumdb — containers have no internet access; fail fast instead of hanging
+ENV GOWORK=off
+ENV GOPROXY=off
+ENV GONOSUMDB=*
+ENV GONOSUMCHECK=*
 RUN mkdir -p ${GOPATH} ${GOCACHE} \
     && chown -R autopod:autopod ${GOPATH} /home/autopod/.cache
 
