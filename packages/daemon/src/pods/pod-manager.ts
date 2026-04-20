@@ -1169,12 +1169,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // Use the first parent's branch as the base — the primary stacking path.
+      // Exception: if the dependent shares a branch with its parent (single-branch
+      // series mode), keep baseBranch pointing at the real base (e.g. main) so diff
+      // stats and the final PR target are correct. The worktree create() will fetch
+      // the existing shared branch and use it as the start point automatically.
       const firstParentId = parentIds[0];
-      const baseBranch = firstParentId
-        ? firstParentId === completedPod.id
-          ? completedPod.branch
-          : podRepo.getOrThrow(firstParentId).branch
-        : completedPod.branch;
+      const isSharedBranch = dep.branch === completedPod.branch;
+      const baseBranch = isSharedBranch
+        ? (completedPod.baseBranch ?? 'main')
+        : firstParentId
+          ? firstParentId === completedPod.id
+            ? completedPod.branch
+            : podRepo.getOrThrow(firstParentId).branch
+          : completedPod.branch;
 
       podRepo.update(dep.id, {
         baseBranch,
@@ -1438,6 +1445,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               branch: pod.branch,
               baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
               pat: profile.adoPat ?? profile.githubPat ?? undefined,
+              sessionId: pod.id,
             });
             worktreePath = result.worktreePath;
             bareRepoPath = result.bareRepoPath;
@@ -4562,22 +4570,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       emitActivityStatus(podId, 'Retrying PR creation…');
       const baseBranch = profile.defaultBranch ?? 'main';
-      const newPrUrl = await prManager.createPr({
-        worktreePath: pod.worktreePath,
-        repoUrl: profile.repoUrl ?? undefined,
-        branch: pod.branch,
-        baseBranch,
-        podId,
-        task: pod.task,
-        profileName: pod.profileName,
-        validationResult: null,
-        filesChanged: pod.filesChanged,
-        linesAdded: pod.linesAdded,
-        linesRemoved: pod.linesRemoved,
-        previewUrl: pod.previewUrl,
-        screenshots: [],
-        taskSummary: pod.taskSummary ?? undefined,
-      });
+
+      // Push the branch to the remote — intermediate series pods (output='branch') skip this
+      // during normal completion, so the branch may only exist locally. Pass the PAT explicitly
+      // because the in-memory cache may be cold after a daemon restart.
+      const retryPat = profile.adoPat ?? profile.githubPat ?? undefined;
+      try {
+        await worktreeManager.mergeBranch({
+          worktreePath: pod.worktreePath,
+          targetBranch: baseBranch,
+          pat: retryPat,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn({ podId, err }, 'retryCreatePr: branch push failed');
+        emitActivityStatus(podId, `Branch push failed: ${message}`);
+        throw new AutopodError(message, 'BRANCH_PUSH_FAILED', 502);
+      }
+
+      let newPrUrl: string;
+      try {
+        newPrUrl = await prManager.createPr({
+          worktreePath: pod.worktreePath,
+          repoUrl: profile.repoUrl ?? undefined,
+          branch: pod.branch,
+          baseBranch,
+          podId,
+          task: pod.task,
+          profileName: pod.profileName,
+          validationResult: null,
+          filesChanged: pod.filesChanged,
+          linesAdded: pod.linesAdded,
+          linesRemoved: pod.linesRemoved,
+          previewUrl: pod.previewUrl,
+          screenshots: [],
+          taskSummary: pod.taskSummary ?? undefined,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn({ podId, err }, 'retryCreatePr: PR creation failed');
+        emitActivityStatus(podId, `PR creation failed: ${message}`);
+        throw new AutopodError(message, 'PR_CREATION_FAILED', 502);
+      }
       podRepo.update(podId, { prUrl: newPrUrl });
       emitActivityStatus(podId, `PR created: ${newPrUrl}`);
       logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');

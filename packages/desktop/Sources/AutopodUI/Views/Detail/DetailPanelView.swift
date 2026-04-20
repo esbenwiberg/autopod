@@ -429,16 +429,26 @@ public struct DetailPanelView: View {
 
             default:
                 if pod.isTerminal {
-                    if pod.status == .complete && pod.prUrl == nil {
-                        Button {
-                            Task { await actions.retryCreatePr(pod.id) }
-                        } label: {
-                            Label("Create PR", systemImage: "arrow.up.doc")
+                    if pod.status == .complete {
+                        if let prUrl = pod.prUrl {
+                            Button {
+                                NSWorkspace.shared.open(prUrl)
+                            } label: {
+                                Label("View PR", systemImage: "arrow.up.right.square")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        } else if pod.pod.output == .pr {
+                            Button {
+                                Task { await actions.retryCreatePr(pod.id) }
+                            } label: {
+                                Label("Create PR", systemImage: "arrow.up.doc")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .tint(.blue)
+                            .help("PR creation failed — retry creating a pull request for this pod's branch")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .tint(.blue)
-                        .help("PR creation failed — retry creating a pull request for this pod's branch")
                     }
                     forkButton
                     Button(role: .destructive) {

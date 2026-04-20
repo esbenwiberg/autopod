@@ -242,7 +242,7 @@ public final class ActionHandler {
     pendingAction = "retry-pr-\(podId)"
     do {
       try await api.retryCreatePr(podId)
-      // prUrl update will arrive via WebSocket pod.updated event
+      await podStore.refreshSession(podId)
     } catch {
       lastError = error.localizedDescription
     }

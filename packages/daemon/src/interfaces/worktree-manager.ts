@@ -4,11 +4,15 @@ export interface WorktreeCreateConfig {
   baseBranch: string;
   /** PAT used for authenticated clone/fetch/push on the daemon host. Never written to git remote config. */
   pat?: string;
+  /** ID used to derive the worktree directory path. Defaults to a sanitized form of the branch name. Pass pod ID to ensure uniqueness when multiple pods share the same branch (e.g. single-mode series). */
+  sessionId?: string;
 }
 
 export interface MergeBranchConfig {
   worktreePath: string;
   targetBranch: string;
+  /** PAT to use for the push — overrides the in-memory cache. Required when the cache may be cold (e.g. after a daemon restart). */
+  pat?: string;
 }
 
 export interface DiffStats {

@@ -104,8 +104,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       this.patCache.set(bareRepoPath, pat);
     }
 
-    // Create worktree — use pod-derived path
-    const sessionDir = branch.replace(/[^a-zA-Z0-9_-]/g, '_');
+    // Create worktree — use sessionId-derived path if provided, else branch-derived
+    const sessionDir = config.sessionId
+      ? config.sessionId
+      : branch.replace(/[^a-zA-Z0-9_-]/g, '_');
     const worktreePath = path.join(this.worktreeDir, sessionDir);
 
     // Ensure bare repo exists, fetch latest, and create worktree — all inside the
@@ -349,7 +351,16 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   async mergeBranch(config: MergeBranchConfig): Promise<void> {
-    const { worktreePath, targetBranch } = config;
+    const { worktreePath, targetBranch, pat } = config;
+
+    // If a PAT is explicitly provided, warm the cache so getAuthUrl picks it up.
+    if (pat) {
+      const { stdout: commonDir } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+        cwd: worktreePath,
+      });
+      const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
+      this.patCache.set(bareRepoPath, pat);
+    }
 
     // Commit any uncommitted work (with deletion guard)
     await this.commitPendingChanges(

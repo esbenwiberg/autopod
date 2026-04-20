@@ -64,6 +64,10 @@ export function seriesRoutes(
     const created: Array<{ title: string; pod: ReturnType<(typeof podManager)['createSession']> }> =
       [];
 
+    // In single mode all pods share the root pod's branch so every commit lands
+    // on one branch and the final pod opens a single PR.
+    let singleModeBranch: string | undefined;
+
     for (let i = 0; i < body.briefs.length; i++) {
       const brief = body.briefs[i];
       if (!brief) continue;
@@ -76,6 +80,8 @@ export function seriesRoutes(
         .map((t) => titleToId.get(t))
         .filter((id): id is string => typeof id === 'string');
 
+      const isRoot = dependsOnPodIds.length === 0;
+
       const output: 'branch' | 'pr' =
         prMode === 'stacked' ? 'pr' : prMode === 'single' && isLast ? 'pr' : 'branch';
 
@@ -84,8 +90,11 @@ export function seriesRoutes(
           {
             profileName: body.profile,
             task: brief.task,
-            baseBranch: dependsOnPodIds.length > 0 ? undefined : (body.baseBranch ?? undefined),
+            baseBranch: isRoot ? (body.baseBranch ?? undefined) : undefined,
             dependsOnPodIds: dependsOnPodIds.length > 0 ? dependsOnPodIds : undefined,
+            // Single mode: non-root pods reuse the root's branch so all commits
+            // land on one branch and the final pod creates a single PR.
+            branch: prMode === 'single' && !isRoot ? singleModeBranch : undefined,
             seriesId,
             seriesName: body.seriesName,
             acceptanceCriteria: brief.acceptanceCriteria,
@@ -93,6 +102,11 @@ export function seriesRoutes(
           },
           userId,
         );
+
+        if (isRoot && prMode === 'single') {
+          singleModeBranch = pod.branch;
+        }
+
         titleToId.set(brief.title, pod.id);
         created.push({ title: brief.title, pod });
       } catch (err) {

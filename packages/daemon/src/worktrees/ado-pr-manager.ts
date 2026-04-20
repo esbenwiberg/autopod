@@ -119,10 +119,14 @@ export class AdoPrManager implements PrManager {
 
     const text = await response.text();
     if (!response.ok) {
-      throw new AdoHttpError(
-        response.status,
-        `ADO API ${options.method ?? 'GET'} ${url} → ${response.status}: ${text}`,
-      );
+      let detail = text;
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        if (typeof parsed['message'] === 'string') detail = parsed['message'];
+      } catch {
+        // use raw text
+      }
+      throw new AdoHttpError(response.status, detail);
     }
     return text ? JSON.parse(text) : null;
   }
