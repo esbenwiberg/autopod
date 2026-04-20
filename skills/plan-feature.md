@@ -41,6 +41,16 @@ scan codebase again → ask ONE question → wait → ... → exit test passes �
 - If the codebase already answers a question, don't ask — cite the finding and move on.
 - Never draft briefs, contracts, or ADRs during the loop. Writing happens only after
   the exit test passes.
+- **The coverage checklist is the only stop sign — not a question count.**
+  Don't treat any number as a target to hit and stop. A low question count is
+  a symptom of skipping the interview, not a budget to spend.
+- **Asymmetric signal:** if you're on question 2 or 3 of a 3+ module feature
+  and feeling ready to write, you are almost certainly wrong — keep going.
+  If you're on question 15 and the checklist is still red, keep going.
+  There is no "enough" — only "checklist green, confirmed by user."
+- **Bias toward more questions, not fewer.** Every ambiguous noun in the user's
+  original prompt (e.g. "scheduler UI", "auth flow", "the new backend") is a
+  question waiting to happen. Pin them down one at a time.
 
 ### Opening move
 
@@ -67,13 +77,32 @@ Each scan+question round should resolve one of these:
 7. **Pod sizing** — is any brief getting too large? Rule of thumb: > 8 files → split it.
 8. **Acceptance criteria** — how will we know each brief is done, without human judgment?
 
-### Exit test (ask silently before writing anything)
+### Exit test — the coverage checklist (NOT silent)
 
-> For every brief I'm about to write: can I name the exact files it touches, the interfaces
-> it must respect, the ACs it must satisfy, and the files it must NOT touch?
-> Can I draw the dependency graph without guessing?
+Before writing any output, produce a checklist covering **all 8 dimensions above**.
+For each dimension, one of these must be true:
 
-If yes → write output. If any brief still has hand-waving → keep interviewing.
+- ✅ Answered by the user (quote their answer, cite which question)
+- 📂 Answered by the codebase (cite the file(s) and what they told you)
+- ⚠️ Explicitly marked N/A with a one-line justification
+
+If any dimension is hand-waved ("probably fine", "we can figure that out", "TBD"),
+that's a ❌ — ask another question.
+
+Additionally, for every brief you're about to write, confirm you can name:
+
+- The exact files it touches
+- The interfaces it must respect
+- The ACs it must satisfy
+- The files it must NOT touch
+- The dependency graph, without guessing
+
+**Show the checklist back to the user** with a clear "ready to write — green light?"
+prompt. Do NOT start writing `specs/<name>/` until the user confirms. This is the
+only batched "question" allowed — because it's a summary, not new interrogation.
+
+If the user spots a gap, keep interviewing. Do not negotiate your way to writing
+early.
 
 ---
 
@@ -194,10 +223,30 @@ If any brief would require a human to explain something at runtime, the loop was
 - Writing any output before the exit test passes
 - Asking a question the codebase already answers
 - Batching two questions in one turn
+- Stopping the interview after 2–3 questions on a multi-module feature
+  (e.g. "New scheduler UI" answered with "what screens?" + "what component
+  library?" and then writing — that's a fail; you haven't pinned entities,
+  state shape, interaction model, empty states, error states, or seams)
+- Accepting vague nouns without pinning them ("the new scheduler backend" —
+  which endpoints? which types? where do they live?)
+- Rationalizing the exit test instead of running the coverage checklist
+- Skipping the "ready to write — green light?" confirmation
 - ACs that require human judgment ("looks good", "feels right")
 - A brief touching > 8 files and not split
 - Skipping ADRs for surprising decisions (next agent will make wrong assumptions)
 - Mixing "what to build" with "how to build it" in the brief body
+
+### Red-flag examples (what "not enough questions" looks like)
+
+| User says | Bad (2 questions → write) | Good (keeps drilling) |
+|-----------|--------------------------|----------------------|
+| "New scheduler UI to match the new scheduler backend" | "What screens?" → "What library?" → write | + which endpoints/types exist? + what entities are scheduled? + list vs calendar view? + create/edit flows? + empty/error/loading states? + where does it live in nav? + reuse existing components or new? + what does "match the backend" mean — 1:1 fields, or curated? |
+| "Add auth to the admin panel" | "SSO or password?" → "Which routes?" → write | + which identity provider? + session storage? + role model? + logout flow? + redirect behavior? + existing auth middleware to reuse? + tests seam? |
+| "Refactor the pod manager" | "Split into what?" → "Keep the API?" → write | + what pain are we solving? + which seams are painful today? + what stays stable? + migration strategy? + test coverage before/after? + rollback plan? |
+
+Rule of thumb: if you can summarize the feature in one sentence *after* the
+interview and it sounds identical to the user's original prompt, you didn't
+interview — you transcribed.
 
 ---
 
