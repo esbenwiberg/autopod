@@ -121,7 +121,7 @@ describe('ClaudeRuntime', () => {
       expect(buildArgs('claude-opus-4-6')).toContain('claude-opus-4-6');
     });
 
-    it('includes --pod-id flag', () => {
+    it('includes --session-id flag', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -137,7 +137,7 @@ describe('ClaudeRuntime', () => {
         env: {},
       });
 
-      expect(args).toContain('--pod-id');
+      expect(args).toContain('--session-id');
     });
 
     it('includes --debug when AUTOPOD_DEBUG_AGENT=1', () => {

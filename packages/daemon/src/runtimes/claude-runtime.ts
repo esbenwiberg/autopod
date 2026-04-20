@@ -269,8 +269,8 @@ export class ClaudeRuntime implements Runtime {
       args.push('--debug');
     }
 
-    // Deterministic pod ID for tracking
-    args.push('--pod-id', randomUUID());
+    // Deterministic Claude CLI session ID for tracking (Claude CLI flag name — not autopod's pod ID)
+    args.push('--session-id', randomUUID());
 
     // Inject autopod system instructions without overwriting the repo's CLAUDE.md
     args.push('--append-system-prompt-file', AUTOPOD_INSTRUCTIONS_PATH);
