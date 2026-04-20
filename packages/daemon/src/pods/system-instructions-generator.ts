@@ -128,7 +128,7 @@ export function generateSystemInstructions(
   }
 
   // Advisor mode — instruct the agent to proactively consult ask_ai
-  if (profile.escalation.advisor.enabled) {
+  if (profile.escalation?.advisor.enabled) {
     lines.push('## AI Advisor');
     lines.push('');
     lines.push(

@@ -87,25 +87,25 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     getMaxAiCalls(podId: string): number {
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
-      return profile.escalation.askAi.maxCalls;
+      return profile.escalation?.askAi.maxCalls ?? 5;
     },
 
     getAutoPauseThreshold(podId: string): number {
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
-      return profile.escalation.autoPauseAfter;
+      return profile.escalation?.autoPauseAfter ?? 3;
     },
 
     getHumanResponseTimeout(podId: string): number {
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
-      return profile.escalation.humanResponseTimeout;
+      return profile.escalation?.humanResponseTimeout ?? 3600;
     },
 
     getReviewerModel(podId: string): string {
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
-      return profile.escalation.askAi.model;
+      return profile.escalation?.askAi.model ?? 'sonnet';
     },
 
     async callReviewerModel(podId: string, question: string, context?: string): Promise<string> {

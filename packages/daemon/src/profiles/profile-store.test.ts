@@ -411,4 +411,71 @@ describe('ProfileStore', () => {
       ]);
     });
   });
+
+  describe('resolveCredentialOwner', () => {
+    it('returns the profile itself when it owns credentials', () => {
+      store.create({
+        ...validInput,
+        name: 'owner',
+        modelProvider: 'max',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'a',
+          refreshToken: 'r',
+          expiresAt: '2026-12-31T00:00:00Z',
+        },
+      });
+      expect(store.resolveCredentialOwner('owner')).toBe('owner');
+    });
+
+    it('returns null when nobody in the chain has credentials', () => {
+      store.create({ ...validInput, name: 'parent' });
+      store.create({ ...validInput, name: 'child', extends: 'parent' });
+      expect(store.resolveCredentialOwner('child')).toBeNull();
+    });
+
+    it('walks up the extends chain to find the credential owner', () => {
+      store.create({
+        ...validInput,
+        name: 'base',
+        modelProvider: 'max',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'a',
+          refreshToken: 'r',
+          expiresAt: '2026-12-31T00:00:00Z',
+        },
+      });
+      store.create({ ...validInput, name: 'middle', extends: 'base' });
+      store.create({ ...validInput, name: 'leaf', extends: 'middle' });
+      expect(store.resolveCredentialOwner('leaf')).toBe('base');
+    });
+
+    it('stops at the first non-null credential in the chain', () => {
+      store.create({
+        ...validInput,
+        name: 'base',
+        modelProvider: 'max',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'base-a',
+          refreshToken: 'base-r',
+          expiresAt: '2026-12-31T00:00:00Z',
+        },
+      });
+      store.create({
+        ...validInput,
+        name: 'middle',
+        extends: 'base',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'mid-a',
+          refreshToken: 'mid-r',
+          expiresAt: '2026-12-31T00:00:00Z',
+        },
+      });
+      store.create({ ...validInput, name: 'leaf', extends: 'middle' });
+      expect(store.resolveCredentialOwner('leaf')).toBe('middle');
+    });
+  });
 });

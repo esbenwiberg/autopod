@@ -8,13 +8,36 @@ import type { ProfileStore } from '../profiles/index.js';
 const CREDENTIALS_PATH = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
 
 /**
+ * In-process serialization keyed by credential-owner profile name. When
+ * multiple pods on derived profiles share one owner (Option B credential
+ * inheritance), their rotation persists must not interleave — the second
+ * writer could otherwise blow away a fresher token from the first.
+ */
+const ownerLocks = new Map<string, Promise<void>>();
+
+function withOwnerLock(owner: string, fn: () => Promise<void>): Promise<void> {
+  const prev = ownerLocks.get(owner) ?? Promise.resolve();
+  const next = prev.then(fn, fn).catch(() => {
+    /* swallow — per-call errors are already logged by fn */
+  });
+  ownerLocks.set(owner, next);
+  // Clean up once done so the map doesn't leak profile names forever.
+  next.finally(() => {
+    if (ownerLocks.get(owner) === next) ownerLocks.delete(owner);
+  });
+  return next;
+}
+
+/**
  * Read back OAuth credentials from the container after agent execution.
  *
  * Claude Code rotates refresh tokens during use. If we don't persist the
  * updated tokens, the next pod will fail to authenticate.
  *
- * Uses optimistic locking: only overwrites if the new token has a later
- * expiry than what's currently stored (guards against concurrent pod stomps).
+ * The rotated credentials are written to whichever profile in the extends
+ * chain actually owns the auth state (not necessarily the pod's profile).
+ * This matches the credential-inheritance design where a base profile can
+ * hold one MAX login used by all its descendants.
  */
 export async function persistRefreshedCredentials(
   containerId: string,
@@ -59,35 +82,40 @@ export async function persistRefreshedCredentials(
     return;
   }
 
-  // Only update if the container has different credentials than what's stored.
-  // We compare refresh tokens (not expiry) because rotating refresh tokens
-  // invalidate the previous one — using a stale refresh token causes invalid_grant.
-  // Expiry-based comparison was wrong: a rotated token can have a shorter or equal
-  // expiry but still be the only valid refresh token.
-  const currentProfile = profileStore.getRaw(profileName);
-  const currentCreds = currentProfile.providerCredentials;
+  // Resolve which profile actually owns these credentials. For derived
+  // profiles that inherit from a parent, rotations go to the parent's row
+  // so all sibling profiles stay in sync.
+  const ownerName = profileStore.resolveCredentialOwner(profileName) ?? profileName;
 
-  if (currentCreds?.provider === 'max' && currentCreds.refreshToken === oauth.refreshToken) {
-    logger.debug({ profileName }, 'Container refresh token matches stored — skipping persist');
-    return;
-  }
+  await withOwnerLock(ownerName, async () => {
+    // Re-read under the lock — another concurrent run may have persisted.
+    const ownerProfile = profileStore.getRaw(ownerName);
+    const currentCreds = ownerProfile.providerCredentials;
 
-  // Build updated credentials — preserve all fields from the file
-  const updated: MaxCredentials = {
-    provider: 'max',
-    accessToken: oauth.accessToken,
-    refreshToken: oauth.refreshToken,
-    expiresAt: new Date(oauth.expiresAt).toISOString(),
-    // Preserve fields from stored credentials that aren't in the rotated token response
-    clientId: currentCreds?.provider === 'max' ? currentCreds.clientId : undefined,
-    scopes: currentCreds?.provider === 'max' ? currentCreds.scopes : undefined,
-    subscriptionType: currentCreds?.provider === 'max' ? currentCreds.subscriptionType : undefined,
-    rateLimitTier: currentCreds?.provider === 'max' ? currentCreds.rateLimitTier : undefined,
-  };
+    if (currentCreds?.provider === 'max' && currentCreds.refreshToken === oauth.refreshToken) {
+      logger.debug(
+        { profileName, ownerName },
+        'Owner refresh token matches container — skipping persist',
+      );
+      return;
+    }
 
-  profileStore.update(profileName, { providerCredentials: updated });
-  logger.info(
-    { profileName, expiresAt: updated.expiresAt },
-    'Persisted rotated OAuth credentials from container',
-  );
+    const updated: MaxCredentials = {
+      provider: 'max',
+      accessToken: oauth.accessToken,
+      refreshToken: oauth.refreshToken,
+      expiresAt: new Date(oauth.expiresAt).toISOString(),
+      clientId: currentCreds?.provider === 'max' ? currentCreds.clientId : undefined,
+      scopes: currentCreds?.provider === 'max' ? currentCreds.scopes : undefined,
+      subscriptionType:
+        currentCreds?.provider === 'max' ? currentCreds.subscriptionType : undefined,
+      rateLimitTier: currentCreds?.provider === 'max' ? currentCreds.rateLimitTier : undefined,
+    };
+
+    profileStore.update(ownerName, { providerCredentials: updated });
+    logger.info(
+      { profileName, ownerName, expiresAt: updated.expiresAt },
+      'Persisted rotated OAuth credentials to credential owner',
+    );
+  });
 }

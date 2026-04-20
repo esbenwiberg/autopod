@@ -5,6 +5,7 @@ import type {
   InjectedClaudeMdSection,
   InjectedMcpServer,
   InjectedSkill,
+  MergeStrategy,
   NetworkPolicy,
   OutputTarget,
   PimActivationConfig,
@@ -38,6 +39,14 @@ export interface ProfileStore {
   update(name: string, changes: Record<string, unknown>): Profile;
   delete(name: string): void;
   exists(name: string): boolean;
+  /**
+   * Walk the `extends` chain starting at `name` and return the name of the
+   * first profile that holds a non-null `providerCredentials`. This is the
+   * profile that actually "owns" the authentication state — credential
+   * rotations during pod runs are persisted there, not on the descendant.
+   * Returns `null` if no profile in the chain has credentials set.
+   */
+  resolveCredentialOwner(name: string): string | null;
 }
 
 /**
@@ -67,28 +76,41 @@ export function rowToProfile(
     raw ? (JSON.parse(raw as string) as ProviderCredentials) : null,
   decryptPat: (raw: unknown) => string | null = (raw) => (raw ? (raw as string) : null),
 ): Profile {
+  // Helpers: keep null as null (signals "inherit from parent" on derived
+  // profiles). Only coerce undefined → null; do NOT substitute schema defaults
+  // here or buildSourceMap can't tell inherited from own.
+  const nullableStr = (v: unknown): string | null =>
+    v === null || v === undefined ? null : (v as string);
+  const nullableNum = (v: unknown): number | null =>
+    v === null || v === undefined ? null : (v as number);
+  const nullableBool = (v: unknown): boolean | null =>
+    v === null || v === undefined ? null : Boolean(v);
+
   return {
     name: row.name as string,
-    repoUrl: row.repo_url as string,
-    defaultBranch: row.default_branch as string,
-    template: row.template as Profile['template'],
-    buildCommand: row.build_command as string,
-    startCommand: row.start_command as string,
-    healthPath: row.health_path as string,
-    healthTimeout: row.health_timeout as number,
-    smokePages: JSON.parse(row.validation_pages as string) as SmokePage[],
-    maxValidationAttempts: row.max_validation_attempts as number,
-    defaultModel: row.default_model as string,
-    defaultRuntime: row.default_runtime as Profile['defaultRuntime'],
-    executionTarget: (row.execution_target as Profile['executionTarget']) ?? 'local',
-    customInstructions: (row.custom_instructions as string) ?? null,
-    escalation: escalationConfigSchema.parse(
-      JSON.parse(row.escalation_config as string),
-    ) as EscalationConfig,
-    extends: (row.extends as string) ?? null,
-    workerProfile: (row.worker_profile as string) ?? null,
-    warmImageTag: (row.warm_image_tag as string) ?? null,
-    warmImageBuiltAt: (row.warm_image_built_at as string) ?? null,
+    repoUrl: nullableStr(row.repo_url),
+    defaultBranch: nullableStr(row.default_branch),
+    template: nullableStr(row.template) as Profile['template'],
+    buildCommand: nullableStr(row.build_command),
+    startCommand: nullableStr(row.start_command),
+    healthPath: nullableStr(row.health_path),
+    healthTimeout: nullableNum(row.health_timeout),
+    smokePages: JSON.parse((row.validation_pages as string) ?? '[]') as SmokePage[],
+    maxValidationAttempts: nullableNum(row.max_validation_attempts),
+    defaultModel: nullableStr(row.default_model),
+    defaultRuntime: nullableStr(row.default_runtime) as Profile['defaultRuntime'],
+    executionTarget: nullableStr(row.execution_target) as Profile['executionTarget'],
+    customInstructions: nullableStr(row.custom_instructions),
+    escalation:
+      row.escalation_config === null || row.escalation_config === undefined
+        ? null
+        : (escalationConfigSchema.parse(
+            JSON.parse(row.escalation_config as string),
+          ) as EscalationConfig),
+    extends: nullableStr(row.extends),
+    workerProfile: nullableStr(row.worker_profile),
+    warmImageTag: nullableStr(row.warm_image_tag),
+    warmImageBuiltAt: nullableStr(row.warm_image_built_at),
     mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]') as InjectedMcpServer[],
     claudeMdSections: JSON.parse(
       (row.claude_md_sections as string) ?? '[]',
@@ -101,30 +123,33 @@ export function rowToProfile(
       ? (JSON.parse(row.action_policy as string) as ActionPolicy)
       : null,
     pod: readProfilePodFromRow(row),
-    outputMode: (row.output_mode as Profile['outputMode']) ?? 'pr',
-    modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
+    outputMode: nullableStr(row.output_mode) as Profile['outputMode'],
+    modelProvider: nullableStr(row.model_provider) as Profile['modelProvider'],
     providerCredentials: decryptCreds(row.provider_credentials),
-    testCommand: (row.test_command as string) ?? null,
-    prProvider: (row.pr_provider as Profile['prProvider']) ?? 'github',
+    testCommand: nullableStr(row.test_command),
+    prProvider: nullableStr(row.pr_provider) as Profile['prProvider'],
     adoPat: decryptPat(row.ado_pat),
     githubPat: decryptPat(row.github_pat),
     privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
     registryPat: decryptPat(row.registry_pat),
-    branchPrefix: (row.branch_prefix as string) ?? 'autopod/',
-    containerMemoryGb: (row.container_memory_gb as number | null) ?? null,
-    buildTimeout: (row.build_timeout as number | null) ?? 300,
-    testTimeout: (row.test_timeout as number | null) ?? 600,
+    branchPrefix: nullableStr(row.branch_prefix),
+    containerMemoryGb: nullableNum(row.container_memory_gb),
+    buildTimeout: nullableNum(row.build_timeout),
+    testTimeout: nullableNum(row.test_timeout),
     version: (row.version as number | null) ?? 1,
-    tokenBudget: (row.token_budget as number | null) ?? null,
-    tokenBudgetWarnAt: (row.token_budget_warn_at as number | null) ?? 0.8,
-    tokenBudgetPolicy: (row.token_budget_policy as 'soft' | 'hard' | null) ?? 'soft',
-    maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
-    hasWebUi: row.has_web_ui !== undefined ? Boolean(row.has_web_ui) : true,
-    issueWatcherEnabled: !!(row.issue_watcher_enabled as number),
-    issueWatcherLabelPrefix: (row.issue_watcher_label_prefix as string) ?? 'autopod',
+    tokenBudget: nullableNum(row.token_budget),
+    tokenBudgetWarnAt: nullableNum(row.token_budget_warn_at),
+    tokenBudgetPolicy: nullableStr(row.token_budget_policy) as 'soft' | 'hard' | null,
+    maxBudgetExtensions: nullableNum(row.max_budget_extensions),
+    hasWebUi: nullableBool(row.has_web_ui),
+    issueWatcherEnabled: nullableBool(row.issue_watcher_enabled),
+    issueWatcherLabelPrefix: nullableStr(row.issue_watcher_label_prefix),
     pimActivations: row.pim_activations
       ? (JSON.parse(row.pim_activations as string) as PimActivationConfig[])
       : null,
+    mergeStrategy: row.merge_strategy
+      ? (JSON.parse(row.merge_strategy as string) as MergeStrategy)
+      : {},
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -243,6 +268,7 @@ export function createProfileStore(
           has_web_ui,
           issue_watcher_enabled, issue_watcher_label_prefix,
           pim_activations,
+          merge_strategy,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
@@ -257,6 +283,7 @@ export function createProfileStore(
           @hasWebUi,
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
           @pimActivations,
+          @mergeStrategy,
           @createdAt, @updatedAt
         )
       `).run({
@@ -268,18 +295,18 @@ export function createProfileStore(
         startCommand: parsed.startCommand,
         healthPath: parsed.healthPath,
         healthTimeout: parsed.healthTimeout,
-        validationPages: JSON.stringify(parsed.smokePages),
+        validationPages: JSON.stringify(parsed.smokePages ?? []),
         maxValidationAttempts: parsed.maxValidationAttempts,
         defaultModel: parsed.defaultModel,
         defaultRuntime: parsed.defaultRuntime,
         executionTarget: parsed.executionTarget,
         customInstructions: parsed.customInstructions,
-        escalationConfig: JSON.stringify(parsed.escalation),
+        escalationConfig: parsed.escalation === null ? null : JSON.stringify(parsed.escalation),
         extends: parsed.extends,
         workerProfile: parsed.workerProfile ?? null,
-        mcpServers: JSON.stringify(parsed.mcpServers),
-        claudeMdSections: JSON.stringify(parsed.claudeMdSections),
-        skills: JSON.stringify(parsed.skills),
+        mcpServers: JSON.stringify(parsed.mcpServers ?? []),
+        claudeMdSections: JSON.stringify(parsed.claudeMdSections ?? []),
+        skills: JSON.stringify(parsed.skills ?? []),
         networkPolicy: parsed.networkPolicy ? JSON.stringify(parsed.networkPolicy) : null,
         actionPolicy: parsed.actionPolicy ? JSON.stringify(parsed.actionPolicy) : null,
         outputMode: legacyOutputMode,
@@ -293,7 +320,7 @@ export function createProfileStore(
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
         githubPat: encryptPat(parsed.githubPat),
-        privateRegistries: JSON.stringify(parsed.privateRegistries),
+        privateRegistries: JSON.stringify(parsed.privateRegistries ?? []),
         registryPat: encryptPat(parsed.registryPat),
         branchPrefix: parsed.branchPrefix,
         containerMemoryGb: parsed.containerMemoryGb ?? null,
@@ -303,10 +330,12 @@ export function createProfileStore(
         tokenBudgetWarnAt: parsed.tokenBudgetWarnAt,
         tokenBudgetPolicy: parsed.tokenBudgetPolicy,
         maxBudgetExtensions: parsed.maxBudgetExtensions ?? null,
-        hasWebUi: parsed.hasWebUi ? 1 : 0,
-        issueWatcherEnabled: parsed.issueWatcherEnabled ? 1 : 0,
+        hasWebUi: parsed.hasWebUi === null ? null : parsed.hasWebUi ? 1 : 0,
+        issueWatcherEnabled:
+          parsed.issueWatcherEnabled === null ? null : parsed.issueWatcherEnabled ? 1 : 0,
         issueWatcherLabelPrefix: parsed.issueWatcherLabelPrefix,
         pimActivations: parsed.pimActivations ? JSON.stringify(parsed.pimActivations) : null,
+        mergeStrategy: JSON.stringify(parsed.mergeStrategy ?? {}),
         createdAt: now,
         updatedAt: now,
       });
@@ -342,7 +371,7 @@ export function createProfileStore(
 
     update(name: string, changes: Record<string, unknown>): Profile {
       // Verify profile exists
-      fetchRaw(name);
+      const existing = fetchRaw(name);
 
       const parsed = updateProfileSchema.parse(changes);
 
@@ -352,6 +381,27 @@ export function createProfileStore(
           .prepare('SELECT 1 FROM profiles WHERE name = ?')
           .get(parsed.extends);
         if (!parentExists) throw new ProfileNotFoundError(parsed.extends);
+      }
+
+      // Enforce: base profiles (extends == null after this update) must have
+      // non-null buildCommand and startCommand. Null is only meaningful on
+      // derived profiles as "inherit from parent".
+      const resultExtends = parsed.extends === undefined ? existing.extends : parsed.extends;
+      if (resultExtends === null) {
+        if (parsed.buildCommand === null) {
+          throw new AutopodError(
+            'buildCommand cannot be null on a base profile (extends is null)',
+            'INVALID_BASE_PROFILE',
+            400,
+          );
+        }
+        if (parsed.startCommand === null) {
+          throw new AutopodError(
+            'startCommand cannot be null on a base profile (extends is null)',
+            'INVALID_BASE_PROFILE',
+            400,
+          );
+        }
       }
 
       // Build dynamic UPDATE — only touch changed fields
@@ -388,7 +438,7 @@ export function createProfileStore(
       }
       if (parsed.smokePages !== undefined) {
         setClauses.push('validation_pages = @validationPages');
-        fieldMap.validationPages = JSON.stringify(parsed.smokePages);
+        fieldMap.validationPages = JSON.stringify(parsed.smokePages ?? []);
       }
       if (parsed.maxValidationAttempts !== undefined) {
         setClauses.push('max_validation_attempts = @maxValidationAttempts');
@@ -412,7 +462,8 @@ export function createProfileStore(
       }
       if (parsed.escalation !== undefined) {
         setClauses.push('escalation_config = @escalationConfig');
-        fieldMap.escalationConfig = JSON.stringify(parsed.escalation);
+        fieldMap.escalationConfig =
+          parsed.escalation === null ? null : JSON.stringify(parsed.escalation);
       }
       if (parsed.extends !== undefined) {
         setClauses.push('extends = @extends');
@@ -424,15 +475,15 @@ export function createProfileStore(
       }
       if (parsed.mcpServers !== undefined) {
         setClauses.push('mcp_servers = @mcpServers');
-        fieldMap.mcpServers = JSON.stringify(parsed.mcpServers);
+        fieldMap.mcpServers = JSON.stringify(parsed.mcpServers ?? []);
       }
       if (parsed.claudeMdSections !== undefined) {
         setClauses.push('claude_md_sections = @claudeMdSections');
-        fieldMap.claudeMdSections = JSON.stringify(parsed.claudeMdSections);
+        fieldMap.claudeMdSections = JSON.stringify(parsed.claudeMdSections ?? []);
       }
       if (parsed.skills !== undefined) {
         setClauses.push('skills = @skills');
-        fieldMap.skills = JSON.stringify(parsed.skills);
+        fieldMap.skills = JSON.stringify(parsed.skills ?? []);
       }
       if (parsed.networkPolicy !== undefined) {
         setClauses.push('network_policy = @networkPolicy');
@@ -499,7 +550,7 @@ export function createProfileStore(
       }
       if (parsed.privateRegistries !== undefined) {
         setClauses.push('private_registries = @privateRegistries');
-        fieldMap.privateRegistries = JSON.stringify(parsed.privateRegistries);
+        fieldMap.privateRegistries = JSON.stringify(parsed.privateRegistries ?? []);
       }
       if (parsed.registryPat !== undefined) {
         setClauses.push('registry_pat = @registryPat');
@@ -539,11 +590,12 @@ export function createProfileStore(
       }
       if (parsed.hasWebUi !== undefined) {
         setClauses.push('has_web_ui = @hasWebUi');
-        fieldMap.hasWebUi = parsed.hasWebUi ? 1 : 0;
+        fieldMap.hasWebUi = parsed.hasWebUi === null ? null : parsed.hasWebUi ? 1 : 0;
       }
       if (parsed.issueWatcherEnabled !== undefined) {
         setClauses.push('issue_watcher_enabled = @issueWatcherEnabled');
-        fieldMap.issueWatcherEnabled = parsed.issueWatcherEnabled ? 1 : 0;
+        fieldMap.issueWatcherEnabled =
+          parsed.issueWatcherEnabled === null ? null : parsed.issueWatcherEnabled ? 1 : 0;
       }
       if (parsed.issueWatcherLabelPrefix !== undefined) {
         setClauses.push('issue_watcher_label_prefix = @issueWatcherLabelPrefix');
@@ -554,6 +606,10 @@ export function createProfileStore(
         fieldMap.pimActivations = parsed.pimActivations
           ? JSON.stringify(parsed.pimActivations)
           : null;
+      }
+      if (parsed.mergeStrategy !== undefined) {
+        setClauses.push('merge_strategy = @mergeStrategy');
+        fieldMap.mergeStrategy = JSON.stringify(parsed.mergeStrategy);
       }
 
       if (setClauses.length === 0) {
@@ -618,6 +674,26 @@ export function createProfileStore(
     exists(name: string): boolean {
       const row = db.prepare('SELECT 1 FROM profiles WHERE name = ?').get(name);
       return row !== undefined;
+    },
+
+    resolveCredentialOwner(name: string): string | null {
+      // Walk up the extends chain — cycle-safe via a visited set.
+      const visited = new Set<string>();
+      let current: string | null = name;
+      while (current !== null && !visited.has(current)) {
+        visited.add(current);
+        const row = db
+          .prepare('SELECT provider_credentials, extends FROM profiles WHERE name = ?')
+          .get(current) as
+          | { provider_credentials: string | null; extends: string | null }
+          | undefined;
+        if (!row) return null;
+        if (row.provider_credentials !== null && row.provider_credentials !== undefined) {
+          return current;
+        }
+        current = row.extends;
+      }
+      return null;
     },
   };
 }

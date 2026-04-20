@@ -18,7 +18,7 @@ const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
 
 export function generateDockerfile(options: DockerfileOptions): string {
   const { profile } = options;
-  const baseImage = getBaseImage(profile.template);
+  const baseImage = getBaseImage(profile.template ?? 'node22');
   const installCommand = getInstallCommand(profile);
 
   const lines: string[] = [
@@ -43,7 +43,6 @@ export function generateDockerfile(options: DockerfileOptions): string {
   // Inject private registry config for install step (uses build args, cleaned up below)
   const npmRegs = profile.privateRegistries.filter((r) => r.type === 'npm');
   const nugetRegs = profile.privateRegistries.filter((r) => r.type === 'nuget');
-  const hasRegistries = npmRegs.length > 0 || nugetRegs.length > 0;
   if (npmRegs.length > 0) {
     lines.push('', 'ARG REGISTRY_PAT');
     lines.push(...generateNpmrcDockerLines(npmRegs));
@@ -69,13 +68,16 @@ export function generateDockerfile(options: DockerfileOptions): string {
     'RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot 2>/dev/null || true',
   );
 
-  // Pre-warm build caches
-  lines.push(
-    '',
-    '# Pre-warm: run build to populate caches',
-    '# || true because build may fail without code changes — we just want cached deps',
-    `RUN ${profile.buildCommand} || true`,
-  );
+  // Pre-warm build caches (buildCommand may be null on derived profiles that
+  // only inherit; skip the pre-warm step in that case).
+  if (profile.buildCommand) {
+    lines.push(
+      '',
+      '# Pre-warm: run build to populate caches',
+      '# || true because build may fail without code changes — we just want cached deps',
+      `RUN ${profile.buildCommand} || true`,
+    );
+  }
 
   // Clean up git credentials
   if (options.gitCredentials === 'pat') {
@@ -116,7 +118,9 @@ export function getBaseImage(template: StackTemplate): string {
 }
 
 export function getInstallCommand(profile: Profile): string {
-  const cmd = profile.buildCommand;
+  // Fall back to an empty string when buildCommand is null (derived profile
+  // that inherits); the install-command inference then falls back to npm ci.
+  const cmd = profile.buildCommand ?? '';
   const isDotnet = profile.template === 'dotnet9' || profile.template === 'dotnet10';
 
   const isGo = profile.template === 'go124' || profile.template === 'go124-pw';

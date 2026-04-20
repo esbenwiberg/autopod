@@ -1,7 +1,7 @@
 import { AutopodError } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ImageBuilder } from '../../images/index.js';
-import type { ProfileStore } from '../../profiles/index.js';
+import { type ProfileStore, buildSourceMap } from '../../profiles/index.js';
 
 export function profileRoutes(
   app: FastifyInstance,
@@ -25,6 +25,23 @@ export function profileRoutes(
   app.get('/profiles/:name', async (request) => {
     const { name } = request.params as { name: string };
     return profileStore.get(name);
+  });
+
+  // GET /profiles/:name/editor — editor-oriented payload
+  // Returns the raw partial (with nulls preserved), the fully resolved profile,
+  // the resolved parent (null for base profiles), a per-field source map,
+  // and the name of the profile in the extends chain that actually owns the
+  // provider credentials (null when the chain has no auth yet). Gives the
+  // desktop everything it needs to render Inherited/Overridden chips and the
+  // "Authenticated via <owner>" UX without re-implementing the merge.
+  app.get('/profiles/:name/editor', async (request) => {
+    const { name } = request.params as { name: string };
+    const raw = profileStore.getRaw(name);
+    const resolved = profileStore.get(name);
+    const parent = raw.extends ? profileStore.get(raw.extends) : null;
+    const sourceMap = buildSourceMap(raw, parent);
+    const credentialOwner = profileStore.resolveCredentialOwner(name);
+    return { raw, resolved, parent, sourceMap, credentialOwner };
   });
 
   // PUT/PATCH /profiles/:name — update profile

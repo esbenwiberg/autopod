@@ -22,6 +22,9 @@ export type {
   PimActivationConfig,
   PrivateRegistry,
   RegistryType,
+  MergeableField,
+  MergeMode,
+  MergeStrategy,
 } from './types/profile.js';
 
 export type {
@@ -211,6 +214,7 @@ export {
   createProfileSchema,
   updateProfileSchema,
   escalationConfigSchema,
+  mergeStrategySchema,
   modelProviderSchema,
   providerCredentialsSchema,
   pimActivationConfigSchema,

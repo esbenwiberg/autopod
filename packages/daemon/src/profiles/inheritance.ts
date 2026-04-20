@@ -1,4 +1,4 @@
-import type { EscalationConfig, Profile } from '@autopod/shared';
+import type { EscalationConfig, MergeStrategy, Profile } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from '../pods/injection-merger.js';
 
@@ -10,6 +10,7 @@ const NEVER_INHERITED: ReadonlySet<keyof Profile> = new Set([
   'extends',
   'createdAt',
   'updatedAt',
+  'mergeStrategy',
 ]);
 
 /** Fields that have special merge logic instead of simple override. */
@@ -30,6 +31,7 @@ const SPECIAL_MERGE_FIELDS: ReadonlySet<keyof Profile> = new Set([
  */
 export function resolveInheritance(child: Profile, parent: Profile): Profile {
   const resolved = { ...child };
+  const strategy: MergeStrategy = child.mergeStrategy ?? {};
 
   // Simple fields: inherit from parent if child has the default/null value
   for (const key of Object.keys(parent) as (keyof Profile)[]) {
@@ -43,54 +45,145 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
     }
   }
 
-  // smokePages: parent pages first, then child pages appended
-  resolved.smokePages = [...parent.smokePages, ...child.smokePages];
+  // smokePages: parent pages first, then child pages appended (or child-only on replace)
+  resolved.smokePages =
+    strategy.smokePages === 'replace'
+      ? child.smokePages
+      : [...parent.smokePages, ...child.smokePages];
 
-  // escalation: deep merge — child overrides individual keys
-  resolved.escalation = {
-    ...parent.escalation,
-    ...child.escalation,
-    askAi: {
-      ...parent.escalation.askAi,
-      ...child.escalation?.askAi,
-    },
-    advisor: {
-      ...parent.escalation.advisor,
-      ...child.escalation?.advisor,
-    },
-  } as EscalationConfig;
+  // escalation: deep merge — child overrides individual keys (or child-only on replace).
+  // Either side may be null on raw profiles; null child means "inherit".
+  if (strategy.escalation === 'replace') {
+    resolved.escalation = child.escalation;
+  } else if (child.escalation === null) {
+    resolved.escalation = parent.escalation;
+  } else if (parent.escalation === null) {
+    resolved.escalation = child.escalation;
+  } else {
+    resolved.escalation = {
+      ...parent.escalation,
+      ...child.escalation,
+      askAi: {
+        ...parent.escalation.askAi,
+        ...child.escalation.askAi,
+      },
+      advisor: {
+        ...parent.escalation.advisor,
+        ...child.escalation.advisor,
+      },
+    } as EscalationConfig;
+  }
 
-  // customInstructions: concatenate with separator
-  if (parent.customInstructions && child.customInstructions) {
+  // customInstructions: concatenate with separator (or use child-only — including null — on replace)
+  if (strategy.customInstructions === 'replace') {
+    resolved.customInstructions = child.customInstructions;
+  } else if (parent.customInstructions && child.customInstructions) {
     resolved.customInstructions = `${parent.customInstructions}\n\n${child.customInstructions}`;
   } else {
     resolved.customInstructions = child.customInstructions ?? parent.customInstructions;
   }
 
-  // mcpServers: merge by name (parent first, child overrides)
-  resolved.mcpServers = mergeMcpServers(parent.mcpServers, child.mcpServers);
+  // mcpServers: merge by name (parent first, child overrides) or child-only on replace
+  resolved.mcpServers =
+    strategy.mcpServers === 'replace'
+      ? child.mcpServers
+      : mergeMcpServers(parent.mcpServers, child.mcpServers);
 
-  // claudeMdSections: merge by heading (parent first, child overrides)
-  resolved.claudeMdSections = mergeClaudeMdSections(
-    parent.claudeMdSections,
-    child.claudeMdSections,
-  );
+  // claudeMdSections: merge by heading (or child-only on replace)
+  resolved.claudeMdSections =
+    strategy.claudeMdSections === 'replace'
+      ? child.claudeMdSections
+      : mergeClaudeMdSections(parent.claudeMdSections, child.claudeMdSections);
 
-  // skills: merge by name (parent first, child overrides)
-  resolved.skills = mergeSkills(parent.skills, child.skills);
+  // skills: merge by name (or child-only on replace)
+  resolved.skills =
+    strategy.skills === 'replace' ? child.skills : mergeSkills(parent.skills, child.skills);
 
   // privateRegistries: concatenate (parent first, child appended — same feed URL deduped)
-  const seenUrls = new Set<string>();
-  const mergedRegistries = [];
-  for (const reg of [...parent.privateRegistries, ...child.privateRegistries]) {
-    if (!seenUrls.has(reg.url)) {
-      seenUrls.add(reg.url);
-      mergedRegistries.push(reg);
+  // or child-only on replace
+  if (strategy.privateRegistries === 'replace') {
+    resolved.privateRegistries = child.privateRegistries;
+  } else {
+    const seenUrls = new Set<string>();
+    const mergedRegistries = [];
+    for (const reg of [...parent.privateRegistries, ...child.privateRegistries]) {
+      if (!seenUrls.has(reg.url)) {
+        seenUrls.add(reg.url);
+        mergedRegistries.push(reg);
+      }
     }
+    resolved.privateRegistries = mergedRegistries;
   }
-  resolved.privateRegistries = mergedRegistries;
 
   return resolved;
+}
+
+/**
+ * Where each field of a resolved profile came from:
+ * - 'own'       — the child explicitly set this value (non-null; non-sentinel-empty for merge-special fields)
+ * - 'inherited' — the child left the field null/empty and the parent supplied the value
+ * - 'merged'    — both sides contributed to a merge-special field (strategy !== 'replace')
+ *
+ * The map is keyed by Profile field names but typed loosely so it can be
+ * serialized to JSON and consumed by the desktop client.
+ */
+export type FieldSource = 'own' | 'inherited' | 'merged';
+
+/** Fields of Profile that buildSourceMap always classifies as 'own' on the child. */
+const SELF_ONLY_FIELDS: ReadonlySet<keyof Profile> = new Set([
+  'name',
+  'extends',
+  'createdAt',
+  'updatedAt',
+  'mergeStrategy',
+]);
+
+function isEmptyForMergeField(key: keyof Profile, value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  // escalation is an object; treat presence as non-empty
+  void key;
+  return false;
+}
+
+export function buildSourceMap(raw: Profile, parent: Profile | null): Record<string, FieldSource> {
+  const map: Record<string, FieldSource> = {};
+  const strategy = raw.mergeStrategy ?? {};
+
+  // Base profile: everything is 'own'.
+  if (parent === null) {
+    for (const key of Object.keys(raw) as (keyof Profile)[]) {
+      map[key as string] = 'own';
+    }
+    return map;
+  }
+
+  for (const key of Object.keys(raw) as (keyof Profile)[]) {
+    if (SELF_ONLY_FIELDS.has(key)) {
+      map[key as string] = 'own';
+      continue;
+    }
+
+    if (SPECIAL_MERGE_FIELDS.has(key)) {
+      const childEmpty = isEmptyForMergeField(key, raw[key]);
+      const mode = strategy[key as keyof typeof strategy];
+      if (mode === 'replace') {
+        map[key as string] = 'own';
+      } else if (childEmpty) {
+        map[key as string] = 'inherited';
+      } else {
+        // child has a value; it's merged with parent by default
+        map[key as string] = 'merged';
+      }
+      continue;
+    }
+
+    // Simple field: null/undefined on child → inherited
+    const childValue = raw[key];
+    map[key as string] = childValue === null || childValue === undefined ? 'inherited' : 'own';
+  }
+
+  return map;
 }
 
 /**

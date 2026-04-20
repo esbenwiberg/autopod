@@ -104,7 +104,7 @@ export function createIssueWatcherService(
     // Resolve which profile should handle this issue
     const target = resolveTargetProfile(
       candidate.triggerLabel,
-      profile.issueWatcherLabelPrefix,
+      profile.issueWatcherLabelPrefix ?? 'autopod',
       profile,
     );
     if (!target) {
@@ -223,7 +223,7 @@ export function createIssueWatcherService(
 
     let candidates: WatchedIssueCandidate[];
     try {
-      candidates = await client.listByLabel(profile.issueWatcherLabelPrefix);
+      candidates = await client.listByLabel(profile.issueWatcherLabelPrefix ?? 'autopod');
     } catch (err) {
       logger.error({ err, profile: profile.name }, 'Failed to list issues by label');
       eventBus.emit({

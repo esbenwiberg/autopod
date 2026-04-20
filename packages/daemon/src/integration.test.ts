@@ -324,6 +324,153 @@ describe('Integration', () => {
       expect(res.statusCode).toBe(204);
     });
 
+    it('GET /profiles/:name/editor returns raw + resolved + null parent for base profile', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/profiles/test-app/editor',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.raw.name).toBe('test-app');
+      expect(body.resolved.name).toBe('test-app');
+      expect(body.parent).toBeNull();
+      expect(body.sourceMap.buildCommand).toBe('own');
+      expect(body.sourceMap.extends).toBe('own');
+      expect(body.credentialOwner).toBeNull();
+    });
+
+    it('GET /profiles/:name/editor reports the credential owner from the extends chain', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          name: 'auth-base',
+          modelProvider: 'max',
+          providerCredentials: {
+            provider: 'max',
+            accessToken: 'a',
+            refreshToken: 'r',
+            expiresAt: '2026-12-31T00:00:00Z',
+          },
+        },
+      });
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          name: 'auth-derived',
+          extends: 'auth-base',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/profiles/auth-derived/editor',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().credentialOwner).toBe('auth-base');
+    });
+
+    it('GET /profiles/:name/editor reflects overrides on derived profile', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          name: 'test-app-derived',
+          extends: 'test-app',
+          buildCommand: 'pnpm build:derived',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/profiles/test-app-derived/editor',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.parent).not.toBeNull();
+      expect(body.parent.name).toBe('test-app');
+      expect(body.resolved.buildCommand).toBe('pnpm build:derived');
+      expect(body.sourceMap.buildCommand).toBe('own');
+    });
+
+    it('PATCH /profiles/:name with buildCommand: null clears override on derived profile', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          name: 'test-app-derived',
+          extends: 'test-app',
+          buildCommand: 'pnpm build:derived',
+        },
+      });
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/profiles/test-app-derived',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { buildCommand: null },
+      });
+      expect(patchRes.statusCode).toBe(200);
+
+      const editorRes = await app.inject({
+        method: 'GET',
+        url: '/profiles/test-app-derived/editor',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      const body = editorRes.json();
+      expect(body.raw.buildCommand).toBeNull();
+      expect(body.resolved.buildCommand).toBe(validProfileInput.buildCommand);
+      expect(body.sourceMap.buildCommand).toBe('inherited');
+    });
+
+    it('PATCH /profiles/:name rejects buildCommand: null on base profile', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: validProfileInput,
+      });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/profiles/test-app',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { buildCommand: null },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
     it('POST /profiles/:name/warm returns 501', async () => {
       await app.inject({
         method: 'POST',

@@ -231,8 +231,8 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         repoUrl: row.repo_url as string,
         defaultBranch: row.default_branch as string,
         template: row.template as StackTemplate,
-        buildCommand: row.build_command as string,
-        startCommand: row.start_command as string,
+        buildCommand: (row.build_command as string | null) ?? null,
+        startCommand: (row.start_command as string | null) ?? null,
         healthPath: row.health_path as string,
         healthTimeout: row.health_timeout as number,
         smokePages: JSON.parse(row.validation_pages as string),
@@ -271,6 +271,12 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         tokenBudgetWarnAt: (row.token_budget_warn_at as number | null) ?? 0.8,
         tokenBudgetPolicy: (row.token_budget_policy as 'soft' | 'hard' | null) ?? 'soft',
         maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
+        pod: null,
+        hasWebUi: row.has_web_ui !== undefined ? Boolean(row.has_web_ui) : true,
+        issueWatcherEnabled: !!(row.issue_watcher_enabled as number),
+        issueWatcherLabelPrefix: (row.issue_watcher_label_prefix as string) ?? 'autopod',
+        pimActivations: row.pim_activations ? JSON.parse(row.pim_activations as string) : null,
+        mergeStrategy: row.merge_strategy ? JSON.parse(row.merge_strategy as string) : {},
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -280,6 +286,7 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
     update: vi.fn(),
     delete: vi.fn(),
     exists: vi.fn(() => true),
+    resolveCredentialOwner: vi.fn((name: string) => name),
   };
 }
 

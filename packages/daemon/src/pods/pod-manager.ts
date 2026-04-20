@@ -507,7 +507,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           executionTarget: parent.executionTarget,
           branch: parent.branch,
           userId: parent.userId,
-          maxValidationAttempts: profile.maxValidationAttempts,
+          maxValidationAttempts: profile.maxValidationAttempts ?? 3,
           skipValidation: false,
           options: parent.options,
           outputMode: parent.outputMode,
@@ -1194,9 +1194,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   return {
     createSession(request: CreatePodRequest, userId: string): Pod {
       const profile = profileStore.get(request.profileName);
-      const model = request.model ?? profile.defaultModel;
-      const runtime = request.runtime ?? profile.defaultRuntime;
-      const executionTarget = request.executionTarget ?? profile.executionTarget;
+      const model = request.model ?? profile.defaultModel ?? 'opus';
+      const runtime = request.runtime ?? profile.defaultRuntime ?? 'claude';
+      const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
       const skipValidation = request.skipValidation ?? false;
 
       // Resolve the effective PodOptions once, so both branch derivation and
@@ -1255,7 +1255,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             executionTarget,
             branch,
             userId,
-            maxValidationAttempts: profile.maxValidationAttempts,
+            maxValidationAttempts: profile.maxValidationAttempts ?? 3,
             skipValidation,
             acceptanceCriteria: request.acceptanceCriteria ?? null,
             options: resolvedPod,
@@ -1404,10 +1404,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } else {
             // Normal path: create worktree
             emitStatus('Creating worktree…');
+            if (!profile.repoUrl) {
+              throw new AutopodError(
+                `Profile '${profile.name}' has no repoUrl (inherited chain did not supply one)`,
+                'INVALID_PROFILE',
+                400,
+              );
+            }
             const result = await worktreeManager.create({
               repoUrl: profile.repoUrl,
               branch: pod.branch,
-              baseBranch: pod.baseBranch ?? profile.defaultBranch,
+              baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
               pat: profile.adoPat ?? profile.githubPat ?? undefined,
             });
             worktreePath = result.worktreePath;
@@ -1455,7 +1462,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // For .NET templates, cap MSBuild node count to half the available CPUs
         // (min 2, max 4) to prevent dozens of MSBuild workers from exhausting memory.
-        const isDotnet = profile.template.startsWith('dotnet');
+        const template = profile.template ?? 'node22';
+        const isDotnet = template.startsWith('dotnet');
 
         // Resolve registry PAT early — needed for both container env vars and config files.
         // Fall back to adoPat when registryPat isn't set — they're usually the same
@@ -1479,7 +1487,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         };
 
         const containerId = await containerManager.spawn({
-          image: getBaseImage(profile.template),
+          image: getBaseImage(template),
           podId,
           env: containerEnv,
           ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
@@ -2223,7 +2231,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const worktreeResult = await worktreeManager.create({
               repoUrl: profile.repoUrl,
               branch: repoBranch,
-              baseBranch: pod.baseBranch ?? profile.defaultBranch,
+              baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
               pat,
             });
             // Copy artifacts into the worktree (cp -a copies contents, trailing /. required)
@@ -2286,13 +2294,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Forked pods (linkedPodId set, or baseBranch differs from defaultBranch)
           // inherit changes from a parent branch. Diff against defaultBranch (not startCommitSha)
           // so the parent's changes are included in the stats.
+          const defaultBranch = profile.defaultBranch ?? 'main';
           const isFork =
-            Boolean(pod.linkedPodId) ||
-            (pod.baseBranch && pod.baseBranch !== profile.defaultBranch);
+            Boolean(pod.linkedPodId) || (pod.baseBranch && pod.baseBranch !== defaultBranch);
           const sinceCommit = isFork ? undefined : (pod.startCommitSha ?? undefined);
           const stats = await worktreeManager.getDiffStats(
             pod.worktreePath,
-            profile.defaultBranch,
+            defaultBranch,
             sinceCommit,
           );
           podRepo.update(podId, {
@@ -2606,16 +2614,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'No PR found — creating PR before merging…');
         try {
           const retryProfile = profileStore.get(pod.profileName);
+          const retryDefaultBranch = retryProfile.defaultBranch ?? 'main';
           await worktreeManager.mergeBranch({
             worktreePath: pod.worktreePath,
-            targetBranch: retryProfile.defaultBranch,
+            targetBranch: retryDefaultBranch,
           });
           const newPrUrl = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
             worktreePath: pod.worktreePath!,
             repoUrl: retryProfile.repoUrl ?? undefined,
             branch: pod.branch,
-            baseBranch: retryProfile.defaultBranch,
+            baseBranch: retryDefaultBranch,
             podId,
             task: pod.task,
             profileName: pod.profileName,
@@ -2658,7 +2667,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const profile = profileStore.get(pod.profileName);
           await worktreeManager.mergeBranch({
             worktreePath: pod.worktreePath,
-            targetBranch: profile.defaultBranch,
+            targetBranch: profile.defaultBranch ?? 'main',
           });
           emitActivityStatus(podId, 'Branch pushed successfully');
         } catch (err) {
@@ -3223,17 +3232,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // parent branch is not the agent's responsibility. Stats/file counts still
         // use the full branch diff (computed earlier) for accurate PR sizing.
         const diffSinceCommit = pod.startCommitSha ?? undefined;
+        const validationDefaultBranch = profile.defaultBranch ?? 'main';
         const [diff, commitLog] = pod.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(
                 pod.worktreePath,
-                profile.defaultBranch,
+                validationDefaultBranch,
                 undefined,
                 diffSinceCommit,
               ),
               worktreeManager.getCommitLog(
                 pod.worktreePath,
-                profile.defaultBranch,
+                validationDefaultBranch,
                 undefined,
                 diffSinceCommit,
               ),
@@ -3258,18 +3268,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           containerId: pod.containerId,
           previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-          buildCommand: profile.buildCommand,
-          startCommand: profile.startCommand,
-          healthPath: profile.healthPath,
-          healthTimeout: profile.healthTimeout,
+          buildCommand: profile.buildCommand ?? '',
+          startCommand: profile.startCommand ?? '',
+          healthPath: profile.healthPath ?? '/',
+          healthTimeout: profile.healthTimeout ?? 120,
           smokePages: profile.smokePages,
           attempt,
           task: pod.task,
           diff,
           testCommand: profile.testCommand,
-          buildTimeout: profile.buildTimeout * 1_000,
-          testTimeout: profile.testTimeout * 1_000,
-          reviewerModel: profile.escalation.askAi.model || profile.defaultModel || 'sonnet',
+          buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
+          testTimeout: (profile.testTimeout ?? 600) * 1_000,
+          reviewerModel: profile.escalation?.askAi.model || profile.defaultModel || 'sonnet',
           acceptanceCriteria: pod.acceptanceCriteria ?? undefined,
           codeReviewSkill,
           commitLog: commitLog || undefined,
@@ -3534,6 +3544,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         if (effectiveResult.overall === 'pass') {
           emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
+          const passDefaultBranch = profile.defaultBranch ?? 'main';
           // Push branch and create PR before transitioning to validated.
           // Fix pods already have prUrl set — carry it forward and skip PR creation.
           let prUrl: string | null = s2.prUrl ?? null;
@@ -3554,7 +3565,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             try {
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
-                targetBranch: profile.defaultBranch,
+                targetBranch: passDefaultBranch,
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
@@ -3564,12 +3575,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // For forked pods, diff against baseBranch to include the parent's changes.
             try {
               const prSinceCommit =
-                s2.linkedPodId || (s2.baseBranch && s2.baseBranch !== profile.defaultBranch)
+                s2.linkedPodId || (s2.baseBranch && s2.baseBranch !== passDefaultBranch)
                   ? undefined
                   : (s2.startCommitSha ?? undefined);
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
-                profile.defaultBranch,
+                passDefaultBranch,
                 prSinceCommit,
               );
               podRepo.update(podId, {
@@ -3605,7 +3616,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: profile.defaultBranch,
+                  baseBranch: passDefaultBranch,
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
@@ -3764,17 +3775,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const cm = containerManagerFactory.get(pod.executionTarget);
         await cm.start(pod.containerId);
 
+        const revalDefaultBranch = profile.defaultBranch ?? 'main';
         const [diff, commitLog] = pod.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(
                 pod.worktreePath,
-                profile.defaultBranch,
+                revalDefaultBranch,
                 undefined,
                 pod.startCommitSha ?? undefined,
               ),
               worktreeManager.getCommitLog(
                 pod.worktreePath,
-                profile.defaultBranch,
+                revalDefaultBranch,
                 undefined,
                 pod.startCommitSha ?? undefined,
               ),
@@ -3795,18 +3807,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               containerId: pod.containerId,
               previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
               containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-              buildCommand: profile.buildCommand,
-              startCommand: profile.startCommand,
-              healthPath: profile.healthPath,
-              healthTimeout: profile.healthTimeout,
+              buildCommand: profile.buildCommand ?? '',
+              startCommand: profile.startCommand ?? '',
+              healthPath: profile.healthPath ?? '/',
+              healthTimeout: profile.healthTimeout ?? 120,
               smokePages: profile.smokePages,
               attempt,
               task: pod.task,
               diff,
               testCommand: profile.testCommand,
-              buildTimeout: profile.buildTimeout * 1_000,
-              testTimeout: profile.testTimeout * 1_000,
-              reviewerModel: profile.escalation.askAi.model || profile.defaultModel || 'sonnet',
+              buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
+              testTimeout: (profile.testTimeout ?? 600) * 1_000,
+              reviewerModel: profile.escalation?.askAi.model || profile.defaultModel || 'sonnet',
               acceptanceCriteria: pod.acceptanceCriteria ?? undefined,
               codeReviewSkill,
               commitLog: commitLog || undefined,
@@ -3876,7 +3888,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             try {
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
-                targetBranch: profile.defaultBranch,
+                targetBranch: revalDefaultBranch,
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
@@ -3884,12 +3896,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
             try {
               const failSinceCommit =
-                s2.linkedPodId || (s2.baseBranch && s2.baseBranch !== profile.defaultBranch)
+                s2.linkedPodId || (s2.baseBranch && s2.baseBranch !== revalDefaultBranch)
                   ? undefined
                   : (s2.startCommitSha ?? undefined);
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
-                profile.defaultBranch,
+                revalDefaultBranch,
                 failSinceCommit,
               );
               podRepo.update(podId, {
@@ -3910,7 +3922,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: profile.defaultBranch,
+                  baseBranch: revalDefaultBranch,
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,

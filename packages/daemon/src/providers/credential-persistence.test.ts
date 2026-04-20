@@ -19,10 +19,14 @@ function makeContainerManager(fileContent: string): ContainerManager {
   } as unknown as ContainerManager;
 }
 
-function makeProfileStore(currentCreds: MaxCredentials | null): ProfileStore {
+function makeProfileStore(
+  currentCreds: MaxCredentials | null,
+  opts: { ownerName?: string } = {},
+): ProfileStore {
+  const ownerName = opts.ownerName ?? 'test-profile';
   return {
     getRaw: vi.fn().mockReturnValue({
-      name: 'test-profile',
+      name: ownerName,
       providerCredentials: currentCreds,
     } as Partial<Profile>),
     update: vi.fn(),
@@ -31,6 +35,7 @@ function makeProfileStore(currentCreds: MaxCredentials | null): ProfileStore {
     list: vi.fn(),
     delete: vi.fn(),
     exists: vi.fn(),
+    resolveCredentialOwner: vi.fn((_name: string) => ownerName),
   } as unknown as ProfileStore;
 }
 
@@ -154,5 +159,40 @@ describe('persistRefreshedCredentials', () => {
     await persistRefreshedCredentials('ctr-1', cm, ps, 'test-profile', logger);
 
     expect(ps.update).not.toHaveBeenCalled();
+  });
+
+  it('persists rotated tokens to the credential owner, not the pod profile', async () => {
+    // Simulate a derived profile running a pod whose auth is owned by a parent.
+    const containerCreds = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'rotated-access',
+        refreshToken: 'rotated-refresh',
+        expiresAt: new Date('2026-04-20T00:00:00Z').getTime(),
+      },
+    });
+
+    const parentCreds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: '2026-03-20T00:00:00Z',
+      clientId: 'parent-client',
+    };
+
+    const cm = makeContainerManager(containerCreds);
+    const ps = makeProfileStore(parentCreds, { ownerName: 'teamplanner-base' });
+
+    await persistRefreshedCredentials('ctr-1', cm, ps, 'teamplanner-workspace', logger);
+
+    expect(ps.resolveCredentialOwner).toHaveBeenCalledWith('teamplanner-workspace');
+    expect(ps.update).toHaveBeenCalledWith(
+      'teamplanner-base',
+      expect.objectContaining({
+        providerCredentials: expect.objectContaining({
+          refreshToken: 'rotated-refresh',
+          clientId: 'parent-client', // preserved from owner, not pod profile
+        }),
+      }),
+    );
   });
 });

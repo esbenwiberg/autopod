@@ -6,6 +6,27 @@ import type { RuntimeType } from './runtime.js';
 
 export type ExecutionTarget = 'local' | 'aci';
 
+/**
+ * Fields whose inheritance behavior can be switched from merge (the default —
+ * append/deep-merge with the parent's value) to replace (use only the child's
+ * value, discard the parent's).
+ *
+ * Note: an empty array in the raw row still means "inherit" (not "empty list")
+ * to preserve existing semantics. Use `mergeStrategy.<field> = 'replace'` with
+ * an empty array to explicitly produce an empty list.
+ */
+export type MergeableField =
+  | 'smokePages'
+  | 'customInstructions'
+  | 'escalation'
+  | 'mcpServers'
+  | 'claudeMdSections'
+  | 'skills'
+  | 'privateRegistries';
+
+export type MergeMode = 'merge' | 'replace';
+export type MergeStrategy = Partial<Record<MergeableField, MergeMode>>;
+
 export type StackTemplate =
   | 'node22'
   | 'node22-pw'
@@ -16,22 +37,31 @@ export type StackTemplate =
   | 'go124-pw'
   | 'custom';
 
+/**
+ * Profile shape. For derived profiles, most fields may be null — null means
+ * "inherit from parent". After `resolveInheritance()` the nulls are filled in
+ * from the parent chain (which must bottom out at a base profile with real
+ * values), so runtime readers of a resolved Profile see non-null values for
+ * these fields even though TypeScript keeps the `| null` for the raw shape.
+ */
 export interface Profile {
   name: string;
   repoUrl: string | null;
-  defaultBranch: string;
-  template: StackTemplate;
-  buildCommand: string;
-  startCommand: string;
-  healthPath: string;
-  healthTimeout: number;
+  defaultBranch: string | null;
+  template: StackTemplate | null;
+  /** Null on derived profiles (extends != null) means "inherit from parent". */
+  buildCommand: string | null;
+  /** Null on derived profiles (extends != null) means "inherit from parent". */
+  startCommand: string | null;
+  healthPath: string | null;
+  healthTimeout: number | null;
   smokePages: SmokePage[];
-  maxValidationAttempts: number;
-  defaultModel: string;
-  defaultRuntime: RuntimeType;
-  executionTarget: ExecutionTarget;
+  maxValidationAttempts: number | null;
+  defaultModel: string | null;
+  defaultRuntime: RuntimeType | null;
+  executionTarget: ExecutionTarget | null;
   customInstructions: string | null;
-  escalation: EscalationConfig;
+  escalation: EscalationConfig | null;
   extends: string | null;
   /** Profile to use when spawning worker sessions from a workspace pod using this profile */
   workerProfile: string | null;
@@ -58,19 +88,19 @@ export interface Profile {
    * @deprecated Mirrors `pod` for wire/storage back-compat. New code should
    * read `pod` directly. Kept in sync by the profile store.
    */
-  outputMode: OutputMode;
+  outputMode: OutputMode | null;
   /** Model provider — determines how the daemon authenticates with the AI backend */
-  modelProvider: ModelProvider;
+  modelProvider: ModelProvider | null;
   /** Provider-specific credentials (OAuth tokens for MAX, endpoint config for Foundry, etc.) */
   providerCredentials: ProviderCredentials | null;
   /** Optional test command to run after build (e.g. 'pnpm test') */
   testCommand?: string | null;
   /** Build phase timeout in seconds. Default 300 (5 min). */
-  buildTimeout: number;
+  buildTimeout: number | null;
   /** Test phase timeout in seconds. Default 600 (10 min). */
-  testTimeout: number;
+  testTimeout: number | null;
   /** PR provider — determines which service creates/merges pull requests */
-  prProvider: 'github' | 'ado';
+  prProvider: 'github' | 'ado' | null;
   /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */
   adoPat: string | null;
   /** GitHub Personal Access Token (encrypted at rest). Used for PR creation and action read access. */
@@ -80,7 +110,7 @@ export interface Profile {
   /** PAT for authenticating against private registries (encrypted at rest) */
   registryPat: string | null;
   /** Branch name prefix for auto-generated session branches. Defaults to 'autopod/'. */
-  branchPrefix: string;
+  branchPrefix: string | null;
   /** Container memory limit in GB. null = no limit (Docker default). */
   containerMemoryGb: number | null;
   /** Auto-incremented on every profile update. Useful for auditing which config a session ran under. */
@@ -88,20 +118,26 @@ export interface Profile {
   /** Maximum total tokens (input + output) allowed per session. null = unlimited. */
   tokenBudget: number | null;
   /** Fraction of tokenBudget at which a warning event is emitted. E.g. 0.8 = warn at 80%. */
-  tokenBudgetWarnAt: number;
+  tokenBudgetWarnAt: number | null;
   /** What to do when the budget is exceeded: 'soft' = pause for user approval, 'hard' = fail immediately. */
-  tokenBudgetPolicy: 'soft' | 'hard';
+  tokenBudgetPolicy: 'soft' | 'hard' | null;
   /** How many times a user may approve budget extensions per session. null = unlimited. */
   maxBudgetExtensions: number | null;
   /** Whether the project has a web frontend. When false, AC validation skips browser checks
    *  and the classifier will not produce web-ui validation types. Default true. */
-  hasWebUi: boolean;
+  hasWebUi: boolean | null;
   /** Whether the issue/work-item watcher is enabled for this profile */
-  issueWatcherEnabled: boolean;
+  issueWatcherEnabled: boolean | null;
   /** Label prefix to watch for. Default 'autopod'. Triggers on exact match or '<prefix>:<target-profile>' */
-  issueWatcherLabelPrefix: string;
+  issueWatcherLabelPrefix: string | null;
   /** PIM activations (group membership and/or RBAC roles) auto-activated for sessions using this profile */
   pimActivations: PimActivationConfig[] | null;
+  /**
+   * Per-field override of merge-vs-replace semantics for merge-special fields.
+   * Absent keys default to 'merge' (historical behavior). Only meaningful on
+   * derived profiles (those with `extends` set).
+   */
+  mergeStrategy: MergeStrategy;
   createdAt: string;
   updatedAt: string;
 }
