@@ -16,12 +16,13 @@ export interface InjectedMcpServer {
 }
 
 /**
- * A custom slash command (skill) to inject into agent sessions.
- * Skills are markdown files placed in the container's `.claude/commands/` directory.
- * The skill name becomes the slash command name (e.g., name "review" → `/review`).
+ * A Claude Code skill to inject into agent sessions.
+ * Written to `.claude/skills/<name>/SKILL.md` in the container — Claude Code 2.x
+ * registers this as both an auto-triggerable skill and a `/name` slash command,
+ * so a single write covers both invocation paths.
  */
 export interface InjectedSkill {
-  /** Unique name — used as the slash command name and merge key */
+  /** Unique name — used as the skill directory name, slash-command name, and merge key */
   name: string;
   /** Where to source the skill content from */
   source: LocalSkillSource | GithubSkillSource;

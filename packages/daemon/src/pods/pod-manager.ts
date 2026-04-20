@@ -1572,11 +1572,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (mergedSkills.length > 0) {
           emitStatus('Resolving skills…');
           const resolvedSkills = await resolveSkills(mergedSkills, logger);
-          const skillsDir = `${CONTAINER_HOME_DIR}/.claude/commands`;
+          const skillsDir = `${CONTAINER_HOME_DIR}/.claude/skills`;
           for (const skill of resolvedSkills) {
             await containerManager.writeFile(
               containerId,
-              `${skillsDir}/${skill.name}.md`,
+              `${skillsDir}/${skill.name}/SKILL.md`,
               skill.content,
             );
           }
