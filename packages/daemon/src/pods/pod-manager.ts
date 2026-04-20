@@ -2308,16 +2308,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         try {
           const profile = profileStore.get(pod.profileName);
-          // Forked pods (linkedPodId set, or baseBranch differs from defaultBranch)
-          // inherit changes from a parent branch. Diff against defaultBranch (not startCommitSha)
-          // so the parent's changes are included in the stats.
           const defaultBranch = profile.defaultBranch ?? 'main';
-          const isFork =
-            Boolean(pod.linkedPodId) || (pod.baseBranch && pod.baseBranch !== defaultBranch);
-          const sinceCommit = isFork ? undefined : (pod.startCommitSha ?? undefined);
+          const sinceCommit = pod.startCommitSha ?? undefined;
+          const baseBranchForStats = pod.baseBranch ?? defaultBranch;
           const stats = await worktreeManager.getDiffStats(
             pod.worktreePath,
-            defaultBranch,
+            baseBranchForStats,
             sinceCommit,
           );
           podRepo.update(podId, {
@@ -2627,7 +2623,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           emitActivityStatus(podId, 'PR merge failed — pod still completing');
         }
-      } else if (!pod.prUrl && prManager && pod.worktreePath) {
+      } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options?.output !== 'branch') {
         // PR creation failed during validation — retry it now
         emitActivityStatus(podId, 'No PR found — creating PR before merging…');
         try {
@@ -3313,6 +3309,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           startCommitSha: pod.startCommitSha ?? undefined,
           overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
           hasWebUi: profile.hasWebUi ?? true,
+          reviewerApiKey: process.env.ANTHROPIC_API_KEY,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
@@ -3573,7 +3570,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Fix pods already have prUrl set — carry it forward and skip PR creation.
           let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-          if (prManager && s2.worktreePath) {
+          if (prManager && s2.worktreePath && s2.options?.output !== 'branch') {
             // Commit screenshots to the branch so they're visible in the PR
             try {
               await worktreeManager.commitFiles(
@@ -3596,15 +3593,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
 
             // Re-compute diff stats now that auto-commit has run.
-            // For forked pods, diff against baseBranch to include the parent's changes.
             try {
-              const prSinceCommit =
-                s2.linkedPodId || (s2.baseBranch && s2.baseBranch !== passDefaultBranch)
-                  ? undefined
-                  : (s2.startCommitSha ?? undefined);
+              const prSinceCommit = s2.startCommitSha ?? undefined;
+              const prBaseBranch = s2.baseBranch ?? passDefaultBranch;
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
-                passDefaultBranch,
+                prBaseBranch,
                 prSinceCommit,
               );
               podRepo.update(podId, {
@@ -3898,7 +3892,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Fix pods already have prUrl set — carry it forward and skip PR creation.
           let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-          if (prManager && s2.worktreePath) {
+          if (prManager && s2.worktreePath && s2.options?.output !== 'branch') {
             try {
               await worktreeManager.commitFiles(
                 s2.worktreePath,
@@ -3919,13 +3913,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
 
             try {
-              const failSinceCommit =
-                s2.linkedPodId || (s2.baseBranch && s2.baseBranch !== revalDefaultBranch)
-                  ? undefined
-                  : (s2.startCommitSha ?? undefined);
+              const failSinceCommit = s2.startCommitSha ?? undefined;
+              const failBaseBranch = s2.baseBranch ?? revalDefaultBranch;
               const stats = await worktreeManager.getDiffStats(
                 s2.worktreePath,
-                revalDefaultBranch,
+                failBaseBranch,
                 failSinceCommit,
               );
               podRepo.update(podId, {

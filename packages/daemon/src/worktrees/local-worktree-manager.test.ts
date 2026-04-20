@@ -347,6 +347,32 @@ describe('LocalWorktreeManager', () => {
       const result = await manager.getDiff('/not/a/repo', 'main');
       expect(result).toBe('');
     });
+
+    it('passes exclude pathspecs to git diff', async () => {
+      const capturedArgs: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          capturedArgs.push([...args]);
+          if (args.join(' ').includes('merge-base')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else {
+            cb(null, { stdout: 'diff --git a/foo.ts b/foo.ts\n+line\n', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await manager.getDiff('/tmp/worktree/sess', 'main');
+
+      const diffCalls = capturedArgs.filter((a) => a[0] === 'diff');
+      expect(diffCalls.length).toBeGreaterThan(0);
+      for (const args of diffCalls) {
+        expect(args).toContain(':(exclude)pnpm-lock.yaml');
+        expect(args).toContain(':(exclude)go.sum');
+        expect(args).toContain(':(exclude)*.min.js');
+      }
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -22,6 +22,8 @@ export interface ValidationEngineConfig {
   task: string;
   diff: string;
   reviewerModel?: string;
+  /** Anthropic API key for Tier 2 tool-use review. Defaults to ANTHROPIC_API_KEY env var. */
+  reviewerApiKey?: string;
   testCommand?: string | null;
   /** Build phase timeout in ms. Default 300_000 (5 min). */
   buildTimeout?: number;

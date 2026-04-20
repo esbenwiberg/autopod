@@ -22,6 +22,17 @@ const GIT_ENV: Record<string, string> = {
   GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
 } as Record<string, string>;
 
+const DIFF_EXCLUDE_PATHSPECS: readonly string[] = [
+  ':(exclude)pnpm-lock.yaml',
+  ':(exclude)package-lock.json',
+  ':(exclude)yarn.lock',
+  ':(exclude)*.lock',
+  ':(exclude)*.lockb',
+  ':(exclude)go.sum',
+  ':(exclude)*.min.js',
+  ':(exclude)*.min.css',
+];
+
 /** Strip credentials from git error messages/commands so PATs never leak into logs. */
 const PAT_PATTERN = /https:\/\/[^@]*@/g;
 function sanitizeGitError(err: unknown): unknown {
@@ -297,10 +308,18 @@ export class LocalWorktreeManager implements WorktreeManager {
       const bufOpts = { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 };
 
       // Committed changes: base..HEAD
-      const { stdout: committedDiff } = await execFileAsync('git', ['diff', base, 'HEAD'], bufOpts);
+      const { stdout: committedDiff } = await execFileAsync(
+        'git',
+        ['diff', base, 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
+        bufOpts,
+      );
 
       // Uncommitted changes: working tree vs HEAD (staged + unstaged)
-      const { stdout: uncommittedDiff } = await execFileAsync('git', ['diff', 'HEAD'], bufOpts);
+      const { stdout: uncommittedDiff } = await execFileAsync(
+        'git',
+        ['diff', 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
+        bufOpts,
+      );
 
       const combined =
         uncommittedDiff.length > 0 ? `${committedDiff}\n${uncommittedDiff}` : committedDiff;
@@ -313,7 +332,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         if (mergeBase && mergeBase !== sinceCommit) {
           const { stdout: mbCommitted } = await execFileAsync(
             'git',
-            ['diff', mergeBase, 'HEAD'],
+            ['diff', mergeBase, 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
             bufOpts,
           );
           const mbCombined =

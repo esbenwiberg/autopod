@@ -2070,6 +2070,7 @@ async function runTaskReview(
         prompt,
         worktreePath,
         timeout: reviewTimeout,
+        apiKey: config.reviewerApiKey,
       });
 
       const tier2Parsed = enforceRequirementsStatus(parseReviewJson(tier2Result.stdout.trim()));
@@ -2143,7 +2144,8 @@ async function runTaskReview(
       log?.warn({ err }, 'Tier 2 tool-use review failed');
       if (!tier1Parsed) {
         // Truncated diff path: no Tier 1 result to fall back to
-        return { result: null, skipReason: 'Tier 2 tool-use review failed and diff was truncated' };
+        const message = err instanceof Error ? err.message : String(err);
+        return { result: null, skipReason: `Tier 2 tool-use review failed (diff was truncated): ${message}` };
       }
       return {
         result: {
