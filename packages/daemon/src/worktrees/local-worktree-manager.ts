@@ -57,7 +57,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   private logger: Logger;
 
   /** Per-repo mutex to avoid git lock contention during concurrent fetches. */
-  private repoLocks = new Map<string, Promise<void>>();
+  private repoLocks = new Map<string, Promise<unknown>>();
 
   /**
    * In-memory PAT cache keyed by bare repo path.
@@ -713,14 +713,16 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   /** Serialize operations on the same repo to avoid git lock contention. */
-  private async withRepoLock(key: string, fn: () => Promise<void>): Promise<void> {
+  private async withRepoLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const existing = this.repoLocks.get(key) ?? Promise.resolve();
-    const next = existing.then(fn, fn); // Run fn regardless of prior result
+    // Chain on existing so fn runs after the prior holder regardless of its
+    // outcome. The chain promise is typed `Promise<unknown>` (carries prior
+    // result type or void); we only care about ordering here.
+    const next: Promise<T> = existing.then(fn, fn);
     this.repoLocks.set(key, next);
     try {
-      await next;
+      return await next;
     } finally {
-      // Clean up if we're still the latest
       if (this.repoLocks.get(key) === next) {
         this.repoLocks.delete(key);
       }
