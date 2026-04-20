@@ -1,22 +1,38 @@
+import AutopodClient
 import SwiftUI
 
 /// Profile list — shows all profiles with quick stats, click to edit.
 public struct ProfileListView: View {
     public let profiles: [Profile]
     public let actionCatalog: [ActionCatalogItem]
-    public var onSave: ((Profile) -> Void)?
-    public var onCreate: ((Profile) -> Void)?
+    public var onSave: ((Profile) async throws -> Void)?
+    public var onCreate: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
+    public var onLoadEditor: ((String) async throws -> ProfileEditorResponse)?
+    public var onSaveWithInheritance: (
+        (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
+    )?
     public init(profiles: [Profile], actionCatalog: [ActionCatalogItem] = [],
-                onSave: ((Profile) -> Void)? = nil, onCreate: ((Profile) -> Void)? = nil,
-                onAuthenticate: ProfileAuthHandler? = nil) {
+                onSave: ((Profile) async throws -> Void)? = nil, onCreate: ((Profile) async throws -> Void)? = nil,
+                onAuthenticate: ProfileAuthHandler? = nil,
+                onLoadEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
+                onSaveWithInheritance: (
+                    (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
+                )? = nil) {
         self.profiles = profiles; self.actionCatalog = actionCatalog
         self.onSave = onSave; self.onCreate = onCreate
         self.onAuthenticate = onAuthenticate
+        self.onLoadEditor = onLoadEditor
+        self.onSaveWithInheritance = onSaveWithInheritance
     }
 
     @State private var selectedProfile: Profile?
     @State private var showCreateSheet = false
+    /// When the kind picker returns "Derived", this holds the parent name
+    /// and the editor sheet opens with `extends` pre-set.
+    @State private var creatingDerivedFrom: String?
+    /// When the kind picker returns "Base", we open the classic editor.
+    @State private var creatingBase = false
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -56,9 +72,30 @@ public struct ProfileListView: View {
             }
         }
         .sheet(item: $selectedProfile) { profile in
-            ProfileEditorView(profile: profile, isNew: false, actionCatalog: actionCatalog, onSave: onSave, onAuthenticate: onAuthenticate)
+            ProfileEditorView(
+                profile: profile,
+                isNew: false,
+                actionCatalog: actionCatalog,
+                onSave: onSave,
+                onAuthenticate: onAuthenticate,
+                onLoadEditor: onLoadEditor,
+                onSaveWithInheritance: onSaveWithInheritance
+            )
         }
         .sheet(isPresented: $showCreateSheet) {
+            NewProfileKindSheet(
+                availableParents: profiles.map(\.name).sorted(),
+                onEmpty: {
+                    // Defer to next runloop so the kind sheet closes cleanly
+                    // before the editor sheet opens.
+                    DispatchQueue.main.async { creatingBase = true }
+                },
+                onDerived: { parent in
+                    DispatchQueue.main.async { creatingDerivedFrom = parent }
+                }
+            )
+        }
+        .sheet(isPresented: $creatingBase) {
             ProfileEditorView(
                 profile: Profile(name: "", repoUrl: ""),
                 isNew: true,
@@ -66,7 +103,25 @@ public struct ProfileListView: View {
                 onSave: onCreate
             )
         }
+        .sheet(item: $creatingDerivedFrom) { parent in
+            ProfileEditorView(
+                profile: Profile(
+                    name: "",
+                    repoUrl: "",
+                    extendsProfile: parent
+                ),
+                isNew: true,
+                actionCatalog: actionCatalog,
+                onSave: onCreate,
+                onLoadEditor: onLoadEditor,
+                onSaveWithInheritance: onSaveWithInheritance
+            )
+        }
     }
+}
+
+extension String: @retroactive Identifiable {
+    public var id: String { self }
 }
 
 // MARK: - Profile card
@@ -106,6 +161,11 @@ struct ProfileCard: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let parent = profile.extendsProfile {
+                    Label("extends \(parent)", systemImage: "arrow.turn.down.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             Spacer()

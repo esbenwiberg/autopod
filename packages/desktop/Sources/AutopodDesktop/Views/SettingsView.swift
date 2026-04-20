@@ -37,16 +37,24 @@ public struct SettingsView: View {
     public let profiles: [Profile]
     public let actionCatalog: [ActionCatalogItem]
     public let profileError: String?
-    public var onSaveProfile: ((Profile) -> Void)?
-    public var onCreateProfile: ((Profile) -> Void)?
+    public var onSaveProfile: ((Profile) async throws -> Void)?
+    public var onCreateProfile: ((Profile) async throws -> Void)?
     public var onAuthenticateProfile: ProfileAuthHandler?
+    public var onLoadProfileEditor: ((String) async throws -> ProfileEditorResponse)?
+    public var onSaveProfileWithInheritance: (
+        (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
+    )?
     @Binding public var isPresented: Bool
 
     public init(connectionManager: ConnectionManager, profiles: [Profile],
                 actionCatalog: [ActionCatalogItem] = [],
                 profileError: String? = nil,
-                onSaveProfile: ((Profile) -> Void)? = nil, onCreateProfile: ((Profile) -> Void)? = nil,
+                onSaveProfile: ((Profile) async throws -> Void)? = nil, onCreateProfile: ((Profile) async throws -> Void)? = nil,
                 onAuthenticateProfile: ProfileAuthHandler? = nil,
+                onLoadProfileEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
+                onSaveProfileWithInheritance: (
+                    (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
+                )? = nil,
                 isPresented: Binding<Bool>) {
         self.connectionManager = connectionManager
         self.profiles = profiles
@@ -55,6 +63,8 @@ public struct SettingsView: View {
         self.onSaveProfile = onSaveProfile
         self.onCreateProfile = onCreateProfile
         self.onAuthenticateProfile = onAuthenticateProfile
+        self.onLoadProfileEditor = onLoadProfileEditor
+        self.onSaveProfileWithInheritance = onSaveProfileWithInheritance
         self._isPresented = isPresented
     }
 
@@ -224,7 +234,9 @@ public struct SettingsView: View {
             }
             ProfileListView(profiles: profiles, actionCatalog: actionCatalog,
                            onSave: onSaveProfile, onCreate: onCreateProfile,
-                           onAuthenticate: onAuthenticateProfile)
+                           onAuthenticate: onAuthenticateProfile,
+                           onLoadEditor: onLoadProfileEditor,
+                           onSaveWithInheritance: onSaveProfileWithInheritance)
         }
     }
 

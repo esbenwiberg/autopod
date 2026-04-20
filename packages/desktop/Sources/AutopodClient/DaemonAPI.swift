@@ -222,6 +222,12 @@ public actor DaemonAPI {
     try await request("GET", "/profiles/\(name)")
   }
 
+  /// Editor-oriented fetch: returns raw + resolved + parent + per-field source map.
+  /// Used by the profile editor to render Inherited/Overridden chips.
+  public func getProfileEditor(_ name: String) async throws -> ProfileEditorResponse {
+    try await request("GET", "/profiles/\(name)/editor")
+  }
+
   public func createProfile(_ body: ProfileResponse) async throws -> ProfileResponse {
     try await request("POST", "/profiles", body: try encode(body))
   }

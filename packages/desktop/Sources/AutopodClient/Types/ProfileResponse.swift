@@ -7,8 +7,10 @@ public struct ProfileResponse: Codable, Sendable {
   public var repoUrl: String
   public var defaultBranch: String
   public var template: String
-  public var buildCommand: String
-  public var startCommand: String
+  /// Null on derived profiles means "inherit from parent".
+  public var buildCommand: String?
+  /// Null on derived profiles means "inherit from parent".
+  public var startCommand: String?
   public var healthPath: String
   public var healthTimeout: Int
   public var smokePages: [SmokePageResponse]
@@ -49,6 +51,10 @@ public struct ProfileResponse: Codable, Sendable {
   public var tokenBudgetWarnAt: Double?
   public var maxBudgetExtensions: Int?
   public var pimActivations: [PimActivationResponse]?
+  /// Per-field override of merge vs replace behavior for inheritance merge-special fields.
+  /// Keys: smokePages, customInstructions, escalation, mcpServers, claudeMdSections,
+  /// skills, privateRegistries. Values: "merge" (default) or "replace".
+  public var mergeStrategy: [String: String]?
   public var version: Int
   public var createdAt: String
   public var updatedAt: String
@@ -56,7 +62,7 @@ public struct ProfileResponse: Codable, Sendable {
   /// Empty init for building responses programmatically (reverse mapping).
   public init() {
     name = ""; repoUrl = ""; defaultBranch = "main"; template = "node22"
-    buildCommand = ""; startCommand = ""; healthPath = "/"; healthTimeout = 120
+    buildCommand = nil; startCommand = nil; healthPath = "/"; healthTimeout = 120
     smokePages = []; maxValidationAttempts = 3; defaultModel = "opus"
     defaultRuntime = "claude"; executionTarget = "local"
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
@@ -64,6 +70,38 @@ public struct ProfileResponse: Codable, Sendable {
     testTimeout = 600; prProvider = "github"; privateRegistries = []
     version = 1; createdAt = ""; updatedAt = ""
   }
+}
+
+// MARK: - Editor payload (GET /profiles/:name/editor)
+
+public enum FieldSource: String, Codable, Sendable {
+  case own
+  case inherited
+  case merged
+}
+
+public enum MergeMode: String, Codable, Sendable {
+  case merge
+  case replace
+}
+
+/// Returned by `GET /profiles/:name/editor`. Gives the desktop everything it
+/// needs to show Inherited / Overridden chips without re-implementing the
+/// inheritance merge on the client.
+public struct ProfileEditorResponse: Codable, Sendable {
+  /// The partial profile as stored — nulls preserved (signals "inherit").
+  public let raw: ProfileResponse
+  /// The fully resolved profile (parent + child merged per mergeStrategy).
+  public let resolved: ProfileResponse
+  /// The fully resolved parent. Null for base profiles.
+  public let parent: ProfileResponse?
+  /// Per-field classification: "own" / "inherited" / "merged".
+  public let sourceMap: [String: FieldSource]
+  /// Name of the profile in the extends chain that actually holds the
+  /// provider credentials. Null when no profile in the chain has auth yet.
+  /// Used to render "Authenticated via <owner>" when the current profile
+  /// inherits its auth from an ancestor.
+  public let credentialOwner: String?
 }
 
 // MARK: - Nested types

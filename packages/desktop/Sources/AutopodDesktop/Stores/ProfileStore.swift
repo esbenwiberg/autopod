@@ -70,6 +70,54 @@ public final class ProfileStore {
     }
   }
 
+  /// Save a profile, honoring inheritance overrides.
+  ///
+  /// - `currentInherited`: fields the UI currently marks as inherited.
+  /// - `initialInherited`: fields that were already inherited on load.
+  ///
+  /// Strategy:
+  ///   - Fields in `currentInherited ∩ initialInherited` were inherited and
+  ///     still are — strip them from the patch entirely. The UI would
+  ///     otherwise echo the parent's value back (via `mapToFields`) which
+  ///     would silently un-inherit them.
+  ///   - Fields in `currentInherited - initialInherited` were overridden
+  ///     and the user just reset them — send explicit `null` to clear the
+  ///     override on the daemon.
+  ///   - Everything else is a normal overridden value.
+  public func saveProfileWithInheritance(
+    _ profile: Profile,
+    currentInherited: Set<String>,
+    initialInherited: Set<String>,
+    mergeStrategy: [String: MergeMode]
+  ) async throws {
+    guard let api else { return }
+    var fields = ProfileMapper.mapToFields(profile)
+
+    let stillInherited = currentInherited.intersection(initialInherited)
+    let resetToInherit = currentInherited.subtracting(initialInherited)
+
+    for field in stillInherited {
+      fields.removeValue(forKey: field)
+    }
+    for field in resetToInherit {
+      fields[field] = NSNull()
+    }
+
+    if !mergeStrategy.isEmpty {
+      var strategyRaw: [String: String] = [:]
+      for (key, mode) in mergeStrategy {
+        strategyRaw[key] = mode.rawValue
+      }
+      fields["mergeStrategy"] = strategyRaw
+    }
+
+    let response = try await api.patchProfile(profile.name, fields: fields)
+    let updated = ProfileMapper.map(response)
+    if let idx = profiles.firstIndex(where: { $0.name == profile.name }) {
+      profiles[idx] = updated
+    }
+  }
+
   public func createProfile(_ profile: Profile) async throws {
     guard let api else { return }
     var fields = ProfileMapper.mapToFields(profile)

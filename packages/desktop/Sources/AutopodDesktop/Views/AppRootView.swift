@@ -161,24 +161,10 @@ public struct AppRootView: View {
         actionCatalog: profileStore.actionCatalog,
         profileError: profileStore.error,
         onSaveProfile: { [profileStore] profile in
-          Task {
-            do {
-              try await profileStore.saveProfile(profile)
-            } catch {
-              print("[AppRootView] Failed to save profile: \(error)")
-              profileStore.error = error.localizedDescription
-            }
-          }
+          try await profileStore.saveProfile(profile)
         },
         onCreateProfile: { [profileStore] profile in
-          Task {
-            do {
-              try await profileStore.createProfile(profile)
-            } catch {
-              print("[AppRootView] Failed to create profile: \(error)")
-              profileStore.error = error.localizedDescription
-            }
-          }
+          try await profileStore.createProfile(profile)
         },
         onAuthenticateProfile: { [connectionManager, profileStore] (name: String, provider: String, completion: @escaping (String?) -> Void) in
           guard let api = connectionManager.api else {
@@ -206,6 +192,20 @@ public struct AppRootView: View {
               await MainActor.run { completion(error.localizedDescription) }
             }
           }
+        },
+        onLoadProfileEditor: { [connectionManager] name in
+          guard let api = connectionManager.api else {
+            throw DaemonError.networkError("Not connected to daemon")
+          }
+          return try await api.getProfileEditor(name)
+        },
+        onSaveProfileWithInheritance: { [profileStore] profile, current, initial, mergeStrategy in
+          try await profileStore.saveProfileWithInheritance(
+            profile,
+            currentInherited: current,
+            initialInherited: initial,
+            mergeStrategy: mergeStrategy
+          )
         },
         isPresented: $showSettings
       )

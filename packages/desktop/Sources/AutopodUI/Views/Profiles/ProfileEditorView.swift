@@ -156,23 +156,49 @@ public struct ProfileEditorView: View {
     @State public var profile: Profile
     public let isNew: Bool
     public let actionCatalog: [ActionCatalogItem]
-    public var onSave: ((Profile) -> Void)?
+    public var onSave: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
     public var memoryEntries: [MemoryEntry] = []
     public var onApproveMemory: (String) -> Void = { _ in }
     public var onRejectMemory: (String) -> Void = { _ in }
     public var onDeleteMemory: (String) -> Void = { _ in }
     public var onEditMemory: ((String, String) -> Void)?
+    /// When editing an existing derived profile, this loads the raw + parent
+    /// + sourceMap so we can render Inherited/Overridden chips. Optional —
+    /// when nil, the editor renders without chips (legacy behavior).
+    public var onLoadEditor: ((String) async throws -> ProfileEditorResponse)?
+    /// Inheritance-aware save. Called with:
+    ///  - `currentInherited`: fields the UI currently marks as inherited.
+    ///    The store should strip these from the patch entirely unless they
+    ///    are in `initialInherited` — see note below.
+    ///  - `initialInherited`: fields that were inherited when the editor
+    ///    first loaded. The diff `currentInherited - initialInherited` is
+    ///    the set of fields the user toggled this session and which must
+    ///    be sent as `null` on the wire to reset the override.
+    ///  - `mergeStrategy`: merge-vs-replace per merge-special field.
+    /// When nil, the editor falls back to `onSave(profile)`.
+    public var onSaveWithInheritance: (
+        (
+            Profile,
+            _ currentInherited: Set<String>,
+            _ initialInherited: Set<String>,
+            _ mergeStrategy: [String: MergeMode]
+        ) async throws -> Void
+    )?
 
     public init(profile: Profile, isNew: Bool,
                 actionCatalog: [ActionCatalogItem] = [],
-                onSave: ((Profile) -> Void)? = nil,
+                onSave: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 memoryEntries: [MemoryEntry] = [],
                 onApproveMemory: @escaping (String) -> Void = { _ in },
                 onRejectMemory: @escaping (String) -> Void = { _ in },
                 onDeleteMemory: @escaping (String) -> Void = { _ in },
-                onEditMemory: ((String, String) -> Void)? = nil) {
+                onEditMemory: ((String, String) -> Void)? = nil,
+                onLoadEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
+                onSaveWithInheritance: (
+                    (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
+                )? = nil) {
         self._profile = State(initialValue: profile)
         self.isNew = isNew
         self.actionCatalog = actionCatalog
@@ -183,6 +209,8 @@ public struct ProfileEditorView: View {
         self.onRejectMemory = onRejectMemory
         self.onDeleteMemory = onDeleteMemory
         self.onEditMemory = onEditMemory
+        self.onLoadEditor = onLoadEditor
+        self.onSaveWithInheritance = onSaveWithInheritance
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -190,6 +218,21 @@ public struct ProfileEditorView: View {
     @State private var authStatus: AuthStatus?
     @State private var searchText: String = ""
     @State private var searchLastSection: ProfileSection = .general
+    @State private var isSaving: Bool = false
+    @State private var saveError: String?
+    @State private var editorPayload: ProfileEditorResponse?
+    /// Current "is this field inherited?" state as shown in the UI.
+    /// Seeded from the server's sourceMap on load; flipped when the user
+    /// taps a chip. Used to drive the disabled/enabled input state.
+    @State private var inheritedFields: Set<String> = []
+    /// The set as it was when the editor first loaded. Used at save time
+    /// to compute only the user's actual changes — we don't want to re-send
+    /// `null` for fields that were *already* inherited on the server.
+    @State private var initialInheritedFields: Set<String> = []
+    /// Working copy of profile.mergeStrategy.
+    @State private var mergeStrategyDraft: [String: MergeMode] = [:]
+    /// The merge-strategy state as loaded, for the same delta reason.
+    @State private var initialMergeStrategy: [String: MergeMode] = [:]
 
     private var filteredSections: [ProfileSection] {
         guard !searchText.isEmpty else { return ProfileSection.allCases }
@@ -211,16 +254,92 @@ public struct ProfileEditorView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            HStack(spacing: 0) {
-                sectionSidebar
-                Divider()
-                sectionContent
+            if showOverridesView {
+                overridesView
+            } else {
+                HStack(spacing: 0) {
+                    sectionSidebar
+                    Divider()
+                    sectionContent
+                }
             }
             Divider()
             actionBar
         }
         .frame(width: 880, height: 720)
         .background(Color(nsColor: .windowBackgroundColor))
+        .task { await loadEditorPayloadIfNeeded() }
+    }
+
+    /// Show the mockup overrides editor when this is an existing derived
+    /// profile and the editor payload successfully loaded. Falls back to the
+    /// classic section-based editor on base profiles or when the daemon
+    /// doesn't serve `/editor`.
+    private var showOverridesView: Bool {
+        !isNew && profile.extendsProfile != nil && editorPayload != nil
+    }
+
+    // MARK: - Inheritance support
+
+    /// Fetch the editor payload (raw + resolved + parent + sourceMap) so the
+    /// editor can render Inherited/Overridden chips. Only fires for existing
+    /// derived profiles; base profiles and new-profile flows skip this.
+    private func loadEditorPayloadIfNeeded() async {
+        guard !isNew, profile.extendsProfile != nil, let onLoadEditor else { return }
+        do {
+            let payload = try await onLoadEditor(profile.name)
+            await MainActor.run {
+                self.editorPayload = payload
+                var draft: [String: MergeMode] = [:]
+                for (key, raw) in (payload.raw.mergeStrategy ?? [:]) {
+                    if let mode = MergeMode(rawValue: raw) { draft[key] = mode }
+                }
+                self.mergeStrategyDraft = draft
+                self.initialMergeStrategy = draft
+                let inherited = Set(
+                    payload.sourceMap.filter { $0.value == .inherited }.map { $0.key }
+                )
+                self.inheritedFields = inherited
+                self.initialInheritedFields = inherited
+            }
+        } catch {
+            // Soft-fail: without the payload we render the legacy editor.
+            // Real failures (e.g. daemon doesn't support the endpoint yet)
+            // shouldn't prevent the user from editing the profile.
+        }
+    }
+
+    /// Returns the per-field source classification, taking into account
+    /// any user toggles made in this session.
+    private func fieldSource(_ fieldName: String) -> FieldSource? {
+        guard editorPayload != nil, profile.extendsProfile != nil else { return nil }
+        if inheritedFields.contains(fieldName) { return .inherited }
+        // Anything the user hasn't explicitly marked inherited that has a
+        // local value is considered 'own'. Merge-special fields may want
+        // .merged when mode == .merge; handled by fieldSourceForMergeable.
+        return .own
+    }
+
+    /// Source classification for one of the six merge-special fields.
+    /// Returns `.merged` when the user hasn't chosen `replace` and both
+    /// sides contribute values; otherwise delegates to `fieldSource`.
+    private func mergeableFieldSource(_ fieldName: String) -> FieldSource? {
+        guard let payload = editorPayload, profile.extendsProfile != nil else { return nil }
+        if inheritedFields.contains(fieldName) { return .inherited }
+        let mode = mergeStrategyDraft[fieldName] ?? .merge
+        if mode == .replace { return .own }
+        return payload.sourceMap[fieldName] == .inherited ? .inherited : .merged
+    }
+
+    private var parentDisplayName: String? {
+        editorPayload?.parent?.name
+    }
+
+    private func bindingForMergeMode(_ field: String) -> Binding<MergeMode> {
+        Binding(
+            get: { mergeStrategyDraft[field] ?? .merge },
+            set: { mergeStrategyDraft[field] = $0 }
+        )
     }
 
     // MARK: - Header
@@ -393,23 +512,76 @@ public struct ProfileEditorView: View {
     // MARK: - Action bar
 
     private var actionBar: some View {
-        HStack {
-            if !isNew {
-                Button("Delete", role: .destructive) {}
-                    .foregroundStyle(.red)
+        VStack(spacing: 8) {
+            if let saveError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text(saveError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            Spacer()
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button(isNew ? "Create" : "Save") {
-                onSave?(profile)
-                dismiss()
+            HStack {
+                if !isNew {
+                    Button("Delete", role: .destructive) {}
+                        .foregroundStyle(.red)
+                        .disabled(isSaving)
+                }
+                Spacer()
+                if isSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isSaving)
+                Button(isNew ? "Create" : "Save") {
+                    submit()
+                }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(isSaving || (isNew && profile.name.isEmpty))
             }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(isNew && profile.name.isEmpty)
         }
         .padding(16)
+    }
+
+    private func submit() {
+        isSaving = true
+        saveError = nil
+        Task {
+            do {
+                // Prefer the inheritance-aware save path when the editor
+                // payload was loaded and the user may have toggled chips
+                // or chosen a merge-strategy mode.
+                if editorPayload != nil, let handler = onSaveWithInheritance {
+                    let strategy: [String: MergeMode] =
+                        mergeStrategyDraft == initialMergeStrategy ? [:] : mergeStrategyDraft
+                    try await handler(profile, inheritedFields, initialInheritedFields, strategy)
+                } else if let onSave {
+                    try await onSave(profile)
+                } else {
+                    await MainActor.run { dismiss() }
+                    return
+                }
+                await MainActor.run {
+                    isSaving = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    saveError = error.localizedDescription
+                }
+            }
+        }
     }
 
     // MARK: - General
@@ -519,15 +691,25 @@ public struct ProfileEditorView: View {
 
     @ViewBuilder
     private var buildRunFields: some View {
-        fieldRow("Build Command", help: "Compiles the project. Runs after repo clone inside the container.") {
+        inheritableFieldRow(
+            "Build Command",
+            fieldName: "buildCommand",
+            help: "Compiles the project. Runs after repo clone inside the container."
+        ) {
             TextField("npm run build", text: $profile.buildCommand)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.callout, design: .monospaced))
+                .disabled(inheritedFields.contains("buildCommand"))
         }
-        fieldRow("Start Command", help: "Starts the app server for health checks and smoke testing.") {
+        inheritableFieldRow(
+            "Start Command",
+            fieldName: "startCommand",
+            help: "Starts the app server for health checks and smoke testing."
+        ) {
             TextField("npm start", text: $profile.startCommand)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.callout, design: .monospaced))
+                .disabled(inheritedFields.contains("startCommand"))
         }
         fieldRow("Test Command", help: "Runs after build to verify tests pass. Leave empty to skip.") {
             TextField("Optional", text: Binding(
@@ -1128,8 +1310,41 @@ public struct ProfileEditorView: View {
         if profile.hasWebUi {
             Divider().padding(.vertical, 4)
 
+            // On derived profiles, let the user choose whether their smoke
+            // pages append to the parent's or replace them entirely.
+            if editorPayload != nil, profile.extendsProfile != nil {
+                HStack(spacing: 6) {
+                    Text("Smoke Pages — Merge Mode")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                MergeModePicker(
+                    mode: bindingForMergeMode("smokePages"),
+                    fieldLabel: "Smoke pages",
+                    parentName: parentDisplayName
+                )
+                .padding(.bottom, 4)
+            }
+
             fieldRow("Smoke Pages", help: "Each page is loaded in a headless browser after the app starts. Verifies the app renders correctly.") {
             VStack(alignment: .leading, spacing: 6) {
+                // Show parent's entries read-only when we're in merge mode.
+                if let parent = editorPayload?.parent,
+                   !parent.smokePages.isEmpty,
+                   (mergeStrategyDraft["smokePages"] ?? .merge) == .merge {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("From \(parent.name)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        ForEach(parent.smokePages.indices, id: \.self) { i in
+                            Text(parent.smokePages[i].path)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 1)
+                        }
+                        Divider().padding(.vertical, 2)
+                    }
+                }
                 ForEach(profile.smokePages.indices, id: \.self) { i in
                     HStack(spacing: 6) {
                         TextField("/path", text: $profile.smokePages[i].path)
@@ -1395,6 +1610,1207 @@ public struct ProfileEditorView: View {
         }
     }
 
+    /// `fieldRow` variant that renders an Inheritance chip when the profile
+    /// is derived and a source map has loaded. Wraps the passed content in
+    /// an override-aware container: the caller supplies the normal input
+    /// (e.g. a TextField) and is responsible for disabling it when the
+    /// field is inherited.
+    @ViewBuilder
+    private func inheritableFieldRow<Content: View>(
+        _ label: String,
+        fieldName: String,
+        help: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let help {
+                    HelpBadge(text: help)
+                }
+                if let source = fieldSource(fieldName) {
+                    InheritanceChip(
+                        source: source,
+                        parentName: parentDisplayName,
+                        onOverride: { inheritedFields.remove(fieldName) },
+                        onReset: { inheritedFields.insert(fieldName) }
+                    )
+                }
+            }
+            content()
+        }
+    }
+
+    // MARK: - Overrides view (derived profiles)
+
+    /// Full list of fields the overrides editor knows how to render. Driven
+    /// by `ProfileOverrideCatalog.all` — add new fields to the catalog and
+    /// a case to `overrideCard(for:)`.
+    private var overridableFields: [ProfileOverrideField] {
+        ProfileOverrideCatalog.all
+    }
+
+    private var currentOverrides: [ProfileOverrideField] {
+        overridableFields.filter { !inheritedFields.contains($0.key) }
+    }
+
+    private var availableToOverride: [ProfileOverrideField] {
+        overridableFields.filter { inheritedFields.contains($0.key) }
+    }
+
+    @ViewBuilder
+    private var overridesView: some View {
+        VStack(spacing: 0) {
+            overridesTopBar
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    // Providers card is always visible on derived profiles —
+                    // auth is high-touch and needs to be discoverable even
+                    // when it's currently inherited from the parent.
+                    providersCard
+
+                    if currentOverrides.isEmpty {
+                        overridesEmptyState
+                    } else {
+                        HStack(spacing: 6) {
+                            Text("Your overrides")
+                                .font(.system(.callout).weight(.semibold))
+                            Text("(\(currentOverrides.count))")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.bottom, 2)
+                        ForEach(currentOverrides) { field in
+                            overrideCard(for: field)
+                        }
+                    }
+                    addOverrideRow
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    // MARK: - Providers (always-visible auth card)
+
+    /// Special-case card: shows who owns the credentials and gives a way to
+    /// authenticate — either re-auth the owner (from this view) or break
+    /// inheritance and auth on this profile directly. Always visible so
+    /// users don't have to fish for it in the Add menu.
+    @ViewBuilder
+    private var providersCard: some View {
+        let ownerName = editorPayload?.credentialOwner
+        let isOwnerSelf = ownerName == profile.name
+        let resolvedProvider = editorPayload?.resolved.modelProvider ?? profile.modelProvider.rawValue
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.badge.key")
+                    .foregroundStyle(.secondary)
+                Text("Authentication")
+                    .font(.callout.weight(.semibold))
+                Text("Providers")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.quaternary.opacity(0.5), in: Capsule())
+                Spacer()
+                Text("Provider: \(resolvedProvider)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let ownerName, !isOwnerSelf {
+                // Inherited auth — read-only state + explicit break-inheritance.
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .foregroundStyle(.green)
+                    Text("Authenticated via")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(ownerName)
+                        .font(.system(.caption, design: .monospaced).weight(.medium))
+                    Spacer()
+                }
+                Text("This profile inherits its \(resolvedProvider.uppercased()) credentials from **\(ownerName)**. Token rotations during pod runs are saved on the owner — one login covers the whole family.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button {
+                        startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
+                    } label: {
+                        Label("Authenticate here (break inheritance)", systemImage: "person.crop.circle.badge.plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    Spacer()
+                }
+                authStatusView
+            } else if ownerName == nil {
+                // No auth anywhere in the chain.
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("No authentication set for this profile family")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                if providerNeedsAuth(resolvedProvider) {
+                    Button {
+                        startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
+                    } label: {
+                        Label("Authenticate with \(providerAuthLabel(resolvedProvider))", systemImage: "person.crop.circle.badge.plus")
+                            .font(.callout)
+                    }
+                    .buttonStyle(.bordered)
+                    authStatusView
+                }
+            } else {
+                // Owned by self.
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    Text("This profile owns its authentication")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                if providerNeedsAuth(resolvedProvider) {
+                    Button {
+                        startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
+                    } label: {
+                        Label("Re-authenticate with \(providerAuthLabel(resolvedProvider))", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    authStatusView
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.blue.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.blue.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    private func providerNeedsAuth(_ provider: String) -> Bool {
+        provider == "max" || provider == "copilot"
+    }
+
+    private func providerAuthLabel(_ provider: String) -> String {
+        switch provider {
+        case "max":     return "Claude MAX"
+        case "copilot": return "GitHub Copilot"
+        default:        return provider
+        }
+    }
+
+    @ViewBuilder
+    private var authStatusView: some View {
+        if let status = authStatus {
+            switch status {
+            case .inProgress(let label):
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Authenticating with \(label)…")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            case .success(let msg):
+                Label(msg, systemImage: "checkmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+            case .failure(let msg):
+                Label(msg, systemImage: "xmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private var overridesTopBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.turn.down.right")
+                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+            Text("Extends")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(editorPayload?.parent?.name ?? profile.extendsProfile ?? "—")
+                .font(.system(.callout, design: .monospaced).weight(.medium))
+            Spacer()
+            Button {
+                // placeholder for the parent-browser drawer
+            } label: {
+                Label("View parent values", systemImage: "sidebar.right")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Coming soon — read-only browser of the resolved parent profile")
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.4))
+    }
+
+    private var overridesEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+            Text("Inheriting everything from \(editorPayload?.parent?.name ?? "parent")")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("This profile currently behaves identically to its parent. Add an override to deviate.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 400)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    @ViewBuilder
+    private var addOverrideRow: some View {
+        if !availableToOverride.isEmpty {
+            Menu {
+                ForEach(ProfileOverrideFieldSection.allCases, id: \.self) { section in
+                    let items = availableToOverride.filter { $0.section == section }
+                    if !items.isEmpty {
+                        Section(section.rawValue) {
+                            ForEach(items) { field in
+                                Button(field.label) {
+                                    inheritedFields.remove(field.key)
+                                }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label("Add override…", systemImage: "plus.circle")
+                    .font(.callout)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(.quaternary, style: StrokeStyle(lineWidth: 1, dash: [4]))
+                    )
+            }
+            .menuStyle(.borderlessButton)
+            .padding(.top, 4)
+        }
+    }
+
+    // MARK: - Override cards — dispatch
+
+    @ViewBuilder
+    private func overrideCard(for field: ProfileOverrideField) -> some View {
+        switch field.key {
+        // MARK: General
+        case "repoUrl":
+            stringCard(field, value: $profile.repoUrl,
+                       parent: editorPayload?.parent?.repoUrl ?? "",
+                       placeholder: "https://github.com/org/repo.git")
+        case "defaultBranch":
+            stringCard(field, value: $profile.defaultBranch,
+                       parent: editorPayload?.parent?.defaultBranch ?? "",
+                       placeholder: "main")
+        case "branchPrefix":
+            stringCard(field, value: $profile.branchPrefix,
+                       parent: editorPayload?.parent?.branchPrefix ?? "autopod/",
+                       placeholder: "autopod/")
+        case "template":
+            enumCard(field, selection: $profile.template,
+                     options: StackTemplate.allCases.map { ($0, $0.label) },
+                     parent: editorPayload?.parent?.template ?? "")
+        case "pod":
+            podCard(field)
+        case "workerProfile":
+            nullableStringCard(field,
+                value: Binding(
+                    get: { profile.workerProfile ?? "" },
+                    set: { profile.workerProfile = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.workerProfile ?? "",
+                placeholder: "Worker profile name")
+
+        // MARK: Build & Run
+        case "buildCommand":
+            stringCard(field, value: $profile.buildCommand,
+                       parent: editorPayload?.parent?.buildCommand ?? "",
+                       placeholder: "npm run build")
+        case "startCommand":
+            stringCard(field, value: $profile.startCommand,
+                       parent: editorPayload?.parent?.startCommand ?? "",
+                       placeholder: "npm start")
+        case "testCommand":
+            nullableStringCard(field,
+                value: Binding(
+                    get: { profile.testCommand ?? "" },
+                    set: { profile.testCommand = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.testCommand ?? "",
+                placeholder: "pnpm test")
+        case "healthPath":
+            stringCard(field, value: $profile.healthPath,
+                       parent: editorPayload?.parent?.healthPath ?? "/",
+                       placeholder: "/")
+        case "healthTimeout":
+            intCard(field, value: $profile.healthTimeout,
+                    parent: editorPayload?.parent?.healthTimeout, range: 10...600, unit: "s")
+        case "buildTimeout":
+            intCard(field, value: $profile.buildTimeout,
+                    parent: editorPayload?.parent?.buildTimeout, range: 30...1800, unit: "s")
+        case "testTimeout":
+            intCard(field, value: $profile.testTimeout,
+                    parent: editorPayload?.parent?.testTimeout, range: 30...3600, unit: "s")
+
+        // MARK: Agent
+        case "defaultModel":
+            stringCard(field, value: $profile.defaultModel,
+                       parent: editorPayload?.parent?.defaultModel ?? "",
+                       placeholder: "opus")
+        case "defaultRuntime":
+            enumCard(field, selection: $profile.defaultRuntime,
+                     options: RuntimeType.allCases.map { ($0, $0.rawValue.capitalized) },
+                     parent: editorPayload?.parent?.defaultRuntime ?? "")
+        case "customInstructions":
+            nullableTextOverrideCard(field: field,
+                value: Binding(
+                    get: { profile.customInstructions ?? "" },
+                    set: { profile.customInstructions = $0.isEmpty ? nil : $0 }
+                ),
+                parentValue: editorPayload?.parent?.customInstructions ?? "")
+
+        // MARK: Providers
+        case "modelProvider":
+            enumCard(field, selection: $profile.modelProvider,
+                     options: ModelProvider.allCases.map { ($0, $0.rawValue.capitalized) },
+                     parent: editorPayload?.parent?.modelProvider ?? "")
+        case "prProvider":
+            enumCard(field, selection: $profile.prProvider,
+                     options: PRProvider.allCases.map { ($0, $0.label) },
+                     parent: editorPayload?.parent?.prProvider ?? "")
+
+        // MARK: Escalation
+        case "escalation":
+            escalationCard(field)
+        case "tokenBudget":
+            nullableIntCard(field,
+                value: Binding(
+                    get: { profile.tokenBudget },
+                    set: { profile.tokenBudget = $0 }
+                ),
+                parent: editorPayload?.parent?.tokenBudget,
+                placeholder: "Unlimited")
+        case "tokenBudgetPolicy":
+            enumCard(field, selection: $profile.tokenBudgetPolicy,
+                     options: TokenBudgetPolicy.allCases.map { ($0, $0.label) },
+                     parent: editorPayload?.parent?.tokenBudgetPolicy ?? "")
+        case "tokenBudgetWarnAt":
+            doubleCard(field, value: $profile.tokenBudgetWarnAt,
+                       parent: editorPayload?.parent?.tokenBudgetWarnAt,
+                       range: 0.1...0.99, format: "%.2f")
+        case "maxBudgetExtensions":
+            nullableIntCard(field,
+                value: Binding(
+                    get: { profile.maxBudgetExtensions },
+                    set: { profile.maxBudgetExtensions = $0 }
+                ),
+                parent: editorPayload?.parent?.maxBudgetExtensions,
+                placeholder: "Unlimited")
+
+        // MARK: Container
+        case "executionTarget":
+            enumCard(field, selection: $profile.executionTarget,
+                     options: ExecutionTarget.allCases.map { ($0, $0.label) },
+                     parent: editorPayload?.parent?.executionTarget ?? "")
+        case "containerMemoryGb":
+            nullableDoubleCard(field,
+                value: Binding(
+                    get: { profile.containerMemoryGb },
+                    set: { profile.containerMemoryGb = $0 }
+                ),
+                parent: editorPayload?.parent?.containerMemoryGb,
+                placeholder: "Docker default")
+
+        // MARK: Network & Security / Actions (composite — full editors)
+        case "networkPolicy":
+            networkPolicyOverrideCard(field: field)
+        case "actionPolicy":
+            actionPolicyOverrideCard(field: field)
+        case "pimActivations":
+            pimActivationsOverrideCard(field: field)
+
+        // MARK: Issue Watcher
+        case "issueWatcherEnabled":
+            boolCard(field, value: $profile.issueWatcherEnabled,
+                     parent: editorPayload?.parent?.issueWatcherEnabled)
+        case "issueWatcherLabelPrefix":
+            stringCard(field, value: $profile.issueWatcherLabelPrefix,
+                       parent: editorPayload?.parent?.issueWatcherLabelPrefix ?? "autopod",
+                       placeholder: "autopod")
+
+        // MARK: Validation
+        case "hasWebUi":
+            boolCard(field, value: $profile.hasWebUi,
+                     parent: editorPayload?.parent?.hasWebUi)
+        case "maxValidationAttempts":
+            intCard(field, value: $profile.maxValidationAttempts,
+                    parent: editorPayload?.parent?.maxValidationAttempts,
+                    range: 1...10, unit: "attempts")
+        case "smokePages":
+            smokePagesOverrideCard(field: field)
+
+        // MARK: Credentials
+        case "githubPat":
+            patCard(field,
+                value: Binding(
+                    get: { profile.githubPat ?? "" },
+                    set: { profile.githubPat = $0.isEmpty ? nil : $0 }
+                ),
+                isSet: profile.hasGithubPat)
+        case "adoPat":
+            patCard(field,
+                value: Binding(
+                    get: { profile.adoPat ?? "" },
+                    set: { profile.adoPat = $0.isEmpty ? nil : $0 }
+                ),
+                isSet: profile.hasAdoPat)
+        case "registryPat":
+            patCard(field,
+                value: Binding(
+                    get: { profile.registryPat ?? "" },
+                    set: { profile.registryPat = $0.isEmpty ? nil : $0 }
+                ),
+                isSet: profile.hasRegistryPat)
+
+        // MARK: Injections (merge-special)
+        case "mcpServers":
+            mcpServersOverrideCard(field: field)
+        case "claudeMdSections":
+            claudeMdSectionsOverrideCard(field: field)
+        case "skills":
+            skillsOverrideCard(field: field)
+        case "privateRegistries":
+            privateRegistriesOverrideCard(field: field)
+
+        default:
+            // Placeholder for unmapped keys — shouldn't fire with a full catalog.
+            overrideCardShell(field: field) {
+                Text("No editor available for `\(field.key)` yet.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    // MARK: - Override card renderers — primitives
+
+    private func stringCard(
+        _ field: ProfileOverrideField,
+        value: Binding<String>,
+        parent: String,
+        placeholder: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            TextField(placeholder, text: value)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.callout, design: .monospaced))
+            parentLine(parent)
+        }
+    }
+
+    private func nullableStringCard(
+        _ field: ProfileOverrideField,
+        value: Binding<String>,
+        parent: String,
+        placeholder: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            TextField(placeholder, text: value)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.callout, design: .monospaced))
+            parentLine(parent.isEmpty ? "(none)" : parent)
+        }
+    }
+
+    private func intCard(
+        _ field: ProfileOverrideField,
+        value: Binding<Int>,
+        parent: Int?,
+        range: ClosedRange<Int>,
+        unit: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            HStack(spacing: 8) {
+                Stepper(value: value, in: range) {
+                    Text("\(value.wrappedValue) \(unit)")
+                        .font(.system(.callout, design: .monospaced))
+                }
+                .frame(maxWidth: 240)
+                Spacer()
+            }
+            parentLine(parent.map { "\($0) \(unit)" } ?? "(inherited)")
+        }
+    }
+
+    private func nullableIntCard(
+        _ field: ProfileOverrideField,
+        value: Binding<Int?>,
+        parent: Int?,
+        placeholder: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            HStack(spacing: 8) {
+                TextField(placeholder, value: value, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+                Button("Clear") { value.wrappedValue = nil }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            parentLine(parent.map { "\($0)" } ?? "Unlimited")
+        }
+    }
+
+    private func doubleCard(
+        _ field: ProfileOverrideField,
+        value: Binding<Double>,
+        parent: Double?,
+        range: ClosedRange<Double>,
+        format: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            HStack(spacing: 8) {
+                Slider(value: value, in: range)
+                    .frame(maxWidth: 260)
+                Text(String(format: format, value.wrappedValue))
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(width: 50, alignment: .leading)
+                Spacer()
+            }
+            parentLine(parent.map { String(format: format, $0) } ?? "(inherited)")
+        }
+    }
+
+    private func nullableDoubleCard(
+        _ field: ProfileOverrideField,
+        value: Binding<Double?>,
+        parent: Double?,
+        placeholder: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            HStack(spacing: 8) {
+                TextField(placeholder, value: value, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+                Button("Clear") { value.wrappedValue = nil }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            parentLine(parent.map { String(format: "%.2f", $0) } ?? placeholder)
+        }
+    }
+
+    private func boolCard(
+        _ field: ProfileOverrideField,
+        value: Binding<Bool>,
+        parent: Bool?
+    ) -> some View {
+        overrideCardShell(field: field) {
+            HStack(spacing: 10) {
+                Toggle("", isOn: value)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                Text(value.wrappedValue ? "On" : "Off")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            parentLine(parent.map { $0 ? "On" : "Off" } ?? "(inherited)")
+        }
+    }
+
+    private func enumCard<T: Hashable>(
+        _ field: ProfileOverrideField,
+        selection: Binding<T>,
+        options: [(T, String)],
+        parent: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            Picker("", selection: selection) {
+                ForEach(options, id: \.0) { opt in
+                    Text(opt.1).tag(opt.0)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 240, alignment: .leading)
+            parentLine(parent.isEmpty ? "(inherited)" : parent)
+        }
+    }
+
+    /// Card for secret-backed fields (PATs). Echoes dot-masked when present;
+    /// clearing the field on save sends null.
+    private func patCard(
+        _ field: ProfileOverrideField,
+        value: Binding<String>,
+        isSet: Bool
+    ) -> some View {
+        overrideCardShell(field: field) {
+            HStack(spacing: 8) {
+                SecureField(isSet ? "(stored — leave blank to keep)" : "Paste token", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.callout, design: .monospaced))
+                if isSet {
+                    Label("Stored", systemImage: "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text("Values are encrypted at rest. Leave blank to keep the current value.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// Network Policy card — summary line + collapsed details. Uses the
+    /// same `networkFields` editor as the classic view.
+    private func networkPolicyOverrideCard(field: ProfileOverrideField) -> some View {
+        overrideCardShell(field: field) {
+            Text(networkPolicySummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    networkFields
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Edit details")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Action Policy card — collapsed details with the full action policy
+    /// editor (enabled groups, overrides, sanitization, quarantine). PIM
+    /// is its own top-level card, so we pass `includePim: false` to avoid
+    /// rendering it twice.
+    private func actionPolicyOverrideCard(field: ProfileOverrideField) -> some View {
+        overrideCardShell(field: field) {
+            Text(actionPolicySummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    ActionsSection(
+                        profile: $profile,
+                        actionCatalog: actionCatalog,
+                        includePim: false
+                    )
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Edit details")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// PIM Activations card — summary + inline list editor. The editor is
+    /// the same component the classic view uses inside ActionsSection.
+    private func pimActivationsOverrideCard(field: ProfileOverrideField) -> some View {
+        overrideCardShell(field: field) {
+            Text("\(profile.pimActivations.count) activation(s)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    PimActivationsEditor(profile: $profile)
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Edit details")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var networkPolicySummary: String {
+        if !profile.networkEnabled { return "Disabled (inherits Docker default)" }
+        let hosts = profile.allowedHosts.isEmpty ? "no custom hosts"
+            : "\(profile.allowedHosts.count) custom host(s)"
+        return "\(profile.networkMode.label) · \(hosts)"
+    }
+
+    private var actionPolicySummary: String {
+        if !profile.actionPolicyEnabled { return "Disabled" }
+        return "\(profile.actionEnabledGroups.count) group(s), \(profile.actionOverrides.count) override(s)"
+    }
+
+    /// Composite card for the `pod` object — four related sub-fields.
+    private func podCard(_ field: ProfileOverrideField) -> some View {
+        overrideCardShell(field: field) {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                GridRow {
+                    Text("Agent Mode").font(.caption2).foregroundStyle(.tertiary)
+                    Picker("", selection: $profile.pod.agentMode) {
+                        ForEach(AgentMode.allCases, id: \.self) { m in
+                            Text(m.label).tag(m)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 160)
+                }
+                GridRow {
+                    Text("Output").font(.caption2).foregroundStyle(.tertiary)
+                    Picker("", selection: $profile.pod.output) {
+                        ForEach(OutputTarget.allCases, id: \.self) { o in
+                            Text(o.label).tag(o)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 160)
+                }
+                GridRow {
+                    Text("Validate").font(.caption2).foregroundStyle(.tertiary)
+                    Toggle("", isOn: $profile.pod.validate)
+                        .toggleStyle(.switch).labelsHidden()
+                }
+                GridRow {
+                    Text("Promotable").font(.caption2).foregroundStyle(.tertiary)
+                    Toggle("", isOn: $profile.pod.promotable)
+                        .toggleStyle(.switch).labelsHidden()
+                }
+            }
+        }
+    }
+
+    /// Composite card for escalation — deep-merged merge-special field.
+    private func escalationCard(_ field: ProfileOverrideField) -> some View {
+        let mode = mergeStrategyDraft["escalation"] ?? .merge
+        return overrideCardShell(
+            field: field,
+            headerTrailing: AnyView(
+                Text(mode == .replace ? "replace parent" : "merge with parent")
+                    .font(.caption2)
+                    .foregroundStyle(mode == .replace ? .orange : .secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        (mode == .replace ? Color.orange : Color.secondary).opacity(0.1),
+                        in: Capsule()
+                    )
+            )
+        ) {
+            MergeModePicker(
+                mode: bindingForMergeMode("escalation"),
+                fieldLabel: "Escalation",
+                parentName: parentDisplayName
+            )
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                GridRow {
+                    Text("Ask human").font(.caption2).foregroundStyle(.tertiary)
+                    Toggle("", isOn: $profile.escalationAskHuman).toggleStyle(.switch).labelsHidden()
+                }
+                GridRow {
+                    Text("Ask AI").font(.caption2).foregroundStyle(.tertiary)
+                    Toggle("", isOn: $profile.escalationAskAiEnabled).toggleStyle(.switch).labelsHidden()
+                }
+                GridRow {
+                    Text("Ask AI model").font(.caption2).foregroundStyle(.tertiary)
+                    TextField("sonnet", text: $profile.escalationAskAiModel)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
+                GridRow {
+                    Text("Ask AI max calls").font(.caption2).foregroundStyle(.tertiary)
+                    Stepper("\(profile.escalationAskAiMaxCalls)", value: $profile.escalationAskAiMaxCalls, in: 0...50)
+                        .frame(maxWidth: 160)
+                }
+                GridRow {
+                    Text("Advisor").font(.caption2).foregroundStyle(.tertiary)
+                    Toggle("", isOn: $profile.escalationAdvisorEnabled).toggleStyle(.switch).labelsHidden()
+                }
+                GridRow {
+                    Text("Auto pause after").font(.caption2).foregroundStyle(.tertiary)
+                    Stepper("\(profile.escalationAutoPauseAfter) escalations", value: $profile.escalationAutoPauseAfter, in: 1...20)
+                }
+                GridRow {
+                    Text("Human resp timeout").font(.caption2).foregroundStyle(.tertiary)
+                    Stepper("\(profile.escalationHumanResponseTimeout)s", value: $profile.escalationHumanResponseTimeout, in: 60...86400, step: 60)
+                }
+            }
+        }
+    }
+
+    /// Compact helper: the "Parent: <value>" subtitle line under most cards.
+    @ViewBuilder
+    private func parentLine(_ value: String) -> some View {
+        if !value.isEmpty {
+            HStack(spacing: 4) {
+                Text("Parent:")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(value)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Override cards — merge-special arrays
+
+    private func mcpServersOverrideCard(field: ProfileOverrideField) -> some View {
+        mergeSpecialArrayCard(
+            field: field,
+            parentItems: (editorPayload?.parent?.mcpServers ?? []).map { $0.name },
+            itemsBinding: $profile.mcpServers,
+            itemLabel: { $0.name.isEmpty ? "(unnamed)" : $0.name },
+            emptyItem: { InjectedMcpServer() },
+            itemEditor: { $item in
+                HStack(spacing: 6) {
+                    TextField("name", text: $item.name)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 140)
+                    TextField("url", text: $item.url)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                }
+            }
+        )
+    }
+
+    private func claudeMdSectionsOverrideCard(field: ProfileOverrideField) -> some View {
+        mergeSpecialArrayCard(
+            field: field,
+            parentItems: (editorPayload?.parent?.claudeMdSections ?? []).map { $0.heading ?? "(untitled)" },
+            itemsBinding: $profile.claudeMdSections,
+            itemLabel: { $0.heading.isEmpty ? "(untitled)" : $0.heading },
+            emptyItem: { InjectedClaudeMdSection() },
+            itemEditor: { $item in
+                VStack(spacing: 4) {
+                    TextField("heading", text: $item.heading)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption))
+                    TextField("content", text: $item.content, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .lineLimit(2...4)
+                }
+            }
+        )
+    }
+
+    private func skillsOverrideCard(field: ProfileOverrideField) -> some View {
+        mergeSpecialArrayCard(
+            field: field,
+            parentItems: (editorPayload?.parent?.skills ?? []).compactMap { $0.name },
+            itemsBinding: $profile.skills,
+            itemLabel: { $0.name.isEmpty ? "(unnamed)" : $0.name },
+            emptyItem: { InjectedSkill() },
+            itemEditor: { $item in
+                HStack(spacing: 6) {
+                    TextField("name", text: $item.name)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 160)
+                    TextField("description", text: Binding(
+                        get: { item.description ?? "" },
+                        set: { item.description = $0.isEmpty ? nil : $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption))
+                }
+            }
+        )
+    }
+
+    private func privateRegistriesOverrideCard(field: ProfileOverrideField) -> some View {
+        mergeSpecialArrayCard(
+            field: field,
+            parentItems: (editorPayload?.parent?.privateRegistries ?? []).map { "\($0.type): \($0.url)" },
+            itemsBinding: $profile.privateRegistries,
+            itemLabel: { "\($0.type.rawValue): \($0.url)" },
+            emptyItem: { PrivateRegistry(type: .npm, url: "") },
+            itemEditor: { $item in
+                HStack(spacing: 6) {
+                    Picker("", selection: $item.type) {
+                        ForEach(RegistryType.allCases, id: \.self) { t in
+                            Text(t.rawValue).tag(t)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 80)
+                    TextField("url", text: $item.url)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                    TextField("scope", text: Binding(
+                        get: { item.scope ?? "" },
+                        set: { item.scope = $0.isEmpty ? nil : $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 110)
+                }
+            }
+        )
+    }
+
+    /// Generic card for merge-special arrays: header badge + mode picker +
+    /// read-only parent preview + editable child list. `itemEditor` renders
+    /// the inline controls for one item; `emptyItem` produces a blank.
+    private func mergeSpecialArrayCard<Item>(
+        field: ProfileOverrideField,
+        parentItems: [String],
+        itemsBinding: Binding<[Item]>,
+        itemLabel: @escaping (Item) -> String,
+        emptyItem: @escaping () -> Item,
+        @ViewBuilder itemEditor: @escaping (Binding<Item>) -> some View
+    ) -> some View {
+        let mode = mergeStrategyDraft[field.key] ?? .merge
+        return overrideCardShell(
+            field: field,
+            headerTrailing: AnyView(
+                Text(mode == .replace ? "replace" : "merge · \(itemsBinding.wrappedValue.count) added")
+                    .font(.caption2)
+                    .foregroundStyle(mode == .replace ? .orange : .secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        (mode == .replace ? Color.orange : Color.secondary).opacity(0.1),
+                        in: Capsule()
+                    )
+            )
+        ) {
+            MergeModePicker(
+                mode: bindingForMergeMode(field.key),
+                fieldLabel: field.label,
+                parentName: parentDisplayName
+            )
+            if mode == .merge, !parentItems.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("From \(parentDisplayName ?? "parent")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    ForEach(parentItems.indices, id: \.self) { i in
+                        Text(parentItems[i])
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 1)
+                    }
+                }
+                .padding(.top, 2)
+                Divider().padding(.vertical, 2)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your \(field.label.lowercased())")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                ForEach(itemsBinding.wrappedValue.indices, id: \.self) { i in
+                    HStack(spacing: 6) {
+                        itemEditor(itemsBinding[i])
+                        Button {
+                            itemsBinding.wrappedValue.remove(at: i)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(.red.opacity(0.6))
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                Button {
+                    itemsBinding.wrappedValue.append(emptyItem())
+                } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    /// Card for a nullable text field where empty = null on save.
+    private func nullableTextOverrideCard(
+        field: ProfileOverrideField,
+        value: Binding<String>,
+        parentValue: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            TextEditor(text: value)
+                .font(.system(.callout))
+                .frame(height: 90)
+                .padding(4)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(.quaternary, lineWidth: 1)
+                )
+            if !parentValue.isEmpty {
+                DisclosureGroup("Parent value (\(parentValue.count) chars)") {
+                    ScrollView {
+                        Text(parentValue)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(6)
+                    }
+                    .frame(maxHeight: 120)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// Card for smokePages — the canonical merge-special flow.
+    private func smokePagesOverrideCard(field: ProfileOverrideField) -> some View {
+        let mode = mergeStrategyDraft["smokePages"] ?? .merge
+        let parentPages = editorPayload?.parent?.smokePages ?? []
+        return overrideCardShell(
+            field: field,
+            headerTrailing: AnyView(
+                Text(mode == .replace ? "replace" : "merge · \(profile.smokePages.count) added")
+                    .font(.caption2)
+                    .foregroundStyle(mode == .replace ? .orange : .secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        (mode == .replace ? Color.orange : Color.secondary).opacity(0.1),
+                        in: Capsule()
+                    )
+            )
+        ) {
+            MergeModePicker(
+                mode: bindingForMergeMode("smokePages"),
+                fieldLabel: "Smoke pages",
+                parentName: parentDisplayName
+            )
+            if mode == .merge, !parentPages.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("From \(parentDisplayName ?? "parent")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    ForEach(parentPages.indices, id: \.self) { i in
+                        Text(parentPages[i].path)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 1)
+                    }
+                }
+                .padding(.top, 2)
+                Divider().padding(.vertical, 2)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your pages")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                ForEach(profile.smokePages.indices, id: \.self) { i in
+                    HStack(spacing: 6) {
+                        TextField("/path", text: $profile.smokePages[i].path)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.caption, design: .monospaced))
+                        Button {
+                            profile.smokePages.remove(at: i)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(.red.opacity(0.6))
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                Button {
+                    profile.smokePages.append(SmokePage(path: "/"))
+                } label: {
+                    Label("Add page", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    /// Shared chrome around every override card: label, remove button, border.
+    @ViewBuilder
+    private func overrideCardShell<Content: View>(
+        field: ProfileOverrideField,
+        headerTrailing: AnyView? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(field.label)
+                    .font(.callout.weight(.semibold))
+                Text(field.section.rawValue)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.quaternary.opacity(0.5), in: Capsule())
+                if let headerTrailing {
+                    headerTrailing
+                }
+                Spacer()
+                Button {
+                    // Remove override → back to inherited
+                    inheritedFields.insert(field.key)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.borderless)
+                .help("Remove override — inherit from \(parentDisplayName ?? "parent")")
+            }
+            if !field.help.isEmpty {
+                Text(field.help)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            content()
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.accentColor.opacity(0.25), lineWidth: 1)
+        )
+    }
+
     // MARK: - Auth flow trigger
 
     private func startAuth(provider: String, label: String) {
@@ -1443,6 +2859,9 @@ public struct ProfileEditorView: View {
 private struct ActionsSection: View {
     @Binding var profile: Profile
     let actionCatalog: [ActionCatalogItem]
+    /// When false, the PIM block is not rendered — used by the overrides
+    /// view which surfaces PIM as its own top-level card.
+    var includePim: Bool = true
 
     var body: some View {
         Toggle(isOn: $profile.actionPolicyEnabled) {
@@ -1525,36 +2944,9 @@ private struct ActionsSection: View {
                 .padding(.leading, 4)
             }
 
-            Divider().padding(.vertical, 4)
-
-            HStack {
-                Text("PIM Activations")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                HelpBadge(text: "Security allowlist for Azure PIM actions. Agents can only activate RBAC roles and Entra groups listed here.")
-                Spacer()
-                Button {
-                    profile.pimActivations.append(PimActivationEntry())
-                } label: {
-                    Label("Add", systemImage: "plus")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-            }
-
-            if profile.pimActivations.isEmpty {
-                Text("No PIM activations configured. Add entries to allow agents to activate Azure RBAC roles or Entra group memberships via the ACP.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach($profile.pimActivations) { $entry in
-                        PimActivationRow(entry: $entry, onDelete: {
-                            profile.pimActivations.removeAll { $0.id == entry.id }
-                        })
-                    }
-                }
-                .padding(.leading, 4)
+            if includePim {
+                Divider().padding(.vertical, 4)
+                PimActivationsEditor(profile: $profile)
             }
 
             Divider().padding(.vertical, 4)
@@ -1817,6 +3209,46 @@ private struct ActionsSection: View {
                 }
             }
             content()
+        }
+    }
+}
+
+// MARK: - PIM activations editor (header + list + add button)
+
+struct PimActivationsEditor: View {
+    @Binding var profile: Profile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("PIM Activations")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                HelpBadge(text: "Security allowlist for Azure PIM actions. Agents can only activate RBAC roles and Entra groups listed here.")
+                Spacer()
+                Button {
+                    profile.pimActivations.append(PimActivationEntry())
+                } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if profile.pimActivations.isEmpty {
+                Text("No PIM activations configured. Add entries to allow agents to activate Azure RBAC roles or Entra group memberships via the ACP.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach($profile.pimActivations) { $entry in
+                        PimActivationRow(entry: $entry, onDelete: {
+                            profile.pimActivations.removeAll { $0.id == entry.id }
+                        })
+                    }
+                }
+                .padding(.leading, 4)
+            }
         }
     }
 }
