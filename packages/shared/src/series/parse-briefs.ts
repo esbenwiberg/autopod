@@ -1,4 +1,5 @@
 import { parse as parseYaml } from 'yaml';
+import { parseAcList } from '../parse-ac-list.js';
 import type { AcDefinition } from '../types/ac.js';
 
 /**
@@ -45,6 +46,16 @@ export function parseBriefFrontmatter(content: string): {
   if (!match) return { frontmatter: {}, body: content.trim() };
   const frontmatter = (parseYaml(match[1] ?? '') ?? {}) as BriefFrontmatter;
   return { frontmatter, body: (match[2] ?? '').trim() };
+}
+
+/**
+ * Extract the content of a `## Acceptance Criteria` section from a markdown
+ * body. Returns the raw text between the heading and the next `##` heading (or
+ * end of string), or an empty string if the section is absent.
+ */
+export function extractMarkdownAcSection(body: string): string {
+  const match = body.match(/##\s+acceptance\s+criteria[^\n]*\n([\s\S]*?)(?=\n##\s|$)/i);
+  return match ? (match[1] ?? '').trim() : '';
 }
 
 /** Numeric prefix from a filename, e.g. `01-types.md` → 1. Infinity if none. */
@@ -124,11 +135,26 @@ export function parseBriefs(
             return prevTitle ? [prevTitle] : [];
           })();
 
+    // YAML frontmatter acceptance_criteria takes priority; fall back to parsing
+    // the markdown ## Acceptance Criteria section if no frontmatter ACs are set.
+    let acceptanceCriteria: AcDefinition[] | undefined = frontmatter.acceptance_criteria;
+    if (!acceptanceCriteria) {
+      const mdSection = extractMarkdownAcSection(body);
+      if (mdSection) {
+        acceptanceCriteria = parseAcList(mdSection).map((test) => ({
+          type: 'none' as const,
+          test,
+          pass: 'criterion satisfied',
+          fail: 'criterion not satisfied',
+        }));
+      }
+    }
+
     return {
       title,
       task,
       dependsOn,
-      acceptanceCriteria: frontmatter.acceptance_criteria,
+      acceptanceCriteria,
     };
   });
 }
