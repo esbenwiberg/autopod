@@ -189,6 +189,7 @@ public enum PodMapper {
       id: response.id,
       status: status,
       pod: pod,
+      hasWorktree: response.worktreePath != nil,
       branch: response.branch,
       profileName: response.profileName,
       task: response.task,

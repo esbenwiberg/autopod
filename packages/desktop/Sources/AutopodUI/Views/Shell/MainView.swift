@@ -134,6 +134,7 @@ public struct MainView: View {
     }
 
     @State private var sidebarSelection: SidebarItem = .attention
+    @State private var showDeleteSeriesConfirmation = false
     @State private var showCreateSheet = false
     @State private var showCreateSeriesSheet = false
     @State private var showCommandPalette = false
@@ -171,12 +172,12 @@ public struct MainView: View {
 
     private var filteredSessions: [Pod] {
         let filtered: [Pod] = switch sidebarSelection {
-        case .attention:      pods.filter { $0.status.needsAttention }
-        case .active:         pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
-        case .running:        pods.filter { $0.status.isActive && !$0.isWorkspace }
-        case .workspaces:     pods.filter { $0.isWorkspace }
-        case .completed:      pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
-        case .all:            pods
+        case .attention:      pods.filter { $0.status.needsAttention && $0.seriesId == nil }
+        case .active:         pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace && $0.seriesId == nil }
+        case .running:        pods.filter { $0.status.isActive && !$0.isWorkspace && $0.seriesId == nil }
+        case .workspaces:     pods.filter { $0.isWorkspace && $0.seriesId == nil }
+        case .completed:      pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace && $0.seriesId == nil }
+        case .all:            pods.filter { $0.seriesId == nil }
         case .analytics:        []
         case .history:          []
         case .memory:           []
@@ -185,13 +186,23 @@ public struct MainView: View {
         case .salesPitch:       []
         case .profile(let p):   pods.filter { $0.profileName == p }
         case .series(let id):   pods.filter { $0.seriesId == id }
-        case .seriesAll:        pods.filter { $0.seriesId != nil }
+        case .seriesAll:        Self.seriesRepresentatives(pods)
         }
         return filtered.sorted { a, b in
             switch sortOrder {
             case .created:    a.startedAt > b.startedAt
             case .lastActive: a.updatedAt > b.updatedAt
             }
+        }
+    }
+
+    /// One pod per unique seriesId — the root (no parents) or earliest-created fallback.
+    /// Lets the Series list show one row per series instead of one per brief.
+    static func seriesRepresentatives(_ pods: [Pod]) -> [Pod] {
+        let grouped = Dictionary(grouping: pods.filter { $0.seriesId != nil }, by: { $0.seriesId! })
+        return grouped.values.compactMap { group in
+            group.first(where: { $0.dependsOnPodIds.isEmpty })
+                ?? group.min(by: { $0.startedAt < $1.startedAt })
         }
     }
 
@@ -483,6 +494,27 @@ public struct MainView: View {
                         .background(Color.accentColor.opacity(0.1))
                         .foregroundStyle(Color.accentColor)
                         .clipShape(Capsule())
+                    Button(role: .destructive) {
+                        showDeleteSeriesConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption)
+                            .foregroundStyle(.red.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .confirmationDialog(
+                        "Delete \"\(seriesPods.first?.seriesName ?? seriesId)\"?",
+                        isPresented: $showDeleteSeriesConfirmation
+                    ) {
+                        Button("Delete Series", role: .destructive) {
+                            Task {
+                                await actions.deleteSeries(seriesId)
+                                sidebarSelection = .attention
+                            }
+                        }
+                    } message: {
+                        Text("Kills all running pods and permanently removes all \(seriesPods.count) pods in this series.")
+                    }
                 }
             }
             .padding(.horizontal, 16)

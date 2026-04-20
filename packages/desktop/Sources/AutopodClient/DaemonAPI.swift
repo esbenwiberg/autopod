@@ -139,6 +139,10 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/pods/\(id)")
   }
 
+  public func deleteSeries(_ seriesId: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/pods/series/\(seriesId)")
+  }
+
   public func approveAllValidated() async throws -> [String] {
     let results: [SessionSummaryResponse] = try await request("POST", "/pods/approve-all")
     return results.map(\.id)

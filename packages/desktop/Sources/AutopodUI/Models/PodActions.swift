@@ -26,6 +26,7 @@ public struct PodActions: Sendable {
   public var extendPrAttempts: @MainActor @Sendable (String, Int) async -> Void
   public var fork: @MainActor @Sendable (String) async -> String?
   public var delete: @MainActor @Sendable (String) async -> Void
+  public var deleteSeries: @MainActor @Sendable (String) async -> Void
   public var createHistoryWorkspace: @MainActor @Sendable (String?, Int) async -> Void
   /// Start/restart the preview container and open the app URL
   public var openLiveApp: @MainActor @Sendable (String) async -> Void
@@ -81,6 +82,7 @@ public struct PodActions: Sendable {
     extendPrAttempts: @escaping @MainActor @Sendable (String, Int) async -> Void = { _, _ in },
     fork: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    deleteSeries: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     createHistoryWorkspace: @escaping @MainActor @Sendable (String?, Int) async -> Void = { _, _ in },
     openLiveApp: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     workerProfileForProfile: @escaping @MainActor @Sendable (String) -> String? = { _ in nil },
@@ -112,6 +114,7 @@ public struct PodActions: Sendable {
     self.extendPrAttempts = extendPrAttempts
     self.fork = fork
     self.delete = delete
+    self.deleteSeries = deleteSeries
     self.createHistoryWorkspace = createHistoryWorkspace
     self.openLiveApp = openLiveApp
     self.workerProfileForProfile = workerProfileForProfile

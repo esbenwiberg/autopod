@@ -70,8 +70,16 @@ public struct DetailPanelView: View {
     @State private var didCopyName: Bool = false
 
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
-    private var isMarkdownAvailable: Bool { pod.pod.agentMode == .interactive || pod.pod.output == .artifact }
+    private var isMarkdownAvailable: Bool { pod.hasWorktree || pod.pod.output == .artifact }
     @State private var showPromoteMenu: Bool = false
+
+    /// Artifact payload beats everything; for series pods the graph is the landing view;
+    /// otherwise Overview. Applied on first appear and when the selected pod changes.
+    static func defaultTab(for pod: Pod) -> DetailTab {
+        if pod.pod.output == .artifact { return .markdown }
+        if pod.seriesId != nil { return .series }
+        return .overview
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -126,11 +134,8 @@ public struct DetailPanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear {
-            if pod.pod.output == .artifact {
-                selectedTab = .markdown
-            }
-        }
+        .onAppear { selectedTab = Self.defaultTab(for: pod) }
+        .onChange(of: pod.id) { _, _ in selectedTab = Self.defaultTab(for: pod) }
         .onChange(of: requestedTab) { _, tab in
             guard let tab else { return }
             guard tab != .terminal || isTerminalAvailable else { requestedTab = nil; return }
@@ -396,6 +401,13 @@ public struct DetailPanelView: View {
                     .controlSize(.small)
                     .tint(.orange)
                 }
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
             case .killed:
                 Button {
@@ -559,7 +571,7 @@ public struct DetailPanelView: View {
                 let isDisabled = (tab == .terminal && !isTerminalAvailable) || (tab == .markdown && !isMarkdownAvailable)
                 let disabledHelp: String = {
                     if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace pods" }
-                    if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer is only available for workspace and artifact pods" }
+                    if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer becomes available once the pod has a workspace" }
                     return ""
                 }()
                 Button {

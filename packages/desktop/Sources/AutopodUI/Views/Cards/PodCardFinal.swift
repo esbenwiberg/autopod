@@ -294,9 +294,12 @@ public struct SessionCardFinal: View {
                     .foregroundStyle(.secondary)
             }
         case .queued:
-            Text("Queue position \(pod.queuePosition ?? 1)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(
+                !pod.dependsOnPodIds.isEmpty ? "Waiting for predecessor"
+                : pod.queuePosition.map { "Queue position \($0)" } ?? "Queued"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         case .provisioning:
             HStack(spacing: 5) {
                 ProgressView().scaleEffect(0.5)

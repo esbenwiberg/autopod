@@ -60,7 +60,7 @@ public enum PipelineDAGLayout {
 
         public init(
             nodeWidth: CGFloat = 200,
-            nodeHeight: CGFloat = 96,
+            nodeHeight: CGFloat = 116,
             horizontalGap: CGFloat = 80,
             verticalGap: CGFloat = 24,
             paddingX: CGFloat = 24,

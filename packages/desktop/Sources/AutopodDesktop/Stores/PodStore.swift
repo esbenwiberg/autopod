@@ -153,6 +153,14 @@ public final class PodStore {
     }
   }
 
+  public func removeSeriesPods(_ seriesId: String) {
+    let removedIds = pods.filter { $0.seriesId == seriesId }.map(\.id)
+    pods.removeAll { $0.seriesId == seriesId }
+    if let selected = selectedSessionId, removedIds.contains(selected) {
+      selectedSessionId = nil
+    }
+  }
+
   public func updateActivity(_ podId: String, activity: String) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
     pods[index].latestActivity = activity

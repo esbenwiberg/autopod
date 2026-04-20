@@ -37,12 +37,12 @@ public struct SidebarView: View {
         self.onShowSettings = onShowSettings
     }
 
-    private var attentionCount: Int { pods.filter { $0.status.needsAttention }.count }
-    private var activeCount: Int { pods.filter { $0.status.isActive || $0.status.needsAttention }.filter { !$0.isWorkspace }.count }
-    private var runningCount: Int { pods.filter { $0.status.isActive && !$0.isWorkspace }.count }
-    private var workspaceCount: Int { pods.filter { $0.isWorkspace }.count }
-    private var completedCount: Int { pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }.count }
-    private var seriesPodCount: Int { pods.filter { $0.seriesId != nil }.count }
+    private var attentionCount: Int { pods.filter { $0.status.needsAttention && $0.seriesId == nil }.count }
+    private var activeCount: Int { pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace && $0.seriesId == nil }.count }
+    private var runningCount: Int { pods.filter { $0.status.isActive && !$0.isWorkspace && $0.seriesId == nil }.count }
+    private var workspaceCount: Int { pods.filter { $0.isWorkspace && $0.seriesId == nil }.count }
+    private var completedCount: Int { pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace && $0.seriesId == nil }.count }
+    private var seriesPodCount: Int { Set(pods.compactMap { $0.seriesId }).count }
     private var profiles: [String] { Array(Set(pods.map(\.profileName))).sorted() }
 
     /// Distinct series, sorted by earliest-pod creation time so newer series

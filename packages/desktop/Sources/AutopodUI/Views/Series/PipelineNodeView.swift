@@ -21,6 +21,21 @@ public struct PipelineNodeView: View {
         return trimmed.isEmpty ? pod.branch : trimmed
     }
 
+    private var briefExcerpt: String? {
+        let lines = pod.task.components(separatedBy: "\n")
+        var skippedTitle = false
+        var result: [String] = []
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if !skippedTitle { skippedTitle = true; continue }
+            if trimmed.hasPrefix("#") || trimmed == "---" { break }
+            if trimmed.isEmpty { if result.isEmpty { continue } else { break } }
+            result.append(trimmed)
+        }
+        let joined = result.joined(separator: " ")
+        return joined.isEmpty ? nil : joined
+    }
+
     private var costLabel: String {
         pod.costUsd > 0 ? String(format: "$%.2f", pod.costUsd) : "—"
     }
@@ -37,6 +52,13 @@ public struct PipelineNodeView: View {
                     Text(pod.duration)
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.tertiary)
+                }
+                if let excerpt = briefExcerpt {
+                    Text(excerpt)
+                        .font(.system(.caption2))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 HStack(spacing: 6) {
                     Text(pod.status.label)

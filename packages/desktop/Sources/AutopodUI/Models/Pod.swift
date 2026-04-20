@@ -421,6 +421,7 @@ public struct Pod: Identifiable, Sendable {
     public let id: String
     public var status: PodStatus
     public var pod: PodConfig
+    public var hasWorktree: Bool
     public var branch: String
     public var profileName: String
     public var task: String
@@ -511,6 +512,7 @@ public struct Pod: Identifiable, Sendable {
         id: String = UUID().uuidString,
         status: PodStatus,
         pod: PodConfig = PodConfig(),
+        hasWorktree: Bool = false,
         branch: String,
         profileName: String,
         task: String = "",
@@ -547,6 +549,7 @@ public struct Pod: Identifiable, Sendable {
         dependencyStartedAt: Date? = nil
     ) {
         self.id = id; self.status = status; self.pod = pod
+        self.hasWorktree = hasWorktree
         self.branch = branch; self.profileName = profileName; self.task = task
         self.model = model; self.startedAt = startedAt; self.updatedAt = updatedAt
         self.baseBranch = baseBranch

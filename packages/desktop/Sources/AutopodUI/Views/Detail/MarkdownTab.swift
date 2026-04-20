@@ -42,6 +42,23 @@ public struct MarkdownTab: View {
     .task(id: pod.id) {
       await refreshFiles()
     }
+    .task(id: "\(pod.id)-\(pod.status.rawValue)") {
+      // Auto-refresh while the agent is active: files appear as the agent writes them,
+      // and the selected file re-renders without a manual reload.
+      guard pod.status == .running else { return }
+      while !Task.isCancelled {
+        do {
+          try await Task.sleep(nanoseconds: 5_000_000_000)
+        } catch {
+          return
+        }
+        guard pod.status == .running else { return }
+        await refreshFiles(silent: true)
+        if let sel = selectedPath {
+          await silentlyReloadSelected(sel)
+        }
+      }
+    }
   }
 
   // MARK: - File list
@@ -164,11 +181,13 @@ public struct MarkdownTab: View {
 
   // MARK: - Loading
 
-  private func refreshFiles() async {
+  private func refreshFiles(silent: Bool = false) async {
     guard let loadFiles else { return }
-    isLoadingList = true
-    errorMessage = nil
-    defer { isLoadingList = false }
+    if !silent {
+      isLoadingList = true
+      errorMessage = nil
+    }
+    defer { if !silent { isLoadingList = false } }
     do {
       files = try await loadFiles(pod.id)
       // Drop selection if the file is gone
@@ -177,7 +196,9 @@ public struct MarkdownTab: View {
         content = ""
       }
     } catch {
-      errorMessage = "Failed to load file list: \(error.localizedDescription)"
+      if !silent {
+        errorMessage = "Failed to load file list: \(error.localizedDescription)"
+      }
     }
   }
 
@@ -192,6 +213,21 @@ public struct MarkdownTab: View {
     } catch {
       errorMessage = "Failed to load \(path): \(error.localizedDescription)"
       content = ""
+    }
+  }
+
+  /// Background refresh of the currently-selected file. Preserves scroll by
+  /// only assigning content when the string actually differs, and swallows
+  /// transient errors so the rendered pane isn't flipped to the error state.
+  private func silentlyReloadSelected(_ path: String) async {
+    guard let loadContent else { return }
+    do {
+      let result = try await loadContent(pod.id, path)
+      if result.content != content {
+        content = result.content
+      }
+    } catch {
+      // Keep last-known content on transient failures.
     }
   }
 }

@@ -1528,10 +1528,13 @@ public struct ProfileEditorView: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(.blue.opacity(0.15), lineWidth: 0.5))
 
         patRow("GitHub PAT", value: $profile.githubPat, isSet: profile.hasGithubPat,
+               isInherited: inheritedFields.contains("githubPat"),
                help: "Personal access token for GitHub — needed for PR creation and private repo cloning.")
         patRow("ADO PAT", value: $profile.adoPat, isSet: profile.hasAdoPat,
+               isInherited: inheritedFields.contains("adoPat"),
                help: "Azure DevOps token — needed for ADO repos, PRs, and package feeds.")
         patRow("Registry PAT", value: $profile.registryPat, isSet: profile.hasRegistryPat,
+               isInherited: inheritedFields.contains("registryPat"),
                help: "Token for private npm or NuGet registries configured below.")
 
         Divider().padding(.vertical, 4)
@@ -3084,7 +3087,13 @@ public struct ProfileEditorView: View {
 
     // MARK: - PAT row (secure input with status)
 
-    private func patRow(_ label: String, value: Binding<String?>, isSet: Bool, help: String) -> some View {
+    private func patRow(
+        _ label: String,
+        value: Binding<String?>,
+        isSet: Bool,
+        isInherited: Bool = false,
+        help: String
+    ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Text(label)
@@ -3092,14 +3101,24 @@ public struct ProfileEditorView: View {
                     .foregroundStyle(.secondary)
                 HelpBadge(text: help)
                 Spacer()
-                if isSet && (value.wrappedValue ?? "").isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Configured")
-                            .foregroundStyle(.secondary)
+                if (value.wrappedValue ?? "").isEmpty {
+                    if isSet {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text(isInherited ? "Inherited ✓" : "Configured")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                    } else if isInherited {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("Inherited — not configured in parent")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
                     }
-                    .font(.caption)
                 }
             }
             SecureField(isSet ? "Enter new value to replace" : "Enter token", text: Binding(

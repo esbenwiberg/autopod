@@ -51,6 +51,7 @@ public final class ActionHandler {
       extendPrAttempts: { [weak self] id, count in await self?.extendPrAttempts(id, additionalAttempts: count) },
       fork: { [weak self] id in await self?.forkSession(id) },
       delete: { [weak self] id in await self?.deletePod(id) },
+      deleteSeries: { [weak self] id in await self?.deleteSeries(id) },
       createHistoryWorkspace: { [weak self] profile, limit in
         await self?.createHistoryWorkspace(profileName: profile, limit: limit)
       },
@@ -329,6 +330,17 @@ public final class ActionHandler {
     do {
       try await api.deletePod(podId)
       podStore.removeSession(podId)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func deleteSeries(_ seriesId: String) async {
+    pendingAction = "delete-series-\(seriesId)"
+    do {
+      try await api.deleteSeries(seriesId)
+      podStore.removeSeriesPods(seriesId)
     } catch {
       lastError = error.localizedDescription
     }

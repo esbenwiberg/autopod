@@ -259,7 +259,7 @@ public struct SeriesResponse: Codable, Sendable {
   public let seriesId: String
   public let seriesName: String
   public let pods: [SessionResponse]
-  public let tokenUsageSummary: TokenUsageSummary
+  public let tokenUsageSummary: TokenUsageSummary?
   public let statusCounts: [String: Int]
 }
 
