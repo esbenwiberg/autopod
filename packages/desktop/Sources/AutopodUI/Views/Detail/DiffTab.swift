@@ -132,91 +132,108 @@ public struct DiffTab: View {
   }
 
   @State private var selectedFile: String?
+  @State private var parsedFiles: [DiffFile]? = nil
+  @State private var isParsing = false
 
-  private var files: [DiffFile] {
-    guard let raw = diffString else { return [] }
-    return DiffParser.parse(raw)
-  }
-
-  private var totalAdded: Int { files.reduce(0) { $0 + $1.linesAdded } }
-  private var totalRemoved: Int { files.reduce(0) { $0 + $1.linesRemoved } }
+  private var totalAdded: Int { (parsedFiles ?? []).reduce(0) { $0 + $1.linesAdded } }
+  private var totalRemoved: Int { (parsedFiles ?? []).reduce(0) { $0 + $1.linesRemoved } }
 
   public var body: some View {
-    if files.isEmpty {
-      VStack(spacing: 10) {
-        Image(systemName: "doc.text.magnifyingglass")
-          .font(.system(size: 32))
-          .foregroundStyle(.tertiary)
-        Text("No diff available")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-        if pod.status.isActive {
-          Text("Diff will be available after validation")
+    Group {
+      if isParsing || (diffString != nil && parsedFiles == nil) {
+        VStack(spacing: 10) {
+          ProgressView()
+          Text("Parsing diff…")
             .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if parsedFiles?.isEmpty != false {
+        VStack(spacing: 10) {
+          Image(systemName: "doc.text.magnifyingglass")
+            .font(.system(size: 32))
             .foregroundStyle(.tertiary)
-        }
-        if let onRefresh {
-          Button {
-            onRefresh()
-          } label: {
-            Label("Refresh", systemImage: "arrow.clockwise")
+          Text("No diff available")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+          if pod.status.isActive {
+            Text("Diff will be available after validation")
+              .font(.caption)
+              .foregroundStyle(.tertiary)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .padding(.top, 4)
-        }
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-    } else {
-      HSplitView {
-        // File tree
-        VStack(alignment: .leading, spacing: 0) {
-          // Stats header
-          HStack(spacing: 8) {
-            Text("\(files.count) files")
-              .font(.caption.weight(.semibold))
-            Spacer()
-            Text("+\(totalAdded)")
-              .font(.system(.caption2, design: .monospaced))
-              .foregroundStyle(.green)
-            Text("-\(totalRemoved)")
-              .font(.system(.caption2, design: .monospaced))
-              .foregroundStyle(.red)
-          }
-          .padding(10)
-
-          Divider()
-
-          List(files, selection: $selectedFile) { file in
-            HStack(spacing: 6) {
-              Image(systemName: file.status.icon)
-                .foregroundStyle(file.status.color)
-                .font(.system(size: 10))
-              Text(file.path)
-                .font(.system(.caption, design: .monospaced))
-                .lineLimit(1)
-              Spacer()
-              Text("+\(file.linesAdded) -\(file.linesRemoved)")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.secondary)
+          if let onRefresh {
+            Button {
+              onRefresh()
+            } label: {
+              Label("Refresh", systemImage: "arrow.clockwise")
             }
-            .tag(file.path)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .padding(.top, 4)
           }
-          .listStyle(.sidebar)
         }
-        .frame(minWidth: 200, idealWidth: 220, maxWidth: 300)
-
-        // Diff content
-        ScrollView {
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        let files = parsedFiles ?? []
+        HSplitView {
+          // File tree
           VStack(alignment: .leading, spacing: 0) {
-            let displayFiles = selectedFile.flatMap { sel in files.filter { $0.path == sel } } ?? files
-            ForEach(displayFiles) { file in
-              diffFileView(file)
+            // Stats header
+            HStack(spacing: 8) {
+              Text("\(files.count) files")
+                .font(.caption.weight(.semibold))
+              Spacer()
+              Text("+\(totalAdded)")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.green)
+              Text("-\(totalRemoved)")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.red)
             }
+            .padding(10)
+
+            Divider()
+
+            List(files, selection: $selectedFile) { file in
+              HStack(spacing: 6) {
+                Image(systemName: file.status.icon)
+                  .foregroundStyle(file.status.color)
+                  .font(.system(size: 10))
+                Text(file.path)
+                  .font(.system(.caption, design: .monospaced))
+                  .lineLimit(1)
+                Spacer()
+                Text("+\(file.linesAdded) -\(file.linesRemoved)")
+                  .font(.system(.caption2, design: .monospaced))
+                  .foregroundStyle(.secondary)
+              }
+              .tag(file.path)
+            }
+            .listStyle(.sidebar)
           }
-          .padding(8)
+          .frame(minWidth: 200, idealWidth: 220, maxWidth: 300)
+
+          // Diff content
+          ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+              let displayFiles = selectedFile.flatMap { sel in files.filter { $0.path == sel } } ?? files
+              ForEach(displayFiles) { file in
+                diffFileView(file)
+              }
+            }
+            .padding(8)
+          }
         }
       }
+    }
+    .task(id: diffString) {
+      guard let raw = diffString else { parsedFiles = []; return }
+      isParsing = true
+      let result = await Task.detached(priority: .userInitiated) {
+        DiffParser.parse(raw)
+      }.value
+      parsedFiles = result
+      isParsing = false
     }
   }
 
