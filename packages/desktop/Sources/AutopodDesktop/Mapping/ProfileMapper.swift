@@ -8,12 +8,13 @@ public enum ProfileMapper {
   // MARK: - ProfileResponse → Profile
 
   public static func map(_ response: ProfileResponse) -> Profile {
-    let template = StackTemplate(rawValue: response.template) ?? .custom
-    let runtime = RuntimeType(rawValue: response.defaultRuntime) ?? .claude
-    let target = ExecutionTarget(rawValue: response.executionTarget) ?? .local
-    let provider = ModelProvider(rawValue: response.modelProvider) ?? .anthropic
-    let prProvider = PRProvider(rawValue: response.prProvider) ?? .github
+    let template = StackTemplate(rawValue: response.template ?? "") ?? .custom
+    let runtime = RuntimeType(rawValue: response.defaultRuntime ?? "") ?? .claude
+    let target = ExecutionTarget(rawValue: response.executionTarget ?? "") ?? .local
+    let provider = ModelProvider(rawValue: response.modelProvider ?? "") ?? .anthropic
+    let prProvider = PRProvider(rawValue: response.prProvider ?? "") ?? .github
     let networkMode = response.networkPolicy.flatMap { NetworkPolicyMode(rawValue: $0.mode ?? "restricted") } ?? .restricted
+    let escalation = response.escalation ?? EscalationConfigResponse()
 
     // Action policy
     let ap = response.actionPolicy
@@ -32,18 +33,18 @@ public enum ProfileMapper {
 
     return Profile(
       name: response.name,
-      repoUrl: response.repoUrl,
-      defaultBranch: response.defaultBranch,
+      repoUrl: response.repoUrl ?? "",
+      defaultBranch: response.defaultBranch ?? "main",
       template: template,
       buildCommand: response.buildCommand ?? "",
       startCommand: response.startCommand ?? "",
       testCommand: response.testCommand,
-      healthPath: response.healthPath,
-      healthTimeout: response.healthTimeout,
-      buildTimeout: response.buildTimeout,
-      testTimeout: response.testTimeout,
-      maxValidationAttempts: response.maxValidationAttempts,
-      defaultModel: response.defaultModel,
+      healthPath: response.healthPath ?? "/",
+      healthTimeout: response.healthTimeout ?? 120,
+      buildTimeout: response.buildTimeout ?? 300,
+      testTimeout: response.testTimeout ?? 600,
+      maxValidationAttempts: response.maxValidationAttempts ?? 3,
+      defaultModel: response.defaultModel ?? "opus",
       defaultRuntime: runtime,
       executionTarget: target,
       modelProvider: provider,
@@ -76,22 +77,22 @@ public enum ProfileMapper {
         InjectedClaudeMdSection(heading: $0.heading ?? "", content: $0.content ?? "")
       },
       skills: response.skills.map {
-        InjectedSkill(name: $0.name ?? "", description: $0.description)
+        InjectedSkill(name: $0.name ?? "", description: $0.description, source: $0.source)
       },
-      escalationAskHuman: response.escalation.askHuman,
-      escalationAskAiEnabled: response.escalation.askAi.enabled,
-      escalationAskAiModel: response.escalation.askAi.model,
-      escalationAskAiMaxCalls: response.escalation.askAi.maxCalls,
-      escalationAdvisorEnabled: response.escalation.advisor?.enabled ?? false,
-      escalationAutoPauseAfter: response.escalation.autoPauseAfter,
-      escalationHumanResponseTimeout: response.escalation.humanResponseTimeout,
+      escalationAskHuman: escalation.askHuman,
+      escalationAskAiEnabled: escalation.askAi.enabled,
+      escalationAskAiModel: escalation.askAi.model,
+      escalationAskAiMaxCalls: escalation.askAi.maxCalls,
+      escalationAdvisorEnabled: escalation.advisor?.enabled ?? false,
+      escalationAutoPauseAfter: escalation.autoPauseAfter,
+      escalationHumanResponseTimeout: escalation.humanResponseTimeout,
       pod: {
         if let p = response.pod {
           let agent = AgentMode(rawValue: p.agentMode) ?? .auto
           let output = OutputTarget(rawValue: p.output) ?? .pr
           return PodConfig(agentMode: agent, output: output, validate: p.validate, promotable: p.promotable)
         }
-        return PodConfig.fromLegacy(response.outputMode)
+        return PodConfig.fromLegacy(response.outputMode ?? "pr")
       }(),
       extendsProfile: response.extends,
       workerProfile: response.workerProfile,
@@ -164,6 +165,30 @@ public enum ProfileMapper {
         return r
       },
       "allowedHosts": profile.allowedHosts,
+      "mcpServers": profile.mcpServers.map { s -> [String: Any] in
+        var r: [String: Any] = ["name": s.name, "url": s.url]
+        if let d = s.description, !d.isEmpty { r["description"] = d }
+        return r
+      },
+      "claudeMdSections": profile.claudeMdSections.map {
+        ["heading": $0.heading, "content": $0.content]
+      },
+      "skills": profile.skills.map { s -> [String: Any] in
+        // Daemon's InjectedSkill schema requires `source`. Pass through the
+        // user-configured source dict; fall back to a local default keyed on
+        // name if the editor left it unset or blank so the patch validates —
+        // resolution at pod-run time still requires the file to exist on the
+        // daemon host.
+        var r: [String: Any] = ["name": s.name]
+        var src = s.source ?? [:]
+        if (src["type"] ?? "local") == "local" && (src["path"]?.isEmpty ?? true) {
+          src = ["type": "local", "path": "\(s.name).md"]
+        }
+        if src["type"] == nil { src["type"] = "local" }
+        r["source"] = src
+        if let d = s.description, !d.isEmpty { r["description"] = d }
+        return r
+      },
     ]
 
     // Issue watcher

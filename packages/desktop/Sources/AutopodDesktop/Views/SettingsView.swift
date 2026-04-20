@@ -44,6 +44,10 @@ public struct SettingsView: View {
     public var onSaveProfileWithInheritance: (
         (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
     )?
+    public var onCreateProfileWithInheritance: (
+        (Profile, Set<String>, [String: MergeMode]) async throws -> Void
+    )?
+    public var onDeleteProfile: ((String) async throws -> Void)?
     @Binding public var isPresented: Bool
 
     public init(connectionManager: ConnectionManager, profiles: [Profile],
@@ -55,6 +59,10 @@ public struct SettingsView: View {
                 onSaveProfileWithInheritance: (
                     (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
                 )? = nil,
+                onCreateProfileWithInheritance: (
+                    (Profile, Set<String>, [String: MergeMode]) async throws -> Void
+                )? = nil,
+                onDeleteProfile: ((String) async throws -> Void)? = nil,
                 isPresented: Binding<Bool>) {
         self.connectionManager = connectionManager
         self.profiles = profiles
@@ -65,6 +73,8 @@ public struct SettingsView: View {
         self.onAuthenticateProfile = onAuthenticateProfile
         self.onLoadProfileEditor = onLoadProfileEditor
         self.onSaveProfileWithInheritance = onSaveProfileWithInheritance
+        self.onCreateProfileWithInheritance = onCreateProfileWithInheritance
+        self.onDeleteProfile = onDeleteProfile
         self._isPresented = isPresented
     }
 
@@ -236,7 +246,9 @@ public struct SettingsView: View {
                            onSave: onSaveProfile, onCreate: onCreateProfile,
                            onAuthenticate: onAuthenticateProfile,
                            onLoadEditor: onLoadProfileEditor,
-                           onSaveWithInheritance: onSaveProfileWithInheritance)
+                           onSaveWithInheritance: onSaveProfileWithInheritance,
+                           onCreateWithInheritance: onCreateProfileWithInheritance,
+                           onDelete: onDeleteProfile)
         }
     }
 

@@ -12,18 +12,28 @@ public struct ProfileListView: View {
     public var onSaveWithInheritance: (
         (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
     )?
+    public var onCreateWithInheritance: (
+        (Profile, Set<String>, [String: MergeMode]) async throws -> Void
+    )?
+    public var onDelete: ((String) async throws -> Void)?
     public init(profiles: [Profile], actionCatalog: [ActionCatalogItem] = [],
                 onSave: ((Profile) async throws -> Void)? = nil, onCreate: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 onLoadEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
                 onSaveWithInheritance: (
                     (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
-                )? = nil) {
+                )? = nil,
+                onCreateWithInheritance: (
+                    (Profile, Set<String>, [String: MergeMode]) async throws -> Void
+                )? = nil,
+                onDelete: ((String) async throws -> Void)? = nil) {
         self.profiles = profiles; self.actionCatalog = actionCatalog
         self.onSave = onSave; self.onCreate = onCreate
         self.onAuthenticate = onAuthenticate
         self.onLoadEditor = onLoadEditor
         self.onSaveWithInheritance = onSaveWithInheritance
+        self.onCreateWithInheritance = onCreateWithInheritance
+        self.onDelete = onDelete
     }
 
     @State private var selectedProfile: Profile?
@@ -79,7 +89,8 @@ public struct ProfileListView: View {
                 onSave: onSave,
                 onAuthenticate: onAuthenticate,
                 onLoadEditor: onLoadEditor,
-                onSaveWithInheritance: onSaveWithInheritance
+                onSaveWithInheritance: onSaveWithInheritance,
+                onDelete: onDelete
             )
         }
         .sheet(isPresented: $showCreateSheet) {
@@ -114,7 +125,8 @@ public struct ProfileListView: View {
                 actionCatalog: actionCatalog,
                 onSave: onCreate,
                 onLoadEditor: onLoadEditor,
-                onSaveWithInheritance: onSaveWithInheritance
+                onSaveWithInheritance: onSaveWithInheritance,
+                onCreateWithInheritance: onCreateWithInheritance
             )
         }
     }

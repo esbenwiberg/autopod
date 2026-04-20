@@ -4,22 +4,22 @@ import Foundation
 
 public struct ProfileResponse: Codable, Sendable {
   public var name: String
-  public var repoUrl: String
-  public var defaultBranch: String
-  public var template: String
-  /// Null on derived profiles means "inherit from parent".
+  /// Nullable on the `raw` shape from /editor — null means "inherit from parent".
+  /// Resolved responses (from list / get) always have a concrete value.
+  public var repoUrl: String?
+  public var defaultBranch: String?
+  public var template: String?
   public var buildCommand: String?
-  /// Null on derived profiles means "inherit from parent".
   public var startCommand: String?
-  public var healthPath: String
-  public var healthTimeout: Int
+  public var healthPath: String?
+  public var healthTimeout: Int?
   public var smokePages: [SmokePageResponse]
-  public var maxValidationAttempts: Int
-  public var defaultModel: String
-  public var defaultRuntime: String
-  public var executionTarget: String
+  public var maxValidationAttempts: Int?
+  public var defaultModel: String?
+  public var defaultRuntime: String?
+  public var executionTarget: String?
   public var customInstructions: String?
-  public var escalation: EscalationConfigResponse
+  public var escalation: EscalationConfigResponse?
   public var extends: String?
   public var workerProfile: String?
   public var warmImageTag: String?
@@ -29,14 +29,14 @@ public struct ProfileResponse: Codable, Sendable {
   public var skills: [InjectedSkillResponse]
   public var networkPolicy: NetworkPolicyResponse?
   public var actionPolicy: ActionPolicyResponse?
-  public var outputMode: String
+  public var outputMode: String?
   public var pod: PodConfigResponse?
-  public var modelProvider: String
+  public var modelProvider: String?
   public var providerCredentials: ProviderCredentialsResponse?
   public var testCommand: String?
-  public var buildTimeout: Int
-  public var testTimeout: Int
-  public var prProvider: String
+  public var buildTimeout: Int?
+  public var testTimeout: Int?
+  public var prProvider: String?
   public var adoPat: String?
   public var githubPat: String?
   public var privateRegistries: [PrivateRegistryResponse]
@@ -58,6 +58,63 @@ public struct ProfileResponse: Codable, Sendable {
   public var version: Int
   public var createdAt: String
   public var updatedAt: String
+
+  /// Decode array fields defensively — the raw shape from /editor may serialize
+  /// missing arrays as null in some edge cases, even though resolved responses
+  /// always return `[]`. Treat null/missing as an empty array.
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    name = try c.decode(String.self, forKey: .name)
+    repoUrl = try c.decodeIfPresent(String.self, forKey: .repoUrl)
+    defaultBranch = try c.decodeIfPresent(String.self, forKey: .defaultBranch)
+    template = try c.decodeIfPresent(String.self, forKey: .template)
+    buildCommand = try c.decodeIfPresent(String.self, forKey: .buildCommand)
+    startCommand = try c.decodeIfPresent(String.self, forKey: .startCommand)
+    healthPath = try c.decodeIfPresent(String.self, forKey: .healthPath)
+    healthTimeout = try c.decodeIfPresent(Int.self, forKey: .healthTimeout)
+    smokePages = (try c.decodeIfPresent([SmokePageResponse].self, forKey: .smokePages)) ?? []
+    maxValidationAttempts = try c.decodeIfPresent(Int.self, forKey: .maxValidationAttempts)
+    defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel)
+    defaultRuntime = try c.decodeIfPresent(String.self, forKey: .defaultRuntime)
+    executionTarget = try c.decodeIfPresent(String.self, forKey: .executionTarget)
+    customInstructions = try c.decodeIfPresent(String.self, forKey: .customInstructions)
+    escalation = try c.decodeIfPresent(EscalationConfigResponse.self, forKey: .escalation)
+    extends = try c.decodeIfPresent(String.self, forKey: .extends)
+    workerProfile = try c.decodeIfPresent(String.self, forKey: .workerProfile)
+    warmImageTag = try c.decodeIfPresent(String.self, forKey: .warmImageTag)
+    warmImageBuiltAt = try c.decodeIfPresent(String.self, forKey: .warmImageBuiltAt)
+    mcpServers = (try c.decodeIfPresent([InjectedMcpServerResponse].self, forKey: .mcpServers)) ?? []
+    claudeMdSections = (try c.decodeIfPresent([InjectedClaudeMdSectionResponse].self, forKey: .claudeMdSections)) ?? []
+    skills = (try c.decodeIfPresent([InjectedSkillResponse].self, forKey: .skills)) ?? []
+    networkPolicy = try c.decodeIfPresent(NetworkPolicyResponse.self, forKey: .networkPolicy)
+    actionPolicy = try c.decodeIfPresent(ActionPolicyResponse.self, forKey: .actionPolicy)
+    outputMode = try c.decodeIfPresent(String.self, forKey: .outputMode)
+    pod = try c.decodeIfPresent(PodConfigResponse.self, forKey: .pod)
+    modelProvider = try c.decodeIfPresent(String.self, forKey: .modelProvider)
+    providerCredentials = try c.decodeIfPresent(ProviderCredentialsResponse.self, forKey: .providerCredentials)
+    testCommand = try c.decodeIfPresent(String.self, forKey: .testCommand)
+    buildTimeout = try c.decodeIfPresent(Int.self, forKey: .buildTimeout)
+    testTimeout = try c.decodeIfPresent(Int.self, forKey: .testTimeout)
+    prProvider = try c.decodeIfPresent(String.self, forKey: .prProvider)
+    adoPat = try c.decodeIfPresent(String.self, forKey: .adoPat)
+    githubPat = try c.decodeIfPresent(String.self, forKey: .githubPat)
+    privateRegistries = (try c.decodeIfPresent([PrivateRegistryResponse].self, forKey: .privateRegistries)) ?? []
+    registryPat = try c.decodeIfPresent(String.self, forKey: .registryPat)
+    containerMemoryGb = try c.decodeIfPresent(Double.self, forKey: .containerMemoryGb)
+    issueWatcherEnabled = try c.decodeIfPresent(Bool.self, forKey: .issueWatcherEnabled)
+    issueWatcherLabelPrefix = try c.decodeIfPresent(String.self, forKey: .issueWatcherLabelPrefix)
+    branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix)
+    hasWebUi = try c.decodeIfPresent(Bool.self, forKey: .hasWebUi)
+    tokenBudget = try c.decodeIfPresent(Int.self, forKey: .tokenBudget)
+    tokenBudgetPolicy = try c.decodeIfPresent(String.self, forKey: .tokenBudgetPolicy)
+    tokenBudgetWarnAt = try c.decodeIfPresent(Double.self, forKey: .tokenBudgetWarnAt)
+    maxBudgetExtensions = try c.decodeIfPresent(Int.self, forKey: .maxBudgetExtensions)
+    pimActivations = try c.decodeIfPresent([PimActivationResponse].self, forKey: .pimActivations)
+    mergeStrategy = try c.decodeIfPresent([String: String].self, forKey: .mergeStrategy)
+    version = try c.decode(Int.self, forKey: .version)
+    createdAt = try c.decode(String.self, forKey: .createdAt)
+    updatedAt = try c.decode(String.self, forKey: .updatedAt)
+  }
 
   /// Empty init for building responses programmatically (reverse mapping).
   public init() {
@@ -102,6 +159,20 @@ public struct ProfileEditorResponse: Codable, Sendable {
   /// Used to render "Authenticated via <owner>" when the current profile
   /// inherits its auth from an ancestor.
   public let credentialOwner: String?
+
+  public init(
+    raw: ProfileResponse,
+    resolved: ProfileResponse,
+    parent: ProfileResponse?,
+    sourceMap: [String: FieldSource],
+    credentialOwner: String?
+  ) {
+    self.raw = raw
+    self.resolved = resolved
+    self.parent = parent
+    self.sourceMap = sourceMap
+    self.credentialOwner = credentialOwner
+  }
 }
 
 // MARK: - Nested types
@@ -230,8 +301,13 @@ public struct InjectedClaudeMdSectionResponse: Codable, Sendable {
 public struct InjectedSkillResponse: Codable, Sendable {
   public var name: String?
   public var description: String?
-  public init(name: String?, description: String?) {
-    self.name = name; self.description = description
+  /// Source discriminator preserved as a plain `[String: String]` so we can
+  /// round-trip the daemon's required `source` field without authoring UI
+  /// yet. Both local (`{type, path}`) and github (`{type, repo, path?, ref?,
+  /// token?}`) shapes are string-valued, which is why this coerces.
+  public var source: [String: String]?
+  public init(name: String?, description: String?, source: [String: String]? = nil) {
+    self.name = name; self.description = description; self.source = source
   }
 }
 

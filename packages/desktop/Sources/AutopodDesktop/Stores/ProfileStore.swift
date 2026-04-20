@@ -127,6 +127,35 @@ public final class ProfileStore {
     profiles.append(created)
   }
 
+  /// Create a derived profile, stripping fields the user left inherited so
+  /// the child stores null (signals "inherit") instead of echoing the
+  /// parent's resolved values.
+  public func createProfileWithInheritance(
+    _ profile: Profile,
+    currentInherited: Set<String>,
+    mergeStrategy: [String: MergeMode]
+  ) async throws {
+    guard let api else { return }
+    var fields = ProfileMapper.mapToFields(profile)
+    fields["name"] = profile.name
+
+    for field in currentInherited {
+      fields.removeValue(forKey: field)
+    }
+
+    if !mergeStrategy.isEmpty {
+      var strategyRaw: [String: String] = [:]
+      for (key, mode) in mergeStrategy {
+        strategyRaw[key] = mode.rawValue
+      }
+      fields["mergeStrategy"] = strategyRaw
+    }
+
+    let response = try await api.createProfileFromFields(fields)
+    let created = ProfileMapper.map(response)
+    profiles.append(created)
+  }
+
   public func deleteProfile(_ name: String) async throws {
     guard let api else { return }
     try await api.deleteProfile(name)

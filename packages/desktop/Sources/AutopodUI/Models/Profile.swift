@@ -447,8 +447,78 @@ public struct InjectedClaudeMdSection: Sendable {
 public struct InjectedSkill: Sendable {
     public var name: String
     public var description: String?
-    public init(name: String = "", description: String? = nil) {
-        self.name = name; self.description = description
+    /// Source discriminator round-tripped to the daemon. Shapes:
+    ///   local  → ["type": "local", "path": "<absolute or cwd-relative path>"]
+    ///   github → ["type": "github", "repo": "owner/name", "path": "...", "ref": "main", "token": "..."]
+    public var source: [String: String]?
+    public init(name: String = "", description: String? = nil, source: [String: String]? = nil) {
+        self.name = name
+        self.description = description
+        // Default to an empty `local` source so the editor has something to display.
+        self.source = source ?? ["type": "local", "path": ""]
+    }
+
+    // MARK: - UI bindings
+
+    public var sourceType: String {
+        get { source?["type"] ?? "local" }
+        set {
+            var s = source ?? [:]
+            s["type"] = newValue
+            // Clear keys that don't apply to the new type so we don't leak stale values.
+            if newValue == "local" {
+                s.removeValue(forKey: "repo")
+                s.removeValue(forKey: "ref")
+                s.removeValue(forKey: "token")
+            } else if newValue == "github" {
+                // Keep `path` — it is valid for both types.
+            }
+            source = s
+        }
+    }
+
+    public var localPath: String {
+        get { source?["path"] ?? "" }
+        set {
+            var s = source ?? ["type": "local"]
+            s["path"] = newValue
+            source = s
+        }
+    }
+
+    public var githubRepo: String {
+        get { source?["repo"] ?? "" }
+        set {
+            var s = source ?? ["type": "github"]
+            s["repo"] = newValue
+            source = s
+        }
+    }
+
+    public var githubPath: String {
+        get { source?["path"] ?? "" }
+        set {
+            var s = source ?? ["type": "github"]
+            if newValue.isEmpty {
+                s.removeValue(forKey: "path")
+            } else {
+                s["path"] = newValue
+            }
+            source = s
+        }
+    }
+
+    public var githubRef: String {
+        get { source?["ref"] ?? "" }
+        set {
+            var s = source ?? ["type": "github"]
+            if newValue.isEmpty {
+                s.removeValue(forKey: "ref")
+            } else {
+                s["ref"] = newValue
+            }
+            source = s
+        }
     }
 }
 

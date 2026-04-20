@@ -207,6 +207,16 @@ public struct AppRootView: View {
             mergeStrategy: mergeStrategy
           )
         },
+        onCreateProfileWithInheritance: { [profileStore] profile, current, mergeStrategy in
+          try await profileStore.createProfileWithInheritance(
+            profile,
+            currentInherited: current,
+            mergeStrategy: mergeStrategy
+          )
+        },
+        onDeleteProfile: { [profileStore] name in
+          try await profileStore.deleteProfile(name)
+        },
         isPresented: $showSettings
       )
     }

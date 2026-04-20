@@ -185,6 +185,19 @@ public struct ProfileEditorView: View {
             _ mergeStrategy: [String: MergeMode]
         ) async throws -> Void
     )?
+    /// Inheritance-aware create. Called with the draft profile, the set of
+    /// fields currently marked inherited (stripped before POST), and the
+    /// chosen merge strategy per merge-special field. When nil, the editor
+    /// falls back to `onSave(profile)` for new derived profiles.
+    public var onCreateWithInheritance: (
+        (
+            Profile,
+            _ currentInherited: Set<String>,
+            _ mergeStrategy: [String: MergeMode]
+        ) async throws -> Void
+    )?
+    /// Delete the profile by name. When nil, the Delete button is hidden.
+    public var onDelete: ((String) async throws -> Void)?
 
     public init(profile: Profile, isNew: Bool,
                 actionCatalog: [ActionCatalogItem] = [],
@@ -198,7 +211,11 @@ public struct ProfileEditorView: View {
                 onLoadEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
                 onSaveWithInheritance: (
                     (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
-                )? = nil) {
+                )? = nil,
+                onCreateWithInheritance: (
+                    (Profile, Set<String>, [String: MergeMode]) async throws -> Void
+                )? = nil,
+                onDelete: ((String) async throws -> Void)? = nil) {
         self._profile = State(initialValue: profile)
         self.isNew = isNew
         self.actionCatalog = actionCatalog
@@ -211,6 +228,8 @@ public struct ProfileEditorView: View {
         self.onEditMemory = onEditMemory
         self.onLoadEditor = onLoadEditor
         self.onSaveWithInheritance = onSaveWithInheritance
+        self.onCreateWithInheritance = onCreateWithInheritance
+        self.onDelete = onDelete
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -220,7 +239,15 @@ public struct ProfileEditorView: View {
     @State private var searchLastSection: ProfileSection = .general
     @State private var isSaving: Bool = false
     @State private var saveError: String?
+    @State private var isDeleting: Bool = false
+    @State private var showDeleteConfirmation: Bool = false
     @State private var editorPayload: ProfileEditorResponse?
+    /// Load state for the inheritance payload. Drives the overrides view's
+    /// loading / error UI. We route derived profiles to the overrides view
+    /// *by intent* (`extendsProfile != nil`), not by whether the payload has
+    /// arrived — a slow or failing fetch must never silently fall back to
+    /// the legacy editor.
+    @State private var editorLoadState: EditorLoadState = .idle
     /// Current "is this field inherited?" state as shown in the UI.
     /// Seeded from the server's sourceMap on load; flipped when the user
     /// taps a chip. Used to drive the disabled/enabled input state.
@@ -250,6 +277,13 @@ public struct ProfileEditorView: View {
         case failure(String)
     }
 
+    private enum EditorLoadState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed(String)
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             header
@@ -271,22 +305,73 @@ public struct ProfileEditorView: View {
         .task { await loadEditorPayloadIfNeeded() }
     }
 
-    /// Show the mockup overrides editor when this is an existing derived
-    /// profile and the editor payload successfully loaded. Falls back to the
-    /// classic section-based editor on base profiles or when the daemon
-    /// doesn't serve `/editor`.
+    /// Show the overrides editor whenever the profile is a derived profile —
+    /// existing or new. Routing is intent-based: the presence of
+    /// `extendsProfile` is the contract. The actual payload loads
+    /// asynchronously; while it loads (or if it fails) the overrides view
+    /// renders its own loading / error UI. We never silently fall back to
+    /// the legacy editor for a derived profile, since that UX looks like
+    /// "the new UI is broken".
     private var showOverridesView: Bool {
-        !isNew && profile.extendsProfile != nil && editorPayload != nil
+        profile.extendsProfile != nil
     }
 
     // MARK: - Inheritance support
 
     /// Fetch the editor payload (raw + resolved + parent + sourceMap) so the
-    /// editor can render Inherited/Overridden chips. Only fires for existing
-    /// derived profiles; base profiles and new-profile flows skip this.
+    /// editor can render Inherited/Overridden chips.
+    ///
+    /// For existing derived profiles we fetch this profile's own editor
+    /// payload. For new derived profiles there's no server-side profile yet,
+    /// so we fetch the *parent's* editor payload and synthesize a local
+    /// payload in which every overridable field is marked inherited —
+    /// giving the user the familiar "Inheriting everything; add an override"
+    /// empty state to start from.
     private func loadEditorPayloadIfNeeded() async {
-        guard !isNew, profile.extendsProfile != nil, let onLoadEditor else { return }
+        guard profile.extendsProfile != nil else { return }
+        guard let onLoadEditor else {
+            await MainActor.run {
+                self.editorLoadState = .failed("Editor client not wired up. Reconnect to the daemon and try again.")
+            }
+            return
+        }
+        await MainActor.run { self.editorLoadState = .loading }
         do {
+            if isNew {
+                guard let parentName = profile.extendsProfile else { return }
+                let parentPayload = try await onLoadEditor(parentName)
+                let allKeys = ProfileOverrideCatalog.all.map(\.key)
+                // The parent's fully-resolved view is what a not-yet-overridden
+                // child inherits. We treat it as both `parent` and `resolved`
+                // on the synthesized payload — the derived profile has no
+                // own values yet, so it behaves exactly like the parent.
+                var emptyRaw = ProfileResponse()
+                emptyRaw.name = ""
+                emptyRaw.extends = parentName
+                let sourceMap = Dictionary(uniqueKeysWithValues: allKeys.map { ($0, FieldSource.inherited) })
+                // `credentialOwner` pass-through: when the parent has no auth
+                // anywhere in its chain, the derived profile starts with no
+                // auth either — propagate nil so the providers card shows the
+                // "no authentication set" prompt instead of claiming the
+                // parent owns credentials it doesn't have.
+                let synthesized = ProfileEditorResponse(
+                    raw: emptyRaw,
+                    resolved: parentPayload.resolved,
+                    parent: parentPayload.resolved,
+                    sourceMap: sourceMap,
+                    credentialOwner: parentPayload.credentialOwner
+                )
+                await MainActor.run {
+                    self.editorPayload = synthesized
+                    self.mergeStrategyDraft = [:]
+                    self.initialMergeStrategy = [:]
+                    let inherited = Set(allKeys)
+                    self.inheritedFields = inherited
+                    self.initialInheritedFields = []
+                    self.editorLoadState = .loaded
+                }
+                return
+            }
             let payload = try await onLoadEditor(profile.name)
             await MainActor.run {
                 self.editorPayload = payload
@@ -301,11 +386,12 @@ public struct ProfileEditorView: View {
                 )
                 self.inheritedFields = inherited
                 self.initialInheritedFields = inherited
+                self.editorLoadState = .loaded
             }
         } catch {
-            // Soft-fail: without the payload we render the legacy editor.
-            // Real failures (e.g. daemon doesn't support the endpoint yet)
-            // shouldn't prevent the user from editing the profile.
+            await MainActor.run {
+                self.editorLoadState = .failed(error.localizedDescription)
+            }
         }
     }
 
@@ -529,28 +615,66 @@ public struct ProfileEditorView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             HStack {
-                if !isNew {
-                    Button("Delete", role: .destructive) {}
+                if !isNew, onDelete != nil {
+                    Button("Delete", role: .destructive) {
+                        showDeleteConfirmation = true
+                    }
                         .foregroundStyle(.red)
-                        .disabled(isSaving)
+                        .disabled(isSaving || isDeleting)
                 }
                 Spacer()
-                if isSaving {
+                if isSaving || isDeleting {
                     ProgressView()
                         .controlSize(.small)
                 }
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                    .disabled(isSaving)
+                    .disabled(isSaving || isDeleting)
                 Button(isNew ? "Create" : "Save") {
                     submit()
                 }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(isSaving || (isNew && profile.name.isEmpty))
+                    .disabled(
+                        isSaving
+                        || isDeleting
+                        || (isNew && profile.name.isEmpty)
+                        || (showOverridesView && editorLoadState != .loaded)
+                    )
             }
         }
         .padding(16)
+        .confirmationDialog(
+            "Delete profile “\(profile.name)”?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { deleteProfile() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone. Pods using this profile keep running, but no new pods can be created from it.")
+        }
+    }
+
+    private func deleteProfile() {
+        guard let onDelete else { return }
+        isDeleting = true
+        saveError = nil
+        let name = profile.name
+        Task {
+            do {
+                try await onDelete(name)
+                await MainActor.run {
+                    isDeleting = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isDeleting = false
+                    saveError = error.localizedDescription
+                }
+            }
+        }
     }
 
     private func submit() {
@@ -558,10 +682,14 @@ public struct ProfileEditorView: View {
         saveError = nil
         Task {
             do {
-                // Prefer the inheritance-aware save path when the editor
-                // payload was loaded and the user may have toggled chips
-                // or chosen a merge-strategy mode.
-                if editorPayload != nil, let handler = onSaveWithInheritance {
+                // Prefer the inheritance-aware save/create paths when the
+                // editor payload was loaded so inherited fields get stripped
+                // instead of echoed back as explicit overrides.
+                if isNew, editorPayload != nil, let handler = onCreateWithInheritance {
+                    let strategy: [String: MergeMode] =
+                        mergeStrategyDraft.isEmpty ? [:] : mergeStrategyDraft
+                    try await handler(profile, inheritedFields, strategy)
+                } else if !isNew, editorPayload != nil, let handler = onSaveWithInheritance {
                     let strategy: [String: MergeMode] =
                         mergeStrategyDraft == initialMergeStrategy ? [:] : mergeStrategyDraft
                     try await handler(profile, inheritedFields, initialInheritedFields, strategy)
@@ -1557,26 +1685,62 @@ public struct ProfileEditorView: View {
 
         // Skills
         fieldRow("Skills", help: "Slash commands available to the agent in the container.") {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(profile.skills.indices, id: \.self) { i in
-                    HStack(spacing: 8) {
-                        TextField("name", text: $profile.skills[i].name)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            TextField("name", text: $profile.skills[i].name)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(width: 140)
+                            TextField("description", text: Binding(
+                                get: { profile.skills[i].description ?? "" },
+                                set: { profile.skills[i].description = $0.isEmpty ? nil : $0 }
+                            ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.caption, design: .monospaced))
-                            .frame(width: 140)
-                        TextField("description", text: Binding(
-                            get: { profile.skills[i].description ?? "" },
-                            set: { profile.skills[i].description = $0.isEmpty ? nil : $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.caption, design: .monospaced))
-                        Button {
-                            profile.skills.remove(at: i)
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundStyle(.red.opacity(0.6))
+                            Button {
+                                profile.skills.remove(at: i)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red.opacity(0.6))
+                            }
+                            .buttonStyle(.borderless)
                         }
-                        .buttonStyle(.borderless)
+                        HStack(spacing: 6) {
+                            Picker("", selection: $profile.skills[i].sourceType) {
+                                Text("local").tag("local")
+                                Text("github").tag("github")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 140)
+                            .labelsHidden()
+
+                            if profile.skills[i].sourceType == "local" {
+                                TextField(
+                                    "absolute or cwd-relative path to .md file",
+                                    text: $profile.skills[i].localPath
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                            } else {
+                                TextField("owner/repo", text: $profile.skills[i].githubRepo)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(width: 160)
+                                TextField(
+                                    "path (defaults to <name>.md)",
+                                    text: $profile.skills[i].githubPath
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                                TextField("ref (default: main)", text: $profile.skills[i].githubRef)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(width: 110)
+                            }
+                        }
+                        .padding(.leading, 4)
                     }
                 }
                 Button {
@@ -1665,34 +1829,75 @@ public struct ProfileEditorView: View {
         VStack(spacing: 0) {
             overridesTopBar
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    // Providers card is always visible on derived profiles —
-                    // auth is high-touch and needs to be discoverable even
-                    // when it's currently inherited from the parent.
-                    providersCard
+            switch editorLoadState {
+            case .idle, .loading:
+                overridesLoadingState
+            case .failed(let message):
+                overridesErrorState(message)
+            case .loaded:
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        // Providers card is always visible on derived profiles —
+                        // auth is high-touch and needs to be discoverable even
+                        // when it's currently inherited from the parent.
+                        providersCard
 
-                    if currentOverrides.isEmpty {
-                        overridesEmptyState
-                    } else {
-                        HStack(spacing: 6) {
-                            Text("Your overrides")
-                                .font(.system(.callout).weight(.semibold))
-                            Text("(\(currentOverrides.count))")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                            Spacer()
+                        if currentOverrides.isEmpty {
+                            overridesEmptyState
+                        } else {
+                            HStack(spacing: 6) {
+                                Text("Your overrides")
+                                    .font(.system(.callout).weight(.semibold))
+                                Text("(\(currentOverrides.count))")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.bottom, 2)
+                            ForEach(currentOverrides) { field in
+                                overrideCard(for: field)
+                            }
                         }
-                        .padding(.bottom, 2)
-                        ForEach(currentOverrides) { field in
-                            overrideCard(for: field)
-                        }
+                        addOverrideRow
                     }
-                    addOverrideRow
+                    .padding(20)
                 }
-                .padding(20)
             }
         }
+    }
+
+    private var overridesLoadingState: some View {
+        VStack(spacing: 10) {
+            ProgressView().controlSize(.regular)
+            Text("Loading inheritance data…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func overridesErrorState(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.orange)
+            Text("Couldn't load inheritance data")
+                .font(.callout.weight(.semibold))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            Button {
+                Task { await loadEditorPayloadIfNeeded() }
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 
     // MARK: - Providers (always-visible auth card)
@@ -1842,26 +2047,44 @@ public struct ProfileEditorView: View {
         }
     }
 
+    @ViewBuilder
     private var overridesTopBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.turn.down.right")
-                .foregroundStyle(.secondary)
-                .font(.system(size: 12))
-            Text("Extends")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(editorPayload?.parent?.name ?? profile.extendsProfile ?? "—")
-                .font(.system(.callout, design: .monospaced).weight(.medium))
-            Spacer()
-            Button {
-                // placeholder for the parent-browser drawer
-            } label: {
-                Label("View parent values", systemImage: "sidebar.right")
-                    .font(.caption)
+        VStack(spacing: 10) {
+            if isNew {
+                HStack(spacing: 10) {
+                    Image(systemName: "tag")
+                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12))
+                    Text("Name")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("my-derived-profile", text: $profile.name)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.callout, design: .monospaced))
+                        .frame(maxWidth: 320)
+                    Spacer()
+                }
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .help("Coming soon — read-only browser of the resolved parent profile")
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.turn.down.right")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                Text("Extends")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(editorPayload?.parent?.name ?? profile.extendsProfile ?? "—")
+                    .font(.system(.callout, design: .monospaced).weight(.medium))
+                Spacer()
+                Button {
+                    // placeholder for the parent-browser drawer
+                } label: {
+                    Label("View parent values", systemImage: "sidebar.right")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Coming soon — read-only browser of the resolved parent profile")
+            }
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
@@ -2539,17 +2762,52 @@ public struct ProfileEditorView: View {
             itemLabel: { $0.name.isEmpty ? "(unnamed)" : $0.name },
             emptyItem: { InjectedSkill() },
             itemEditor: { $item in
-                HStack(spacing: 6) {
-                    TextField("name", text: $item.name)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        TextField("name", text: $item.name)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(width: 160)
+                        TextField("description", text: Binding(
+                            get: { item.description ?? "" },
+                            set: { item.description = $0.isEmpty ? nil : $0 }
+                        ))
                         .textFieldStyle(.roundedBorder)
-                        .font(.system(.caption, design: .monospaced))
-                        .frame(width: 160)
-                    TextField("description", text: Binding(
-                        get: { item.description ?? "" },
-                        set: { item.description = $0.isEmpty ? nil : $0 }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.caption))
+                        .font(.system(.caption))
+                    }
+                    HStack(spacing: 6) {
+                        Picker("", selection: $item.sourceType) {
+                            Text("local").tag("local")
+                            Text("github").tag("github")
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 140)
+                        .labelsHidden()
+
+                        if item.sourceType == "local" {
+                            TextField(
+                                "absolute or cwd-relative path to .md file",
+                                text: $item.localPath
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.caption, design: .monospaced))
+                        } else {
+                            TextField("owner/repo", text: $item.githubRepo)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(width: 160)
+                            TextField(
+                                "path (defaults to <name>.md)",
+                                text: $item.githubPath
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.caption, design: .monospaced))
+                            TextField("ref (default: main)", text: $item.githubRef)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(width: 110)
+                        }
+                    }
                 }
             }
         )
