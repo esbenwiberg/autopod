@@ -57,30 +57,36 @@ public struct CreateSeriesSheet: View {
     @State private var errorMessage: String?
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("New Series")
-                .font(.title2.weight(.semibold))
+        VStack(spacing: 0) {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("New Series")
+                        .font(.title2.weight(.semibold))
 
-            sourcePicker
-            profilePicker
-            baseBranchField
-            briefSourceFields
-            if let preview {
-                previewSection(preview)
+                    sourcePicker
+                    profilePicker
+                    baseBranchField
+                    briefSourceFields
+                    if let preview {
+                        previewSection(preview)
+                    }
+                    prModePicker
+
+                    if let err = errorMessage {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.red.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            prModePicker
 
-            if let err = errorMessage {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.red.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-
-            Spacer(minLength: 0)
+            Divider()
 
             HStack {
                 Spacer()
@@ -92,8 +98,8 @@ public struct CreateSeriesSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(submitDisabled)
             }
+            .padding(20)
         }
-        .padding(20)
         .frame(width: 640, height: 620)
         .onAppear {
             if selectedProfile.isEmpty {
@@ -224,9 +230,10 @@ public struct CreateSeriesSheet: View {
             }
         }()
         guard let response else {
-            errorMessage = briefSource == .localFolder
+            let fallback = briefSource == .localFolder
                 ? "Could not parse briefs from that folder."
                 : "Could not parse briefs from \(branchPath) on \(baseBranch). Check the profile has access and the path exists on the branch."
+            errorMessage = actions.lastPreviewError() ?? fallback
             preview = nil
             return
         }
@@ -248,6 +255,7 @@ public struct CreateSeriesSheet: View {
                     .foregroundStyle(.secondary)
             }
             briefDAG(preview.briefs)
+                .frame(maxWidth: .infinity)
                 .frame(height: 180)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
                 .clipShape(RoundedRectangle(cornerRadius: 6))

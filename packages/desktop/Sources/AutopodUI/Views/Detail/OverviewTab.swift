@@ -1,4 +1,5 @@
 import AutopodClient
+import MarkdownUI
 import SwiftUI
 
 /// Overview tab — pod metadata, escalation, plan progress, activity feed.
@@ -78,9 +79,10 @@ struct OverviewTab: View {
                     .font(.system(.subheadline).weight(.semibold))
             }
 
-            Text(question)
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
+            Markdown(question)
+                .markdownTheme(.gitHub)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             if let options = pod.escalationOptions, !options.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -153,9 +155,10 @@ struct OverviewTab: View {
                     .font(.system(.subheadline).weight(.semibold))
             }
 
-            Text(question)
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
+            Markdown(question)
+                .markdownTheme(.gitHub)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
                 Button {

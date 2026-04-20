@@ -1,3 +1,4 @@
+import AppKit
 import AutopodClient
 import SwiftUI
 
@@ -66,6 +67,7 @@ public struct DetailPanelView: View {
 
     @State private var selectedTab: DetailTab = .overview
     @State private var isTaskExpanded: Bool = false
+    @State private var didCopyName: Bool = false
 
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
     private var isMarkdownAvailable: Bool { pod.pod.agentMode == .interactive || pod.pod.output == .artifact }
@@ -159,9 +161,18 @@ public struct DetailPanelView: View {
             HStack(spacing: 10) {
                 StatusDot(status: pod.status)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(pod.id)
-                        .font(.system(.title3, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(pod.status == .complete ? .green : pod.status == .killed ? .red.opacity(0.6) : .primary)
+                    HStack(spacing: 6) {
+                        Text(pod.id)
+                            .font(.system(.title3, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(pod.status == .complete ? .green : pod.status == .killed ? .red.opacity(0.6) : .primary)
+                        Image(systemName: didCopyName ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10))
+                            .foregroundStyle(didCopyName ? Color.green : Color.secondary.opacity(0.6))
+                            .transition(.opacity)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { copyPodName() }
+                    .help(didCopyName ? "Copied!" : "Click to copy name")
                     HStack(spacing: 6) {
                         Text(pod.profileName)
                         Text("·")
@@ -433,6 +444,18 @@ public struct DetailPanelView: View {
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
+
+    private func copyPodName() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(pod.id, forType: .string)
+        withAnimation(.easeOut(duration: 0.15)) { didCopyName = true }
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await MainActor.run {
+                withAnimation(.easeIn(duration: 0.2)) { didCopyName = false }
+            }
+        }
+    }
 
     private var nudgeSheet: some View {
         VStack(alignment: .leading, spacing: 16) {

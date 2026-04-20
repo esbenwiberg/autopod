@@ -43,6 +43,10 @@ public struct PodActions: Sendable {
   public var previewSeriesOnBranch: @MainActor @Sendable (
     _ profileName: String, _ branch: String, _ path: String
   ) async -> SeriesPreviewResponse?
+  /// Most recent error from any preview call (nil if the last call succeeded
+  /// or if no preview has been attempted). The sheet uses this to surface the
+  /// real daemon error instead of a generic message.
+  public var lastPreviewError: @MainActor @Sendable () -> String?
   /// Launch a pod series. Returns the seriesId on success.
   public var createSeries: @MainActor @Sendable (CreateSeriesRequest) async -> String?
   /// Spawn a new pod that depends on the given parent pod IDs, optionally
@@ -85,6 +89,7 @@ public struct PodActions: Sendable {
     spawnFix: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
     previewSeriesOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> SeriesPreviewResponse? = { _, _, _ in nil },
+    lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
     createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
     spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, [AcDefinition]?, String?) async -> String? = { _, _, _, _, _, _, _ in nil }
   ) {
@@ -115,6 +120,7 @@ public struct PodActions: Sendable {
     self.spawnFix = spawnFix
     self.previewSeriesFolder = previewSeriesFolder
     self.previewSeriesOnBranch = previewSeriesOnBranch
+    self.lastPreviewError = lastPreviewError
     self.createSeries = createSeries
     self.spawnDependent = spawnDependent
   }

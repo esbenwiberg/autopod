@@ -10,6 +10,9 @@ public final class ActionHandler {
 
   public private(set) var pendingAction: String?
   public private(set) var lastError: String?
+  /// Error from the most recent preview call, or nil on success. Separate
+  /// from lastError so the series sheet doesn't pick up unrelated failures.
+  public private(set) var lastPreviewError: String?
 
   private let api: DaemonAPI
   private let podStore: PodStore
@@ -66,6 +69,7 @@ public final class ActionHandler {
       previewSeriesOnBranch: { [weak self] profile, branch, path in
         await self?.previewSeriesOnBranch(profileName: profile, branch: branch, path: path) ?? nil
       },
+      lastPreviewError: { [weak self] in self?.lastPreviewError },
       createSeries: { [weak self] request in
         await self?.createSeries(request) ?? nil
       },
@@ -394,10 +398,11 @@ public final class ActionHandler {
   // MARK: - Series
 
   public func previewSeriesFolder(path: String) async -> SeriesPreviewResponse? {
+    lastPreviewError = nil
     do {
       return try await api.previewSeriesFolder(path: path)
     } catch {
-      lastError = error.localizedDescription
+      lastPreviewError = error.localizedDescription
       return nil
     }
   }
@@ -405,12 +410,13 @@ public final class ActionHandler {
   public func previewSeriesOnBranch(
     profileName: String, branch: String, path: String
   ) async -> SeriesPreviewResponse? {
+    lastPreviewError = nil
     do {
       return try await api.previewSeriesOnBranch(
         profileName: profileName, branch: branch, path: path
       )
     } catch {
-      lastError = error.localizedDescription
+      lastPreviewError = error.localizedDescription
       return nil
     }
   }

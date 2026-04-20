@@ -1,5 +1,6 @@
 import SwiftUI
 import AutopodClient
+import MarkdownUI
 
 /// Controls card information density in the fleet grid.
 public enum CardDensity: String, CaseIterable {
@@ -101,7 +102,7 @@ public struct SessionCardFinal: View {
                     Label("Spawn follow-up pod", systemImage: "arrow.branch")
                 }
             }
-            if let onLaunchSeriesFromPod, pod.isWorkspace, !pod.isTerminal {
+            if let onLaunchSeriesFromPod, pod.isWorkspace, pod.status == .complete {
                 Button {
                     onLaunchSeriesFromPod(pod)
                 } label: {
@@ -439,18 +440,6 @@ public struct SessionCardFinal: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .help("Create a worker pod starting from this workspace's branch")
-
-                    if let onLaunchSeriesFromPod {
-                        Button {
-                            onLaunchSeriesFromPod(pod)
-                        } label: {
-                            Label("Launch Series", systemImage: "rectangle.3.group.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("Launch a pod series stacked on this interactive pod's branch")
-                    }
                 }
 
                 if pod.linkedSessionId != nil {
@@ -479,6 +468,18 @@ public struct SessionCardFinal: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.blue)
+
+                if let onLaunchSeriesFromPod {
+                    Button {
+                        onLaunchSeriesFromPod(pod)
+                    } label: {
+                        Label("Launch Series", systemImage: "rectangle.3.group.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Launch a pod series stacked on this branch")
+                }
             }
         default:
             EmptyView()
@@ -814,9 +815,9 @@ public struct SessionCardFinal: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(pod.escalationQuestion ?? "Agent needs input")
-                        .font(.headline)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Markdown(pod.escalationQuestion ?? "Agent needs input")
+                        .markdownTheme(.gitHub)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     if let options = pod.escalationOptions, !options.isEmpty {
