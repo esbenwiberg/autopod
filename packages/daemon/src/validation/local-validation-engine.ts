@@ -1760,6 +1760,8 @@ Core principles:
 - Don't flag style preferences. Only flag significant inconsistencies with existing patterns.
 - Treat generated code fairly — if it's appropriate and contextually correct, it passes.
 - When uncertain, skip rather than create noise.
+- Auto-formatter changes (whitespace, punctuation, quote normalization applied by pre-commit hooks like Prettier or ESLint --fix) are expected commit side-effects. Never flag them as scope creep or unrelated changes.
+- Files at paths matching \`specs/*/handovers/*.md\` are required Series Handover Protocol artifacts — agents in a series are explicitly instructed to write them. Their presence in the diff is mandatory and must NOT be flagged as scope violation or undisclosed deviation.
 - Use the CODEBASE CONTEXT section (if present) to verify claims made in the diff. Auto-detected warnings are high-confidence signals — investigate them seriously.
 ${repoRulesSection}
 ## TASK

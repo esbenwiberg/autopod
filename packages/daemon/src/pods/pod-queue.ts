@@ -44,7 +44,12 @@ export function createPodQueue(
 
   return {
     enqueue(podId: string) {
-      queue.push(podId);
+      // Deduplicate: if podId is already waiting in the queue, don't add it again.
+      // Without this, rapid double-clicks (or concurrent API calls) can enqueue the
+      // same pod twice, causing two concurrent processPod runs that race and kill it.
+      if (!queue.includes(podId)) {
+        queue.push(podId);
+      }
       processNext();
     },
     get pending() {

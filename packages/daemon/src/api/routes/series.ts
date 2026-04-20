@@ -89,7 +89,7 @@ export function seriesRoutes(
             seriesId,
             seriesName: body.seriesName,
             acceptanceCriteria: brief.acceptanceCriteria,
-            options: { output },
+            options: { agentMode: 'auto', output },
           },
           userId,
         );
@@ -104,11 +104,22 @@ export function seriesRoutes(
       }
     }
 
+    const createdPods = created.map(({ title, pod }) => ({ title, ...pod }));
+    const statusCounts = createdPods.reduce(
+      (acc, p) => {
+        acc[p.status] = (acc[p.status] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
     reply.status(201);
     return {
       seriesId,
       seriesName: body.seriesName,
-      pods: created.map(({ title, pod }) => ({ title, ...pod })),
+      pods: createdPods,
+      tokenUsageSummary: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      statusCounts,
     };
   });
 
@@ -230,6 +241,13 @@ export function seriesRoutes(
         error: err instanceof Error ? err.message : 'Failed to read branch folder',
       };
     }
+  });
+
+  // DELETE /pods/series/:seriesId — kill all running pods, then delete all pods in the series
+  app.delete('/pods/series/:seriesId', async (request, reply) => {
+    const { seriesId } = request.params as { seriesId: string };
+    await podManager.deleteSeriesWithCascade(seriesId);
+    reply.status(204);
   });
 
   // GET /pods/series/:seriesId — all pods in a series with cost roll-up

@@ -1206,5 +1206,38 @@ describe('Integration', () => {
       expect(body.pods[0].acceptanceCriteria[0].type).toBe('none');
       expect(body.pods[0].acceptanceCriteria[1].type).toBe('api');
     });
+
+    it('POST /pods/series forces agentMode:auto even when profile defaults to interactive', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          name: 'workspace-default',
+          pod: { agentMode: 'interactive', output: 'branch' },
+        },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'auto-override',
+          profile: 'workspace-default',
+          briefs: [
+            { title: '01', task: 'First', dependsOn: [] },
+            { title: '02', task: 'Second', dependsOn: ['01'] },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const { pods } = res.json();
+      for (const pod of pods) {
+        expect(pod.options.agentMode).toBe('auto');
+      }
+    });
   });
 });

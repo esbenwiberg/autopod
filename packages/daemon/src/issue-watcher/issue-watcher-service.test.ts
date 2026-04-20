@@ -301,4 +301,34 @@ describe('IssueWatcherService', () => {
 
     expect(client.addLabel).toHaveBeenCalledWith('42', 'autopod:failed');
   });
+
+  it('skips and warns when issue watcher enabled but no PAT in inheritance chain', async () => {
+    // Override the derived profile to have null githubPat (simulates base profile
+    // with no github_pat — inheritance returns null, hasPat = false).
+    mockProfileStore.setProfile('test-profile', {
+      prProvider: 'github',
+      githubPat: null,
+      adoPat: null,
+      issueWatcherEnabled: true,
+      issueWatcherLabelPrefix: 'autopod',
+      extends: 'base-profile',
+    } as Partial<Profile>);
+
+    const { service } = createService([
+      {
+        id: '99',
+        title: 'Should be skipped',
+        body: '',
+        url: 'https://github.com/org/repo/issues/99',
+        labels: ['autopod'],
+        triggerLabel: 'autopod',
+      },
+    ]);
+
+    service.start();
+    await new Promise((r) => setTimeout(r, 50));
+    service.stop();
+
+    expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+  });
 });

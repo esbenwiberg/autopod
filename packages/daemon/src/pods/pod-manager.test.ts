@@ -694,6 +694,33 @@ describe('PodManager', () => {
       });
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
     });
+
+    it('enqueues dependent series pod after manual approval', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Parent task' },
+        'user-1',
+      );
+      const child = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Child task',
+          dependsOnPodIds: [parent.id],
+        },
+        'user-1',
+      );
+
+      // Child must not be enqueued yet (waiting for parent)
+      expect(ctx.enqueuedSessions).not.toContain(child.id);
+
+      ctx.podRepo.update(parent.id, { status: 'validated', branch: 'feature/parent' });
+      await manager.approveSession(parent.id);
+
+      expect(manager.getSession(parent.id).status).toBe('complete');
+      expect(ctx.enqueuedSessions).toContain(child.id);
+    });
   });
 
   describe('rejectSession', () => {

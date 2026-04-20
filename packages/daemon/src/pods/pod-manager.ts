@@ -388,6 +388,13 @@ export interface PodManager {
   spawnFixSession(podId: string): Promise<void>;
   /** Return all pods belonging to a series, ordered by creation time. */
   getSeriesPods(seriesId: string): Pod[];
+  /**
+   * Re-trigger any `queued` dependent pods whose all parents have already
+   * reached a terminal-success state (validated/approved/complete/etc.).
+   * Call on daemon startup to recover series that got stuck across restarts
+   * or due to a missing `maybeTriggerDependents` call.
+   */
+  rehydrateDependentSessions(): void;
 }
 
 export function createPodManager(deps: PodManagerDependencies): PodManager {
@@ -594,7 +601,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         if (status.merged) {
           emitActivityStatus(podId, 'PR merged successfully');
-          transition(pod, 'complete', {
+          const mergedPod = transition(pod, 'complete', {
             completedAt: new Date().toISOString(),
             mergeBlockReason: null,
           });
@@ -619,6 +626,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           logger.info({ podId, prUrl: pod.prUrl }, 'Merge polling: PR merged — pod complete');
           stopMergePolling(podId);
+          maybeTriggerDependents(mergedPod);
           return;
         }
 
@@ -1128,7 +1136,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const parentsReady = parentIds.every((pid) => {
         if (pid === completedPod.id) return true;
         try {
-          return podRepo.getOrThrow(pid).status === 'validated';
+          const parentStatus = podRepo.getOrThrow(pid).status;
+          // Accept any terminal-success status — a manually approved parent reaches
+          // 'complete' without passing through 'validated' in the dependent's view.
+          return (
+            parentStatus === 'validated' ||
+            parentStatus === 'approved' ||
+            parentStatus === 'merging' ||
+            parentStatus === 'merge_pending' ||
+            parentStatus === 'complete'
+          );
         } catch {
           // Missing parent — treat as not ready rather than crashing.
           return false;
@@ -2523,7 +2540,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'No changes to merge — completing pod');
         const s1 = transition(pod, 'approved');
         const s2 = transition(s1, 'merging');
-        transition(s2, 'complete', { completedAt: new Date().toISOString() });
+        const noChangePod = transition(s2, 'complete', { completedAt: new Date().toISOString() });
         eventBus.emit({
           type: 'pod.completed',
           timestamp: new Date().toISOString(),
@@ -2542,6 +2559,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           },
         });
         logger.info({ podId }, 'Pod approved with no changes — completed without PR');
+        maybeTriggerDependents(noChangePod);
         return;
       }
 
@@ -2677,7 +2695,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       emitActivityStatus(podId, 'Pod complete');
-      transition(s2, 'complete', { completedAt: new Date().toISOString() });
+      const completedPod = transition(s2, 'complete', { completedAt: new Date().toISOString() });
 
       eventBus.emit({
         type: 'pod.completed',
@@ -2698,6 +2716,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       });
 
       logger.info({ podId, prUrl: pod.prUrl }, 'Pod approved and completed');
+      maybeTriggerDependents(completedPod);
     },
 
     async rejectSession(podId: string, reason?: string): Promise<void> {
@@ -2838,6 +2857,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.worktreePath) {
           try {
             await worktreeManager.cleanup(pod.worktreePath);
+            podRepo.update(podId, { worktreePath: null });
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to cleanup worktree');
           }
@@ -3142,7 +3162,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         pod.status === 'review_required' ||
         pod.status === 'killed' ||
         pod.status === 'validated';
-      if (force && fromTerminal && pod.worktreePath) {
+      // Interactive pods can always be re-provisioned: no agent, no validation, no worktree required.
+      const isInteractive = pod.options.agentMode === 'interactive';
+      if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
         // Kill the old container (best-effort — it may already be dead)
@@ -3159,8 +3181,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Clear claudeSessionId so the agent gets a fresh spawn instead of resuming
         // a stale/broken pod context. Set reworkReason so processPod builds
         // a rework-specific prompt instead of the generic "you were interrupted" recovery prompt.
-        const reworkReason =
-          pod.status === 'failed'
+        // Interactive pods don't need a rework prompt — they get a fresh container.
+        const reworkReason = isInteractive
+          ? null
+          : pod.status === 'failed'
             ? 'Your previous attempt failed. Review what went wrong and try again.'
             : pod.status === 'review_required'
               ? 'Your previous attempt exhausted its validation attempts. Review what went wrong and try again with extended attempts.'
@@ -3172,14 +3196,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           lastValidationResult: null,
           containerId: null,
           claudeSessionId: null,
-          recoveryWorktreePath: pod.worktreePath,
+          recoveryWorktreePath: pod.worktreePath ?? null,
           reworkReason,
         });
         transition(pod, 'queued');
         enqueueSession(podId);
 
         logger.info(
-          { podId, worktreePath: pod.worktreePath, reworkReason },
+          { podId, worktreePath: pod.worktreePath, reworkReason, isInteractive },
           'Rework: re-queued with fresh container provisioning',
         );
         return;
@@ -4199,6 +4223,73 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     getSeriesPods(seriesId: string): Pod[] {
       return podRepo.getPodsBySeries(seriesId);
+    },
+
+    rehydrateDependentSessions(): void {
+      const PARENT_DONE = new Set([
+        'validated',
+        'approved',
+        'merging',
+        'merge_pending',
+        'complete',
+      ]);
+      const stuckDeps = podRepo
+        .list({ status: 'queued' })
+        .filter((p) => p.dependsOnPodIds.length > 0 || !!p.dependsOnPodId);
+
+      for (const dep of stuckDeps) {
+        const parentIds =
+          dep.dependsOnPodIds.length > 0
+            ? dep.dependsOnPodIds
+            : dep.dependsOnPodId
+              ? [dep.dependsOnPodId]
+              : [];
+        if (parentIds.length === 0) continue;
+
+        const allParentsDone = parentIds.every((pid) => {
+          try {
+            return PARENT_DONE.has(podRepo.getOrThrow(pid).status);
+          } catch {
+            return false;
+          }
+        });
+        if (!allParentsDone) continue;
+
+        // Enqueue each stuck pod directly (once per pod) rather than calling
+        // maybeTriggerDependents which iterates *all* dependents of the parent
+        // and would fire multiple times if called once per stuck dep in the loop.
+        const firstParentId = parentIds[0];
+        if (!firstParentId) continue;
+        try {
+          const firstParent = podRepo.getOrThrow(firstParentId);
+          podRepo.update(dep.id, {
+            baseBranch: firstParent.branch,
+            dependencyStartedAt: new Date().toISOString(),
+          });
+          enqueueSession(dep.id);
+          logger.info({ podId: dep.id, firstParentId }, 'Series: rehydrated stuck dependent pod');
+        } catch {
+          logger.warn({ podId: dep.id }, 'rehydrate: failed to enqueue dependent');
+        }
+      }
+    },
+
+    async deleteSeriesWithCascade(seriesId: string): Promise<void> {
+      const seriesPods = podRepo.getPodsBySeries(seriesId);
+      if (seriesPods.length === 0) {
+        throw new AutopodError(`Series ${seriesId} not found`, 'NOT_FOUND', 404);
+      }
+      for (const pod of seriesPods) {
+        if (canKill(pod.status)) {
+          await this.killSession(pod.id).catch((err) =>
+            logger.warn({ err, podId: pod.id, seriesId }, 'Series delete: kill failed, continuing'),
+          );
+        }
+        await this.deleteSession(pod.id).catch((err) =>
+          logger.warn({ err, podId: pod.id, seriesId }, 'Series delete: delete failed, continuing'),
+        );
+      }
+      logger.info({ seriesId, count: seriesPods.length }, 'Series deleted');
     },
 
     getValidationHistory(podId: string) {

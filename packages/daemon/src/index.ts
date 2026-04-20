@@ -523,6 +523,10 @@ if (aciContainerManager) {
     });
 }
 
+// Re-trigger any queued series pods whose parents are already done (e.g. after
+// a daemon restart or after the approveSession bug that omitted this call).
+podManager.rehydrateDependentSessions();
+
 // Graceful shutdown
 async function shutdown(signal: string) {
   logger.info({ signal }, 'Shutting down...');

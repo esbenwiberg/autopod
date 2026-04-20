@@ -216,6 +216,45 @@ describe('reconcileLocalSessions', () => {
     expect(pod.completedAt).not.toBeNull();
   });
 
+  it('re-queues interactive pod with no worktree for fresh re-provision', async () => {
+    const { deps, podRepo, enqueuedSessions } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'int-1',
+      profileName: 'test-profile',
+      task: 'Workspace task',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/int-1',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'workspace',
+      options: { agentMode: 'interactive', output: 'branch', validate: false, promotable: true },
+      baseBranch: null,
+      acFrom: null,
+    });
+    // No worktreePath — interactive pod that was killed/restarted before worktree was created
+    podRepo.update('int-1', { containerId: 'ctr-old' });
+
+    // Worktree does NOT exist
+    mockedAccess.mockRejectedValue(new Error('ENOENT'));
+
+    const result = await reconcileLocalSessions(deps);
+
+    // Should be re-queued, NOT killed
+    expect(result.recovered).toContain('int-1');
+    expect(result.killed).not.toContain('int-1');
+
+    const pod = podRepo.getOrThrow('int-1');
+    expect(pod.status).toBe('queued');
+    expect(enqueuedSessions).toContain('int-1');
+    expect(pod.recoveryWorktreePath).toBeNull();
+  });
+
   it('finishes pod stuck in killing state', async () => {
     const { deps, podRepo } = createReconcilerDeps();
 

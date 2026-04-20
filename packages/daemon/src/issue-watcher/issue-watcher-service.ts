@@ -207,8 +207,14 @@ export function createIssueWatcherService(
     const hasPat = profile.prProvider === 'ado' ? !!profile.adoPat : !!profile.githubPat;
     if (!hasPat) {
       logger.warn(
-        { profile: profile.name, prProvider: profile.prProvider },
-        'Issue watcher enabled but no PAT configured, skipping',
+        {
+          profile: profile.name,
+          extends: profile.extends ?? undefined,
+          prProvider: profile.prProvider,
+        },
+        profile.extends
+          ? `Issue watcher enabled but no PAT found in inheritance chain (${profile.name} → ${profile.extends}), skipping`
+          : 'Issue watcher enabled but no PAT configured, skipping',
       );
       return;
     }

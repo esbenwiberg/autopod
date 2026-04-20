@@ -69,7 +69,7 @@ async function reconcileSession(
   deps: LocalReconcilerDependencies,
   result: ReconcileResult,
 ): Promise<void> {
-  const { podRepo, eventBus, logger } = deps;
+  const { podRepo, eventBus, enqueueSession, logger } = deps;
 
   // 1. Sessions already in `killing` → finish the kill
   if (pod.status === 'killing') {
@@ -97,7 +97,23 @@ async function reconcileSession(
     return;
   }
 
-  // 4. Sessions whose worktree is gone → kill (unrecoverable)
+  // 4. Interactive pods (workspace) can always be re-provisioned with a fresh
+  //    container — there is no agent state to recover. Re-queue without recovery
+  //    worktree so processPod starts clean.
+  if (pod.outputMode === 'workspace') {
+    result.recovered.push(pod.id);
+    const previousStatus = pod.status;
+    podRepo.update(pod.id, { status: 'queued', containerId: null, recoveryWorktreePath: null });
+    emitStatusChanged(pod.id, previousStatus, 'queued', eventBus);
+    enqueueSession(pod.id);
+    logger.info(
+      { podId: pod.id, previousStatus },
+      'Interactive pod re-queued with fresh container (no worktree to recover)',
+    );
+    return;
+  }
+
+  // 5. Sessions whose worktree is gone → kill (unrecoverable)
   logger.warn(
     { podId: pod.id, worktreePath: pod.worktreePath },
     'Worktree missing — killing unrecoverable pod',
