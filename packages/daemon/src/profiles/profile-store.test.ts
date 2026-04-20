@@ -123,6 +123,54 @@ describe('ProfileStore', () => {
         ProfileNotFoundError,
       );
     });
+
+    it('should create a derived profile that omits repoUrl/buildCommand/startCommand', () => {
+      store.create({ ...validInput, name: 'parent' });
+      expect(() => store.create({ name: 'child', extends: 'parent' })).not.toThrow();
+      const raw = store.getRaw('child');
+      expect(raw.extends).toBe('parent');
+      expect(raw.repoUrl).toBeNull();
+      expect(raw.buildCommand).toBeNull();
+      expect(raw.startCommand).toBeNull();
+      const resolved = store.get('child');
+      expect(resolved.repoUrl).toBe('https://github.com/org/repo');
+      expect(resolved.buildCommand).toBe('npm run build');
+    });
+
+    it('stores missing fields on a derived profile as null (not schema defaults)', () => {
+      // Regression: a freshly-created derived profile with only name+extends
+      // must leave every inheritable field null in the DB. Otherwise the
+      // editor sees concrete values on reopen and marks them as overrides.
+      store.create({ ...validInput, name: 'parent' });
+      store.create({ name: 'child', extends: 'parent' });
+      const raw = store.getRaw('child');
+
+      // Scalar defaults that would otherwise be filled by Zod.
+      expect(raw.defaultBranch).toBeNull();
+      expect(raw.template).toBeNull();
+      expect(raw.healthPath).toBeNull();
+      expect(raw.healthTimeout).toBeNull();
+      expect(raw.buildTimeout).toBeNull();
+      expect(raw.testTimeout).toBeNull();
+      expect(raw.maxValidationAttempts).toBeNull();
+      expect(raw.defaultModel).toBeNull();
+      expect(raw.defaultRuntime).toBeNull();
+      expect(raw.executionTarget).toBeNull();
+      expect(raw.modelProvider).toBeNull();
+      expect(raw.prProvider).toBeNull();
+      expect(raw.branchPrefix).toBeNull();
+      expect(raw.tokenBudgetPolicy).toBeNull();
+      expect(raw.tokenBudgetWarnAt).toBeNull();
+      expect(raw.hasWebUi).toBeNull();
+      expect(raw.issueWatcherEnabled).toBeNull();
+      expect(raw.issueWatcherLabelPrefix).toBeNull();
+      // Object/array defaults likewise.
+      expect(raw.escalation).toBeNull();
+      // Resolved view pulls the parent's values.
+      const resolved = store.get('child');
+      expect(resolved.defaultBranch).toBe('main');
+      expect(resolved.template).toBe('node22');
+    });
   });
 
   describe('get', () => {

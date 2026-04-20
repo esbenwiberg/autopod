@@ -155,7 +155,7 @@ const createProfileBaseSchema = z.object({
     .min(1)
     .max(64)
     .regex(/^[a-z0-9\-]+$/, 'Profile name must be lowercase alphanumeric with hyphens'),
-  repoUrl: z.string().url().nullable(),
+  repoUrl: z.string().url().nullable().default(null),
   defaultBranch: z.string().nullable().default('main'),
   template: z
     .enum([
@@ -170,8 +170,8 @@ const createProfileBaseSchema = z.object({
     ])
     .nullable()
     .default('node22'),
-  buildCommand: z.string().min(1).nullable(),
-  startCommand: z.string().min(1).nullable(),
+  buildCommand: z.string().min(1).nullable().default(null),
+  startCommand: z.string().min(1).nullable().default(null),
   healthPath: z.string().nullable().default('/'),
   healthTimeout: z.number().int().min(10).max(600).nullable().default(120),
   // Nullable on the wire so derived profiles can signal "inherit from parent".
@@ -227,33 +227,56 @@ const createProfileBaseSchema = z.object({
   mergeStrategy: mergeStrategySchema,
 });
 
+// Every nullable field on the base schema except identity/metadata. On a
+// derived profile, missing-on-the-wire must mean "inherit" (null), not
+// "use the schema default" — otherwise the child would silently copy concrete
+// values from the default and masquerade as an override on reopen.
+const DERIVED_NULLABLE_FIELDS: readonly string[] = Object.keys(
+  createProfileBaseSchema.shape,
+).filter((k) => k !== 'name' && k !== 'extends' && k !== 'mergeStrategy');
+
 // Base profiles (no `extends`) must carry the fields that cannot fall back to
 // a parent — primarily repoUrl and the command fields. Other fields either
 // have schema defaults (so they can't actually be null on create) or are
 // legitimately optional.
-export const createProfileSchema = createProfileBaseSchema.superRefine((data, ctx) => {
-  if (data.extends !== null) return;
-  if (data.repoUrl === null) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['repoUrl'],
-      message: 'repoUrl is required on base profiles (extends is null)',
-    });
-  }
-  if (data.buildCommand === null) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['buildCommand'],
-      message: 'buildCommand is required on base profiles (extends is null)',
-    });
-  }
-  if (data.startCommand === null) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['startCommand'],
-      message: 'startCommand is required on base profiles (extends is null)',
-    });
-  }
-});
+export const createProfileSchema = z
+  .preprocess((input) => {
+    if (!input || typeof input !== 'object') return input;
+    const data = input as Record<string, unknown>;
+    // Base profile — keep Zod defaults so the row gets sensible values.
+    if (data.extends == null) return data;
+    // Derived profile — replace every missing nullable field with explicit
+    // null so .nullable() preserves the intent instead of falling through
+    // to .default(concreteValue).
+    const result: Record<string, unknown> = { ...data };
+    for (const key of DERIVED_NULLABLE_FIELDS) {
+      if (!(key in result)) result[key] = null;
+    }
+    return result;
+  }, createProfileBaseSchema)
+  .superRefine((data, ctx) => {
+    if (data.extends !== null) return;
+    if (data.repoUrl === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['repoUrl'],
+        message: 'repoUrl is required on base profiles (extends is null)',
+      });
+    }
+    if (data.buildCommand === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['buildCommand'],
+        message: 'buildCommand is required on base profiles (extends is null)',
+      });
+    }
+    if (data.startCommand === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['startCommand'],
+        message: 'startCommand is required on base profiles (extends is null)',
+      });
+    }
+  });
 
 export const updateProfileSchema = createProfileBaseSchema.partial().omit({ name: true });
