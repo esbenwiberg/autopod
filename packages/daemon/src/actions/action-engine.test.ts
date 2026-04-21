@@ -248,6 +248,65 @@ describe('ActionEngine', () => {
     expect(auditCall?.actionName).toBe('read_issue');
   });
 
+  it('allows access to all repos when multiple per-repo overrides are configured', async () => {
+    const policy: ActionPolicy = {
+      ...testPolicy,
+      actionOverrides: [
+        { action: 'read_issue', allowedResources: ['org/repo-a'] },
+        { action: 'read_issue', allowedResources: ['org/repo-b'] },
+      ],
+    };
+
+    const resultA = await engine.execute(
+      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo-a', issue_number: 1 } },
+      policy,
+    );
+    expect(resultA.error).not.toContain('not allowed for resource');
+
+    const resultB = await engine.execute(
+      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo-b', issue_number: 1 } },
+      policy,
+    );
+    expect(resultB.error).not.toContain('not allowed for resource');
+
+    const resultC = await engine.execute(
+      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/forbidden', issue_number: 1 } },
+      policy,
+    );
+    expect(resultC.success).toBe(false);
+    expect(resultC.error).toContain('not allowed for resource');
+  });
+
+  it('matches URL-encoded resource patterns against decoded params', async () => {
+    const policy: ActionPolicy = {
+      ...testPolicy,
+      // Pattern stored as copy-pasted ADO URL segment (@ encoded as %40)
+      actionOverrides: [{ action: 'read_issue', allowedResources: ['org/TeamPlanner%40-V3%40'] }],
+    };
+
+    const result = await engine.execute(
+      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/TeamPlanner@-V3@', issue_number: 1 } },
+      policy,
+    );
+    expect(result.error).not.toContain('not allowed for resource');
+  });
+
+  it('skips disabled overrides when evaluating allowedResources', async () => {
+    const policy: ActionPolicy = {
+      ...testPolicy,
+      actionOverrides: [
+        { action: 'read_issue', allowedResources: ['org/restricted'], disabled: true },
+      ],
+    };
+
+    // Disabled override should be ignored → no allowedResources constraint active
+    const result = await engine.execute(
+      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/any-repo', issue_number: 1 } },
+      policy,
+    );
+    expect(result.error).not.toContain('not allowed for resource');
+  });
+
   it('getAvailableActions delegates to registry', () => {
     const actions = engine.getAvailableActions(testPolicy);
     expect(registry.getAvailableActions).toHaveBeenCalledWith(testPolicy);

@@ -32,12 +32,15 @@ export function createActionRegistry(logger: Logger): ActionRegistry {
     getAvailableActions(policy: ActionPolicy): ActionDefinition[] {
       const enabledGroups = new Set(policy.enabledGroups);
       const enabledActions = new Set(policy.enabledActions ?? []);
-      const overrides = new Map((policy.actionOverrides ?? []).map((o) => [o.action, o]));
+      const allOverrides = policy.actionOverrides ?? [];
 
-      // Filter built-in actions by enabled groups/actions + overrides
+      // Filter built-in actions by enabled groups/actions + overrides.
+      // An action is blocked only when EVERY override for it has disabled:true — a single
+      // active override (disabled:false/unset) redeems the action. Using a Map here would
+      // silently drop overrides when multiple per-resource entries share the same action name.
       const builtIn = defaults.filter((action) => {
-        const override = overrides.get(action.name);
-        if (override?.disabled) return false;
+        const actionOverrides = allOverrides.filter((o) => o.action === action.name);
+        if (actionOverrides.length > 0 && actionOverrides.every((o) => o.disabled)) return false;
         return enabledGroups.has(action.group) || enabledActions.has(action.name);
       });
 

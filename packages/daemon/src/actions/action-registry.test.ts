@@ -174,6 +174,27 @@ describe('ActionRegistry', () => {
     expect(actions.find((a) => a.name === firstAction.name)).toBeUndefined();
   });
 
+  it('does not block action when only some overrides are disabled', () => {
+    const registry = createActionRegistry(logger);
+    const defaults = registry.getAllDefaults();
+
+    if (defaults.length === 0) return;
+
+    const firstAction = defaults[0];
+    const policy: ActionPolicy = {
+      enabledGroups: [],
+      enabledActions: [firstAction.name],
+      actionOverrides: [
+        { action: firstAction.name, disabled: true },
+        { action: firstAction.name, allowedResources: ['org/repo-a'] },
+      ],
+      sanitization: { preset: 'standard' },
+    };
+
+    const actions = registry.getAvailableActions(policy);
+    expect(actions.find((a) => a.name === firstAction.name)).toBeDefined();
+  });
+
   it('backward compat: works without enabledActions field', () => {
     const registry = createActionRegistry(logger);
     const defaults = registry.getAllDefaults();

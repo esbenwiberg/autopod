@@ -60,8 +60,16 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       }
 
       // 2. Check overrides (approval required, resource restrictions)
-      const override = (policy.actionOverrides ?? []).find((o) => o.action === actionName);
-      if (override?.requiresApproval && !request.skipApprovalCheck) {
+      // Collect ALL active (non-disabled) overrides for this action and merge their constraints.
+      // Multiple overrides per action are used to grant access to several specific repos —
+      // using .find() would only honour the first one and silently block the rest.
+      const activeOverrides = (policy.actionOverrides ?? []).filter(
+        (o) => o.action === actionName && !o.disabled,
+      );
+      const requiresApproval = activeOverrides.some((o) => o.requiresApproval);
+      const allAllowedResources = activeOverrides.flatMap((o) => o.allowedResources ?? []);
+
+      if (requiresApproval && !request.skipApprovalCheck) {
         return {
           success: false,
           error: `Action '${actionName}' requires human approval. This check should be handled by the MCP layer — if you see this, the approval flow was bypassed.`,
@@ -69,7 +77,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
           quarantined: false,
         };
       }
-      if (override?.allowedResources?.length) {
+      if (allAllowedResources.length > 0) {
         const resource =
           (params.repo as string) ??
           (params.org as string) ??
@@ -89,7 +97,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
             quarantined: false,
           };
         }
-        if (!matchesResource(resource, override.allowedResources)) {
+        if (!matchesResource(resource, allAllowedResources)) {
           return {
             success: false,
             error: `Action '${actionName}' not allowed for resource '${resource}'`,
@@ -239,13 +247,26 @@ function sanitizeParamsForAudit(params: Record<string, unknown>): Record<string,
  *   '*'        — allow any resource
  *   'org/*'    — allow all repos within the org (prefix match on "org/")
  *   'org/repo' — exact match
+ *
+ * Both sides are URL-decoded before comparison so that patterns copy-pasted from
+ * ADO URLs (e.g. "org/TeamPlanner%40-V3%40") match the raw repo name the agent passes.
  */
 function matchesResource(resource: string, patterns: string[]): boolean {
+  const decoded = safeDecodeURIComponent(resource);
   return patterns.some((p) => {
-    if (p === '*') return true;
-    if (p.endsWith('/*')) return resource.startsWith(p.slice(0, -1));
-    return p === resource;
+    const decodedP = safeDecodeURIComponent(p);
+    if (decodedP === '*') return true;
+    if (decodedP.endsWith('/*')) return decoded.startsWith(decodedP.slice(0, -1));
+    return decodedP === decoded;
   });
+}
+
+function safeDecodeURIComponent(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
 
 function summarizeResponse(data: unknown): string {
