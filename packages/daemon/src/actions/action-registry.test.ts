@@ -156,7 +156,7 @@ describe('ActionRegistry', () => {
     expect(actions[0]?.name).toBe(firstAction.name);
   });
 
-  it('disabled override wins over enabledActions', () => {
+  it('disabled override does NOT block the action — disabled means the rule is paused', () => {
     const registry = createActionRegistry(logger);
     const defaults = registry.getAllDefaults();
 
@@ -166,28 +166,9 @@ describe('ActionRegistry', () => {
     const policy: ActionPolicy = {
       enabledGroups: [],
       enabledActions: [firstAction.name],
+      // disabled:true = this override rule is paused; the action itself is still available
+      // because it is in enabledActions. Blocking is done by removing from enabledActions.
       actionOverrides: [{ action: firstAction.name, disabled: true }],
-      sanitization: { preset: 'standard' },
-    };
-
-    const actions = registry.getAvailableActions(policy);
-    expect(actions.find((a) => a.name === firstAction.name)).toBeUndefined();
-  });
-
-  it('does not block action when only some overrides are disabled', () => {
-    const registry = createActionRegistry(logger);
-    const defaults = registry.getAllDefaults();
-
-    if (defaults.length === 0) return;
-
-    const firstAction = defaults[0];
-    const policy: ActionPolicy = {
-      enabledGroups: [],
-      enabledActions: [firstAction.name],
-      actionOverrides: [
-        { action: firstAction.name, disabled: true },
-        { action: firstAction.name, allowedResources: ['org/repo-a'] },
-      ],
       sanitization: { preset: 'standard' },
     };
 
