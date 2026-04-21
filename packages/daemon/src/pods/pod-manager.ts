@@ -1589,25 +1589,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // The bare repo's worktrees/<name>/gitdir still points to the host bind-mount
           // path (/mnt/worktree or the host worktree dir). Repoint it to /workspace so
           // git commands work on the container's native overlayfs filesystem.
-          await containerManager.execInContainer(
+          // mkdir -p guards against the worktrees/<name>/ dir not yet existing (e.g. first
+          // container start before the bare repo's metadata is fully materialised).
+          const repoint = await containerManager.execInContainer(
             containerId,
             [
               'sh',
               '-c',
-              'BARE_WT=$(sed "s/^gitdir: //" /workspace/.git) && echo "/workspace/.git" > "${BARE_WT}/gitdir"',
+              'BARE_WT=$(sed "s/^gitdir: //" /workspace/.git) && mkdir -p "${BARE_WT}" && echo "/workspace/.git" > "${BARE_WT}/gitdir"',
             ],
             { timeout: 5_000 },
           );
+          if (repoint.exitCode !== 0) {
+            throw new Error(
+              `Git worktree gitdir repoint failed (exit ${repoint.exitCode}): ${repoint.stderr}`,
+            );
+          }
           // Restore any tracked files missing from the working tree (M/D status).
           // syncWorkspaceBack() clears + re-copies the host bind-mount; if it dies mid-flight
           // (OOM, Docker crash, Azure SMB error) the host worktree loses files while the git
           // index still references them. Recovery mode then copies that partial tree into the
           // container. `git restore .` is idempotent — a no-op when the tree is clean.
-          await containerManager.execInContainer(
+          const restore = await containerManager.execInContainer(
             containerId,
             ['git', '-C', '/workspace', 'restore', '.'],
             { timeout: 30_000 },
           );
+          if (restore.exitCode !== 0) {
+            throw new Error(
+              `Git workspace restore failed (exit ${restore.exitCode}): ${restore.stderr}`,
+            );
+          }
         }
 
         // Clone reference repos into /repos/<mountPath> inside the container (read-only)
