@@ -55,7 +55,11 @@ import type {
   WorktreeManager,
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
-import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
+import {
+  buildClaudeConfigFiles,
+  buildProviderEnv,
+  persistRefreshedCredentials,
+} from '../providers/index.js';
 import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
@@ -1415,7 +1419,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // The queue's activeIds dedup prevents most races, but this guard ensures
       // a stale processPod call can never kill a pod that's already running.
       if (pod.status !== 'queued' && pod.status !== 'handoff') {
-        logger.warn({ podId, status: pod.status }, 'processPod skipped — pod not in queued/handoff state');
+        logger.warn(
+          { podId, status: pod.status },
+          'processPod skipped — pod not in queued/handoff state',
+        );
         return;
       }
 
@@ -1720,34 +1727,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Interactive pods: container stays alive, no agent/validation/PR
         if (pod.options.agentMode === 'interactive') {
-          // Write provider credential files + Claude config (disclaimer ack, folder trust) so
-          // interactive Claude Code in the terminal doesn't show onboarding/disclaimer/trust prompts.
-          // Best-effort — missing/expired credentials are fine for workspace pods since the user
-          // can authenticate manually via `ap inject` after attaching.
-          try {
-            const wsProviderResult = await buildProviderEnv(profile, podId, logger);
-            for (const file of wsProviderResult.containerFiles) {
-              await containerManager.writeFile(containerId, file.path, file.content);
-            }
-            // Write provider env vars (ANTHROPIC_API_KEY, Foundry vars, Copilot token, etc.) to
-            // a login-shell profile script so they're available when the user runs `claude` in the
-            // terminal. MAX provider has no env vars (uses .credentials.json only) — skip in that case.
-            const providerEnvEntries = Object.entries(wsProviderResult.env);
-            if (providerEnvEntries.length > 0) {
-              const profileScript = providerEnvEntries
-                .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
-                .join('\n');
-              await containerManager.writeFile(
-                containerId,
-                '/etc/profile.d/autopod-creds.sh',
-                `${profileScript}\n`,
-              );
-            }
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Could not write provider credentials to workspace container — user will need to authenticate manually',
-            );
+          // Write Claude UX config (disclaimer ack, folder trust, theme, auto-updater off) so
+          // `claude` inside the container doesn't show first-run theme/trust/disclaimer prompts.
+          // Workspace pods intentionally do NOT pre-seed provider credentials — the user runs
+          // `/login` manually inside the container. Rationale: pre-seeded OAuth tokens can be
+          // silently rejected by Anthropic (policy changes, Enterprise org restrictions, etc.),
+          // producing a confusing "logged in as enterprise → 401" state. Manual /login keeps
+          // the surprise surface zero.
+          for (const file of buildClaudeConfigFiles()) {
+            await containerManager.writeFile(containerId, file.path, file.content);
           }
           // Capture starting HEAD so the diff endpoint only shows workspace changes,
           // not the entire branch history since it diverged from main.
@@ -2731,7 +2719,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await worktreeManager.pushBranch(pod.worktreePath);
           emitActivityStatus(podId, 'Branch pushed');
         } catch (pushErr) {
-          logger.warn({ err: pushErr, podId }, 'Pre-merge push failed — proceeding with merge attempt');
+          logger.warn(
+            { err: pushErr, podId },
+            'Pre-merge push failed — proceeding with merge attempt',
+          );
         }
         emitActivityStatus(podId, `Merging PR: ${pod.prUrl}`);
         try {
@@ -4675,7 +4666,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       await maybeSpawnFixSession(podId, status, userMessage);
-      logger.info({ podId, hasUserMessage: Boolean(userMessage) }, 'Manual fix pod spawn triggered');
+      logger.info(
+        { podId, hasUserMessage: Boolean(userMessage) },
+        'Manual fix pod spawn triggered',
+      );
     },
 
     async retryCreatePr(podId: string): Promise<void> {
@@ -4688,11 +4682,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
       if (pod.prUrl) {
-        throw new AutopodError(
-          `Pod ${podId} already has a PR: ${pod.prUrl}`,
-          'INVALID_STATE',
-          409,
-        );
+        throw new AutopodError(`Pod ${podId} already has a PR: ${pod.prUrl}`, 'INVALID_STATE', 409);
       }
       if (!pod.worktreePath) {
         throw new AutopodError(

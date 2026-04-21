@@ -12,9 +12,14 @@ const CONTAINER_WORK_DIR = '/workspace';
  * Returns the Claude Code config files to inject into every container:
  *
  *  ~/.claude.json       — skips onboarding, disclaimer, and pre-accepts folder trust
- *  ~/.claude/settings.json — sets theme to dark
+ *  ~/.claude/settings.json — sets theme to dark, disables auto-updater
+ *
+ * Exported so pod-manager can write these for workspace pods independently of
+ * provider credential injection — workspace pods don't pre-seed credentials
+ * (users /login manually), but they still need these UX files written to skip
+ * the first-run theme/trust/disclaimer prompts every time they run `claude`.
  */
-function buildClaudeConfigFiles(): ContainerFile[] {
+export function buildClaudeConfigFiles(): ContainerFile[] {
   const claudeJson = JSON.stringify(
     {
       hasCompletedOnboarding: true,
