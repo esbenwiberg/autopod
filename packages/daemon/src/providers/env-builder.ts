@@ -31,7 +31,7 @@ function buildClaudeConfigFiles(): ContainerFile[] {
     2,
   );
 
-  const settingsJson = JSON.stringify({ theme: 'dark' }, null, 2);
+  const settingsJson = JSON.stringify({ theme: 'dark', autoUpdaterStatus: 'disabled' }, null, 2);
 
   return [
     { path: `${CONTAINER_HOME_DIR}/.claude.json`, content: claudeJson },

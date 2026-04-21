@@ -1729,6 +1729,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             for (const file of wsProviderResult.containerFiles) {
               await containerManager.writeFile(containerId, file.path, file.content);
             }
+            // Write provider env vars (ANTHROPIC_API_KEY, Foundry vars, Copilot token, etc.) to
+            // a login-shell profile script so they're available when the user runs `claude` in the
+            // terminal. MAX provider has no env vars (uses .credentials.json only) — skip in that case.
+            const providerEnvEntries = Object.entries(wsProviderResult.env);
+            if (providerEnvEntries.length > 0) {
+              const profileScript = providerEnvEntries
+                .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
+                .join('\n');
+              await containerManager.writeFile(
+                containerId,
+                '/etc/profile.d/autopod-creds.sh',
+                `${profileScript}\n`,
+              );
+            }
           } catch (err) {
             logger.warn(
               { err, podId },
