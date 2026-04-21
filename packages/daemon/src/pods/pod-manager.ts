@@ -1446,12 +1446,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           let recoveryViable = false;
           if (isRecovery && pod.recoveryWorktreePath) {
             try {
-              await access(path.join(pod.recoveryWorktreePath, '.git'));
+              const gitlinkPath = path.join(pod.recoveryWorktreePath, '.git');
+              await access(gitlinkPath);
+              // Also verify the bare-repo worktree metadata directory still exists.
+              // `git worktree prune` can remove it while the on-disk directory survives,
+              // leaving the worktree in a broken state where the container gitdir repointing
+              // script would fail trying to write to a non-existent path.
+              const gitlinkContent = await readFile(gitlinkPath, 'utf8');
+              const bareWorktreeDir = path.resolve(
+                pod.recoveryWorktreePath,
+                gitlinkContent.trim().replace(/^gitdir:\s*/, ''),
+              );
+              await access(bareWorktreeDir);
               recoveryViable = true;
             } catch {
               logger.warn(
                 { podId, worktreePath: pod.recoveryWorktreePath },
-                'Recovery worktree missing or not a git directory — falling back to fresh worktree',
+                'Recovery worktree missing or bare-repo metadata gone — falling back to fresh worktree',
               );
               podRepo.update(podId, { recoveryWorktreePath: null });
             }
@@ -2624,6 +2635,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const approveProfile = profileStore.get(pod.profileName);
       const prManager = prManagerFactory ? prManagerFactory(approveProfile) : null;
       if (pod.prUrl && prManager && pod.worktreePath) {
+        // Fix pods make commits in the container but rely on the agent to push.
+        // Push explicitly here before attempting to complete the PR so any local
+        // commits the agent forgot (or failed) to push are flushed to the remote.
+        try {
+          await worktreeManager.pushBranch(pod.worktreePath);
+          emitActivityStatus(podId, 'Branch pushed');
+        } catch (pushErr) {
+          logger.warn({ err: pushErr, podId }, 'Pre-merge push failed — proceeding with merge attempt');
+        }
         emitActivityStatus(podId, `Merging PR: ${pod.prUrl}`);
         try {
           const mergeResult = await prManager.mergePr({
@@ -2906,14 +2926,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           logger.warn({ err, podId }, 'Failed to abort runtime');
         }
 
-        // Cleanup worktree
+        // Cleanup worktree — always clear the DB path even if cleanup throws,
+        // so a subsequent rework doesn't attempt recovery on a stale directory.
         if (pod.worktreePath) {
           try {
             await worktreeManager.cleanup(pod.worktreePath);
-            podRepo.update(podId, { worktreePath: null });
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to cleanup worktree');
           }
+          podRepo.update(podId, { worktreePath: null });
         }
       };
 
