@@ -17,6 +17,7 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
   async function adoFetch(url: string): Promise<unknown> {
     const response = await fetchWithTimeout(url, {
       headers: {
+        Accept: 'application/json',
         Authorization: getAuth(),
         'Content-Type': 'application/json',
       },
@@ -35,6 +36,7 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
     const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
+        Accept: 'application/json',
         Authorization: getAuth(),
         'Content-Type': 'application/json',
       },
@@ -164,7 +166,10 @@ export function createAdoHandler(config: HandlerConfig): ActionHandler {
           const repo = encodeURIComponent(params.repo as string);
           const filePath = params.path as string;
           const version = params.version as string | undefined;
-          let url = `https://dev.azure.com/${org}/${project}/_apis/git/repositories/${repo}/items?path=${encodeURIComponent(filePath)}&includeContent=true&api-version=${ADO_API_VERSION}`;
+          // $format=json forces ADO's Items endpoint to return a JSON envelope with
+          // the file content in the `content` field. Without it, the endpoint returns
+          // raw file bytes (YAML/Markdown/etc.) which JSON.parse then chokes on.
+          let url = `https://dev.azure.com/${org}/${project}/_apis/git/repositories/${repo}/items?path=${encodeURIComponent(filePath)}&includeContent=true&$format=json&api-version=${ADO_API_VERSION}`;
           if (version) {
             url += `&versionDescriptor.version=${encodeURIComponent(version)}`;
           }

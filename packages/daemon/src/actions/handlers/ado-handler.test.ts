@@ -404,8 +404,16 @@ describe('createAdoHandler', () => {
 
     const calledUrl = vi.mocked(global.fetch).mock.calls[0][0] as string;
     expect(calledUrl).toContain('includeContent=true');
+    // $format=json forces ADO to return a JSON envelope instead of raw file bytes.
+    // Without it, reading a .yml/.md file throws "Unexpected token '#'..." in JSON.parse.
+    expect(calledUrl).toContain('$format=json');
     expect(calledUrl).toContain('path=%2Fsrc%2Findex.ts');
     expect(calledUrl).not.toContain('versionDescriptor');
+
+    const calledOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
+    const acceptHeader = (calledOpts.headers as Record<string, string>).Accept;
+    expect(acceptHeader).toBe('application/json');
+
     expect(result).toEqual(expect.objectContaining({ content: 'console.log("hello");' }));
   });
 
