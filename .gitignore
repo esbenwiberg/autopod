@@ -11,6 +11,7 @@ coverage/
 .pnpm-store/
 .DS_Store
 *.key
+.autopod-data/
 packages/desktop/.build/
 packages/desktop/.swiftpm/xcode/xcuserdata/
 packages/desktop/.swiftpm/xcode/package.xcworkspace/xcuserdata/
