@@ -1779,6 +1779,33 @@ describe('PodManager', () => {
         expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       });
 
+      it('injects escalation MCP server into /workspace/.mcp.json for workspace pods', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace pod',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        await manager.processPod(pod.id);
+
+        const mcpJsonCalls = ctx.containerManager.writeFile.mock.calls.filter(
+          ([, path]) => path === '/workspace/.mcp.json',
+        );
+        expect(mcpJsonCalls.length).toBe(1);
+        const written = JSON.parse(mcpJsonCalls[0][2] as string);
+        expect(written.mcpServers).toBeDefined();
+        expect(written.mcpServers.escalation).toMatchObject({
+          type: 'http',
+          url: expect.stringContaining('/mcp/'),
+        });
+      });
+
       it('captures startCommitSha for workspace pods', async () => {
         const ctx = createTestContext();
         const fakeSha = 'abc123def456';

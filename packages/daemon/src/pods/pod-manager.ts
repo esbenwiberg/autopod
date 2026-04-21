@@ -1819,8 +1819,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
 
-          // Inject escalation + profile MCP servers into ~/.claude/settings.json so
+          // Inject escalation + profile MCP servers into /workspace/.mcp.json so
           // interactive `claude` sessions in this workspace pod pick them up automatically.
+          // Claude Code reads .mcp.json as project-level MCP config — this is the reliable
+          // path; settings.json mcpServers is not loaded by the Claude Code version in containers.
           try {
             const wsMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
             const wsProxiedServers = wsMcpServers.map((s) => ({
@@ -1830,7 +1832,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const wsToken = deps.sessionTokenIssuer?.generate(podId);
             const wsAuthHeader = wsToken ? { Authorization: `Bearer ${wsToken}` } : undefined;
 
-            const mcpServersObj: Record<
+            const injectedServers: Record<
               string,
               { type: string; url: string; headers?: Record<string, string> }
             > = {
@@ -1847,19 +1849,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ),
             };
 
+            // Merge with any existing /workspace/.mcp.json so project-configured servers survive.
+            let existingMcp: Record<string, unknown> = {};
+            try {
+              const raw = await containerManager.readFile(containerId, '/workspace/.mcp.json');
+              existingMcp = JSON.parse(raw) as Record<string, unknown>;
+            } catch {
+              // File absent or unreadable — start fresh
+            }
+            const existingServers =
+              existingMcp.mcpServers && typeof existingMcp.mcpServers === 'object'
+                ? (existingMcp.mcpServers as Record<string, unknown>)
+                : {};
+            const mergedMcp = {
+              ...existingMcp,
+              mcpServers: { ...existingServers, ...injectedServers },
+            };
+
             await containerManager.writeFile(
               containerId,
-              `${CONTAINER_HOME_DIR}/.claude/settings.json`,
-              JSON.stringify({ theme: 'dark', mcpServers: mcpServersObj }, null, 2),
+              '/workspace/.mcp.json',
+              JSON.stringify(mergedMcp, null, 2),
             );
             logger.info(
-              { podId, servers: Object.keys(mcpServersObj) },
-              'MCP servers injected into workspace container settings',
+              { podId, servers: Object.keys(injectedServers) },
+              'MCP servers injected into workspace .mcp.json',
             );
           } catch (err) {
             logger.warn(
               { err, podId },
-              'Failed to inject MCP servers into workspace container — MCP tools unavailable',
+              'Failed to inject MCP servers into workspace .mcp.json — MCP tools unavailable',
             );
           }
 
