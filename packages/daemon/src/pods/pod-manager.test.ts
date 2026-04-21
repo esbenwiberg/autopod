@@ -1008,15 +1008,23 @@ describe('PodManager', () => {
 
     describe('recovery mode', () => {
       const recoveryWorktree = '/tmp/worktree/existing';
+      const fakeBareRepo = '/tmp/bare/repo.git';
+      const fakeBareWorktreeDir = `${fakeBareRepo}/worktrees/existing`;
 
       beforeEach(() => {
-        // Create a fake worktree directory with a .git marker so the recovery
-        // viability check (fs.access) passes in processPod.
-        fs.mkdirSync(path.join(recoveryWorktree, '.git'), { recursive: true });
+        // Create a proper git worktree structure so the enhanced recovery viability
+        // check passes: a .git GITLINK FILE pointing to an existing bare-repo metadata dir.
+        fs.mkdirSync(recoveryWorktree, { recursive: true });
+        fs.mkdirSync(fakeBareWorktreeDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(recoveryWorktree, '.git'),
+          `gitdir: ${fakeBareWorktreeDir}\n`,
+        );
       });
 
       afterEach(() => {
         fs.rmSync(recoveryWorktree, { recursive: true, force: true });
+        fs.rmSync(fakeBareRepo, { recursive: true, force: true });
       });
 
       /**
@@ -1265,6 +1273,38 @@ describe('PodManager', () => {
         // Pod should still complete (not crash)
         const updated = manager.getSession(pod.id);
         expect(updated.status).toBe('validated');
+      });
+
+      it('falls back to fresh worktree when bare-repo worktree metadata is missing', async () => {
+        // Simulate the case where the .git gitlink exists but the bare repo metadata dir
+        // was pruned (git worktree prune removed it while the directory survived).
+        const staleWorktree = '/tmp/worktree/stale-metadata';
+        const staleWorktreeGit = path.join(staleWorktree, '.git');
+        const nonExistentBareDir = '/tmp/bare/gone.git/worktrees/stale-metadata';
+        fs.mkdirSync(staleWorktree, { recursive: true });
+        fs.writeFileSync(staleWorktreeGit, `gitdir: ${nonExistentBareDir}\n`);
+
+        try {
+          const ctx = createTestContext();
+          const manager = createPodManager(ctx.deps);
+          const pod = manager.createSession(
+            { profileName: 'test-profile', task: 'Recover stale', skipValidation: true },
+            'user-1',
+          );
+
+          ctx.podRepo.update(pod.id, { recoveryWorktreePath: staleWorktree });
+
+          await manager.processPod(pod.id);
+
+          // Recovery should have been skipped — worktree manager creates a fresh one
+          expect(ctx.worktreeManager.create).toHaveBeenCalled();
+
+          // recoveryWorktreePath should be cleared
+          const updated = manager.getSession(pod.id);
+          expect(updated.recoveryWorktreePath).toBeNull();
+        } finally {
+          fs.rmSync(staleWorktree, { recursive: true, force: true });
+        }
       });
     });
 
