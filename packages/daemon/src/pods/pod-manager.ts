@@ -55,7 +55,11 @@ import type {
   WorktreeManager,
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
-import { buildProviderEnv, persistRefreshedCredentials } from '../providers/index.js';
+import {
+  buildClaudeConfigFiles,
+  buildProviderEnv,
+  persistRefreshedCredentials,
+} from '../providers/index.js';
 import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
@@ -1415,7 +1419,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // The queue's activeIds dedup prevents most races, but this guard ensures
       // a stale processPod call can never kill a pod that's already running.
       if (pod.status !== 'queued' && pod.status !== 'handoff') {
-        logger.warn({ podId, status: pod.status }, 'processPod skipped — pod not in queued/handoff state');
+        logger.warn(
+          { podId, status: pod.status },
+          'processPod skipped — pod not in queued/handoff state',
+        );
         return;
       }
 
@@ -1720,13 +1727,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Interactive pods: container stays alive, no agent/validation/PR
         if (pod.options.agentMode === 'interactive') {
-          // Write provider credential files + Claude config (disclaimer ack, folder trust) so
-          // interactive Claude Code in the terminal doesn't show onboarding/disclaimer/trust prompts.
-          // Best-effort — missing/expired credentials are fine for workspace pods since the user
-          // can authenticate manually via `ap inject` after attaching.
+          // Write Claude UX config (disclaimer ack, folder trust, theme, auto-updater off)
+          // unconditionally. Decoupled from provider credentials so that an OAuth refresh
+          // failure (429 rate limit, 401 revoked, network blip) does NOT leave the user
+          // staring at theme/trust/disclaimer prompts every time they run `claude`.
+          for (const file of buildClaudeConfigFiles()) {
+            await containerManager.writeFile(containerId, file.path, file.content);
+          }
+
+          // Best-effort provider credential injection — env vars + MAX .credentials.json.
+          // Failures here are survivable: the user can authenticate manually via `ap inject`
+          // after attaching. The UX config above is already in place.
+          //
+          // bestEffortRefresh=true: for MAX, attempt the OAuth refresh to hand Claude CLI
+          // a fresh access token (login works immediately). If the refresh fails transiently
+          // (429/5xx/network), fall back to the stored credentials and let Claude CLI inside
+          // the container retry the refresh on first use. A 429 at the OAuth endpoint on the
+          // daemon side must NOT leave the workspace pod logged out.
           try {
-            const wsProviderResult = await buildProviderEnv(profile, podId, logger);
+            const wsProviderResult = await buildProviderEnv(profile, podId, logger, {
+              bestEffortRefresh: true,
+            });
             for (const file of wsProviderResult.containerFiles) {
+              // Skip duplicates — buildProviderEnv still returns the Claude UX files for
+              // the auto-pod path. Writing them twice is harmless but wasteful.
+              if (
+                file.path.endsWith('/.claude.json') ||
+                file.path.endsWith('/.claude/settings.json')
+              ) {
+                continue;
+              }
               await containerManager.writeFile(containerId, file.path, file.content);
             }
             // Write provider env vars (ANTHROPIC_API_KEY, Foundry vars, Copilot token, etc.) to
@@ -2731,7 +2761,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await worktreeManager.pushBranch(pod.worktreePath);
           emitActivityStatus(podId, 'Branch pushed');
         } catch (pushErr) {
-          logger.warn({ err: pushErr, podId }, 'Pre-merge push failed — proceeding with merge attempt');
+          logger.warn(
+            { err: pushErr, podId },
+            'Pre-merge push failed — proceeding with merge attempt',
+          );
         }
         emitActivityStatus(podId, `Merging PR: ${pod.prUrl}`);
         try {
@@ -2997,6 +3030,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // can never leave the pod stuck in 'killing' forever.
       const KILL_TIMEOUT_MS = 30_000;
       const cleanup = async () => {
+        // Persist rotated OAuth credentials before killing the container —
+        // readFile() can't reach .credentials.json once the container is gone.
+        // Workspace pods rotate refresh tokens in-container and this is often
+        // the only terminal path they take (user never calls ap complete).
+        if (pod.containerId) {
+          try {
+            const cm = containerManagerFactory.get(pod.executionTarget);
+            const profile = profileStore.get(pod.profileName);
+            if (profile.modelProvider === 'max') {
+              await persistRefreshedCredentials(
+                pod.containerId,
+                cm,
+                profileStore,
+                pod.profileName,
+                logger,
+              );
+            }
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to persist rotated OAuth credentials on kill — next pod may get stale creds',
+            );
+          }
+        }
+
         // Kill container
         if (pod.containerId) {
           try {
@@ -3188,6 +3246,32 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (options?.promoteTo && options.promoteTo !== 'branch') {
         await this.promoteToAuto(podId, options.promoteTo);
         return { promotedTo: options.promoteTo };
+      }
+
+      // Persist rotated OAuth credentials before tearing down the container.
+      // Claude CLI inside the container rotates the refresh_token during use;
+      // if we don't read it back, the next workspace pod inherits stale creds
+      // and fails with 401 "Invalid authentication credentials" — the auto-pod
+      // path already does this at processPod's post-exec step.
+      if (pod.containerId) {
+        const profile = profileStore.get(pod.profileName);
+        if (profile.modelProvider === 'max') {
+          try {
+            const cm = containerManagerFactory.get(pod.executionTarget);
+            await persistRefreshedCredentials(
+              pod.containerId,
+              cm,
+              profileStore,
+              pod.profileName,
+              logger,
+            );
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to persist rotated OAuth credentials on complete — next pod may get stale creds',
+            );
+          }
+        }
       }
 
       // Sync workspace changes back to host worktree before pushing
@@ -4675,7 +4759,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       await maybeSpawnFixSession(podId, status, userMessage);
-      logger.info({ podId, hasUserMessage: Boolean(userMessage) }, 'Manual fix pod spawn triggered');
+      logger.info(
+        { podId, hasUserMessage: Boolean(userMessage) },
+        'Manual fix pod spawn triggered',
+      );
     },
 
     async retryCreatePr(podId: string): Promise<void> {
@@ -4688,11 +4775,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
       if (pod.prUrl) {
-        throw new AutopodError(
-          `Pod ${podId} already has a PR: ${pod.prUrl}`,
-          'INVALID_STATE',
-          409,
-        );
+        throw new AutopodError(`Pod ${podId} already has a PR: ${pod.prUrl}`, 'INVALID_STATE', 409);
       }
       if (!pod.worktreePath) {
         throw new AutopodError(

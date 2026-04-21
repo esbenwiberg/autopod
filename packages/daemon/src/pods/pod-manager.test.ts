@@ -72,6 +72,8 @@ interface TestProfileOverrides {
   privateRegistries?: string;
   registryPat?: string;
   branchPrefix?: string;
+  modelProvider?: 'anthropic' | 'max' | 'foundry' | 'copilot';
+  providerCredentials?: unknown;
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -84,12 +86,14 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       name, repo_url, default_branch, template, build_command, start_command,
       health_path, health_timeout, validation_pages, max_validation_attempts,
       default_model, default_runtime, escalation_config,
-      private_registries, registry_pat, branch_prefix
+      private_registries, registry_pat, branch_prefix,
+      model_provider, provider_credentials
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
       @defaultModel, @defaultRuntime, @escalationConfig,
-      @privateRegistries, @registryPat, @branchPrefix
+      @privateRegistries, @registryPat, @branchPrefix,
+      @modelProvider, @providerCredentials
     )
   `).run({
     name,
@@ -114,6 +118,8 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     privateRegistries: opts.privateRegistries ?? '[]',
     registryPat: opts.registryPat ?? null,
     branchPrefix: opts.branchPrefix ?? 'autopod/',
+    modelProvider: opts.modelProvider ?? null,
+    providerCredentials: opts.providerCredentials ? JSON.stringify(opts.providerCredentials) : null,
   });
 }
 
@@ -286,11 +292,25 @@ function createTestContext(
         updatedAt: row.updated_at as string,
       };
     }),
-    getRaw: vi.fn(),
+    getRaw: vi.fn((name: string) => {
+      const row = db.prepare('SELECT * FROM profiles WHERE name = ?').get(name) as
+        | Record<string, unknown>
+        | undefined;
+      if (!row) throw new Error(`Profile "${name}" not found`);
+      return {
+        name: row.name as string,
+        modelProvider:
+          (row.model_provider as 'anthropic' | 'max' | 'foundry' | 'copilot') ?? 'anthropic',
+        providerCredentials: row.provider_credentials
+          ? JSON.parse(row.provider_credentials as string)
+          : null,
+      } as ReturnType<ProfileStore['getRaw']>;
+    }),
     list: vi.fn(() => []),
     update: vi.fn(),
     delete: vi.fn(),
     exists: vi.fn(() => true),
+    resolveCredentialOwner: vi.fn((name: string) => name),
   };
 
   const runtime = createMockRuntime();
@@ -541,6 +561,86 @@ describe('PodManager', () => {
 
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
       expect(ctx.worktreeManager.cleanup).toHaveBeenCalledWith('/tmp/wt');
+    });
+
+    it('persists rotated MAX credentials from the container before kill', async () => {
+      const ctx = createTestContext(undefined, {
+        modelProvider: 'max',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'old-access',
+          refreshToken: 'old-refresh',
+          expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        },
+      });
+      const rotated = {
+        claudeAiOauth: {
+          accessToken: 'rotated-access',
+          refreshToken: 'rotated-refresh',
+          expiresAt: Date.now() + 7200_000,
+        },
+      };
+      vi.mocked(ctx.containerManager.readFile).mockResolvedValueOnce(JSON.stringify(rotated));
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession({ profileName: 'test-profile', task: 'Work' }, 'user-1');
+      ctx.podRepo.update(pod.id, { containerId: 'ctr-1' });
+
+      await manager.killSession(pod.id);
+
+      // Credential file must be read BEFORE container kill.
+      const readCall = vi
+        .mocked(ctx.containerManager.readFile)
+        .mock.calls.find((c) => c[1] === '/home/autopod/.claude/.credentials.json');
+      expect(readCall).toBeDefined();
+      expect(vi.mocked(ctx.profileStore.update)).toHaveBeenCalledWith(
+        'test-profile',
+        expect.objectContaining({
+          providerCredentials: expect.objectContaining({
+            provider: 'max',
+            accessToken: 'rotated-access',
+            refreshToken: 'rotated-refresh',
+          }),
+        }),
+      );
+    });
+
+    it('does not read credentials for non-MAX profiles on kill', async () => {
+      // Default profile has no modelProvider → resolves to 'anthropic'
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession({ profileName: 'test-profile', task: 'Work' }, 'user-1');
+      ctx.podRepo.update(pod.id, { containerId: 'ctr-1' });
+
+      await manager.killSession(pod.id);
+
+      const credReads = vi
+        .mocked(ctx.containerManager.readFile)
+        .mock.calls.filter((c) => c[1] === '/home/autopod/.claude/.credentials.json');
+      expect(credReads).toHaveLength(0);
+    });
+
+    it('swallows credential read failure and still kills the pod', async () => {
+      const ctx = createTestContext(undefined, {
+        modelProvider: 'max',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'x',
+          refreshToken: 'y',
+          expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        },
+      });
+      vi.mocked(ctx.containerManager.readFile).mockRejectedValueOnce(new Error('container gone'));
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession({ profileName: 'test-profile', task: 'Work' }, 'user-1');
+      ctx.podRepo.update(pod.id, { containerId: 'ctr-1' });
+
+      await manager.killSession(pod.id);
+
+      const killed = manager.getSession(pod.id);
+      expect(killed.status).toBe('killed');
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
     });
 
     it('throws for pods that cannot be killed', async () => {
@@ -1016,10 +1116,7 @@ describe('PodManager', () => {
         // check passes: a .git GITLINK FILE pointing to an existing bare-repo metadata dir.
         fs.mkdirSync(recoveryWorktree, { recursive: true });
         fs.mkdirSync(fakeBareWorktreeDir, { recursive: true });
-        fs.writeFileSync(
-          path.join(recoveryWorktree, '.git'),
-          `gitdir: ${fakeBareWorktreeDir}\n`,
-        );
+        fs.writeFileSync(path.join(recoveryWorktree, '.git'), `gitdir: ${fakeBareWorktreeDir}\n`);
       });
 
       afterEach(() => {
@@ -1974,6 +2071,85 @@ describe('PodManager', () => {
         await expect(manager.completeSession(pod.id)).rejects.toMatchObject({
           code: 'INVALID_STATE',
         });
+      });
+
+      it('persists rotated MAX credentials from the container before complete', async () => {
+        const ctx = createTestContext(undefined, {
+          modelProvider: 'max',
+          providerCredentials: {
+            provider: 'max',
+            accessToken: 'old-access',
+            refreshToken: 'old-refresh',
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          },
+        });
+        const rotated = {
+          claudeAiOauth: {
+            accessToken: 'rotated-access',
+            refreshToken: 'rotated-refresh',
+            expiresAt: Date.now() + 7200_000,
+          },
+        };
+        vi.mocked(ctx.containerManager.readFile).mockResolvedValueOnce(JSON.stringify(rotated));
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace pod',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+
+        await manager.completeSession(pod.id);
+
+        const readCall = vi
+          .mocked(ctx.containerManager.readFile)
+          .mock.calls.find((c) => c[1] === '/home/autopod/.claude/.credentials.json');
+        expect(readCall).toBeDefined();
+        expect(vi.mocked(ctx.profileStore.update)).toHaveBeenCalledWith(
+          'test-profile',
+          expect.objectContaining({
+            providerCredentials: expect.objectContaining({
+              provider: 'max',
+              accessToken: 'rotated-access',
+              refreshToken: 'rotated-refresh',
+            }),
+          }),
+        );
+      });
+
+      it('does not read credentials for non-MAX profiles on complete', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace pod',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+
+        await manager.completeSession(pod.id);
+
+        const credReads = vi
+          .mocked(ctx.containerManager.readFile)
+          .mock.calls.filter((c) => c[1] === '/home/autopod/.claude/.credentials.json');
+        expect(credReads).toHaveLength(0);
       });
 
       it('surfaces push errors without blocking completion', async () => {
