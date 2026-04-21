@@ -12,13 +12,9 @@ const CONTAINER_WORK_DIR = '/workspace';
  * Returns the Claude Code config files to inject into every container:
  *
  *  ~/.claude.json       — skips onboarding, disclaimer, and pre-accepts folder trust
- *  ~/.claude/settings.json — sets theme to dark, disables auto-updater
- *
- * Exported so callers can write these unconditionally, independent of the
- * provider credential refresh (which can fail transiently on 429/401 and
- * must not take the UX config down with it).
+ *  ~/.claude/settings.json — sets theme to dark
  */
-export function buildClaudeConfigFiles(): ContainerFile[] {
+function buildClaudeConfigFiles(): ContainerFile[] {
   const claudeJson = JSON.stringify(
     {
       hasCompletedOnboarding: true,
@@ -43,20 +39,6 @@ export function buildClaudeConfigFiles(): ContainerFile[] {
   ];
 }
 
-export interface BuildProviderEnvOptions {
-  /**
-   * For MAX/PRO: attempt the daemon-side OAuth refresh, but fall back to the
-   * stored credentials on failure instead of throwing. Use for workspace pods
-   * where Claude CLI inside the container can refresh on its own — a transient
-   * 429/5xx/network blip at the OAuth endpoint must not leave the pod logged out.
-   *
-   * When false (default): refresh failure throws, failing the whole provisioning
-   * step. Right for auto pods where we need verified-valid creds up-front because
-   * the agent has no way to interactively log in.
-   */
-  bestEffortRefresh?: boolean;
-}
-
 /**
  * Build provider-specific environment variables and credential files for a pod.
  *
@@ -67,7 +49,6 @@ export async function buildProviderEnv(
   profile: Profile,
   _sessionId: string,
   logger: Logger,
-  options: BuildProviderEnvOptions = {},
 ): Promise<ProviderEnvResult> {
   const provider = profile.modelProvider;
 
@@ -76,7 +57,7 @@ export async function buildProviderEnv(
       return buildAnthropicEnv();
 
     case 'max':
-      return buildMaxEnv(profile, logger, options.bestEffortRefresh ?? false);
+      return buildMaxEnv(profile, logger);
 
     case 'foundry':
       return buildFoundryEnv(profile);
@@ -110,19 +91,12 @@ function buildAnthropicEnv(): ProviderEnvResult {
 /**
  * MAX/PRO OAuth provider.
  *
- * 1. Refreshes the access token if near expiry. When `bestEffortRefresh` is set
- *    (workspace pods), refresh failures fall back to the stored credentials so
- *    Claude CLI inside the container can handle its own refresh. Otherwise the
- *    failure throws and fails provisioning.
+ * 1. Refreshes the access token if near expiry
  * 2. Builds a `.claude/.credentials.json` file for the container
  * 3. Sets HOME env to a temp dir so Claude Code finds the credentials
  * 4. Does NOT set ANTHROPIC_API_KEY (forces OAuth path)
  */
-async function buildMaxEnv(
-  profile: Profile,
-  logger: Logger,
-  bestEffortRefresh: boolean,
-): Promise<ProviderEnvResult> {
+async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEnvResult> {
   const creds = profile.providerCredentials;
 
   if (!creds || creds.provider !== 'max') {
@@ -131,20 +105,8 @@ async function buildMaxEnv(
     );
   }
 
-  let refreshed: MaxCredentials;
-  if (bestEffortRefresh) {
-    try {
-      refreshed = await refreshOAuthToken(creds, logger);
-    } catch (err) {
-      logger.warn(
-        { err },
-        'OAuth token refresh failed — falling back to stored credentials. Claude CLI in the container will retry the refresh on first use.',
-      );
-      refreshed = creds;
-    }
-  } else {
-    refreshed = await refreshOAuthToken(creds, logger);
-  }
+  // Pre-flight token refresh
+  const refreshed = await refreshOAuthToken(creds, logger);
 
   // Build the credentials file that Claude Code expects at ~/.claude/.credentials.json.
   // All fields must be preserved — claude 2.1.80+ requires scopes/subscriptionType
