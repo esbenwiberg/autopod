@@ -78,9 +78,12 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
         };
       }
       if (allAllowedResources.length > 0) {
+        // Build the most-specific resource identifier available.
+        // ADO actions pass org + project + repo as separate params; combine them so
+        // allowedResources patterns like "365projectum/TeamPlanner@V3@" can match
+        // against calls that specify any repo within that org/project.
         const resource =
-          (params.repo as string) ??
-          (params.org as string) ??
+          buildResourceId(params) ??
           (params.scope as string) ?? // Azure RBAC PIM role actions
           (params.group_id as string); // Azure PIM group actions
         if (!resource) {
@@ -242,14 +245,17 @@ function sanitizeParamsForAudit(params: Record<string, unknown>): Record<string,
 }
 
 /**
- * Check whether a resource (e.g. "org/repo") matches any pattern in the allowlist.
+ * Check whether a resource matches any pattern in the allowlist.
  * Supported pattern syntax:
- *   '*'        — allow any resource
- *   'org/*'    — allow all repos within the org (prefix match on "org/")
- *   'org/repo' — exact match
+ *   '*'             — allow any resource
+ *   'org/*'         — allow all repos within the org (explicit wildcard)
+ *   'org/project'   — allow any repo within the org/project (prefix-segment match)
+ *   'org/repo'      — exact match
  *
  * Both sides are URL-decoded before comparison so that patterns copy-pasted from
- * ADO URLs (e.g. "org/TeamPlanner%40-V3%40") match the raw repo name the agent passes.
+ * ADO URLs (e.g. "org/TeamPlanner%40-V3%40") match the raw params the agent passes.
+ * Prefix-segment matching means "org/project" covers "org/project/repo" without
+ * requiring users to append "/*" to every scope.
  */
 function matchesResource(resource: string, patterns: string[]): boolean {
   const decoded = safeDecodeURIComponent(resource);
@@ -257,8 +263,24 @@ function matchesResource(resource: string, patterns: string[]): boolean {
     const decodedP = safeDecodeURIComponent(p);
     if (decodedP === '*') return true;
     if (decodedP.endsWith('/*')) return decoded.startsWith(decodedP.slice(0, -1));
+    if (decoded.startsWith(decodedP + '/')) return true;
     return decodedP === decoded;
   });
+}
+
+/**
+ * Build the most-specific hierarchical resource identifier from action params.
+ * For ADO actions (separate org + project + repo params) this produces "org/project/repo"
+ * so that allowedResources patterns like "org/project" match via prefix-segment logic.
+ */
+function buildResourceId(params: Record<string, unknown>): string | undefined {
+  const org = params.org as string | undefined;
+  const project = params.project as string | undefined;
+  const repo = params.repo as string | undefined;
+  if (org && project && repo) return `${org}/${project}/${repo}`;
+  if (org && project) return `${org}/${project}`;
+  if (org && repo) return `${org}/${repo}`;
+  return repo ?? org;
 }
 
 function safeDecodeURIComponent(s: string): string {

@@ -253,7 +253,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const profile = profileStore.get(pod.profileName);
       if (!profile.actionPolicy) return false;
       const override = (profile.actionPolicy.actionOverrides ?? []).find(
-        (o) => o.action === actionName,
+        (o) => o.action === actionName && !o.disabled,
       );
       return override?.requiresApproval ?? false;
     },

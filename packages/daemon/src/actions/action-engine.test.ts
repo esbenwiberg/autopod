@@ -307,6 +307,107 @@ describe('ActionEngine', () => {
     expect(result.error).not.toContain('not allowed for resource');
   });
 
+  // ─── ADO composite resource matching ────────────────────────────────────────
+  // ADO actions pass org + project + repo as separate params. The engine builds
+  // "org/project/repo" so that allowedResources patterns like "org/project" work
+  // via prefix-segment matching without requiring an explicit "/*" wildcard.
+
+  const adoReadFileAction: ActionDefinition = {
+    name: 'ado_read_file',
+    description: 'Read a file from ADO',
+    group: 'ado-code',
+    handler: 'ado',
+    params: {
+      org: { type: 'string', required: true, description: 'ADO org' },
+      project: { type: 'string', required: true, description: 'ADO project' },
+      repo: { type: 'string', required: true, description: 'Repo name' },
+      path: { type: 'string', required: true, description: 'File path' },
+    },
+    response: { fields: ['content'] },
+  };
+
+  const adoPolicy: ActionPolicy = {
+    enabledGroups: ['ado-code'],
+    sanitization: { preset: 'standard' },
+  };
+
+  it('allows ado_read_file when org/project pattern prefix-matches org/project/repo resource', async () => {
+    const adoEngine = createActionEngine({
+      registry: createMockRegistry([adoReadFileAction]),
+      auditRepo: createMockAuditRepo(),
+      logger: pino({ level: 'silent' }),
+      getSecret: () => 'test-ado-pat',
+    });
+
+    const result = await adoEngine.execute(
+      {
+        podId: 'sess-1',
+        actionName: 'ado_read_file',
+        params: { org: '365projectum', project: 'TeamPlanner@V3@', repo: 'teamplanner-pipelines', path: 'file.yml' },
+      },
+      { ...adoPolicy, actionOverrides: [{ action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@'] }] },
+    );
+    expect(result.error).not.toContain('not allowed for resource');
+  });
+
+  it('allows ado_read_file when org/project/*-wildcard matches org/project/repo resource', async () => {
+    const adoEngine = createActionEngine({
+      registry: createMockRegistry([adoReadFileAction]),
+      auditRepo: createMockAuditRepo(),
+      logger: pino({ level: 'silent' }),
+      getSecret: () => 'test-ado-pat',
+    });
+
+    const result = await adoEngine.execute(
+      {
+        podId: 'sess-1',
+        actionName: 'ado_read_file',
+        params: { org: '365projectum', project: 'TeamPlanner@V3@', repo: 'any-repo', path: 'file.yml' },
+      },
+      { ...adoPolicy, actionOverrides: [{ action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@/*'] }] },
+    );
+    expect(result.error).not.toContain('not allowed for resource');
+  });
+
+  it('allows ado_read_file with URL-encoded org/project pattern via prefix match', async () => {
+    const adoEngine = createActionEngine({
+      registry: createMockRegistry([adoReadFileAction]),
+      auditRepo: createMockAuditRepo(),
+      logger: pino({ level: 'silent' }),
+      getSecret: () => 'test-ado-pat',
+    });
+
+    const result = await adoEngine.execute(
+      {
+        podId: 'sess-1',
+        actionName: 'ado_read_file',
+        params: { org: '365projectum', project: 'TeamPlanner@V3@', repo: 'teamplanner-pipelines', path: 'file.yml' },
+      },
+      { ...adoPolicy, actionOverrides: [{ action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner%40V3%40'] }] },
+    );
+    expect(result.error).not.toContain('not allowed for resource');
+  });
+
+  it('blocks ado_read_file when org/project does not match', async () => {
+    const adoEngine = createActionEngine({
+      registry: createMockRegistry([adoReadFileAction]),
+      auditRepo: createMockAuditRepo(),
+      logger: pino({ level: 'silent' }),
+      getSecret: () => 'test-ado-pat',
+    });
+
+    const result = await adoEngine.execute(
+      {
+        podId: 'sess-1',
+        actionName: 'ado_read_file',
+        params: { org: 'other-org', project: 'SomeProject', repo: 'some-repo', path: 'file.yml' },
+      },
+      { ...adoPolicy, actionOverrides: [{ action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@'] }] },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not allowed for resource');
+  });
+
   it('getAvailableActions delegates to registry', () => {
     const actions = engine.getAvailableActions(testPolicy);
     expect(registry.getAvailableActions).toHaveBeenCalledWith(testPolicy);
