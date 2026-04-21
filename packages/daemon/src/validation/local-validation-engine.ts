@@ -2145,7 +2145,10 @@ async function runTaskReview(
       if (!tier1Parsed) {
         // Truncated diff path: no Tier 1 result to fall back to
         const message = err instanceof Error ? err.message : String(err);
-        return { result: null, skipReason: `Tier 2 tool-use review failed (diff was truncated): ${message}` };
+        return {
+          result: null,
+          skipReason: `Tier 2 tool-use review failed (diff was truncated): ${message}`,
+        };
       }
       return {
         result: {

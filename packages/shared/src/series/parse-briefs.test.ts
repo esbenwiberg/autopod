@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  extractMarkdownAcSection,
-  parseBriefFrontmatter,
-  parseBriefs,
-} from './parse-briefs.js';
+import { extractMarkdownAcSection, parseBriefFrontmatter, parseBriefs } from './parse-briefs.js';
 
 describe('parseBriefFrontmatter', () => {
   it('returns empty frontmatter and body as-is when no fence', () => {
@@ -13,7 +9,7 @@ describe('parseBriefFrontmatter', () => {
   });
 
   it('parses YAML frontmatter and trims body', () => {
-    const content = `---\ntitle: My Brief\ndepends_on: [other]\n---\n\nBody text\n`;
+    const content = '---\ntitle: My Brief\ndepends_on: [other]\n---\n\nBody text\n';
     const { frontmatter, body } = parseBriefFrontmatter(content);
     expect(frontmatter.title).toBe('My Brief');
     expect(frontmatter.depends_on).toEqual(['other']);
@@ -21,7 +17,8 @@ describe('parseBriefFrontmatter', () => {
   });
 
   it('parses structured acceptance_criteria from frontmatter', () => {
-    const content = `---\nacceptance_criteria:\n  - type: api\n    test: GET /health\n    pass: 200 ok\n    fail: non-200\n---\nBody\n`;
+    const content =
+      '---\nacceptance_criteria:\n  - type: api\n    test: GET /health\n    pass: 200 ok\n    fail: non-200\n---\nBody\n';
     const { frontmatter } = parseBriefFrontmatter(content);
     expect(frontmatter.acceptance_criteria).toHaveLength(1);
     expect(frontmatter.acceptance_criteria?.[0]?.type).toBe('api');
@@ -31,12 +28,13 @@ describe('parseBriefFrontmatter', () => {
 
 describe('extractMarkdownAcSection', () => {
   it('extracts AC section content', () => {
-    const body = `## Overview\n\nSome text\n\n## Acceptance Criteria\n\n- [ ] First criterion\n- [ ] Second criterion\n\n## Next Section\n\nMore text`;
+    const body =
+      '## Overview\n\nSome text\n\n## Acceptance Criteria\n\n- [ ] First criterion\n- [ ] Second criterion\n\n## Next Section\n\nMore text';
     expect(extractMarkdownAcSection(body)).toBe('- [ ] First criterion\n- [ ] Second criterion');
   });
 
   it('handles AC section at end of file', () => {
-    const body = `## Overview\n\nSome text\n\n## Acceptance Criteria\n\n- [ ] Only criterion`;
+    const body = '## Overview\n\nSome text\n\n## Acceptance Criteria\n\n- [ ] Only criterion';
     expect(extractMarkdownAcSection(body)).toBe('- [ ] Only criterion');
   });
 
@@ -45,7 +43,7 @@ describe('extractMarkdownAcSection', () => {
   });
 
   it('is case-insensitive for heading', () => {
-    const body = `## acceptance criteria\n\n- item`;
+    const body = '## acceptance criteria\n\n- item';
     expect(extractMarkdownAcSection(body)).toBe('- item');
   });
 });
@@ -57,7 +55,7 @@ describe('parseBriefs', () => {
   });
 
   it('uses frontmatter title when present', () => {
-    const content = `---\ntitle: Custom Title\n---\nBody`;
+    const content = '---\ntitle: Custom Title\n---\nBody';
     const briefs = parseBriefs([{ filename: '01-ignored.md', content }]);
     expect(briefs[0]?.title).toBe('Custom Title');
   });
@@ -81,7 +79,7 @@ describe('parseBriefs', () => {
   });
 
   it('resolves explicit depends_on to brief titles', () => {
-    const second = `---\ndepends_on: [01-first]\n---\nTask 2`;
+    const second = '---\ndepends_on: [01-first]\n---\nTask 2';
     const briefs = parseBriefs([
       { filename: '01-first.md', content: 'Task 1' },
       { filename: '02-second.md', content: second },

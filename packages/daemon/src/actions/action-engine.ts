@@ -263,7 +263,7 @@ function matchesResource(resource: string, patterns: string[]): boolean {
     const decodedP = safeDecodeURIComponent(p);
     if (decodedP === '*') return true;
     if (decodedP.endsWith('/*')) return decoded.startsWith(decodedP.slice(0, -1));
-    if (decoded.startsWith(decodedP + '/')) return true;
+    if (decoded.startsWith(`${decodedP}/`)) return true;
     return decodedP === decoded;
   });
 }

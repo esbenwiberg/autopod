@@ -28,13 +28,20 @@ public enum PodMapper {
 
   public static func map(_ response: SessionResponse) -> Pod {
     let status = PodStatus(rawValue: response.status) ?? .queued
+    // The daemon always ships PodOptions under `options` on the wire (Pod.options is
+    // non-optional in shared). If it's missing, we're talking to an incompatible
+    // daemon — don't silently coerce via the lossy legacy outputMode path, which
+    // collapses {interactive, artifact} → {interactive, branch} and has caused
+    // real user-visible bugs (wrong badge, missing Markdown tab). Log + default
+    // instead, so the failure mode is a stale UI rather than silently-wrong state.
     let pod: PodConfig = {
       if let p = response.pod {
         let agent = AgentMode(rawValue: p.agentMode) ?? .auto
         let output = OutputTarget(rawValue: p.output) ?? .pr
         return PodConfig(agentMode: agent, output: output, validate: p.validate, promotable: p.promotable)
       }
-      return PodConfig.fromLegacy(response.outputMode)
+      print("[PodMapper] WARNING: pod \(response.id) response missing `options` — daemon/client version skew?")
+      return PodConfig()
     }()
 
     // Map escalation from pending escalation
@@ -222,7 +229,8 @@ public enum PodMapper {
       seriesName: response.seriesName,
       dependsOnPodIds: response.dependsOnPodIds
         ?? (response.dependsOnPodId.map { [$0] } ?? []),
-      dependencyStartedAt: response.dependencyStartedAt.map { parseDate($0) }
+      dependencyStartedAt: response.dependencyStartedAt.map { parseDate($0) },
+      artifactsPath: response.artifactsPath
     )
   }
 

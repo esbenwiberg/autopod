@@ -45,8 +45,9 @@ end try
 }
 
 async function saveLinuxClipboardImage(destPath: string): Promise<boolean> {
-  return spawnToFile('xclip', ['-selection', 'clipboard', '-t', 'image/png', '-o'], destPath)
-    .then((ok) => ok || spawnToFile('xsel', ['--clipboard', '--output'], destPath));
+  return spawnToFile('xclip', ['-selection', 'clipboard', '-t', 'image/png', '-o'], destPath).then(
+    (ok) => ok || spawnToFile('xsel', ['--clipboard', '--output'], destPath),
+  );
 }
 
 function spawnToFile(cmd: string, args: string[], destPath: string): Promise<boolean> {

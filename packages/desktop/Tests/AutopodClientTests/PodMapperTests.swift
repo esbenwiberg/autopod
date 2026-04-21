@@ -35,9 +35,10 @@ import AutopodUI
     "prUrl": null,
     "plan": { "summary": "Add OAuth flow", "steps": ["Setup", "Implement"] },
     "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
-    "acceptanceCriteria": ["Users can sign in"],
+    "acceptanceCriteria": [{"type":"none","test":"Users can sign in","pass":"signed in","fail":"not signed in"}],
     "claudeSessionId": null,
     "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
     "baseBranch": null,
     "acFrom": null,
     "recoveryWorktreePath": null,
@@ -64,7 +65,7 @@ import AutopodUI
   #expect(pod.phase?.current == 3)
   #expect(pod.phase?.total == 5)
   #expect(pod.containerUrl?.absoluteString == "http://localhost:3001")
-  #expect(pod.acceptanceCriteria?.first == "Users can sign in")
+  #expect(pod.acceptanceCriteria?.first?.test == "Users can sign in")
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
   #expect(pod.isWorkspace == false)
@@ -111,6 +112,7 @@ import AutopodUI
     "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
     "baseBranch": null,
     "acFrom": null,
     "recoveryWorktreePath": null,
@@ -164,6 +166,7 @@ import AutopodUI
     "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "workspace",
+    "options": { "agentMode": "interactive", "output": "branch", "validate": false, "promotable": true },
     "baseBranch": null,
     "acFrom": null,
     "recoveryWorktreePath": null,
@@ -219,7 +222,7 @@ import AutopodUI
     "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "workspace",
-    "pod": { "agentMode": "interactive", "output": "pr", "validate": false, "promotable": true },
+    "options": { "agentMode": "interactive", "output": "pr", "validate": false, "promotable": true },
     "baseBranch": null,
     "acFrom": null,
     "recoveryWorktreePath": null,
@@ -241,4 +244,65 @@ import AutopodUI
   #expect(pod.pod.promotable == true)
   #expect(pod.isWorkspace == true)
   #expect(pod.isPromotable == true)
+}
+
+/// Regression guard: {interactive, artifact} must round-trip cleanly. Prior to
+/// the PodResponse CodingKeys fix the wire field `options` was ignored and the
+/// mapper fell back to `outputMode='workspace'`, which coerced the output to
+/// `branch` — hiding artifact pods as branch pods and blocking the Markdown tab.
+@Test func mapsInteractiveArtifactPodWithArtifactsPath() throws {
+  let json = """
+  {
+    "id": "research-pod",
+    "profileName": "ctx",
+    "task": "plan the thing",
+    "status": "complete",
+    "model": "sonnet",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "research/research-pod",
+    "containerId": null,
+    "worktreePath": null,
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": true,
+    "createdAt": "2026-04-21T20:00:00Z",
+    "startedAt": "2026-04-21T20:00:00Z",
+    "completedAt": "2026-04-21T21:00:00Z",
+    "updatedAt": "2026-04-21T21:00:00Z",
+    "userId": "user-1",
+    "filesChanged": 2,
+    "linesAdded": 1639,
+    "linesRemoved": 0,
+    "previewUrl": null,
+    "prUrl": null,
+    "plan": null,
+    "progress": null,
+    "acceptanceCriteria": null,
+    "claudeSessionId": null,
+    "outputMode": "workspace",
+    "options": { "agentMode": "interactive", "output": "artifact", "validate": false, "promotable": true },
+    "baseBranch": null,
+    "acFrom": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "commitCount": 0,
+    "lastCommitAt": null,
+    "artifactsPath": "/Users/ewi/.autopod-data/artifacts/research-pod"
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+
+  #expect(pod.pod.agentMode == .interactive)
+  #expect(pod.pod.output == .artifact)
+  #expect(pod.isWorkspace == true)
+  #expect(pod.artifactsPath == "/Users/ewi/.autopod-data/artifacts/research-pod")
 }

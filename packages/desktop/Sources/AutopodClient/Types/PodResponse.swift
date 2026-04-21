@@ -104,6 +104,25 @@ public struct SessionResponse: Codable, Sendable {
   public let seriesId: String?
   public let seriesName: String?
   public let dependencyStartedAt: String?
+  public let artifactsPath: String?
+
+  // Backend serializes PodOptions under the key `options`; the Swift field is
+  // named `pod` for readability (matches the domain model). Remap on the wire.
+  private enum CodingKeys: String, CodingKey {
+    case id, profileName, task, status, model, runtime, executionTarget, branch
+    case containerId, worktreePath, validationAttempts, maxValidationAttempts
+    case lastValidationResult, pendingEscalation, escalationCount, skipValidation
+    case createdAt, startedAt, completedAt, updatedAt, userId
+    case filesChanged, linesAdded, linesRemoved, previewUrl, prUrl
+    case mergeBlockReason, plan, progress, acceptanceCriteria, claudeSessionId
+    case outputMode
+    case pod = "options"
+    case baseBranch, acFrom, recoveryWorktreePath, lastHeartbeatAt
+    case inputTokens, outputTokens, costUsd, commitCount, lastCommitAt
+    case linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
+    case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, dependencyStartedAt
+    case artifactsPath
+  }
 }
 
 public struct DeviationResponse: Codable, Sendable {

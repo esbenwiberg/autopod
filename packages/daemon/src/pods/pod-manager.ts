@@ -3181,51 +3181,79 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return { promotedTo: options.promoteTo };
       }
 
-      // Sync workspace changes back to host worktree before pushing
-      let workspaceSyncOk = true;
-      if (pod.containerId && pod.worktreePath) {
-        try {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
-        } catch (err) {
-          workspaceSyncOk = false;
-          logger.warn({ err, podId }, 'Failed to sync workspace before push');
-        }
-      }
-
-      // Push the branch to origin before completing, then clean up the worktree.
-      // Only remove the worktree if push succeeds — don't lose uncommitted work.
       let pushError: string | undefined;
-      if (pod.worktreePath) {
-        try {
-          // Pre-commit with tight deletion guard when sync failed, so mergeBranch
-          // doesn't blindly commit a partially-synced worktree.
-          if (!workspaceSyncOk) {
-            await worktreeManager.commitPendingChanges(
-              pod.worktreePath,
-              'chore: auto-commit uncommitted changes before merge',
-              { maxDeletions: 0 },
+
+      if (pod.options.output === 'artifact') {
+        // Artifact pods: tar-stream /workspace out to the host data dir and
+        // complete. Mirrors the auto-mode path in processPod (~line 2362), minus
+        // the optional branch push — if the user picked `artifact` they want a
+        // file drop, not a PR. To get a branch in the same motion, promote
+        // via `ap complete <id> --pr`.
+        const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+        const artifactsPath = path.join(dataDir, 'artifacts', podId);
+        await mkdir(artifactsPath, { recursive: true });
+
+        if (pod.containerId) {
+          const cm = containerManagerFactory.get(pod.executionTarget);
+          try {
+            emitActivityStatus(podId, 'Collecting artifacts…');
+            await cm.extractDirectoryFromContainer(pod.containerId, '/workspace', artifactsPath);
+            logger.info({ podId, artifactsPath }, 'Artifacts extracted from container');
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to extract artifacts — completing with empty artifact store',
             );
           }
-          // mergeBranch auto-commits any remaining uncommitted changes before pushing
-          await worktreeManager.mergeBranch({
-            worktreePath: pod.worktreePath,
-            targetBranch: pod.branch ?? 'HEAD',
-          });
-          logger.info({ podId, branch: pod.branch }, 'Workspace branch pushed to origin');
-          // Safe to clean up — work is in origin
+        }
+
+        podRepo.update(podId, { artifactsPath });
+      } else {
+        // Sync workspace changes back to host worktree before pushing
+        let workspaceSyncOk = true;
+        if (pod.containerId && pod.worktreePath) {
           try {
-            await worktreeManager.cleanup(pod.worktreePath);
-            logger.info({ podId }, 'Workspace worktree cleaned up');
+            const cm = containerManagerFactory.get(pod.executionTarget);
+            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
           } catch (err) {
-            logger.warn({ err, podId }, 'Failed to cleanup workspace worktree');
+            workspaceSyncOk = false;
+            logger.warn({ err, podId }, 'Failed to sync workspace before push');
           }
-        } catch (err) {
-          pushError = err instanceof Error ? err.message : String(err);
-          logger.warn(
-            { err, podId },
-            'Failed to push workspace branch — completing anyway, worktree preserved',
-          );
+        }
+
+        // Push the branch to origin before completing, then clean up the worktree.
+        // Only remove the worktree if push succeeds — don't lose uncommitted work.
+        if (pod.worktreePath) {
+          try {
+            // Pre-commit with tight deletion guard when sync failed, so mergeBranch
+            // doesn't blindly commit a partially-synced worktree.
+            if (!workspaceSyncOk) {
+              await worktreeManager.commitPendingChanges(
+                pod.worktreePath,
+                'chore: auto-commit uncommitted changes before merge',
+                { maxDeletions: 0 },
+              );
+            }
+            // mergeBranch auto-commits any remaining uncommitted changes before pushing
+            await worktreeManager.mergeBranch({
+              worktreePath: pod.worktreePath,
+              targetBranch: pod.branch ?? 'HEAD',
+            });
+            logger.info({ podId, branch: pod.branch }, 'Workspace branch pushed to origin');
+            // Safe to clean up — work is in origin
+            try {
+              await worktreeManager.cleanup(pod.worktreePath);
+              logger.info({ podId }, 'Workspace worktree cleaned up');
+            } catch (err) {
+              logger.warn({ err, podId }, 'Failed to cleanup workspace worktree');
+            }
+          } catch (err) {
+            pushError = err instanceof Error ? err.message : String(err);
+            logger.warn(
+              { err, podId },
+              'Failed to push workspace branch — completing anyway, worktree preserved',
+            );
+          }
         }
       }
 

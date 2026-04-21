@@ -134,7 +134,10 @@ describe('buildProviderEnv', () => {
       // settings.json should set dark theme
       const settingsJson = result.containerFiles.find((f) => f.path.endsWith('settings.json'));
       expect(settingsJson).toBeDefined();
-      expect(JSON.parse(settingsJson?.content ?? '{}')).toEqual({ theme: 'dark', autoUpdaterStatus: 'disabled' });
+      expect(JSON.parse(settingsJson?.content ?? '{}')).toEqual({
+        theme: 'dark',
+        autoUpdaterStatus: 'disabled',
+      });
     });
 
     it('throws when modelProvider is max but credentials are missing', async () => {

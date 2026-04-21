@@ -46,7 +46,7 @@ import Testing
     "prUrl": null,
     "plan": { "summary": "Add OAuth flow", "steps": ["Setup routes", "Add middleware"] },
     "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
-    "acceptanceCriteria": ["Users can sign in with Google"],
+    "acceptanceCriteria": [{"type":"none","test":"Users can sign in with Google","pass":"signed in","fail":"not signed in"}],
     "claudeSessionId": null,
     "outputMode": "pr",
     "baseBranch": null,
@@ -66,7 +66,7 @@ import Testing
   #expect(pod.status == "running")
   #expect(pod.plan?.steps.count == 2)
   #expect(pod.progress?.currentPhase == 3)
-  #expect(pod.acceptanceCriteria?.first == "Users can sign in with Google")
+  #expect(pod.acceptanceCriteria?.first?.test == "Users can sign in with Google")
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
 }
@@ -114,6 +114,7 @@ import Testing
     "privateRegistries": [],
     "registryPat": null,
     "containerMemoryGb": 4.0,
+    "version": 1,
     "createdAt": "2026-03-01T00:00:00Z",
     "updatedAt": "2026-04-01T00:00:00Z"
   }
@@ -202,7 +203,7 @@ import Testing
     profileName: "my-app",
     task: "Add OAuth login",
     model: "opus",
-    acceptanceCriteria: ["Users can log in"],
+    acceptanceCriteria: [AcDefinition.fromString("Users can log in")],
     outputMode: "pr"
   )
 
@@ -211,7 +212,8 @@ import Testing
   #expect(dict["profileName"] as? String == "my-app")
   #expect(dict["task"] as? String == "Add OAuth login")
   #expect(dict["model"] as? String == "opus")
-  #expect((dict["acceptanceCriteria"] as? [String])?.first == "Users can log in")
+  let acs = dict["acceptanceCriteria"] as? [[String: Any]]
+  #expect(acs?.first?["test"] as? String == "Users can log in")
   // Optional fields should not be present when nil
   #expect(dict["branch"] == nil)
   #expect(dict["runtime"] == nil)

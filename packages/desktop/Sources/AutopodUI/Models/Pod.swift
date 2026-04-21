@@ -467,6 +467,11 @@ public struct Pod: Identifiable, Sendable {
     /// Snapshot of the resolved profile config at pod creation time
     public var profileSnapshot: Profile?
 
+    /// Host-filesystem path where artifacts were extracted — only set after
+    /// an artifact-output pod completes. Used by the Overview tab to offer
+    /// "Reveal in Finder".
+    public var artifactsPath: String?
+
     // MARK: - Series (pod dependency DAG)
 
     /// Series this pod belongs to, or nil for standalone pods.
@@ -546,7 +551,8 @@ public struct Pod: Identifiable, Sendable {
         seriesId: String? = nil,
         seriesName: String? = nil,
         dependsOnPodIds: [String] = [],
-        dependencyStartedAt: Date? = nil
+        dependencyStartedAt: Date? = nil,
+        artifactsPath: String? = nil
     ) {
         self.id = id; self.status = status; self.pod = pod
         self.hasWorktree = hasWorktree
@@ -567,6 +573,7 @@ public struct Pod: Identifiable, Sendable {
         self.seriesId = seriesId; self.seriesName = seriesName
         self.dependsOnPodIds = dependsOnPodIds
         self.dependencyStartedAt = dependencyStartedAt
+        self.artifactsPath = artifactsPath
     }
 
     /// Back-compat init that takes a legacy `OutputMode` and derives a `PodConfig`.

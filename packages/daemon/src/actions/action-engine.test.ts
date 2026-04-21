@@ -258,19 +258,31 @@ describe('ActionEngine', () => {
     };
 
     const resultA = await engine.execute(
-      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo-a', issue_number: 1 } },
+      {
+        podId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/repo-a', issue_number: 1 },
+      },
       policy,
     );
     expect(resultA.error).not.toContain('not allowed for resource');
 
     const resultB = await engine.execute(
-      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo-b', issue_number: 1 } },
+      {
+        podId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/repo-b', issue_number: 1 },
+      },
       policy,
     );
     expect(resultB.error).not.toContain('not allowed for resource');
 
     const resultC = await engine.execute(
-      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/forbidden', issue_number: 1 } },
+      {
+        podId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/forbidden', issue_number: 1 },
+      },
       policy,
     );
     expect(resultC.success).toBe(false);
@@ -285,7 +297,11 @@ describe('ActionEngine', () => {
     };
 
     const result = await engine.execute(
-      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/TeamPlanner@-V3@', issue_number: 1 } },
+      {
+        podId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/TeamPlanner@-V3@', issue_number: 1 },
+      },
       policy,
     );
     expect(result.error).not.toContain('not allowed for resource');
@@ -301,7 +317,11 @@ describe('ActionEngine', () => {
 
     // Disabled override should be ignored → no allowedResources constraint active
     const result = await engine.execute(
-      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/any-repo', issue_number: 1 } },
+      {
+        podId: 'sess-1',
+        actionName: 'read_issue',
+        params: { repo: 'org/any-repo', issue_number: 1 },
+      },
       policy,
     );
     expect(result.error).not.toContain('not allowed for resource');
@@ -343,9 +363,19 @@ describe('ActionEngine', () => {
       {
         podId: 'sess-1',
         actionName: 'ado_read_file',
-        params: { org: '365projectum', project: 'TeamPlanner@V3@', repo: 'teamplanner-pipelines', path: 'file.yml' },
+        params: {
+          org: '365projectum',
+          project: 'TeamPlanner@V3@',
+          repo: 'teamplanner-pipelines',
+          path: 'file.yml',
+        },
       },
-      { ...adoPolicy, actionOverrides: [{ action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@'] }] },
+      {
+        ...adoPolicy,
+        actionOverrides: [
+          { action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@'] },
+        ],
+      },
     );
     expect(result.error).not.toContain('not allowed for resource');
   });
@@ -362,9 +392,19 @@ describe('ActionEngine', () => {
       {
         podId: 'sess-1',
         actionName: 'ado_read_file',
-        params: { org: '365projectum', project: 'TeamPlanner@V3@', repo: 'any-repo', path: 'file.yml' },
+        params: {
+          org: '365projectum',
+          project: 'TeamPlanner@V3@',
+          repo: 'any-repo',
+          path: 'file.yml',
+        },
       },
-      { ...adoPolicy, actionOverrides: [{ action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@/*'] }] },
+      {
+        ...adoPolicy,
+        actionOverrides: [
+          { action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@/*'] },
+        ],
+      },
     );
     expect(result.error).not.toContain('not allowed for resource');
   });
@@ -381,9 +421,19 @@ describe('ActionEngine', () => {
       {
         podId: 'sess-1',
         actionName: 'ado_read_file',
-        params: { org: '365projectum', project: 'TeamPlanner@V3@', repo: 'teamplanner-pipelines', path: 'file.yml' },
+        params: {
+          org: '365projectum',
+          project: 'TeamPlanner@V3@',
+          repo: 'teamplanner-pipelines',
+          path: 'file.yml',
+        },
       },
-      { ...adoPolicy, actionOverrides: [{ action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner%40V3%40'] }] },
+      {
+        ...adoPolicy,
+        actionOverrides: [
+          { action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner%40V3%40'] },
+        ],
+      },
     );
     expect(result.error).not.toContain('not allowed for resource');
   });
@@ -402,7 +452,12 @@ describe('ActionEngine', () => {
         actionName: 'ado_read_file',
         params: { org: 'other-org', project: 'SomeProject', repo: 'some-repo', path: 'file.yml' },
       },
-      { ...adoPolicy, actionOverrides: [{ action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@'] }] },
+      {
+        ...adoPolicy,
+        actionOverrides: [
+          { action: 'ado_read_file', allowedResources: ['365projectum/TeamPlanner@V3@'] },
+        ],
+      },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain('not allowed for resource');

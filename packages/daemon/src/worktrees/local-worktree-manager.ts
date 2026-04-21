@@ -105,9 +105,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
 
     // Create worktree — use sessionId-derived path if provided, else branch-derived
-    const sessionDir = config.sessionId
-      ? config.sessionId
-      : branch.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const sessionDir = config.sessionId ? config.sessionId : branch.replace(/[^a-zA-Z0-9_-]/g, '_');
     const worktreePath = path.join(this.worktreeDir, sessionDir);
 
     // Ensure bare repo exists, fetch latest, and create worktree — all inside the

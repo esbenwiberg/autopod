@@ -1,3 +1,4 @@
+import AppKit
 import AutopodClient
 import MarkdownUI
 import SwiftUI
@@ -37,6 +38,11 @@ struct OverviewTab: View {
 
                 // Profile metadata row
                 profileMetadataRow
+
+                // Artifacts (interactive-artifact pods only land here after complete)
+                if let artifactsPath = pod.artifactsPath, !artifactsPath.isEmpty {
+                    artifactsSection(artifactsPath)
+                }
 
                 // Metrics row
                 metricsRow
@@ -322,6 +328,42 @@ struct OverviewTab: View {
         .padding(.vertical, 8)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Artifacts
+
+    private func artifactsSection(_ artifactsPath: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "archivebox.fill")
+                    .foregroundStyle(.blue)
+                Text("Artifacts")
+                    .font(.system(.subheadline).weight(.semibold))
+                Spacer()
+                Button {
+                    let url = URL(fileURLWithPath: artifactsPath)
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Label("Reveal in Finder", systemImage: "folder")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            Text(artifactsPath)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+        }
+        .padding(14)
+        .background(Color.blue.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.blue.opacity(0.15), lineWidth: 1)
+        )
     }
 
     // MARK: - Metrics

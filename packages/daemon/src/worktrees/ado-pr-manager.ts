@@ -122,7 +122,7 @@ export class AdoPrManager implements PrManager {
       let detail = text;
       try {
         const parsed = JSON.parse(text) as Record<string, unknown>;
-        if (typeof parsed['message'] === 'string') detail = parsed['message'];
+        if (typeof parsed.message === 'string') detail = parsed.message;
       } catch {
         // use raw text
       }

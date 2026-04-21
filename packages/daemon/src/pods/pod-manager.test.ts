@@ -135,6 +135,7 @@ function createMockContainerManager(): ContainerManager {
     refreshFirewall: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
     readFile: vi.fn(async () => ''),
+    extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     execStreaming: vi.fn(),
@@ -1016,10 +1017,7 @@ describe('PodManager', () => {
         // check passes: a .git GITLINK FILE pointing to an existing bare-repo metadata dir.
         fs.mkdirSync(recoveryWorktree, { recursive: true });
         fs.mkdirSync(fakeBareWorktreeDir, { recursive: true });
-        fs.writeFileSync(
-          path.join(recoveryWorktree, '.git'),
-          `gitdir: ${fakeBareWorktreeDir}\n`,
-        );
+        fs.writeFileSync(path.join(recoveryWorktree, '.git'), `gitdir: ${fakeBareWorktreeDir}\n`);
       });
 
       afterEach(() => {
@@ -2004,6 +2002,81 @@ describe('PodManager', () => {
         // Pod still transitions to complete
         const completed = manager.getSession(pod.id);
         expect(completed.status).toBe('complete');
+      });
+
+      it('extracts /workspace to artifactsPath for interactive-artifact pods, skipping branch push', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Plan some stuff',
+            options: {
+              agentMode: 'interactive',
+              output: 'artifact',
+              validate: false,
+              promotable: true,
+            },
+          },
+          'user-1',
+        );
+
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'container-abc',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+
+        const result = await manager.completeSession(pod.id);
+
+        expect(result.pushError).toBeUndefined();
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+          'container-abc',
+          '/workspace',
+          expect.stringContaining(`artifacts/${pod.id}`),
+        );
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+
+        const completed = manager.getSession(pod.id);
+        expect(completed.status).toBe('complete');
+        expect(completed.artifactsPath).toContain(`artifacts/${pod.id}`);
+      });
+
+      it('completes interactive-artifact pod even when extraction fails', async () => {
+        const ctx = createTestContext();
+        (
+          ctx.containerManager.extractDirectoryFromContainer as ReturnType<typeof vi.fn>
+        ).mockRejectedValue(new Error('tar: broken pipe'));
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Plan some stuff',
+            options: {
+              agentMode: 'interactive',
+              output: 'artifact',
+              validate: false,
+              promotable: true,
+            },
+          },
+          'user-1',
+        );
+
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'container-abc',
+          startedAt: new Date().toISOString(),
+        });
+
+        await manager.completeSession(pod.id);
+
+        const completed = manager.getSession(pod.id);
+        expect(completed.status).toBe('complete');
+        // artifactsPath is still set — the dir was created even if extraction failed
+        expect(completed.artifactsPath).toContain(`artifacts/${pod.id}`);
       });
     });
   });

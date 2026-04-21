@@ -60,8 +60,16 @@ export function podOptionsFromOutputMode(mode: OutputMode): PodOptions {
 
 /**
  * Derive a legacy `OutputMode` for wire back-compat. The legacy enum can't
- * express the full axis space — e.g. `{interactive, pr}` has no legacy peer —
- * so this returns the closest match.
+ * express the full axis space, so this is **lossy** — e.g. both `{interactive,
+ * branch}` and `{interactive, artifact}` collapse to `'workspace'`. Anything
+ * reading this back through `podOptionsFromOutputMode()` will see the
+ * non-artifact variant, which historically surfaced as a wrong `INT·BR` badge
+ * on interactive-artifact pods (see the `pods` table: `output_target` is the
+ * authoritative column; `output_mode` is kept only to not break older readers).
+ *
+ * **Deprecated for new call sites** — write/read `PodOptions` directly.
+ * This helper exists only to keep the legacy `output_mode` DB column in sync
+ * on insert and for older API clients that still key off the string.
  */
 export function outputModeFromPodOptions(options: PodOptions): OutputMode {
   if (options.agentMode === 'interactive') return 'workspace';

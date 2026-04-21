@@ -13,10 +13,10 @@ function parseSince(value: string): string {
   if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value;
 
   const match = value.match(/^(\d+)([dhwm])$/);
-  if (!match) return value;
+  if (!match?.[1] || !match[2]) return value;
 
-  const amount = Number.parseInt(match[1]!, 10);
-  const unit = match[2]!;
+  const amount = Number.parseInt(match[1], 10);
+  const unit = match[2];
   const now = new Date();
 
   switch (unit) {
