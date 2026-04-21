@@ -233,7 +233,26 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
     });
 }
 
+async function ensureSpawnHelperExecutable(): Promise<void> {
+  try {
+    const { createRequire } = await import('node:module');
+    const { stat, chmod } = await import('node:fs/promises');
+    const { join, dirname } = await import('node:path');
+    const req = createRequire(import.meta.url);
+    const ptyMain = req.resolve('node-pty');
+    const platform = `${process.platform}-${process.arch}`;
+    const helperPath = join(dirname(dirname(ptyMain)), 'prebuilds', platform, 'spawn-helper');
+    const s = await stat(helperPath);
+    if (!(s.mode & 0o111)) {
+      await chmod(helperPath, s.mode | 0o111);
+    }
+  } catch {
+    // best-effort — node-pty will throw its own error if it still can't exec
+  }
+}
+
 async function runAttachSession(containerName: string): Promise<number> {
+  await ensureSpawnHelperExecutable();
   const { spawn: ptySpawn } = await import('node-pty');
 
   const cols = process.stdout.columns || 80;

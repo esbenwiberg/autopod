@@ -1,8 +1,8 @@
-import MarkdownUI
+@preconcurrency import MarkdownUI
 import SwiftUI
 
 extension Theme {
-    static let autopod = Theme()
+    @MainActor static let autopod = Theme()
         .text {
             ForegroundColor(.primary)
         }
