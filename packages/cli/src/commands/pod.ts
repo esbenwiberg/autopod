@@ -524,7 +524,14 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
           break;
         case 'escalation': {
           const p = inner.payload.payload;
-          const desc = 'question' in p ? p.question : p.description;
+          const desc =
+            'question' in p
+              ? p.question
+              : 'description' in p
+                ? (p as { description: string }).description
+                : 'reason' in p
+                  ? (p as { reason: string }).reason
+                  : '(override)';
           console.log(
             `${ts} ${chalk.yellow.bold(`[escalation: ${inner.escalationType}]`)} ${desc}`,
           );
@@ -566,10 +573,15 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
     }
     case 'pod.escalation_created': {
       const ec = event as import('@autopod/shared').EscalationCreatedEvent;
+      const ep = ec.escalation.payload;
       const desc =
-        'question' in ec.escalation.payload
-          ? ec.escalation.payload.question
-          : ec.escalation.payload.description;
+        'question' in ep
+          ? ep.question
+          : 'description' in ep
+            ? (ep as { description: string }).description
+            : 'reason' in ep
+              ? (ep as { reason: string }).reason
+              : '(override)';
       console.log(`${ts} ${chalk.yellow.bold(`[escalation: ${ec.escalation.type}]`)} ${desc}`);
       break;
     }

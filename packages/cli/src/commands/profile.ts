@@ -15,7 +15,7 @@ import { type ColumnDef, renderTable } from '../output/table.js';
 const profileColumns: ColumnDef<Profile>[] = [
   { header: 'Name', key: 'name', width: 20 },
   { header: 'Template', key: 'template', width: 14 },
-  { header: 'Repo', formatter: (p) => p.repoUrl.replace(/^https?:\/\//, ''), width: 40 },
+  { header: 'Repo', formatter: (p) => (p.repoUrl ?? '').replace(/^https?:\/\//, ''), width: 40 },
   { header: 'Model', key: 'defaultModel', width: 10 },
   { header: 'Runtime', key: 'defaultRuntime', width: 10 },
 ];
@@ -155,7 +155,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         return;
       }
 
-      const parsed = createProfileSchema.parse(edited);
+      const parsed = createProfileSchema.parse(edited) as Partial<Profile>;
       const created = await withSpinner('Creating profile...', () => client.createProfile(parsed));
       console.log(chalk.green(`Profile "${created.name}" created.`));
     });
@@ -183,7 +183,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       }
 
       const { name: _n, ...updates } = edited as Record<string, unknown>;
-      const parsed = updateProfileSchema.parse(updates);
+      const parsed = updateProfileSchema.parse(updates) as Partial<Profile>;
       await withSpinner('Updating profile...', () => client.updateProfile(name, parsed));
       console.log(chalk.green(`Profile "${name}" updated.`));
     });

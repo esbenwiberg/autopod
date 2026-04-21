@@ -21,6 +21,7 @@ const STATUS_MAP: Record<PodStatus, StatusStyle> = {
   merge_pending: { color: chalk.yellow, symbol: '⏳', label: 'Merge Pending' },
   complete: { color: chalk.dim.green, symbol: '✓', label: 'Complete' },
   paused: { color: chalk.yellow.bold, symbol: '⏸', label: 'Paused' },
+  handoff: { color: chalk.blue, symbol: '→', label: 'Handoff' },
   killing: { color: chalk.dim.red, symbol: '⟳', label: 'Killing' },
   killed: { color: chalk.dim.red, symbol: '✗', label: 'Killed' },
 };

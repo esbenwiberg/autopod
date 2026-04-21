@@ -10,7 +10,6 @@ import type {
   AcDefinition,
   CreatePodRequest,
   CreateScheduledJobRequest,
-  HistoryQuery,
   Pod,
   PodStatus,
   Profile,
