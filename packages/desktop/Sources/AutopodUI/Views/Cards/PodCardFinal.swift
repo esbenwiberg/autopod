@@ -819,7 +819,7 @@ public struct SessionCardFinal: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     Markdown(pod.escalationQuestion ?? "Agent needs input")
-                        .markdownTheme(.gitHub)
+                        .markdownTheme(.autopod)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
 

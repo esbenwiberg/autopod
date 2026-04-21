@@ -80,7 +80,7 @@ struct OverviewTab: View {
             }
 
             Markdown(question)
-                .markdownTheme(.gitHub)
+                .markdownTheme(.autopod)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -156,7 +156,7 @@ struct OverviewTab: View {
             }
 
             Markdown(question)
-                .markdownTheme(.gitHub)
+                .markdownTheme(.autopod)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 

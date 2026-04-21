@@ -140,7 +140,7 @@ public struct MarkdownTab: View {
     } else {
       ScrollView {
         Markdown(content)
-          .markdownTheme(.gitHub)
+          .markdownTheme(.autopod)
           .textSelection(.enabled)
           .padding(20)
           .frame(maxWidth: .infinity, alignment: .leading)
