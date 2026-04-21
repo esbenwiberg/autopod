@@ -1807,6 +1807,50 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
 
+          // Inject escalation + profile MCP servers into ~/.claude/settings.json so
+          // interactive `claude` sessions in this workspace pod pick them up automatically.
+          try {
+            const wsMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
+            const wsProxiedServers = wsMcpServers.map((s) => ({
+              name: s.name,
+              url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(s.name)}/${podId}`,
+            }));
+            const wsToken = deps.sessionTokenIssuer?.generate(podId);
+            const wsAuthHeader = wsToken ? { Authorization: `Bearer ${wsToken}` } : undefined;
+
+            const mcpServersObj: Record<
+              string,
+              { type: string; url: string; headers?: Record<string, string> }
+            > = {
+              escalation: {
+                type: 'http',
+                url: `${mcpBaseUrl}/mcp/${podId}`,
+                ...(wsAuthHeader && { headers: wsAuthHeader }),
+              },
+              ...Object.fromEntries(
+                wsProxiedServers.map((s) => [
+                  s.name,
+                  { type: 'http', url: s.url, ...(wsAuthHeader && { headers: wsAuthHeader }) },
+                ]),
+              ),
+            };
+
+            await containerManager.writeFile(
+              containerId,
+              `${CONTAINER_HOME_DIR}/.claude/settings.json`,
+              JSON.stringify({ theme: 'dark', mcpServers: mcpServersObj }, null, 2),
+            );
+            logger.info(
+              { podId, servers: Object.keys(mcpServersObj) },
+              'MCP servers injected into workspace container settings',
+            );
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to inject MCP servers into workspace container — MCP tools unavailable',
+            );
+          }
+
           logger.info({ podId }, 'Workspace pod running — awaiting manual attach');
           return;
         }
