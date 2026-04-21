@@ -1,9 +1,12 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { unlink } from 'node:fs/promises';
 import chalk from 'chalk';
 import type { Command } from 'commander';
+import type { IPty } from 'node-pty';
 import type { AutopodClient } from '../api/client.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
+import { saveClipboardImage } from '../utils/clipboard.js';
 import { resolvePodId } from '../utils/id-resolver.js';
 
 export function registerWorkspaceCommands(program: Command, getClient: () => AutopodClient): void {
@@ -86,19 +89,12 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       console.log(chalk.dim(`Attaching to ${containerName}…`));
       console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
 
-      const result = spawnSync('docker', ['exec', '-it', containerName, '/bin/bash', '-l'], {
-        stdio: 'inherit',
-      });
-
-      if (result.error) {
-        console.error(chalk.red('docker CLI not found on PATH'));
-        process.exit(1);
-      }
+      const exitCode = await runAttachSession(containerName);
 
       console.log();
 
       // Non-zero exit may mean the container stopped unexpectedly
-      if (result.status !== 0) {
+      if (exitCode !== 0) {
         try {
           const refreshed = await client.getSession(resolvedId);
           if (refreshed.status !== 'running') {
@@ -235,4 +231,115 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
         ),
       );
     });
+}
+
+async function runAttachSession(containerName: string): Promise<number> {
+  const { spawn: ptySpawn } = await import('node-pty');
+
+  const cols = process.stdout.columns || 80;
+  const rows = process.stdout.rows || 24;
+
+  const ptyProcess = ptySpawn('docker', ['exec', '-it', containerName, '/bin/bash', '-l'], {
+    name: 'xterm-256color',
+    cols,
+    rows,
+    env: process.env as Record<string, string>,
+  });
+
+  // Enable bracketed paste mode on the outer terminal
+  process.stdout.write('\x1b[?2004h');
+
+  ptyProcess.onData((data) => {
+    process.stdout.write(data);
+  });
+
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+
+  let pasteState: 'normal' | 'in-paste' = 'normal';
+  let pasteBuffer = '';
+
+  const onData = async (chunk: Buffer) => {
+    const str = chunk.toString('binary');
+
+    if (pasteState === 'normal' && str.includes('\x1b[200~')) {
+      pasteState = 'in-paste';
+      const after = str.split('\x1b[200~')[1] ?? '';
+      if (after.includes('\x1b[201~')) {
+        // Start and end in the same chunk
+        const content = after.split('\x1b[201~')[0] ?? '';
+        pasteState = 'normal';
+        await handleImagePaste(content, containerName, ptyProcess);
+      } else {
+        pasteBuffer = after;
+      }
+      return;
+    }
+
+    if (pasteState === 'in-paste') {
+      if (str.includes('\x1b[201~')) {
+        pasteBuffer += str.split('\x1b[201~')[0] ?? '';
+        pasteState = 'normal';
+        const content = pasteBuffer;
+        pasteBuffer = '';
+        await handleImagePaste(content, containerName, ptyProcess);
+      } else {
+        pasteBuffer += str;
+      }
+      return;
+    }
+
+    ptyProcess.write(str);
+  };
+
+  process.stdin.on('data', onData);
+
+  const onResize = () => {
+    ptyProcess.resize(process.stdout.columns || 80, process.stdout.rows || 24);
+  };
+  process.stdout.on('resize', onResize);
+
+  return new Promise<number>((resolve) => {
+    ptyProcess.onExit(({ exitCode }) => {
+      process.stdin.setRawMode(false);
+      process.stdout.write('\x1b[?2004l');
+      process.stdin.removeListener('data', onData);
+      process.stdout.removeListener('resize', onResize);
+      resolve(exitCode ?? 0);
+    });
+  });
+}
+
+async function handleImagePaste(
+  content: string,
+  containerName: string,
+  ptyProcess: IPty,
+): Promise<void> {
+  if (content.trim().length > 0) {
+    ptyProcess.write(content);
+    return;
+  }
+
+  const ts = Date.now();
+  const tmpPath = `/tmp/autopod_paste_${ts}.png`;
+  const containerPath = `/tmp/paste_${ts}.png`;
+
+  const saved = await saveClipboardImage(tmpPath);
+  if (!saved) {
+    ptyProcess.write('\x07'); // bell — nothing in clipboard
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const cp = spawn('docker', ['cp', tmpPath, `${containerName}:${containerPath}`]);
+    cp.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`docker cp exited with ${code}`));
+    });
+    cp.on('error', reject);
+  });
+
+  unlink(tmpPath).catch(() => {});
+
+  ptyProcess.write(containerPath);
 }
