@@ -131,8 +131,9 @@ public actor DaemonAPI {
     )
   }
 
-  public func spawnFixSession(_ id: String) async throws {
-    let _: OkResponse = try await request("POST", "/pods/\(id)/spawn-fix")
+  public func spawnFixSession(_ id: String, userMessage: String? = nil) async throws {
+    let body = try userMessage.map { try encode(SpawnFixBody(userMessage: $0)) }
+    let _: OkResponse = try await request("POST", "/pods/\(id)/spawn-fix", body: body)
   }
 
   public func retryCreatePr(_ id: String) async throws {
@@ -523,6 +524,10 @@ struct WarmBody: Codable {
 
 struct ExtendAttemptsBody: Codable {
   let additionalAttempts: Int
+}
+
+struct SpawnFixBody: Codable {
+  let userMessage: String
 }
 
 struct PreviewResponse: Codable {

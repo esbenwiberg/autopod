@@ -277,6 +277,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     seriesId: (row.series_id as string) ?? null,
     seriesName: (row.series_name as string) ?? null,
     dependencyStartedAt: (row.dependency_started_at as string) ?? null,
+    waitForMerge: Boolean(row.wait_for_merge),
   };
 }
 
@@ -303,14 +304,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
           output_mode, agent_mode, output_target, validate, promotable,
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, reference_repo_pat, scheduled_job_id,
-          depends_on_pod_id, depends_on_pod_ids, series_id, series_name
+          depends_on_pod_id, depends_on_pod_ids, series_id, series_name, wait_for_merge
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId,
-          @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName
+          @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @waitForMerge
         )
       `).run({
         id: pod.id,
@@ -343,6 +344,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         dependsOnPodIds: depIds.length > 0 ? JSON.stringify(depIds) : null,
         seriesId: pod.seriesId ?? null,
         seriesName: pod.seriesName ?? null,
+        waitForMerge: pod.waitForMerge ? 1 : 0,
       });
     },
 
@@ -542,6 +544,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.baseBranch !== undefined) {
         setClauses.push('base_branch = @baseBranch');
         params.baseBranch = changes.baseBranch ?? null;
+      }
+      if (changes.waitForMerge !== undefined) {
+        setClauses.push('wait_for_merge = @waitForMerge');
+        params.waitForMerge = changes.waitForMerge ? 1 : 0;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so

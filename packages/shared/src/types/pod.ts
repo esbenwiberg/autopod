@@ -129,6 +129,12 @@ export interface Pod {
   seriesName: string | null;
   /** When the dependency pod reached validated and this pod was enqueued. */
   dependencyStartedAt: string | null;
+  /**
+   * When true (stacked series), this pod waits for its parent to reach `complete`
+   * (fully merged) before starting. When false (single-branch series or standalone),
+   * it starts as soon as the parent reaches `validated`.
+   */
+  waitForMerge: boolean;
 }
 
 export interface CreatePodRequest {
@@ -183,6 +189,11 @@ export interface CreatePodRequest {
   seriesId?: string | null;
   /** Human-readable series name. */
   seriesName?: string | null;
+  /**
+   * Gate the next pod in a stacked series on this pod's PR being merged (complete).
+   * Defaults to false — set to true for stacked-series non-root pods.
+   */
+  waitForMerge?: boolean;
 }
 
 export interface PodSummary {

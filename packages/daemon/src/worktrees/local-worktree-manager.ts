@@ -203,9 +203,33 @@ export class LocalWorktreeManager implements WorktreeManager {
 
       // -B force-creates branch to handle retry scenarios
       this.logger.info({ worktreePath, branch, startPoint }, 'Creating worktree');
-      await execFileAsync('git', ['worktree', 'add', '-B', branch, worktreePath, startPoint], {
-        cwd: bareRepoPath,
-      });
+      try {
+        await execFileAsync('git', ['worktree', 'add', '-B', branch, worktreePath, startPoint], {
+          cwd: bareRepoPath,
+        });
+      } catch (addErr: unknown) {
+        // Handle "branch already used by worktree at X" — stale/orphaned worktree from a
+        // previous pod run (e.g. old branch-name-derived paths before sessionId naming).
+        const msg = addErr instanceof Error ? addErr.message : String(addErr);
+        const match = /already used by worktree at '(.+)'/.exec(msg);
+        if (match?.[1]) {
+          const conflictPath = match[1];
+          this.logger.warn(
+            { conflictPath, branch },
+            'Branch locked by orphaned worktree — removing and retrying',
+          );
+          await execFileAsync('git', ['worktree', 'remove', '--force', conflictPath], {
+            cwd: bareRepoPath,
+          }).catch(() => {});
+          await fs.rm(conflictPath, { recursive: true, force: true }).catch(() => {});
+          await execFileAsync('git', ['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+          await execFileAsync('git', ['worktree', 'add', '-B', branch, worktreePath, startPoint], {
+            cwd: bareRepoPath,
+          });
+        } else {
+          throw addErr;
+        }
+      }
     });
 
     return { worktreePath, bareRepoPath };

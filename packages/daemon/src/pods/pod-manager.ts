@@ -111,7 +111,12 @@ const CONTAINER_APP_PORT = 3000;
  * Build the task string for a PR fix pod, injecting CI failure details and
  * review comments so the agent knows exactly what to fix.
  */
-function buildPrFixTask(pod: Pod, status: PrMergeStatus, podRepo: PodRepository): string {
+function buildPrFixTask(
+  pod: Pod,
+  status: PrMergeStatus,
+  podRepo: PodRepository,
+  userMessage?: string,
+): string {
   const attempt = (pod.prFixAttempts ?? 0) + 1;
 
   // Resolve the root original task by following linkedPodId back to the source.
@@ -161,6 +166,12 @@ function buildPrFixTask(pod: Pod, status: PrMergeStatus, podRepo: PodRepository)
       sections.push(`${prefix}${rc.body}`);
       sections.push('');
     }
+  }
+
+  if (userMessage) {
+    sections.push('## Instructions from Reviewer\n');
+    sections.push(userMessage.trim());
+    sections.push('');
   }
 
   sections.push('After pushing your fixes, the PR will be re-evaluated automatically.');
@@ -380,12 +391,13 @@ export interface PodManager {
    */
   injectCredential(podId: string, service: 'github' | 'ado'): Promise<void>;
   /**
-   * Manually spawn a fix pod for a merge_pending pod, bypassing the
+   * Manually spawn a fix pod for a merge_pending or complete pod, bypassing the
    * automatic detection guards. Clears any stale fixPodId first so the fix
    * is created immediately rather than waiting for the next poll cycle.
    * Bumps maxPrFixAttempts if the current cap would otherwise block spawn.
+   * Optional userMessage is prepended to the fix task as reviewer instructions.
    */
-  spawnFixSession(podId: string): Promise<void>;
+  spawnFixSession(podId: string, userMessage?: string): Promise<void>;
   /**
    * Retry PR creation for a complete pod whose PR was never successfully created.
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
@@ -448,6 +460,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const maybeSpawnFixSession = async (
     parentSessionId: string,
     status: PrMergeStatus,
+    userMessage?: string,
   ): Promise<void> => {
     // Re-read from DB to avoid stale closure state across 60s intervals
     const parent = podRepo.getOrThrow(parentSessionId);
@@ -502,7 +515,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     // Build fix task and create child pod directly using closure deps
     const newAttempt = (parent.prFixAttempts ?? 0) + 1;
-    const fixTask = buildPrFixTask(parent, status, podRepo);
+    const fixTask = buildPrFixTask(parent, status, podRepo, userMessage);
     const profile = profileStore.get(parent.profileName);
 
     let fixId = '';
@@ -1139,17 +1152,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (parentIds.length === 0) continue;
 
       const parentsReady = parentIds.every((pid) => {
-        if (pid === completedPod.id) return true;
+        if (pid === completedPod.id) {
+          // For wait-for-merge deps, the triggering pod must be complete.
+          if (dep.waitForMerge && completedPod.status !== 'complete') return false;
+          return true;
+        }
         try {
-          const parentStatus = podRepo.getOrThrow(pid).status;
+          const parent = podRepo.getOrThrow(pid);
+          if (dep.waitForMerge) {
+            // Stacked series: wait until the parent PR is fully merged.
+            return parent.status === 'complete';
+          }
           // Accept any terminal-success status — a manually approved parent reaches
           // 'complete' without passing through 'validated' in the dependent's view.
           return (
-            parentStatus === 'validated' ||
-            parentStatus === 'approved' ||
-            parentStatus === 'merging' ||
-            parentStatus === 'merge_pending' ||
-            parentStatus === 'complete'
+            parent.status === 'validated' ||
+            parent.status === 'approved' ||
+            parent.status === 'merging' ||
+            parent.status === 'merge_pending' ||
+            parent.status === 'complete'
           );
         } catch {
           // Missing parent — treat as not ready rather than crashing.
@@ -1168,20 +1189,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         continue;
       }
 
-      // Use the first parent's branch as the base — the primary stacking path.
-      // Exception: if the dependent shares a branch with its parent (single-branch
-      // series mode), keep baseBranch pointing at the real base (e.g. main) so diff
-      // stats and the final PR target are correct. The worktree create() will fetch
-      // the existing shared branch and use it as the start point automatically.
+      // Determine base branch for the dependent pod:
+      // - Single-branch (shared branch): keep pointing at real base (e.g. main) so diff
+      //   stats and the final PR target are correct.
+      // - Stacked with waitForMerge: parent branch is deleted post-merge; use parent's
+      //   baseBranch (main) so the dependent starts from the freshly-merged main.
+      // - Stacked without waitForMerge: stack directly on parent's branch (classic stacking).
       const firstParentId = parentIds[0];
       const isSharedBranch = dep.branch === completedPod.branch;
-      const baseBranch = isSharedBranch
-        ? (completedPod.baseBranch ?? 'main')
-        : firstParentId
+      let baseBranch: string;
+      if (isSharedBranch || dep.waitForMerge) {
+        baseBranch = completedPod.baseBranch ?? 'main';
+      } else {
+        baseBranch = firstParentId
           ? firstParentId === completedPod.id
             ? completedPod.branch
             : podRepo.getOrThrow(firstParentId).branch
           : completedPod.branch;
+      }
 
       podRepo.update(dep.id, {
         baseBranch,
@@ -1385,6 +1410,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async processPod(podId: string): Promise<void> {
       let pod = podRepo.getOrThrow(podId);
+
+      // Defense-in-depth: processPod must only run for pods in queued/handoff state.
+      // The queue's activeIds dedup prevents most races, but this guard ensures
+      // a stale processPod call can never kill a pod that's already running.
+      if (pod.status !== 'queued' && pod.status !== 'handoff') {
+        logger.warn({ podId, status: pod.status }, 'processPod skipped — pod not in queued/handoff state');
+        return;
+      }
+
       const profile = profileStore.get(pod.profileName);
 
       function emitStatus(message: string): void {
@@ -4471,11 +4505,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       emitActivityStatus(podId, `${service} credentials injected.`);
     },
 
-    async spawnFixSession(podId: string): Promise<void> {
+    async spawnFixSession(podId: string, userMessage?: string): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'merge_pending') {
+      if (pod.status !== 'merge_pending' && pod.status !== 'complete') {
         throw new AutopodError(
-          `Cannot spawn fix pod for ${podId} in status ${pod.status} — only merge_pending pods`,
+          `Cannot spawn fix pod for ${podId} in status ${pod.status} — only merge_pending or complete pods`,
           'INVALID_STATE',
           409,
         );
@@ -4512,7 +4546,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let status: PrMergeStatus = {
         merged: false,
         open: true,
-        blockReason: pod.mergeBlockReason ?? 'PR is blocked',
+        blockReason: pod.mergeBlockReason ?? 'PR needs fixes',
         ciFailures: [],
         reviewComments: [],
       };
@@ -4530,8 +4564,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
-      await maybeSpawnFixSession(podId, status);
-      logger.info({ podId }, 'Manual fix pod spawn triggered');
+      await maybeSpawnFixSession(podId, status, userMessage);
+      logger.info({ podId, hasUserMessage: Boolean(userMessage) }, 'Manual fix pod spawn triggered');
     },
 
     async retryCreatePr(podId: string): Promise<void> {

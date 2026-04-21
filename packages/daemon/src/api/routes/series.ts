@@ -99,6 +99,9 @@ export function seriesRoutes(
             seriesName: body.seriesName,
             acceptanceCriteria: brief.acceptanceCriteria,
             options: { agentMode: 'auto', output },
+            // Stacked non-root pods wait for their parent PR to fully merge before
+            // starting so they always build on top of merged (green) code.
+            waitForMerge: prMode === 'stacked' && !isRoot,
           },
           userId,
         );

@@ -36,8 +36,9 @@ public struct PodActions: Sendable {
   public var interruptValidation: @MainActor @Sendable (String) async -> Void
   /// Enqueue a finding override — params: podId, findingId, description, action, reason?, guidance?
   public var addValidationOverride: @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void
-  /// Manually force-spawn a fix pod for a merge_pending pod, bypassing auto-detection guards
-  public var spawnFix: @MainActor @Sendable (String) async -> Void
+  /// Manually force-spawn a fix pod for a merge_pending/complete pod. Optional message is forwarded
+  /// to the fix pod as explicit reviewer instructions alongside auto-detected CI/review failures.
+  public var spawnFix: @MainActor @Sendable (String, String?) async -> Void
   /// Retry PR creation for a complete pod whose PR was never successfully created
   public var retryCreatePr: @MainActor @Sendable (String) async -> Void
   /// Ask the daemon to parse a local brief folder and return the DAG preview.
@@ -90,7 +91,7 @@ public struct PodActions: Sendable {
     workerProfileForProfile: @escaping @MainActor @Sendable (String) -> String? = { _ in nil },
     interruptValidation: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
-    spawnFix: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    spawnFix: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
     previewSeriesOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> SeriesPreviewResponse? = { _, _, _ in nil },

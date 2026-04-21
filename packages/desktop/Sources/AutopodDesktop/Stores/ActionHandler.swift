@@ -63,7 +63,7 @@ public final class ActionHandler {
       addValidationOverride: { [weak self] id, fid, desc, action, reason, guidance in
         await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
       },
-      spawnFix: { [weak self] id in await self?.spawnFixSession(id) },
+      spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       previewSeriesFolder: { [weak self] path in
         await self?.previewSeriesFolder(path: path) ?? nil
@@ -227,10 +227,10 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
-  public func spawnFixSession(_ podId: String) async {
+  public func spawnFixSession(_ podId: String, userMessage: String? = nil) async {
     pendingAction = "spawn-fix-\(podId)"
     do {
-      try await api.spawnFixSession(podId)
+      try await api.spawnFixSession(podId, userMessage: userMessage)
       // Fix pod will appear via WebSocket pod.created event
     } catch {
       lastError = error.localizedDescription

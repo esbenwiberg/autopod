@@ -121,6 +121,31 @@ describe('pod-queue', () => {
     expect(processor).toHaveBeenCalledTimes(2);
   });
 
+  it('deduplicates pod IDs that are actively being processed', async () => {
+    const processed: string[] = [];
+    let resolveFirst!: () => void;
+    const firstPromise = new Promise<void>((r) => {
+      resolveFirst = r;
+    });
+
+    const processor = vi.fn(async (id: string) => {
+      if (id === 's1') await firstPromise;
+      processed.push(id);
+    });
+
+    const queue = createPodQueue(2, processor, logger);
+    queue.enqueue('s1'); // starts processing immediately (concurrency=2)
+    // s1 is now active — a second enqueue should be ignored
+    queue.enqueue('s1');
+
+    resolveFirst();
+    await queue.drain();
+
+    // s1 should only be processed once despite being enqueued while active
+    expect(processed).toEqual(['s1']);
+    expect(processor).toHaveBeenCalledTimes(1);
+  });
+
   it('processes items in FIFO order', async () => {
     const processed: string[] = [];
     const processor = vi.fn(async (id: string) => {

@@ -357,14 +357,15 @@ public struct DetailPanelView: View {
 
             case .mergePending:
                 Button {
-                    Task { await actions.spawnFix(pod.id) }
+                    spawnFixMessage = ""
+                    showSpawnFixSheet = true
                 } label: {
                     Label("Spawn Fix", systemImage: "hammer.circle")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.orange)
-                .help("Manually spawn a fix pod for the failing PR checks")
+                .help("Spawn a fix pod — optionally include reviewer comments")
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
@@ -438,6 +439,16 @@ public struct DetailPanelView: View {
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
+                            Button {
+                                spawnFixMessage = ""
+                                showSpawnFixSheet = true
+                            } label: {
+                                Label("Fix with Message", systemImage: "hammer.circle")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .tint(.orange)
+                            .help("Spawn a fix pod with explicit reviewer instructions")
                         } else if pod.pod.output == .pr {
                             Button {
                                 Task { await actions.retryCreatePr(pod.id) }
@@ -468,6 +479,16 @@ public struct DetailPanelView: View {
         } message: {
             Text("This will permanently remove the pod record.")
         }
+        .sheet(isPresented: $showSpawnFixSheet) {
+            SpawnFixSheet(
+                podId: pod.id,
+                message: $spawnFixMessage,
+                isPresented: $showSpawnFixSheet,
+                onSpawn: { message in
+                    Task { await actions.spawnFix(pod.id, message.isEmpty ? nil : message) }
+                }
+            )
+        }
     }
 
     @State private var showNudgeInput = false
@@ -477,6 +498,8 @@ public struct DetailPanelView: View {
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
+    @State private var showSpawnFixSheet = false
+    @State private var spawnFixMessage = ""
 
     private func copyPodName() {
         NSPasteboard.general.clearContents()

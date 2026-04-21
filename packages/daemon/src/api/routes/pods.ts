@@ -181,11 +181,16 @@ export function podRoutes(
     }
   });
 
-  // POST /pods/:podId/spawn-fix — manually force-spawn a fix pod for merge_pending
+  // POST /pods/:podId/spawn-fix — manually force-spawn a fix pod for merge_pending or complete
   app.post('/pods/:podId/spawn-fix', async (request, reply) => {
     const { podId } = request.params as { podId: string };
+    const body = (request.body ?? {}) as { userMessage?: string };
+    const userMessage =
+      typeof body.userMessage === 'string' && body.userMessage.trim()
+        ? body.userMessage.trim()
+        : undefined;
     try {
-      await podManager.spawnFixSession(podId);
+      await podManager.spawnFixSession(podId, userMessage);
       reply.status(202);
       return { ok: true };
     } catch (err) {

@@ -13,6 +13,10 @@ export function createPodQueue(
   logger: Logger,
 ): PodQueue {
   const queue: string[] = [];
+  // Track pod IDs that are actively being processed. Combined with the waiting-queue
+  // dedup, this prevents a concurrent second processPod() run from racing the first
+  // and killing the pod when it fails the queued→provisioning state transition.
+  const activeIds = new Set<string>();
   let activeCount = 0;
   let drainResolvers: (() => void)[] = [];
 
@@ -29,6 +33,7 @@ export function createPodQueue(
     const podId = queue.shift();
     if (!podId) return;
     activeCount++;
+    activeIds.add(podId);
     logger.info({ podId, activeCount, queued: queue.length }, 'Processing pod');
 
     try {
@@ -37,6 +42,7 @@ export function createPodQueue(
       logger.error({ err, podId }, 'Pod processing failed');
     } finally {
       activeCount--;
+      activeIds.delete(podId);
       checkDrain();
       processNext(); // pick up next item
     }
@@ -44,10 +50,12 @@ export function createPodQueue(
 
   return {
     enqueue(podId: string) {
-      // Deduplicate: if podId is already waiting in the queue, don't add it again.
-      // Without this, rapid double-clicks (or concurrent API calls) can enqueue the
-      // same pod twice, causing two concurrent processPod runs that race and kill it.
-      if (!queue.includes(podId)) {
+      // Deduplicate: skip if the pod is already waiting in the queue OR actively
+      // being processed. Without this, rapid double-clicks, concurrent API calls, or
+      // a race between the reconciler and a user rework can enqueue the same pod
+      // twice — the second processPod run would fail the queued→provisioning state
+      // transition and the error handler would kill the pod.
+      if (!queue.includes(podId) && !activeIds.has(podId)) {
         queue.push(podId);
       }
       processNext();
