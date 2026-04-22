@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { unlink } from 'node:fs/promises';
+import { stat, unlink } from 'node:fs/promises';
+import { extname } from 'node:path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { IPty } from 'node-pty';
@@ -8,6 +9,24 @@ import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
 import { saveClipboardImage } from '../utils/clipboard.js';
 import { resolvePodId } from '../utils/id-resolver.js';
+
+const IMAGE_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.tiff',
+  '.tif',
+  '.heic',
+]);
+
+function attachDebug(msg: string): void {
+  if (process.env.AUTOPOD_ATTACH_DEBUG === '1') {
+    process.stderr.write(`[autopod:attach] ${msg}\n`);
+  }
+}
 
 export function registerWorkspaceCommands(program: Command, getClient: () => AutopodClient): void {
   // ap workspace <profile> [description]
@@ -281,6 +300,11 @@ async function runAttachSession(containerName: string): Promise<number> {
   const onData = async (chunk: Buffer) => {
     const str = chunk.toString('binary');
 
+    if (process.env.AUTOPOD_ATTACH_DEBUG === '1') {
+      const preview = chunk.subarray(0, 64).toString('hex');
+      attachDebug(`stdin chunk len=${chunk.length} state=${pasteState} hex=${preview}`);
+    }
+
     if (pasteState === 'normal' && str.includes('\x1b[200~')) {
       pasteState = 'in-paste';
       const after = str.split('\x1b[200~')[1] ?? '';
@@ -329,36 +353,115 @@ async function runAttachSession(containerName: string): Promise<number> {
   });
 }
 
+type PasteClassification =
+  | { kind: 'empty-paste' }
+  | { kind: 'host-image-path'; hostPath: string; ext: string }
+  | { kind: 'text' };
+
+async function classifyPaste(content: string): Promise<PasteClassification> {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    return { kind: 'empty-paste' };
+  }
+
+  // cmux (and some other terminals) paste an image by writing its host-side
+  // tempfile path into the PTY, optionally prefixed with `@`. Detect that case
+  // so we can copy the file into the container instead of letting Claude Code
+  // try to open a path that doesn't exist in its filesystem.
+  let candidate = trimmed;
+  if (candidate.startsWith('@')) candidate = candidate.slice(1).trim();
+
+  if (!candidate.startsWith('/')) return { kind: 'text' };
+  // Reject anything with whitespace or newlines in the middle — not a single path.
+  if (/\s/.test(candidate)) return { kind: 'text' };
+
+  const ext = extname(candidate).toLowerCase();
+  if (!IMAGE_EXTENSIONS.has(ext)) return { kind: 'text' };
+
+  try {
+    const s = await stat(candidate);
+    if (!s.isFile()) return { kind: 'text' };
+  } catch {
+    return { kind: 'text' };
+  }
+
+  return { kind: 'host-image-path', hostPath: candidate, ext: ext.slice(1) };
+}
+
+async function copyHostFileToContainer(
+  hostPath: string,
+  containerName: string,
+  destPath: string,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const cp = spawn('docker', ['cp', hostPath, `${containerName}:${destPath}`]);
+    let stderr = '';
+    cp.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    cp.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`docker cp exited with ${code}${stderr ? `: ${stderr.trim()}` : ''}`));
+    });
+    cp.on('error', reject);
+  });
+}
+
 async function handleImagePaste(
   content: string,
   containerName: string,
   ptyProcess: IPty,
 ): Promise<void> {
-  if (content.trim().length > 0) {
+  const classification = await classifyPaste(content);
+  attachDebug(`paste classified as ${classification.kind} (len=${content.length})`);
+
+  if (classification.kind === 'text') {
     ptyProcess.write(content);
     return;
   }
 
   const ts = Date.now();
-  const tmpPath = `/tmp/autopod_paste_${ts}.png`;
-  const containerPath = `/tmp/paste_${ts}.png`;
 
-  const saved = await saveClipboardImage(tmpPath);
+  if (classification.kind === 'host-image-path') {
+    const destPath = `/tmp/paste_${ts}.${classification.ext}`;
+    try {
+      await copyHostFileToContainer(classification.hostPath, containerName, destPath);
+    } catch (err) {
+      // Copy failed — fall back to writing the original content so the user
+      // isn't left with a silently-eaten keystroke.
+      process.stderr.write(
+        `\n[autopod] image copy failed (${err instanceof Error ? err.message : String(err)}); pasting path as text\n`,
+      );
+      ptyProcess.write(content);
+      return;
+    }
+    ptyProcess.write(`@${destPath} `);
+    process.stderr.write(`\n[autopod] attached image → ${destPath}\n`);
+    return;
+  }
+
+  // empty-paste — read host clipboard directly. Covers terminals that do
+  // deliver an empty bracketed paste on image Cmd+V.
+  const hostTmp = `/tmp/autopod_paste_${ts}.png`;
+  const destPath = `/tmp/paste_${ts}.png`;
+
+  const saved = await saveClipboardImage(hostTmp);
   if (!saved) {
     ptyProcess.write('\x07'); // bell — nothing in clipboard
     return;
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const cp = spawn('docker', ['cp', tmpPath, `${containerName}:${containerPath}`]);
-    cp.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`docker cp exited with ${code}`));
-    });
-    cp.on('error', reject);
-  });
+  try {
+    await copyHostFileToContainer(hostTmp, containerName, destPath);
+  } catch (err) {
+    process.stderr.write(
+      `\n[autopod] image copy failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return;
+  } finally {
+    unlink(hostTmp).catch(() => {});
+  }
 
-  unlink(tmpPath).catch(() => {});
-
-  ptyProcess.write(containerPath);
+  ptyProcess.write(`@${destPath} `);
+  process.stderr.write(`\n[autopod] attached image → ${destPath}\n`);
 }
