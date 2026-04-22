@@ -1,0 +1,34 @@
+[
+  {
+    "name": "ado_run_test_pipeline",
+    "description": "Push the pod's current branch to a pre-configured test repo and trigger an ADO pipeline against it. The pod sees no secrets — the test pipeline owns its own ADO variable groups. Use for fast integration validation of pipeline code (e.g. Dagger pipelines) before pushing to the real target branch.",
+    "group": "ado-test-pipeline",
+    "handler": "test-pipeline",
+    "params": {},
+    "response": {
+      "fields": ["runId", "url", "testBranch"]
+    }
+  },
+  {
+    "name": "ado_get_test_run_status",
+    "description": "Long-poll (up to 5 min) the status of a test pipeline run previously kicked off by ado_run_test_pipeline. Returns status, URL, duration, and a log tail on failure.",
+    "group": "ado-test-pipeline",
+    "handler": "test-pipeline",
+    "params": {
+      "run_id": {
+        "type": "number",
+        "required": true,
+        "description": "Run ID returned by ado_run_test_pipeline"
+      },
+      "timeout_seconds": {
+        "type": "number",
+        "required": false,
+        "description": "Max seconds to long-poll before returning 'inProgress'. Default 300.",
+        "default": 300
+      }
+    },
+    "response": {
+      "fields": ["status", "url", "durationSeconds", "failingStage", "logsTail"]
+    }
+  }
+]

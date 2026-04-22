@@ -112,6 +112,37 @@ export const pimActivationConfigSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+const daggerSidecarConfigSchema = z.object({
+  enabled: z.boolean(),
+  // registry.dagger.io/engine@sha256:... — digest-pinned, no rolling tags.
+  engineImageDigest: z
+    .string()
+    .min(1)
+    .regex(/@sha256:[0-9a-f]{64}$/, 'engineImageDigest must be pinned by sha256 digest'),
+  engineVersion: z.string().min(1).max(64),
+  enginePort: z.number().int().min(1).max(65_535).optional(),
+  memoryGb: z.number().positive().max(64).optional(),
+  cpus: z.number().positive().max(32).optional(),
+  storageGb: z.number().positive().max(200).optional(),
+});
+
+const sidecarsConfigSchema = z.object({
+  dagger: daggerSidecarConfigSchema.optional(),
+});
+
+const testPipelineConfigSchema = z.object({
+  enabled: z.boolean(),
+  testRepo: z.string().url(),
+  testPipelineId: z.number().int().positive(),
+  rateLimitPerHour: z.number().int().min(1).max(1000).optional(),
+  branchPrefix: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9\-_/]+\/$/, 'branchPrefix must end with `/` and be path-safe')
+    .optional(),
+});
+
 const mergeableFieldSchema = z.enum([
   'smokePages',
   'customInstructions',
@@ -225,6 +256,11 @@ const createProfileBaseSchema = z.object({
     .default('autopod'),
   pimActivations: z.array(pimActivationConfigSchema).nullable().default(null),
   mergeStrategy: mergeStrategySchema,
+  sidecars: sidecarsConfigSchema.nullable().default(null),
+  // trustedSource gates privileged sidecars. Safe default is false — privileged
+  // sidecars won't be spawned until the profile author explicitly sets true.
+  trustedSource: z.boolean().nullable().default(false),
+  testPipeline: testPipelineConfigSchema.nullable().default(null),
 });
 
 // Every nullable field on the base schema except identity/metadata. On a

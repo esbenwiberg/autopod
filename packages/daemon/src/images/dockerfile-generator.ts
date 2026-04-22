@@ -68,6 +68,19 @@ export function generateDockerfile(options: DockerfileOptions): string {
     'RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot 2>/dev/null || true',
   );
 
+  // Per-sidecar image mods: tools the pod needs to interact with a sidecar
+  // must be present in the image (the pod can't install them at runtime under
+  // a restricted network policy). Dagger sidecar → install the Dagger CLI.
+  if (profile.sidecars?.dagger?.enabled) {
+    lines.push(
+      '',
+      '# Dagger CLI — talks to the dagger-engine sidecar over TCP',
+      'USER root',
+      'RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh',
+      'USER autopod',
+    );
+  }
+
   // Pre-warm build caches (buildCommand may be null on derived profiles that
   // only inherit; skip the pre-warm step in that case).
   if (profile.buildCommand) {

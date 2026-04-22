@@ -330,6 +330,42 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('NuGet.config');
   });
 
+  it('installs the Dagger CLI when profile has a dagger sidecar enabled', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        sidecars: {
+          dagger: {
+            enabled: true,
+            engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+            engineVersion: 'v0.12.0',
+          },
+        },
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('dl.dagger.io');
+    expect(df).toContain('install.sh');
+    // Must not leak docker-cli — the pod talks to the engine via TCP, not docker.sock
+    expect(df).not.toContain('docker-cli');
+    expect(df).not.toContain('docker-ce-cli');
+  });
+
+  it('does not install the Dagger CLI when the dagger sidecar is disabled', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        sidecars: {
+          dagger: {
+            enabled: false,
+            engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+            engineVersion: 'v0.12.0',
+          },
+        },
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).not.toContain('dl.dagger.io');
+  });
+
   it('snapshot: full Dockerfile with npm + nuget registries and PAT git', () => {
     const df = generateDockerfile({
       profile: mockProfile({

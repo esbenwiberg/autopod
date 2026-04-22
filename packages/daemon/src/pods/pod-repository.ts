@@ -60,6 +60,8 @@ export interface NewPod {
   seriesId?: string | null;
   /** Human-readable series name. */
   seriesName?: string | null;
+  /** Names of sidecars to spawn for this pod (e.g. `['dagger']`). */
+  requireSidecars?: string[] | null;
 }
 
 export interface PodFilters {
@@ -119,6 +121,8 @@ export interface PodUpdates {
   options?: PodOptions;
   dependencyStartedAt?: string | null;
   baseBranch?: string | null;
+  sidecarContainerIds?: Record<string, string> | null;
+  testRunBranches?: string[] | null;
 }
 
 export interface PodStats {
@@ -278,6 +282,15 @@ function rowToSession(row: Record<string, unknown>): Pod {
     seriesName: (row.series_name as string) ?? null,
     dependencyStartedAt: (row.dependency_started_at as string) ?? null,
     waitForMerge: Boolean(row.wait_for_merge),
+    requireSidecars: row.require_sidecars
+      ? (JSON.parse(row.require_sidecars as string) as string[])
+      : [],
+    sidecarContainerIds: row.sidecar_container_ids
+      ? (JSON.parse(row.sidecar_container_ids as string) as Record<string, string>)
+      : null,
+    testRunBranches: row.test_run_branches
+      ? (JSON.parse(row.test_run_branches as string) as string[])
+      : null,
   };
 }
 
@@ -304,14 +317,16 @@ export function createPodRepository(db: Database.Database): PodRepository {
           output_mode, agent_mode, output_target, validate, promotable,
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, reference_repo_pat, scheduled_job_id,
-          depends_on_pod_id, depends_on_pod_ids, series_id, series_name, wait_for_merge
+          depends_on_pod_id, depends_on_pod_ids, series_id, series_name, wait_for_merge,
+          require_sidecars
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId,
-          @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @waitForMerge
+          @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @waitForMerge,
+          @requireSidecars
         )
       `).run({
         id: pod.id,
@@ -345,6 +360,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
         seriesId: pod.seriesId ?? null,
         seriesName: pod.seriesName ?? null,
         waitForMerge: pod.waitForMerge ? 1 : 0,
+        requireSidecars:
+          pod.requireSidecars && pod.requireSidecars.length > 0
+            ? JSON.stringify(pod.requireSidecars)
+            : null,
       });
     },
 
@@ -548,6 +567,19 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.waitForMerge !== undefined) {
         setClauses.push('wait_for_merge = @waitForMerge');
         params.waitForMerge = changes.waitForMerge ? 1 : 0;
+      }
+      if (changes.sidecarContainerIds !== undefined) {
+        setClauses.push('sidecar_container_ids = @sidecarContainerIds');
+        params.sidecarContainerIds = changes.sidecarContainerIds
+          ? JSON.stringify(changes.sidecarContainerIds)
+          : null;
+      }
+      if (changes.testRunBranches !== undefined) {
+        setClauses.push('test_run_branches = @testRunBranches');
+        params.testRunBranches =
+          changes.testRunBranches && changes.testRunBranches.length > 0
+            ? JSON.stringify(changes.testRunBranches)
+            : null;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so

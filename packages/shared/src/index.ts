@@ -25,7 +25,25 @@ export type {
   MergeableField,
   MergeMode,
   MergeStrategy,
+  TestPipelineConfig,
 } from './types/profile.js';
+
+export type {
+  SidecarType,
+  SidecarHealthCheck,
+  SidecarResources,
+  SidecarSpec,
+  DaggerSidecarConfig,
+  SidecarsConfig,
+} from './types/sidecar.js';
+export {
+  DEFAULT_DAGGER_ENGINE_PORT,
+  DAGGER_RUNNER_HOST_ENV,
+  SIDECAR_LABEL_POD_ID,
+  SIDECAR_LABEL_NAME,
+  SIDECAR_LABEL_TYPE,
+  SIDECAR_CONTAINER_LABEL,
+} from './types/sidecar.js';
 
 export type {
   ActionGroup,

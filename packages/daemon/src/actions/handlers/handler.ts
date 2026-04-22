@@ -7,7 +7,17 @@ import type { Logger } from 'pino';
  */
 export interface ActionHandler {
   readonly handlerType: string;
-  execute(action: ActionDefinition, params: Record<string, unknown>): Promise<unknown>;
+  execute(
+    action: ActionDefinition,
+    params: Record<string, unknown>,
+    context?: ActionHandlerContext,
+  ): Promise<unknown>;
+}
+
+/** Per-call context forwarded by the action-engine. Handlers that don't need
+ *  it simply ignore the argument. */
+export interface ActionHandlerContext {
+  podId: string;
 }
 
 export interface HandlerConfig {

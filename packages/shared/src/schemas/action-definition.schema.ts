@@ -46,12 +46,20 @@ export const actionGroupSchema = z.enum([
   'ado-workitems',
   'ado-prs',
   'ado-code',
+  'ado-test-pipeline',
   'azure-logs',
   'azure-pim',
   'custom',
 ]);
 
-export const actionHandlerSchema = z.enum(['github', 'ado', 'azure-logs', 'azure-pim', 'http']);
+export const actionHandlerSchema = z.enum([
+  'github',
+  'ado',
+  'azure-logs',
+  'azure-pim',
+  'http',
+  'test-pipeline',
+]);
 
 // ─── Endpoint (HTTP handler) ────────────────────────────────────
 const endpointSchema = z.object({

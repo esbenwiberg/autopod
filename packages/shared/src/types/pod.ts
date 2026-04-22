@@ -135,6 +135,24 @@ export interface Pod {
    * it starts as soon as the parent reaches `validated`.
    */
   waitForMerge: boolean;
+  /**
+   * Names of sidecars this pod requested at creation time (e.g. `['dagger']`).
+   * Persisted so daemon-restart recovery can re-resolve + re-spawn them.
+   * Empty array when the pod declared no sidecars.
+   */
+  requireSidecars: string[];
+  /**
+   * Map of sidecar name → container id for sidecars spawned for this pod.
+   * E.g. `{ dagger: 'abc123...' }`. Empty/null when no sidecars were requested.
+   * Used for orphan reconciliation and teardown cascade.
+   */
+  sidecarContainerIds: Record<string, string> | null;
+  /**
+   * Branch names the daemon pushed to the test repo on behalf of this pod
+   * (via `ado.run_test_pipeline`). Cleared on pod end so the branch-cleanup
+   * sweep can reap them.
+   */
+  testRunBranches: string[] | null;
 }
 
 export interface CreatePodRequest {
@@ -194,6 +212,12 @@ export interface CreatePodRequest {
    * Defaults to false — set to true for stacked-series non-root pods.
    */
   waitForMerge?: boolean;
+  /**
+   * Names of sidecars to spawn for this pod (e.g. `['dagger']`). Each name
+   * must correspond to an enabled entry in `profile.sidecars`. Privileged
+   * sidecars additionally require `profile.trustedSource: true`.
+   */
+  requireSidecars?: string[];
 }
 
 export interface PodSummary {

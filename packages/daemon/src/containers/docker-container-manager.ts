@@ -11,6 +11,11 @@ import type {
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
+import {
+  alignMemoryToPageSize,
+  createContainerWithStaleRetry,
+  isExpectedDockerError,
+} from './docker-helpers.js';
 
 interface DockerContainerManagerOptions {
   docker?: Dockerode;
@@ -60,8 +65,7 @@ export class DockerContainerManager implements ContainerManager {
       PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
       AutoRemove: false,
       // Hard memory cap — prevents OOM kills from taking down the whole Docker VM.
-      // Docker requires Memory to be a multiple of the system's page size (4096 bytes).
-      Memory: config.memoryBytes ? Math.ceil(config.memoryBytes / 4096) * 4096 : undefined,
+      Memory: config.memoryBytes ? alignMemoryToPageSize(config.memoryBytes) : undefined,
     };
 
     if (config.networkName) {
@@ -73,9 +77,9 @@ export class DockerContainerManager implements ContainerManager {
       hostConfig.ExtraHosts = ['host.docker.internal:host-gateway'];
     }
 
-    let container: Dockerode.Container;
-    try {
-      container = await this.docker.createContainer({
+    const container = await createContainerWithStaleRetry(
+      this.docker,
+      {
         Image: config.image,
         name: containerName,
         Env: env,
@@ -84,37 +88,9 @@ export class DockerContainerManager implements ContainerManager {
         User: 'autopod',
         ExposedPorts: exposedPorts,
         HostConfig: hostConfig,
-      });
-    } catch (err: unknown) {
-      // If a stale container with the same name exists (e.g. daemon crashed mid-provisioning
-      // before the containerId was persisted), remove it and retry.
-      if (isExpectedError(err, [409])) {
-        this.logger.warn(
-          { containerName },
-          'Stale container with same name exists — removing and retrying',
-        );
-        const stale = this.docker.getContainer(containerName);
-        try {
-          await stale.stop({ t: 5 });
-        } catch {
-          // may already be stopped
-        }
-        await stale.remove({ force: true });
-
-        container = await this.docker.createContainer({
-          Image: config.image,
-          name: containerName,
-          Env: env,
-          Cmd: ['sleep', 'infinity'],
-          WorkingDir: '/workspace',
-          User: 'autopod',
-          ExposedPorts: exposedPorts,
-          HostConfig: hostConfig,
-        });
-      } else {
-        throw err;
-      }
-    }
+      },
+      this.logger,
+    );
 
     await container.start();
 
@@ -142,7 +118,7 @@ export class DockerContainerManager implements ContainerManager {
       await container.stop({ t: 10 });
       this.logger.info({ containerId }, 'Docker container stopped');
     } catch (err: unknown) {
-      if (isExpectedError(err, [304])) {
+      if (isExpectedDockerError(err, [304])) {
         this.logger.debug({ containerId }, 'Container already stopped');
         return;
       }
@@ -157,7 +133,7 @@ export class DockerContainerManager implements ContainerManager {
       await container.start();
       this.logger.info({ containerId }, 'Docker container started');
     } catch (err: unknown) {
-      if (isExpectedError(err, [304])) {
+      if (isExpectedDockerError(err, [304])) {
         this.logger.debug({ containerId }, 'Container already running');
         return;
       }
@@ -173,7 +149,7 @@ export class DockerContainerManager implements ContainerManager {
         await container.stop({ t: 10 });
       } catch (err: unknown) {
         // Swallow "not running" — container may already be stopped
-        if (!isExpectedError(err, [304, 404])) {
+        if (!isExpectedDockerError(err, [304, 404])) {
           throw err;
         }
       }
@@ -181,13 +157,13 @@ export class DockerContainerManager implements ContainerManager {
         await container.remove({ force: true });
       } catch (err: unknown) {
         // Swallow "not found" — container may already be removed
-        if (!isExpectedError(err, [404])) {
+        if (!isExpectedDockerError(err, [404])) {
           throw err;
         }
       }
       this.logger.info({ containerId }, 'Docker container killed');
     } catch (err: unknown) {
-      if (isExpectedError(err, [404])) {
+      if (isExpectedDockerError(err, [404])) {
         this.logger.debug({ containerId }, 'Container already gone, nothing to kill');
         return;
       }
@@ -520,14 +496,4 @@ function collectDemuxedOutput(
       }, timeout);
     }
   });
-}
-
-/**
- * Check if a Docker error matches one of the expected HTTP status codes.
- */
-function isExpectedError(err: unknown, statusCodes: number[]): boolean {
-  if (err && typeof err === 'object' && 'statusCode' in err) {
-    return statusCodes.includes((err as { statusCode: number }).statusCode);
-  }
-  return false;
 }

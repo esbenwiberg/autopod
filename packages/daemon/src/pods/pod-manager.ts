@@ -42,6 +42,8 @@ import {
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
+import type { SidecarManager } from '../containers/sidecar-manager.js';
+import { resolveSidecarSpec, sidecarPodEnv } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import { createHistoryExporter } from '../history/history-exporter.js';
 import { generateHistoryInstructions } from '../history/instructions-generator.js';
@@ -308,6 +310,9 @@ export interface PodManagerDependencies {
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
   networkManager?: NetworkManager;
+  /** Optional sidecar orchestrator. Pods that set `requireSidecars` need this;
+   *  pods that don't aren't affected by its absence. */
+  sidecarManager?: SidecarManager;
   /** Factory returning the appropriate PrManager for a given profile. Return null to skip PR creation. */
   prManagerFactory?: (profile: Profile) => PrManager | null;
   actionEngine?: {
@@ -430,6 +435,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     runtimeRegistry,
     validationEngine,
     networkManager,
+    sidecarManager,
     prManagerFactory,
     enqueueSession,
     mcpBaseUrl,
@@ -438,6 +444,78 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validationRepo,
     progressEventRepo,
   } = deps;
+
+  /** Tear down all sidecars attached to a pod. Re-reads the pod so it sees
+   *  the most recent `sidecarContainerIds` even if the caller's snapshot is
+   *  stale. No-ops if the pod never spawned any, or if no SidecarManager is
+   *  configured (older deployments). Never throws — failures are logged. */
+  async function killSidecarsForPod(podId: string): Promise<void> {
+    if (!sidecarManager) return;
+    let current: Pod;
+    try {
+      current = podRepo.getOrThrow(podId);
+    } catch {
+      return;
+    }
+    const ids = current.sidecarContainerIds;
+    if (!ids) return;
+    await Promise.allSettled(
+      Object.entries(ids).map(async ([name, containerId]) => {
+        try {
+          await sidecarManager.kill(containerId);
+        } catch (err) {
+          logger.warn({ err, podId, sidecarName: name, containerId }, 'Failed to kill sidecar');
+        }
+      }),
+    );
+    podRepo.update(podId, { sidecarContainerIds: null });
+  }
+
+  /** Delete any branches this pod pushed to the test repo via
+   *  `ado.run_test_pipeline`. Best-effort — network failures or already-deleted
+   *  branches are logged, not thrown. Cleared from the DB afterwards so a
+   *  cron-level sweep can see "this pod has no pending test branches".
+   */
+  async function cleanupTestRunBranches(podId: string): Promise<void> {
+    let current: Pod;
+    try {
+      current = podRepo.getOrThrow(podId);
+    } catch {
+      return;
+    }
+    const branches = current.testRunBranches;
+    if (!branches || branches.length === 0) return;
+    const profile = profileStore.get(current.profileName);
+    const cfg = profile.testPipeline;
+    if (!cfg || !cfg.enabled || !profile.adoPat) {
+      podRepo.update(podId, { testRunBranches: null });
+      return;
+    }
+    const authedUrl = new URL(cfg.testRepo);
+    authedUrl.username = 'x-access-token';
+    authedUrl.password = profile.adoPat;
+    const authedUrlStr = authedUrl.toString();
+    if (!current.worktreePath) {
+      // No worktree to run git from. Can't delete; leave a daily sweep to reap.
+      logger.warn({ podId, branches }, 'Cannot cleanup test-run branches — pod has no worktree');
+      podRepo.update(podId, { testRunBranches: null });
+      return;
+    }
+    await Promise.allSettled(
+      branches.map(async (branch) => {
+        try {
+          await execFileAsync(
+            'git',
+            ['-C', current.worktreePath as string, 'push', authedUrlStr, '--delete', branch],
+            { timeout: 30_000 },
+          );
+        } catch (err) {
+          logger.warn({ err, podId, branch }, 'Failed to delete test-run branch');
+        }
+      }),
+    );
+    podRepo.update(podId, { testRunBranches: null });
+  }
 
   /** Active auto-stop timers for preview containers, keyed by podId. */
   const previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1279,6 +1357,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
+      // Validate requireSidecars against the pod's profile at create time so
+      // typos and missing configs fail fast instead of silently no-oping at
+      // spawn. Privileged sidecars additionally require `trustedSource:true`.
+      const requireSidecars = request.requireSidecars ?? [];
+      for (const name of requireSidecars) {
+        const spec = resolveSidecarSpec(profile, name);
+        if (!spec) {
+          throw new AutopodError(
+            `Pod requested sidecar '${name}' but profile '${profile.name}' has no matching enabled config`,
+            'INVALID_SIDECAR',
+            400,
+          );
+        }
+        if (spec.privileged === true && profile.trustedSource !== true) {
+          throw new AutopodError(
+            `Sidecar '${name}' runs privileged; profile '${profile.name}' must have trustedSource:true to enable it`,
+            'UNTRUSTED_PROFILE',
+            403,
+          );
+        }
+      }
+
       // Derive referenceRepos with mountPath from URL last segment
       const derivedReferenceRepos: ReferenceRepo[] = (request.referenceRepos ?? []).map((r) => ({
         url: r.url,
@@ -1351,6 +1451,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             dependsOnPodId: request.dependsOnPodId ?? null,
             seriesId: request.seriesId ?? null,
             seriesName: request.seriesName ?? null,
+            requireSidecars: requireSidecars.length > 0 ? requireSidecars : null,
           });
           break;
         } catch (err: unknown) {
@@ -1552,6 +1653,42 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // PAT for ADO-hosted feeds, and requiring both is a footgun.
         const effectiveRegistryPat = profile.registryPat ?? profile.adoPat ?? null;
 
+        // Resolve sidecar specs up front so their env vars (e.g. Dagger's
+        // _EXPERIMENTAL_DAGGER_RUNNER_HOST) can be baked into the pod container
+        // env before spawn. Sidecar validation already ran at createSession, so
+        // a null spec here is a config change between create and spawn; treat
+        // as a hard error rather than silently skipping.
+        const sidecarSpecs: { name: string; spec: import('@autopod/shared').SidecarSpec }[] = [];
+        for (const name of pod.requireSidecars) {
+          const spec = resolveSidecarSpec(profile, name);
+          if (!spec) {
+            throw new AutopodError(
+              `Sidecar '${name}' is no longer available on profile '${profile.name}'`,
+              'INVALID_SIDECAR',
+              409,
+            );
+          }
+          sidecarSpecs.push({ name, spec });
+        }
+        const sidecarEnv: Record<string, string> = {};
+        for (const { spec } of sidecarSpecs) {
+          Object.assign(sidecarEnv, sidecarPodEnv(spec));
+        }
+        if (sidecarSpecs.length > 0 && !sidecarManager) {
+          throw new AutopodError(
+            `Pod ${podId} requires sidecars but no SidecarManager is configured on the daemon`,
+            'MISCONFIGURED_DAEMON',
+            500,
+          );
+        }
+        if (sidecarSpecs.length > 0 && !networkName) {
+          throw new AutopodError(
+            `Pod ${podId} requires sidecars; profile must have a networkPolicy enabled so sidecars and the pod share an isolated network`,
+            'INVALID_CONFIGURATION',
+            400,
+          );
+        }
+
         const containerEnv: Record<string, string> = {
           POD_ID: podId,
           PORT: String(CONTAINER_APP_PORT),
@@ -1566,6 +1703,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             : {}),
           // NuGet credential provider env — auth handled via env var, not config files
           ...buildNuGetCredentialEnv(profile.privateRegistries, effectiveRegistryPat),
+          ...sidecarEnv,
         };
 
         const containerId = await containerManager.spawn({
@@ -1582,6 +1720,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           memoryBytes:
             (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
         });
+
+        // Spawn sidecars on the pod's network now that it's up. If any fail,
+        // kill anything we already started (main + partials) and surface the
+        // error so processPod's outer error path tears the pod down cleanly.
+        if (sidecarSpecs.length > 0 && sidecarManager && networkName) {
+          const started: Record<string, string> = {};
+          try {
+            for (const { name, spec } of sidecarSpecs) {
+              emitStatus(`Spawning sidecar '${name}'…`);
+              const handle = await sidecarManager.spawn({ spec, podId, networkName });
+              started[name] = handle.containerId;
+              await sidecarManager.waitHealthy(handle, spec);
+            }
+            podRepo.update(podId, { sidecarContainerIds: started });
+          } catch (err) {
+            logger.error({ err, podId, started }, 'Sidecar spawn failed — cleaning up');
+            for (const id of Object.values(started)) {
+              await sidecarManager.kill(id).catch((killErr) => {
+                logger.warn({ killErr, containerId: id }, 'Failed to kill partial sidecar');
+              });
+            }
+            await containerManager.kill(containerId).catch(() => {});
+            throw err;
+          }
+        }
 
         // Copy worktree content from bind mount to container's native filesystem.
         // VirtioFS bind mounts break getcwd() on Docker Desktop for Mac — overlayfs does not.
@@ -2988,6 +3151,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // can never leave the pod stuck in 'killing' forever.
       const KILL_TIMEOUT_MS = 30_000;
       const cleanup = async () => {
+        // Kill sidecars before the main container so they can't outlive their pod.
+        await killSidecarsForPod(podId);
+        await cleanupTestRunBranches(podId);
         // Kill container
         if (pod.containerId) {
           try {
@@ -3350,6 +3516,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
         // Kill the old container (best-effort — it may already be dead)
+        await killSidecarsForPod(podId);
+        await cleanupTestRunBranches(podId);
         if (pod.containerId) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
@@ -4265,6 +4433,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // Clean up container if still present
+      await killSidecarsForPod(podId);
+      await cleanupTestRunBranches(podId);
       if (pod.containerId) {
         try {
           const cm = containerManagerFactory.get(pod.executionTarget);

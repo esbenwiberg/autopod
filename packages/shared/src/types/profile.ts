@@ -3,6 +3,7 @@ import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from '
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
 import type { PodOptions } from './pod-options.js';
 import type { RuntimeType } from './runtime.js';
+import type { SidecarsConfig } from './sidecar.js';
 
 export type ExecutionTarget = 'local' | 'aci';
 
@@ -138,8 +139,40 @@ export interface Profile {
    * derived profiles (those with `extends` set).
    */
   mergeStrategy: MergeStrategy;
+  /**
+   * Companion-container configs per sidecar type (e.g. `sidecars.dagger`).
+   * Pods created against this profile may request any declared sidecar via
+   * `CreatePodRequest.requireSidecars`. Null = inherit from parent.
+   */
+  sidecars: SidecarsConfig | null;
+  /**
+   * Trust gate for privileged sidecars (currently: Dagger engine). When a
+   * sidecar has `privileged: true`, the daemon refuses to spawn it unless the
+   * owning profile has `trustedSource: true`. Internal repos with reviewed PRs
+   * qualify; public-PR / OSS profiles should not. Null = inherit from parent.
+   */
+  trustedSource: boolean | null;
+  /**
+   * Pre-configured ADO test pipeline the agent can trigger for integration
+   * validation (`execute_action("ado.run_test_pipeline", ...)`). Secrets live
+   * in the test repo's ADO variable groups — pods never see them. Null =
+   * inherit from parent / feature disabled.
+   */
+  testPipeline: TestPipelineConfig | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TestPipelineConfig {
+  enabled: boolean;
+  /** Full URL of the test repo (separate from the pod's main repo for blast-radius). */
+  testRepo: string;
+  /** ADO pipeline definition id to trigger. */
+  testPipelineId: number;
+  /** Max test runs per pod per hour. Default 10. */
+  rateLimitPerHour?: number;
+  /** Prefix for temp branches the daemon pushes to the test repo. Default `test-runs/`. */
+  branchPrefix?: string;
 }
 
 export interface SmokePage {

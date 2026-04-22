@@ -6,11 +6,18 @@ export type ActionGroup =
   | 'ado-workitems'
   | 'ado-prs'
   | 'ado-code'
+  | 'ado-test-pipeline'
   | 'azure-logs'
   | 'azure-pim'
   | 'custom';
 
-export type ActionHandler = 'github' | 'ado' | 'azure-logs' | 'azure-pim' | 'http';
+export type ActionHandler =
+  | 'github'
+  | 'ado'
+  | 'azure-logs'
+  | 'azure-pim'
+  | 'http'
+  | 'test-pipeline';
 
 // ─── Auth Config ────────────────────────────────────────────────
 export type AuthConfig =

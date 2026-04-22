@@ -13,7 +13,9 @@ import type {
   PrivateRegistry,
   Profile,
   ProviderCredentials,
+  SidecarsConfig,
   SmokePage,
+  TestPipelineConfig,
 } from '@autopod/shared';
 import {
   AutopodError,
@@ -150,6 +152,11 @@ export function rowToProfile(
     mergeStrategy: row.merge_strategy
       ? (JSON.parse(row.merge_strategy as string) as MergeStrategy)
       : {},
+    sidecars: row.sidecars ? (JSON.parse(row.sidecars as string) as SidecarsConfig) : null,
+    trustedSource: nullableBool(row.trusted_source),
+    testPipeline: row.test_pipeline
+      ? (JSON.parse(row.test_pipeline as string) as TestPipelineConfig)
+      : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -269,6 +276,7 @@ export function createProfileStore(
           issue_watcher_enabled, issue_watcher_label_prefix,
           pim_activations,
           merge_strategy,
+          sidecars, trusted_source, test_pipeline,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
@@ -284,6 +292,7 @@ export function createProfileStore(
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
           @pimActivations,
           @mergeStrategy,
+          @sidecars, @trustedSource, @testPipeline,
           @createdAt, @updatedAt
         )
       `).run({
@@ -336,6 +345,14 @@ export function createProfileStore(
         issueWatcherLabelPrefix: parsed.issueWatcherLabelPrefix,
         pimActivations: parsed.pimActivations ? JSON.stringify(parsed.pimActivations) : null,
         mergeStrategy: JSON.stringify(parsed.mergeStrategy ?? {}),
+        sidecars: parsed.sidecars ? JSON.stringify(parsed.sidecars) : null,
+        trustedSource:
+          parsed.trustedSource === null || parsed.trustedSource === undefined
+            ? null
+            : parsed.trustedSource
+              ? 1
+              : 0,
+        testPipeline: parsed.testPipeline ? JSON.stringify(parsed.testPipeline) : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -610,6 +627,19 @@ export function createProfileStore(
       if (parsed.mergeStrategy !== undefined) {
         setClauses.push('merge_strategy = @mergeStrategy');
         fieldMap.mergeStrategy = JSON.stringify(parsed.mergeStrategy);
+      }
+      if (parsed.sidecars !== undefined) {
+        setClauses.push('sidecars = @sidecars');
+        fieldMap.sidecars = parsed.sidecars ? JSON.stringify(parsed.sidecars) : null;
+      }
+      if (parsed.trustedSource !== undefined) {
+        setClauses.push('trusted_source = @trustedSource');
+        fieldMap.trustedSource =
+          parsed.trustedSource === null ? null : parsed.trustedSource ? 1 : 0;
+      }
+      if (parsed.testPipeline !== undefined) {
+        setClauses.push('test_pipeline = @testPipeline');
+        fieldMap.testPipeline = parsed.testPipeline ? JSON.stringify(parsed.testPipeline) : null;
       }
 
       if (setClauses.length === 0) {

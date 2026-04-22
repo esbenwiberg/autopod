@@ -277,6 +277,11 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         issueWatcherLabelPrefix: (row.issue_watcher_label_prefix as string) ?? 'autopod',
         pimActivations: row.pim_activations ? JSON.parse(row.pim_activations as string) : null,
         mergeStrategy: row.merge_strategy ? JSON.parse(row.merge_strategy as string) : {},
+        sidecars: row.sidecars ? JSON.parse(row.sidecars as string) : null,
+        trustedSource:
+          row.trusted_source === null || row.trusted_source === undefined
+            ? null
+            : Boolean(row.trusted_source),
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };

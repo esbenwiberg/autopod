@@ -6,6 +6,8 @@ import type {
 } from '@autopod/shared';
 import { processContentDeep } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { PodRepository } from '../pods/pod-repository.js';
+import type { ProfileStore } from '../profiles/index.js';
 import type { ActionRegistry } from './action-registry.js';
 import type { ActionAuditRepository } from './audit-repository.js';
 import { createGenericHttpHandler } from './generic-http-handler.js';
@@ -14,6 +16,7 @@ import { createAzureLogsHandler } from './handlers/azure-logs-handler.js';
 import { createAzurePimHandler } from './handlers/azure-pim-handler.js';
 import { createGitHubHandler } from './handlers/github-handler.js';
 import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
+import { createTestPipelineHandler } from './handlers/test-pipeline-handler.js';
 
 export interface ActionEngine {
   /** Execute an action for a pod */
@@ -27,10 +30,14 @@ export interface ActionEngineDependencies {
   auditRepo: ActionAuditRepository;
   logger: Logger;
   getSecret: (ref: string) => string | undefined;
+  /** Optional — required only when the `test-pipeline` handler is used. */
+  podRepo?: PodRepository;
+  /** Optional — required only when the `test-pipeline` handler is used. */
+  profileStore?: ProfileStore;
 }
 
 export function createActionEngine(deps: ActionEngineDependencies): ActionEngine {
-  const { registry, auditRepo, logger, getSecret } = deps;
+  const { registry, auditRepo, logger, getSecret, podRepo, profileStore } = deps;
   const log = logger.child({ component: 'action-engine' });
 
   // Create handler instances
@@ -42,6 +49,13 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
     'azure-pim': createAzurePimHandler(handlerConfig),
     http: createGenericHttpHandler(handlerConfig),
   };
+  if (podRepo && profileStore) {
+    handlers['test-pipeline'] = createTestPipelineHandler({
+      logger: log,
+      podRepo,
+      profileStore,
+    });
+  }
 
   return {
     async execute(request: ActionRequest, policy: ActionPolicy): Promise<ActionResponse> {
@@ -132,7 +146,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
 
       let rawData: unknown;
       try {
-        rawData = await handler.execute(action, resolvedParams);
+        rawData = await handler.execute(action, resolvedParams, { podId });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error({ err, podId, actionName }, 'Action handler failed');
