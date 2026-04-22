@@ -16,6 +16,15 @@ const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
   custom: 'autopod-node22:latest',
 };
 
+// Base images that ship with the Dagger CLI already installed in /usr/local/bin.
+// Keep in sync with templates/base/Dockerfile.<template>.
+const DAGGER_PREINSTALLED: ReadonlySet<StackTemplate> = new Set([
+  'dotnet9',
+  'dotnet10',
+  'go124',
+  'go124-pw',
+]);
+
 export function generateDockerfile(options: DockerfileOptions): string {
   const { profile } = options;
   const baseImage = getBaseImage(profile.template ?? 'node22');
@@ -70,8 +79,10 @@ export function generateDockerfile(options: DockerfileOptions): string {
 
   // Per-sidecar image mods: tools the pod needs to interact with a sidecar
   // must be present in the image (the pod can't install them at runtime under
-  // a restricted network policy). Dagger sidecar → install the Dagger CLI.
-  if (profile.sidecars?.dagger?.enabled) {
+  // a restricted network policy). Dagger sidecar → install the Dagger CLI,
+  // unless the base image already ships it.
+  const template = profile.template ?? 'node22';
+  if (profile.sidecars?.dagger?.enabled && !DAGGER_PREINSTALLED.has(template)) {
     lines.push(
       '',
       '# Dagger CLI — talks to the dagger-engine sidecar over TCP',

@@ -42,6 +42,12 @@ ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED=true
 # Agent CLIs
 RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
+# Dagger CLI — pre-installed so pods with restricted/deny-all network policies
+# can still use Dagger modules (runtime install from dl.dagger.io would fail).
+RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh \
+    && test -x /usr/local/bin/dagger \
+    || (echo "ERROR: Dagger CLI installation failed" && exit 1)
+
 # Pre-warm NuGet cache with common restore patterns
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1

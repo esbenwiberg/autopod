@@ -36,6 +36,12 @@ RUN npm install -g pnpm@9
 # Agent CLIs
 RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
+# Dagger CLI — pre-installed so pods with restricted/deny-all network policies
+# can still use Dagger modules (runtime install from dl.dagger.io would fail).
+RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh \
+    && test -x /usr/local/bin/dagger \
+    || (echo "ERROR: Dagger CLI installation failed" && exit 1)
+
 # Pre-install Playwright + Chromium with all system dependencies.
 # `playwright install --with-deps` installs the complete set of OS packages
 # that Chromium needs — don't hand-pick them, Playwright knows best.
@@ -50,13 +56,26 @@ ENV GOCACHE=/home/autopod/.cache/go-build
 ENV GOMODCACHE=/home/autopod/go/pkg/mod
 ENV PATH=${GOPATH}/bin:${PATH}
 # Disable go.work (workspace requires Go 1.26; image ships 1.24)
-# Disable proxy/sumdb — containers have no internet access; fail fast instead of hanging
 ENV GOWORK=off
-ENV GOPROXY=off
-ENV GONOSUMDB=*
-ENV GONOSUMCHECK=*
+# Go module proxy: reach the public proxy when network is available; GOSUMDB=off
+# skips the checksum database (requires separate outbound + isn't useful when the
+# repo's go.sum is trusted). Pods under deny-all network policy rely on the
+# pre-cached modules below; anything uncached will fail loudly.
+ENV GOPROXY=https://proxy.golang.org,direct
+ENV GOSUMDB=off
 RUN mkdir -p ${GOPATH} ${GOCACHE} \
     && chown -R autopod:autopod ${GOPATH} /home/autopod/.cache
+
+# Pre-cache the Dagger Go SDK into GOMODCACHE so pods can `import "dagger.io/dagger"`
+# without reaching the Go proxy at runtime. Bump this ARG to match the Dagger engine
+# version used by profiles (see sidecars.dagger.engineVersion).
+ARG DAGGER_GO_SDK_VERSION=v0.18.6
+RUN mkdir -p /tmp/dagger-warmup \
+    && cd /tmp/dagger-warmup \
+    && go mod init warmup \
+    && go get dagger.io/dagger@${DAGGER_GO_SDK_VERSION} \
+    && cd / && rm -rf /tmp/dagger-warmup \
+    && chown -R autopod:autopod ${GOPATH}
 
 # Working directory
 WORKDIR /workspace
