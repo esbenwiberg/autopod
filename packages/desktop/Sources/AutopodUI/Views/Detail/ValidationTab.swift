@@ -380,7 +380,7 @@ public struct ValidationTab: View {
           }
         }
       }
-      screenshotImage(page.screenshotBase64)
+      screenshotThumbnail(page.screenshotBase64)
     }
     .padding(10)
     .background(page.status == "pass"
@@ -424,7 +424,7 @@ public struct ValidationTab: View {
         Text(check.reasoning)
           .font(.caption)
           .foregroundStyle(.secondary)
-        screenshotImage(check.screenshot)
+        screenshotThumbnail(check.screenshot)
       }
     }
   }
@@ -510,7 +510,7 @@ public struct ValidationTab: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
           ForEach(Array(screenshots.enumerated()), id: \.offset) { _, ss in
-            screenshotImage(ss)
+            screenshotThumbnail(ss)
           }
         }
       }
@@ -694,18 +694,6 @@ public struct ValidationTab: View {
       .background(color.opacity(0.12))
       .foregroundStyle(color)
       .clipShape(Capsule())
-  }
-
-  @ViewBuilder
-  private func screenshotImage(_ base64: String?) -> some View {
-    if let base64, let data = Data(base64Encoded: base64), let nsImage = NSImage(data: data) {
-      Image(nsImage: nsImage)
-        .resizable()
-        .aspectRatio(contentMode: .fit)
-        .frame(maxHeight: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3), lineWidth: 1))
-    }
   }
 
   private func tailLines(_ text: String, count: Int = 100) -> String {

@@ -17,6 +17,11 @@ struct SummaryTab: View {
                     taskSummaryCard(summary)
                 }
 
+                // Proof of work — smoke-page screenshots for web features
+                if let shots = pod.validationChecks?.proofOfWorkScreenshots, !shots.isEmpty {
+                    proofOfWorkCard(shots)
+                }
+
                 // Pod prompt
                 promptSection
             }
@@ -115,6 +120,36 @@ struct SummaryTab: View {
                         .padding(8)
                         .background(Color.orange.opacity(0.05))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Proof of work
+
+    private func proofOfWorkCard(_ shots: [PageScreenshot]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .foregroundStyle(.green)
+                Text("Proof of Work")
+                    .font(.system(.subheadline).weight(.semibold))
+                Text("\(shots.count) page\(shots.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(shots) { shot in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(shot.path)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        screenshotThumbnail(shot.base64)
                     }
                 }
             }

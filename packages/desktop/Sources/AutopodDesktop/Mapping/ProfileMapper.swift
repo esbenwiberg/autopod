@@ -120,6 +120,30 @@ public enum ProfileMapper {
           justification: r.justification
         )
       },
+      trustedSource: response.trustedSource ?? false,
+      sidecars: response.sidecars.flatMap { s -> SidecarsSnapshot? in
+        guard let d = s.dagger else { return SidecarsSnapshot(dagger: nil) }
+        return SidecarsSnapshot(
+          dagger: DaggerSidecarSnapshot(
+            enabled: d.enabled,
+            engineImageDigest: d.engineImageDigest,
+            engineVersion: d.engineVersion,
+            enginePort: d.enginePort,
+            memoryGb: d.memoryGb,
+            cpus: d.cpus,
+            storageGb: d.storageGb
+          )
+        )
+      },
+      testPipeline: response.testPipeline.map { t in
+        TestPipelineConfig(
+          enabled: t.enabled,
+          testRepo: t.testRepo,
+          testPipelineId: t.testPipelineId,
+          rateLimitPerHour: t.rateLimitPerHour,
+          branchPrefix: t.branchPrefix
+        )
+      },
       providerCredentialsType: response.providerCredentials?.provider,
       version: response.version,
       createdAt: PodMapper.parseDate(response.createdAt),
@@ -267,6 +291,41 @@ public enum ProfileMapper {
       }
     } else {
       d["pimActivations"] = NSNull()
+    }
+
+    // Sandbox & test pipeline
+    d["trustedSource"] = profile.trustedSource
+    if let t = profile.testPipeline {
+      var tp: [String: Any] = [
+        "enabled": t.enabled,
+        "testRepo": t.testRepo,
+        "testPipelineId": t.testPipelineId,
+      ]
+      if let r = t.rateLimitPerHour { tp["rateLimitPerHour"] = r }
+      if let b = t.branchPrefix, !b.isEmpty { tp["branchPrefix"] = b }
+      d["testPipeline"] = tp
+    } else {
+      d["testPipeline"] = NSNull()
+    }
+    // Sidecars: preserved verbatim so write operations don't wipe fields the
+    // editor doesn't surface yet (dagger engine digest/version/etc.).
+    if let s = profile.sidecars {
+      var sidecars: [String: Any] = [:]
+      if let d2 = s.dagger {
+        var dag: [String: Any] = [
+          "enabled": d2.enabled,
+          "engineImageDigest": d2.engineImageDigest,
+          "engineVersion": d2.engineVersion,
+        ]
+        if let v = d2.enginePort { dag["enginePort"] = v }
+        if let v = d2.memoryGb { dag["memoryGb"] = v }
+        if let v = d2.cpus { dag["cpus"] = v }
+        if let v = d2.storageGb { dag["storageGb"] = v }
+        sidecars["dagger"] = dag
+      }
+      d["sidecars"] = sidecars
+    } else {
+      d["sidecars"] = NSNull()
     }
 
     // Action policy

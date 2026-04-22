@@ -125,6 +125,17 @@ public struct PageDetail: Sendable {
     }
 }
 
+/// A page screenshot surfaced on the Summary tab as proof-of-work.
+/// Populated from smoke.pages regardless of pass/fail so reviewers can eyeball the result.
+public struct PageScreenshot: Sendable, Identifiable {
+    public let id = UUID()
+    public let path: String
+    public let base64: String
+    public init(path: String, base64: String) {
+        self.path = path; self.base64 = base64
+    }
+}
+
 public struct AcCheckDetail: Sendable {
     public let criterion: String
     public let passed: Bool
@@ -163,6 +174,8 @@ public struct ValidationChecks: Sendable {
     public let acChecks: [AcCheckDetail]?
     public let requirementsCheck: [RequirementCheckDetail]?
     public let taskReviewScreenshots: [String]?
+    /// Smoke-page screenshots surfaced on the Summary tab as proof-of-work (independent of pass/fail).
+    public let proofOfWorkScreenshots: [PageScreenshot]?
     /// The formatted markdown feedback that was sent back to the agent after a failed validation attempt.
     public let correctionMessage: String?
     public init(
@@ -176,6 +189,7 @@ public struct ValidationChecks: Sendable {
         acChecks: [AcCheckDetail]? = nil,
         requirementsCheck: [RequirementCheckDetail]? = nil,
         taskReviewScreenshots: [String]? = nil,
+        proofOfWorkScreenshots: [PageScreenshot]? = nil,
         correctionMessage: String? = nil
     ) {
         self.smoke = smoke; self.tests = tests; self.review = review
@@ -186,6 +200,7 @@ public struct ValidationChecks: Sendable {
         self.acValidation = acValidation; self.acChecks = acChecks
         self.requirementsCheck = requirementsCheck
         self.taskReviewScreenshots = taskReviewScreenshots
+        self.proofOfWorkScreenshots = proofOfWorkScreenshots
         self.correctionMessage = correctionMessage
     }
 
@@ -472,6 +487,13 @@ public struct Pod: Identifiable, Sendable {
     /// "Reveal in Finder".
     public var artifactsPath: String?
 
+    /// Names of sidecars this pod requested at creation (e.g. `["dagger"]`).
+    public var requireSidecars: [String]
+    /// Map of sidecar name → container id for currently-running sidecars.
+    public var sidecarContainerIds: [String: String]
+    /// Branches this pod pushed to the configured test repo (cleared on pod end).
+    public var testRunBranches: [String]
+
     // MARK: - Series (pod dependency DAG)
 
     /// Series this pod belongs to, or nil for standalone pods.
@@ -552,7 +574,10 @@ public struct Pod: Identifiable, Sendable {
         seriesName: String? = nil,
         dependsOnPodIds: [String] = [],
         dependencyStartedAt: Date? = nil,
-        artifactsPath: String? = nil
+        artifactsPath: String? = nil,
+        requireSidecars: [String] = [],
+        sidecarContainerIds: [String: String] = [:],
+        testRunBranches: [String] = []
     ) {
         self.id = id; self.status = status; self.pod = pod
         self.hasWorktree = hasWorktree
@@ -574,6 +599,9 @@ public struct Pod: Identifiable, Sendable {
         self.dependsOnPodIds = dependsOnPodIds
         self.dependencyStartedAt = dependencyStartedAt
         self.artifactsPath = artifactsPath
+        self.requireSidecars = requireSidecars
+        self.sidecarContainerIds = sidecarContainerIds
+        self.testRunBranches = testRunBranches
     }
 
     /// Back-compat init that takes a legacy `OutputMode` and derives a `PodConfig`.

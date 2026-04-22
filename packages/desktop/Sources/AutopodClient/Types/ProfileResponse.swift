@@ -55,6 +55,12 @@ public struct ProfileResponse: Codable, Sendable {
   /// Keys: smokePages, customInstructions, escalation, mcpServers, claudeMdSections,
   /// skills, privateRegistries. Values: "merge" (default) or "replace".
   public var mergeStrategy: [String: String]?
+  /// Per-type sidecar configs (e.g. `sidecars.dagger`). Null = inherit.
+  public var sidecars: SidecarsResponse?
+  /// Gate for privileged sidecars. Null = inherit.
+  public var trustedSource: Bool?
+  /// Pre-configured ADO test pipeline for the `ado_run_test_pipeline` action.
+  public var testPipeline: TestPipelineResponse?
   public var version: Int
   public var createdAt: String
   public var updatedAt: String
@@ -111,6 +117,9 @@ public struct ProfileResponse: Codable, Sendable {
     maxBudgetExtensions = try c.decodeIfPresent(Int.self, forKey: .maxBudgetExtensions)
     pimActivations = try c.decodeIfPresent([PimActivationResponse].self, forKey: .pimActivations)
     mergeStrategy = try c.decodeIfPresent([String: String].self, forKey: .mergeStrategy)
+    sidecars = try c.decodeIfPresent(SidecarsResponse.self, forKey: .sidecars)
+    trustedSource = try decodeBoolOrIntIfPresent(c, key: .trustedSource)
+    testPipeline = try c.decodeIfPresent(TestPipelineResponse.self, forKey: .testPipeline)
     version = try c.decode(Int.self, forKey: .version)
     createdAt = try c.decode(String.self, forKey: .createdAt)
     updatedAt = try c.decode(String.self, forKey: .updatedAt)
@@ -308,6 +317,83 @@ public struct InjectedSkillResponse: Codable, Sendable {
   public var source: [String: String]?
   public init(name: String?, description: String?, source: [String: String]? = nil) {
     self.name = name; self.description = description; self.source = source
+  }
+}
+
+// MARK: - Sidecars + test pipeline
+
+public struct SidecarsResponse: Codable, Sendable {
+  public var dagger: DaggerSidecarResponse?
+  public init(dagger: DaggerSidecarResponse? = nil) { self.dagger = dagger }
+}
+
+public struct DaggerSidecarResponse: Codable, Sendable {
+  public var enabled: Bool
+  public var engineImageDigest: String
+  public var engineVersion: String
+  public var enginePort: Int?
+  public var memoryGb: Double?
+  public var cpus: Double?
+  public var storageGb: Double?
+
+  public init(
+    enabled: Bool,
+    engineImageDigest: String,
+    engineVersion: String,
+    enginePort: Int? = nil,
+    memoryGb: Double? = nil,
+    cpus: Double? = nil,
+    storageGb: Double? = nil
+  ) {
+    self.enabled = enabled
+    self.engineImageDigest = engineImageDigest
+    self.engineVersion = engineVersion
+    self.enginePort = enginePort
+    self.memoryGb = memoryGb
+    self.cpus = cpus
+    self.storageGb = storageGb
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
+    engineImageDigest = try c.decode(String.self, forKey: .engineImageDigest)
+    engineVersion = try c.decode(String.self, forKey: .engineVersion)
+    enginePort = try c.decodeIfPresent(Int.self, forKey: .enginePort)
+    memoryGb = try c.decodeIfPresent(Double.self, forKey: .memoryGb)
+    cpus = try c.decodeIfPresent(Double.self, forKey: .cpus)
+    storageGb = try c.decodeIfPresent(Double.self, forKey: .storageGb)
+  }
+}
+
+public struct TestPipelineResponse: Codable, Sendable {
+  public var enabled: Bool
+  public var testRepo: String
+  public var testPipelineId: Int
+  public var rateLimitPerHour: Int?
+  public var branchPrefix: String?
+
+  public init(
+    enabled: Bool,
+    testRepo: String,
+    testPipelineId: Int,
+    rateLimitPerHour: Int? = nil,
+    branchPrefix: String? = nil
+  ) {
+    self.enabled = enabled
+    self.testRepo = testRepo
+    self.testPipelineId = testPipelineId
+    self.rateLimitPerHour = rateLimitPerHour
+    self.branchPrefix = branchPrefix
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
+    testRepo = try c.decode(String.self, forKey: .testRepo)
+    testPipelineId = try c.decode(Int.self, forKey: .testPipelineId)
+    rateLimitPerHour = try c.decodeIfPresent(Int.self, forKey: .rateLimitPerHour)
+    branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix)
   }
 }
 

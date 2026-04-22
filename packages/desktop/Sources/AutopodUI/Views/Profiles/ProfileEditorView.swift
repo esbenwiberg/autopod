@@ -11,6 +11,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
     case escalation
     case container
     case network
+    case sandbox
     case actions
     case issueWatcher
     case validation
@@ -29,6 +30,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .escalation: "Escalation"
         case .container:  "Container"
         case .network:    "Network & Security"
+        case .sandbox:    "Sandbox & Test Pipeline"
         case .actions:    "Actions"
         case .issueWatcher: "Issue Watcher"
         case .validation: "Validation"
@@ -47,6 +49,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .escalation: "bubble.left.and.exclamationmark.bubble.right"
         case .container:  "server.rack"
         case .network:    "shield.checkered"
+        case .sandbox:    "lock.shield"
         case .actions:    "bolt.shield"
         case .issueWatcher: "eye"
         case .validation: "globe"
@@ -72,6 +75,8 @@ enum ProfileSection: String, CaseIterable, Identifiable {
             "Execution environment and resource limits for the agent container."
         case .network:
             "Outbound network access controls for container isolation."
+        case .sandbox:
+            "Trust gate for privileged sidecars (e.g. Dagger engine) and configuration for the ADO test pipeline the agent can trigger for integration validation."
         case .actions:
             "Control plane actions the agent can execute — GitHub, ADO, Azure, and custom HTTP."
         case .issueWatcher:
@@ -103,6 +108,8 @@ enum ProfileSection: String, CaseIterable, Identifiable {
             ["execution target", "docker", "aci", "azure container instances", "memory", "memory limit", "warm image"]
         case .network:
             ["network", "isolation", "firewall", "allow all", "deny all", "restricted", "allowed hosts", "package managers", "egress"]
+        case .sandbox:
+            ["sandbox", "trusted source", "trust", "sidecar", "dagger", "test pipeline", "test repo", "ado pipeline", "pipeline trigger", "rate limit"]
         case .actions:
             ["actions", "github issues", "github prs", "github code", "ado workitems", "ado prs", "azure logs", "azure pim", "pim", "action overrides", "sanitization", "quarantine", "custom actions"]
         case .issueWatcher:
@@ -563,6 +570,7 @@ public struct ProfileEditorView: View {
                 case .escalation:   escalationFields
                 case .container:    containerFields
                 case .network:      networkFields
+                case .sandbox:      sandboxFields
                 case .actions:      actionFields
                 case .issueWatcher: issueWatcherFields
                 case .validation:   validationFields
@@ -1407,6 +1415,137 @@ public struct ProfileEditorView: View {
                 .background(Color.orange.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             Text(desc)
+        }
+    }
+
+    // MARK: - Sandbox & Test Pipeline
+
+    @ViewBuilder
+    private var sandboxFields: some View {
+        Toggle(isOn: $profile.trustedSource) {
+            HStack(spacing: 4) {
+                Text("Trusted source")
+                HelpBadge(text: "Gates privileged sidecars (currently: Dagger engine). Only enable for internal repos with reviewed PRs — privileged sidecars can access the pod's entire filesystem and network.")
+            }
+        }
+
+        if profile.trustedSource {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Privileged sidecars (Dagger engine, etc.) can be spawned for pods using this profile. Do not enable on public-PR / OSS profiles.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+
+        Divider().padding(.vertical, 8)
+
+        let tpEnabledBinding = Binding<Bool>(
+            get: { profile.testPipeline?.enabled ?? false },
+            set: { newValue in
+                if newValue {
+                    if profile.testPipeline == nil {
+                        profile.testPipeline = TestPipelineConfig(enabled: true)
+                    } else {
+                        profile.testPipeline?.enabled = true
+                    }
+                } else {
+                    profile.testPipeline?.enabled = false
+                }
+            }
+        )
+
+        Toggle(isOn: tpEnabledBinding) {
+            HStack(spacing: 4) {
+                Text("Enable ADO test pipeline")
+                HelpBadge(text: "Lets the agent trigger a pre-configured ADO pipeline via `ado_run_test_pipeline`. The daemon pushes the pod's branch to a test repo; the test pipeline runs with sandbox credentials stored in ADO variable groups — never in the pod.")
+            }
+        }
+
+        if profile.testPipeline?.enabled == true {
+            let tpBinding = Binding<TestPipelineConfig>(
+                get: { profile.testPipeline ?? TestPipelineConfig(enabled: true) },
+                set: { profile.testPipeline = $0 }
+            )
+
+            fieldRow("Test Repo URL", help: "Full ADO repo URL (e.g. https://dev.azure.com/org/project/_git/test-repo). Keep this separate from the main repo so the test pipeline can't accidentally fire production stages.") {
+                TextField("https://dev.azure.com/org/project/_git/test-repo",
+                          text: Binding(
+                            get: { tpBinding.wrappedValue.testRepo },
+                            set: { tpBinding.wrappedValue.testRepo = $0 }
+                          ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+            }
+
+            fieldRow("Test Pipeline ID", help: "Numeric ID of the ADO pipeline definition to trigger. Find it in the URL of the pipeline's ADO page.") {
+                TextField("42", value: Binding(
+                    get: { tpBinding.wrappedValue.testPipelineId },
+                    set: { tpBinding.wrappedValue.testPipelineId = $0 }
+                ), format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 120)
+            }
+
+            fieldRow("Rate Limit (per hour)", help: "Max test pipeline runs per pod per hour. Leave blank for the default (10). Prevents runaway agents burning ADO minutes.") {
+                TextField("10", value: Binding(
+                    get: { tpBinding.wrappedValue.rateLimitPerHour ?? 0 },
+                    set: { tpBinding.wrappedValue.rateLimitPerHour = $0 == 0 ? nil : $0 }
+                ), format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 120)
+            }
+
+            fieldRow("Branch Prefix", help: "Prefix for the temp branches the daemon pushes to the test repo. Must end with '/'. Default: test-runs/") {
+                TextField("test-runs/", text: Binding(
+                    get: { tpBinding.wrappedValue.branchPrefix ?? "" },
+                    set: { tpBinding.wrappedValue.branchPrefix = $0.isEmpty ? nil : $0 }
+                ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 240)
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.blue)
+                Text("The test pipeline YAML (in the test repo) must trigger on `branches: include: [test-runs/*]`. Its ADO variable groups hold real credentials — keep the YAML owned by the team, never modifiable by the agent.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 8)
+        }
+
+        if profile.sidecars?.dagger != nil {
+            Divider().padding(.vertical, 8)
+            Text("Dagger sidecar")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Image(systemName: "cube.box")
+                    .foregroundStyle(.purple)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.sidecars?.dagger?.enabled == true ? "Enabled" : "Configured (disabled)")
+                        .font(.caption.weight(.medium))
+                    if let version = profile.sidecars?.dagger?.engineVersion {
+                        Text("engine \(version)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Edit sidecar config via CLI — typed editor coming in a follow-up.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(10)
+            .background(Color.purple.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
     }
 

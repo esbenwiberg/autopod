@@ -44,6 +44,15 @@ struct OverviewTab: View {
                     artifactsSection(artifactsPath)
                 }
 
+                // Infrastructure — sidecars + test-pipeline branches. Hidden entirely
+                // when the pod has neither.
+                if !pod.requireSidecars.isEmpty
+                    || !pod.sidecarContainerIds.isEmpty
+                    || !pod.testRunBranches.isEmpty
+                {
+                    infrastructureSection
+                }
+
                 // Metrics row
                 metricsRow
 
@@ -363,6 +372,79 @@ struct OverviewTab: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.blue.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Infrastructure (sidecars + test-pipeline branches)
+
+    private var infrastructureSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "cube.box.fill")
+                    .foregroundStyle(.purple)
+                Text("Infrastructure")
+                    .font(.system(.subheadline).weight(.semibold))
+            }
+
+            if !pod.requireSidecars.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sidecars requested")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(pod.requireSidecars, id: \.self) { name in
+                            Text(name)
+                                .font(.system(.caption, design: .monospaced))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.purple.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+
+            if !pod.sidecarContainerIds.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Running containers")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(pod.sidecarContainerIds.sorted(by: { $0.key < $1.key }), id: \.key) { name, id in
+                        HStack(spacing: 6) {
+                            Text(name)
+                                .font(.caption.weight(.medium))
+                                .frame(width: 70, alignment: .leading)
+                            Text(String(id.prefix(12)))
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+
+            if !pod.testRunBranches.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Active test-run branches")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(pod.testRunBranches, id: \.self) { branch in
+                        Text(branch)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.purple.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.purple.opacity(0.15), lineWidth: 1)
         )
     }
 

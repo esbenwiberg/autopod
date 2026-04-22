@@ -22,9 +22,19 @@ public enum MockData: Sendable {
         status: .validated, branch: "feat/cart", profileName: "webapp", model: "claude-opus",
         startedAt: .minutesAgo(12),
         diffStats: DiffStats(added: 142, removed: 38, files: 8),
-        validationChecks: ValidationChecks(smoke: true, tests: true, review: true),
+        validationChecks: ValidationChecks(
+            smoke: true, tests: true, review: true,
+            proofOfWorkScreenshots: [
+                PageScreenshot(path: "/", base64: tinyPngBase64),
+                PageScreenshot(path: "/cart", base64: tinyPngBase64),
+            ]
+        ),
         containerUrl: URL(string: "http://localhost:3001")
     )
+
+    /// 1×1 red PNG — just enough payload to prove the screenshot card renders in SwiftUI previews.
+    private static let tinyPngBase64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8//8/AwAI/AL+5Tpv/wAAAABJRU5ErkJggg=="
 
     public static let validatedFailed = Pod(
         status: .validated, branch: "fix/auth-flow", profileName: "webapp", model: "claude-sonnet",

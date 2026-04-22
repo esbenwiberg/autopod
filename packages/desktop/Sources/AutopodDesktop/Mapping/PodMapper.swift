@@ -108,6 +108,13 @@ public enum PodMapper {
         guard let ss = v.taskReview?.screenshots, !ss.isEmpty else { return nil }
         return ss
       }()
+      let proofOfWorkScreenshots: [PageScreenshot]? = {
+        let shots = v.smoke.pages.compactMap { p -> PageScreenshot? in
+          guard let b64 = p.screenshotBase64, !b64.isEmpty else { return nil }
+          return PageScreenshot(path: p.path, base64: b64)
+        }
+        return shots.isEmpty ? nil : shots
+      }()
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
         tests: mapTriState(v.test?.status),
@@ -123,6 +130,7 @@ public enum PodMapper {
         acChecks: acChecks,
         requirementsCheck: requirementsCheck,
         taskReviewScreenshots: taskReviewScreenshots,
+        proofOfWorkScreenshots: proofOfWorkScreenshots,
         correctionMessage: response.lastCorrectionMessage
       )
     }()
@@ -230,7 +238,10 @@ public enum PodMapper {
       dependsOnPodIds: response.dependsOnPodIds
         ?? (response.dependsOnPodId.map { [$0] } ?? []),
       dependencyStartedAt: response.dependencyStartedAt.map { parseDate($0) },
-      artifactsPath: response.artifactsPath
+      artifactsPath: response.artifactsPath,
+      requireSidecars: response.requireSidecars ?? [],
+      sidecarContainerIds: response.sidecarContainerIds ?? [:],
+      testRunBranches: response.testRunBranches ?? []
     )
   }
 

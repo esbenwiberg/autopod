@@ -105,6 +105,12 @@ public struct SessionResponse: Codable, Sendable {
   public let seriesName: String?
   public let dependencyStartedAt: String?
   public let artifactsPath: String?
+  /// Names of sidecars this pod requested (e.g. ["dagger"]).
+  public let requireSidecars: [String]?
+  /// Map of sidecar name → container id.
+  public let sidecarContainerIds: [String: String]?
+  /// Branches this pod pushed to the configured test repo (cleared on pod end).
+  public let testRunBranches: [String]?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
@@ -122,6 +128,7 @@ public struct SessionResponse: Codable, Sendable {
     case linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
     case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, dependencyStartedAt
     case artifactsPath
+    case requireSidecars, sidecarContainerIds, testRunBranches
   }
 }
 

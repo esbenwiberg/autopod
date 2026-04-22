@@ -95,6 +95,19 @@ public struct Profile: Identifiable, Sendable {
     // PIM activations (security allowlist for Azure PIM actions)
     public var pimActivations: [PimActivationEntry]
 
+    // Sandbox / sidecars
+    /// Gate for privileged sidecars (currently Dagger engine). When true, this
+    /// profile is allowed to spawn sidecars that run privileged. Only internal
+    /// repos with reviewed PRs should set this.
+    public var trustedSource: Bool
+    /// Opaque sidecar config preserved on round-trip. Editor UI covers only
+    /// the trustedSource toggle + testPipeline in v1; sidecars.dagger is still
+    /// edited via CLI / direct profile JSON.
+    public var sidecars: SidecarsSnapshot?
+
+    // Test pipeline (ADO)
+    public var testPipeline: TestPipelineConfig?
+
     // Provider credentials (read-only indicator)
     public var providerCredentialsType: String?
 
@@ -156,6 +169,9 @@ public struct Profile: Identifiable, Sendable {
         actionQuarantineBlockThreshold: Double = 0.8,
         actionQuarantineOnBlock: QuarantineOnBlock = .askHuman,
         pimActivations: [PimActivationEntry] = [],
+        trustedSource: Bool = false,
+        sidecars: SidecarsSnapshot? = nil,
+        testPipeline: TestPipelineConfig? = nil,
         providerCredentialsType: String? = nil,
         version: Int = 1,
         createdAt: Date = Date(), updatedAt: Date = Date()
@@ -206,9 +222,71 @@ public struct Profile: Identifiable, Sendable {
         self.actionQuarantineBlockThreshold = actionQuarantineBlockThreshold
         self.actionQuarantineOnBlock = actionQuarantineOnBlock
         self.pimActivations = pimActivations
+        self.trustedSource = trustedSource
+        self.sidecars = sidecars
+        self.testPipeline = testPipeline
         self.providerCredentialsType = providerCredentialsType
         self.version = version
         self.createdAt = createdAt; self.updatedAt = updatedAt
+    }
+}
+
+// MARK: - Sandbox & test-pipeline domain types
+
+/// Opaque snapshot of the profile's `sidecars` config. Preserved verbatim so
+/// write operations don't wipe out fields the editor UI doesn't surface yet.
+public struct SidecarsSnapshot: Sendable, Equatable {
+    public var dagger: DaggerSidecarSnapshot?
+    public init(dagger: DaggerSidecarSnapshot? = nil) { self.dagger = dagger }
+}
+
+public struct DaggerSidecarSnapshot: Sendable, Equatable {
+    public var enabled: Bool
+    public var engineImageDigest: String
+    public var engineVersion: String
+    public var enginePort: Int?
+    public var memoryGb: Double?
+    public var cpus: Double?
+    public var storageGb: Double?
+
+    public init(
+        enabled: Bool,
+        engineImageDigest: String,
+        engineVersion: String,
+        enginePort: Int? = nil,
+        memoryGb: Double? = nil,
+        cpus: Double? = nil,
+        storageGb: Double? = nil
+    ) {
+        self.enabled = enabled
+        self.engineImageDigest = engineImageDigest
+        self.engineVersion = engineVersion
+        self.enginePort = enginePort
+        self.memoryGb = memoryGb
+        self.cpus = cpus
+        self.storageGb = storageGb
+    }
+}
+
+public struct TestPipelineConfig: Sendable, Equatable {
+    public var enabled: Bool
+    public var testRepo: String
+    public var testPipelineId: Int
+    public var rateLimitPerHour: Int?
+    public var branchPrefix: String?
+
+    public init(
+        enabled: Bool = false,
+        testRepo: String = "",
+        testPipelineId: Int = 0,
+        rateLimitPerHour: Int? = nil,
+        branchPrefix: String? = nil
+    ) {
+        self.enabled = enabled
+        self.testRepo = testRepo
+        self.testPipelineId = testPipelineId
+        self.rateLimitPerHour = rateLimitPerHour
+        self.branchPrefix = branchPrefix
     }
 }
 
@@ -278,21 +356,23 @@ public enum ActionGroup: String, CaseIterable, Sendable, Hashable {
     case adoWorkitems = "ado-workitems"
     case adoPrs = "ado-prs"
     case adoCode = "ado-code"
+    case adoTestPipeline = "ado-test-pipeline"
     case azureLogs = "azure-logs"
     case azurePim = "azure-pim"
     case custom
 
     public var label: String {
         switch self {
-        case .githubIssues:  "GitHub Issues"
-        case .githubPrs:     "GitHub PRs"
-        case .githubCode:    "GitHub Code"
-        case .adoWorkitems:  "ADO Work Items"
-        case .adoPrs:        "ADO PRs"
-        case .adoCode:       "ADO Code"
-        case .azureLogs:     "Azure Logs"
-        case .azurePim:      "Azure PIM"
-        case .custom:        "Custom"
+        case .githubIssues:     "GitHub Issues"
+        case .githubPrs:        "GitHub PRs"
+        case .githubCode:       "GitHub Code"
+        case .adoWorkitems:     "ADO Work Items"
+        case .adoPrs:           "ADO PRs"
+        case .adoCode:          "ADO Code"
+        case .adoTestPipeline:  "ADO Test Pipeline"
+        case .azureLogs:        "Azure Logs"
+        case .azurePim:         "Azure PIM"
+        case .custom:           "Custom"
         }
     }
 }
