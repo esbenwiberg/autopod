@@ -15,7 +15,7 @@
     "build": "tsup",
     "clean": "rm -rf dist",
     "test": "vitest run",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch --no-dts"
   },
   "dependencies": {
     "nanoid": "^5.0.9",
