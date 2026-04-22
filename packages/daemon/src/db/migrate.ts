@@ -48,8 +48,30 @@ export function runMigrations(db: Database.Database, migrationsDir: string, logg
       db.pragma('foreign_keys = OFF');
     }
 
+    // Opt-in marker for repair migrations that re-assert ALTER TABLE ADD COLUMN
+    // statements which may or may not already be applied (SQLite lacks
+    // IF NOT EXISTS for ADD COLUMN). When present, split on `;` and swallow
+    // only "duplicate column name" errors per statement.
+    const allowDuplicateColumns = /--\s*@allow-duplicate-columns/i.test(sql);
+
     const migrate = db.transaction(() => {
-      db.exec(sql);
+      if (allowDuplicateColumns) {
+        const statements = sql
+          .split(';')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        for (const stmt of statements) {
+          try {
+            db.exec(`${stmt};`);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : '';
+            if (!msg.includes('duplicate column name')) throw err;
+            logger.debug({ stmt, file }, 'Skipping already-applied ADD COLUMN');
+          }
+        }
+      } else {
+        db.exec(sql);
+      }
       db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version);
     });
 
