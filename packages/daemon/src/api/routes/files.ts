@@ -36,6 +36,14 @@ const SKIP_DIRS = new Set([
   '.vs',
   'bin',
   'obj',
+  '.venv',
+  '.idea',
+  '.gradle',
+  '.nx',
+  '.pnpm-store',
+  '.yarn',
+  '.vercel',
+  '.svelte-kit',
 ]);
 
 export function filesRoutes(app: FastifyInstance, podManager: PodManager): void {
@@ -134,9 +142,6 @@ async function walk(root: string, extensions: Set<string>): Promise<FileEntry[]>
 
     for (const entry of entries) {
       if (out.length >= MAX_LIST_FILES) return;
-      if (entry.name.startsWith('.') && entry.name !== '.') {
-        if (entry.isDirectory()) continue;
-      }
 
       const full = path.join(dir, entry.name);
 
