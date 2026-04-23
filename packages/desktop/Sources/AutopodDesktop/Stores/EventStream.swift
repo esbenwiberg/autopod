@@ -353,10 +353,30 @@ public final class EventStream {
       timestamp: date,
       type: type,
       summary: summary,
-      detail: response.output ?? response.diff,
+      detail: EventStream.detailForEvent(response),
       toolName: response.tool,
       isFatal: response.fatal ?? false
     )
+  }
+
+  /// Resolve the expanded-detail string for a log row.
+  ///
+  /// Priority: tool/file output, then file diff, then structured payload —
+  /// `escalation` events render their full `EscalationPayload`, and `tool_use`
+  /// events (including MCP escalation + dynamic action tools) render their
+  /// input payload so the agent's question/params are revealed on click.
+  /// `tool_result` events keep the output-first path and never fall through
+  /// to input rendering.
+  private static func detailForEvent(_ response: AgentEventResponse) -> String? {
+    if let output = response.output, !output.isEmpty { return output }
+    if let diff = response.diff, !diff.isEmpty { return diff }
+    if response.type == "escalation" {
+      return escalationDetail(payload: response.payload)
+    }
+    if response.type == "tool_use", response.tool != "tool_result" {
+      return toolInputDetail(response.input)
+    }
+    return nil
   }
 
   // MARK: - Summary helpers
@@ -385,11 +405,127 @@ public final class EventStream {
     case "TodoWrite":
       return input["todos"]?.stringValue
     default:
-      // For unknown tools, try common field names
-      return input["command"]?.stringValue
-        ?? input["file_path"]?.stringValue.map { shortenPath($0) }
-        ?? input["query"]?.stringValue
+      // Built-in tools above have custom formatting. For everything else —
+      // MCP escalation tools (ask_ai, ask_human, report_*, memory_*,
+      // validate_in_browser, request_credential, trigger_revalidation) and
+      // dynamic action tools registered from the profile's action policy —
+      // pick the most useful single field to display inline.
+      return genericInputSummary(input)
     }
+  }
+
+  /// Extract a one-line inline summary from an unknown tool's input payload.
+  /// Tries a priority list of common field names, then falls back to the first
+  /// non-empty top-level string value. Nil when nothing usable is present.
+  private static func genericInputSummary(_ input: AnyCodable) -> String? {
+    let priorityKeys = [
+      "question", "description", "summary", "plan", "message",
+      "url", "query", "command", "file_path", "path", "name",
+      "actionName", "key",
+    ]
+    let pathKeys: Set<String> = ["file_path", "path"]
+
+    for key in priorityKeys {
+      if let value = input[key]?.stringValue, !value.isEmpty {
+        return pathKeys.contains(key) ? shortenPath(value) : value
+      }
+    }
+    if let dict = input.asDict {
+      for (_, v) in dict.sorted(by: { $0.key < $1.key }) {
+        if let s = v.stringValue, !s.isEmpty { return s }
+      }
+    }
+    return nil
+  }
+
+  /// Render a tool's full input payload as multi-line key/value text for the
+  /// expanded detail bubble. Returns nil for trivial payloads where the inline
+  /// summary already shows everything (single short single-line string field).
+  private static func toolInputDetail(_ input: AnyCodable?) -> String? {
+    guard let input, let dict = input.asDict, !dict.isEmpty else { return nil }
+    if dict.count == 1, let only = dict.values.first,
+       let s = only.stringValue, !s.contains("\n"), s.count <= 80 {
+      return nil
+    }
+    return prettyPayload(input, indent: 0)
+  }
+
+  /// Render an EscalationPayload's non-nil fields as multi-line key/value text.
+  private static func escalationDetail(payload: EscalationPayload?) -> String? {
+    guard let payload else { return nil }
+    var lines: [String] = []
+
+    func appendString(_ key: String, _ value: String?) {
+      guard let value, !value.isEmpty else { return }
+      if value.contains("\n") {
+        lines.append("\(key):")
+        for line in value.components(separatedBy: "\n") {
+          lines.append("  \(line)")
+        }
+      } else {
+        lines.append("\(key): \(value)")
+      }
+    }
+
+    func appendList(_ key: String, _ items: [String]?) {
+      guard let items, !items.isEmpty else { return }
+      lines.append("\(key):")
+      for item in items { lines.append("  - \(item)") }
+    }
+
+    appendString("question", payload.question)
+    appendString("context", payload.context)
+    appendString("domain", payload.domain)
+    appendList("options", payload.options)
+    appendString("description", payload.description)
+    appendList("attempted", payload.attempted)
+    appendString("needs", payload.needs)
+    appendString("actionName", payload.actionName)
+    if let params = payload.params, !params.isEmpty {
+      lines.append("params:")
+      for (k, v) in params.sorted(by: { $0.key < $1.key }) {
+        if let s = v.stringValue, !s.contains("\n") {
+          lines.append("  \(k): \(s)")
+        } else {
+          lines.append("  \(k): \(v.displayValue)")
+        }
+      }
+    }
+
+    return lines.isEmpty ? nil : lines.joined(separator: "\n")
+  }
+
+  /// Pretty-print an AnyCodable payload as YAML-ish indented text.
+  /// String values with newlines are preserved on their own indented lines;
+  /// nested dicts/arrays recurse one indent level deeper.
+  private static func prettyPayload(_ value: AnyCodable, indent: Int) -> String {
+    let pad = String(repeating: "  ", count: indent)
+    if let dict = value.asDict {
+      return dict.sorted(by: { $0.key < $1.key }).map { key, val in
+        if let s = val.stringValue {
+          if s.contains("\n") {
+            let block = s.components(separatedBy: "\n")
+              .map { "\(pad)  \($0)" }
+              .joined(separator: "\n")
+            return "\(pad)\(key):\n\(block)"
+          }
+          return "\(pad)\(key): \(s)"
+        }
+        if val.asDict != nil || val.asArray != nil {
+          return "\(pad)\(key):\n\(prettyPayload(val, indent: indent + 1))"
+        }
+        return "\(pad)\(key): \(val.displayValue)"
+      }.joined(separator: "\n")
+    }
+    if let arr = value.asArray {
+      return arr.map { v in
+        if v.asDict != nil {
+          return "\(pad)-\n\(prettyPayload(v, indent: indent + 1))"
+        }
+        return "\(pad)- \(v.displayValue)"
+      }.joined(separator: "\n")
+    }
+    return "\(pad)\(value.displayValue)"
   }
 
   /// Strip /workspace/ prefix and leading ./ from container paths.

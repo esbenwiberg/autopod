@@ -539,6 +539,16 @@ public struct AnyCodable: Codable, Sendable {
     return nil
   }
 
+  public var asDict: [String: AnyCodable]? {
+    if case .dict(let d) = storage { return d }
+    return nil
+  }
+
+  public var asArray: [AnyCodable]? {
+    if case .array(let a) = storage { return a }
+    return nil
+  }
+
   /// Human-readable display value for any storage type.
   public var displayValue: String {
     switch storage {
