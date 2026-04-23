@@ -1,3 +1,4 @@
+import MarkdownUI
 import SwiftUI
 
 /// Summary tab — plan, task summary, deviations from plan, and original pod prompt.
@@ -40,10 +41,12 @@ struct SummaryTab: View {
                     .font(.system(.subheadline).weight(.semibold))
             }
 
-            Text(plan.summary)
+            Markdown(plan.summary)
+                .markdownTheme(.autopod)
                 .font(.callout)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
 
             if !plan.steps.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -53,10 +56,12 @@ struct SummaryTab: View {
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .frame(width: 20, alignment: .trailing)
-                            Text(step)
+                            Markdown(step)
+                                .markdownTheme(.autopod)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
                         }
                     }
                 }
@@ -78,7 +83,8 @@ struct SummaryTab: View {
                     .font(.system(.subheadline).weight(.semibold))
             }
 
-            Text(summary.actualSummary)
+            Markdown(summary.actualSummary)
+                .markdownTheme(.autopod)
                 .font(.callout)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -166,7 +172,8 @@ struct SummaryTab: View {
             Image(systemName: "text.quote")
                 .foregroundStyle(.secondary)
                 .padding(.top, 2)
-            Text(pod.task)
+            Markdown(pod.task)
+                .markdownTheme(.autopod)
                 .font(.subheadline)
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
