@@ -28,6 +28,7 @@ public struct MainView: View {
     public var onShowSettings: (() -> Void)?
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
+    public var loadQuality: ((String) async throws -> PodQualitySignals)?
 
     // Scheduled Jobs
     public var onRunCatchup: ((ScheduledJob) -> Void)?
@@ -76,6 +77,7 @@ public struct MainView: View {
         onShowSettings: (() -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
+        loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
         onTriggerJob: ((ScheduledJob) -> Void)? = nil,
@@ -117,6 +119,7 @@ public struct MainView: View {
         self.onShowSettings = onShowSettings
         self.loadFiles = loadFiles
         self.loadContent = loadContent
+        self.loadQuality = loadQuality
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
         self.onTriggerJob = onTriggerJob
@@ -335,6 +338,7 @@ public struct MainView: View {
                     onRefreshDiff: { onRefreshDiff?(pod.id) },
                     loadFiles: loadFiles,
                     loadContent: loadContent,
+                    loadQuality: loadQuality,
                     isLoadingLogs: isLoadingLogs,
                     logsLoadError: logsLoadError,
                     onReloadLogs: onReloadLogs,

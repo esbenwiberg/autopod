@@ -7,6 +7,9 @@ export type {
   CreatePodRequest,
   PodSummary,
   ReferenceRepo,
+  QualityGrade,
+  QualitySignals,
+  PodQualityScore,
 } from './types/pod.js';
 
 export type {

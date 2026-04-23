@@ -61,3 +61,14 @@ export {
   createPendingOverrideRepository,
   type PendingOverrideRepository,
 } from './pending-override-repository.js';
+export {
+  createQualityScoreRepository,
+  type QualityScoreRepository,
+  type QualityScoreFilters,
+} from './quality-score-repository.js';
+export {
+  createQualityScoreRecorder,
+  type QualityScoreRecorder,
+} from './quality-score-recorder.js';
+export { computeQualitySignals } from './quality-signals.js';
+export { computeScore } from './quality-score.js';

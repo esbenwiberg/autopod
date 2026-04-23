@@ -231,3 +231,58 @@ export interface PodSummary {
   filesChanged: number;
   createdAt: string;
 }
+
+/**
+ * Per-pod behavioural telemetry derived from the agent event stream plus
+ * escalation/pod state. Surfaces how the agent actually worked — reading
+ * before editing, how often the human had to intervene, cost — so sketchy
+ * sessions can be spotted at a glance.
+ */
+export type QualityGrade = 'green' | 'yellow' | 'red';
+
+export interface QualitySignals {
+  podId: string;
+  /** Count of `Read` tool invocations on the agent stream. */
+  readCount: number;
+  /** Count of `create` + `modify` file-change events. */
+  editCount: number;
+  /** `readCount / max(editCount, 1)` — higher is better. */
+  readEditRatio: number;
+  /** Modifies to files that were never read earlier in the session. */
+  editsWithoutPriorRead: number;
+  /** `ask_human` escalations plus 1 if the pod ended in `killed`. */
+  userInterrupts: number;
+  tokens: { input: number; output: number; costUsd: number };
+  grade: QualityGrade;
+  /**
+   * Persisted numeric score (0..100) from `pod_quality_scores`, or `null`
+   * if the pod hasn't reached a terminal state yet.
+   */
+  score: number | null;
+  /** Exact model string at completion time, e.g. `'claude-opus-4-7'`. */
+  model: string | null;
+}
+
+/**
+ * Persisted record written to `pod_quality_scores` on pod completion. Used
+ * for fleet-wide queries (leaderboards, drift detection, model A/B).
+ */
+export interface PodQualityScore {
+  podId: string;
+  score: number;
+  readCount: number;
+  editCount: number;
+  readEditRatio: number;
+  editsWithoutPriorRead: number;
+  userInterrupts: number;
+  tellsCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  runtime: RuntimeType;
+  profileName: string;
+  model: string | null;
+  finalStatus: 'complete' | 'killed';
+  completedAt: string;
+  computedAt: string;
+}

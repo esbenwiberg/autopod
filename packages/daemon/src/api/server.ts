@@ -15,12 +15,15 @@ import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { IssueWatcherRepository } from '../issue-watcher/issue-watcher-repository.js';
 import type {
   ContainerManagerFactory,
+  EscalationRepository,
   EventBus,
   EventRepository,
   MemoryRepository,
   PendingOverrideRepository,
   PodManager,
   PodQueue,
+  PodRepository,
+  QualityScoreRepository,
 } from '../pods/index.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
@@ -53,6 +56,9 @@ export interface ServerDependencies {
   worktreeManager?: WorktreeManager;
   eventBus: EventBus;
   eventRepo: EventRepository;
+  podRepo?: PodRepository;
+  escalationRepo?: EscalationRepository;
+  qualityScoreRepo?: QualityScoreRepository;
   podBridge: PodBridge;
   pendingRequestsByPod: Map<string, PendingRequests>;
   containerManagerFactory?: ContainerManagerFactory;
@@ -121,6 +127,9 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.sessionTokenIssuer,
     deps.eventRepo,
     deps.pendingOverrideRepo,
+    deps.podRepo,
+    deps.escalationRepo,
+    deps.qualityScoreRepo,
   );
   if (deps.worktreeManager) {
     seriesRoutes(app, deps.podManager, deps.profileStore, deps.worktreeManager);

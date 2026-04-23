@@ -116,6 +116,10 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.getSessionFileContent(id, path: path)
       },
+      loadQuality: { [connectionManager] (id: String) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getPodQuality(id)
+      },
       onRunCatchup: { job in Task { try? await scheduledJobStore.runCatchup(job.id) } },
       onSkipCatchup: { job in Task { try? await scheduledJobStore.skipCatchup(job.id) } },
       onTriggerJob: { job in Task { try? await scheduledJobStore.triggerJob(job.id) } },

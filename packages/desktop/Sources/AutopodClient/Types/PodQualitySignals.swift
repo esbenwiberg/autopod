@@ -1,0 +1,24 @@
+import Foundation
+
+/// Response from GET /pods/:id/quality — per-pod behavioural telemetry
+/// derived from the agent event stream plus escalation/pod state.
+public struct PodQualitySignals: Codable, Sendable {
+  public let podId: String
+  public let readCount: Int
+  public let editCount: Int
+  public let readEditRatio: Double
+  public let editsWithoutPriorRead: Int
+  public let userInterrupts: Int
+  public let tokens: PodQualityTokens
+  public let grade: String  // "green" | "yellow" | "red"
+  /// Persisted numeric score (0..100); nil for pods that haven't reached terminal state.
+  public let score: Int?
+  /// Exact model string at completion, e.g. "claude-opus-4-7".
+  public let model: String?
+}
+
+public struct PodQualityTokens: Codable, Sendable {
+  public let input: Int
+  public let output: Int
+  public let costUsd: Double
+}

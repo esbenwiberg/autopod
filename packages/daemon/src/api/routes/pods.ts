@@ -6,9 +6,13 @@ import {
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { PodTokenIssuer } from '../../crypto/pod-tokens.js';
+import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import type { EventRepository } from '../../pods/event-repository.js';
 import type { PodManager } from '../../pods/index.js';
 import type { PendingOverrideRepository } from '../../pods/pending-override-repository.js';
+import type { PodRepository } from '../../pods/pod-repository.js';
+import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
+import { computeQualitySignals } from '../../pods/quality-signals.js';
 import { generateValidationReport } from '../../validation/report-generator.js';
 
 export function podRoutes(
@@ -17,6 +21,9 @@ export function podRoutes(
   sessionTokenIssuer?: PodTokenIssuer,
   eventRepo?: EventRepository,
   pendingOverrideRepo?: PendingOverrideRepository,
+  podRepo?: PodRepository,
+  escalationRepo?: EscalationRepository,
+  qualityScoreRepo?: QualityScoreRepository,
 ): void {
   // POST /pods — create a new pod
   app.post('/pods', async (request, reply) => {
@@ -105,6 +112,45 @@ export function podRoutes(
         }
         return raw;
       });
+  });
+
+  // GET /pods/:podId/quality — behavioural quality signals computed on the fly
+  app.get('/pods/:podId/quality', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    // Verify pod exists (throws 404 if not found)
+    podManager.getSession(podId);
+    if (!podRepo || !eventRepo || !escalationRepo) {
+      reply.status(503);
+      return { error: 'Quality signals unavailable — repositories not wired' };
+    }
+    return computeQualitySignals(podId, {
+      podRepo,
+      eventRepo,
+      escalationRepo,
+      qualityScoreRepo,
+    });
+  });
+
+  // GET /pods/scores — persisted quality-score leaderboard / history
+  app.get('/pods/scores', async (request, reply) => {
+    if (!qualityScoreRepo) {
+      reply.status(503);
+      return { error: 'Quality scores unavailable — repository not wired' };
+    }
+    const query = request.query as {
+      runtime?: string;
+      model?: string;
+      profileName?: string;
+      since?: string;
+      limit?: string;
+    };
+    return qualityScoreRepo.list({
+      runtime: query.runtime as 'claude' | 'codex' | 'copilot' | undefined,
+      model: query.model,
+      profileName: query.profileName,
+      since: query.since,
+      limit: query.limit ? Number.parseInt(query.limit, 10) : undefined,
+    });
   });
 
   // GET /pods/:podId/report — HTML validation report (pod-token auth)

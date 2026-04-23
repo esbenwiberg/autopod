@@ -166,6 +166,10 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)/events")
   }
 
+  public func getPodQuality(_ id: String) async throws -> PodQualitySignals {
+    try await request("GET", "/pods/\(id)/quality")
+  }
+
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
     try await request("GET", "/pods/\(id)/diff")
   }

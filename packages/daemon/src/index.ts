@@ -38,6 +38,8 @@ import {
   createPodQueue,
   createPodRepository,
   createProgressEventRepository,
+  createQualityScoreRecorder,
+  createQualityScoreRepository,
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
@@ -108,6 +110,7 @@ const validationRepo = createValidationRepository(db);
 const progressEventRepo = createProgressEventRepository(db);
 const memoryRepo = createMemoryRepository(db);
 const pendingOverrideRepo = createPendingOverrideRepository(db);
+const qualityScoreRepo = createQualityScoreRepository(db);
 
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);
@@ -426,6 +429,17 @@ const notificationService = createNotificationService({
 });
 notificationService.start();
 
+// Quality-score recorder: writes one pod_quality_scores row per pod on terminal state.
+const qualityScoreRecorder = createQualityScoreRecorder({
+  eventBus,
+  podRepo,
+  eventRepo,
+  escalationRepo,
+  qualityScoreRepo,
+  logger,
+});
+qualityScoreRecorder.start();
+
 // Issue watcher (polls GitHub Issues / ADO Work Items for labeled issues)
 import { createIssueWatcherRepository } from './issue-watcher/issue-watcher-repository.js';
 import { createIssueWatcherService } from './issue-watcher/issue-watcher-service.js';
@@ -453,6 +467,9 @@ const app = await createServer({
   worktreeManager,
   eventBus,
   eventRepo,
+  podRepo,
+  escalationRepo,
+  qualityScoreRepo,
   podBridge,
   pendingRequestsByPod,
   containerManagerFactory,
@@ -536,8 +553,9 @@ async function shutdown(signal: string) {
   // Stop accepting new requests
   await app.close();
 
-  // Stop notifications and issue watcher
+  // Stop notifications, quality recorder, and issue watcher
   notificationService.stop();
+  qualityScoreRecorder.stop();
   issueWatcherService.stop();
 
   // Stop scheduled job scheduler

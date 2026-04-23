@@ -22,6 +22,7 @@ public struct DetailPanelView: View {
     public var onRefreshDiff: (() -> Void)?
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
+    public var loadQuality: ((String) async throws -> PodQualitySignals)?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
     public var onReloadLogs: (() -> Void)?
@@ -41,6 +42,7 @@ public struct DetailPanelView: View {
         onRefreshDiff: (() -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
+        loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
         onReloadLogs: (() -> Void)? = nil,
@@ -59,6 +61,7 @@ public struct DetailPanelView: View {
         self.onRefreshDiff = onRefreshDiff
         self.loadFiles = loadFiles
         self.loadContent = loadContent
+        self.loadQuality = loadQuality
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
         self.onReloadLogs = onReloadLogs
@@ -105,7 +108,7 @@ public struct DetailPanelView: View {
                 )
                 case .diff:       DiffTab(pod: pod, diffString: diffString, onRefresh: onRefreshDiff)
                 case .validation: ValidationTab(pod: pod, actions: actions)
-                case .summary:    SummaryTab(pod: pod)
+                case .summary:    SummaryTab(pod: pod, loadQuality: loadQuality)
                 case .terminal:   EmptyView()
                 case .markdown:   MarkdownTab(pod: pod, loadFiles: loadFiles, loadContent: loadContent)
                 case .series:

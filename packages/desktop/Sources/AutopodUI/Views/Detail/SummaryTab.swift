@@ -1,13 +1,24 @@
+import AutopodClient
 import MarkdownUI
 import SwiftUI
 
 /// Summary tab — plan, task summary, deviations from plan, and original pod prompt.
 struct SummaryTab: View {
     let pod: Pod
+    /// Optional closure for fetching session-quality signals. When nil
+    /// (previews, tests without daemon), the quality card is simply hidden.
+    var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
+
+    @State private var quality: PodQualitySignals? = nil
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // Session quality — behavioural telemetry (read:edit, blind edits, interrupts)
+                if let signals = quality {
+                    qualityCard(signals)
+                }
+
                 // Plan
                 if let plan = pod.plan {
                     planCard(plan)
@@ -27,6 +38,96 @@ struct SummaryTab: View {
                 promptSection
             }
             .padding(20)
+        }
+        .task(id: pod.id) {
+            await fetchQuality()
+        }
+    }
+
+    // MARK: - Session quality
+
+    private func fetchQuality() async {
+        guard let loadQuality else { return }
+        do {
+            quality = try await loadQuality(pod.id)
+        } catch {
+            // Non-fatal: pod may have been killed early, daemon may not have
+            // the route wired (503), etc. Leave the card hidden.
+            quality = nil
+        }
+    }
+
+    private func qualityCard(_ s: PodQualitySignals) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(qualityColor(s.grade))
+                    .frame(width: 10, height: 10)
+                Text("Session Quality")
+                    .font(.system(.subheadline).weight(.semibold))
+                Spacer()
+                if let score = s.score {
+                    Text("\(score)/100")
+                        .font(.system(.caption, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(qualityColor(s.grade))
+                }
+                Text(s.grade.capitalized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(alignment: .top, spacing: 24) {
+                qualityMetric(
+                    label: "Read / Edit",
+                    value: s.editCount == 0 ? "—" : String(format: "%.1f", s.readEditRatio),
+                    hint: "\(s.readCount) reads vs \(s.editCount) edits. Higher is better."
+                )
+                qualityMetric(
+                    label: "Blind Edits",
+                    value: "\(s.editsWithoutPriorRead)",
+                    hint: "Modifies to files that were never read earlier in the session."
+                )
+                qualityMetric(
+                    label: "Interrupts",
+                    value: "\(s.userInterrupts)",
+                    hint: "ask_human escalations + kill, if any."
+                )
+                qualityMetric(
+                    label: "Cost",
+                    value: String(format: "$%.2f", s.tokens.costUsd),
+                    hint: "\(s.tokens.input) in / \(s.tokens.output) out tokens."
+                )
+            }
+
+            if let model = s.model, !model.isEmpty {
+                Text("Model: \(model)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func qualityMetric(label: String, value: String, hint: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(.callout, design: .monospaced).weight(.medium))
+        }
+        .help(hint)
+    }
+
+    private func qualityColor(_ grade: String) -> Color {
+        switch grade.lowercased() {
+        case "green": return .green
+        case "yellow": return .yellow
+        case "red": return .red
+        default: return .gray
         }
     }
 
