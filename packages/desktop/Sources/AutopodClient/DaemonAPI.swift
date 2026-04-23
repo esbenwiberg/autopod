@@ -170,6 +170,23 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)/quality")
   }
 
+  /// GET /pods/scores — persisted quality-score leaderboard.
+  public func listQualityScores(
+    runtime: String? = nil,
+    model: String? = nil,
+    profileName: String? = nil,
+    since: String? = nil,
+    limit: Int? = nil
+  ) async throws -> [PodQualityScore] {
+    var query: [String: String] = [:]
+    if let runtime { query["runtime"] = runtime }
+    if let model { query["model"] = model }
+    if let profileName { query["profileName"] = profileName }
+    if let since { query["since"] = since }
+    if let limit { query["limit"] = "\(limit)" }
+    return try await request("GET", "/pods/scores", query: query)
+  }
+
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
     try await request("GET", "/pods/\(id)/diff")
   }

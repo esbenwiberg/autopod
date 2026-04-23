@@ -1,11 +1,31 @@
+import AutopodClient
 import SwiftUI
 
 /// Analytics dashboard — aggregate stats across all pods.
 public struct AnalyticsView: View {
     public let pods: [Pod]
+    /// Optional closure for fetching persisted quality scores. When nil
+    /// (previews, disconnected), the Session Quality section is hidden.
+    public var loadScores: (() async throws -> [PodQualityScore])?
+    /// Optional callback fired when a row in the scores table is clicked.
+    /// Typically: route to the pod detail view (switch sidebar + set selection).
+    public var onSelectPod: ((String) -> Void)?
 
-    public init(pods: [Pod]) {
+    @State private var scores: [PodQualityScore] = []
+    @State private var scoresLoadError: String? = nil
+    @State private var isLoadingScores: Bool = false
+    @State private var sortOrder: [KeyPathComparator<PodQualityScore>] = [
+        KeyPathComparator(\.computedAt, order: .reverse)
+    ]
+
+    public init(
+        pods: [Pod],
+        loadScores: (() async throws -> [PodQualityScore])? = nil,
+        onSelectPod: ((String) -> Void)? = nil
+    ) {
         self.pods = pods
+        self.loadScores = loadScores
+        self.onSelectPod = onSelectPod
     }
 
     // MARK: - Computed stats
@@ -66,10 +86,219 @@ public struct AnalyticsView: View {
                 if !profileStats.isEmpty {
                     profileBreakdown
                 }
+
+                if loadScores != nil {
+                    qualitySection
+                }
             }
             .padding(24)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .task {
+            await fetchScores()
+        }
+    }
+
+    // MARK: - Session Quality (Phase 3e)
+
+    private func fetchScores() async {
+        guard let loadScores else { return }
+        isLoadingScores = true
+        defer { isLoadingScores = false }
+        do {
+            scores = try await loadScores()
+            scoresLoadError = nil
+        } catch {
+            scoresLoadError = error.localizedDescription
+        }
+    }
+
+    private var runtimeModelStats: [RuntimeModelStat] {
+        let groups = Dictionary(grouping: scores) { score -> String in
+            "\(score.runtime)\u{0001}\(score.model ?? "—")"
+        }
+        return groups
+            .map { key, group -> RuntimeModelStat in
+                let parts = key.split(separator: "\u{0001}", maxSplits: 1).map(String.init)
+                let runtime = parts.first ?? "?"
+                let model = parts.count > 1 ? parts[1] : "—"
+                let total = group.reduce(0) { $0 + $1.score }
+                let avgScore = Double(total) / Double(group.count)
+                let avgCost = group.reduce(0.0) { $0 + $1.costUsd } / Double(group.count)
+                return RuntimeModelStat(
+                    runtime: runtime,
+                    model: model,
+                    count: group.count,
+                    avgScore: avgScore,
+                    avgCost: avgCost
+                )
+            }
+            .sorted { $0.count > $1.count }
+    }
+
+    private var sortedScores: [PodQualityScore] {
+        scores.sorted(using: sortOrder)
+    }
+
+    private var qualitySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "speedometer")
+                    .foregroundStyle(.secondary)
+                Text("Session Quality")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                if isLoadingScores {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("\(scores.count) pod\(scores.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let err = scoresLoadError {
+                Text("Couldn't load scores: \(err)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if scores.isEmpty && !isLoadingScores {
+                Text("No completed pods scored yet. Run a pod to completion and it'll show up here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                // Per-(runtime, model) aggregate cards — the model-drift sniffer.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(runtimeModelStats) { stat in
+                            runtimeModelCard(stat)
+                        }
+                    }
+                }
+
+                // Recent scores table — sortable via KeyPathComparator.
+                scoresTable
+            }
+        }
+        .padding(16)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func runtimeModelCard(_ stat: RuntimeModelStat) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text(stat.runtime)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                Text("\(stat.count)")
+                    .font(.system(.caption, design: .monospaced).weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            Text(stat.model)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(Int(stat.avgScore.rounded()))")
+                    .font(.system(.title2, design: .rounded).weight(.bold))
+                    .foregroundStyle(scoreColor(Int(stat.avgScore.rounded())))
+                    .monospacedDigit()
+                Text("avg")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            if stat.avgCost > 0 {
+                Text(String(format: "avg $%.2f", stat.avgCost))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(10)
+        .frame(minWidth: 160, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var scoresTable: some View {
+        Table(sortedScores, sortOrder: $sortOrder) {
+            TableColumn("Score", value: \.score) { s in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(scoreColor(s.score))
+                        .frame(width: 8, height: 8)
+                    Text("\(s.score)")
+                        .font(.system(.body, design: .monospaced).weight(.semibold))
+                        .monospacedDigit()
+                }
+            }
+            .width(min: 60, ideal: 70, max: 90)
+
+            TableColumn("Profile", value: \.profileName) { s in
+                Text(s.profileName).lineLimit(1)
+            }
+            .width(min: 110, ideal: 150)
+
+            TableColumn("Runtime", value: \.runtime) { s in
+                Text(s.runtime).font(.system(.body, design: .monospaced))
+            }
+            .width(min: 70, ideal: 80, max: 100)
+
+            TableColumn("Model") { (s: PodQualityScore) in
+                Text(s.model ?? "—")
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .width(min: 120, ideal: 180)
+
+            TableColumn("Cost", value: \.costUsd) { s in
+                Text(String(format: "$%.2f", s.costUsd))
+                    .font(.system(.body, design: .monospaced).monospacedDigit())
+            }
+            .width(min: 60, ideal: 70, max: 90)
+
+            TableColumn("Completed", value: \.completedAt) { s in
+                Text(relativeDate(s.completedAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 100, ideal: 140)
+
+            TableColumn("Pod") { (s: PodQualityScore) in
+                Button {
+                    onSelectPod?(s.podId)
+                } label: {
+                    Text(String(s.podId.suffix(8)))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+                .help("Open pod \(s.podId)")
+            }
+            .width(min: 80, ideal: 100)
+        }
+        .frame(minHeight: 260)
+    }
+
+    private func scoreColor(_ score: Int) -> Color {
+        switch score {
+        case 80...: return .green
+        case 60..<80: return .yellow
+        default: return .red
+        }
+    }
+
+    private func relativeDate(_ iso: String) -> String {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let parsed = fmt.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        guard let date = parsed else { return iso }
+        let rel = RelativeDateTimeFormatter()
+        rel.unitsStyle = .short
+        return rel.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - Hero stats (top 3 KPIs)
@@ -334,6 +563,15 @@ struct StatusCount: Identifiable {
     let status: PodStatus
     let count: Int
     var id: String { status.rawValue }
+}
+
+struct RuntimeModelStat: Identifiable {
+    let runtime: String
+    let model: String
+    let count: Int
+    let avgScore: Double
+    let avgCost: Double
+    var id: String { "\(runtime)/\(model)" }
 }
 
 // MARK: - Preview

@@ -29,6 +29,7 @@ public struct MainView: View {
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
+    public var loadQualityScores: (() async throws -> [PodQualityScore])?
 
     // Scheduled Jobs
     public var onRunCatchup: ((ScheduledJob) -> Void)?
@@ -78,6 +79,7 @@ public struct MainView: View {
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
+        loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
         onTriggerJob: ((ScheduledJob) -> Void)? = nil,
@@ -120,6 +122,7 @@ public struct MainView: View {
         self.loadFiles = loadFiles
         self.loadContent = loadContent
         self.loadQuality = loadQuality
+        self.loadQualityScores = loadQualityScores
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
         self.onTriggerJob = onTriggerJob
@@ -225,8 +228,15 @@ public struct MainView: View {
             )
         } content: {
             if sidebarSelection == .analytics {
-                AnalyticsView(pods: pods)
-                    .frame(minWidth: 600)
+                AnalyticsView(
+                    pods: pods,
+                    loadScores: loadQualityScores,
+                    onSelectPod: { podId in
+                        sidebarSelection = .all
+                        selectedSessionId = podId
+                    }
+                )
+                .frame(minWidth: 600)
             } else if sidebarSelection == .history {
                 HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames)
                     .frame(minWidth: 600)
