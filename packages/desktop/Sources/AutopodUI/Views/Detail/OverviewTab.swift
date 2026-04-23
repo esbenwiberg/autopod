@@ -13,6 +13,7 @@ struct OverviewTab: View {
     var onRejectMemory: (String) -> Void = { _ in }
 
     @State private var replyText = ""
+    @State private var expandedActivityEventId: Int?
 
     var body: some View {
         ScrollView {
@@ -778,23 +779,43 @@ struct OverviewTab: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(overviewEvents) { event in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: event.type.icon)
-                            .font(.system(size: 9))
-                            .foregroundStyle(event.type.color)
-                            .frame(width: 14)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(event.summary)
-                                .font(.caption)
-                                .lineLimit(1)
-                            Text(event.timeString)
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                    let isExpanded = expandedActivityEventId == event.id
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            expandedActivityEventId = isExpanded ? nil : event.id
                         }
+                    } label: {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: event.type.icon)
+                                .font(.system(size: 9))
+                                .foregroundStyle(event.type.color)
+                                .frame(width: 14)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(event.summary)
+                                    .font(.caption)
+                                    .lineLimit(isExpanded ? nil : 1)
+                                    .truncationMode(.tail)
+                                    .fixedSize(horizontal: false, vertical: isExpanded)
+                                if isExpanded, let detail = event.detail {
+                                    Text(detail)
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                        .padding(6)
+                                        .background(Color(nsColor: .windowBackgroundColor))
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                                Text(event.timeString)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 8)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 8)
+                    .buttonStyle(.plain)
                     if event.id != overviewEvents.last?.id {
                         Divider().padding(.leading, 28)
                     }
