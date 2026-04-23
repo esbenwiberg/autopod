@@ -52,7 +52,7 @@ public enum PodStatus: String, Sendable {
         case .approved:        .secondary
         case .merging:       .blue
         case .mergePending:  .orange
-        case .complete:      .secondary
+        case .complete:      .green
         case .paused:        .gray
         case .handoff:       .blue
         case .killing:       .red

@@ -62,7 +62,7 @@ public struct SessionCardFinal: View {
             // Accent stripe
             pod.status.color
                 .frame(height: 2)
-                .opacity(isSelected ? 0.8 : pod.status.needsAttention ? 0.9 : 0.25)
+                .opacity(isSelected ? 0.8 : (pod.status.needsAttention || pod.status == .complete) ? 0.9 : 0.25)
 
             compactContent
                 .padding(12)
@@ -90,7 +90,7 @@ public struct SessionCardFinal: View {
                         ? Color.accentColor.opacity(0.9)
                         : isHovered
                             ? Color.accentColor.opacity(0.4)
-                            : pod.status.needsAttention
+                            : (pod.status.needsAttention || pod.status == .complete)
                                 ? pod.status.color.opacity(0.35)
                                 : Color.white.opacity(0.15),
                     lineWidth: isSelected ? 2 : 1.5
