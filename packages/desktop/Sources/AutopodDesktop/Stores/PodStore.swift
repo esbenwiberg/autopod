@@ -17,6 +17,11 @@ public final class PodStore {
   /// Cached diff strings keyed by pod ID
   public private(set) var sessionDiffs: [String: String] = [:]
 
+  /// Persisted quality scores keyed by pod ID. Populated by
+  /// `loadQualityScores()` alongside `loadSessions()`. Only terminal pods
+  /// appear — running pods won't have a score until the recorder writes one.
+  public private(set) var qualityScores: [String: PodQualityScore] = [:]
+
   /// Cached series responses keyed by series ID. Populated via `loadSeries`;
   /// individual pod updates stream in through the normal event bus and the
   /// pipeline view filters `pods` by seriesId at render time, so this cache
@@ -69,6 +74,26 @@ public final class PodStore {
       self.error = error.localizedDescription
     }
     isLoading = false
+
+    // Best-effort score refresh — failures are non-fatal. Fires after pods
+    // so the UI paints the card list immediately and badges fill in next tick.
+    await loadQualityScores()
+  }
+
+  /// Fetch the persisted quality scores and build the by-pod dictionary.
+  /// Silent failure — the badge is a nice-to-have, not a blocker.
+  public func loadQualityScores() async {
+    guard let api else { return }
+    do {
+      let list = try await api.listQualityScores(limit: 500)
+      var byId: [String: PodQualityScore] = [:]
+      byId.reserveCapacity(list.count)
+      for score in list { byId[score.podId] = score }
+      qualityScores = byId
+    } catch {
+      // Ignore — keep whatever we had. A disconnected daemon shouldn't clear
+      // already-visible badges.
+    }
   }
 
   public func refreshSession(_ id: String) async {

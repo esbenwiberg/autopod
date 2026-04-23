@@ -72,6 +72,7 @@ public struct AppRootView: View {
       isLoading: podStore.isLoading,
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
+      profileDetails: profileStore.profiles,
       selectedSessionEvents: selectedSessionEvents,
       isLoadingLogs: selectedSessionIsLoadingLogs,
       logsLoadError: selectedSessionLogsError,
@@ -124,6 +125,7 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.listQualityScores()
       },
+      qualityScores: podStore.qualityScores,
       onRunCatchup: { job in Task { try? await scheduledJobStore.runCatchup(job.id) } },
       onSkipCatchup: { job in Task { try? await scheduledJobStore.skipCatchup(job.id) } },
       onTriggerJob: { job in Task { try? await scheduledJobStore.triggerJob(job.id) } },

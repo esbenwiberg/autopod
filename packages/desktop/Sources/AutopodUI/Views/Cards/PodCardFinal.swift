@@ -35,6 +35,10 @@ public struct SessionCardFinal: View {
     /// Called when the user picks "Launch series from here" on an interactive
     /// pod. Host opens the CreateSeriesSheet with baseBranch pre-filled.
     public var onLaunchSeriesFromPod: ((Pod) -> Void)?
+    /// Persisted quality score for this pod (nil for running pods or pods
+    /// that completed before the recorder shipped). When set and pod is
+    /// terminal, a small colored pill renders in the top row.
+    public var qualityScore: PodQualityScore?
 
     public init(
         pod: Pod,
@@ -42,11 +46,13 @@ public struct SessionCardFinal: View {
         density: CardDensity = .detailed,
         isSelected: Bool = false,
         onSpawnFollowUp: ((Pod) -> Void)? = nil,
-        onLaunchSeriesFromPod: ((Pod) -> Void)? = nil
+        onLaunchSeriesFromPod: ((Pod) -> Void)? = nil,
+        qualityScore: PodQualityScore? = nil
     ) {
         self.pod = pod; self.actions = actions; self.density = density; self.isSelected = isSelected
         self.onSpawnFollowUp = onSpawnFollowUp
         self.onLaunchSeriesFromPod = onLaunchSeriesFromPod
+        self.qualityScore = qualityScore
     }
 
     @State private var isHovered = false
@@ -140,6 +146,7 @@ public struct SessionCardFinal: View {
                         pod.acceptanceCriteria,
                         pod.branch,
                         pod.acFrom,
+                        nil,
                         nil
                     )
                 }
@@ -168,6 +175,9 @@ public struct SessionCardFinal: View {
                     seriesChip
                 }
                 Spacer()
+                if let score = qualityScore, pod.isTerminal {
+                    qualityPill(score)
+                }
                 modeBadge
                 statusBadge
             }
@@ -342,6 +352,37 @@ public struct SessionCardFinal: View {
             .background(pod.status.color.opacity(0.08))
             .foregroundStyle(pod.status.color.opacity(0.85))
             .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func qualityPill(_ score: PodQualityScore) -> some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(qualityColor(score.score))
+                .frame(width: 6, height: 6)
+            Text("\(score.score)")
+                .font(.system(.caption2).weight(.semibold))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(qualityColor(score.score).opacity(0.1))
+        .foregroundStyle(qualityColor(score.score).opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .help(
+            "Quality score \(score.score)/100 · "
+            + "\(score.runtime) · \(score.model ?? "?") · "
+            + "read/edit \(String(format: "%.1f", score.readEditRatio)) · "
+            + "blind edits \(score.editsWithoutPriorRead) · "
+            + "interrupts \(score.userInterrupts)"
+        )
+    }
+
+    private func qualityColor(_ score: Int) -> Color {
+        switch score {
+        case 80...: return .green
+        case 60..<80: return .yellow
+        default: return .red
+        }
     }
 
     // MARK: - Expanded detail

@@ -11,6 +11,9 @@ public struct MainView: View {
     public var isLoading: Bool
     public var actions: PodActions
     public var profileNames: [String]
+    /// Full profile objects. Optional — used by the create-pod sheet to drive
+    /// per-profile UI (e.g. the Dagger sidecar toggle). Empty = name-only fallback.
+    public var profileDetails: [Profile]
     public var selectedSessionEvents: [AgentEvent]
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
@@ -30,6 +33,9 @@ public struct MainView: View {
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
+    /// Per-pod persisted quality scores keyed by pod id. Used to render the
+    /// score pill on completed pod cards. Empty when scores haven't loaded yet.
+    public var qualityScores: [String: PodQualityScore]
 
     // Scheduled Jobs
     public var onRunCatchup: ((ScheduledJob) -> Void)?
@@ -61,6 +67,7 @@ public struct MainView: View {
         isLoading: Bool = false,
         actions: PodActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
+        profileDetails: [Profile] = [],
         selectedSessionEvents: [AgentEvent] = [],
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
@@ -80,6 +87,7 @@ public struct MainView: View {
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
+        qualityScores: [String: PodQualityScore] = [:],
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
         onTriggerJob: ((ScheduledJob) -> Void)? = nil,
@@ -104,6 +112,7 @@ public struct MainView: View {
         self.isLoading = isLoading
         self.actions = actions
         self.profileNames = profileNames
+        self.profileDetails = profileDetails
         self.selectedSessionEvents = selectedSessionEvents
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
@@ -123,6 +132,7 @@ public struct MainView: View {
         self.loadContent = loadContent
         self.loadQuality = loadQuality
         self.loadQualityScores = loadQualityScores
+        self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
         self.onTriggerJob = onTriggerJob
@@ -363,7 +373,8 @@ public struct MainView: View {
             CreateSessionSheet(
                 isPresented: $showCreateSheet,
                 actions: actions,
-                profileNames: profileNames
+                profileNames: profileNames,
+                profileDetails: profileDetails
             )
         }
         .sheet(isPresented: $showCreateSeriesSheet) {
@@ -585,7 +596,8 @@ public struct MainView: View {
                         density: cardDensity,
                         isSelected: selectedSessionId == pod.id,
                         onSpawnFollowUp: { spawnFollowUpInitiator = $0 },
-                        onLaunchSeriesFromPod: { seriesFromPod = $0 }
+                        onLaunchSeriesFromPod: { seriesFromPod = $0 },
+                        qualityScore: qualityScores[pod.id]
                     )
                     .onTapGesture { selectedSessionId = pod.id }
                 }
