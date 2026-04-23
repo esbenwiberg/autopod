@@ -1,7 +1,11 @@
 import type { ChildProcess } from 'node:child_process';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LocalWorktreeManager, truncateDiffAtFileBoundary } from './local-worktree-manager.js';
+import {
+  DeletionGuardError,
+  LocalWorktreeManager,
+  truncateDiffAtFileBoundary,
+} from './local-worktree-manager.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -459,6 +463,90 @@ describe('LocalWorktreeManager', () => {
 
       const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
       expect(result).toBe(true);
+    });
+
+    it('throws a typed DeletionGuardError with count + threshold', async () => {
+      mockWithDeletions(7);
+
+      try {
+        await manager.commitPendingChanges('/tmp/worktree/sess', 'test', { maxDeletions: 3 });
+        expect.fail('commitPendingChanges should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(DeletionGuardError);
+        const guard = err as DeletionGuardError;
+        expect(guard.deletionCount).toBe(7);
+        expect(guard.threshold).toBe(3);
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // mergeBranch — guard propagation
+  // -------------------------------------------------------------------------
+
+  describe('mergeBranch deletion guard', () => {
+    /**
+     * Mock git state for mergeBranch:
+     * - rev-parse reports HEAD short sha (so the "no commits" early-exit doesn't trigger)
+     * - `diff --cached --quiet` exits non-zero (changes staged)
+     * - `diff --cached --diff-filter=D --name-only` lists N deleted files
+     */
+    function mockMergeWithDeletions(deletionCount: number) {
+      const deletedFiles = Array.from({ length: deletionCount }, (_, i) => `src/f${i}.ts`);
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('diff --cached --quiet')) {
+            cb(new Error('changes exist'), { stdout: '', stderr: '' });
+          } else if (cmd.includes('diff --cached --diff-filter=D --name-only')) {
+            cb(null, { stdout: deletedFiles.join('\n'), stderr: '' });
+          } else if (cmd.startsWith('rev-parse')) {
+            cb(null, { stdout: 'abc1234', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+    }
+
+    it('passes maxDeletions: 0 through to the internal auto-commit', async () => {
+      mockMergeWithDeletions(1);
+
+      await expect(
+        manager.mergeBranch({
+          worktreePath: '/tmp/worktree/sess',
+          targetBranch: 'feat/x',
+          maxDeletions: 0,
+        }),
+      ).rejects.toBeInstanceOf(DeletionGuardError);
+    });
+
+    it('uses default threshold 100 when maxDeletions is omitted', async () => {
+      mockMergeWithDeletions(150);
+
+      await expect(
+        manager.mergeBranch({
+          worktreePath: '/tmp/worktree/sess',
+          targetBranch: 'feat/x',
+        }),
+      ).rejects.toThrow('150 files staged for deletion exceeds threshold of 100');
+    });
+
+    it('allows deletions under a custom threshold', async () => {
+      mockMergeWithDeletions(40);
+
+      // Won't throw the guard; may fail later (push, etc.) — we only assert the guard passes.
+      try {
+        await manager.mergeBranch({
+          worktreePath: '/tmp/worktree/sess',
+          targetBranch: 'feat/x',
+          maxDeletions: 100,
+        });
+      } catch (err) {
+        expect(err).not.toBeInstanceOf(DeletionGuardError);
+      }
     });
   });
 

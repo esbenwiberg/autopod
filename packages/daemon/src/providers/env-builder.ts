@@ -36,7 +36,15 @@ export function buildClaudeConfigFiles(): ContainerFile[] {
     2,
   );
 
-  const settingsJson = JSON.stringify({ theme: 'dark', autoUpdaterStatus: 'disabled' }, null, 2);
+  const settingsJson = JSON.stringify(
+    {
+      theme: 'dark',
+      autoUpdaterStatus: 'disabled',
+      env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: '1' },
+    },
+    null,
+    2,
+  );
 
   return [
     { path: `${CONTAINER_HOME_DIR}/.claude.json`, content: claudeJson },

@@ -316,26 +316,45 @@ describe('DockerNetworkManager', () => {
     });
   });
 
-  describe('ensureNetwork()', () => {
-    it('creates network if it does not exist', async () => {
+  describe('ensureNetworkForPod()', () => {
+    it('creates a per-pod bridge with ICC enabled when it does not exist', async () => {
       docker.mock._inspect.mockRejectedValueOnce(new Error('not found'));
-      await manager.ensureNetwork();
+      const name = await manager.ensureNetworkForPod('pod-abc');
+      expect(name).toBe('autopod-pod-abc');
       expect(docker.mock.createNetwork).toHaveBeenCalledWith(
-        expect.objectContaining({ Name: 'autopod-net', Driver: 'bridge' }),
+        expect.objectContaining({
+          Name: 'autopod-pod-abc',
+          Driver: 'bridge',
+          Options: expect.objectContaining({
+            'com.docker.network.bridge.enable_icc': 'true',
+          }),
+        }),
       );
     });
 
-    it('skips creation if network already exists', async () => {
+    it('skips creation when the pod bridge already exists', async () => {
       docker.mock._inspect.mockResolvedValueOnce({});
-      await manager.ensureNetwork();
+      const name = await manager.ensureNetworkForPod('pod-abc');
+      expect(name).toBe('autopod-pod-abc');
       expect(docker.mock.createNetwork).not.toHaveBeenCalled();
     });
+  });
 
-    it('is idempotent -- second call is a no-op', async () => {
-      docker.mock._inspect.mockResolvedValueOnce({});
-      await manager.ensureNetwork();
-      await manager.ensureNetwork();
-      expect(docker.mock.getNetwork).toHaveBeenCalledTimes(1);
+  describe('destroyNetworkForPod()', () => {
+    it('removes the per-pod bridge', async () => {
+      const remove = vi.fn().mockResolvedValue(undefined);
+      docker.mock.getNetwork.mockReturnValue({ remove, inspect: vi.fn() });
+      await manager.destroyNetworkForPod('pod-abc');
+      expect(docker.mock.getNetwork).toHaveBeenCalledWith('autopod-pod-abc');
+      expect(remove).toHaveBeenCalled();
+    });
+
+    it('swallows 404 when the network is already gone', async () => {
+      const remove = vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error('not found'), { statusCode: 404 }));
+      docker.mock.getNetwork.mockReturnValue({ remove, inspect: vi.fn() });
+      await expect(manager.destroyNetworkForPod('pod-abc')).resolves.not.toThrow();
     });
   });
 
@@ -352,16 +371,31 @@ describe('DockerNetworkManager', () => {
       expect(result).toBeNull();
     });
 
-    it('returns config with networkName and firewallScript when enabled', async () => {
+    it('returns per-pod networkName and firewallScript when podId is supplied', async () => {
       docker.mock._inspect.mockResolvedValueOnce({});
       const result = await manager.buildNetworkConfig(
         makePolicy({ enabled: true, allowedHosts: ['example.com'] }),
         [],
         GATEWAY,
+        [],
+        'pod-abc',
       );
       expect(result).not.toBeNull();
-      expect(result?.networkName).toBe('autopod-net');
+      expect(result?.networkName).toBe('autopod-pod-abc');
       expect(result?.firewallScript).toContain('#!/bin/sh');
+    });
+
+    it('injects extraAllowedIps into the firewall script so the pod can reach sidecars', async () => {
+      docker.mock._inspect.mockResolvedValueOnce({});
+      const result = await manager.buildNetworkConfig(
+        makePolicy({ enabled: true, mode: 'deny-all' }),
+        [],
+        GATEWAY,
+        [],
+        'pod-abc',
+        ['172.19.0.5'],
+      );
+      expect(result?.firewallScript).toContain('iptables -A OUTPUT -d "172.19.0.5" -j ACCEPT');
     });
   });
 });

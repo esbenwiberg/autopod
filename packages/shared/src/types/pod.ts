@@ -153,6 +153,15 @@ export interface Pod {
    * sweep can reap them.
    */
   testRunBranches: string[] | null;
+  /**
+   * Set by the daemon when the auto-commit deletion guard aborts a commit —
+   * almost always because `syncWorkspaceBack()` failed and left the host worktree
+   * missing files while the git index still references them. When true, the
+   * desktop should disable "Create PR" / merge actions and show a recovery banner:
+   * the agent's real work may still live in the container and retrying the push
+   * will commit a phantom mass-delete.
+   */
+  worktreeCompromised: boolean;
 }
 
 export interface CreatePodRequest {

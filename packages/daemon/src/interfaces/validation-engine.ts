@@ -1,5 +1,6 @@
 import type {
   AcCheckResult,
+  AcDefinition,
   TaskSummary,
   ValidationOverride,
   ValidationPhase,
@@ -29,7 +30,7 @@ export interface ValidationEngineConfig {
   buildTimeout?: number;
   /** Test phase timeout in ms. Default 600_000 (10 min). */
   testTimeout?: number;
-  acceptanceCriteria?: string[];
+  acceptanceCriteria?: AcDefinition[];
   /** Repo-specific review rules loaded from e.g. skills/code-review.md in the worktree */
   codeReviewSkill?: string;
   /** Git commit log between base branch and HEAD (one-line format) */

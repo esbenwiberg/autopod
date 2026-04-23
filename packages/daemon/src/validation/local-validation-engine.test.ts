@@ -1,6 +1,9 @@
+import type { AcDefinition } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
+import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
 import {
   buildReviewPrompt,
+  classifyAcTypes,
   deduplicateAcsByBaseText,
   enforceRequirementsStatus,
   parseAcInstructionsJson,
@@ -9,6 +12,11 @@ import {
   parseClassificationJson,
   stripMarkdownFences,
 } from './local-validation-engine.js';
+
+/** Build a minimal AcDefinition for tests — shorthand for the string-only fixtures. */
+function ac(test: string, type: AcDefinition['type'] = 'none'): AcDefinition {
+  return { type, test, pass: 'criterion satisfied', fail: 'criterion not satisfied' };
+}
 
 describe('stripMarkdownFences', () => {
   it('strips ```json fences', () => {
@@ -141,7 +149,7 @@ describe('parseClassificationJson', () => {
   const acTypeExport = 'ScheduledJob type is exported from @autopod/shared';
   const acApiEndpoint = 'POST /scheduled-jobs returns 201';
   const acUiToggle = 'Settings page has a dark mode toggle';
-  const acs = [acTypeExport, acApiEndpoint, acUiToggle];
+  const acs: AcDefinition[] = [ac(acTypeExport), ac(acApiEndpoint), ac(acUiToggle)];
 
   it('parses valid classification array', () => {
     const input = JSON.stringify([
@@ -162,7 +170,7 @@ describe('parseClassificationJson', () => {
 
   it('handles markdown-fenced JSON', () => {
     const input = `\`\`\`json\n${JSON.stringify([{ criterion: acTypeExport, validationType: 'none', reason: 'type check' }])}\n\`\`\``;
-    const result = parseClassificationJson(input, [acTypeExport]);
+    const result = parseClassificationJson(input, [ac(acTypeExport)]);
     expect(result).toHaveLength(1);
     expect(result?.at(0)?.validationType).toBe('none');
   });
@@ -188,6 +196,21 @@ describe('parseClassificationJson', () => {
     expect(missing.every((r) => r.validationType === 'none')).toBe(true);
   });
 
+  it('enriches results with author-declared pass/fail hints', () => {
+    const input = JSON.stringify([
+      { criterion: acApiEndpoint, validationType: 'api', reason: 'endpoint' },
+    ]);
+    const hinted: AcDefinition = {
+      type: 'api',
+      test: acApiEndpoint,
+      pass: 'body contains id',
+      fail: '500 error',
+    };
+    const result = parseClassificationJson(input, [hinted]);
+    expect(result?.at(0)?.pass).toBe('body contains id');
+    expect(result?.at(0)?.fail).toBe('500 error');
+  });
+
   it('returns null for garbage input', () => {
     expect(parseClassificationJson('not json at all', acs)).toBeNull();
   });
@@ -201,10 +224,71 @@ describe('parseClassificationJson', () => {
       { criterion: acApiEndpoint, validationType: 'api', reason: 'endpoint' },
     ]);
     const result = parseClassificationJson(`Here is my answer:\n${jsonPart}\nDone.`, [
-      acApiEndpoint,
+      ac(acApiEndpoint),
     ]);
     expect(result).toHaveLength(1);
     expect(result?.at(0)?.validationType).toBe('api');
+  });
+});
+
+describe('classifyAcTypes', () => {
+  // Minimal config stub — classifyAcTypes only reads acceptanceCriteria and hasWebUi
+  // in the declared-types path, so we don't need to wire real validation infra.
+  function configWith(acs: AcDefinition[], hasWebUi = true): ValidationEngineConfig {
+    return {
+      podId: 'sess-1',
+      containerId: 'c1',
+      previewUrl: 'http://localhost:3000',
+      buildCommand: 'npm run build',
+      startCommand: 'npm start',
+      healthPath: '/health',
+      healthTimeout: 30_000,
+      smokePages: [],
+      attempt: 1,
+      task: 'test task',
+      diff: '',
+      reviewerModel: 'sonnet',
+      acceptanceCriteria: acs,
+      hasWebUi,
+    };
+  }
+
+  it('skips the LLM when every AC has a brief-declared type', async () => {
+    const acs: AcDefinition[] = [
+      { type: 'none', test: 'Types exported', pass: 'exports present', fail: 'missing' },
+      { type: 'api', test: 'POST /jobs returns 201', pass: '201 status', fail: 'non-201' },
+      { type: 'web', test: 'Settings has toggle', pass: 'toggle visible', fail: 'missing' },
+    ];
+    // If the LLM were invoked, this would spawn a `claude` subprocess and hang or fail;
+    // resolving synchronously proves the short-circuit path ran.
+    const result = await classifyAcTypes(configWith(acs));
+    expect(result).toHaveLength(3);
+    expect(result?.[0]).toMatchObject({
+      criterion: 'Types exported',
+      validationType: 'none',
+      pass: 'exports present',
+      fail: 'missing',
+    });
+    expect(result?.[1]?.validationType).toBe('api');
+    // Brief `type: web` maps to engine `web-ui`.
+    expect(result?.[2]?.validationType).toBe('web-ui');
+    // Reason signals the skip path so logs remain diagnosable.
+    expect(result?.[0]?.reason).toMatch(/brief/i);
+  });
+
+  it('downgrades web-ui to none when hasWebUi is false', async () => {
+    const acs: AcDefinition[] = [
+      { type: 'web', test: 'Settings has toggle', pass: '...', fail: '...' },
+      { type: 'api', test: 'POST /jobs returns 201', pass: '...', fail: '...' },
+    ];
+    const result = await classifyAcTypes(configWith(acs, false));
+    expect(result?.[0]?.validationType).toBe('none');
+    expect(result?.[1]?.validationType).toBe('api');
+  });
+
+  it('returns [] for empty input without invoking the LLM', async () => {
+    const result = await classifyAcTypes(configWith([]));
+    expect(result).toEqual([]);
   });
 });
 
@@ -355,45 +439,45 @@ describe('parseApiCheckSpecs', () => {
 describe('deduplicateAcsByBaseText', () => {
   it('passes through non-duplicate criteria unchanged', () => {
     const acs = [
-      'POST /jobs returns 201',
-      'GET /jobs returns 200',
-      'DELETE /jobs/{id} returns 204',
+      ac('POST /jobs returns 201'),
+      ac('GET /jobs returns 200'),
+      ac('DELETE /jobs/{id} returns 204'),
     ];
     const { deduped } = deduplicateAcsByBaseText(acs);
     expect(deduped).toHaveLength(3);
-    expect(deduped).toEqual(acs);
+    expect(deduped.map((d) => d.test)).toEqual(acs.map((a) => a.test));
   });
 
   it('deduplicates exact duplicates', () => {
-    const acs = ['POST /jobs returns 201', 'POST /jobs returns 201'];
+    const acs = [ac('POST /jobs returns 201'), ac('POST /jobs returns 201')];
     const { deduped } = deduplicateAcsByBaseText(acs);
     expect(deduped).toHaveLength(1);
-    expect(deduped[0]).toBe('POST /jobs returns 201');
+    expect(deduped[0]?.test).toBe('POST /jobs returns 201');
   });
 
   it('deduplicates when one AC is the other plus a parenthetical suffix', () => {
     const short = 'POST /jobs returns 201';
     const long =
       'POST /jobs returns 201 (HTTP status code is directly verifiable via a POST request)';
-    const { deduped } = deduplicateAcsByBaseText([short, long]);
+    const { deduped } = deduplicateAcsByBaseText([ac(short), ac(long)]);
     expect(deduped).toHaveLength(1);
     // Keeps the longer (more informative) form
-    expect(deduped[0]).toBe(long);
+    expect(deduped[0]?.test).toBe(long);
   });
 
   it('deduplicates and keeps longest when long form comes first', () => {
     const short = 'ConsecutiveFailureCount increments by 1 on each failure';
     const long =
       'ConsecutiveFailureCount increments by 1 on each failure (ConsecutiveFailureCount is a persisted job field verifiable via GET /api/schedule/jobs/{id} after induced failures.)';
-    const { deduped } = deduplicateAcsByBaseText([long, short]);
+    const { deduped } = deduplicateAcsByBaseText([ac(long), ac(short)]);
     expect(deduped).toHaveLength(1);
-    expect(deduped[0]).toBe(long);
+    expect(deduped[0]?.test).toBe(long);
   });
 
   it('expandResult maps canonical result back to all original criteria', () => {
     const short = 'POST /jobs returns 201';
     const long = 'POST /jobs returns 201 (HTTP status code is directly verifiable)';
-    const { expandResult } = deduplicateAcsByBaseText([short, long]);
+    const { expandResult } = deduplicateAcsByBaseText([ac(short), ac(long)]);
 
     const compactResults = [
       {
@@ -418,7 +502,7 @@ describe('deduplicateAcsByBaseText', () => {
   it('expandResult propagates failures to all matching originals', () => {
     const short = 'GET /jobs/{id} returns 200';
     const long = 'GET /jobs/{id} returns 200 (use the id from the POST response)';
-    const { expandResult } = deduplicateAcsByBaseText([short, long]);
+    const { expandResult } = deduplicateAcsByBaseText([ac(short), ac(long)]);
 
     const compactResults = [
       {
@@ -437,11 +521,12 @@ describe('deduplicateAcsByBaseText', () => {
     const unique = 'GET /health returns 200';
     const short = 'POST /jobs returns 201';
     const long = 'POST /jobs returns 201 (verifiable via a POST request)';
-    const { deduped } = deduplicateAcsByBaseText([unique, short, long]);
+    const { deduped } = deduplicateAcsByBaseText([ac(unique), ac(short), ac(long)]);
     expect(deduped).toHaveLength(2);
-    expect(deduped).toContain(unique);
-    expect(deduped).toContain(long);
-    expect(deduped).not.toContain(short);
+    const tests = deduped.map((d) => d.test);
+    expect(tests).toContain(unique);
+    expect(tests).toContain(long);
+    expect(tests).not.toContain(short);
   });
 });
 
@@ -544,7 +629,7 @@ describe('buildReviewPrompt', () => {
   it('renders AUTO-VERIFIED section for non-none ACs when noneAcCriteria is provided', () => {
     const config = {
       ...baseConfig,
-      acceptanceCriteria: ['POST /api/jobs returns 201', 'Scheduler runs on startup'],
+      acceptanceCriteria: [ac('POST /api/jobs returns 201'), ac('Scheduler runs on startup')],
     };
     const noneAcs = ['Scheduler runs on startup'];
     const prompt = buildReviewPrompt(config, undefined, noneAcs);
@@ -558,13 +643,13 @@ describe('buildReviewPrompt', () => {
   });
 
   it('omits DIFF VERIFICATION section when noneAcCriteria is empty', () => {
-    const config = { ...baseConfig, acceptanceCriteria: ['POST /api/jobs returns 201'] };
+    const config = { ...baseConfig, acceptanceCriteria: [ac('POST /api/jobs returns 201')] };
     const prompt = buildReviewPrompt(config, undefined, []);
     expect(prompt).not.toContain('DIFF VERIFICATION REQUIRED');
   });
 
   it('omits AUTO-VERIFIED section when all ACs are none-classified', () => {
-    const config = { ...baseConfig, acceptanceCriteria: ['Scheduler runs on startup'] };
+    const config = { ...baseConfig, acceptanceCriteria: [ac('Scheduler runs on startup')] };
     const noneAcs = ['Scheduler runs on startup'];
     const prompt = buildReviewPrompt(config, undefined, noneAcs);
     expect(prompt).not.toContain('AUTO-VERIFIED');
@@ -572,7 +657,7 @@ describe('buildReviewPrompt', () => {
   });
 
   it('omits requirementsCheck from JSON format comment when no none ACs', () => {
-    const config = { ...baseConfig, acceptanceCriteria: ['POST /api/jobs returns 201'] };
+    const config = { ...baseConfig, acceptanceCriteria: [ac('POST /api/jobs returns 201')] };
     const prompt = buildReviewPrompt(config, undefined, []);
     // Standard requirementsCheck format (not the diff-only variant)
     expect(prompt).toContain('"requirementsCheck"');
@@ -582,7 +667,7 @@ describe('buildReviewPrompt', () => {
   it('instructs reviewer to include only DIFF VERIFICATION criteria in requirementsCheck', () => {
     const config = {
       ...baseConfig,
-      acceptanceCriteria: ['POST /api/jobs returns 201', 'Scheduler runs on startup'],
+      acceptanceCriteria: [ac('POST /api/jobs returns 201'), ac('Scheduler runs on startup')],
     };
     const noneAcs = ['Scheduler runs on startup'];
     const prompt = buildReviewPrompt(config, undefined, noneAcs);

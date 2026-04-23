@@ -200,7 +200,7 @@ public enum PodMapper {
       return nil
     }()
 
-    return Pod(
+    var result = Pod(
       id: response.id,
       status: status,
       pod: pod,
@@ -243,6 +243,8 @@ public enum PodMapper {
       sidecarContainerIds: response.sidecarContainerIds ?? [:],
       testRunBranches: response.testRunBranches ?? []
     )
+    result.worktreeCompromised = response.worktreeCompromised ?? false
+    return result
   }
 
   // MARK: - Batch mapping

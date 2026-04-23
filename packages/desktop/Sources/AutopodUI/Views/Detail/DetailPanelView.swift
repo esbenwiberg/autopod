@@ -207,10 +207,37 @@ public struct DetailPanelView: View {
                     .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { isTaskExpanded.toggle() } }
                     .help("Click to \(isTaskExpanded ? "collapse" : "expand") task")
             }
+
+            if pod.worktreeCompromised {
+                worktreeCompromisedBanner
+                    .padding(.top, 10)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(.regularMaterial)
+    }
+
+    private var worktreeCompromisedBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Worktree out of sync with container")
+                    .font(.caption.weight(.semibold))
+                Text("The auto-commit deletion guard blocked a phantom mass-delete. The agent's real work may still live in the container — don't retry the PR; recover manually first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -461,7 +488,10 @@ public struct DetailPanelView: View {
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                             .tint(.blue)
-                            .help("PR creation failed — retry creating a pull request for this pod's branch")
+                            .disabled(pod.worktreeCompromised)
+                            .help(pod.worktreeCompromised
+                                ? "Worktree sync failed — retrying would commit phantom deletions. Recover manually first."
+                                : "PR creation failed — retry creating a pull request for this pod's branch")
                         }
                     }
                     forkButton

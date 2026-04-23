@@ -5,6 +5,10 @@ import type { AcDefinition } from '../types/ac.js';
 /**
  * YAML frontmatter shape for a brief markdown file. All fields are optional
  * — a body-only brief is still valid and gets its title from the filename.
+ *
+ * Sidecar fields accept both `require_sidecars` (YAML-idiomatic snake_case)
+ * and `requireSidecars` (matches the daemon wire name) so spec authors can
+ * use whichever reads best. When both are set, `require_sidecars` wins.
  */
 export interface BriefFrontmatter {
   title?: string;
@@ -12,6 +16,14 @@ export interface BriefFrontmatter {
   context_files?: string[];
   handover_from?: string[];
   acceptance_criteria?: AcDefinition[];
+  /**
+   * Companion sidecars to spawn for this brief's pod (e.g. `[dagger]`). The
+   * daemon validates each name against `profile.sidecars` and the profile's
+   * `trustedSource` gate at pod-creation time — so a typo or an untrusted
+   * profile fails the series fast rather than at pod-spawn time.
+   */
+  require_sidecars?: string[];
+  requireSidecars?: string[];
 }
 
 /**
@@ -24,6 +36,8 @@ export interface ParsedBrief {
   task: string;
   dependsOn: string[];
   acceptanceCriteria?: AcDefinition[];
+  /** Per-pod sidecar requests (e.g. `['dagger']`). Undefined = no sidecars. */
+  requireSidecars?: string[];
 }
 
 /** Input for `parseBriefs` — one entry per .md file in the folder. */
@@ -150,11 +164,19 @@ export function parseBriefs(
       }
     }
 
+    // Accept either the snake_case or camelCase spelling in YAML. Normalize
+    // to camelCase for the ParsedBrief. Empty arrays become undefined so the
+    // wire payload omits the field when no sidecars are requested.
+    const sidecarsRaw = frontmatter.require_sidecars ?? frontmatter.requireSidecars;
+    const requireSidecars =
+      Array.isArray(sidecarsRaw) && sidecarsRaw.length > 0 ? sidecarsRaw : undefined;
+
     return {
       title,
       task,
       dependsOn,
       acceptanceCriteria,
+      requireSidecars,
     };
   });
 }

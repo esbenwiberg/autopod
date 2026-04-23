@@ -1148,6 +1148,8 @@ describe('Integration', () => {
     });
 
     it('POST /pods/series supports fan-in briefs (child.dependsOn = [a, b])', async () => {
+      // Stacked mode — each sibling gets its own branch, so true fan-out/fan-in
+      // parallelism is possible. (Single mode chains siblings on the shared branch.)
       const res = await app.inject({
         method: 'POST',
         url: '/pods/series',
@@ -1155,6 +1157,7 @@ describe('Integration', () => {
         payload: {
           seriesName: 'diamond',
           profile: 'test-app',
+          prMode: 'stacked',
           briefs: [
             { title: '01-base', task: 'Base task', dependsOn: [] },
             { title: '02-a', task: 'Branch A', dependsOn: ['01-base'] },
@@ -1171,6 +1174,34 @@ describe('Integration', () => {
       expect(a.dependsOnPodIds).toEqual([base.id]);
       expect(b.dependsOnPodIds).toEqual([base.id]);
       expect(merge.dependsOnPodIds).toEqual([a.id, b.id]);
+    });
+
+    it('POST /pods/series chains single-mode siblings so they serialize on the shared branch', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'single-chain',
+          profile: 'test-app',
+          prMode: 'single',
+          briefs: [
+            { title: '01-base', task: 'Base task', dependsOn: [] },
+            { title: '02-a', task: 'Branch A', dependsOn: ['01-base'] },
+            { title: '02-b', task: 'Branch B', dependsOn: ['01-base'] },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const [base, a, b] = res.json().pods;
+      expect(base.dependsOnPodIds).toEqual([]);
+      expect(a.dependsOnPodIds).toEqual([base.id]);
+      // 02-b's brief only says it depends on base, but single mode chains it
+      // onto 02-a so Git doesn't race on the shared branch.
+      expect(b.dependsOnPodIds).toEqual([base.id, a.id]);
+      // All three share the root's branch (single-mode invariant).
+      expect(a.branch).toBe(base.branch);
+      expect(b.branch).toBe(base.branch);
     });
 
     it('POST /pods/series accepts structured AcDefinition acceptance criteria', async () => {

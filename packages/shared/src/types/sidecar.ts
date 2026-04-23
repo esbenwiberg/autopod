@@ -47,6 +47,13 @@ export interface SidecarSpec {
   privileged?: boolean;
   /** Extra Linux capabilities. Additive to the non-privileged defaults. */
   capabilities?: string[];
+  /**
+   * Override for the container's `Cmd`. Appended to the image's entrypoint.
+   * Needed for sidecars whose default entrypoint doesn't expose a TCP listener
+   * (e.g. dagger-engine defaults to a unix socket only — we need
+   * `--addr tcp://0.0.0.0:<port>` for the pod to reach it over the network).
+   */
+  command?: string[];
 }
 
 /**

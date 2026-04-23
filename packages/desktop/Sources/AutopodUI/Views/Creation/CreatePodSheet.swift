@@ -6,14 +6,21 @@ public struct CreateSessionSheet: View {
     @Binding public var isPresented: Bool
     public var actions: PodActions
     public var profileNames: [String]
+    /// Full profile objects for the selection list. Optional — when provided,
+    /// the sheet uses these to drive per-profile UI (e.g. surfacing the Dagger
+    /// sidecar toggle only for trusted profiles with Dagger enabled). When
+    /// empty, only `profileNames` is used and profile-gated controls stay hidden.
+    public var profileDetails: [Profile]
     public init(
         isPresented: Binding<Bool>,
         actions: PodActions = .preview,
-        profileNames: [String] = ["my-app", "webapp", "backend"]
+        profileNames: [String] = ["my-app", "webapp", "backend"],
+        profileDetails: [Profile] = []
     ) {
         self._isPresented = isPresented
         self.actions = actions
         self.profileNames = profileNames
+        self.profileDetails = profileDetails
     }
 
     @State private var selectedProfile = "my-app"
@@ -29,8 +36,24 @@ public struct CreateSessionSheet: View {
     @State private var bulkText = ""
     @State private var pimGroups: [PimGroupRequest] = []
     @State private var showAdvanced = false
+    @State private var enableDaggerSidecar = false
 
     private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
+
+    /// Selected profile's full config, if available. `profileDetails` is
+    /// optional so previews / callers that only pass names still work.
+    private var selectedProfileDetail: Profile? {
+        profileDetails.first { $0.name == selectedProfile }
+    }
+
+    /// The Dagger sidecar toggle is gated on two profile flags:
+    ///  - `trustedSource` — the privileged-sidecar trust gate
+    ///  - `sidecars.dagger.enabled` — the engine image/version is configured
+    /// Without both, spawning would fail server-side anyway.
+    private var canRequestDaggerSidecar: Bool {
+        guard let p = selectedProfileDetail else { return false }
+        return p.trustedSource && (p.sidecars?.dagger?.enabled ?? false)
+    }
     private let agentModes = [("auto", "Agent"), ("interactive", "Interactive")]
     private let outputTargets = [
         ("pr", "Pull Request"),
@@ -77,6 +100,12 @@ public struct CreateSessionSheet: View {
                             }
                         }
                         .labelsHidden()
+                        .onChange(of: selectedProfile) { _, _ in
+                            // Reset the Dagger toggle if the new profile can't
+                            // spawn one — avoids sending a request the daemon
+                            // would reject with UNTRUSTED_PROFILE.
+                            if !canRequestDaggerSidecar { enableDaggerSidecar = false }
+                        }
                     }
 
                     // Agent + Output
@@ -286,10 +315,36 @@ public struct CreateSessionSheet: View {
                         .foregroundStyle(.tertiary)
                     } // end if !isInteractive
 
-                    // Advanced options (PIM groups)
+                    // Advanced options (PIM groups, sidecars)
                     if !isInteractive {
                         DisclosureGroup(isExpanded: $showAdvanced) {
                             VStack(alignment: .leading, spacing: 10) {
+                                // Dagger sidecar — only offered when the profile
+                                // has trustedSource + sidecars.dagger.enabled.
+                                if canRequestDaggerSidecar {
+                                    HStack {
+                                        Text("Sidecars")
+                                            .font(.system(.caption).weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                        HelpBadge(text: "Spawns a privileged Dagger engine container alongside the pod so the agent's `dagger` CLI can run pipelines. Rarely needed — enable only when developing/editing .dagger modules.")
+                                        Spacer()
+                                    }
+                                    Toggle(isOn: $enableDaggerSidecar) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Enable Dagger engine")
+                                                .font(.callout)
+                                            Text(enableDaggerSidecar
+                                                ? "Spawns a privileged sidecar; adds ~10–30s to pod startup."
+                                                : "Agent's `dagger develop` / `dagger call` will fail without this.")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                                    Divider()
+                                }
+
                                 HStack {
                                     Text("Azure PIM Groups")
                                         .font(.system(.caption).weight(.semibold))
@@ -382,12 +437,14 @@ public struct CreateSessionSheet: View {
                             validate: validate,
                             promotable: isInteractive
                         )
+                        let sidecars: [String]? = (canRequestDaggerSidecar && enableDaggerSidecar) ? ["dagger"] : nil
                         _ = await actions.createPod(
                             selectedProfile, task, model.isEmpty ? nil : model,
                             pod, ac.isEmpty ? nil : ac,
                             baseBranch.isEmpty ? nil : baseBranch,
                             acFromPath.isEmpty ? nil : acFromPath,
-                            pim.isEmpty ? nil : pim
+                            pim.isEmpty ? nil : pim,
+                            sidecars
                         )
                         isPresented = false
                     }

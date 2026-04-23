@@ -111,6 +111,11 @@ public struct SessionResponse: Codable, Sendable {
   public let sidecarContainerIds: [String: String]?
   /// Branches this pod pushed to the configured test repo (cleared on pod end).
   public let testRunBranches: [String]?
+  /// Set by the daemon when the auto-commit deletion guard aborted a commit —
+  /// the host worktree is out of sync with the container and retry/merge
+  /// actions would commit a phantom mass-deletion. Optional for back-compat
+  /// with pre-#056 daemon responses; nil is treated as false.
+  public let worktreeCompromised: Bool?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
@@ -129,6 +134,7 @@ public struct SessionResponse: Codable, Sendable {
     case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, dependencyStartedAt
     case artifactsPath
     case requireSidecars, sidecarContainerIds, testRunBranches
+    case worktreeCompromised
   }
 }
 
@@ -223,6 +229,10 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var dependsOnPodIds: [String]?
   public var seriesId: String?
   public var seriesName: String?
+  // Companion sidecars to spawn alongside the pod (e.g. ["dagger"]). Each
+  // entry must correspond to an enabled entry in `profile.sidecars`;
+  // privileged sidecars additionally require `profile.trustedSource: true`.
+  public var requireSidecars: [String]?
 
   public init(
     profileName: String,
@@ -241,7 +251,8 @@ public struct CreateSessionRequest: Codable, Sendable {
     pimGroups: [PimGroupRequest]? = nil,
     dependsOnPodIds: [String]? = nil,
     seriesId: String? = nil,
-    seriesName: String? = nil
+    seriesName: String? = nil,
+    requireSidecars: [String]? = nil
   ) {
     self.profileName = profileName
     self.task = task
@@ -260,6 +271,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.dependsOnPodIds = dependsOnPodIds
     self.seriesId = seriesId
     self.seriesName = seriesName
+    self.requireSidecars = requireSidecars
   }
 
   // Backend zod schema names the pod-config field `options`; the Swift
@@ -269,7 +281,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     case skipValidation, acceptanceCriteria, outputMode
     case pod = "options"
     case baseBranch, acFrom, linkedSessionId, pimGroups
-    case dependsOnPodIds, seriesId, seriesName
+    case dependsOnPodIds, seriesId, seriesName, requireSidecars
   }
 }
 
@@ -296,11 +308,21 @@ public struct ParsedBriefResponse: Codable, Sendable {
   public let title: String
   public let task: String
   public let dependsOn: [String]
+  /// Per-brief sidecar requests (e.g. `["dagger"]`). Surfaced on the DAG
+  /// preview so reviewers can see which pods will spawn privileged sidecars
+  /// before submitting. Nil/empty = no sidecars.
+  public let requireSidecars: [String]?
 
-  public init(title: String, task: String, dependsOn: [String]) {
+  public init(
+    title: String,
+    task: String,
+    dependsOn: [String],
+    requireSidecars: [String]? = nil
+  ) {
     self.title = title
     self.task = task
     self.dependsOn = dependsOn
+    self.requireSidecars = requireSidecars
   }
 }
 

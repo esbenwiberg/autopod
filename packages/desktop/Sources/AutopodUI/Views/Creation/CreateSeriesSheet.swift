@@ -266,16 +266,35 @@ public struct CreateSeriesSheet: View {
     }
 
     private func briefDAG(_ briefs: [ParsedBriefResponse]) -> some View {
-        let inputs = briefs.map {
-            PipelineDAGLayout.Input(id: $0.title, parentIds: $0.dependsOn)
+        // Single-mode siblings share the root's branch, and Git allows only one
+        // worktree per branch. The daemon chains them at creation time — mirror
+        // that here so the preview matches the physical execution order the
+        // user is about to trigger instead of the aspirational brief DAG.
+        let inputs: [PipelineDAGLayout.Input] = briefs.enumerated().map { idx, brief in
+            if prMode == "single", idx > 0 {
+                let previous = briefs[idx - 1].title
+                var parents = brief.dependsOn
+                if !parents.contains(previous) { parents.append(previous) }
+                return PipelineDAGLayout.Input(id: brief.title, parentIds: parents)
+            }
+            return PipelineDAGLayout.Input(id: brief.title, parentIds: brief.dependsOn)
         }
+        // Taller nodes so the sidecar chip has somewhere to sit without
+        // clipping the title.
         let metrics = PipelineDAGLayout.Metrics(
-            nodeWidth: 140, nodeHeight: 44,
-            horizontalGap: 40, verticalGap: 14,
+            nodeWidth: 140, nodeHeight: 56,
+            horizontalGap: 40, verticalGap: 16,
             paddingX: 12, paddingY: 12
         )
         let layout = PipelineDAGLayout.layout(inputs, metrics: metrics)
         let positions = Dictionary(uniqueKeysWithValues: layout.nodes.map { ($0.id, $0.position) })
+        // Fast lookup from brief title → sidecar list for the badge render.
+        let sidecarsByTitle: [String: [String]] = Dictionary(
+            uniqueKeysWithValues: briefs.compactMap { b in
+                guard let s = b.requireSidecars, !s.isEmpty else { return nil }
+                return (b.title, s)
+            }
+        )
         let edges = layout.edges.map {
             PipelineEdgeCanvas.EdgeStyle(from: $0.from, to: $0.to, color: .accentColor)
         }
@@ -289,22 +308,57 @@ public struct CreateSeriesSheet: View {
                 .frame(width: layout.width, height: layout.height)
 
                 ForEach(layout.nodes, id: \.id) { node in
-                    Text(node.id)
-                        .font(.caption)
-                        .lineLimit(2)
-                        .padding(6)
-                        .frame(width: metrics.nodeWidth, height: metrics.nodeHeight)
-                        .background(Color.accentColor.opacity(0.12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 5)
-                                .stroke(Color.accentColor.opacity(0.5), lineWidth: 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                        .position(x: node.position.x, y: node.position.y)
+                    briefNode(
+                        title: node.id,
+                        sidecars: sidecarsByTitle[node.id] ?? []
+                    )
+                    .frame(width: metrics.nodeWidth, height: metrics.nodeHeight)
+                    .position(x: node.position.x, y: node.position.y)
                 }
             }
             .frame(width: layout.width, height: layout.height)
         }
+    }
+
+    /// A single brief node in the DAG. Shows the title plus, when the brief
+    /// requested sidecars, a chip listing them (e.g. "🛠 dagger"). The chip
+    /// is orange-tinted — a quiet "privileged container will spawn here"
+    /// signal for reviewers before they click Create.
+    @ViewBuilder
+    private func briefNode(title: String, sidecars: [String]) -> some View {
+        VStack(spacing: 3) {
+            Text(title)
+                .font(.caption)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+            if !sidecars.isEmpty {
+                Text("🛠 \(sidecars.joined(separator: ", "))")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.orange.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            sidecars.isEmpty
+                ? Color.accentColor.opacity(0.12)
+                : Color.orange.opacity(0.10)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(
+                    sidecars.isEmpty
+                        ? Color.accentColor.opacity(0.5)
+                        : Color.orange.opacity(0.6),
+                    lineWidth: 1
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 
     // MARK: - Other fields

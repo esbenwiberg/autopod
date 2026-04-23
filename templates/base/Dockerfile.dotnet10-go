@@ -51,11 +51,24 @@ ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED=true
 # Agent CLIs
 RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
-# Dagger CLI — pre-installed so pods with restricted/deny-all network policies
-# can still use Dagger modules (runtime install from dl.dagger.io would fail).
-RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh \
+# Dagger version — single source of truth for CLI, SDK, and the engine digest
+# users pin on their profile. Leaving any of the three on rolling-latest causes
+# silent drift: e.g. a newer CLI scaffolding against a pinned older engine
+# produces code that targets an API the engine doesn't implement yet. Bumping
+# this ARG requires also updating profile.sidecars.dagger.engineImageDigest
+# to the matching engine digest.
+ARG DAGGER_GO_SDK_VERSION=v0.18.6
+
+# Dagger CLI — pre-installed (pinned to the same version as the SDK below) so
+# pods with restricted/deny-all network policies can still use Dagger modules
+# without a runtime install from dl.dagger.io. install.sh reads DAGGER_VERSION
+# without the `v` prefix, so strip it.
+RUN curl -fsSL https://dl.dagger.io/dagger/install.sh \
+    | DAGGER_VERSION=${DAGGER_GO_SDK_VERSION#v} BIN_DIR=/usr/local/bin sh \
     && test -x /usr/local/bin/dagger \
-    || (echo "ERROR: Dagger CLI installation failed" && exit 1)
+    && dagger version \
+    && dagger version | grep -q "${DAGGER_GO_SDK_VERSION}" \
+    || (echo "ERROR: Dagger CLI install failed or version didn't pin to ${DAGGER_GO_SDK_VERSION}" && exit 1)
 
 # Go toolchain — copied from the official golang image so we track the same
 # version as autopod-go124 (currently 1.24). Using COPY --from avoids a
@@ -79,9 +92,10 @@ RUN mkdir -p ${GOPATH} ${GOCACHE} \
     && chown -R autopod:autopod ${GOPATH} /home/autopod/.cache
 
 # Pre-cache the Dagger Go SDK into GOMODCACHE so pods can `import "dagger.io/dagger"`
-# without reaching the Go proxy at runtime. Keep this ARG in lockstep with
-# templates/base/Dockerfile.go124 so both bases ship the same module graph.
-ARG DAGGER_GO_SDK_VERSION=v0.18.6
+# without reaching the Go proxy at runtime. DAGGER_GO_SDK_VERSION is declared
+# above (used for the CLI install too); redeclaring here is harmless and keeps
+# the arg scoped to the RUN below if Docker ever drops the inherited scope.
+ARG DAGGER_GO_SDK_VERSION
 RUN mkdir -p /tmp/dagger-warmup \
     && cd /tmp/dagger-warmup \
     && go mod init warmup \

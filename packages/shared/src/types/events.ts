@@ -33,7 +33,8 @@ export type SystemEvent =
   | ScheduledJobFiredEvent
   | IssueWatcherPickedUpEvent
   | IssueWatcherCompletedEvent
-  | IssueWatcherErrorEvent;
+  | IssueWatcherErrorEvent
+  | PodWorktreeCompromisedEvent;
 
 export interface PodCreatedEvent {
   type: 'pod.created';
@@ -193,4 +194,18 @@ export interface IssueWatcherErrorEvent {
   timestamp: string;
   profileName: string;
   error: string;
+}
+
+/**
+ * Emitted when the daemon refuses to auto-commit because the number of staged deletions
+ * exceeds the safety threshold — a strong signal that the host worktree is out of sync
+ * with the container. The agent's real work may still live in the container; the user
+ * should avoid retry/merge actions until the situation is manually reconciled.
+ */
+export interface PodWorktreeCompromisedEvent {
+  type: 'pod.worktree_compromised';
+  timestamp: string;
+  podId: string;
+  deletionCount: number;
+  threshold: number;
 }

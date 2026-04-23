@@ -27,6 +27,11 @@ function truncate(str: string, max: number): string {
   return `${str.slice(0, max - 1)}…`;
 }
 
+// Commander collector for repeatable `--sidecar <name>` flags.
+function collectRepeatable(value: string, previous: string[]): string[] {
+  return previous.concat(value);
+}
+
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   // ap run
   program
@@ -39,6 +44,12 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
     .option('--ac-from <path>', 'Load acceptance criteria from a file in the repo')
     .option('--skip-validation', 'Skip validation phase')
+    .option(
+      '-s, --sidecar <name>',
+      'Companion sidecar to spawn (e.g. "dagger"). Repeatable. Requires the profile to have sidecars.<name> enabled; privileged sidecars also require trustedSource.',
+      collectRepeatable,
+      [] as string[],
+    )
     .action(
       async (
         profile: string,
@@ -51,6 +62,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           baseBranch?: string;
           acFrom?: string;
           skipValidation?: boolean;
+          sidecar: string[];
         },
       ) => {
         const client = getClient();
@@ -65,6 +77,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             baseBranch: opts.baseBranch,
             acFrom: opts.acFrom,
             skipValidation: opts.skipValidation,
+            requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
           }),
         );
 
@@ -94,6 +107,12 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--base-branch <branch>', 'Branch from a specific base')
     .option('--ac-from <path>', 'Load acceptance criteria from a file in the repo')
+    .option(
+      '-s, --sidecar <name>',
+      'Companion sidecar to spawn (e.g. "dagger"). Repeatable. Requires the profile to have sidecars.<name> enabled; privileged sidecars also require trustedSource.',
+      collectRepeatable,
+      [] as string[],
+    )
     .action(
       async (
         profile: string,
@@ -108,6 +127,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branchPrefix?: string;
           baseBranch?: string;
           acFrom?: string;
+          sidecar: string[];
         },
       ) => {
         const client = getClient();
@@ -149,6 +169,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             baseBranch: opts.baseBranch,
             acFrom: opts.acFrom,
             options: podOptions,
+            requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
           }),
         );
 

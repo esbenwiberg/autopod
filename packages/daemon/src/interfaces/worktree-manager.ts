@@ -13,6 +13,12 @@ export interface MergeBranchConfig {
   targetBranch: string;
   /** PAT to use for the push — overrides the in-memory cache. Required when the cache may be cold (e.g. after a daemon restart). */
   pat?: string;
+  /**
+   * Maximum number of files that may be staged for deletion during the internal auto-commit.
+   * Defaults to 100. Pass 0 when the worktree may be out of sync with the container (sync-back
+   * failed or wasn't attempted) so a ghost mass-deletion does not get committed over real work.
+   */
+  maxDeletions?: number;
 }
 
 export interface DiffStats {

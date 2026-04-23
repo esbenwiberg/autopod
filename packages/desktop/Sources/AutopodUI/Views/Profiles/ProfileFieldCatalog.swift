@@ -15,6 +15,7 @@ public enum ProfileOverrideFieldSection: String, CaseIterable, Sendable {
     case actions     = "Actions"
     case issueWatcher = "Issue Watcher"
     case validation  = "Validation"
+    case sandbox     = "Sandbox & Test Pipeline"
     case credentials = "Credentials"
     case injections  = "Injections"
 }
@@ -252,6 +253,26 @@ public enum ProfileOverrideCatalog {
             label: "Smoke Pages",
             section: .validation,
             help: "Pages loaded after start to verify the app renders."
+        ),
+
+        // MARK: Sandbox & Test Pipeline
+        .init(
+            key: "trustedSource",
+            label: "Trusted Source",
+            section: .sandbox,
+            help: "Gate for privileged sidecars (Dagger engine). Only enable for internal repos with reviewed PRs."
+        ),
+        .init(
+            key: "sidecars",
+            label: "Sidecars",
+            section: .sandbox,
+            help: "Per-type sidecar config (currently: Dagger engine digest/version). Edited in the Sandbox & Test Pipeline tab."
+        ),
+        .init(
+            key: "testPipeline",
+            label: "Test Pipeline",
+            section: .sandbox,
+            help: "ADO pipeline the agent can trigger for integration validation."
         ),
 
         // MARK: Credentials

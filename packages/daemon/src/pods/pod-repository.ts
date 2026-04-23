@@ -123,6 +123,7 @@ export interface PodUpdates {
   baseBranch?: string | null;
   sidecarContainerIds?: Record<string, string> | null;
   testRunBranches?: string[] | null;
+  worktreeCompromised?: boolean;
 }
 
 export interface PodStats {
@@ -291,6 +292,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     testRunBranches: row.test_run_branches
       ? (JSON.parse(row.test_run_branches as string) as string[])
       : null,
+    worktreeCompromised: Boolean(row.worktree_compromised),
   };
 }
 
@@ -580,6 +582,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
           changes.testRunBranches && changes.testRunBranches.length > 0
             ? JSON.stringify(changes.testRunBranches)
             : null;
+      }
+      if (changes.worktreeCompromised !== undefined) {
+        setClauses.push('worktree_compromised = @worktreeCompromised');
+        params.worktreeCompromised = changes.worktreeCompromised ? 1 : 0;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so

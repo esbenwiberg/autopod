@@ -101,6 +101,45 @@ describe('pod commands', () => {
     );
   });
 
+  it('passes --sidecar flags as requireSidecars on run', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'run',
+      'test-profile',
+      'build the thing',
+      '--sidecar',
+      'dagger',
+    ]);
+    expect(mockClient.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ requireSidecars: ['dagger'] }),
+    );
+  });
+
+  it('accepts multiple --sidecar flags on start', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'start',
+      'test-profile',
+      'do it',
+      '-s',
+      'dagger',
+      '-s',
+      'postgres',
+    ]);
+    expect(mockClient.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ requireSidecars: ['dagger', 'postgres'] }),
+    );
+  });
+
+  it('omits requireSidecars when no --sidecar flags are passed', async () => {
+    await program.parseAsync(['node', 'ap', 'run', 'test-profile', 'do it']);
+    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(call.requireSidecars).toBeUndefined();
+  });
+
   it('registers ls command that calls listSessions', async () => {
     await program.parseAsync(['node', 'ap', 'ls']);
     expect(mockClient.listSessions).toHaveBeenCalled();

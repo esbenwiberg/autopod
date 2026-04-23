@@ -62,6 +62,21 @@ export const createPodRequestSchema = z
         }),
       )
       .optional(),
+    // Sidecars to spawn for this pod (e.g. ['dagger']). Each must correspond
+    // to an enabled entry in `profile.sidecars`; privileged sidecars also
+    // require the profile's `trustedSource` flag. Zod strips unknown fields,
+    // so without this entry the field would be silently dropped by the POST
+    // /pods handler even though the Pod type persists it.
+    requireSidecars: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(32)
+          .regex(/^[a-z][a-z0-9-]*$/, 'Sidecar names are lowercase kebab-case'),
+      )
+      .max(8)
+      .optional(),
   })
   .refine(
     (data) => {

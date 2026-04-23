@@ -125,13 +125,20 @@ export function createIssueWatcherService(
       return;
     }
 
-    // Build pod request
+    // Build pod request. Issue bodies supply plain-text criteria lines;
+    // wrap each as a minimal AcDefinition so downstream code can treat them
+    // uniformly with brief-parsed ACs.
     const task = `${candidate.title}\n\n${candidate.body}`;
     const request: CreatePodRequest = {
       profileName: target.profileName,
       task,
       branchPrefix: `issue-${candidate.id}/`,
-      acceptanceCriteria: candidate.acceptanceCriteria,
+      acceptanceCriteria: candidate.acceptanceCriteria?.map((test) => ({
+        type: 'none' as const,
+        test,
+        pass: 'criterion satisfied',
+        fail: 'criterion not satisfied',
+      })),
       outputMode: target.outputMode,
     };
 

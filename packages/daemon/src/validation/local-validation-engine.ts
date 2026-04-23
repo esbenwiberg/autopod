@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 
 import type {
   AcCheckResult,
+  AcDefinition,
+  AcType,
   AcValidationResult,
   DeviationsAssessment,
   PageResult,
@@ -734,17 +736,52 @@ export interface ClassifiedAc {
   criterion: string;
   validationType: AcValidationType;
   reason: string;
+  /** Author-declared pass condition from the brief frontmatter, if present. */
+  pass?: string;
+  /** Author-declared fail condition from the brief frontmatter, if present. */
+  fail?: string;
 }
 
-/** LLM-based classification: assigns a validation type to each AC before execution. */
+/** Map brief-declared `AcType` to the engine's internal `AcValidationType`. */
+function mapBriefType(t: AcType): AcValidationType {
+  return t === 'web' ? 'web-ui' : t;
+}
+
+/**
+ * Assign a validation type to each AC. Brief-declared types are authoritative —
+ * the LLM classifier is only invoked for legacy paths where `type` is absent.
+ */
 export async function classifyAcTypes(
   config: ValidationEngineConfig,
   log?: Logger,
 ): Promise<ClassifiedAc[] | null> {
   const acs = config.acceptanceCriteria ?? [];
-  const acList = acs.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
-  const hasWebUi = config.hasWebUi ?? true;
+  if (acs.length === 0) return [];
 
+  // Brief frontmatter and the pod repository both produce `AcDefinition` with a
+  // declared `type` — trust it and skip the LLM classification entirely.
+  const hasWebUi = config.hasWebUi ?? true;
+  const allDeclared = acs.every((ac) => ac.type === 'none' || ac.type === 'api' || ac.type === 'web');
+  if (allDeclared) {
+    log?.info({ acCount: acs.length }, 'using brief-declared AC types, skipping LLM classifier');
+    return acs.map((ac) => {
+      let validationType = mapBriefType(ac.type);
+      // Respect `hasWebUi: false` — downgrade to 'none' rather than run a
+      // browser phase against a project that has no frontend.
+      if (validationType === 'web-ui' && !hasWebUi) validationType = 'none';
+      return {
+        criterion: ac.test,
+        validationType,
+        reason: 'declared in brief frontmatter',
+        pass: ac.pass,
+        fail: ac.fail,
+      };
+    });
+  }
+
+  // Fallback: ask the LLM when types weren't declared (reserved for future
+  // ingestion paths that produce `AcDefinition`s without a type).
+  const acList = acs.map((ac, i) => `${i + 1}. ${ac.test}`).join('\n');
   const webUiRestriction = hasWebUi
     ? ''
     : '\nIMPORTANT: This project has NO web frontend. Do not classify any criterion as "web-ui". Use "api" or "none" only.\n';
@@ -802,7 +839,10 @@ Respond ONLY with the JSON array, no markdown fences or extra text.`;
 }
 
 /** Parse and validate the classification JSON response from the LLM. */
-export function parseClassificationJson(raw: string, originalAcs: string[]): ClassifiedAc[] | null {
+export function parseClassificationJson(
+  raw: string,
+  originalAcs: AcDefinition[],
+): ClassifiedAc[] | null {
   const cleaned = stripMarkdownFences(raw);
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
   if (!jsonMatch) return null;
@@ -821,12 +861,28 @@ export function parseClassificationJson(raw: string, originalAcs: string[]): Cla
         typeof (item as Record<string, unknown>).reason === 'string',
     );
 
-    // If we got fewer results than ACs, fall back any missing ones to 'none'
+    // Enrich LLM results with author-declared pass/fail hints (matched by test text).
+    const hintsByText = new Map(originalAcs.map((ac) => [ac.test, ac]));
+    for (const r of results) {
+      const hint = hintsByText.get(r.criterion);
+      if (hint) {
+        r.pass = hint.pass;
+        r.fail = hint.fail;
+      }
+    }
+
+    // If we got fewer results than ACs, fall back any missing ones to 'none'.
     if (results.length < originalAcs.length) {
       const covered = new Set(results.map((r) => r.criterion));
       for (const ac of originalAcs) {
-        if (!covered.has(ac)) {
-          results.push({ criterion: ac, validationType: 'none', reason: 'Not classified by LLM' });
+        if (!covered.has(ac.test)) {
+          results.push({
+            criterion: ac.test,
+            validationType: 'none',
+            reason: 'Not classified by LLM',
+            pass: ac.pass,
+            fail: ac.fail,
+          });
         }
       }
     }
@@ -847,8 +903,8 @@ export function parseClassificationJson(raw: string, originalAcs: string[]): Cla
  *
  * @internal Exported for testing.
  */
-export function deduplicateAcsByBaseText(criteria: string[]): {
-  deduped: string[];
+export function deduplicateAcsByBaseText(criteria: AcDefinition[]): {
+  deduped: AcDefinition[];
   expandResult: (results: AcCheckResult[]) => AcCheckResult[];
 } {
   // Normalise: strip trailing " (...)" parenthetical that /prep adds for testability context.
@@ -856,39 +912,39 @@ export function deduplicateAcsByBaseText(criteria: string[]): {
     return ac.replace(/\s+\([^)]*\)\s*$/, '').trim();
   }
 
-  // Map from base text → longest original criterion that shares it.
-  const canonical = new Map<string, string>();
+  // Map from base text → longest original AC (by test-text length) that shares it.
+  const canonical = new Map<string, AcDefinition>();
   for (const ac of criteria) {
-    const base = baseText(ac);
+    const base = baseText(ac.test);
     const existing = canonical.get(base);
-    if (!existing || ac.length > existing.length) {
+    if (!existing || ac.test.length > existing.test.length) {
       canonical.set(base, ac);
     }
   }
 
   const deduped = [...canonical.values()];
 
-  // For each original criterion, find which canonical form it maps to.
-  const originalToCanonical = new Map<string, string>();
+  // For each original criterion, find which canonical test-text it maps to.
+  const originalToCanonical = new Map<AcDefinition, string>();
   for (const ac of criteria) {
-    const canon = canonical.get(baseText(ac));
-    if (canon) originalToCanonical.set(ac, canon);
+    const canon = canonical.get(baseText(ac.test));
+    if (canon) originalToCanonical.set(ac, canon.test);
   }
 
   function expandResult(results: AcCheckResult[]): AcCheckResult[] {
     const byCanonical = new Map(results.map((r) => [r.criterion, r]));
     const expanded: AcCheckResult[] = [];
     for (const ac of criteria) {
-      const canon = originalToCanonical.get(ac);
-      const result = canon ? byCanonical.get(canon) : undefined;
+      const canonText = originalToCanonical.get(ac);
+      const result = canonText ? byCanonical.get(canonText) : undefined;
       if (result) {
         // Re-emit the result under the original criterion text so the feedback
         // message shows the text the user actually wrote.
-        expanded.push({ ...result, criterion: ac });
+        expanded.push({ ...result, criterion: ac.test });
       } else {
         // Fallback: shouldn't happen, but don't silently drop a criterion
         expanded.push({
-          criterion: ac,
+          criterion: ac.test,
           passed: false,
           validationType: 'none' as const,
           reasoning: 'No result available for this criterion',
@@ -939,7 +995,10 @@ async function runAcValidation(
       : config;
 
   // Step 2: Classify each AC by validation type (cached to prevent non-deterministic re-classification)
-  const cacheKey = [...dedupedCriteria].sort().join('|');
+  const cacheKey = dedupedCriteria
+    .map((ac) => ac.test)
+    .sort()
+    .join('|');
   const cachedClassification = acClassificationCache?.get(cacheKey) ?? null;
   const classified = cachedClassification ?? (await classifyAcTypes(dedupedConfig, log));
   if (classified && classified.length > 0 && !cachedClassification) {
@@ -948,7 +1007,7 @@ async function runAcValidation(
   if (!classified || classified.length === 0) {
     log?.warn('AC classification failed, marking all as diff-reviewed');
     const fallbackResults: AcCheckResult[] = (config.acceptanceCriteria ?? []).map((ac) => ({
-      criterion: ac,
+      criterion: ac.test,
       passed: true,
       validationType: 'none' as const,
       reasoning: 'Classification failed — evaluated by diff reviewer',
@@ -983,10 +1042,7 @@ async function runAcValidation(
 
   let browserResults: AcCheckResult[] = [];
   if (webUiAcs.length > 0) {
-    const webUiInstructions = await generateAcInstructions(
-      { ...dedupedConfig, acceptanceCriteria: webUiAcs.map((c) => c.criterion) },
-      log,
-    );
+    const webUiInstructions = await generateAcInstructions(dedupedConfig, webUiAcs, log);
     if (webUiInstructions && webUiInstructions.length > 0) {
       browserResults = await executeAcChecks(
         containerManager,
@@ -1036,10 +1092,18 @@ async function runAcValidation(
 /** Reviewer LLM generates natural language validation instructions from ACs. */
 async function generateAcInstructions(
   config: ValidationEngineConfig,
+  webUiAcs: ClassifiedAc[],
   log?: Logger,
 ): Promise<Array<{ criterion: string; instruction: string }> | null> {
-  const acs = config.acceptanceCriteria ?? [];
-  const acList = acs.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
+  const acList = webUiAcs
+    .map((ac, i) => {
+      const hints =
+        ac.pass || ac.fail
+          ? `\n   Pass: ${ac.pass ?? '(no explicit pass condition)'}\n   Fail: ${ac.fail ?? '(no explicit fail condition)'}`
+          : '';
+      return `${i + 1}. ${ac.criterion}${hints}`;
+    })
+    .join('\n');
 
   const prompt = `You are a QA reviewer for a web application. Your job is to generate browser-based validation instructions for each acceptance criterion.
 
@@ -1117,7 +1181,15 @@ async function executeApiChecks(
   apiAcs: ClassifiedAc[],
   log?: Logger,
 ): Promise<AcCheckResult[]> {
-  const acList = apiAcs.map((c, i) => `${i + 1}. ${c.criterion} (${c.reason})`).join('\n');
+  const acList = apiAcs
+    .map((c, i) => {
+      const hints =
+        c.pass || c.fail
+          ? `\n   Pass: ${c.pass ?? '(no explicit pass condition)'}\n   Fail: ${c.fail ?? '(no explicit fail condition)'}`
+          : '';
+      return `${i + 1}. ${c.criterion} (${c.reason})${hints}`;
+    })
+    .join('\n');
 
   const prompt = `You are a QA automation engineer. Generate HTTP request specs to validate each acceptance criterion against a running server.
 
@@ -1704,14 +1776,14 @@ export function buildReviewPrompt(
   const allAcs = config.acceptanceCriteria ?? [];
 
   // ACs already verified by the automated harness (api + web-ui)
-  const autoVerifiedAcs = allAcs.filter((ac) => !noneAcCriteria.includes(ac));
+  const autoVerifiedAcs = allAcs.filter((ac) => !noneAcCriteria.includes(ac.test));
 
   // For backward-compat: we still need acList as a boolean signal for step numbering
   const acList = allAcs.length > 0 ? true : null;
 
   const autoSection =
     autoVerifiedAcs.length > 0
-      ? `\n## ACCEPTANCE CRITERIA — AUTO-VERIFIED\nThe following were already checked by the automated test harness (HTTP calls / browser). You do not need to re-verify these unless you spot a code defect that would cause them to fail at runtime:\n${autoVerifiedAcs.map((ac, i) => `${i + 1}. ${ac}`).join('\n')}\n`
+      ? `\n## ACCEPTANCE CRITERIA — AUTO-VERIFIED\nThe following were already checked by the automated test harness (HTTP calls / browser). You do not need to re-verify these unless you spot a code defect that would cause them to fail at runtime:\n${autoVerifiedAcs.map((ac, i) => `${i + 1}. ${ac.test}`).join('\n')}\n`
       : '';
 
   const noneSection =

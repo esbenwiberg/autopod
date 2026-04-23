@@ -15,6 +15,25 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Thrown when `commitPendingChanges` refuses to commit because the number of staged deletions
+ * exceeds the safety threshold. The usual cause is a failed container→host sync that left the
+ * worktree partially populated while the git index still references the missing files. Catch
+ * this specifically to surface a "worktree compromised" state instead of a generic 500.
+ */
+export class DeletionGuardError extends Error {
+  readonly deletionCount: number;
+  readonly threshold: number;
+  constructor(deletionCount: number, threshold: number) {
+    super(
+      `Auto-commit aborted: ${deletionCount} files staged for deletion exceeds threshold of ${threshold}`,
+    );
+    this.name = 'DeletionGuardError';
+    this.deletionCount = deletionCount;
+    this.threshold = threshold;
+  }
+}
+
 /** Env vars applied to every git subprocess to prevent interactive prompts from hanging the daemon. */
 const GIT_ENV: Record<string, string> = {
   ...process.env,
@@ -384,10 +403,13 @@ export class LocalWorktreeManager implements WorktreeManager {
       this.patCache.set(bareRepoPath, pat);
     }
 
-    // Commit any uncommitted work (with deletion guard)
+    // Commit any uncommitted work (with deletion guard). Callers that know the worktree may be
+    // out of sync with the container should pass `maxDeletions: 0` so a ghost mass-deletion
+    // cannot be committed over the agent's real work.
     await this.commitPendingChanges(
       worktreePath,
       'chore: auto-commit uncommitted changes before merge',
+      { maxDeletions: config.maxDeletions ?? 100 },
     );
 
     // Push using auth URL so the PAT is never stored in git config.
@@ -444,9 +466,7 @@ export class LocalWorktreeManager implements WorktreeManager {
           { worktreePath, deletionCount, maxDeletions },
           'Auto-commit aborted: staged deletions exceed safety threshold',
         );
-        throw new Error(
-          `Auto-commit aborted: ${deletionCount} files staged for deletion exceeds threshold of ${maxDeletions}`,
-        );
+        throw new DeletionGuardError(deletionCount, maxDeletions);
       }
       await execFileAsync('git', ['commit', '-m', message], { cwd: worktreePath });
       this.logger.info({ worktreePath, deletionCount }, 'Auto-committed pending changes');

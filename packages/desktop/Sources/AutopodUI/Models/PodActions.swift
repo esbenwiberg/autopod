@@ -15,8 +15,8 @@ public struct PodActions: Sendable {
   public var rework: @MainActor @Sendable (String) async -> Void
   public var fixManually: @MainActor @Sendable (String) async -> String?
   public var revalidate: @MainActor @Sendable (String) async -> Void
-  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, [PimGroupRequest]?) async -> String?
-  // createPod params: profileName, task, model, pod, acceptanceCriteria, baseBranch, acFrom, pimGroups → returns pod ID or nil
+  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, [PimGroupRequest]?, [String]?) async -> String?
+  // createPod params: profileName, task, model, pod, acceptanceCriteria, baseBranch, acFrom, pimGroups, requireSidecars → returns pod ID or nil
   /// Promote an interactive pod to agent-driven in place. `targetOutput` ∈ {pr, branch, artifact, none}.
   public var promote: @MainActor @Sendable (String, String?) async -> Void
   public var attachTerminal: @MainActor @Sendable (String) -> Void
@@ -76,7 +76,7 @@ public struct PodActions: Sendable {
     rework: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     fixManually: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     revalidate: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, [PimGroupRequest]?) async -> String? = { _, _, _, _, _, _, _, _ in nil },
+    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, [PimGroupRequest]?, [String]?) async -> String? = { _, _, _, _, _, _, _, _, _ in nil },
     promote: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},

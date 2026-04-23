@@ -17,6 +17,11 @@ interface ParsedBrief {
   task: string;
   dependsOn: string[];
   acceptanceCriteria?: AcDefinition[];
+  /**
+   * Per-brief sidecar requests (e.g. `['dagger']`). Validated by the pod
+   * manager at createSession against `profile.sidecars` and `trustedSource`.
+   */
+  requireSidecars?: string[];
 }
 
 interface CreateSeriesRequest {
@@ -76,11 +81,22 @@ export function seriesRoutes(
       // Resolve all parent titles to pod IDs — enables fan-in (a pod can wait
       // on multiple parents). Unresolved titles are dropped rather than throwing
       // so partial briefs don't break the whole series.
-      const dependsOnPodIds: string[] = brief.dependsOn
+      const briefDependsOnPodIds: string[] = brief.dependsOn
         .map((t) => titleToId.get(t))
         .filter((id): id is string => typeof id === 'string');
 
-      const isRoot = dependsOnPodIds.length === 0;
+      const isRoot = briefDependsOnPodIds.length === 0;
+
+      // Single mode: every pod shares the root's branch, and Git allows only one
+      // worktree per branch. Chain each pod to the previous one in creation order
+      // so siblings serialize on the shared branch — the DAG then matches physical
+      // scheduling instead of pretending fan-out is possible.
+      const previousSiblingId =
+        prMode === 'single' && i > 0 ? created[created.length - 1]?.pod.id : undefined;
+
+      const dependsOnPodIds: string[] = previousSiblingId
+        ? Array.from(new Set([...briefDependsOnPodIds, previousSiblingId]))
+        : briefDependsOnPodIds;
 
       const output: 'branch' | 'pr' =
         prMode === 'stacked' ? 'pr' : prMode === 'single' && isLast ? 'pr' : 'branch';
@@ -99,6 +115,11 @@ export function seriesRoutes(
             seriesName: body.seriesName,
             acceptanceCriteria: brief.acceptanceCriteria,
             options: { agentMode: 'auto', output },
+            // Per-brief sidecars (e.g. Dagger engine for a pipeline-wiring pod).
+            // Validated against the profile's sidecar config + trustedSource
+            // inside createSession — an untrusted profile aborts the series
+            // fast with a 403 rather than at pod-spawn time.
+            requireSidecars: brief.requireSidecars,
             // Stacked non-root pods wait for their parent PR to fully merge before
             // starting so they always build on top of merged (green) code.
             waitForMerge: prMode === 'stacked' && !isRoot,

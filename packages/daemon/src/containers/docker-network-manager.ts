@@ -12,7 +12,17 @@ import type { Logger } from 'pino';
 const SAFE_HOST_REGEX =
   /^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$|^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
-const NETWORK_NAME = 'autopod-net';
+/**
+ * Per-pod Docker network naming. Each pod gets its own bridge
+ * (`autopod-<podId>`) with inter-container communication enabled — that way
+ * a pod and its sidecars (e.g. Dagger engine) can talk to each other without
+ * flipping the shared bridge's ICC flag and opening pod-to-pod visibility.
+ * Cross-pod isolation is preserved because different pods are on different
+ * bridges entirely, so their L2 domains never intersect.
+ */
+export function networkNameForPod(podId: string): string {
+  return `autopod-${podId}`;
+}
 
 /** Docker's embedded DNS resolver address on custom bridge networks */
 const DOCKER_DNS = '127.0.0.11';
@@ -59,32 +69,69 @@ export interface NetworkConfig {
 export class DockerNetworkManager {
   private docker: Dockerode;
   private logger: Logger;
-  private networkEnsured = false;
 
   constructor({ docker, logger }: DockerNetworkManagerOptions) {
     this.docker = docker;
     this.logger = logger.child({ component: 'docker-network-manager' });
   }
 
-  async ensureNetwork(): Promise<void> {
-    if (this.networkEnsured) return;
-
+  /**
+   * Create (or reuse) the per-pod bridge network. Idempotent — safe to call
+   * on recovery paths where the network may already exist from a previous
+   * daemon run. Returns the network name.
+   *
+   * ICC is enabled: every container on this bridge can talk to every other.
+   * That's what we want — the pod + its sidecars share this bridge and
+   * nothing else lives here. Pod-to-pod isolation comes from each pod
+   * having its own bridge, not from ICC.
+   */
+  async ensureNetworkForPod(podId: string): Promise<string> {
+    const name = networkNameForPod(podId);
     try {
-      const network = this.docker.getNetwork(NETWORK_NAME);
-      await network.inspect();
-      this.logger.debug('Network %s already exists', NETWORK_NAME);
+      await this.docker.getNetwork(name).inspect();
+      this.logger.debug({ network: name, podId }, 'Pod network already exists');
+      return name;
     } catch {
-      this.logger.info('Creating Docker network %s', NETWORK_NAME);
-      await this.docker.createNetwork({
-        Name: NETWORK_NAME,
-        Driver: 'bridge',
-        Options: {
-          'com.docker.network.bridge.enable_icc': 'false',
-        },
-      });
+      // not found — create it
     }
+    this.logger.info({ network: name, podId }, 'Creating pod network');
+    await this.docker.createNetwork({
+      Name: name,
+      Driver: 'bridge',
+      Labels: {
+        'com.autopod.pod-network': 'true',
+        'com.autopod.pod-id': podId,
+      },
+      Options: {
+        // ICC on — sidecar + pod must reach each other. Pod-to-pod isolation
+        // is provided by the fact that each pod is on its own bridge.
+        'com.docker.network.bridge.enable_icc': 'true',
+      },
+    });
+    return name;
+  }
 
-    this.networkEnsured = true;
+  /**
+   * Remove the per-pod bridge. Called from the pod cleanup path so networks
+   * don't accumulate. Idempotent — swallows "already gone" errors.
+   */
+  async destroyNetworkForPod(podId: string): Promise<void> {
+    const name = networkNameForPod(podId);
+    try {
+      const network = this.docker.getNetwork(name);
+      await network.remove();
+      this.logger.info({ network: name, podId }, 'Pod network removed');
+    } catch (err: unknown) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode === 404) {
+        this.logger.debug({ network: name, podId }, 'Pod network already gone');
+        return;
+      }
+      // 403 "has active endpoints" means the pod or sidecar containers are
+      // still attached. Log and continue — the orphan reconciler will sweep
+      // them on next startup.
+      this.logger.warn({ err, network: name, podId }, 'Failed to remove pod network');
+    }
   }
 
   /**
@@ -192,6 +239,22 @@ export class DockerNetworkManager {
     allowedHosts: string[],
     mode: NetworkPolicyMode = 'restricted',
     daemonGatewayIp?: string,
+    /**
+     * Raw IPs (e.g. sidecar bridge IPs) that must be reachable regardless of
+     * the domain allowlist. These are added as explicit ACCEPT rules /
+     * pre-seeded into the ipset before the REJECT default kicks in, so the
+     * pod can always reach its companion sidecars even under `deny-all`.
+     */
+    extraAllowedIps: string[] = [],
+    /**
+     * DNS names (e.g. `['dagger']`) that must resolve from inside the pod.
+     * Iptables-level allowlisting of the IP is not enough on its own: the
+     * pod's DNS resolver is dnsmasq, which only forwards queries for
+     * allow-listed domains. Without adding the sidecar's name here, the pod's
+     * Dagger CLI sees `tcp://dagger:8080` and tries `getent ahostsv4 dagger`
+     * → NXDOMAIN → `dagger develop` hangs on DNS.
+     */
+    extraAllowedDnsNames: string[] = [],
   ): Promise<string> {
     const lines = ['#!/bin/sh', 'set -e', ''];
 
@@ -229,6 +292,13 @@ export class DockerNetworkManager {
       lines.push('# Allow DNS');
       lines.push('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
       lines.push('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
+      if (extraAllowedIps.length > 0) {
+        lines.push('');
+        lines.push(`# Allow sidecar IPs (${extraAllowedIps.length})`);
+        for (const ip of extraAllowedIps) {
+          lines.push(`iptables -A OUTPUT -d "${ip}" -j ACCEPT`);
+        }
+      }
       lines.push('');
       lines.push(
         '# Reject everything else outbound (REJECT, not DROP — fast failure for debugging)',
@@ -250,6 +320,12 @@ export class DockerNetworkManager {
     // Resolve exact hosts to /24 CIDRs (used by both modes for pre-seeding)
     const cidrs = new Set<string>();
     for (const ip of ipHosts) {
+      cidrs.add(ip);
+    }
+    // Sidecar IPs are exact /32s — don't expand to /24 (would accidentally
+    // cover the whole bridge subnet and let one pod's sidecar be reached by
+    // another pod that somehow got onto the same subnet).
+    for (const ip of extraAllowedIps) {
       cidrs.add(ip);
     }
     await Promise.all(
@@ -276,6 +352,14 @@ export class DockerNetworkManager {
     for (const h of wildcardHosts) {
       // *.blob.core.windows.net → blob.core.windows.net (dnsmasq suffix match)
       dnsmasqDomains.push(h.slice(2));
+    }
+    // Sidecar DNS names must be resolvable from inside the pod. Without the
+    // dnsmasq `server=` line, the pod's CLI (e.g. `dagger`) can't resolve the
+    // sidecar hostname and fails before it even opens a TCP connection.
+    for (const name of extraAllowedDnsNames) {
+      if (SAFE_HOST_REGEX.test(name)) {
+        dnsmasqDomains.push(name);
+      }
     }
 
     // --- dnsmasq+ipset mode ---
@@ -419,39 +503,56 @@ export class DockerNetworkManager {
   }
 
   /**
-   * Build the full network config for a container, or null if network
-   * isolation is not enabled for this profile.
+   * Build the full network config for a pod, or null if network isolation is
+   * not enabled for this profile. Per-pod: each call creates/reuses
+   * `autopod-<podId>`. `extraAllowedIps` lets callers whitelist specific IPs
+   * (e.g. sidecar bridge IPs discovered after the sidecar is spawned) so the
+   * pod can reach them through the restrictive iptables rules.
    */
   async buildNetworkConfig(
     policy: NetworkPolicy | null,
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
     registries: PrivateRegistry[] = [],
+    podId?: string,
+    extraAllowedIps: string[] = [],
+    extraAllowedDnsNames: string[] = [],
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
-    await this.ensureNetwork();
+    const networkName = podId
+      ? await this.ensureNetworkForPod(podId)
+      : // Legacy / refresh path — caller didn't pass a podId. Fall back to
+        // the default per-pod name format using a synthetic `shared` tag so
+        // existing tests that don't thread podId still get a valid string.
+        // Real pod spawns always pass podId.
+        'autopod-shared';
 
     const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp, registries);
     const firewallScript = await this.generateFirewallScript(
       allowlist,
       policy.mode,
       daemonGatewayIp,
+      extraAllowedIps,
+      extraAllowedDnsNames,
     );
 
     return {
-      networkName: NETWORK_NAME,
+      networkName,
       firewallScript,
     };
   }
 
   /**
-   * Detect the gateway IP of the autopod-net bridge network.
-   * Falls back to 'host.docker.internal' if detection fails.
+   * Detect the gateway IP of the pod's bridge network. Falls back to
+   * `host.docker.internal` if the network doesn't exist yet or inspection
+   * fails — the container's `ExtraHosts: host.docker.internal:host-gateway`
+   * provides a safe default.
    */
-  async getGatewayIp(): Promise<string> {
+  async getGatewayIp(podId?: string): Promise<string> {
+    if (!podId) return 'host.docker.internal';
     try {
-      const network = this.docker.getNetwork(NETWORK_NAME);
+      const network = this.docker.getNetwork(networkNameForPod(podId));
       const info = await network.inspect();
       const gateway = info.IPAM?.Config?.[0]?.Gateway;
       if (gateway) return gateway;

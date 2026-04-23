@@ -42,6 +42,7 @@ import {
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
+import { networkNameForPod } from '../containers/docker-network-manager.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import { resolveSidecarSpec, sidecarPodEnv } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
@@ -66,6 +67,7 @@ import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
+import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
 import { readAcFile } from './ac-file-parser.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -293,8 +295,13 @@ export interface NetworkManager {
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
     registries?: PrivateRegistry[],
+    podId?: string,
+    extraAllowedIps?: string[],
+    extraAllowedDnsNames?: string[],
   ): Promise<{ networkName: string; firewallScript: string } | null>;
-  getGatewayIp(): Promise<string>;
+  getGatewayIp(podId?: string): Promise<string>;
+  /** Remove the per-pod bridge — called from pod cleanup. Idempotent. */
+  destroyNetworkForPod?(podId: string): Promise<void>;
 }
 
 export interface PodManagerDependencies {
@@ -444,6 +451,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validationRepo,
     progressEventRepo,
   } = deps;
+
+  /** Destroy the per-pod Docker bridge. Must be called AFTER the pod + all
+   *  sidecars are killed, otherwise Docker refuses with "has active endpoints".
+   *  No-ops when the network manager doesn't support teardown (tests / older
+   *  implementations) or isn't wired. Never throws. */
+  async function destroyPodNetwork(podId: string): Promise<void> {
+    if (!networkManager?.destroyNetworkForPod) return;
+    try {
+      await networkManager.destroyNetworkForPod(podId);
+    } catch (err) {
+      logger.warn({ err, podId }, 'Failed to destroy pod network');
+    }
+  }
 
   /** Tear down all sidecars attached to a pod. Re-reads the pod so it sees
    *  the most recent `sidecarContainerIds` even if the caller's snapshot is
@@ -1193,6 +1213,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
   }
 
+  /**
+   * If `err` is a DeletionGuardError, mark the pod as worktree-compromised so the desktop
+   * disables Create PR / merge actions until a human reconciles the state. Emits an event
+   * plus an activity-status line. Returns true if the error was a guard trip so callers can
+   * skip redundant warnings about the same condition.
+   */
+  function handleDeletionGuardError(podId: string, err: unknown): boolean {
+    if (!(err instanceof DeletionGuardError)) return false;
+    try {
+      podRepo.update(podId, { worktreeCompromised: true });
+    } catch (updateErr) {
+      logger.warn({ err: updateErr, podId }, 'Failed to persist worktreeCompromised flag');
+    }
+    eventBus.emit({
+      type: 'pod.worktree_compromised',
+      timestamp: new Date().toISOString(),
+      podId,
+      deletionCount: err.deletionCount,
+      threshold: err.threshold,
+    });
+    emitActivityStatus(
+      podId,
+      `Worktree out of sync with container — ${err.deletionCount} phantom deletions blocked. Do not retry PR; work may still live in the container.`,
+    );
+    return true;
+  }
+
   function transition(pod: Pod, to: PodStatus, extraUpdates?: Partial<PodUpdates>): Pod {
     validateTransition(pod.id, pod.status, to);
     const previousStatus = pod.status;
@@ -1205,7 +1252,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       previousStatus,
       newStatus: to,
     });
-    if (to === 'failed' || to === 'killed') {
+    // Only cascade on explicit kill — a 'failed' parent can still be recovered
+    // (re-queued by local-reconciler, or retried after a daemon restart), and
+    // there is no code path that un-fails cascade-failed children when the
+    // parent later succeeds. Cascading on 'failed' therefore strands the
+    // series. 'killed' is explicit user intent and is not recovered.
+    if (to === 'killed') {
       failDependents(pod.id);
     }
     return podRepo.getOrThrow(pod.id);
@@ -1234,30 +1286,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (parentIds.length === 0) continue;
 
       const parentsReady = parentIds.every((pid) => {
-        if (pid === completedPod.id) {
-          // For wait-for-merge deps, the triggering pod must be complete.
-          if (dep.waitForMerge && completedPod.status !== 'complete') return false;
-          return true;
-        }
+        let parent: Pod;
         try {
-          const parent = podRepo.getOrThrow(pid);
-          if (dep.waitForMerge) {
-            // Stacked series: wait until the parent PR is fully merged.
-            return parent.status === 'complete';
-          }
-          // Accept any terminal-success status — a manually approved parent reaches
-          // 'complete' without passing through 'validated' in the dependent's view.
-          return (
-            parent.status === 'validated' ||
-            parent.status === 'approved' ||
-            parent.status === 'merging' ||
-            parent.status === 'merge_pending' ||
-            parent.status === 'complete'
-          );
+          parent = pid === completedPod.id ? completedPod : podRepo.getOrThrow(pid);
         } catch {
           // Missing parent — treat as not ready rather than crashing.
           return false;
         }
+        // Shared branch (single-mode siblings): the parent holds the Git worktree
+        // lock on the branch until it reaches 'complete' — worktree is cleaned up
+        // on completion, not on validation. Starting the child early races into
+        // an empty worktree and the repoint step fails. Wait for 'complete'.
+        if (parent.branch === dep.branch) {
+          return parent.status === 'complete';
+        }
+        if (dep.waitForMerge) {
+          // Stacked series: wait until the parent PR is fully merged.
+          return parent.status === 'complete';
+        }
+        // Accept any terminal-success status — a manually approved parent reaches
+        // 'complete' without passing through 'validated' in the dependent's view.
+        return (
+          parent.status === 'validated' ||
+          parent.status === 'approved' ||
+          parent.status === 'merging' ||
+          parent.status === 'merge_pending' ||
+          parent.status === 'complete'
+        );
       });
       if (!parentsReady) {
         logger.debug(
@@ -1300,7 +1355,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   // Uses podRepo.update() directly instead of transition() to avoid a circular call:
-  // transition() calls failDependents() when a pod reaches 'failed', so calling transition()
+  // transition() calls failDependents() when a pod reaches 'killed', so calling transition()
   // here would recurse. Direct update is safe because queued pods have no in-progress work.
   function failDependents(failedPodId: string): void {
     const dependents = podRepo.getPodsDependingOn(failedPodId);
@@ -1608,7 +1663,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // If acFrom is set, read acceptance criteria from the worktree
         if (pod.acFrom && worktreePath) {
           const criteria = await readAcFile(worktreePath, pod.acFrom);
-          podRepo.update(podId, { acceptanceCriteria: criteria });
+          // File-sourced criteria are plain lines — wrap each as a minimal
+          // AcDefinition so the validation engine can treat them uniformly.
+          const wrapped = criteria.map((test) => ({
+            type: 'none' as const,
+            test,
+            pass: 'criterion satisfied',
+            fail: 'criterion not satisfied',
+          }));
+          podRepo.update(podId, { acceptanceCriteria: wrapped });
           pod = podRepo.getOrThrow(podId);
           logger.info(
             { podId, acFrom: pod.acFrom, count: criteria.length },
@@ -1619,17 +1682,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Select container manager based on execution target
         const containerManager = containerManagerFactory.get(pod.executionTarget);
 
-        // Compute network isolation config (Docker only, opt-in via profile)
+        // Compute initial network config — this creates the per-pod bridge
+        // so sidecars can join it. The firewall script built here does NOT
+        // yet include sidecar IPs; we rebuild it below once sidecars are up
+        // and their bridge IPs are known.
         let networkName: string | undefined;
         let firewallScript: string | undefined;
+        let initialMergedMcpServers: import('@autopod/shared').InjectedMcpServer[] | undefined;
+        let daemonGatewayIp: string | undefined;
         if (networkManager && pod.executionTarget === 'local' && profile.networkPolicy?.enabled) {
-          const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
-          const gatewayIp = await networkManager.getGatewayIp();
+          initialMergedMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
+          daemonGatewayIp = await networkManager.getGatewayIp(podId);
           const netConfig = await networkManager.buildNetworkConfig(
             profile.networkPolicy,
-            mergedServers,
-            gatewayIp,
+            initialMergedMcpServers,
+            daemonGatewayIp,
             profile.privateRegistries,
+            podId,
+            [],
           );
           if (netConfig) {
             networkName = netConfig.networkName;
@@ -1639,9 +1709,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Allocate a host port for the container's app server
         const hostPort = allocateHostPort();
-
-        // Spawn container with port mapping so daemon + user can reach the app
-        emitStatus(`Spawning container (${profile.template})…`);
 
         // For .NET templates, cap MSBuild node count to half the available CPUs
         // (min 2, max 4) to prevent dozens of MSBuild workers from exhausting memory.
@@ -1689,6 +1756,75 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         }
 
+        // Spawn sidecars FIRST on the per-pod bridge so the pod container's
+        // firewall can be built with the sidecar IPs pre-allowlisted. If we
+        // spawned the pod first, its iptables OUTPUT chain would REJECT every
+        // packet to the sidecar before the sidecar even had an IP — the bug
+        // that produced the "Connection refused" we chased.
+        const startedSidecars: Record<string, string> = {};
+        const sidecarIps: string[] = [];
+        if (sidecarSpecs.length > 0 && sidecarManager && networkName) {
+          try {
+            for (const { name, spec } of sidecarSpecs) {
+              emitStatus(`Spawning sidecar '${name}'…`);
+              const handle = await sidecarManager.spawn({ spec, podId, networkName });
+              startedSidecars[name] = handle.containerId;
+              await sidecarManager.waitHealthy(handle, spec);
+              const ip = await sidecarManager.getBridgeIp(handle, networkName);
+              if (ip) {
+                sidecarIps.push(ip);
+              } else {
+                logger.warn(
+                  { podId, sidecarName: name, containerId: handle.containerId },
+                  'Sidecar has no IP on the pod network — pod firewall may block traffic to it',
+                );
+              }
+            }
+            podRepo.update(podId, { sidecarContainerIds: startedSidecars });
+          } catch (err) {
+            logger.error(
+              { err, podId, started: startedSidecars },
+              'Sidecar spawn failed — cleaning up',
+            );
+            for (const id of Object.values(startedSidecars)) {
+              await sidecarManager.kill(id).catch((killErr) => {
+                logger.warn({ killErr, containerId: id }, 'Failed to kill partial sidecar');
+              });
+            }
+            throw err;
+          }
+        }
+
+        // Rebuild the firewall script with sidecar IPs AND DNS names allowed
+        // through the pod's firewall. The IP list unblocks iptables; the DNS
+        // name list unblocks dnsmasq — both are required. Without the DNS
+        // piece the pod's CLI resolves the sidecar to NXDOMAIN and never
+        // gets as far as iptables to notice the IP is allowed.
+        if (
+          sidecarSpecs.length > 0 &&
+          networkManager &&
+          initialMergedMcpServers &&
+          daemonGatewayIp &&
+          profile.networkPolicy?.enabled
+        ) {
+          const sidecarDnsNames = sidecarSpecs.map(({ spec }) => spec.name);
+          const finalConfig = await networkManager.buildNetworkConfig(
+            profile.networkPolicy,
+            initialMergedMcpServers,
+            daemonGatewayIp,
+            profile.privateRegistries,
+            podId,
+            sidecarIps,
+            sidecarDnsNames,
+          );
+          if (finalConfig) {
+            firewallScript = finalConfig.firewallScript;
+          }
+        }
+
+        // Spawn container with port mapping so daemon + user can reach the app
+        emitStatus(`Spawning container (${profile.template})…`);
+
         const containerEnv: Record<string, string> = {
           POD_ID: podId,
           PORT: String(CONTAINER_APP_PORT),
@@ -1706,44 +1842,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ...sidecarEnv,
         };
 
-        const containerId = await containerManager.spawn({
-          image: getBaseImage(template),
-          podId,
-          env: containerEnv,
-          ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
-          volumes: [
-            ...(worktreePath ? [{ host: worktreePath, container: '/mnt/worktree' }] : []),
-            ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
-          ],
-          networkName,
-          firewallScript,
-          memoryBytes:
-            (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
-        });
-
-        // Spawn sidecars on the pod's network now that it's up. If any fail,
-        // kill anything we already started (main + partials) and surface the
-        // error so processPod's outer error path tears the pod down cleanly.
-        if (sidecarSpecs.length > 0 && sidecarManager && networkName) {
-          const started: Record<string, string> = {};
-          try {
-            for (const { name, spec } of sidecarSpecs) {
-              emitStatus(`Spawning sidecar '${name}'…`);
-              const handle = await sidecarManager.spawn({ spec, podId, networkName });
-              started[name] = handle.containerId;
-              await sidecarManager.waitHealthy(handle, spec);
+        let containerId: string;
+        try {
+          containerId = await containerManager.spawn({
+            image: getBaseImage(template),
+            podId,
+            env: containerEnv,
+            ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
+            volumes: [
+              ...(worktreePath ? [{ host: worktreePath, container: '/mnt/worktree' }] : []),
+              ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
+            ],
+            networkName,
+            firewallScript,
+            memoryBytes:
+              (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
+          });
+        } catch (err) {
+          // Pod container failed to spawn — tear down sidecars we already
+          // brought up so they don't leak on the per-pod bridge.
+          if (sidecarManager) {
+            for (const id of Object.values(startedSidecars)) {
+              await sidecarManager.kill(id).catch(() => {});
             }
-            podRepo.update(podId, { sidecarContainerIds: started });
-          } catch (err) {
-            logger.error({ err, podId, started }, 'Sidecar spawn failed — cleaning up');
-            for (const id of Object.values(started)) {
-              await sidecarManager.kill(id).catch((killErr) => {
-                logger.warn({ killErr, containerId: id }, 'Failed to kill partial sidecar');
-              });
-            }
-            await containerManager.kill(containerId).catch(() => {});
-            throw err;
           }
+          throw err;
         }
 
         // Copy worktree content from bind mount to container's native filesystem.
@@ -2612,6 +2735,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         } catch (err) {
           logger.error({ err, podId }, 'Auto-commit blocked by deletion safety guard');
+          handleDeletionGuardError(podId, err);
         }
 
         try {
@@ -2952,6 +3076,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await worktreeManager.mergeBranch({
             worktreePath: pod.worktreePath,
             targetBranch: retryDefaultBranch,
+            // Post-container retry: sync-back already happened (or failed silently) upstream;
+            // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
+            maxDeletions: 0,
           });
           const newPrUrl = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
@@ -2992,7 +3119,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         } catch (err) {
           logger.error({ err, podId }, 'Failed to create/merge PR during approval');
-          emitActivityStatus(podId, 'PR creation failed — branch is pushed but no PR was merged');
+          if (!handleDeletionGuardError(podId, err)) {
+            emitActivityStatus(podId, 'PR creation failed — branch is pushed but no PR was merged');
+          }
         }
       } else if (pod.worktreePath) {
         // Fallback: no PR manager configured — push branch directly
@@ -3002,11 +3131,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           await worktreeManager.mergeBranch({
             worktreePath: pod.worktreePath,
             targetBranch: profile.defaultBranch ?? 'main',
+            // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
+            maxDeletions: 0,
           });
           emitActivityStatus(podId, 'Branch pushed successfully');
         } catch (err) {
           logger.error({ err, podId }, 'Failed to push branch during approval');
-          emitActivityStatus(podId, 'Branch push failed — pod still completing');
+          if (!handleDeletionGuardError(podId, err)) {
+            emitActivityStatus(podId, 'Branch push failed — pod still completing');
+          }
         }
       }
 
@@ -3163,6 +3296,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             logger.warn({ err, podId }, 'Failed to kill container');
           }
         }
+        // Remove the per-pod bridge network. Safe now that both the pod and
+        // its sidecars are dead; Docker would otherwise refuse the remove.
+        await destroyPodNetwork(podId);
 
         // Abort runtime
         try {
@@ -3391,19 +3527,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Only remove the worktree if push succeeds — don't lose uncommitted work.
         if (pod.worktreePath) {
           try {
-            // Pre-commit with tight deletion guard when sync failed, so mergeBranch
-            // doesn't blindly commit a partially-synced worktree.
-            if (!workspaceSyncOk) {
-              await worktreeManager.commitPendingChanges(
-                pod.worktreePath,
-                'chore: auto-commit uncommitted changes before merge',
-                { maxDeletions: 0 },
-              );
-            }
-            // mergeBranch auto-commits any remaining uncommitted changes before pushing
+            // mergeBranch auto-commits any remaining uncommitted changes before pushing.
+            // If sync-back failed, the host worktree may be missing files the index still
+            // references — tighten the deletion guard so a ghost mass-delete cannot ship.
             await worktreeManager.mergeBranch({
               worktreePath: pod.worktreePath,
               targetBranch: pod.branch ?? 'HEAD',
+              maxDeletions: workspaceSyncOk ? 100 : 0,
             });
             logger.info({ podId, branch: pod.branch }, 'Workspace branch pushed to origin');
             // Safe to clean up — work is in origin
@@ -3419,6 +3549,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               { err, podId },
               'Failed to push workspace branch — completing anyway, worktree preserved',
             );
+            handleDeletionGuardError(podId, err);
           }
         }
       }
@@ -3526,6 +3657,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Container may already be removed — that's fine
           }
         }
+        // The new container will be attached to a freshly-created per-pod
+        // bridge below; blow away any stale bridge from the prior attempt.
+        await destroyPodNetwork(podId);
 
         // Re-queue through processPod with recovery worktree.
         // Clear claudeSessionId so the agent gets a fresh spawn instead of resuming
@@ -3591,11 +3725,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Sync workspace back before reading diff/commit log from host worktree
+        let validationSyncOk = true;
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
             await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
           } catch (err) {
+            validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace before validation');
           }
         }
@@ -3745,6 +3881,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const cm = containerManagerFactory.get(pod.executionTarget);
             await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
           } catch (err) {
+            validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace after validation');
           }
         }
@@ -3936,14 +4073,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               logger.warn({ err, podId }, 'Failed to commit screenshots');
             }
 
-            // Push branch so `gh pr create --head` can reference it
+            // Push branch so `gh pr create --head` can reference it. If sync-back failed
+            // earlier in this validation run, tighten the deletion guard so a ghost
+            // mass-deletion cannot ship as "chore: auto-commit …".
             try {
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
                 targetBranch: passDefaultBranch,
+                maxDeletions: validationSyncOk ? 100 : 0,
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
+              handleDeletionGuardError(podId, err);
             }
 
             // Re-compute diff stats now that auto-commit has run.
@@ -4258,12 +4399,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
 
             try {
+              // revalidateSession runs on a worktree just pushed by a human — nothing should
+              // be uncommitted. If git add -A finds phantom deletions, it's a sync artifact,
+              // not real work; block it.
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
                 targetBranch: revalDefaultBranch,
+                maxDeletions: 0,
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
+              handleDeletionGuardError(podId, err);
             }
 
             try {
@@ -4443,6 +4589,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           logger.warn({ err, podId }, 'Failed to kill container during delete');
         }
       }
+      await destroyPodNetwork(podId);
 
       // Clean up worktree if still present
       if (pod.worktreePath) {
@@ -4596,7 +4743,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const allParentsDone = parentIds.every((pid) => {
           try {
-            return PARENT_DONE.has(podRepo.getOrThrow(pid).status);
+            const parent = podRepo.getOrThrow(pid);
+            // Shared branch: parent must reach 'complete' before its worktree
+            // releases the branch lock. See maybeTriggerDependents for rationale.
+            if (parent.branch === dep.branch) {
+              return parent.status === 'complete';
+            }
+            return PARENT_DONE.has(parent.status);
           } catch {
             return false;
           }
@@ -4759,19 +4912,41 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (runningSessions.length === 0) return;
 
       const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
-      const gatewayIp = await networkManager.getGatewayIp();
-      const netConfig = await networkManager.buildNetworkConfig(
-        profile.networkPolicy,
-        mergedServers,
-        gatewayIp,
-        profile.privateRegistries,
-      );
-      if (!netConfig) return;
-
       const cm = containerManagerFactory.get('local');
+
+      // Resolve the current bridge IP of each sidecar for a given pod. With
+      // per-pod networks each pod has its own `autopod-<podId>` bridge, and
+      // sidecar IPs can be different across pods.
+      const collectSidecarIps = async (pod: import('@autopod/shared').Pod): Promise<string[]> => {
+        if (!sidecarManager || !pod.sidecarContainerIds) return [];
+        const networkName = networkNameForPod(pod.id);
+        const ips: string[] = [];
+        for (const [name, containerId] of Object.entries(pod.sidecarContainerIds)) {
+          const ip = await sidecarManager.getBridgeIp({ containerId, name }, networkName);
+          if (ip) ips.push(ip);
+        }
+        return ips;
+      };
+
+      // With per-pod networks, each pod has its own bridge and may have
+      // different sidecar IPs to allowlist. Build the firewall script per
+      // pod rather than once for the whole profile.
       await Promise.all(
         runningSessions.map(async (pod) => {
           try {
+            const gatewayIp = await networkManager.getGatewayIp(pod.id);
+            const sidecarIps = await collectSidecarIps(pod);
+            const sidecarDnsNames = Object.keys(pod.sidecarContainerIds ?? {});
+            const netConfig = await networkManager.buildNetworkConfig(
+              profile.networkPolicy,
+              mergedServers,
+              gatewayIp,
+              profile.privateRegistries,
+              pod.id,
+              sidecarIps,
+              sidecarDnsNames,
+            );
+            if (!netConfig) return;
             // biome-ignore lint/style/noNonNullAssertion: runningSessions always have a containerId
             await cm.refreshFirewall(pod.containerId!, netConfig.firewallScript);
             logger.info(
@@ -4912,10 +5087,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           worktreePath: pod.worktreePath,
           targetBranch: baseBranch,
           pat: retryPat,
+          // retryCreatePr runs post-container with no fresh sync-back: if the worktree is
+          // missing files, it's almost certainly a ghost from an earlier sync failure.
+          // Block auto-commit deletions entirely — the user wants to ship what's already
+          // on the branch, not commit a catastrophic delete on top of it.
+          maxDeletions: 0,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger.warn({ podId, err }, 'retryCreatePr: branch push failed');
+        if (handleDeletionGuardError(podId, err)) {
+          // The guard already surfaced a specific activity-status message + event.
+          // Use a distinct error code so the desktop can render a recovery banner
+          // instead of a generic failure toast.
+          throw new AutopodError(message, 'WORKTREE_COMPROMISED', 409);
+        }
         emitActivityStatus(podId, `Branch push failed: ${message}`);
         throw new AutopodError(message, 'BRANCH_PUSH_FAILED', 502);
       }

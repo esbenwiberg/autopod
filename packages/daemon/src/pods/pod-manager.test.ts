@@ -28,6 +28,7 @@ import type {
   WorktreeManager,
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
+import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
@@ -558,6 +559,31 @@ describe('PodManager', () => {
 
       await expect(manager.killSession(pod.id)).rejects.toThrow(AutopodError);
     });
+
+    it('cascade-fails queued dependents when parent is killed', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Parent task' },
+        'user-1',
+      );
+      const child = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Child task',
+          dependsOnPodIds: [parent.id],
+        },
+        'user-1',
+      );
+
+      await manager.killSession(parent.id);
+
+      expect(manager.getSession(parent.id).status).toBe('killed');
+      const childResult = manager.getSession(child.id);
+      expect(childResult.status).toBe('failed');
+      expect(childResult.mergeBlockReason).toContain(parent.id);
+    });
   });
 
   describe('approveSession', () => {
@@ -662,10 +688,12 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       // Branch is pushed first, then PR is created and merged
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
-        worktreePath: '/tmp/wt',
-        targetBranch: 'main',
-      });
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreePath: '/tmp/wt',
+          targetBranch: 'main',
+        }),
+      );
       expect(ctx.prManager.createPr).toHaveBeenCalled();
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
         expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
@@ -689,10 +717,12 @@ describe('PodManager', () => {
 
       await manager.approveSession(pod.id);
 
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
-        worktreePath: '/tmp/wt',
-        targetBranch: 'main',
-      });
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreePath: '/tmp/wt',
+          targetBranch: 'main',
+        }),
+      );
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
     });
 
@@ -720,6 +750,38 @@ describe('PodManager', () => {
       await manager.approveSession(parent.id);
 
       expect(manager.getSession(parent.id).status).toBe('complete');
+      expect(ctx.enqueuedSessions).toContain(child.id);
+    });
+
+    it('rehydrate defers shared-branch child until parent reaches complete', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      // Single-mode series: every pod reuses the root's branch.
+      const sharedBranch = 'feature/shared';
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Parent task', branch: sharedBranch },
+        'user-1',
+      );
+      const child = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Child task',
+          branch: sharedBranch,
+          dependsOnPodIds: [parent.id],
+        },
+        'user-1',
+      );
+
+      ctx.podRepo.update(parent.id, { status: 'validated' });
+      ctx.enqueuedSessions.length = 0;
+
+      manager.rehydrateDependentSessions();
+      expect(ctx.enqueuedSessions).not.toContain(child.id);
+
+      // Parent reaches complete → worktree released → child can start.
+      ctx.podRepo.update(parent.id, { status: 'complete' });
+      manager.rehydrateDependentSessions();
       expect(ctx.enqueuedSessions).toContain(child.id);
     });
   });
@@ -1449,10 +1511,12 @@ describe('PodManager', () => {
       await manager.triggerValidation(pod.id);
 
       // Branch was pushed
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
-        worktreePath: '/tmp/wt',
-        targetBranch: 'main',
-      });
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreePath: '/tmp/wt',
+          targetBranch: 'main',
+        }),
+      );
 
       // PR was created
       expect(ctx.prManager.createPr).toHaveBeenCalledWith(
@@ -1897,10 +1961,12 @@ describe('PodManager', () => {
         const result = await manager.completeSession(pod.id);
 
         expect(result.pushError).toBeUndefined();
-        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith({
-          worktreePath: '/tmp/worktree/abc',
-          targetBranch: expect.any(String),
-        });
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            worktreePath: '/tmp/worktree/abc',
+            targetBranch: expect.any(String),
+          }),
+        );
 
         const completed = manager.getSession(pod.id);
         expect(completed.status).toBe('complete');
@@ -2078,6 +2144,96 @@ describe('PodManager', () => {
         // artifactsPath is still set — the dir was created even if extraction failed
         expect(completed.artifactsPath).toContain(`artifacts/${pod.id}`);
       });
+    });
+  });
+
+  describe('retryCreatePr — worktree compromise guard', () => {
+    async function setupCompletePodForRetry(ctx: TestContext) {
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do a thing' },
+        'user-1',
+      );
+      // Transition queued → provisioning → running → validating → validated →
+      // approved → merging → complete without a prUrl (the state needed by retry).
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-xyz',
+        startedAt: new Date().toISOString(),
+      });
+      for (const status of [
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(pod.id, { status });
+      }
+      return { manager, pod };
+    }
+
+    it('flags worktreeCompromised and emits event when mergeBranch hits the guard', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+
+      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new DeletionGuardError(1730, 0),
+      );
+
+      const compromisedEvents: unknown[] = [];
+      ctx.eventBus.subscribe((evt) => {
+        if (evt.type === 'pod.worktree_compromised') compromisedEvents.push(evt);
+      });
+
+      await expect(manager.retryCreatePr(pod.id)).rejects.toMatchObject({
+        code: 'WORKTREE_COMPROMISED',
+        statusCode: 409,
+      });
+
+      const persisted = manager.getSession(pod.id);
+      expect(persisted.worktreeCompromised).toBe(true);
+      expect(compromisedEvents).toHaveLength(1);
+      expect(compromisedEvents[0]).toMatchObject({
+        type: 'pod.worktree_compromised',
+        podId: pod.id,
+        deletionCount: 1730,
+        threshold: 0,
+      });
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it('surfaces non-guard push failures as BRANCH_PUSH_FAILED 502', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+
+      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('ssh: connection refused'),
+      );
+
+      await expect(manager.retryCreatePr(pod.id)).rejects.toMatchObject({
+        code: 'BRANCH_PUSH_FAILED',
+        statusCode: 502,
+      });
+
+      const persisted = manager.getSession(pod.id);
+      expect(persisted.worktreeCompromised).toBe(false);
+    });
+
+    it('passes maxDeletions: 0 so any staged deletion aborts the commit', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+
+      await manager.retryCreatePr(pod.id);
+
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreePath: '/tmp/worktree/abc',
+          maxDeletions: 0,
+        }),
+      );
     });
   });
 });

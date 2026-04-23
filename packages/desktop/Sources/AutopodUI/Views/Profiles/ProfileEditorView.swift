@@ -1522,30 +1522,120 @@ public struct ProfileEditorView: View {
             .padding(.top, 8)
         }
 
-        if profile.sidecars?.dagger != nil {
-            Divider().padding(.vertical, 8)
-            Text("Dagger sidecar")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                Image(systemName: "cube.box")
-                    .foregroundStyle(.purple)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(profile.sidecars?.dagger?.enabled == true ? "Enabled" : "Configured (disabled)")
-                        .font(.caption.weight(.medium))
-                    if let version = profile.sidecars?.dagger?.engineVersion {
-                        Text("engine \(version)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+        Divider().padding(.vertical, 8)
+
+        daggerSidecarSubsection
+    }
+
+    /// Editable config for the Dagger engine sidecar. Two-layer gate:
+    ///  - `trustedSource` must be on (privileged-sidecar trust)
+    ///  - `sidecars.dagger.enabled` must be on (the toggle here)
+    /// Both must flip on for pods to actually be able to request `dagger`.
+    @ViewBuilder
+    private var daggerSidecarSubsection: some View {
+        // Binding reads `sidecars.dagger.enabled`; writing creates the nested
+        // config on first-enable so the form fields have somewhere to bind.
+        let enabledBinding = Binding<Bool>(
+            get: { profile.sidecars?.dagger?.enabled ?? false },
+            set: { newValue in
+                if newValue {
+                    if profile.sidecars == nil {
+                        profile.sidecars = SidecarsSnapshot(
+                            dagger: DaggerSidecarSnapshot(
+                                enabled: true,
+                                // Paste a pinned digest before saving. Enforced
+                                // server-side by /@sha256:[0-9a-f]{64}$/.
+                                engineImageDigest: "",
+                                engineVersion: "v0.18.6"
+                            )
+                        )
+                    } else if profile.sidecars?.dagger == nil {
+                        profile.sidecars?.dagger = DaggerSidecarSnapshot(
+                            enabled: true,
+                            engineImageDigest: "",
+                            engineVersion: "v0.18.6"
+                        )
+                    } else {
+                        profile.sidecars?.dagger?.enabled = true
                     }
-                    Text("Edit sidecar config via CLI — typed editor coming in a follow-up.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                } else {
+                    profile.sidecars?.dagger?.enabled = false
                 }
             }
-            .padding(10)
-            .background(Color.purple.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+        )
+
+        HStack(spacing: 6) {
+            Image(systemName: "cube.box")
+                .foregroundStyle(.purple)
+            Text("Dagger sidecar")
+                .font(.subheadline.weight(.medium))
+            HelpBadge(text: "Spawns a privileged Dagger engine container alongside pods that set requireSidecars: [dagger]. Required for briefs that run dagger CLI / import the Dagger SDK. Needs Trusted source enabled (above).")
+            Spacer()
+        }
+
+        Toggle(isOn: enabledBinding) {
+            Text(profile.sidecars?.dagger?.enabled == true
+                ? "Enable Dagger engine config"
+                : "Enable Dagger engine config")
+                .font(.callout)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .disabled(!profile.trustedSource)
+
+        if !profile.trustedSource {
+            Text("Turn on Trusted source above to configure the Dagger engine.")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        }
+
+        if profile.sidecars?.dagger != nil {
+            let digestBinding = Binding<String>(
+                get: { profile.sidecars?.dagger?.engineImageDigest ?? "" },
+                set: { profile.sidecars?.dagger?.engineImageDigest = $0 }
+            )
+            let versionBinding = Binding<String>(
+                get: { profile.sidecars?.dagger?.engineVersion ?? "" },
+                set: { profile.sidecars?.dagger?.engineVersion = $0 }
+            )
+
+            fieldRow("Engine image digest", help: "Pinned Dagger engine image. Must match /@sha256:[0-9a-f]{64}$/ — the daemon rejects rolling tags. Example: registry.dagger.io/engine@sha256:abc… (64 hex chars). Get it from `docker pull registry.dagger.io/engine:<version>` + `docker inspect`.") {
+                TextField(
+                    "registry.dagger.io/engine@sha256:…",
+                    text: digestBinding
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.caption, design: .monospaced))
+            }
+
+            fieldRow("Engine version", help: "Human-readable version label for audit logs. Should match the SDK version baked into the stack image (v0.18.6 for dotnet10-go / go124 / go124-pw).") {
+                TextField("v0.18.6", text: versionBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 140)
+            }
+
+            let digest = profile.sidecars?.dagger?.engineImageDigest ?? ""
+            let digestRegex = #/@sha256:[0-9a-f]{64}$/#
+            let digestLooksValid = (try? digestRegex.firstMatch(in: digest)) ?? nil != nil
+
+            if !digest.isEmpty && !digestLooksValid {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    Text("Digest must end with @sha256:<64 hex chars>. The daemon will reject rolling tags.")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            } else if digest.isEmpty && profile.sidecars?.dagger?.enabled == true {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.orange)
+                    Text("Paste a pinned digest before saving — required for pods to spawn the sidecar.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
         }
     }
 

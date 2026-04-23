@@ -15,6 +15,7 @@ import {
 import { createServer } from './api/server.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
+import { DockerSidecarManager } from './containers/sidecar-manager.js';
 import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createPodTokenIssuer } from './crypto/pod-tokens.js';
 import { createDatabase } from './db/connection.js';
@@ -190,6 +191,11 @@ type DockerodeInstance = InstanceType<typeof Dockerode>;
 let docker: DockerodeInstance | undefined;
 let containerManager: ContainerManager;
 let networkManager: DockerNetworkManager | undefined;
+// Spawns companion sidecars (e.g. Dagger engine) on the pod's isolated
+// network. Only wired when real Docker is available — mock mode skips
+// sidecars entirely and the pod manager surfaces MISCONFIGURED_DAEMON if a
+// pod requests one, which is the correct behaviour in that mode.
+let sidecarManager: DockerSidecarManager | undefined;
 
 if (MOCK_DOCKER) {
   logger.warn('AUTOPOD_MOCK_DOCKER=true — Docker disabled. Sessions will not run real containers.');
@@ -211,6 +217,17 @@ if (MOCK_DOCKER) {
   docker = d;
   containerManager = new DockerContainerManager({ docker: d, logger });
   networkManager = new DockerNetworkManager({ docker: d, logger });
+  sidecarManager = new DockerSidecarManager({ docker: d, logger });
+}
+
+// Surface sidecar wiring in startup output so a missing manager is obvious
+// from the first line of log, not only when a pod tries to use one.
+if (sidecarManager) {
+  logger.info('SidecarManager: configured (Docker)');
+} else {
+  logger.warn(
+    'SidecarManager: disabled (mock mode). Pods that set requireSidecars will fail with MISCONFIGURED_DAEMON.',
+  );
 }
 
 let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
@@ -348,6 +365,7 @@ podManager = createPodManager({
   runtimeRegistry,
   validationEngine,
   networkManager,
+  sidecarManager,
   prManagerFactory,
   actionEngine: actionRegistry,
   enqueueSession: (id) => podQueue.enqueue(id),

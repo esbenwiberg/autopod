@@ -494,6 +494,12 @@ public struct Pod: Identifiable, Sendable {
     /// Branches this pod pushed to the configured test repo (cleared on pod end).
     public var testRunBranches: [String]
 
+    /// Set by the daemon when the auto-commit deletion guard aborted a commit —
+    /// the host worktree is out of sync with the container. When true, the desktop
+    /// must block retry / merge actions and show a recovery banner: the agent's
+    /// real work may still live in the container.
+    public var worktreeCompromised: Bool
+
     // MARK: - Series (pod dependency DAG)
 
     /// Series this pod belongs to, or nil for standalone pods.
@@ -577,7 +583,8 @@ public struct Pod: Identifiable, Sendable {
         artifactsPath: String? = nil,
         requireSidecars: [String] = [],
         sidecarContainerIds: [String: String] = [:],
-        testRunBranches: [String] = []
+        testRunBranches: [String] = [],
+        worktreeCompromised: Bool = false
     ) {
         self.id = id; self.status = status; self.pod = pod
         self.hasWorktree = hasWorktree
@@ -602,6 +609,7 @@ public struct Pod: Identifiable, Sendable {
         self.requireSidecars = requireSidecars
         self.sidecarContainerIds = sidecarContainerIds
         self.testRunBranches = testRunBranches
+        self.worktreeCompromised = worktreeCompromised
     }
 
     /// Back-compat init that takes a legacy `OutputMode` and derives a `PodConfig`.

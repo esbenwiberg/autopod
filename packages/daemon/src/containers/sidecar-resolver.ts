@@ -39,12 +39,13 @@ export function sidecarPodEnv(spec: SidecarSpec): Record<string, string> {
 }
 
 function buildDaggerSidecarSpec(cfg: DaggerSidecarConfig): SidecarSpec {
+  const port = cfg.enginePort ?? DEFAULT_DAGGER_ENGINE_PORT;
   return {
     type: 'dagger-engine',
     name: 'dagger',
     image: cfg.engineImageDigest,
     healthCheck: {
-      port: cfg.enginePort ?? DEFAULT_DAGGER_ENGINE_PORT,
+      port,
       // Engine pulls BuildKit layers + starts up; 90s covers cold-pull worst case.
       timeoutMs: 90_000,
       intervalMs: 500,
@@ -57,5 +58,11 @@ function buildDaggerSidecarSpec(cfg: DaggerSidecarConfig): SidecarSpec {
     },
     // BuildKit requires privileged mode for its OCI runtime + overlay mounts.
     privileged: true,
+    // By default dagger-entrypoint.sh boots the engine with only the unix
+    // socket (/run/buildkit/buildkitd.sock). The pod reaches the engine over
+    // TCP, so we have to explicitly add a TCP listener. Keeping the unix
+    // socket as well means `docker exec dagger-engine dagger` still works
+    // for debugging from inside the sidecar.
+    command: ['--addr', `tcp://0.0.0.0:${port}`, '--addr', 'unix:///run/buildkit/buildkitd.sock'],
   };
 }

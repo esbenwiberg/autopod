@@ -137,6 +137,7 @@ describe('buildProviderEnv', () => {
       expect(JSON.parse(settingsJson?.content ?? '{}')).toEqual({
         theme: 'dark',
         autoUpdaterStatus: 'disabled',
+        env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: '1' },
       });
     });
 

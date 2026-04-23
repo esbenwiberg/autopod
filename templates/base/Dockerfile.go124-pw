@@ -36,11 +36,22 @@ RUN npm install -g pnpm@9
 # Agent CLIs
 RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
-# Dagger CLI — pre-installed so pods with restricted/deny-all network policies
-# can still use Dagger modules (runtime install from dl.dagger.io would fail).
-RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh \
+# Dagger version — single source of truth for CLI, SDK, and the engine digest
+# users pin on their profile. Leaving any of the three on rolling-latest causes
+# silent drift: e.g. a newer CLI scaffolding against a pinned older engine
+# produces code that targets an API the engine doesn't implement yet.
+ARG DAGGER_GO_SDK_VERSION=v0.18.6
+
+# Dagger CLI — pre-installed (pinned to match DAGGER_GO_SDK_VERSION) so pods
+# with restricted/deny-all network policies can still use Dagger modules
+# without a runtime install from dl.dagger.io. install.sh reads DAGGER_VERSION
+# without the leading `v`, so strip it.
+RUN curl -fsSL https://dl.dagger.io/dagger/install.sh \
+    | DAGGER_VERSION=${DAGGER_GO_SDK_VERSION#v} BIN_DIR=/usr/local/bin sh \
     && test -x /usr/local/bin/dagger \
-    || (echo "ERROR: Dagger CLI installation failed" && exit 1)
+    && dagger version \
+    && dagger version | grep -q "${DAGGER_GO_SDK_VERSION}" \
+    || (echo "ERROR: Dagger CLI install failed or version didn't pin to ${DAGGER_GO_SDK_VERSION}" && exit 1)
 
 # Pre-install Playwright + Chromium with all system dependencies.
 # `playwright install --with-deps` installs the complete set of OS packages
@@ -67,9 +78,9 @@ RUN mkdir -p ${GOPATH} ${GOCACHE} \
     && chown -R autopod:autopod ${GOPATH} /home/autopod/.cache
 
 # Pre-cache the Dagger Go SDK into GOMODCACHE so pods can `import "dagger.io/dagger"`
-# without reaching the Go proxy at runtime. Bump this ARG to match the Dagger engine
-# version used by profiles (see sidecars.dagger.engineVersion).
-ARG DAGGER_GO_SDK_VERSION=v0.18.6
+# without reaching the Go proxy at runtime. DAGGER_GO_SDK_VERSION declared
+# above; redeclare here so it remains in scope for this RUN (Docker ARG scope).
+ARG DAGGER_GO_SDK_VERSION
 RUN mkdir -p /tmp/dagger-warmup \
     && cd /tmp/dagger-warmup \
     && go mod init warmup \

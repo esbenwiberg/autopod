@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import type { SidecarSpec } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
@@ -21,6 +22,20 @@ interface MockContainer {
   stop: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>;
   inspect: ReturnType<typeof vi.fn>;
+  exec: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * Build an exec mock that the TCP-listening probe can drive end to end.
+ * `probeTcpListening` calls container.exec → exec.start() → drain stream →
+ * exec.inspect() → ExitCode. Passing `exitCode: 0` simulates a listening
+ * port; non-zero simulates not-listening.
+ */
+function mockExec(exitCode: number) {
+  return vi.fn().mockResolvedValue({
+    start: vi.fn().mockResolvedValue(Readable.from([])),
+    inspect: vi.fn().mockResolvedValue({ ExitCode: exitCode }),
+  });
 }
 
 function mockContainer(overrides: Partial<MockContainer> = {}): MockContainer {
@@ -30,6 +45,8 @@ function mockContainer(overrides: Partial<MockContainer> = {}): MockContainer {
     stop: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
     inspect: vi.fn().mockResolvedValue({ State: { Running: true, ExitCode: 0 } }),
+    // Default: probe reports listening (exit 0) so waitHealthy returns quickly.
+    exec: mockExec(0),
     ...overrides,
   };
 }
@@ -192,11 +209,29 @@ describe('DockerSidecarManager', () => {
   });
 
   describe('waitHealthy()', () => {
-    it('returns once the container reports Running and exit code 0', async () => {
+    it('returns once the container reports Running AND the TCP port is listening', async () => {
       container.inspect = vi.fn().mockResolvedValue({ State: { Running: true, ExitCode: 0 } });
+      container.exec = mockExec(0);
       await expect(
         manager.waitHealthy({ containerId: 'x', name: 'dagger' }, daggerSpec),
       ).resolves.not.toThrow();
+      expect(container.exec).toHaveBeenCalled();
+    });
+
+    it('keeps probing when container is up but TCP port is not listening yet', async () => {
+      container.inspect = vi.fn().mockResolvedValue({ State: { Running: true, ExitCode: 0 } });
+      // First probe fails (port not bound), second succeeds.
+      let call = 0;
+      container.exec = vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          start: vi.fn().mockResolvedValue(Readable.from([])),
+          inspect: vi.fn().mockResolvedValue({ ExitCode: call++ === 0 ? 1 : 0 }),
+        }),
+      );
+      await expect(
+        manager.waitHealthy({ containerId: 'x', name: 'dagger' }, daggerSpec),
+      ).resolves.not.toThrow();
+      expect(container.exec).toHaveBeenCalledTimes(2);
     });
 
     it('throws SidecarHealthTimeoutError if the container never becomes healthy', async () => {
@@ -208,6 +243,59 @@ describe('DockerSidecarManager', () => {
       await expect(
         manager.waitHealthy({ containerId: 'x', name: 'dagger' }, shortSpec),
       ).rejects.toBeInstanceOf(SidecarHealthTimeoutError);
+    });
+
+    it('throws SidecarHealthTimeoutError if the TCP port never starts listening', async () => {
+      container.inspect = vi.fn().mockResolvedValue({ State: { Running: true, ExitCode: 0 } });
+      container.exec = mockExec(1); // always reports not-listening
+      const shortSpec: SidecarSpec = {
+        ...daggerSpec,
+        healthCheck: { port: 8080, timeoutMs: 100, intervalMs: 10 },
+      };
+      await expect(
+        manager.waitHealthy({ containerId: 'x', name: 'dagger' }, shortSpec),
+      ).rejects.toBeInstanceOf(SidecarHealthTimeoutError);
+    });
+  });
+
+  describe('spawn() Cmd wiring', () => {
+    it('passes spec.command through as Dockerode Cmd when set', async () => {
+      const specWithCmd: SidecarSpec = {
+        ...daggerSpec,
+        command: ['--addr', 'tcp://0.0.0.0:8080', '--addr', 'unix:///run/buildkit/buildkitd.sock'],
+      };
+      await manager.spawn({ spec: specWithCmd, podId: 'p1', networkName: 'autopod-p1' });
+      const args = docker.createContainer.mock.calls[0]?.[0] as Dockerode.ContainerCreateOptions;
+      expect(args.Cmd).toEqual(specWithCmd.command);
+    });
+
+    it('leaves Cmd undefined when spec has no command (image entrypoint runs unmodified)', async () => {
+      await manager.spawn({ spec: daggerSpec, podId: 'p1', networkName: 'autopod-p1' });
+      const args = docker.createContainer.mock.calls[0]?.[0] as Dockerode.ContainerCreateOptions;
+      expect(args.Cmd).toBeUndefined();
+    });
+  });
+
+  describe('getBridgeIp()', () => {
+    it('returns the sidecar IP on the given network', async () => {
+      container.inspect = vi.fn().mockResolvedValue({
+        NetworkSettings: {
+          Networks: {
+            'autopod-p1': { IPAddress: '172.19.0.5' },
+            other: { IPAddress: '10.0.0.1' },
+          },
+        },
+      });
+      const ip = await manager.getBridgeIp({ containerId: 'x', name: 'dagger' }, 'autopod-p1');
+      expect(ip).toBe('172.19.0.5');
+    });
+
+    it('returns null when the container is not on the given network', async () => {
+      container.inspect = vi.fn().mockResolvedValue({
+        NetworkSettings: { Networks: { somewhere_else: { IPAddress: '10.0.0.1' } } },
+      });
+      const ip = await manager.getBridgeIp({ containerId: 'x', name: 'dagger' }, 'autopod-p1');
+      expect(ip).toBeNull();
     });
   });
 });

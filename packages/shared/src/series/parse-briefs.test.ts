@@ -167,6 +167,35 @@ acceptance_criteria:
     expect(briefs[0]?.acceptanceCriteria?.[0]?.type).toBe('web');
   });
 
+  it('extracts require_sidecars from frontmatter (snake_case)', () => {
+    const content =
+      '---\ntitle: Wire Dagger pipeline\nrequire_sidecars: [dagger]\n---\nBuild the pipeline';
+    const briefs = parseBriefs([{ filename: '02-pipeline.md', content }]);
+    expect(briefs[0]?.requireSidecars).toEqual(['dagger']);
+  });
+
+  it('also accepts requireSidecars (camelCase) spelling', () => {
+    const content = '---\nrequireSidecars: [dagger]\n---\nPipeline';
+    const briefs = parseBriefs([{ filename: '01-task.md', content }]);
+    expect(briefs[0]?.requireSidecars).toEqual(['dagger']);
+  });
+
+  it('normalizes empty and missing requireSidecars to undefined', () => {
+    const noField = parseBriefs([{ filename: '01-a.md', content: 'Body' }]);
+    expect(noField[0]?.requireSidecars).toBeUndefined();
+
+    const emptyList = parseBriefs([
+      { filename: '01-b.md', content: '---\nrequire_sidecars: []\n---\nBody' },
+    ]);
+    expect(emptyList[0]?.requireSidecars).toBeUndefined();
+  });
+
+  it('snake_case require_sidecars wins over camelCase when both are set', () => {
+    const content = '---\nrequire_sidecars: [dagger]\nrequireSidecars: [postgres]\n---\nBody';
+    const briefs = parseBriefs([{ filename: '01-task.md', content }]);
+    expect(briefs[0]?.requireSidecars).toEqual(['dagger']);
+  });
+
   it('parses real-world style brief with checkbox ACs matching spec format', () => {
     const content = `# Brief 01: Runner protocol contracts
 
