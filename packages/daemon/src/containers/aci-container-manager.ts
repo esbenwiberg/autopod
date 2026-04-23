@@ -203,6 +203,7 @@ export class AciContainerManager implements ContainerManager {
     _containerId: string,
     _containerPath: string,
     _hostPath: string,
+    _excludes?: string[],
   ): Promise<void> {
     // ACI doesn't expose a Docker-style archive API — offline directory extraction is not supported
     throw new Error('extractDirectoryFromContainer is not supported for ACI containers');

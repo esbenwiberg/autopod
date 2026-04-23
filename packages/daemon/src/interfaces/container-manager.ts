@@ -47,12 +47,15 @@ export interface ContainerManager {
   readFile(containerId: string, path: string): Promise<string>;
   /**
    * Extract a directory from a container (works on stopped containers) to a host path.
-   * Clears the host directory contents first, then extracts the container directory.
+   * Clears the host directory contents first (skipping any entries in `excludes`),
+   * then extracts the container directory (skipping entries matching `excludes`).
+   * `excludes` entries are matched against the top-level names within containerPath.
    */
   extractDirectoryFromContainer(
     containerId: string,
     containerPath: string,
     hostPath: string,
+    excludes?: string[],
   ): Promise<void>;
   getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'>;
   execInContainer(

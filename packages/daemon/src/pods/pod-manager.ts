@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
@@ -968,8 +969,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * container's native /workspace (overlayfs) — this avoids VirtioFS getcwd() bugs
    * on Docker Desktop for Mac. We sync back before any host-side git operations.
    *
-   * If the container is already stopped (user disconnected before sync ran), falls
-   * back to Docker's archive API which reads the container filesystem offline.
+   * Strategy:
+   *  1. Read the bare repo path from /workspace/.git/objects/info/alternates (written by the
+   *     gitlink→real-dir conversion at container start).
+   *  2. Push new commits from /workspace to the bare so host git sees them after sync.
+   *  3. Sync files back excluding .git — the host worktree's gitlink is preserved.
+   *
+   * If the container is already stopped, falls back to Docker's archive API. In that case
+   * we extract /workspace (minus .git) then extract /workspace/.git separately and push
+   * from the host side.
    */
   async function syncWorkspaceBack(
     containerId: string,
@@ -977,12 +985,45 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     cm: ContainerManager,
   ): Promise<void> {
     try {
+      // Read the bare repo path from the alternates file written during gitlink conversion.
+      // Alternates contains "<bareRepoPath>/objects" — strip the trailing "/objects".
+      const alternatesResult = await cm.execInContainer(
+        containerId,
+        [
+          'sh',
+          '-c',
+          "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
+        ],
+        { timeout: 5_000 },
+      );
+      const bareRepoPath =
+        alternatesResult.exitCode === 0 && alternatesResult.stdout.trim()
+          ? alternatesResult.stdout.trim()
+          : null;
+
+      // Push new commits to the bare before clearing the bind mount, so any commits made
+      // inside the container are visible to host-side git operations after sync.
+      if (bareRepoPath) {
+        const push = await cm.execInContainer(
+          containerId,
+          ['sh', '-c', `git -C /workspace push "${bareRepoPath}" HEAD`],
+          { timeout: 30_000 },
+        );
+        if (push.exitCode !== 0) {
+          logger.warn(
+            { worktreePath, stderr: push.stderr },
+            'Git push to bare during sync-back failed — new commits may not be visible on host',
+          );
+        }
+      }
+
+      // Sync files back, excluding .git so the host gitlink is never overwritten.
       await cm.execInContainer(
         containerId,
         [
           'sh',
           '-c',
-          'find /mnt/worktree -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -a /workspace/. /mnt/worktree/',
+          "find /mnt/worktree -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} + ; find /workspace -mindepth 1 -maxdepth 1 ! -name '.git' -exec cp -a {} /mnt/worktree/ \\;",
         ],
         { timeout: 120_000 },
       );
@@ -998,21 +1039,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           (err as { statusCode: number }).statusCode === 409) ||
         (err instanceof Error && err.message.includes('is not running'));
       if (isContainerNotRunning) {
-        await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath);
+        // Extract workspace files excluding .git so the host gitlink is preserved.
+        await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath, ['.git']);
+
+        // Try to recover commits: extract the container's .git to a temp dir and push to bare.
+        let bareRepoPath: string | null = null;
+        try {
+          // Host worktree gitlink is intact (we excluded .git above), so we can derive the path.
+          bareRepoPath = await deriveBareRepoPath(worktreePath);
+        } catch {
+          // Best-effort — if we can't get the bare path, commit recovery is skipped.
+        }
+        if (bareRepoPath) {
+          const tmpGitDir = path.join(os.tmpdir(), `autopod-git-${Date.now()}`);
+          try {
+            await mkdir(tmpGitDir, { recursive: true });
+            // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
+            // so git can resolve baseline objects and push only the new ones.
+            await cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir);
+            await execFileAsync('git', ['--git-dir', tmpGitDir, 'push', bareRepoPath, 'HEAD']);
+          } catch (gitRecoveryErr) {
+            logger.warn(
+              { err: gitRecoveryErr, worktreePath },
+              'Could not push commits from stopped container — new commits may be lost',
+            );
+          } finally {
+            await rm(tmpGitDir, { recursive: true, force: true }).catch(() => {});
+          }
+        }
       } else {
         throw err;
       }
-    }
-
-    // Restore the bare repo's worktrees/<name>/gitdir to the host path now that files
-    // are back on the host filesystem. During the pod it was pointed at /workspace/.git
-    // (a container-only path) — leaving it there would break host-side git operations.
-    try {
-      const gitlinkContent = await readFile(path.join(worktreePath, '.git'), 'utf8');
-      const bareWtDir = gitlinkContent.replace(/^gitdir:\s*/m, '').trim();
-      await writeFile(path.join(bareWtDir, 'gitdir'), `${path.join(worktreePath, '.git')}\n`);
-    } catch (err) {
-      logger.warn({ err, worktreePath }, 'Failed to restore worktree gitdir after sync');
     }
   }
 
@@ -1879,23 +1936,42 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             ['cp', '-a', '/mnt/worktree/.', '/workspace/'],
             { timeout: 120_000 },
           );
-          // The bare repo's worktrees/<name>/gitdir still points to the host bind-mount
-          // path (/mnt/worktree or the host worktree dir). Repoint it to /workspace so
-          // git commands work on the container's native overlayfs filesystem.
-          // mkdir -p guards against the worktrees/<name>/ dir not yet existing (e.g. first
-          // container start before the bare repo's metadata is fully materialised).
+          // Convert /workspace/.git from a gitlink file into a self-contained real .git
+          // directory. The gitlink references a Mac host path that sub-processes
+          // (e.g. Dagger CLI, go-git) can't follow when they don't inherit autopod's
+          // bind mounts. A real .git directory works everywhere inside the container.
+          // Objects are shared via alternates so no object copying is needed.
           const repoint = await containerManager.execInContainer(
             containerId,
             [
               'sh',
               '-c',
-              'BARE_WT=$(sed "s/^gitdir: //" /workspace/.git) && mkdir -p "${BARE_WT}" && echo "/workspace/.git" > "${BARE_WT}/gitdir"',
+              [
+                'set -e',
+                // Resolve bare worktree metadata dir and bare root from the gitlink
+                "BARE_WT=$(sed 's/^gitdir: //' /workspace/.git | tr -d '\\n')",
+                'BARE_COMMON=$(cat "${BARE_WT}/commondir" 2>/dev/null || echo "../..")',
+                'BARE_ROOT=$(cd "${BARE_WT}/${BARE_COMMON}" && pwd)',
+                // Replace the gitlink file with a real git directory
+                'rm /workspace/.git',
+                'mkdir -p /workspace/.git',
+                // Seed it with the worktree-specific metadata (HEAD, index, logs, etc.)
+                'cp -a "${BARE_WT}/." /workspace/.git/',
+                // Strip the commondir/gitdir files — this is now a standalone git dir
+                'rm -f /workspace/.git/commondir /workspace/.git/gitdir',
+                // Wire alternates so git can read objects from the bare without copying them
+                'mkdir -p /workspace/.git/objects/info',
+                'echo "${BARE_ROOT}/objects" > /workspace/.git/objects/info/alternates',
+                // Materialise refs from the bare (worktree metadata only has per-branch refs)
+                'cp -a "${BARE_ROOT}/refs/." /workspace/.git/refs/ 2>/dev/null || true',
+                'cp "${BARE_ROOT}/packed-refs" /workspace/.git/ 2>/dev/null || true',
+              ].join(' && '),
             ],
-            { timeout: 5_000 },
+            { timeout: 15_000 },
           );
           if (repoint.exitCode !== 0) {
             throw new Error(
-              `Git worktree gitdir repoint failed (exit ${repoint.exitCode}): ${repoint.stderr}`,
+              `Git workspace setup failed (exit ${repoint.exitCode}): ${repoint.stderr}`,
             );
           }
           // Restore any tracked files missing from the working tree (M/D status).

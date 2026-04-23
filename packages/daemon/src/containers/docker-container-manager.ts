@@ -231,14 +231,18 @@ export class DockerContainerManager implements ContainerManager {
     containerId: string,
     containerPath: string,
     hostPath: string,
+    excludes?: string[],
   ): Promise<void> {
     const container = this.docker.getContainer(containerId);
     // getArchive works on stopped containers — safe to call after container exits
     const archiveStream = await container.getArchive({ path: containerPath });
 
-    // Clear host directory contents before extracting (mirrors exec-based sync behaviour)
+    // Clear host directory contents before extracting (mirrors exec-based sync behaviour),
+    // skipping any entries that are in the excludes list.
     for (const entry of readdirSync(hostPath)) {
-      rmSync(join(hostPath, entry), { recursive: true, force: true });
+      if (!excludes?.includes(entry)) {
+        rmSync(join(hostPath, entry), { recursive: true, force: true });
+      }
     }
 
     // Tar entries are prefixed with the basename of containerPath (e.g. "workspace/")
@@ -251,6 +255,14 @@ export class DockerContainerManager implements ContainerManager {
 
         if (!rel) {
           // Root directory entry itself — skip
+          stream.resume();
+          stream.on('end', next);
+          return;
+        }
+
+        // Skip entries that match an excluded top-level name
+        const topLevel = rel.split('/')[0];
+        if (topLevel && excludes?.includes(topLevel)) {
           stream.resume();
           stream.on('end', next);
           return;
