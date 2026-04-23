@@ -67,7 +67,7 @@ RUN mkdir -p /tmp/dagger-warmup \
     && go mod init warmup \
     && go get dagger.io/dagger@${DAGGER_GO_SDK_VERSION} \
     && cd / && rm -rf /tmp/dagger-warmup \
-    && chown -R autopod:autopod ${GOPATH}
+    && chown -R autopod:autopod ${GOPATH} /home/autopod/.cache
 
 # Working directory
 WORKDIR /workspace
