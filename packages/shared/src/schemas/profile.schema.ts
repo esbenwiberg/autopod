@@ -194,6 +194,7 @@ const createProfileBaseSchema = z.object({
       'node22-pw',
       'dotnet9',
       'dotnet10',
+      'dotnet10-go',
       'python312',
       'go124',
       'go124-pw',

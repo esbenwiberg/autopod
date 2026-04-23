@@ -10,6 +10,7 @@ const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
   'node22-pw': 'autopod-node22-pw:latest',
   dotnet9: 'autopod-dotnet9:latest',
   dotnet10: 'autopod-dotnet10:latest',
+  'dotnet10-go': 'autopod-dotnet10-go:latest',
   python312: 'autopod-python312:latest',
   go124: 'autopod-go124:latest',
   'go124-pw': 'autopod-go124-pw:latest',
@@ -21,6 +22,7 @@ const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
 const DAGGER_PREINSTALLED: ReadonlySet<StackTemplate> = new Set([
   'dotnet9',
   'dotnet10',
+  'dotnet10-go',
   'go124',
   'go124-pw',
 ]);
@@ -145,7 +147,10 @@ export function getInstallCommand(profile: Profile): string {
   // Fall back to an empty string when buildCommand is null (derived profile
   // that inherits); the install-command inference then falls back to npm ci.
   const cmd = profile.buildCommand ?? '';
-  const isDotnet = profile.template === 'dotnet9' || profile.template === 'dotnet10';
+  const isDotnet =
+    profile.template === 'dotnet9' ||
+    profile.template === 'dotnet10' ||
+    profile.template === 'dotnet10-go';
 
   const isGo = profile.template === 'go124' || profile.template === 'go124-pw';
   if (isGo) {

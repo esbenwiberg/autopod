@@ -53,6 +53,7 @@ describe('getBaseImage', () => {
     ['node22-pw', 'autopod-node22-pw:latest'],
     ['dotnet9', 'autopod-dotnet9:latest'],
     ['dotnet10', 'autopod-dotnet10:latest'],
+    ['dotnet10-go', 'autopod-dotnet10-go:latest'],
     ['python312', 'autopod-python312:latest'],
     ['go124', 'autopod-go124:latest'],
     ['go124-pw', 'autopod-go124-pw:latest'],
@@ -95,6 +96,23 @@ describe('getInstallCommand', () => {
         mockProfile({ template: 'dotnet10', buildCommand: 'dotnet build && pnpm run build' }),
       ),
     ).toContain('dotnet restore');
+  });
+
+  it('treats dotnet10-go like dotnet10 for primary install', () => {
+    expect(
+      getInstallCommand(mockProfile({ template: 'dotnet10-go', buildCommand: 'dotnet build' })),
+    ).toBe('dotnet restore');
+  });
+
+  it('mixes dotnet+npm on dotnet10-go', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({
+          template: 'dotnet10-go',
+          buildCommand: 'dotnet build && npm run build',
+        }),
+      ),
+    ).toBe('dotnet restore && npm ci');
   });
 
   it('detects pip', () => {
@@ -167,6 +185,15 @@ describe('generateDockerfile', () => {
       gitCredentials: 'none',
     });
     expect(df).toContain('FROM autopod-dotnet10:latest');
+    expect(df).toContain('dotnet restore');
+  });
+
+  it('generates Dockerfile for dotnet10-go project (Dagger-in-Go pipelines)', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({ template: 'dotnet10-go', buildCommand: 'dotnet build' }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('FROM autopod-dotnet10-go:latest');
     expect(df).toContain('dotnet restore');
   });
 
@@ -366,7 +393,7 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('dl.dagger.io');
   });
 
-  it.each(['dotnet9', 'dotnet10', 'go124', 'go124-pw'] as const)(
+  it.each(['dotnet9', 'dotnet10', 'dotnet10-go', 'go124', 'go124-pw'] as const)(
     'skips the per-pod Dagger CLI install on %s (pre-installed in base image)',
     (template) => {
       const df = generateDockerfile({

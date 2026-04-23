@@ -1,0 +1,134 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    gnupg \
+    locales \
+    iptables ipset dnsmasq \
+    sqlite3 \
+    tmux \
+    build-essential \
+    && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+
+# Glow — terminal markdown viewer from Charm
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list \
+    && apt-get update && apt-get install -y --no-install-recommends glow \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8
+
+# Node.js 22 (for npm frontend builds)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user (GID 1000 may already exist in the base image)
+RUN groupadd --gid 1000 autopod 2>/dev/null || groupmod -n autopod "$(getent group 1000 | cut -d: -f1)" && \
+    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod 2>/dev/null || usermod -l autopod -d /home/autopod -m "$(getent passwd 1000 | cut -d: -f1)"
+
+# Pre-install Playwright + Chromium with all system dependencies.
+# `playwright install --with-deps` installs the complete set of OS packages
+# that Chromium needs — don't hand-pick them, Playwright knows best.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN npm install -g playwright && \
+    playwright install --with-deps chromium && \
+    chmod -R 755 /opt/pw-browsers
+
+# Azure Artifacts Credential Provider (NuGet auth via env var, no cleartext in config)
+# Verify installation succeeded — the curl|bash can fail silently (GitHub rate limits, etc.)
+RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash \
+    && test -d /root/.nuget/plugins/netcore/CredentialProvider.Microsoft \
+    || (echo "ERROR: Credential provider installation failed" && exit 1)
+ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED=true
+
+# Agent CLIs
+RUN npm install -g @anthropic-ai/claude-code @github/copilot
+
+# Dagger CLI — pre-installed so pods with restricted/deny-all network policies
+# can still use Dagger modules (runtime install from dl.dagger.io would fail).
+RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh \
+    && test -x /usr/local/bin/dagger \
+    || (echo "ERROR: Dagger CLI installation failed" && exit 1)
+
+# Go toolchain — copied from the official golang image so we track the same
+# version as autopod-go124 (currently 1.24). Using COPY --from avoids a
+# tarball-and-shasum dance and keeps this base deterministic with go124.
+COPY --from=golang:1.24-bookworm /usr/local/go /usr/local/go
+ENV PATH=/usr/local/go/bin:${PATH}
+
+# Go environment — give autopod user a writable module + build cache
+ENV GOPATH=/home/autopod/go
+ENV GOCACHE=/home/autopod/.cache/go-build
+ENV GOMODCACHE=/home/autopod/go/pkg/mod
+# Disable go.work (workspace requires Go 1.26; image ships 1.24)
+ENV GOWORK=off
+# Go module proxy: reach the public proxy when network is available; GOSUMDB=off
+# skips the checksum database (requires separate outbound + isn't useful when the
+# repo's go.sum is trusted). Pods under deny-all network policy rely on the
+# pre-cached modules below; anything uncached will fail loudly.
+ENV GOPROXY=https://proxy.golang.org,direct
+ENV GOSUMDB=off
+RUN mkdir -p ${GOPATH} ${GOCACHE} \
+    && chown -R autopod:autopod ${GOPATH} /home/autopod/.cache
+
+# Pre-cache the Dagger Go SDK into GOMODCACHE so pods can `import "dagger.io/dagger"`
+# without reaching the Go proxy at runtime. Keep this ARG in lockstep with
+# templates/base/Dockerfile.go124 so both bases ship the same module graph.
+ARG DAGGER_GO_SDK_VERSION=v0.18.6
+RUN mkdir -p /tmp/dagger-warmup \
+    && cd /tmp/dagger-warmup \
+    && go mod init warmup \
+    && go get dagger.io/dagger@${DAGGER_GO_SDK_VERSION} \
+    && cd / && rm -rf /tmp/dagger-warmup \
+    && chown -R autopod:autopod ${GOPATH}
+
+# .NET env
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_NOLOGO=1
+# Limit MSBuild parallelism to prevent OOM kills in memory-constrained containers.
+# Without this, MSBuild spawns one worker per CPU core which can exceed the memory cap.
+ENV MSBUILDDISABLENODEREUSE=1
+ENV MSBUILDMAXCPUCOUNT=4
+# Shared NuGet cache accessible by both root (image build) and autopod (runtime)
+ENV NUGET_PACKAGES=/usr/local/share/nuget/packages
+
+# Pre-warm Microsoft.VisualStudio.JavaScript.Sdk for .esproj support.
+# This is a NuGet-distributed MSBuild SDK (not a workload) — installing it into
+# the shared package cache makes it resolvable at build time without VS.
+RUN mkdir /tmp/sdk-warmup \
+    && dotnet new classlib -o /tmp/sdk-warmup --no-restore \
+    && dotnet add /tmp/sdk-warmup package Microsoft.VisualStudio.JavaScript.Sdk \
+    && dotnet restore /tmp/sdk-warmup \
+    && rm -rf /tmp/sdk-warmup \
+    && chown -R autopod:autopod "$NUGET_PACKAGES"
+
+# Working directory
+WORKDIR /workspace
+RUN chown autopod:autopod /workspace
+
+USER autopod
+
+# Install credential provider for the runtime user (root install above covers build-time only)
+RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash \
+    && test -d /home/autopod/.nuget/plugins/netcore/CredentialProvider.Microsoft \
+    || (echo "ERROR: Credential provider installation failed for autopod user" && exit 1)
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# Allow bare imports of globally installed packages (e.g. playwright in validation scripts)
+ENV NODE_PATH=/usr/lib/node_modules
+# Turborepo cache dir — /workspace/.turbo may not be writable depending on how
+# the worktree is mounted, so use /tmp which is always writable.
+ENV TURBO_CACHE_DIR=/tmp/.turbo
+# Point node-gyp at local Node headers so native addon rebuilds work offline
+# (nodesource installs headers under /usr/include/node/).
+ENV npm_config_nodedir=/usr
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
