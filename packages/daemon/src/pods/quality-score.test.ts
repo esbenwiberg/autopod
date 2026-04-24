@@ -126,7 +126,7 @@ describe('computeScore', () => {
     });
     expect(passed).toBe(98); // 93 + 5
     expect(failed).toBe(88); // 93 - 5
-    expect(none).toBe(93);   // 93 ± 0
+    expect(none).toBe(93); // 93 ± 0
   });
 
   it('applies tell penalties per distinct pattern', () => {

@@ -5,9 +5,9 @@ import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
-import type { ValidationRepository } from './validation-repository.js';
 import { computeScore } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
+import type { ValidationRepository } from './validation-repository.js';
 
 export interface QualityScoreRecorder {
   start(): void;

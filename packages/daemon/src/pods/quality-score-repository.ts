@@ -106,8 +106,7 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
         editChurnCount: score.editChurnCount,
         tellsCount: score.tellsCount,
         prFixAttempts: score.prFixAttempts,
-        validationPassed:
-          score.validationPassed === null ? null : score.validationPassed ? 1 : 0,
+        validationPassed: score.validationPassed === null ? null : score.validationPassed ? 1 : 0,
         inputTokens: score.inputTokens,
         outputTokens: score.outputTokens,
         costUsd: score.costUsd,

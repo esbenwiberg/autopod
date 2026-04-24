@@ -154,7 +154,12 @@ describe('IssueWatcherService', () => {
     expect(createCall[0].profileName).toBe('test-profile');
     expect(createCall[0].task).toContain('Fix login bug');
     expect(createCall[0].acceptanceCriteria).toEqual([
-      { type: 'none', test: 'Login works', pass: 'criterion satisfied', fail: 'criterion not satisfied' },
+      {
+        type: 'none',
+        test: 'Login works',
+        pass: 'criterion satisfied',
+        fail: 'criterion not satisfied',
+      },
     ]);
     expect(createCall[0].branchPrefix).toBe('issue-42/');
 
