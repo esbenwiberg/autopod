@@ -60,6 +60,7 @@ export interface Profile {
   smokePages: SmokePage[];
   maxValidationAttempts: number | null;
   defaultModel: string | null;
+  reviewerModel: string | null;
   defaultRuntime: RuntimeType | null;
   executionTarget: ExecutionTarget | null;
   customInstructions: string | null;

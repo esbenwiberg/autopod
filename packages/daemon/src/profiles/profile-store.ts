@@ -100,6 +100,7 @@ export function rowToProfile(
     smokePages: JSON.parse((row.validation_pages as string) ?? '[]') as SmokePage[],
     maxValidationAttempts: nullableNum(row.max_validation_attempts),
     defaultModel: nullableStr(row.default_model),
+    reviewerModel: nullableStr(row.reviewer_model),
     defaultRuntime: nullableStr(row.default_runtime) as Profile['defaultRuntime'],
     executionTarget: nullableStr(row.execution_target) as Profile['executionTarget'],
     customInstructions: nullableStr(row.custom_instructions),
@@ -265,7 +266,7 @@ export function createProfileStore(
         INSERT INTO profiles (
           name, repo_url, default_branch, template, build_command, start_command,
           health_path, health_timeout, validation_pages, max_validation_attempts,
-          default_model, default_runtime, execution_target, custom_instructions, escalation_config,
+          default_model, reviewer_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, promotable,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
@@ -281,7 +282,7 @@ export function createProfileStore(
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
-          @defaultModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
+          @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @promotable,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
@@ -307,6 +308,7 @@ export function createProfileStore(
         validationPages: JSON.stringify(parsed.smokePages ?? []),
         maxValidationAttempts: parsed.maxValidationAttempts,
         defaultModel: parsed.defaultModel,
+        reviewerModel: parsed.reviewerModel ?? null,
         defaultRuntime: parsed.defaultRuntime,
         executionTarget: parsed.executionTarget,
         customInstructions: parsed.customInstructions,
@@ -464,6 +466,10 @@ export function createProfileStore(
       if (parsed.defaultModel !== undefined) {
         setClauses.push('default_model = @defaultModel');
         fieldMap.defaultModel = parsed.defaultModel;
+      }
+      if (parsed.reviewerModel !== undefined) {
+        setClauses.push('reviewer_model = @reviewerModel');
+        fieldMap.reviewerModel = parsed.reviewerModel;
       }
       if (parsed.defaultRuntime !== undefined) {
         setClauses.push('default_runtime = @defaultRuntime');

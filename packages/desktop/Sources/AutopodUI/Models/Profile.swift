@@ -17,6 +17,7 @@ public struct Profile: Identifiable, Sendable {
     public var testTimeout: Int
     public var maxValidationAttempts: Int
     public var defaultModel: String
+    public var reviewerModel: String
     public var defaultRuntime: RuntimeType
     public var executionTarget: ExecutionTarget
     public var modelProvider: ModelProvider
@@ -134,7 +135,8 @@ public struct Profile: Identifiable, Sendable {
         healthPath: String = "/", healthTimeout: Int = 120,
         buildTimeout: Int = 300, testTimeout: Int = 600,
         maxValidationAttempts: Int = 3,
-        defaultModel: String = "opus", defaultRuntime: RuntimeType = .claude,
+        defaultModel: String = "opus", reviewerModel: String = "sonnet",
+        defaultRuntime: RuntimeType = .claude,
         executionTarget: ExecutionTarget = .local,
         modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
         customInstructions: String? = nil, containerMemoryGb: Double? = nil,
@@ -182,7 +184,8 @@ public struct Profile: Identifiable, Sendable {
         self.healthPath = healthPath; self.healthTimeout = healthTimeout
         self.buildTimeout = buildTimeout; self.testTimeout = testTimeout
         self.maxValidationAttempts = maxValidationAttempts
-        self.defaultModel = defaultModel; self.defaultRuntime = defaultRuntime
+        self.defaultModel = defaultModel; self.reviewerModel = reviewerModel
+        self.defaultRuntime = defaultRuntime
         self.executionTarget = executionTarget; self.modelProvider = modelProvider
         self.prProvider = prProvider; self.customInstructions = customInstructions
         self.containerMemoryGb = containerMemoryGb

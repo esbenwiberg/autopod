@@ -108,6 +108,14 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     errors.push('defaultModel must not be empty');
   }
 
+  // Reviewer model — used for AC validation and task review; defaults to defaultModel at runtime
+  const reviewerModel = input.reviewerModel;
+  if (reviewerModel !== undefined && reviewerModel !== null && typeof reviewerModel !== 'string') {
+    errors.push('reviewerModel must be a string');
+  } else if (typeof reviewerModel === 'string' && reviewerModel.trim().length === 0) {
+    errors.push('reviewerModel must not be empty');
+  }
+
   // Default runtime
   const defaultRuntime = input.defaultRuntime;
   if (defaultRuntime !== undefined && !KNOWN_RUNTIMES.includes(defaultRuntime as string)) {

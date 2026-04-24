@@ -16,6 +16,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var smokePages: [SmokePageResponse]
   public var maxValidationAttempts: Int?
   public var defaultModel: String?
+  public var reviewerModel: String?
   public var defaultRuntime: String?
   public var executionTarget: String?
   public var customInstructions: String?
@@ -81,6 +82,7 @@ public struct ProfileResponse: Codable, Sendable {
     smokePages = (try c.decodeIfPresent([SmokePageResponse].self, forKey: .smokePages)) ?? []
     maxValidationAttempts = try c.decodeIfPresent(Int.self, forKey: .maxValidationAttempts)
     defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel)
+    reviewerModel = try c.decodeIfPresent(String.self, forKey: .reviewerModel)
     defaultRuntime = try c.decodeIfPresent(String.self, forKey: .defaultRuntime)
     executionTarget = try c.decodeIfPresent(String.self, forKey: .executionTarget)
     customInstructions = try c.decodeIfPresent(String.self, forKey: .customInstructions)

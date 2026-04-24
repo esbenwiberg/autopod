@@ -303,12 +303,12 @@ public struct SeriesResponse: Codable, Sendable {
 }
 
 /// A single parsed brief returned from `POST /pods/series/preview`. Titles are
-/// used as node identifiers in the DAG; `dependsOn` references other brief
-/// titles. `acceptanceCriteria` is left untyped (we render as-is in the preview).
+/// used as node identifiers in the DAG; `dependsOn` references other brief titles.
 public struct ParsedBriefResponse: Codable, Sendable {
   public let title: String
   public let task: String
   public let dependsOn: [String]
+  public let acceptanceCriteria: [AcDefinition]?
   /// Per-brief sidecar requests (e.g. `["dagger"]`). Surfaced on the DAG
   /// preview so reviewers can see which pods will spawn privileged sidecars
   /// before submitting. Nil/empty = no sidecars.
@@ -318,11 +318,13 @@ public struct ParsedBriefResponse: Codable, Sendable {
     title: String,
     task: String,
     dependsOn: [String],
+    acceptanceCriteria: [AcDefinition]? = nil,
     requireSidecars: [String]? = nil
   ) {
     self.title = title
     self.task = task
     self.dependsOn = dependsOn
+    self.acceptanceCriteria = acceptanceCriteria
     self.requireSidecars = requireSidecars
   }
 }

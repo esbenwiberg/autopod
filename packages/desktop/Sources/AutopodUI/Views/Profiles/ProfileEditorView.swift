@@ -896,6 +896,14 @@ public struct ProfileEditorView: View {
                 .labelsHidden()
                 .frame(width: 130)
             }
+            fieldRow("Reviewer Model", help: "Model used for AC validation and task review. Sonnet is sufficient for automated checks.") {
+                Picker("", selection: $profile.reviewerModel) {
+                    Text("Sonnet").tag("sonnet")
+                    Text("Opus").tag("opus")
+                }
+                .labelsHidden()
+                .frame(width: 130)
+            }
             fieldRow("Runtime", help: "AI runtime engine — Claude Code, OpenAI Codex, or GitHub Copilot.") {
                 Picker("", selection: $profile.defaultRuntime) {
                     ForEach(RuntimeType.allCases, id: \.self) { r in
@@ -2441,6 +2449,10 @@ public struct ProfileEditorView: View {
             stringCard(field, value: $profile.defaultModel,
                        parent: editorPayload?.parent?.defaultModel ?? "",
                        placeholder: "opus")
+        case "reviewerModel":
+            stringCard(field, value: $profile.reviewerModel,
+                       parent: editorPayload?.parent?.reviewerModel ?? "",
+                       placeholder: profile.defaultModel)
         case "defaultRuntime":
             enumCard(field, selection: $profile.defaultRuntime,
                      options: RuntimeType.allCases.map { ($0, $0.rawValue.capitalized) },
