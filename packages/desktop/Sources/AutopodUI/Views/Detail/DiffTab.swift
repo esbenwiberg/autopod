@@ -202,6 +202,7 @@ public struct DiffTab: View {
                 Text(file.path)
                   .font(.system(.caption, design: .monospaced))
                   .lineLimit(1)
+                  .help(file.path)
                 Spacer()
                 Text("+\(file.linesAdded) -\(file.linesRemoved)")
                   .font(.system(.caption2, design: .monospaced))
@@ -211,7 +212,7 @@ public struct DiffTab: View {
             }
             .listStyle(.sidebar)
           }
-          .frame(minWidth: 200, idealWidth: 220, maxWidth: 300)
+          .frame(minWidth: 200, idealWidth: 280)
 
           // Diff content
           ScrollView {
