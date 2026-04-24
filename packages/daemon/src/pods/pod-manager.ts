@@ -4309,7 +4309,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (validatedPod.autoApprove) {
             logger.info({ podId }, 'Auto-approving pod after validation');
             setImmediate(() => {
-              approveSession(podId).catch((err) =>
+              this.approveSession(podId).catch((err) =>
                 logger.warn({ err, podId }, 'Auto-approve failed'),
               );
             });
@@ -4645,7 +4645,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (revalidatedPod.autoApprove) {
             logger.info({ podId }, 'Auto-approving pod after revalidation');
             setImmediate(() => {
-              approveSession(podId).catch((err) =>
+              this.approveSession(podId).catch((err) =>
                 logger.warn({ err, podId }, 'Auto-approve failed after revalidation'),
               );
             });
