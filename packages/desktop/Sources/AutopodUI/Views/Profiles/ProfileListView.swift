@@ -232,7 +232,7 @@ struct ProfileCard: View {
         switch profile.template {
         case .node22, .node22Pw:             "n.circle"
         case .dotnet9, .dotnet10, .dotnet10Go: "d.circle"
-        case .python312:                     "p.circle"
+        case .python312, .pythonNode:        "p.circle"
         case .go124, .go124Pw:               "g.circle"
         case .custom:                        "gearshape"
         }
