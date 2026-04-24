@@ -606,7 +606,7 @@ public struct ValidationTab: View {
       Text(title)
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
-      ScrollView(.horizontal, showsIndicators: true) {
+      ScrollView([.vertical, .horizontal], showsIndicators: true) {
         Text(expanded.wrappedValue ? text : tailLines(text))
           .font(.system(.caption2, design: .monospaced))
           .foregroundStyle(color.opacity(0.9))
