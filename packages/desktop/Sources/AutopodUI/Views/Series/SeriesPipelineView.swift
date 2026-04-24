@@ -5,20 +5,34 @@ import SwiftUI
 ///
 /// The view is a pure projection of `pods` — it re-renders whenever any pod's
 /// status or cost changes. No polling, no local state for pod contents.
+///
+/// When `panelEnabled` is true, tapping a node slides in a `PodActivityPanel`
+/// on the right instead of calling `onSelectPod` directly. A navigate button
+/// in the panel calls `onSelectPod`.
 public struct SeriesPipelineView: View {
     public let pods: [Pod]
     public let selectedPodId: String?
     public let onSelectPod: (String) -> Void
+    /// When true, tapping a node opens the slide-in activity panel instead of
+    /// immediately navigating via `onSelectPod`.
+    public var panelEnabled: Bool
+    public var actions: PodActions
 
     public init(
         pods: [Pod],
         selectedPodId: String? = nil,
-        onSelectPod: @escaping (String) -> Void = { _ in }
+        onSelectPod: @escaping (String) -> Void = { _ in },
+        panelEnabled: Bool = false,
+        actions: PodActions = .preview
     ) {
         self.pods = pods
         self.selectedPodId = selectedPodId
         self.onSelectPod = onSelectPod
+        self.panelEnabled = panelEnabled
+        self.actions = actions
     }
+
+    @State private var panelPodId: String?
 
     private let metrics = PipelineDAGLayout.Metrics.default
 
@@ -66,32 +80,58 @@ public struct SeriesPipelineView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            ScrollView([.horizontal, .vertical]) {
-                let layout = layoutResult
-                ZStack(alignment: .topLeading) {
-                    PipelineEdgeCanvas(
-                        edges: edgeStyles,
-                        nodePositions: nodePositions,
-                        nodeSize: CGSize(width: metrics.nodeWidth, height: metrics.nodeHeight)
-                    )
-                    .frame(width: layout.width, height: layout.height)
-
-                    ForEach(layout.nodes, id: \.id) { node in
-                        if let pod = podsById[node.id] {
-                            PipelineNodeView(
-                                pod: pod,
-                                isSelected: selectedPodId == pod.id,
-                                onTap: { onSelectPod(pod.id) }
-                            )
-                            .frame(width: metrics.nodeWidth, height: metrics.nodeHeight)
-                            .position(x: node.position.x, y: node.position.y)
+            HStack(spacing: 0) {
+                dagCanvas
+                if panelEnabled, let pid = panelPodId, let pod = podsById[pid] {
+                    Divider()
+                    PodActivityPanel(
+                        pod: pod,
+                        actions: actions,
+                        onNavigate: {
+                            panelPodId = nil
+                            onSelectPod(pod.id)
                         }
-                    }
+                    )
+                    .frame(width: 280)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
-                .frame(width: layoutResult.width, height: layoutResult.height)
             }
+            .animation(.easeOut(duration: 0.18), value: panelPodId)
             Divider()
             footer
+        }
+    }
+
+    private var dagCanvas: some View {
+        ScrollView([.horizontal, .vertical]) {
+            let layout = layoutResult
+            ZStack(alignment: .topLeading) {
+                PipelineEdgeCanvas(
+                    edges: edgeStyles,
+                    nodePositions: nodePositions,
+                    nodeSize: CGSize(width: metrics.nodeWidth, height: metrics.nodeHeight)
+                )
+                .frame(width: layout.width, height: layout.height)
+
+                ForEach(layout.nodes, id: \.id) { node in
+                    if let pod = podsById[node.id] {
+                        PipelineNodeView(
+                            pod: pod,
+                            isSelected: panelEnabled ? panelPodId == pod.id : selectedPodId == pod.id,
+                            onTap: {
+                                if panelEnabled {
+                                    panelPodId = panelPodId == pod.id ? nil : pod.id
+                                } else {
+                                    onSelectPod(pod.id)
+                                }
+                            }
+                        )
+                        .frame(width: metrics.nodeWidth, height: metrics.nodeHeight)
+                        .position(x: node.position.x, y: node.position.y)
+                    }
+                }
+            }
+            .frame(width: layoutResult.width, height: layoutResult.height)
         }
     }
 

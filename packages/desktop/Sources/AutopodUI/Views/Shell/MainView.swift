@@ -188,12 +188,12 @@ public struct MainView: View {
 
     private var filteredSessions: [Pod] {
         let filtered: [Pod] = switch sidebarSelection {
-        case .attention:      pods.filter { $0.status.needsAttention && $0.seriesId == nil }
-        case .active:         pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace && $0.seriesId == nil }
-        case .running:        pods.filter { $0.status.isActive && !$0.isWorkspace && $0.seriesId == nil }
-        case .workspaces:     pods.filter { $0.isWorkspace && $0.seriesId == nil }
-        case .completed:      pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace && $0.seriesId == nil }
-        case .all:            pods.filter { $0.seriesId == nil }
+        case .attention:      pods.filter { $0.status.needsAttention }
+        case .active:         pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
+        case .running:        pods.filter { $0.status.isActive && !$0.isWorkspace }
+        case .workspaces:     pods.filter { $0.isWorkspace }
+        case .completed:      pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
+        case .all:            pods
         case .analytics:        []
         case .history:          []
         case .memory:           []
@@ -300,6 +300,13 @@ public struct MainView: View {
             } else if sidebarSelection == .featureOverview {
                 FeatureOverviewView(selectedFeature: $selectedFeature)
                     .frame(minWidth: 600)
+            } else if sidebarSelection == .seriesAll {
+                SeriesListView(
+                    pods: pods,
+                    selectedPodId: $selectedSessionId,
+                    actions: wiredActions
+                )
+                .frame(minWidth: 500)
             } else {
                 VStack(spacing: 0) {
                     contentToolbar
@@ -657,9 +664,24 @@ struct SessionListRow: View {
         HStack(spacing: 10) {
             StatusDot(status: pod.status)
             VStack(alignment: .leading, spacing: 2) {
-                Text(pod.id)
-                    .font(.system(.callout, design: .monospaced).weight(.medium))
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(pod.id)
+                        .font(.system(.callout, design: .monospaced).weight(.medium))
+                        .lineLimit(1)
+                    if let name = pod.seriesName {
+                        HStack(spacing: 3) {
+                            Image(systemName: "rectangle.3.group.fill")
+                                .font(.system(size: 9))
+                            Text(name)
+                                .font(.system(.caption2).weight(.medium))
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.08))
+                        .clipShape(Capsule())
+                    }
+                }
                 Text(pod.profileName)
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -37,34 +37,22 @@ public struct SidebarView: View {
         self.onShowSettings = onShowSettings
     }
 
-    private var attentionCount: Int { pods.filter { $0.status.needsAttention && $0.seriesId == nil }.count }
-    private var activeCount: Int { pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace && $0.seriesId == nil }.count }
-    private var runningCount: Int { pods.filter { $0.status.isActive && !$0.isWorkspace && $0.seriesId == nil }.count }
-    private var workspaceCount: Int { pods.filter { $0.isWorkspace && $0.seriesId == nil }.count }
-    private var completedCount: Int { pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace && $0.seriesId == nil }.count }
-    private var seriesPodCount: Int { Set(pods.compactMap { $0.seriesId }).count }
-    private var profiles: [String] { Array(Set(pods.map(\.profileName))).sorted() }
-
-    /// Distinct series, sorted by earliest-pod creation time so newer series
-    /// appear first.
-    private var seriesList: [(id: String, name: String, count: Int)] {
-        var byId: [String: (name: String, count: Int, earliest: Date)] = [:]
+    private var attentionCount: Int { pods.filter { $0.status.needsAttention }.count }
+    private var activeCount: Int { pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }.count }
+    private var runningCount: Int { pods.filter { $0.status.isActive && !$0.isWorkspace }.count }
+    private var workspaceCount: Int { pods.filter { $0.isWorkspace }.count }
+    private var completedCount: Int { pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }.count }
+    /// Count of series that have at least one non-terminal pod.
+    private var activeSeriesCount: Int {
+        let terminalStatuses: Set<PodStatus> = [.complete, .killed, .failed]
+        var activeSeries = Set<String>()
         for pod in pods {
-            guard let id = pod.seriesId else { continue }
-            let name = pod.seriesName ?? id
-            if var existing = byId[id] {
-                existing.count += 1
-                if pod.startedAt < existing.earliest { existing.earliest = pod.startedAt }
-                byId[id] = existing
-            } else {
-                byId[id] = (name: name, count: 1, earliest: pod.startedAt)
-            }
+            guard let sid = pod.seriesId else { continue }
+            if !terminalStatuses.contains(pod.status) { activeSeries.insert(sid) }
         }
-        return byId
-            .map { (id: $0.key, name: $0.value.name, count: $0.value.count, earliest: $0.value.earliest) }
-            .sorted { $0.earliest > $1.earliest }
-            .map { (id: $0.id, name: $0.name, count: $0.count) }
+        return activeSeries.count
     }
+    private var profiles: [String] { Array(Set(pods.map(\.profileName))).sorted() }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -105,37 +93,13 @@ public struct SidebarView: View {
                     sidebarRow(.active, icon: "bolt.circle.fill", color: .blue, badge: activeCount)
                     sidebarRow(.running, icon: "play.circle.fill", color: .secondary, badge: runningCount)
                     sidebarRow(.workspaces, icon: "terminal.fill", color: .secondary, badge: workspaceCount)
-                    sidebarRow(.seriesAll, icon: "rectangle.3.group.fill", color: .accentColor, badge: seriesPodCount)
+                    sidebarRow(.seriesAll, icon: "rectangle.3.group.fill", color: .accentColor, badge: activeSeriesCount)
                     sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
                     sidebarRow(.all, icon: "square.grid.2x2", color: .secondary, badge: pods.count)
                     sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
                     sidebarRow(.history, icon: "clock.arrow.circlepath", color: .secondary, badge: 0)
                     sidebarRow(.memory, icon: "brain", color: .purple, badge: pendingMemoryCount)
                     sidebarRow(.scheduledJobs, icon: "clock.badge.checkmark", color: catchupPendingCount > 0 ? .orange : .secondary, badge: catchupPendingCount > 0 ? catchupPendingCount : scheduledJobCount)
-                }
-
-                if !seriesList.isEmpty {
-                    Section("Series") {
-                        ForEach(seriesList, id: \.id) { entry in
-                            Label {
-                                HStack {
-                                    Text(entry.name).lineLimit(1)
-                                    Spacer()
-                                    Text("\(entry.count)")
-                                        .font(.system(.caption2).weight(.semibold))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 1)
-                                        .background(Color.accentColor.opacity(0.12))
-                                        .foregroundStyle(Color.accentColor)
-                                        .clipShape(Capsule())
-                                }
-                            } icon: {
-                                Image(systemName: "rectangle.3.group.fill")
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            .tag(SidebarItem.series(entry.id))
-                        }
-                    }
                 }
 
                 Section("Profiles") {

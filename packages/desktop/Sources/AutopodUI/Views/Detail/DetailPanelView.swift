@@ -115,7 +115,9 @@ public struct DetailPanelView: View {
                     SeriesPipelineView(
                         pods: seriesPods,
                         selectedPodId: pod.id,
-                        onSelectPod: { onSelectPod?($0) }
+                        onSelectPod: { onSelectPod?($0) },
+                        panelEnabled: true,
+                        actions: actions
                     )
                 }
 

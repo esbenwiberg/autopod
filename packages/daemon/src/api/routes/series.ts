@@ -277,7 +277,10 @@ export function seriesRoutes(
       }
 
       const briefs = parseBriefs(contents.files, contents.sharedContext);
-      const seriesName = body.path.split('/').filter(Boolean).pop() ?? body.branch;
+      const parts = body.path.split('/').filter(Boolean);
+      const lastPart = parts[parts.length - 1] ?? body.branch;
+      const parentPart = parts[parts.length - 2];
+      const seriesName = lastPart === 'briefs' && parentPart ? parentPart : lastPart;
 
       return { seriesName, briefs };
     } catch (err) {
