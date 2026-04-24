@@ -435,6 +435,14 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       return pod.linkedPodId;
     },
 
+    isAskHumanDisabled(podId: string): boolean {
+      try {
+        return podRepo.getOrThrow(podId).disableAskHuman;
+      } catch {
+        return false;
+      }
+    },
+
     async revalidateLinkedPod(
       linkedPodId: string,
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {

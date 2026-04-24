@@ -342,19 +342,25 @@ public struct CreateSeriesRequest: Codable, Sendable {
   public var profile: String
   public var baseBranch: String?
   public var prMode: String?   // "single" | "stacked" | "none"
+  public var autoApprove: Bool?
+  public var disableAskHuman: Bool?
 
   public init(
     seriesName: String,
     briefs: [ParsedBriefResponse],
     profile: String,
     baseBranch: String? = nil,
-    prMode: String? = nil
+    prMode: String? = nil,
+    autoApprove: Bool? = nil,
+    disableAskHuman: Bool? = nil
   ) {
     self.seriesName = seriesName
     self.briefs = briefs
     self.profile = profile
     self.baseBranch = baseBranch
     self.prMode = prMode
+    self.autoApprove = autoApprove
+    self.disableAskHuman = disableAskHuman
   }
 }
 

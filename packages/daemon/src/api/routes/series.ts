@@ -30,6 +30,10 @@ interface CreateSeriesRequest {
   profile: string;
   baseBranch?: string;
   prMode?: 'single' | 'stacked' | 'none';
+  /** Auto-approve each pod once it reaches validated — no human gate needed. */
+  autoApprove?: boolean;
+  /** Redirect agent ask_human calls to the reviewer AI model instead of blocking. */
+  disableAskHuman?: boolean;
 }
 
 interface PreviewSeriesFolderRequest {
@@ -58,7 +62,8 @@ export function seriesRoutes(
       return { error: 'seriesName, briefs, and profile are required' };
     }
 
-    const seriesId = generateId(12);
+    const rawSlug = body.seriesName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const seriesId = rawSlug || generateId(12);
     const prMode = body.prMode ?? 'single';
     const userId = request.user.oid;
 
@@ -123,6 +128,8 @@ export function seriesRoutes(
             // Stacked non-root pods wait for their parent PR to fully merge before
             // starting so they always build on top of merged (green) code.
             waitForMerge: prMode === 'stacked' && !isRoot,
+            autoApprove: body.autoApprove ?? false,
+            disableAskHuman: body.disableAskHuman ?? false,
           },
           userId,
         );

@@ -64,6 +64,10 @@ export interface NewPod {
   seriesName?: string | null;
   /** Names of sidecars to spawn for this pod (e.g. `['dagger']`). */
   requireSidecars?: string[] | null;
+  /** Auto-approve on validate. */
+  autoApprove?: boolean;
+  /** Redirect ask_human to AI. */
+  disableAskHuman?: boolean;
 }
 
 export interface PodFilters {
@@ -295,6 +299,8 @@ function rowToSession(row: Record<string, unknown>): Pod {
     seriesName: (row.series_name as string) ?? null,
     dependencyStartedAt: (row.dependency_started_at as string) ?? null,
     waitForMerge: Boolean(row.wait_for_merge),
+    autoApprove: Boolean(row.auto_approve),
+    disableAskHuman: Boolean(row.disable_ask_human),
     requireSidecars: row.require_sidecars
       ? (JSON.parse(row.require_sidecars as string) as string[])
       : [],
@@ -332,7 +338,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, reference_repo_pat, scheduled_job_id,
           depends_on_pod_id, depends_on_pod_ids, series_id, series_name, wait_for_merge,
-          require_sidecars
+          require_sidecars, auto_approve, disable_ask_human
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
@@ -340,7 +346,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId,
           @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @waitForMerge,
-          @requireSidecars
+          @requireSidecars, @autoApprove, @disableAskHuman
         )
       `).run({
         id: pod.id,
@@ -378,6 +384,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
           pod.requireSidecars && pod.requireSidecars.length > 0
             ? JSON.stringify(pod.requireSidecars)
             : null,
+        autoApprove: pod.autoApprove ? 1 : 0,
+        disableAskHuman: pod.disableAskHuman ? 1 : 0,
       });
     },
 

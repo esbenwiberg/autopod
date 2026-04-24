@@ -15,6 +15,12 @@ export async function askHuman(
   bridge: PodBridge,
   pendingRequests: PendingRequests,
 ): Promise<string> {
+  // Series unattended mode: redirect to AI instead of blocking for a human
+  if (bridge.isAskHumanDisabled(podId)) {
+    const aiResponse = await bridge.callReviewerModel(podId, input.question, input.context);
+    return `[Auto-routed to AI — ask_human is disabled for this series]\n\n${aiResponse}`;
+  }
+
   const escalationId = generateId();
   const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
 

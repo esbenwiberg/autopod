@@ -76,6 +76,9 @@ export interface PodBridge {
   /** Get the linked pod ID for a workspace (if any). */
   getLinkedPodId(podId: string): string | null;
 
+  /** Returns true if ask_human calls should be auto-resolved via the reviewer model (series unattended mode). */
+  isAskHumanDisabled(podId: string): boolean;
+
   /** List approved memories for the given scope. */
   listMemories(podId: string, scope: MemoryScope): MemoryEntry[];
 

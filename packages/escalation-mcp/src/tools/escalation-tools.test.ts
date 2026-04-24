@@ -23,6 +23,7 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
     getReviewerModel: vi.fn().mockReturnValue('claude-sonnet-4-6'),
     callReviewerModel: vi.fn().mockResolvedValue('The AI says: proceed'),
     incrementEscalationCount: vi.fn(),
+    isAskHumanDisabled: vi.fn().mockReturnValue(false),
     reportPlan: vi.fn(),
     reportProgress: vi.fn(),
     consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),

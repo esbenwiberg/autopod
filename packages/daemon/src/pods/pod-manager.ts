@@ -1571,6 +1571,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             seriesId: request.seriesId ?? null,
             seriesName: request.seriesName ?? null,
             requireSidecars: requireSidecars.length > 0 ? requireSidecars : null,
+            autoApprove: request.autoApprove ?? false,
+            disableAskHuman: request.disableAskHuman ?? false,
           });
           break;
         } catch (err: unknown) {
@@ -4292,6 +4294,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               logger.warn({ err, podId }, 'Failed to stop container post-validation');
             }
           }
+
+          if (validatedPod.autoApprove) {
+            logger.info({ podId }, 'Auto-approving pod after validation');
+            setImmediate(() => {
+              approveSession(podId).catch((err) =>
+                logger.warn({ err, podId }, 'Auto-approve failed'),
+              );
+            });
+          }
         } else if (force || attempt < s2.maxValidationAttempts) {
           emitActivityStatus(
             podId,
@@ -4596,6 +4607,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to stop container post-revalidation');
             }
+          }
+
+          if (revalidatedPod.autoApprove) {
+            logger.info({ podId }, 'Auto-approving pod after revalidation');
+            setImmediate(() => {
+              approveSession(podId).catch((err) =>
+                logger.warn({ err, podId }, 'Auto-approve failed after revalidation'),
+              );
+            });
           }
 
           return { newCommits: true, result: 'pass' };

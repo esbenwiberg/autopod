@@ -52,6 +52,8 @@ public struct CreateSeriesSheet: View {
     @State private var selectedProfile: String = ""
     @State private var baseBranch: String = ""
     @State private var prMode: String = "single"
+    @State private var autoApprove: Bool = false
+    @State private var disableAskHuman: Bool = false
     @State private var isPreviewing = false
     @State private var isSubmitting = false
     @State private var errorMessage: String?
@@ -71,6 +73,7 @@ public struct CreateSeriesSheet: View {
                         previewSection(preview)
                     }
                     prModePicker
+                    unattendedSection
 
                     if let err = errorMessage {
                         Text(err)
@@ -100,7 +103,7 @@ public struct CreateSeriesSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 640, height: 620)
+        .frame(width: 640, height: 700)
         .onAppear {
             if selectedProfile.isEmpty {
                 selectedProfile = initialProfile
@@ -388,6 +391,33 @@ public struct CreateSeriesSheet: View {
         }
     }
 
+    private var unattendedSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Unattended run")
+                .font(.subheadline.weight(.semibold))
+            Toggle(isOn: $autoApprove) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Auto-approve on validate")
+                        .font(.body)
+                    Text("Skip the human approval gate — pods merge automatically once validation passes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(isSubmitting)
+            Toggle(isOn: $disableAskHuman) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Replace ask_human with AI")
+                        .font(.body)
+                    Text("Agent questions are answered by the reviewer model instead of blocking for a human.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(isSubmitting)
+        }
+    }
+
     private var baseBranchField: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(briefSource == .onBranch ? "Base branch" : "Base branch (optional)")
@@ -418,7 +448,9 @@ public struct CreateSeriesSheet: View {
             briefs: preview.briefs,
             profile: selectedProfile,
             baseBranch: baseBranch.isEmpty ? nil : baseBranch,
-            prMode: prMode
+            prMode: prMode,
+            autoApprove: autoApprove ? true : nil,
+            disableAskHuman: disableAskHuman ? true : nil
         )
         if let id = await actions.createSeries(request) {
             onSeriesCreated?(id)

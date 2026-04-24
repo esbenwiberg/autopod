@@ -163,6 +163,10 @@ export interface Pod {
    * will commit a phantom mass-delete.
    */
   worktreeCompromised: boolean;
+  /** When true, the pod is automatically approved once it reaches `validated` — no human gate. */
+  autoApprove: boolean;
+  /** When true, agent `ask_human` calls are rerouted to the reviewer AI model instead of blocking. */
+  disableAskHuman: boolean;
 }
 
 export interface CreatePodRequest {
@@ -228,6 +232,10 @@ export interface CreatePodRequest {
    * sidecars additionally require `profile.trustedSource: true`.
    */
   requireSidecars?: string[];
+  /** Auto-approve the pod once it reaches `validated` — no human gate. Useful for overnight series. */
+  autoApprove?: boolean;
+  /** Redirect agent `ask_human` calls to the reviewer AI model instead of blocking. */
+  disableAskHuman?: boolean;
 }
 
 export interface PodSummary {
