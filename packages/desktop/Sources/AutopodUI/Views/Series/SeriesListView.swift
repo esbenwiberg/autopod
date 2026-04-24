@@ -5,12 +5,22 @@ import SwiftUI
 /// Defaults to active-only (series with ≥1 non-terminal pod); toggle reveals completed.
 public struct SeriesListView: View {
     public let pods: [Pod]
-    @Binding public var selectedPodId: String?
+    /// The currently selected pod ID — used only for highlighting nodes in the DAG.
+    public var selectedPodId: String?
+    /// Called when the user taps a pipeline node. The parent sets selectedSessionId
+    /// and can also override the detail tab (e.g. to .overview).
+    public var onSelectPod: (String) -> Void
     public var actions: PodActions
 
-    public init(pods: [Pod], selectedPodId: Binding<String?>, actions: PodActions) {
+    public init(
+        pods: [Pod],
+        selectedPodId: String? = nil,
+        onSelectPod: @escaping (String) -> Void = { _ in },
+        actions: PodActions
+    ) {
         self.pods = pods
-        self._selectedPodId = selectedPodId
+        self.selectedPodId = selectedPodId
+        self.onSelectPod = onSelectPod
         self.actions = actions
     }
 
@@ -124,10 +134,6 @@ public struct SeriesListView: View {
             Button {
                 if isExpanded { expandedIds.remove(group.id) }
                 else { expandedIds.insert(group.id) }
-                // Select the most relevant pod so the right pane lights up
-                let target = group.pods.first { $0.status.isActive || $0.status.needsAttention }
-                    ?? group.pods.first
-                if let id = target?.id { selectedPodId = id }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -195,7 +201,7 @@ public struct SeriesListView: View {
                 SeriesPipelineView(
                     pods: group.pods,
                     selectedPodId: selectedPodId,
-                    onSelectPod: { selectedPodId = $0 }
+                    onSelectPod: onSelectPod
                 )
                 .frame(minHeight: 160, maxHeight: 320)
             }

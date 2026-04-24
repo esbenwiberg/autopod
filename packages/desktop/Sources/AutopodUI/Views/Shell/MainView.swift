@@ -303,7 +303,11 @@ public struct MainView: View {
             } else if sidebarSelection == .seriesAll {
                 SeriesListView(
                     pods: pods,
-                    selectedPodId: $selectedSessionId,
+                    selectedPodId: selectedSessionId,
+                    onSelectPod: { podId in
+                        selectedSessionId = podId
+                        requestedDetailTab = .overview
+                    },
                     actions: wiredActions
                 )
                 .frame(minWidth: 500)
