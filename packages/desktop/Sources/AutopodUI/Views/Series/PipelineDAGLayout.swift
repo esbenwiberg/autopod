@@ -11,6 +11,10 @@ import CoreGraphics
 ///   3. Within each layer, sort by (first parent's layer index, node id) so
 ///      edges tend not to cross.
 ///
+/// When `Metrics.maxColumns` is set AND the graph is a purely linear chain,
+/// a snake layout is used instead: nodes wrap into rows like text, with
+/// alternating left-to-right / right-to-left direction per row.
+///
 /// Kept separate from SwiftUI so it can be unit-tested with plain `XCTest`.
 public enum PipelineDAGLayout {
 
@@ -57,6 +61,8 @@ public enum PipelineDAGLayout {
         public var verticalGap: CGFloat
         public var paddingX: CGFloat
         public var paddingY: CGFloat
+        /// When set, linear chains wrap into rows of this many columns (snake layout).
+        public var maxColumns: Int?
 
         public init(
             nodeWidth: CGFloat = 200,
@@ -64,7 +70,8 @@ public enum PipelineDAGLayout {
             horizontalGap: CGFloat = 80,
             verticalGap: CGFloat = 24,
             paddingX: CGFloat = 24,
-            paddingY: CGFloat = 24
+            paddingY: CGFloat = 24,
+            maxColumns: Int? = nil
         ) {
             self.nodeWidth = nodeWidth
             self.nodeHeight = nodeHeight
@@ -72,9 +79,13 @@ public enum PipelineDAGLayout {
             self.verticalGap = verticalGap
             self.paddingX = paddingX
             self.paddingY = paddingY
+            self.maxColumns = maxColumns
         }
 
         public static let `default` = Metrics()
+
+        /// Vertical gap between wrapped rows — same as horizontalGap for visual balance.
+        var verticalRowGap: CGFloat { horizontalGap }
     }
 
     /// Layout the DAG. Inputs may reference parents that aren't in `inputs` —
@@ -85,6 +96,12 @@ public enum PipelineDAGLayout {
         // Drop edges that reference unknown parents.
         let filtered = inputs.map { input in
             Input(id: input.id, parentIds: input.parentIds.filter { ids.contains($0) })
+        }
+
+        // Use snake layout for linear chains when maxColumns is set.
+        if let maxCols = metrics.maxColumns,
+           let sorted = sortedLinearChain(filtered) {
+            return layoutSnake(sorted, metrics: metrics, maxCols: maxCols)
         }
 
         let ranks = computeRanks(filtered)
@@ -156,6 +173,93 @@ public enum PipelineDAGLayout {
 
         return Result(nodes: nodes, edges: edges, width: totalWidth, height: totalHeight)
     }
+
+    // MARK: - Snake layout (linear chains only)
+
+    /// Returns nodes sorted root-first if the DAG is a purely linear chain
+    /// (each node has at most one parent and one child, with a single root).
+    /// Returns nil for branching DAGs, which use the Sugiyama layout instead.
+    static func sortedLinearChain(_ inputs: [Input]) -> [Input]? {
+        guard !inputs.isEmpty else { return [] }
+
+        // Each node must have at most one parent.
+        guard inputs.allSatisfy({ $0.parentIds.count <= 1 }) else { return nil }
+
+        // Each node must have at most one child.
+        var childCounts: [String: Int] = [:]
+        for input in inputs {
+            for parentId in input.parentIds {
+                childCounts[parentId, default: 0] += 1
+            }
+        }
+        guard inputs.allSatisfy({ childCounts[$0.id, default: 0] <= 1 }) else { return nil }
+
+        // Exactly one root.
+        let roots = inputs.filter { $0.parentIds.isEmpty }
+        guard roots.count == 1 else { return nil }
+
+        // Follow the chain from root to end.
+        let byId = Dictionary(uniqueKeysWithValues: inputs.map { ($0.id, $0) })
+        let childOf = Dictionary(
+            uniqueKeysWithValues: inputs.compactMap { input -> (String, String)? in
+                guard let parentId = input.parentIds.first else { return nil }
+                return (parentId, input.id)
+            }
+        )
+
+        var sorted: [Input] = []
+        var current: String? = roots[0].id
+        while let id = current {
+            guard let input = byId[id] else { break }
+            sorted.append(input)
+            current = childOf[id]
+        }
+
+        guard sorted.count == inputs.count else { return nil }
+        return sorted
+    }
+
+    /// Snake layout: folds a linear chain into rows of `maxCols`, alternating
+    /// direction each row (left→right, right→left, left→right, …).
+    private static func layoutSnake(_ sorted: [Input], metrics: Metrics, maxCols: Int) -> Result {
+        let numNodes = sorted.count
+        var nodes: [Node] = []
+
+        for (rank, input) in sorted.enumerated() {
+            let row = rank / maxCols
+            let col = rank % maxCols
+            let isOddRow = row % 2 != 0
+            let visualCol = isOddRow ? (maxCols - 1 - col) : col
+
+            let x = metrics.paddingX
+                + CGFloat(visualCol) * (metrics.nodeWidth + metrics.horizontalGap)
+                + metrics.nodeWidth / 2
+            let y = metrics.paddingY
+                + CGFloat(row) * (metrics.nodeHeight + metrics.verticalRowGap)
+                + metrics.nodeHeight / 2
+
+            nodes.append(Node(id: input.id, rank: rank, position: CGPoint(x: x, y: y)))
+        }
+
+        let edges: [Edge] = sorted.compactMap { input -> Edge? in
+            guard let parentId = input.parentIds.first else { return nil }
+            return Edge(from: parentId, to: input.id)
+        }
+
+        let numRows = (numNodes + maxCols - 1) / maxCols
+        let actualCols = min(maxCols, numNodes)
+
+        let width = metrics.paddingX * 2
+            + CGFloat(actualCols) * metrics.nodeWidth
+            + CGFloat(max(0, actualCols - 1)) * metrics.horizontalGap
+        let height = metrics.paddingY * 2
+            + CGFloat(numRows) * metrics.nodeHeight
+            + CGFloat(max(0, numRows - 1)) * metrics.verticalRowGap
+
+        return Result(nodes: nodes, edges: edges, width: width, height: height)
+    }
+
+    // MARK: - Rank computation
 
     /// Compute a rank per node as the length of the longest path from any root.
     /// Uses iterative relaxation — safe for up to a few hundred nodes, which is

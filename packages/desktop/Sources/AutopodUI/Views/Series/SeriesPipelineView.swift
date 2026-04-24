@@ -34,30 +34,8 @@ public struct SeriesPipelineView: View {
 
     @State private var panelPodId: String?
 
-    private let metrics = PipelineDAGLayout.Metrics.default
-
     private var podsById: [String: Pod] {
         Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
-    }
-
-    private var layoutResult: PipelineDAGLayout.Result {
-        let inputs = pods.map {
-            PipelineDAGLayout.Input(id: $0.id, parentIds: $0.dependsOnPodIds)
-        }
-        return PipelineDAGLayout.layout(inputs, metrics: metrics)
-    }
-
-    private var edgeStyles: [PipelineEdgeCanvas.EdgeStyle] {
-        let layout = layoutResult
-        return layout.edges.map { edge in
-            let parent = podsById[edge.from]
-            let child = podsById[edge.to]
-            return PipelineEdgeCanvas.EdgeStyle(
-                from: edge.from,
-                to: edge.to,
-                color: edgeColor(parent: parent, child: child)
-            )
-        }
     }
 
     private func edgeColor(parent: Pod?, child: Pod?) -> Color {
@@ -72,10 +50,6 @@ public struct SeriesPipelineView: View {
             return .green
         }
         return .gray.opacity(0.8)
-    }
-
-    private var nodePositions: [String: CGPoint] {
-        Dictionary(uniqueKeysWithValues: layoutResult.nodes.map { ($0.id, $0.position) })
     }
 
     public var body: some View {
@@ -102,36 +76,97 @@ public struct SeriesPipelineView: View {
         }
     }
 
-    private var dagCanvas: some View {
-        ScrollView([.horizontal, .vertical]) {
-            let layout = layoutResult
-            ZStack(alignment: .topLeading) {
-                PipelineEdgeCanvas(
-                    edges: edgeStyles,
-                    nodePositions: nodePositions,
-                    nodeSize: CGSize(width: metrics.nodeWidth, height: metrics.nodeHeight)
-                )
-                .frame(width: layout.width, height: layout.height)
+    private func fittingMetrics(for size: CGSize) -> PipelineDAGLayout.Metrics {
+        let base = PipelineDAGLayout.Metrics.default
+        guard size.width > 0, size.height > 0, !pods.isEmpty else { return base }
 
-                ForEach(layout.nodes, id: \.id) { node in
-                    if let pod = podsById[node.id] {
-                        PipelineNodeView(
-                            pod: pod,
-                            isSelected: panelEnabled ? panelPodId == pod.id : selectedPodId == pod.id,
-                            onTap: {
-                                if panelEnabled {
-                                    panelPodId = panelPodId == pod.id ? nil : pod.id
-                                } else {
-                                    onSelectPod(pod.id)
+        let inputs = pods.map { PipelineDAGLayout.Input(id: $0.id, parentIds: $0.dependsOnPodIds) }
+
+        // How many columns fit in the available width at default node size?
+        let startCols = max(1, Int(
+            (size.width - 2 * base.paddingX + base.horizontalGap)
+                / (base.nodeWidth + base.horizontalGap)
+        ))
+
+        // Find the fewest columns that keeps scale >= 0.7 (wider layout = fewer rows = shorter height).
+        // Iterates from startCols upward until the layout fits or we exhaust all columns (single row).
+        var chosenMetrics = base
+        chosenMetrics.maxColumns = startCols
+
+        let maxIter = max(startCols, inputs.count)
+        for cols in startCols...maxIter {
+            var m = base
+            m.maxColumns = cols
+            let lo = PipelineDAGLayout.layout(inputs, metrics: m)
+            guard lo.width > 0, lo.height > 0 else { continue }
+
+            let scale = min(size.height / lo.height, size.width / lo.width)
+            let s = min(max(scale, 0.7), 3.0)
+
+            chosenMetrics = PipelineDAGLayout.Metrics(
+                nodeWidth:     base.nodeWidth     * s,
+                nodeHeight:    base.nodeHeight    * s,
+                horizontalGap: base.horizontalGap * s,
+                verticalGap:   base.verticalGap   * s,
+                paddingX:      base.paddingX      * s,
+                paddingY:      base.paddingY      * s,
+                maxColumns:    cols
+            )
+
+            if scale >= 0.7 { break }
+        }
+
+        return chosenMetrics
+    }
+
+    private var dagCanvas: some View {
+        GeometryReader { geo in
+            let sm = fittingMetrics(for: geo.size)
+            let inputs = pods.map { PipelineDAGLayout.Input(id: $0.id, parentIds: $0.dependsOnPodIds) }
+            let layout = PipelineDAGLayout.layout(inputs, metrics: sm)
+            let positions = Dictionary(uniqueKeysWithValues: layout.nodes.map { ($0.id, $0.position) })
+            let edges = layout.edges.map { edge in
+                PipelineEdgeCanvas.EdgeStyle(
+                    from: edge.from, to: edge.to,
+                    color: edgeColor(parent: podsById[edge.from], child: podsById[edge.to])
+                )
+            }
+            let xOff = geo.size.width > layout.width ? (geo.size.width - layout.width) / 2 : 0
+            let yOff = geo.size.height > layout.height ? (geo.size.height - layout.height) / 2 : 0
+
+            ScrollView([.horizontal, .vertical]) {
+                ZStack(alignment: .topLeading) {
+                    PipelineEdgeCanvas(
+                        edges: edges,
+                        nodePositions: positions,
+                        nodeSize: CGSize(width: sm.nodeWidth, height: sm.nodeHeight)
+                    )
+                    .frame(width: layout.width, height: layout.height)
+                    .offset(x: xOff, y: yOff)
+
+                    ForEach(layout.nodes, id: \.id) { node in
+                        if let pod = podsById[node.id] {
+                            PipelineNodeView(
+                                pod: pod,
+                                isSelected: panelEnabled ? panelPodId == pod.id : selectedPodId == pod.id,
+                                onTap: {
+                                    if panelEnabled {
+                                        panelPodId = panelPodId == pod.id ? nil : pod.id
+                                    } else {
+                                        onSelectPod(pod.id)
+                                    }
                                 }
-                            }
-                        )
-                        .frame(width: metrics.nodeWidth, height: metrics.nodeHeight)
-                        .position(x: node.position.x, y: node.position.y)
+                            )
+                            .frame(width: sm.nodeWidth, height: sm.nodeHeight)
+                            .position(x: node.position.x + xOff, y: node.position.y + yOff)
+                        }
                     }
                 }
+                .frame(
+                    width: max(layout.width, geo.size.width),
+                    height: max(layout.height, geo.size.height)
+                )
             }
-            .frame(width: layoutResult.width, height: layoutResult.height)
         }
     }
 
