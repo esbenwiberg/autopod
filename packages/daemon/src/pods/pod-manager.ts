@@ -3907,6 +3907,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           buildCommand: profile.buildCommand ?? '',
           startCommand: profile.startCommand ?? '',
+          buildWorkDir: profile.buildWorkDir ?? undefined,
           healthPath: profile.healthPath ?? '/',
           healthTimeout: profile.healthTimeout ?? 120,
           smokePages: profile.smokePages,
@@ -4311,7 +4312,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Build correction message with structured feedback for the agent
           emitActivityStatus(podId, 'Sending validation feedback to agent…');
           const cm = containerManagerFactory.get(s2.executionTarget);
-          const correctionMessage = await buildCorrectionMessage(s2, profile, effectiveResult, cm);
+          let correctionMessage = await buildCorrectionMessage(s2, profile, effectiveResult, cm);
+
+          // Flush overrides that arrived during the await above (race window: pod was still
+          // `validating` so the override route couldn't queue a nudge for a running agent)
+          const raceOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
+          if (raceOverrides.length > 0) {
+            const merged = mergeOverrides(s2.validationOverrides ?? [], raceOverrides);
+            podRepo.update(podId, { validationOverrides: merged });
+            const overrideLines = raceOverrides.map((o) => {
+              const detail =
+                o.action === 'guidance' && o.guidance
+                  ? `Guidance: ${o.guidance}`
+                  : `Dismissed${o.reason ? `: ${o.reason}` : ''}`;
+              return `- "${o.description}" — ${detail}`;
+            });
+            correctionMessage += `\n\n### Overridden Findings (a human reviewed these — do NOT address them)\n${overrideLines.join('\n')}`;
+          }
+
           podRepo.update(podId, { lastCorrectionMessage: correctionMessage });
 
           // Transition back to running for retry
@@ -4458,6 +4476,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
               buildCommand: profile.buildCommand ?? '',
               startCommand: profile.startCommand ?? '',
+              buildWorkDir: profile.buildWorkDir ?? undefined,
               healthPath: profile.healthPath ?? '/',
               healthTimeout: profile.healthTimeout ?? 120,
               smokePages: profile.smokePages,
