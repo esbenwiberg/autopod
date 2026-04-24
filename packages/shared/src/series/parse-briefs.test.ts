@@ -8,6 +8,20 @@ describe('parseBriefFrontmatter', () => {
     expect(body).toBe('Just a body');
   });
 
+  it('tolerates invalid YAML escape sequences like \\| in double-quoted strings', () => {
+    const content = `---
+acceptance_criteria:
+  - type: cmd
+    test: "grep -rn 'AddTPGraphClient\\|ITPGraphClient' /workspace"
+    pass: match found
+    fail: no match
+---
+Body`;
+    const { frontmatter } = parseBriefFrontmatter(content);
+    expect(frontmatter.acceptance_criteria).toHaveLength(1);
+    expect(frontmatter.acceptance_criteria?.[0]?.pass).toBe('match found');
+  });
+
   it('parses YAML frontmatter and trims body', () => {
     const content = '---\ntitle: My Brief\ndepends_on: [other]\n---\n\nBody text\n';
     const { frontmatter, body } = parseBriefFrontmatter(content);

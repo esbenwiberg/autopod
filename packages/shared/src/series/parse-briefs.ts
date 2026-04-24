@@ -1,4 +1,4 @@
-import { parse as parseYaml } from 'yaml';
+import { parseDocument as parseYamlDocument } from 'yaml';
 import { parseAcList } from '../parse-ac-list.js';
 import type { AcDefinition } from '../types/ac.js';
 
@@ -58,7 +58,16 @@ export function parseBriefFrontmatter(content: string): {
 } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: content.trim() };
-  const frontmatter = (parseYaml(match[1] ?? '') ?? {}) as BriefFrontmatter;
+  let frontmatter: BriefFrontmatter;
+  try {
+    // parseDocument collects errors without throwing — brief authors commonly use \| in grep
+    // commands inside double-quoted YAML strings which strict parse rejects. Best-effort is fine.
+    frontmatter = (parseYamlDocument(match[1] ?? '').toJS() ?? {}) as BriefFrontmatter;
+  } catch (err) {
+    throw new Error(
+      `YAML frontmatter parse error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   return { frontmatter, body: (match[2] ?? '').trim() };
 }
 

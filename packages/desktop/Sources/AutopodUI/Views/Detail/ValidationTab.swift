@@ -215,32 +215,35 @@ public struct ValidationTab: View {
       case .ac:      acDetail
       case .review:  reviewDetail
       }
-    } else if progress == nil && checks == nil {
-      // Empty state — no validation run yet
-      VStack(spacing: 10) {
-        Image(systemName: "checkmark.seal")
-          .font(.system(size: 32))
-          .foregroundStyle(.tertiary)
-        Text("No validation results yet")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-        if pod.status == .validating {
-          ProgressView("Validating…").font(.caption)
-        }
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .padding(.top, 40)
     } else {
-      // AC list always visible at top (regardless of selected phase) for pods with criteria
-      if let criteria = pod.acceptanceCriteria, !criteria.isEmpty {
+      let criteria = pod.acceptanceCriteria ?? []
+      // AC list always visible when pod has criteria, regardless of validation state
+      if !criteria.isEmpty {
         acListSection(criteria: criteria, acChecks: progress?.acChecks ?? checks?.acChecks)
       }
-      // Prompt to click a chip
-      Text("Select a phase above to see details")
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-        .frame(maxWidth: .infinity)
-        .padding(.top, 12)
+      if progress == nil && checks == nil {
+        // Empty state — no validation run yet
+        VStack(spacing: 10) {
+          Image(systemName: "checkmark.seal")
+            .font(.system(size: 32))
+            .foregroundStyle(.tertiary)
+          Text("No validation results yet")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+          if pod.status == .validating {
+            ProgressView("Validating…").font(.caption)
+          }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, criteria.isEmpty ? 40 : 16)
+      } else {
+        // Prompt to click a chip
+        Text("Select a phase above to see details")
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+          .frame(maxWidth: .infinity)
+          .padding(.top, 12)
+      }
     }
   }
 

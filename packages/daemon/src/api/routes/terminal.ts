@@ -30,7 +30,7 @@ export function terminalRoutes(
 
   app.get(
     '/pods/:podId/terminal',
-    { websocket: true, config: { auth: false } },
+    { websocket: true, config: { auth: false, rateLimit: false } },
     (socket: WebSocket, request) => {
       const { podId } = request.params as { podId: string };
       const url = new URL(request.url, 'http://localhost');
