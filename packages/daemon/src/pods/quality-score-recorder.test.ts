@@ -109,8 +109,8 @@ describe('QualityScoreRecorder', () => {
     expect(persisted?.outputTokens).toBe(300);
     expect(persisted?.costUsd).toBe(0.05);
     // 3 reads / 1 edit = 3.0 ratio, no blind edits, no interrupts, completed
-    // reading 30 * clamp(3/5) = 18, blind 25, tells 20, interrupts 15, complete 10 = 88
-    expect(persisted?.score).toBe(88);
+    // reading 30*clamp(3/5)=18, blind 20, tells 20, interrupts 15, complete 10, churn 10 = 93
+    expect(persisted?.score).toBe(93);
   });
 
   it('records killed pods with the completion bonus missing', () => {
@@ -138,9 +138,9 @@ describe('QualityScoreRecorder', () => {
 
     const persisted = ctx.qualityScoreRepo.get(POD_ID);
     expect(persisted?.finalStatus).toBe('killed');
-    // killed pod, zero edits → reading 30 + blind 25 + tells 20 + interrupts 0 (one kill) + complete 0
-    // interrupts: 1 kill → 15 * (1 - 1/3) = 10
-    expect(persisted?.score).toBe(85);
+    // zero edits → reading 30 (short-circuit); 1 kill → userInterrupts=1 → interruptScore=15*(1-1/3)=10
+    // 30 + 20 (blind) + 20 (tells) + 10 (interrupts) + 0 (killed) + 10 (churn) = 90
+    expect(persisted?.score).toBe(90);
   });
 
   it('unsubscribes on stop()', () => {

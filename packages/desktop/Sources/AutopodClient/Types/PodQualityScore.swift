@@ -10,7 +10,10 @@ public struct PodQualityScore: Codable, Sendable, Identifiable {
   public let readEditRatio: Double
   public let editsWithoutPriorRead: Int
   public let userInterrupts: Int
+  public let editChurnCount: Int
   public let tellsCount: Int
+  public let prFixAttempts: Int
+  public let validationPassed: Bool?
   public let inputTokens: Int
   public let outputTokens: Int
   public let costUsd: Double

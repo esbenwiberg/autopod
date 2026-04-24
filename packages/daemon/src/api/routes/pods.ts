@@ -13,6 +13,7 @@ import type { PendingOverrideRepository } from '../../pods/pending-override-repo
 import type { PodRepository } from '../../pods/pod-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
+import type { ValidationRepository } from '../../pods/validation-repository.js';
 import { generateValidationReport } from '../../validation/report-generator.js';
 
 export function podRoutes(
@@ -24,6 +25,7 @@ export function podRoutes(
   podRepo?: PodRepository,
   escalationRepo?: EscalationRepository,
   qualityScoreRepo?: QualityScoreRepository,
+  validationRepo?: ValidationRepository,
 ): void {
   // POST /pods — create a new pod
   app.post('/pods', async (request, reply) => {
@@ -128,7 +130,19 @@ export function podRoutes(
       eventRepo,
       escalationRepo,
       qualityScoreRepo,
+      validationRepo,
     });
+  });
+
+  // GET /pods/quality/trends — daily average quality scores (trailing N days)
+  app.get('/pods/quality/trends', async (request, reply) => {
+    if (!qualityScoreRepo) {
+      reply.status(503);
+      return { error: 'Quality scores unavailable — repository not wired' };
+    }
+    const query = request.query as { days?: string };
+    const days = query.days ? Number.parseInt(query.days, 10) : 30;
+    return qualityScoreRepo.getTrends(days);
   });
 
   // GET /pods/scores — persisted quality-score leaderboard / history

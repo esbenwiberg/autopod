@@ -99,6 +99,37 @@ struct SummaryTab: View {
                 )
             }
 
+            HStack(alignment: .top, spacing: 24) {
+                qualityMetric(
+                    label: "Churn",
+                    value: "\(s.editChurnCount)",
+                    hint: "Files edited 3+ times — indicates thrashing."
+                )
+                qualityMetric(
+                    label: "Tells",
+                    value: "\(s.tellsCount)",
+                    hint: "Hedging / give-up phrases detected in agent output."
+                )
+                qualityMetric(
+                    label: "PR Fixes",
+                    value: "\(s.prFixAttempts)",
+                    hint: "Number of PR fix cycles."
+                )
+                if let passed = s.validationPassed {
+                    qualityMetric(
+                        label: "Validation",
+                        value: passed ? "✓" : "✗",
+                        hint: passed ? "Smoke tests passed." : "Smoke tests failed."
+                    )
+                } else {
+                    qualityMetric(
+                        label: "Validation",
+                        value: "—",
+                        hint: "No validation ran for this pod."
+                    )
+                }
+            }
+
             if let model = s.model, !model.isEmpty {
                 Text("Model: \(model)")
                     .font(.caption2)

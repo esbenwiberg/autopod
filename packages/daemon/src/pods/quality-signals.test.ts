@@ -1,6 +1,8 @@
 import type {
   AgentActivityEvent,
+  AgentCompleteEvent,
   AgentFileChangeEvent,
+  AgentTaskSummaryEvent,
   AgentToolUseEvent,
   EscalationRequest,
 } from '@autopod/shared';
@@ -193,5 +195,79 @@ describe('computeQualitySignals', () => {
     const signals = computeQualitySignals(POD_ID, deps);
 
     expect(signals.tokens).toEqual({ input: 1000, output: 500, costUsd: 0.12 });
+  });
+
+  it('detects edit churn when the same file is modified 3+ times', () => {
+    podRepo.insert(basePod());
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify')); // 3rd modify → churn
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.editChurnCount).toBe(1);
+  });
+
+  it('does not count churn below the threshold', () => {
+    podRepo.insert(basePod());
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify')); // only 2 — no churn
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.editChurnCount).toBe(0);
+  });
+
+  it('detects tell patterns in task summary text', () => {
+    podRepo.insert(basePod());
+    const summary: AgentTaskSummaryEvent = {
+      type: 'task_summary',
+      timestamp: new Date().toISOString(),
+      actualSummary: 'Unfortunately I was unable to complete the migration.',
+      deviations: [],
+    };
+    const activity: AgentActivityEvent = {
+      type: 'pod.agent_activity',
+      timestamp: summary.timestamp,
+      podId: POD_ID,
+      event: summary,
+    };
+    eventRepo.insert(activity);
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.tellsCount).toBeGreaterThan(0);
+  });
+
+  it('detects tell patterns in complete event result text', () => {
+    podRepo.insert(basePod());
+    const complete: AgentCompleteEvent = {
+      type: 'complete',
+      timestamp: new Date().toISOString(),
+      result: 'I apologize — there is no viable path forward with the current config.',
+    };
+    const activity: AgentActivityEvent = {
+      type: 'pod.agent_activity',
+      timestamp: complete.timestamp,
+      podId: POD_ID,
+      event: complete,
+    };
+    eventRepo.insert(activity);
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    // "I apologize" and "no viable path forward" both match — counts distinct patterns
+    expect(signals.tellsCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('exposes prFixAttempts from the pod row', () => {
+    podRepo.insert(basePod());
+    podRepo.update(POD_ID, { prFixAttempts: 2 });
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.prFixAttempts).toBe(2);
   });
 });

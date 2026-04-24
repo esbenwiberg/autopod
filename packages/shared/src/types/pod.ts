@@ -262,6 +262,14 @@ export interface QualitySignals {
   editsWithoutPriorRead: number;
   /** `ask_human` escalations plus 1 if the pod ended in `killed`. */
   userInterrupts: number;
+  /** Distinct files with 3+ modify events — indicates thrashing. */
+  editChurnCount: number;
+  /** Stop-phrase/hedging/give-up patterns detected in agent output text. */
+  tellsCount: number;
+  /** Number of PR fix cycles the pod went through. */
+  prFixAttempts: number;
+  /** Whether smoke validation passed (null = no validation ran). */
+  validationPassed: boolean | null;
   tokens: { input: number; output: number; costUsd: number };
   grade: QualityGrade;
   /**
@@ -285,7 +293,10 @@ export interface PodQualityScore {
   readEditRatio: number;
   editsWithoutPriorRead: number;
   userInterrupts: number;
+  editChurnCount: number;
   tellsCount: number;
+  prFixAttempts: number;
+  validationPassed: boolean | null;
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
@@ -295,4 +306,16 @@ export interface PodQualityScore {
   finalStatus: 'complete' | 'killed';
   completedAt: string;
   computedAt: string;
+}
+
+/**
+ * One data point from `GET /pods/quality/trends` — daily average score
+ * per runtime/model over the trailing N days.
+ */
+export interface QualityTrend {
+  day: string;
+  avgScore: number;
+  podCount: number;
+  runtime: string;
+  model: string | null;
 }

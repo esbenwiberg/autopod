@@ -10,6 +10,7 @@ export type {
   QualityGrade,
   QualitySignals,
   PodQualityScore,
+  QualityTrend,
 } from './types/pod.js';
 
 export type {

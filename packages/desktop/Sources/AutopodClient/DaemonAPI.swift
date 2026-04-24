@@ -187,6 +187,11 @@ public actor DaemonAPI {
     return try await request("GET", "/pods/scores", query: query)
   }
 
+  /// GET /pods/quality/trends — daily average quality scores per runtime/model.
+  public func listQualityTrends(days: Int = 30) async throws -> [QualityTrend] {
+    try await request("GET", "/pods/quality/trends", query: ["days": "\(days)"])
+  }
+
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
     try await request("GET", "/pods/\(id)/diff")
   }

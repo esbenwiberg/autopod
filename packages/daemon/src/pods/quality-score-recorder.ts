@@ -5,6 +5,7 @@ import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
+import type { ValidationRepository } from './validation-repository.js';
 import { computeScore } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
 
@@ -20,6 +21,8 @@ export interface QualityScoreRecorderDeps {
   escalationRepo: EscalationRepository;
   qualityScoreRepo: QualityScoreRepository;
   logger: Logger;
+  /** Optional — when wired, validation outcome is included in the score. */
+  validationRepo?: ValidationRepository;
 }
 
 /**
@@ -28,7 +31,8 @@ export interface QualityScoreRecorderDeps {
  * block the pod lifecycle. Idempotent via `INSERT … ON CONFLICT` in the repo.
  */
 export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): QualityScoreRecorder {
-  const { eventBus, podRepo, eventRepo, escalationRepo, qualityScoreRepo, logger } = deps;
+  const { eventBus, podRepo, eventRepo, escalationRepo, qualityScoreRepo, validationRepo, logger } =
+    deps;
   const unsubscribers: Array<() => void> = [];
 
   function recordFor(event: PodCompletedEvent): void {
@@ -38,12 +42,9 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
         podRepo,
         eventRepo,
         escalationRepo,
+        validationRepo,
       });
-      const score = computeScore({
-        signals,
-        finalStatus: event.finalStatus,
-        tellsCount: 0, // wired up in Phase 2
-      });
+      const score = computeScore({ signals, finalStatus: event.finalStatus });
 
       qualityScoreRepo.insert({
         podId: event.podId,
@@ -53,7 +54,10 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
         readEditRatio: signals.readEditRatio,
         editsWithoutPriorRead: signals.editsWithoutPriorRead,
         userInterrupts: signals.userInterrupts,
-        tellsCount: 0,
+        editChurnCount: signals.editChurnCount,
+        tellsCount: signals.tellsCount,
+        prFixAttempts: signals.prFixAttempts,
+        validationPassed: signals.validationPassed,
         inputTokens: pod.inputTokens,
         outputTokens: pod.outputTokens,
         costUsd: pod.costUsd,
@@ -74,6 +78,8 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
           grade: signals.grade,
           runtime: pod.runtime,
           model: pod.model,
+          tellsCount: signals.tellsCount,
+          editChurnCount: signals.editChurnCount,
         },
         'Recorded pod quality score',
       );

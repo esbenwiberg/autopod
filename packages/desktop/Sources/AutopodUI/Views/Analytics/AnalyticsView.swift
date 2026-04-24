@@ -125,15 +125,40 @@ public struct AnalyticsView: View {
                 let total = group.reduce(0) { $0 + $1.score }
                 let avgScore = Double(total) / Double(group.count)
                 let avgCost = group.reduce(0.0) { $0 + $1.costUsd } / Double(group.count)
+                // Daily averages for the sparkline — last 30 days, sorted ascending.
+                let dayAverages = Self.dailyAverages(for: group)
                 return RuntimeModelStat(
                     runtime: runtime,
                     model: model,
                     count: group.count,
                     avgScore: avgScore,
-                    avgCost: avgCost
+                    avgCost: avgCost,
+                    dailyAverages: dayAverages
                 )
             }
             .sorted { $0.count > $1.count }
+    }
+
+    /// Groups scores by calendar day and returns sorted daily averages (ascending).
+    private static func dailyAverages(for group: [PodQualityScore]) -> [Double] {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        let byDay = Dictionary(grouping: group.filter {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let d = iso.date(from: $0.completedAt) ?? ISO8601DateFormatter().date(from: $0.completedAt) ?? Date.distantPast
+            return d >= cutoff
+        }) { score -> String in
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let d = iso.date(from: score.completedAt) ?? ISO8601DateFormatter().date(from: score.completedAt) ?? Date.distantPast
+            return fmt.string(from: d)
+        }
+        return byDay.keys.sorted().compactMap { day -> Double? in
+            guard let group = byDay[day], !group.isEmpty else { return nil }
+            return Double(group.reduce(0) { $0 + $1.score }) / Double(group.count)
+        }
     }
 
     private var sortedScores: [PodQualityScore] {
@@ -214,6 +239,11 @@ public struct AnalyticsView: View {
                 Text(String(format: "avg $%.2f", stat.avgCost))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
+            }
+            if stat.dailyAverages.count >= 2 {
+                SparklineView(values: stat.dailyAverages, color: scoreColor(Int(stat.avgScore.rounded())))
+                    .frame(height: 24)
+                    .padding(.top, 2)
             }
         }
         .padding(10)
@@ -571,7 +601,52 @@ struct RuntimeModelStat: Identifiable {
     let count: Int
     let avgScore: Double
     let avgCost: Double
+    let dailyAverages: [Double]
     var id: String { "\(runtime)/\(model)" }
+}
+
+/// Mini line chart for the runtime/model quality score over the last 30 days.
+private struct SparklineView: View {
+    let values: [Double]
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let min = values.min() ?? 0
+            let max = values.max() ?? 1
+            let range = max - min > 0 ? max - min : 1
+            let w = geo.size.width
+            let h = geo.size.height
+            let step = w / CGFloat(values.count - 1)
+
+            ZStack(alignment: .bottomLeading) {
+                // Fill
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: h))
+                    for (i, v) in values.enumerated() {
+                        let x = CGFloat(i) * step
+                        let y = h - CGFloat((v - min) / range) * h
+                        if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                        else { path.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                    path.addLine(to: CGPoint(x: w, y: h))
+                    path.closeSubpath()
+                }
+                .fill(color.opacity(0.12))
+
+                // Line
+                Path { path in
+                    for (i, v) in values.enumerated() {
+                        let x = CGFloat(i) * step
+                        let y = h - CGFloat((v - min) / range) * h
+                        if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                        else { path.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                }
+                .stroke(color.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            }
+        }
+    }
 }
 
 // MARK: - Preview

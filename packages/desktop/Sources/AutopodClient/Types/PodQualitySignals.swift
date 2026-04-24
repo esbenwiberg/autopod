@@ -9,6 +9,14 @@ public struct PodQualitySignals: Codable, Sendable {
   public let readEditRatio: Double
   public let editsWithoutPriorRead: Int
   public let userInterrupts: Int
+  /// Distinct files with 3+ modify events — indicates thrashing.
+  public let editChurnCount: Int
+  /// Stop-phrase/hedging patterns detected in agent output.
+  public let tellsCount: Int
+  /// Number of PR fix cycles.
+  public let prFixAttempts: Int
+  /// Whether smoke validation passed (nil = no validation ran).
+  public let validationPassed: Bool?
   public let tokens: PodQualityTokens
   public let grade: String  // "green" | "yellow" | "red"
   /// Persisted numeric score (0..100); nil for pods that haven't reached terminal state.

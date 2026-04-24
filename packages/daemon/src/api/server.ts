@@ -25,6 +25,7 @@ import type {
   PodRepository,
   QualityScoreRepository,
 } from '../pods/index.js';
+import type { ValidationRepository } from '../pods/validation-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
@@ -59,6 +60,7 @@ export interface ServerDependencies {
   podRepo?: PodRepository;
   escalationRepo?: EscalationRepository;
   qualityScoreRepo?: QualityScoreRepository;
+  validationRepo?: ValidationRepository;
   podBridge: PodBridge;
   pendingRequestsByPod: Map<string, PendingRequests>;
   containerManagerFactory?: ContainerManagerFactory;
@@ -130,6 +132,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.podRepo,
     deps.escalationRepo,
     deps.qualityScoreRepo,
+    deps.validationRepo,
   );
   if (deps.worktreeManager) {
     seriesRoutes(app, deps.podManager, deps.profileStore, deps.worktreeManager);

@@ -454,6 +454,7 @@ const qualityScoreRecorder = createQualityScoreRecorder({
   eventRepo,
   escalationRepo,
   qualityScoreRepo,
+  validationRepo,
   logger,
 });
 qualityScoreRecorder.start();
@@ -488,6 +489,7 @@ const app = await createServer({
   podRepo,
   escalationRepo,
   qualityScoreRepo,
+  validationRepo,
   podBridge,
   pendingRequestsByPod,
   containerManagerFactory,
