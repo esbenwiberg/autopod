@@ -370,7 +370,7 @@ export function generateSystemInstructions(
   );
   lines.push(
     '5. **Capture knowledge for future agents**: Before finishing, call `memory_suggest` ' +
-      'if — and only if — you learned something a colleague starting cold on this repo would thank you for. ' +
+      'if — and only if — you learned something worth preserving. ' +
       "Skip it if you didn't. **Filler is worse than nothing** — an approval queue full of trivia gets ignored.",
   );
   lines.push('');
@@ -405,8 +405,13 @@ export function generateSystemInstructions(
   lines.push('');
   lines.push(
     '   **Format**: Compact (≤400 chars content). One concept per entry. Prose, not code blocks — ' +
-      'include only the non-obvious line(s). Scope: `profile` for repo-specific, `global` for universal, ' +
-      '`pod` for working notes. Prefer updating an existing memory over creating a near-duplicate.',
+      'include only the non-obvious line(s).\n' +
+      '   **Scope** — ask yourself "If a future pod is assigned a completely different task on this profile, does this memory still help them?"\n' +
+      '   - `profile` — yes, always true regardless of task (structural invariants, codebase-wide gotchas, auth patterns, architectural constraints)\n' +
+      '   - `pod` — no, only relevant to this task or this brief series (path explored, decision made for this PR, gotcha specific to these files)\n' +
+      '   - `global` — useful across all repos/profiles (universal tool quirks, cross-cutting patterns)\n' +
+      '   When in doubt, prefer `pod` — a narrow profile memory is noise; a well-targeted pod memory is gold.' +
+      ' Prefer updating an existing memory over creating a near-duplicate.',
   );
   lines.push(
     '6. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
