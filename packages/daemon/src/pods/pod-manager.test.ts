@@ -560,7 +560,7 @@ describe('PodManager', () => {
       await expect(manager.killSession(pod.id)).rejects.toThrow(AutopodError);
     });
 
-    it('cascade-fails queued dependents when parent is killed', async () => {
+    it('keeps queued dependents in queued state when parent is killed', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
 
@@ -580,9 +580,11 @@ describe('PodManager', () => {
       await manager.killSession(parent.id);
 
       expect(manager.getSession(parent.id).status).toBe('killed');
+      // Dependents must stay queued — they never ran and should remain schedulable
+      // when the parent is eventually re-queued via rework.
       const childResult = manager.getSession(child.id);
-      expect(childResult.status).toBe('failed');
-      expect(childResult.mergeBlockReason).toContain(parent.id);
+      expect(childResult.status).toBe('queued');
+      expect(childResult.mergeBlockReason).toBeNull();
     });
   });
 

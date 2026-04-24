@@ -92,6 +92,7 @@ import {
 import { resolveSections } from './section-resolver.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
+  canFail,
   canKill,
   canNudge,
   canPause,
@@ -1318,14 +1319,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       previousStatus,
       newStatus: to,
     });
-    // Only cascade on explicit kill — a 'failed' parent can still be recovered
-    // (re-queued by local-reconciler, or retried after a daemon restart), and
-    // there is no code path that un-fails cascade-failed children when the
-    // parent later succeeds. Cascading on 'failed' therefore strands the
-    // series. 'killed' is explicit user intent and is not recovered.
-    if (to === 'killed') {
-      failDependents(pod.id);
-    }
     return podRepo.getOrThrow(pod.id);
   }
 
@@ -1341,7 +1334,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function maybeTriggerDependents(completedPod: Pod): void {
     const dependents = podRepo.getPodsDependingOn(completedPod.id);
     for (const dep of dependents) {
-      if (dep.status !== 'queued') continue;
+      // Also heal pods that were cascade-failed when this parent was previously killed.
+      // The mergeBlockReason marker identifies exactly those pods so we don't disturb
+      // genuinely-failed dependents that have their own failure reason.
+      const cascadeFailed =
+        dep.status === 'failed' &&
+        dep.mergeBlockReason === `dependency pod ${completedPod.id} failed`;
+      if (dep.status !== 'queued' && !cascadeFailed) continue;
 
       const parentIds =
         dep.dependsOnPodIds.length > 0
@@ -1411,40 +1410,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           : completedPod.branch;
       }
 
+      if (cascadeFailed) {
+        podRepo.update(dep.id, { status: 'queued', completedAt: null, mergeBlockReason: null });
+        eventBus.emit({
+          type: 'pod.status_changed',
+          timestamp: new Date().toISOString(),
+          podId: dep.id,
+          previousStatus: 'failed',
+          newStatus: 'queued',
+        });
+        logger.info(
+          { podId: dep.id, parentId: completedPod.id },
+          'Series: healed cascade-failed dependent — parent completed',
+        );
+      }
       podRepo.update(dep.id, {
         baseBranch,
         dependencyStartedAt: new Date().toISOString(),
       });
       enqueueSession(dep.id);
       logger.info({ podId: dep.id, parentIds, baseBranch }, 'Series: dependent pod enqueued');
-    }
-  }
-
-  // Uses podRepo.update() directly instead of transition() to avoid a circular call:
-  // transition() calls failDependents() when a pod reaches 'killed', so calling transition()
-  // here would recurse. Direct update is safe because queued pods have no in-progress work.
-  function failDependents(failedPodId: string): void {
-    const dependents = podRepo.getPodsDependingOn(failedPodId);
-    for (const dep of dependents) {
-      if (dep.status !== 'queued') continue;
-      podRepo.update(dep.id, {
-        status: 'failed',
-        completedAt: new Date().toISOString(),
-        mergeBlockReason: `dependency pod ${failedPodId} failed`,
-      });
-      eventBus.emit({
-        type: 'pod.status_changed',
-        timestamp: new Date().toISOString(),
-        podId: dep.id,
-        previousStatus: 'queued',
-        newStatus: 'failed',
-      });
-      logger.info(
-        { podId: dep.id, failedPodId },
-        'Series: dependent pod failed due to dependency failure',
-      );
-      // Cascade further down the chain
-      failDependents(dep.id);
     }
   }
 
@@ -3217,6 +3202,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             previewUrl: pod.previewUrl,
             screenshots: [],
             taskSummary: pod.taskSummary ?? undefined,
+            seriesDescription: pod.seriesDescription ?? undefined,
+            seriesName: pod.seriesName ?? undefined,
           });
           podRepo.update(podId, { prUrl: newPrUrl });
           emitActivityStatus(podId, `PR created: ${newPrUrl}`);
@@ -4278,6 +4265,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   previewUrl: s2.previewUrl,
                   screenshots: screenshotRefs,
                   taskSummary: s3.taskSummary ?? undefined,
+                  seriesDescription: s2.seriesDescription ?? undefined,
+                  seriesName: s2.seriesName ?? undefined,
                 });
                 if (prUrl) {
                   emitActivityStatus(podId, `PR created: ${prUrl}`);
@@ -5375,6 +5364,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           previewUrl: pod.previewUrl,
           screenshots: [],
           taskSummary: pod.taskSummary ?? undefined,
+          seriesDescription: pod.seriesDescription ?? undefined,
+          seriesName: pod.seriesName ?? undefined,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
