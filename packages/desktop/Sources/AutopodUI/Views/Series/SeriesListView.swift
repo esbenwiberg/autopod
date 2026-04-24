@@ -124,6 +124,10 @@ public struct SeriesListView: View {
             Button {
                 if isExpanded { expandedIds.remove(group.id) }
                 else { expandedIds.insert(group.id) }
+                // Select the most relevant pod so the right pane lights up
+                let target = group.pods.first { $0.status.isActive || $0.status.needsAttention }
+                    ?? group.pods.first
+                if let id = target?.id { selectedPodId = id }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -191,8 +195,7 @@ public struct SeriesListView: View {
                 SeriesPipelineView(
                     pods: group.pods,
                     selectedPodId: selectedPodId,
-                    onSelectPod: { selectedPodId = $0 },
-                    panelEnabled: true
+                    onSelectPod: { selectedPodId = $0 }
                 )
                 .frame(minHeight: 160, maxHeight: 320)
             }
