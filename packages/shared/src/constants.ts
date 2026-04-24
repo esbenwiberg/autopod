@@ -35,10 +35,10 @@ export const AUTOPOD_INSTRUCTIONS_PATH = '/home/autopod/.autopod/system-instruct
 
 export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   queued: ['provisioning', 'killing'],
-  provisioning: ['running', 'killing'],
+  provisioning: ['running', 'killing', 'failed'],
   running: ['awaiting_input', 'validating', 'paused', 'handoff', 'killing', 'complete', 'failed'],
-  awaiting_input: ['running', 'killing'],
-  paused: ['running', 'killing'],
+  awaiting_input: ['running', 'killing', 'failed'],
+  paused: ['running', 'killing', 'failed'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
   validated: ['approved', 'running', 'validating', 'killing', 'queued'],
   failed: ['running', 'validating', 'validated', 'killing', 'queued', 'merge_pending'],

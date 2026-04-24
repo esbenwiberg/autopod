@@ -501,7 +501,7 @@ describe('Pod Lifecycle E2E', () => {
   });
 
   describe('Error recovery', () => {
-    it('kills pod when container spawn fails', async () => {
+    it('fails pod when container spawn fails', async () => {
       const ctx = createTestContext();
       (ctx.containerManager.spawn as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Docker daemon not running'),
@@ -513,10 +513,10 @@ describe('Pod Lifecycle E2E', () => {
       await manager.processPod(pod.id);
 
       const result = manager.getSession(pod.id);
-      expect(result.status).toBe('killed');
+      expect(result.status).toBe('failed');
     });
 
-    it('kills pod when worktree creation fails', async () => {
+    it('fails pod when worktree creation fails', async () => {
       const ctx = createTestContext();
       (ctx.worktreeManager.create as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Git clone failed'),
@@ -528,7 +528,7 @@ describe('Pod Lifecycle E2E', () => {
       await manager.processPod(pod.id);
 
       const result = manager.getSession(pod.id);
-      expect(result.status).toBe('killed');
+      expect(result.status).toBe('failed');
     });
 
     it('transitions to review_required when validation engine throws (treated as failed validation)', async () => {

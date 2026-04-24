@@ -28,6 +28,10 @@ export function canKill(status: PodStatus): boolean {
   return VALID_STATUS_TRANSITIONS[status].includes('killing');
 }
 
+export function canFail(status: PodStatus): boolean {
+  return VALID_STATUS_TRANSITIONS[status].includes('failed');
+}
+
 /**
  * Can this pod be promoted to a different pod config (e.g.
  * interactive→auto via `ap complete --pr`)? Only interactive pods that

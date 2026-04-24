@@ -938,7 +938,7 @@ describe('PodManager', () => {
       expect(ctx.containerManager.writeFile).toHaveBeenCalled();
     });
 
-    it('handles errors by killing the pod', async () => {
+    it('fails the pod on unexpected errors (not killed — killed is reserved for user intent)', async () => {
       const ctx = createTestContext();
       (ctx.containerManager.spawn as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Docker failed'),
@@ -952,9 +952,8 @@ describe('PodManager', () => {
 
       await manager.processPod(pod.id);
 
-      // Should have been killed due to error during provisioning
       const result = manager.getSession(pod.id);
-      expect(result.status).toBe('killed');
+      expect(result.status).toBe('failed');
     });
 
     it('writes .npmrc to container when profile has npm registry', async () => {
