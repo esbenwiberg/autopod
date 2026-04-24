@@ -146,14 +146,28 @@ export function createLocalValidationEngine(
       let stopMonitor: (() => void) | undefined;
 
       try {
-        // ── Phase 1: Build ──────────────────────────────────────────────
+        // ── Phase 1: Lint ──────────────────────────────────────────────
+        checkAbort();
+        callbacks?.onPhaseStarted?.('lint');
+        if (config.lintCommand) onProgress?.('Running lint…');
+        const lintResult = await runLint(containerManager, config, log);
+        callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
+
+        // ── Phase 2: SAST ──────────────────────────────────────────────
+        checkAbort();
+        callbacks?.onPhaseStarted?.('sast');
+        if (config.sastCommand) onProgress?.('Running SAST…');
+        const sastResult = await runSast(containerManager, config, log);
+        callbacks?.onPhaseCompleted?.('sast', sastResult.status, sastResult);
+
+        // ── Phase 3: Build ─────────────────────────────────────────────
         checkAbort();
         callbacks?.onPhaseStarted?.('build');
         if (config.buildCommand) onProgress?.('Running build…');
         const buildResult = await runBuild(containerManager, config, log);
         callbacks?.onPhaseCompleted?.('build', buildResult.status, buildResult);
 
-        // ── Phase 2: Test ───────────────────────────────────────────────
+        // ── Phase 4: Test ──────────────────────────────────────────────
         checkAbort();
         callbacks?.onPhaseStarted?.('test');
         if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
@@ -163,27 +177,7 @@ export function createLocalValidationEngine(
             : { status: 'skip' as const, duration: 0 };
         callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
-        // ── Phase 3: Lint ───────────────────────────────────────────────
-        checkAbort();
-        callbacks?.onPhaseStarted?.('lint');
-        if (buildResult.status === 'pass' && config.lintCommand) onProgress?.('Running lint…');
-        const lintResult =
-          buildResult.status === 'pass'
-            ? await runLint(containerManager, config, log)
-            : { status: 'skip' as const, output: '', duration: 0 };
-        callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
-
-        // ── Phase 4: SAST ───────────────────────────────────────────────
-        checkAbort();
-        callbacks?.onPhaseStarted?.('sast');
-        if (buildResult.status === 'pass' && config.sastCommand) onProgress?.('Running SAST…');
-        const sastResult =
-          buildResult.status === 'pass'
-            ? await runSast(containerManager, config, log)
-            : { status: 'skip' as const, output: '', duration: 0 };
-        callbacks?.onPhaseCompleted?.('sast', sastResult.status, sastResult);
-
-        // ── Phase 5: Health check ───────────────────────────────────────
+        // ── Phase 5: Health check ──────────────────────────────────────
         checkAbort();
         callbacks?.onPhaseStarted?.('health');
         if (buildResult.status === 'pass' && config.startCommand)
@@ -212,7 +206,7 @@ export function createLocalValidationEngine(
           });
         }
 
-        // ── Phase 4: Page validation ─────────────────────────────────────
+        // ── Phase 6: Page validation ───────────────────────────────────
         checkAbort();
         callbacks?.onPhaseStarted?.('pages');
         if (healthResult.status === 'pass' && config.smokePages.length > 0)
@@ -229,7 +223,7 @@ export function createLocalValidationEngine(
               : 'fail';
         callbacks?.onPhaseCompleted?.('pages', pagesStatus, pages);
 
-        // ── Phase 5: AC Validation ────────────────────────────────────────
+        // ── Phase 7: AC Validation ────────────────────────────────────
         checkAbort();
         callbacks?.onPhaseStarted?.('ac');
         if (healthResult.status === 'pass' && config.acceptanceCriteria?.length)
@@ -253,7 +247,7 @@ export function createLocalValidationEngine(
             .filter((r) => r.validationType === 'none')
             .map((r) => r.criterion) ?? [];
 
-        // ── Phase 6: AI Task Review ─────────────────────────────────────
+        // ── Phase 8: AI Task Review ────────────────────────────────────
         checkAbort();
         callbacks?.onPhaseStarted?.('review');
         onProgress?.('Running AI task review…');
@@ -283,7 +277,7 @@ export function createLocalValidationEngine(
           taskReview === null ? 'skip' : taskReview.status === 'fail' ? 'fail' : 'pass';
         callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
-        // ── Phase 7: Overall result ─────────────────────────────────────
+        // ── Phase 9: Overall result ────────────────────────────────────
         const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
         const smokeStatus =
           buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass

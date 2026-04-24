@@ -64,10 +64,10 @@ public struct RawSystemEvent: Codable, Sendable {
 // MARK: - ValidationPhase
 
 public enum ValidationPhase: String, Sendable, CaseIterable {
-  case build
-  case test
   case lint
   case sast
+  case build
+  case test
   case health
   case pages
   case ac
