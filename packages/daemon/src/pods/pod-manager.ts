@@ -361,6 +361,9 @@ export interface PodManager {
   /** Apply queued overrides to the last validation result without re-running validation.
    *  If overrides make the result pass, transitions review_required → validated. */
   applyOverridesInstant(podId: string): Promise<{ advanced: boolean }>;
+  /** Bypass validation and transition the pod directly to validated.
+   *  Valid from failed or review_required. The pod then awaits normal approval. */
+  forceApprove(podId: string, reason?: string): Promise<void>;
   extendPrAttempts(podId: string, additionalAttempts: number): Promise<void>;
   pauseSession(podId: string): Promise<void>;
   nudgeSession(podId: string, message: string): void;
@@ -378,6 +381,7 @@ export interface PodManager {
   /** Create a linked workspace pod on the same branch as a failed worker pod for human fixes. */
   fixManually(podId: string, userId: string): Pod;
   createHistoryWorkspace(profileName: string, userId: string, historyQuery: HistoryQuery): Pod;
+  createMemoryWorkspace(profileName: string, userId: string): Pod;
   deleteSession(podId: string): Promise<void>;
   startPreview(podId: string): Promise<{ previewUrl: string }>;
   stopPreview(podId: string): Promise<void>;
@@ -1617,6 +1621,43 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Encode query params into the task field with a [history] prefix
       const queryJson = JSON.stringify(historyQuery);
       const task = `[history] History analysis workspace | ${queryJson}`;
+      return this.createSession(
+        {
+          profileName,
+          task,
+          outputMode: 'workspace',
+          skipValidation: true,
+        },
+        userId,
+      );
+    },
+
+    createMemoryWorkspace(profileName: string, userId: string): Pod {
+      const globalMems = deps.memoryRepo?.listByScope('global', true) ?? [];
+      const profileMems = deps.memoryRepo?.list('profile', profileName, true) ?? [];
+      const all = [...globalMems, ...profileMems];
+
+      const formatted = all
+        .map(
+          (m) =>
+            `### ${m.path}\n${m.rationale ? `Why: ${m.rationale}\n\n` : ''}${m.content}`,
+        )
+        .join('\n\n---\n\n');
+
+      const task = [
+        `[memory-analysis] Review ${all.length} memories and draft a fix plan`,
+        '',
+        'You have been given a snapshot of memories from this project.',
+        'Your job:',
+        '1. Identify gotchas, bugs, and missing config that can be fixed in the repo',
+        '2. For each fixable item, draft the specific change or PR needed',
+        '3. Prioritize and optionally implement the most critical fixes',
+        '',
+        '## Memories',
+        '',
+        formatted,
+      ].join('\n');
+
       return this.createSession(
         {
           profileName,
@@ -3609,10 +3650,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // mergeBranch auto-commits any remaining uncommitted changes before pushing.
             // If sync-back failed, the host worktree may be missing files the index still
             // references — tighten the deletion guard so a ghost mass-delete cannot ship.
+            const rawTask = pod.task?.trim() ?? '';
+            const commitMessage =
+              rawTask.length > 0
+                ? rawTask.length > 72
+                  ? `${rawTask.slice(0, 69)}...`
+                  : rawTask
+                : 'chore: workspace session complete';
             await worktreeManager.mergeBranch({
               worktreePath: pod.worktreePath,
               targetBranch: pod.branch ?? 'HEAD',
               maxDeletions: workspaceSyncOk ? 100 : 0,
+              commitMessage,
             });
             logger.info({ podId, branch: pod.branch }, 'Workspace branch pushed to origin');
             // Safe to clean up — work is in origin
@@ -4986,6 +5035,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       emitActivityStatus(podId, 'Some findings remain — pod still needs review');
       return { advanced: false };
+    },
+
+    async forceApprove(podId: string, reason?: string): Promise<void> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.status !== 'failed' && pod.status !== 'review_required') {
+        throw new AutopodError(
+          `Cannot force-approve pod ${podId} in status ${pod.status} — only failed or review_required pods`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      const note = reason
+        ? `[FORCE APPROVED] ${reason}`
+        : '[FORCE APPROVED] Human overrode validation — no further agent run needed';
+      podRepo.update(podId, { lastCorrectionMessage: note });
+      transition(pod, 'validated');
+      emitActivityStatus(podId, 'Force approved — validation bypassed by human');
+      logger.info({ podId, reason }, 'Pod force-approved, transitioning to validated');
     },
 
     async extendPrAttempts(podId: string, additionalAttempts: number): Promise<void> {

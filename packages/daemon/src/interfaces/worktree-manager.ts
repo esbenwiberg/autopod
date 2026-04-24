@@ -19,6 +19,8 @@ export interface MergeBranchConfig {
    * failed or wasn't attempted) so a ghost mass-deletion does not get committed over real work.
    */
   maxDeletions?: number;
+  /** Override the default auto-commit message. Defaults to a generic chore message. */
+  commitMessage?: string;
 }
 
 export interface DiffStats {

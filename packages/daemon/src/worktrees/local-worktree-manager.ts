@@ -408,7 +408,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     // cannot be committed over the agent's real work.
     await this.commitPendingChanges(
       worktreePath,
-      'chore: auto-commit uncommitted changes before merge',
+      config.commitMessage ?? 'chore: auto-commit uncommitted changes before merge',
       { maxDeletions: config.maxDeletions ?? 100 },
     );
 
