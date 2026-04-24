@@ -1619,6 +1619,23 @@ async function executeAcChecks(
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const execTimeout = instructions.length * 45_000 + 30_000;
 
+  // Guard against the race between health-check pass and Playwright execution.
+  // Dev servers sometimes respond to the health poll once and then crash during
+  // startup; a brief retry window catches momentary jitter without masking real failures.
+  if (useHost && config.startCommand) {
+    const reachable = await pollUntilReachable(config.previewUrl, {
+      attempts: 4,
+      intervalMs: 1_500,
+    });
+    if (!reachable) {
+      return instructions.map((inst) => ({
+        criterion: inst.criterion,
+        passed: false,
+        reasoning: `App not reachable at ${config.previewUrl} — ensure the start command keeps the server running`,
+      }));
+    }
+  }
+
   async function generateScript(mode: 'host' | 'container'): Promise<string> {
     const baseUrl =
       mode === 'host' ? config.previewUrl : (config.containerBaseUrl ?? config.previewUrl);

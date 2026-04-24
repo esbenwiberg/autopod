@@ -41,6 +41,21 @@ const GIT_ENV: Record<string, string> = {
   GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
 } as Record<string, string>;
 
+/**
+ * Remove diff sections that only change file mode (chmod) with no content hunks.
+ * Git records these as "old mode / new mode" lines without any +/- content.
+ * They are environment artifacts inside containers and add noise to the AI reviewer.
+ */
+function stripModeOnlyChanges(diff: string): string {
+  const sections = diff.split(/(?=^diff --git )/m);
+  return sections
+    .filter((section) => {
+      if (!section.startsWith('diff --git ')) return true;
+      return /^@@/m.test(section) || /^[+-](?![+-][+-])/m.test(section);
+    })
+    .join('');
+}
+
 const DIFF_EXCLUDE_PATHSPECS: readonly string[] = [
   ':(exclude)pnpm-lock.yaml',
   ':(exclude)package-lock.json',
@@ -380,11 +395,11 @@ export class LocalWorktreeManager implements WorktreeManager {
           );
           const mbCombined =
             uncommittedDiff.length > 0 ? `${mbCommitted}\n${uncommittedDiff}` : mbCommitted;
-          return truncateDiffAtFileBoundary(mbCombined, maxLength);
+          return truncateDiffAtFileBoundary(stripModeOnlyChanges(mbCombined), maxLength);
         }
       }
 
-      return truncateDiffAtFileBoundary(combined, maxLength);
+      return truncateDiffAtFileBoundary(stripModeOnlyChanges(combined), maxLength);
     } catch (err) {
       this.logger.warn({ err: sanitizeGitError(err), worktreePath }, 'getDiff: git diff failed');
       return '';
