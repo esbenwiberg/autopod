@@ -297,19 +297,20 @@ public struct TestPipelineConfig: Sendable, Equatable {
 
 public enum StackTemplate: String, CaseIterable, Sendable {
     case node22, node22Pw = "node22-pw", dotnet9, dotnet10, dotnet10Go = "dotnet10-go",
-         python312, go124, go124Pw = "go124-pw", custom
+         python312, pythonNode = "python-node", go124, go124Pw = "go124-pw", custom
 
     public var label: String {
         switch self {
-        case .node22:     "Node 22"
-        case .node22Pw:   "Node 22 + Playwright"
-        case .dotnet9:    ".NET 9"
-        case .dotnet10:   ".NET 10"
-        case .dotnet10Go: ".NET 10 + Go"
-        case .python312:  "Python 3.12"
-        case .go124:      "Go 1.24"
-        case .go124Pw:    "Go 1.24 + Playwright"
-        case .custom:     "Custom"
+        case .node22:       "Node 22"
+        case .node22Pw:     "Node 22 + Playwright"
+        case .dotnet9:      ".NET 9"
+        case .dotnet10:     ".NET 10"
+        case .dotnet10Go:   ".NET 10 + Go"
+        case .python312:    "Python 3.12"
+        case .pythonNode:   "Python + Node"
+        case .go124:        "Go 1.24"
+        case .go124Pw:      "Go 1.24 + Playwright"
+        case .custom:       "Custom"
         }
     }
 }

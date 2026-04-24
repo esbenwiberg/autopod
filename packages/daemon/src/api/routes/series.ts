@@ -62,7 +62,11 @@ export function seriesRoutes(
       return { error: 'seriesName, briefs, and profile are required' };
     }
 
-    const rawSlug = body.seriesName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const rawSlug = body.seriesName
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
     const seriesId = rawSlug || generateId(12);
     const prMode = body.prMode ?? 'single';
     const userId = request.user.oid;

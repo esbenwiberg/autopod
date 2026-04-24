@@ -49,6 +49,10 @@ export default defineConfig({
   test: {
     globals: true,
     passWithNoTests: true,
-    exclude: ['**/node_modules/**', ...(shouldSkipDbTests() ? dbTestPatterns : [])],
+    exclude: [
+      '**/node_modules/**',
+      '**/.autopod-data/**',
+      ...(shouldSkipDbTests() ? dbTestPatterns : []),
+    ],
   },
 });

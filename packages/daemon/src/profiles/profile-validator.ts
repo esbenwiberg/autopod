@@ -13,6 +13,7 @@ const VALID_TEMPLATES: StackTemplate[] = [
   'dotnet10',
   'dotnet10-go',
   'python312',
+  'python-node',
   'go124',
   'go124-pw',
   'custom',

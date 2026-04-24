@@ -57,6 +57,7 @@ describe('getBaseImage', () => {
     ['python312', 'autopod-python312:latest'],
     ['go124', 'autopod-go124:latest'],
     ['go124-pw', 'autopod-go124-pw:latest'],
+    ['python-node', 'autopod-python-node:latest'],
     ['custom', 'autopod-node22:latest'],
   ] as const)('maps %s → %s', (template, expected) => {
     expect(getBaseImage(template)).toBe(expected);
@@ -118,6 +119,48 @@ describe('getInstallCommand', () => {
   it('detects pip', () => {
     expect(getInstallCommand(mockProfile({ buildCommand: 'pip install -e .' }))).toBe(
       'pip install -r requirements.txt',
+    );
+  });
+
+  it('python-node: pip only when no node pkg manager', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({
+          template: 'python-node',
+          buildCommand: 'pip install -e . && python manage.py collectstatic',
+        }),
+      ),
+    ).toBe('pip install -r requirements.txt');
+  });
+
+  it('python-node: pip + npm ci when build uses npm', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({ template: 'python-node', buildCommand: 'pip install -e . && npm run build' }),
+      ),
+    ).toBe('pip install -r requirements.txt && npm ci');
+  });
+
+  it('python-node: pip + pnpm when build uses pnpm', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({
+          template: 'python-node',
+          buildCommand: 'pip install -e . && pnpm run build',
+        }),
+      ),
+    ).toBe(
+      'pip install -r requirements.txt && corepack enable pnpm && pnpm install --frozen-lockfile',
+    );
+  });
+
+  it('python-node: pip + yarn when build uses yarn', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({ template: 'python-node', buildCommand: 'pip install -e . && yarn build' }),
+      ),
+    ).toBe(
+      'pip install -r requirements.txt && corepack enable yarn && yarn install --frozen-lockfile',
     );
   });
 
@@ -216,6 +259,18 @@ describe('generateDockerfile', () => {
     });
     expect(df).toContain('FROM autopod-python312:latest');
     expect(df).toContain('pip install -r requirements.txt');
+  });
+
+  it('generates Dockerfile for python-node project with both installs', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        template: 'python-node',
+        buildCommand: 'pip install -e . && npm run build',
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('FROM autopod-python-node:latest');
+    expect(df).toContain('pip install -r requirements.txt && npm ci');
   });
 
   it('includes PAT-based git clone for private repos', () => {

@@ -12,6 +12,7 @@ const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
   dotnet10: 'autopod-dotnet10:latest',
   'dotnet10-go': 'autopod-dotnet10-go:latest',
   python312: 'autopod-python312:latest',
+  'python-node': 'autopod-python-node:latest',
   go124: 'autopod-go124:latest',
   'go124-pw': 'autopod-go124-pw:latest',
   custom: 'autopod-node22:latest',
@@ -151,6 +152,21 @@ export function getInstallCommand(profile: Profile): string {
     profile.template === 'dotnet9' ||
     profile.template === 'dotnet10' ||
     profile.template === 'dotnet10-go';
+
+  const isPythonNode = profile.template === 'python-node';
+  if (isPythonNode) {
+    const pip = 'pip install -r requirements.txt';
+    if (cmd.includes('pnpm')) {
+      return `${pip} && corepack enable pnpm && pnpm install --frozen-lockfile`;
+    }
+    if (cmd.includes('yarn')) {
+      return `${pip} && corepack enable yarn && yarn install --frozen-lockfile`;
+    }
+    if (cmd.includes('npm')) {
+      return `${pip} && npm ci`;
+    }
+    return pip;
+  }
 
   const isGo = profile.template === 'go124' || profile.template === 'go124-pw';
   if (isGo) {

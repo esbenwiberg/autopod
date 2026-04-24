@@ -1,0 +1,54 @@
+FROM python:3.12-slim
+
+# System deps + Node.js 22
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    gnupg \
+    locales \
+    iptables ipset dnsmasq \
+    sqlite3 \
+    tmux \
+    build-essential \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+
+# Glow — terminal markdown viewer from Charm
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list \
+    && apt-get update && apt-get install -y --no-install-recommends glow \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8
+ENV PYTHONUNBUFFERED=1
+
+# uv — fast Python package manager
+RUN pip install --no-cache-dir uv
+
+# Create non-root user
+RUN groupadd --gid 1000 autopod && \
+    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod
+
+# Global Node tools
+RUN npm install -g pnpm@9
+
+# Agent CLIs
+RUN npm install -g @anthropic-ai/claude-code @github/copilot
+
+# Working directory
+WORKDIR /workspace
+RUN chown autopod:autopod /workspace
+
+USER autopod
+
+ENV TURBO_CACHE_DIR=/tmp/.turbo
+ENV npm_config_nodedir=/usr/local
+RUN echo "nodedir=/usr/local" >> /home/autopod/.npmrc
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
