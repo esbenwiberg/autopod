@@ -28,7 +28,7 @@ ENV LANG=en_US.UTF-8
 ENV PYTHONUNBUFFERED=1
 
 # uv — fast Python package manager
-RUN pip install --no-cache-dir uv
+RUN pip install --no-cache-dir uv pytest
 
 # Create non-root user
 RUN groupadd --gid 1000 autopod && \

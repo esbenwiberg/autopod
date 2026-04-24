@@ -7,6 +7,8 @@ export interface ValidationResult {
   timestamp: string;
   smoke: SmokeResult;
   test?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
+  lint?: LintResult;
+  sast?: SastResult;
   acValidation?: AcValidationResult | null;
   taskReview: TaskReviewResult | null;
   /** Human-readable reason when taskReview is null (e.g. "No code changes detected") */
@@ -24,6 +26,18 @@ export interface SmokeResult {
 
 export interface BuildResult {
   status: 'pass' | 'fail';
+  output: string;
+  duration: number;
+}
+
+export interface LintResult {
+  status: 'pass' | 'fail' | 'skip';
+  output: string;
+  duration: number;
+}
+
+export interface SastResult {
+  status: 'pass' | 'fail' | 'skip';
   output: string;
   duration: number;
 }

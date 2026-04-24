@@ -105,6 +105,14 @@ export interface Profile {
   buildTimeout: number | null;
   /** Test phase timeout in seconds. Default 600 (10 min). */
   testTimeout: number | null;
+  /** Optional lint command to run after tests (e.g. 'biome lint .') */
+  lintCommand?: string | null;
+  /** Lint phase timeout in seconds. Default 120 (2 min). */
+  lintTimeout?: number | null;
+  /** Optional SAST command to run after lint (e.g. 'semgrep --config=p/security-audit .') */
+  sastCommand?: string | null;
+  /** SAST phase timeout in seconds. Default 300 (5 min). */
+  sastTimeout?: number | null;
   /** PR provider — determines which service creates/merges pull requests */
   prProvider: 'github' | 'ado' | null;
   /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */

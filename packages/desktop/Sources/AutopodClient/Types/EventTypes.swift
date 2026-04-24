@@ -31,6 +31,8 @@ public struct RawSystemEvent: Codable, Sendable {
   // Phase-specific results (only one is set per validation_phase_completed event):
   public let buildResult: BuildResultResponse?
   public let testResult: TestResultResponse?
+  public let lintResult: LintResultResponse?
+  public let sastResult: SastResultResponse?
   public let healthResult: HealthResultResponse?
   public let pageResults: [PageResultResponse]?
   public let acResult: AcValidationResponse?
@@ -64,6 +66,8 @@ public struct RawSystemEvent: Codable, Sendable {
 public enum ValidationPhase: String, Sendable, CaseIterable {
   case build
   case test
+  case lint
+  case sast
   case health
   case pages
   case ac
@@ -73,6 +77,8 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
     switch self {
     case .build: return "Build"
     case .test: return "Tests"
+    case .lint: return "Lint"
+    case .sast: return "SAST"
     case .health: return "Health"
     case .pages: return "Pages"
     case .ac: return "AC"
@@ -89,6 +95,8 @@ public struct ValidationPhaseResult: Sendable {
   public let phaseStatus: String  // "pass" | "fail" | "skip"
   public let buildResult: BuildResultResponse?
   public let testResult: TestResultResponse?
+  public let lintResult: LintResultResponse?
+  public let sastResult: SastResultResponse?
   public let healthResult: HealthResultResponse?
   public let pageResults: [PageResultResponse]?
   public let acResult: AcValidationResponse?
@@ -98,6 +106,8 @@ public struct ValidationPhaseResult: Sendable {
     phaseStatus = raw.phaseStatus ?? "skip"
     buildResult = raw.buildResult
     testResult = raw.testResult
+    lintResult = raw.lintResult
+    sastResult = raw.sastResult
     healthResult = raw.healthResult
     pageResults = raw.pageResults
     acResult = raw.acResult

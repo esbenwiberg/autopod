@@ -96,6 +96,28 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('');
   }
 
+  // Lint failures
+  if (result.lint?.status === 'fail') {
+    lines.push('### Lint Failures');
+    if (result.lint.output) {
+      lines.push('```');
+      lines.push(result.lint.output.slice(0, 10_000));
+      lines.push('```');
+    }
+    lines.push('');
+  }
+
+  // SAST failures
+  if (result.sast?.status === 'fail') {
+    lines.push('### Security Scan Failures');
+    if (result.sast.output) {
+      lines.push('```');
+      lines.push(result.sast.output.slice(0, 10_000));
+      lines.push('```');
+    }
+    lines.push('');
+  }
+
   // Page-level failures
   const failedPages = result.smoke.pages.filter((p) => p.status === 'fail');
   if (failedPages.length > 0) {

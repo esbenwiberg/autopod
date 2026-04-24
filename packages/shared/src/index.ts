@@ -110,6 +110,8 @@ export type {
   ValidationResult,
   SmokeResult,
   BuildResult,
+  LintResult,
+  SastResult,
   HealthResult,
   PageResult,
   AssertionResult,

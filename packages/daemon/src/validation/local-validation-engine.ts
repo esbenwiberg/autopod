@@ -163,7 +163,27 @@ export function createLocalValidationEngine(
             : { status: 'skip' as const, duration: 0 };
         callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
-        // ── Phase 3: Health check ───────────────────────────────────────
+        // ── Phase 3: Lint ───────────────────────────────────────────────
+        checkAbort();
+        callbacks?.onPhaseStarted?.('lint');
+        if (buildResult.status === 'pass' && config.lintCommand) onProgress?.('Running lint…');
+        const lintResult =
+          buildResult.status === 'pass'
+            ? await runLint(containerManager, config, log)
+            : { status: 'skip' as const, output: '', duration: 0 };
+        callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
+
+        // ── Phase 4: SAST ───────────────────────────────────────────────
+        checkAbort();
+        callbacks?.onPhaseStarted?.('sast');
+        if (buildResult.status === 'pass' && config.sastCommand) onProgress?.('Running SAST…');
+        const sastResult =
+          buildResult.status === 'pass'
+            ? await runSast(containerManager, config, log)
+            : { status: 'skip' as const, output: '', duration: 0 };
+        callbacks?.onPhaseCompleted?.('sast', sastResult.status, sastResult);
+
+        // ── Phase 5: Health check ───────────────────────────────────────
         checkAbort();
         callbacks?.onPhaseStarted?.('health');
         if (buildResult.status === 'pass' && config.startCommand)
@@ -279,9 +299,13 @@ export function createLocalValidationEngine(
           (reviewSkipReason.includes('timed out') || reviewSkipReason.includes('timed_out'));
         const isReviewBlocker =
           reviewSkipReason?.startsWith('Review failed:') && !isReviewInfraFailure;
+        const lintFailed = lintResult.status === 'fail';
+        const sastFailed = sastResult.status === 'fail';
         const overall =
           smokeStatus === 'pass' &&
           !testFailed &&
+          !lintFailed &&
+          !sastFailed &&
           !acFailed &&
           ((taskReview === null && !isReviewBlocker) || taskReview?.status === 'pass')
             ? ('pass' as const)
@@ -300,6 +324,8 @@ export function createLocalValidationEngine(
             pages,
           },
           test: testResult,
+          lint: lintResult,
+          sast: sastResult,
           acValidation,
           taskReview,
           reviewSkipReason,
@@ -515,6 +541,102 @@ async function runTests(
     stdout: result.stdout.slice(0, 50_000),
     stderr: result.stderr.slice(0, 50_000),
   };
+}
+
+// ── Lint phase ──────────────────────────────────────────────────────────────
+
+async function runLint(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+) {
+  if (!config.lintCommand) {
+    log?.info('no lint command configured, skipping lint');
+    return { status: 'skip' as const, output: '', duration: 0 };
+  }
+
+  const lintStart = Date.now();
+  log?.info({ lintCommand: config.lintCommand }, 'running lint');
+
+  const cwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
+  let result: { stdout: string; stderr: string; exitCode: number };
+  try {
+    result = await containerManager.execInContainer(
+      config.containerId,
+      ['sh', '-c', config.lintCommand],
+      { cwd, timeout: config.lintTimeout ?? 120_000 },
+    );
+  } catch (err) {
+    const duration = Date.now() - lintStart;
+    const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
+    const message = err instanceof Error ? err.message : String(err);
+    log?.warn({ duration }, `lint timed out: ${message}`);
+    return {
+      status: 'fail' as const,
+      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
+      duration,
+    };
+  }
+
+  const duration = Date.now() - lintStart;
+  const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
+
+  if (status === 'fail') {
+    log?.warn({ exitCode: result.exitCode, duration }, 'lint failed');
+  } else {
+    log?.info({ duration }, 'lint passed');
+  }
+
+  const combined = [result.stdout, result.stderr].filter(Boolean).join('\n');
+  return { status, output: combined.slice(0, 50_000), duration };
+}
+
+// ── SAST phase ──────────────────────────────────────────────────────────────
+
+async function runSast(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+) {
+  if (!config.sastCommand) {
+    log?.info('no SAST command configured, skipping SAST');
+    return { status: 'skip' as const, output: '', duration: 0 };
+  }
+
+  const sastStart = Date.now();
+  log?.info({ sastCommand: config.sastCommand }, 'running SAST');
+
+  const cwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
+  let result: { stdout: string; stderr: string; exitCode: number };
+  try {
+    result = await containerManager.execInContainer(
+      config.containerId,
+      ['sh', '-c', config.sastCommand],
+      { cwd, timeout: config.sastTimeout ?? 300_000 },
+    );
+  } catch (err) {
+    const duration = Date.now() - sastStart;
+    const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
+    const message = err instanceof Error ? err.message : String(err);
+    log?.warn({ duration }, `SAST timed out: ${message}`);
+    return {
+      status: 'fail' as const,
+      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
+      duration,
+    };
+  }
+
+  const duration = Date.now() - sastStart;
+  const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
+
+  if (status === 'fail') {
+    log?.warn({ exitCode: result.exitCode, duration }, 'SAST failed');
+  } else {
+    log?.info({ duration }, 'SAST passed');
+  }
+
+  const combined = [result.stdout, result.stderr].filter(Boolean).join('\n');
+  return { status, output: combined.slice(0, 50_000), duration };
 }
 
 // ── Health check phase ──────────────────────────────────────────────────────

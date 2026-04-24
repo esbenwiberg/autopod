@@ -28,6 +28,8 @@ public struct ValidationResponse: Codable, Sendable {
   public let timestamp: String
   public let smoke: SmokeResultResponse
   public let test: TestResultResponse?
+  public let lint: LintResultResponse?
+  public let sast: SastResultResponse?
   public let acValidation: AcValidationResponse?
   public let taskReview: TaskReviewResponse?
   public let reviewSkipReason: String?
@@ -91,6 +93,22 @@ public struct TestResultResponse: Codable, Sendable {
   public let duration: Int
   public let stdout: String?
   public let stderr: String?
+}
+
+// MARK: - Lint
+
+public struct LintResultResponse: Codable, Sendable {
+  public let status: String
+  public let output: String
+  public let duration: Int
+}
+
+// MARK: - SAST
+
+public struct SastResultResponse: Codable, Sendable {
+  public let status: String
+  public let output: String
+  public let duration: Int
 }
 
 // MARK: - AC Validation

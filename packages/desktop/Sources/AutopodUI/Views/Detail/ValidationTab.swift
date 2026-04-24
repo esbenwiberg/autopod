@@ -15,6 +15,8 @@ public struct ValidationTab: View {
   @State private var selectedPhase: ValidationPhase? = nil
   @State private var expandedBuildOutput = false
   @State private var expandedTestOutput = false
+  @State private var expandedLintOutput = false
+  @State private var expandedSastOutput = false
   @State private var isOpeningApp = false
   @State private var isInterrupting = false
   @State private var isForceApproving = false
@@ -66,6 +68,10 @@ public struct ValidationTab: View {
       return c.smoke || c.buildOutput == nil ? .passed : .failed
     case .test:
       return switch c.tests { case true: .passed; case false: .failed; default: .skipped }
+    case .lint:
+      return switch c.lint { case true: .passed; case false: .failed; default: .skipped }
+    case .sast:
+      return switch c.sast { case true: .passed; case false: .failed; default: .skipped }
     case .health:
       if !c.smoke, let h = c.healthCheck { return h.status == "fail" ? .failed : .passed }
       return c.smoke ? .passed : .notStarted
@@ -282,6 +288,8 @@ public struct ValidationTab: View {
       switch phase {
       case .build:   buildDetail
       case .test:    testDetail
+      case .lint:    lintDetail
+      case .sast:    sastDetail
       case .health:  healthDetail
       case .pages:   pagesDetail
       case .ac:      acDetail
@@ -349,6 +357,40 @@ public struct ValidationTab: View {
                      duration: dur)
       if let output, !output.isEmpty {
         outputBlock(title: "Test Output", text: output, expanded: $expandedTestOutput, color: status.color)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var lintDetail: some View {
+    let status = phaseStatus(.lint)
+    let output: String? = progress?.lintOutput ?? checks?.lintOutput
+    let dur: Int? = progress?.lint.duration
+    let buildOk = checks?.smoke != false || (progress?.build.status == .passed)
+
+    VStack(alignment: .leading, spacing: 12) {
+      phaseStatusRow(status: status, passLabel: "Lint passed", failLabel: "Lint failed",
+                     skipLabel: buildOk ? "No lint command configured" : "Build failed — lint skipped",
+                     duration: dur)
+      if let output, !output.isEmpty {
+        outputBlock(title: "Lint Output", text: output, expanded: $expandedLintOutput, color: status.color)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var sastDetail: some View {
+    let status = phaseStatus(.sast)
+    let output: String? = progress?.sastOutput ?? checks?.sastOutput
+    let dur: Int? = progress?.sast.duration
+    let buildOk = checks?.smoke != false || (progress?.build.status == .passed)
+
+    VStack(alignment: .leading, spacing: 12) {
+      phaseStatusRow(status: status, passLabel: "Security scan passed", failLabel: "Security scan failed",
+                     skipLabel: buildOk ? "No SAST command configured" : "Build failed — SAST skipped",
+                     duration: dur)
+      if let output, !output.isEmpty {
+        outputBlock(title: "Security Scan Output", text: output, expanded: $expandedSastOutput, color: status.color)
       }
     }
   }

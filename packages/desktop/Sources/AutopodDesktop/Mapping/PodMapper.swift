@@ -79,6 +79,8 @@ public enum PodMapper {
         let combined = [t.stdout, t.stderr].compactMap { $0 }.joined(separator: "\n")
         return combined.isEmpty ? nil : combined
       }()
+      let lintOutput: String? = v.lint?.status == "fail" ? (v.lint?.output.isEmpty == false ? v.lint?.output : nil) : nil
+      let sastOutput: String? = v.sast?.status == "fail" ? (v.sast?.output.isEmpty == false ? v.sast?.output : nil) : nil
       let healthCheck = HealthCheckDetail(
         status: v.smoke.health.status,
         url: v.smoke.health.url,
@@ -123,9 +125,13 @@ public enum PodMapper {
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
         tests: mapTriState(v.test?.status),
+        lint: mapTriState(v.lint?.status),
+        sast: mapTriState(v.sast?.status),
         review: mapTriState(v.taskReview?.status),
         buildOutput: buildOutput,
         testOutput: testOutput,
+        lintOutput: lintOutput,
+        sastOutput: sastOutput,
         reviewIssues: v.taskReview?.issues,
         reviewFindings: response.lastValidationFindings,
         dismissedFindingIds: dismissedFindingIds,

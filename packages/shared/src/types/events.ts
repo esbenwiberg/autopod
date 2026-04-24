@@ -6,13 +6,23 @@ import type {
   AcValidationResult,
   BuildResult,
   HealthResult,
+  LintResult,
   PageResult,
+  SastResult,
   TaskReviewResult,
   ValidationOverride,
   ValidationResult,
 } from './validation.js';
 
-export type ValidationPhase = 'build' | 'test' | 'health' | 'pages' | 'ac' | 'review';
+export type ValidationPhase =
+  | 'build'
+  | 'test'
+  | 'lint'
+  | 'sast'
+  | 'health'
+  | 'pages'
+  | 'ac'
+  | 'review';
 
 export type SystemEvent =
   | PodCreatedEvent
@@ -93,6 +103,8 @@ export interface ValidationPhaseCompletedEvent {
     stdout?: string;
     stderr?: string;
   };
+  lintResult?: LintResult;
+  sastResult?: SastResult;
   healthResult?: HealthResult;
   pageResults?: PageResult[];
   acResult?: AcValidationResult | null;

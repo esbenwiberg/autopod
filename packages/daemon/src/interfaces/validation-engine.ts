@@ -32,6 +32,14 @@ export interface ValidationEngineConfig {
   buildTimeout?: number;
   /** Test phase timeout in ms. Default 600_000 (10 min). */
   testTimeout?: number;
+  /** Optional lint command (e.g. 'biome lint .'). Phase is skipped when absent. */
+  lintCommand?: string | null;
+  /** Lint phase timeout in ms. Default 120_000 (2 min). */
+  lintTimeout?: number;
+  /** Optional SAST command (e.g. 'semgrep --config=p/security-audit .'). Phase is skipped when absent. */
+  sastCommand?: string | null;
+  /** SAST phase timeout in ms. Default 300_000 (5 min). */
+  sastTimeout?: number;
   acceptanceCriteria?: AcDefinition[];
   /** Repo-specific review rules loaded from e.g. skills/code-review.md in the worktree */
   codeReviewSkill?: string;

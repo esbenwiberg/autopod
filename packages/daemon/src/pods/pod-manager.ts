@@ -15,6 +15,7 @@ import type {
   HealthResult,
   HistoryQuery,
   InjectedMcpServer,
+  LintResult,
   NetworkPolicy,
   PageResult,
   Pod,
@@ -24,6 +25,7 @@ import type {
   Profile,
   ReferenceRepo,
   RequestCredentialPayload,
+  SastResult,
   TaskReviewResult,
   ValidationFinding,
   ValidationOverride,
@@ -3917,6 +3919,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           testCommand: profile.testCommand,
           buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
           testTimeout: (profile.testTimeout ?? 600) * 1_000,
+          lintCommand: profile.lintCommand ?? undefined,
+          lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
+          sastCommand: profile.sastCommand ?? undefined,
+          sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
           reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
           acceptanceCriteria: pod.acceptanceCriteria ?? undefined,
           codeReviewSkill,
@@ -3967,6 +3973,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                       stderr?: string;
                     },
                   });
+                } else if (phase === 'lint') {
+                  eventBus.emit({ ...base, lintResult: phaseResult as LintResult });
+                } else if (phase === 'sast') {
+                  eventBus.emit({ ...base, sastResult: phaseResult as SastResult });
                 } else if (phase === 'health') {
                   eventBus.emit({ ...base, healthResult: phaseResult as HealthResult });
                 } else if (phase === 'pages') {
@@ -4486,6 +4496,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               testCommand: profile.testCommand,
               buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
               testTimeout: (profile.testTimeout ?? 600) * 1_000,
+              lintCommand: profile.lintCommand ?? undefined,
+              lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
+              sastCommand: profile.sastCommand ?? undefined,
+              sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
               reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
               acceptanceCriteria: pod.acceptanceCriteria ?? undefined,
               codeReviewSkill,

@@ -165,6 +165,8 @@ public final class EventStream {
       let checks = ValidationChecks(
         smoke: result.smoke.status == "pass",
         tests: PodMapper.mapTriState(result.test?.status),
+        lint: PodMapper.mapTriState(result.lint?.status),
+        sast: PodMapper.mapTriState(result.sast?.status),
         review: PodMapper.mapTriState(result.taskReview?.status),
         reviewSkipReason: result.reviewSkipReason
       )

@@ -93,7 +93,9 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     if (typeof buildWorkDir !== 'string') {
       errors.push('buildWorkDir must be a string');
     } else if (buildWorkDir.includes('..') || buildWorkDir.startsWith('/')) {
-      errors.push('buildWorkDir must be a relative path without traversal (no ".." or leading "/")');
+      errors.push(
+        'buildWorkDir must be a relative path without traversal (no ".." or leading "/")',
+      );
     }
   }
 
@@ -180,6 +182,48 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   // hasWebUi
   if (input.hasWebUi !== undefined && typeof input.hasWebUi !== 'boolean') {
     errors.push('hasWebUi must be a boolean');
+  }
+
+  // Lint command
+  const lintCommand = input.lintCommand;
+  if (lintCommand !== null && lintCommand !== undefined && typeof lintCommand !== 'string') {
+    errors.push('lintCommand must be a string or null');
+  } else if (typeof lintCommand === 'string') {
+    for (const pattern of DANGEROUS_PATTERNS) {
+      if (pattern.test(lintCommand)) {
+        errors.push(`lintCommand contains dangerous pattern: ${pattern.source}`);
+        break;
+      }
+    }
+  }
+
+  // Lint timeout
+  const lintTimeout = input.lintTimeout;
+  if (lintTimeout !== undefined && lintTimeout !== null) {
+    if (typeof lintTimeout !== 'number' || lintTimeout < 10 || lintTimeout > 600) {
+      errors.push('lintTimeout must be between 10 and 600');
+    }
+  }
+
+  // SAST command
+  const sastCommand = input.sastCommand;
+  if (sastCommand !== null && sastCommand !== undefined && typeof sastCommand !== 'string') {
+    errors.push('sastCommand must be a string or null');
+  } else if (typeof sastCommand === 'string') {
+    for (const pattern of DANGEROUS_PATTERNS) {
+      if (pattern.test(sastCommand)) {
+        errors.push(`sastCommand contains dangerous pattern: ${pattern.source}`);
+        break;
+      }
+    }
+  }
+
+  // SAST timeout
+  const sastTimeout = input.sastTimeout;
+  if (sastTimeout !== undefined && sastTimeout !== null) {
+    if (typeof sastTimeout !== 'number' || sastTimeout < 10 || sastTimeout > 1800) {
+      errors.push('sastTimeout must be between 10 and 1800');
+    }
   }
 
   return { valid: errors.length === 0, errors };
