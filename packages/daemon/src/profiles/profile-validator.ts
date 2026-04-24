@@ -87,6 +87,16 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     errors.push('startCommand must contain $PORT placeholder');
   }
 
+  // Build work dir — optional, must be a relative path without traversal
+  const buildWorkDir = (input as Record<string, unknown>).buildWorkDir;
+  if (buildWorkDir !== null && buildWorkDir !== undefined) {
+    if (typeof buildWorkDir !== 'string') {
+      errors.push('buildWorkDir must be a string');
+    } else if (buildWorkDir.includes('..') || buildWorkDir.startsWith('/')) {
+      errors.push('buildWorkDir must be a relative path without traversal (no ".." or leading "/")');
+    }
+  }
+
   // Health path
   const healthPath = input.healthPath;
   if (healthPath !== undefined && typeof healthPath === 'string' && !healthPath.startsWith('/')) {

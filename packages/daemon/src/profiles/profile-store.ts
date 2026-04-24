@@ -95,6 +95,7 @@ export function rowToProfile(
     template: nullableStr(row.template) as Profile['template'],
     buildCommand: nullableStr(row.build_command),
     startCommand: nullableStr(row.start_command),
+    buildWorkDir: nullableStr(row.build_work_dir),
     healthPath: nullableStr(row.health_path),
     healthTimeout: nullableNum(row.health_timeout),
     smokePages: JSON.parse((row.validation_pages as string) ?? '[]') as SmokePage[],
@@ -264,7 +265,7 @@ export function createProfileStore(
 
       db.prepare(`
         INSERT INTO profiles (
-          name, repo_url, default_branch, template, build_command, start_command,
+          name, repo_url, default_branch, template, build_command, start_command, build_work_dir,
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, reviewer_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
@@ -280,7 +281,7 @@ export function createProfileStore(
           sidecars, trusted_source, test_pipeline,
           created_at, updated_at
         ) VALUES (
-          @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
+          @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand, @buildWorkDir,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
@@ -303,6 +304,7 @@ export function createProfileStore(
         template: parsed.template,
         buildCommand: parsed.buildCommand,
         startCommand: parsed.startCommand,
+        buildWorkDir: parsed.buildWorkDir ?? null,
         healthPath: parsed.healthPath,
         healthTimeout: parsed.healthTimeout,
         validationPages: JSON.stringify(parsed.smokePages ?? []),
@@ -558,6 +560,10 @@ export function createProfileStore(
       if (parsed.testCommand !== undefined) {
         setClauses.push('test_command = @testCommand');
         fieldMap.testCommand = parsed.testCommand ?? null;
+      }
+      if (parsed.buildWorkDir !== undefined) {
+        setClauses.push('build_work_dir = @buildWorkDir');
+        fieldMap.buildWorkDir = parsed.buildWorkDir ?? null;
       }
       if (parsed.prProvider !== undefined) {
         setClauses.push('pr_provider = @prProvider');

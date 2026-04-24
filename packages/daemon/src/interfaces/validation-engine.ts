@@ -26,6 +26,8 @@ export interface ValidationEngineConfig {
   /** Anthropic API key for Tier 2 tool-use review. Defaults to ANTHROPIC_API_KEY env var. */
   reviewerApiKey?: string;
   testCommand?: string | null;
+  /** Subdirectory relative to /workspace where build/test/start commands execute. */
+  buildWorkDir?: string | null;
   /** Build phase timeout in ms. Default 300_000 (5 min). */
   buildTimeout?: number;
   /** Test phase timeout in ms. Default 600_000 (10 min). */

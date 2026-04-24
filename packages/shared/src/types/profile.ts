@@ -56,6 +56,8 @@ export interface Profile {
   buildCommand: string | null;
   /** Null on derived profiles (extends != null) means "inherit from parent". */
   startCommand: string | null;
+  /** Optional subdirectory (relative to /workspace) where build/test/start commands run. */
+  buildWorkDir: string | null;
   healthPath: string | null;
   healthTimeout: number | null;
   smokePages: SmokePage[];

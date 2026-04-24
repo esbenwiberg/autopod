@@ -98,11 +98,14 @@ export function generateDockerfile(options: DockerfileOptions): string {
   // Pre-warm build caches (buildCommand may be null on derived profiles that
   // only inherit; skip the pre-warm step in that case).
   if (profile.buildCommand) {
+    const buildCmd = profile.buildWorkDir
+      ? `cd /workspace/${profile.buildWorkDir} && ${profile.buildCommand}`
+      : profile.buildCommand;
     lines.push(
       '',
       '# Pre-warm: run build to populate caches',
       '# || true because build may fail without code changes — we just want cached deps',
-      `RUN ${profile.buildCommand} || true`,
+      `RUN ${buildCmd} || true`,
     );
   }
 

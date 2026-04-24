@@ -351,6 +351,24 @@ function makeInterruptedResult(
 }
 
 /**
+/** Retry polling a URL until it returns 2xx or all attempts are exhausted. */
+async function pollUntilReachable(
+  url: string,
+  opts: { attempts: number; intervalMs: number },
+): Promise<boolean> {
+  for (let i = 0; i < opts.attempts; i++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+      if (res.status >= 200 && res.status < 300) return true;
+    } catch {
+      // connection refused or timeout — keep retrying
+    }
+    if (i < opts.attempts - 1) await sleep(opts.intervalMs);
+  }
+  return false;
+}
+
+/**
  * Poll the health URL every 5 seconds after the app passes its initial health check.
  * If the app becomes unreachable (2 consecutive failures), fires `onCrash` once.
  * Returns a stop function — call it when validation finishes.
@@ -409,12 +427,13 @@ async function runBuild(
   const buildStart = Date.now();
   log?.info({ buildCommand: config.buildCommand }, 'running build');
 
+  const buildCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
     result = await containerManager.execInContainer(
       config.containerId,
       ['sh', '-c', config.buildCommand],
-      { cwd: '/workspace', timeout: config.buildTimeout ?? 300_000 },
+      { cwd: buildCwd, timeout: config.buildTimeout ?? 300_000 },
     );
   } catch (err) {
     const duration = Date.now() - buildStart;
@@ -460,12 +479,13 @@ async function runTests(
   const testStart = Date.now();
   log?.info({ testCommand: config.testCommand }, 'running tests');
 
+  const testCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
     result = await containerManager.execInContainer(
       config.containerId,
       ['sh', '-c', config.testCommand],
-      { cwd: '/workspace', timeout: config.testTimeout ?? 600_000 },
+      { cwd: testCwd, timeout: config.testTimeout ?? 600_000 },
     );
   } catch (err) {
     const duration = Date.now() - testStart;
@@ -523,11 +543,12 @@ async function runHealthCheck(
   // Start the app in the background, redirecting output to a log file so we can
   // retrieve it for diagnostics if the health check fails.
   const startLogPath = '/tmp/autopod-start.log';
+  const startCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
   containerManager
     .execInContainer(
       config.containerId,
       ['sh', '-c', `${config.startCommand} > ${startLogPath} 2>&1 &`],
-      { cwd: '/workspace' },
+      { cwd: startCwd },
     )
     .catch((err) => {
       log?.warn(
