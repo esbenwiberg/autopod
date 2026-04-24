@@ -278,7 +278,7 @@ public struct ValidationTab: View {
       phaseStatusRow(status: status, passLabel: "Build succeeded", failLabel: "Build failed",
                      skipLabel: "Build skipped", duration: dur)
       if let output, !output.isEmpty {
-        outputBlock(title: "Build Output", text: output, expanded: $expandedBuildOutput, color: .red)
+        outputBlock(title: "Build Output", text: output, expanded: $expandedBuildOutput, color: status.color)
       }
     }
   }
@@ -295,7 +295,7 @@ public struct ValidationTab: View {
                      skipLabel: smokeOk ? "No test command configured" : "Build failed — tests skipped",
                      duration: dur)
       if let output, !output.isEmpty {
-        outputBlock(title: "Test Output", text: output, expanded: $expandedTestOutput, color: .red)
+        outputBlock(title: "Test Output", text: output, expanded: $expandedTestOutput, color: status.color)
       }
     }
   }
