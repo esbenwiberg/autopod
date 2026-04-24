@@ -562,6 +562,32 @@ if (aciContainerManager) {
     });
 }
 
+// Prune orphan pod networks and sidecars left behind by a previous crashed run.
+// Runs after pod reconciliation so the active pod ID set reflects the true state.
+{
+  const activePodIds = new Set(podRepo.listNonTerminalPodIds());
+  if (networkManager) {
+    networkManager
+      .reconcileOrphanNetworks(activePodIds)
+      .then((pruned) => {
+        if (pruned > 0) logger.info({ pruned }, 'Startup: pruned orphan pod networks');
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Network orphan reconciliation failed');
+      });
+  }
+  if (sidecarManager) {
+    sidecarManager
+      .reconcileOrphans(activePodIds)
+      .then((reaped) => {
+        if (reaped > 0) logger.info({ reaped }, 'Startup: reaped orphan sidecars');
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Sidecar orphan reconciliation failed');
+      });
+  }
+}
+
 // Re-trigger any queued series pods whose parents are already done (e.g. after
 // a daemon restart or after the approveSession bug that omitted this call).
 podManager.rehydrateDependentSessions();

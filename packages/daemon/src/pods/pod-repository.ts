@@ -147,6 +147,7 @@ export interface PodRepository {
   getStats(filters?: { profileName?: string }): PodStats;
   getPodsDependingOn(podId: string): Pod[];
   getPodsBySeries(seriesId: string): Pod[];
+  listNonTerminalPodIds(): string[];
 }
 
 /**
@@ -660,6 +661,13 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .all(params) as Record<string, unknown>[];
 
       return rows.map(rowToSession);
+    },
+
+    listNonTerminalPodIds(): string[] {
+      const rows = db
+        .prepare("SELECT id FROM pods WHERE status NOT IN ('complete', 'killed')")
+        .all() as { id: string }[];
+      return rows.map((r) => r.id);
     },
 
     delete(id: string): void {

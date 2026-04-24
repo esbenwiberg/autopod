@@ -9,15 +9,18 @@ function createMockDocker() {
   const inspectFn = vi.fn();
   const getNetworkFn = vi.fn().mockReturnValue({ inspect: inspectFn });
   const createNetworkFn = vi.fn().mockResolvedValue({});
+  const listNetworksFn = vi.fn().mockResolvedValue([]);
   return {
     mock: {
       getNetwork: getNetworkFn,
       createNetwork: createNetworkFn,
+      listNetworks: listNetworksFn,
       _inspect: inspectFn,
     },
     instance: {
       getNetwork: getNetworkFn,
       createNetwork: createNetworkFn,
+      listNetworks: listNetworksFn,
     } as unknown as import('dockerode'),
   };
 }
@@ -337,6 +340,116 @@ describe('DockerNetworkManager', () => {
       const name = await manager.ensureNetworkForPod('pod-abc');
       expect(name).toBe('autopod-pod-abc');
       expect(docker.mock.createNetwork).not.toHaveBeenCalled();
+    });
+
+    it('prunes unattached autopod networks and retries when subnet pool is exhausted', async () => {
+      docker.mock._inspect.mockRejectedValueOnce(new Error('not found'));
+
+      const exhaustedError = Object.assign(
+        new Error(
+          '(HTTP code 400) unexpected - all predefined address pools have been fully subnetted ',
+        ),
+        { statusCode: 400 },
+      );
+      docker.mock.createNetwork
+        .mockRejectedValueOnce(exhaustedError)
+        .mockResolvedValueOnce({});
+
+      const removeFn = vi.fn().mockResolvedValue(undefined);
+      docker.mock.listNetworks.mockResolvedValueOnce([
+        // attached — should be preserved
+        {
+          Id: 'net1',
+          Name: 'autopod-active',
+          Labels: { 'com.autopod.pod-id': 'active' },
+          Containers: { ctr1: {} },
+        },
+        // unattached orphan — should be pruned
+        {
+          Id: 'net2',
+          Name: 'autopod-orphan',
+          Labels: { 'com.autopod.pod-id': 'orphan' },
+          Containers: {},
+        },
+      ]);
+      // Route getNetwork by argument: inspect path uses the shared _inspect mock;
+      // the prune step uses the removeFn.
+      docker.mock.getNetwork.mockImplementation((id: string) => {
+        if (id === 'net2') return { remove: removeFn, inspect: vi.fn() };
+        return { inspect: docker.mock._inspect };
+      });
+
+      const name = await manager.ensureNetworkForPod('pod-abc');
+      expect(name).toBe('autopod-pod-abc');
+      expect(docker.mock.createNetwork).toHaveBeenCalledTimes(2);
+      expect(removeFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-throws non-subnet errors from createNetwork', async () => {
+      docker.mock._inspect.mockRejectedValueOnce(new Error('not found'));
+      docker.mock.createNetwork.mockRejectedValueOnce(new Error('server error'));
+      await expect(manager.ensureNetworkForPod('pod-abc')).rejects.toThrow('server error');
+    });
+  });
+
+  describe('reconcileOrphanNetworks()', () => {
+    it('removes networks whose pod ID is not in the active set', async () => {
+      const removeFn = vi.fn().mockResolvedValue(undefined);
+      docker.mock.listNetworks.mockResolvedValueOnce([
+        { Id: 'net-a', Name: 'autopod-aaa', Labels: { 'com.autopod.pod-id': 'aaa' }, Containers: {} },
+        { Id: 'net-b', Name: 'autopod-bbb', Labels: { 'com.autopod.pod-id': 'bbb' }, Containers: {} },
+      ]);
+      docker.mock.getNetwork.mockImplementation((id: string) => ({ remove: removeFn, inspect: vi.fn() }));
+
+      const pruned = await manager.reconcileOrphanNetworks(new Set(['aaa']));
+      expect(pruned).toBe(1);
+      expect(docker.mock.getNetwork).toHaveBeenCalledWith('net-b');
+      expect(removeFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves networks whose pod ID is active', async () => {
+      const removeFn = vi.fn().mockResolvedValue(undefined);
+      docker.mock.listNetworks.mockResolvedValueOnce([
+        { Id: 'net-a', Name: 'autopod-aaa', Labels: { 'com.autopod.pod-id': 'aaa' }, Containers: {} },
+      ]);
+      docker.mock.getNetwork.mockReturnValue({ remove: removeFn, inspect: vi.fn() });
+
+      const pruned = await manager.reconcileOrphanNetworks(new Set(['aaa']));
+      expect(pruned).toBe(0);
+      expect(removeFn).not.toHaveBeenCalled();
+    });
+
+    it('skips networks with no pod-id label', async () => {
+      const removeFn = vi.fn().mockResolvedValue(undefined);
+      docker.mock.listNetworks.mockResolvedValueOnce([
+        { Id: 'net-x', Name: 'bridge', Labels: {}, Containers: {} },
+      ]);
+      docker.mock.getNetwork.mockReturnValue({ remove: removeFn, inspect: vi.fn() });
+
+      const pruned = await manager.reconcileOrphanNetworks(new Set());
+      expect(pruned).toBe(0);
+      expect(removeFn).not.toHaveBeenCalled();
+    });
+
+    it('returns 0 and does not throw when Docker returns no networks', async () => {
+      docker.mock.listNetworks.mockResolvedValueOnce([]);
+      await expect(manager.reconcileOrphanNetworks(new Set())).resolves.toBe(0);
+    });
+
+    it('continues and returns partial count when a remove fails', async () => {
+      const removeFail = vi.fn().mockRejectedValue(new Error('busy'));
+      const removeOk = vi.fn().mockResolvedValue(undefined);
+      docker.mock.listNetworks.mockResolvedValueOnce([
+        { Id: 'net-a', Name: 'autopod-aaa', Labels: { 'com.autopod.pod-id': 'aaa' }, Containers: {} },
+        { Id: 'net-b', Name: 'autopod-bbb', Labels: { 'com.autopod.pod-id': 'bbb' }, Containers: {} },
+      ]);
+      docker.mock.getNetwork.mockImplementation((id: string) => ({
+        remove: id === 'net-a' ? removeFail : removeOk,
+        inspect: vi.fn(),
+      }));
+
+      const pruned = await manager.reconcileOrphanNetworks(new Set());
+      expect(pruned).toBe(1);
     });
   });
 

@@ -95,7 +95,7 @@ export class DockerNetworkManager {
       // not found — create it
     }
     this.logger.info({ network: name, podId }, 'Creating pod network');
-    await this.docker.createNetwork({
+    const networkConfig = {
       Name: name,
       Driver: 'bridge',
       Labels: {
@@ -107,8 +107,63 @@ export class DockerNetworkManager {
         // is provided by the fact that each pod is on its own bridge.
         'com.docker.network.bridge.enable_icc': 'true',
       },
-    });
+    };
+    try {
+      await this.docker.createNetwork(networkConfig);
+    } catch (err: unknown) {
+      const msg = (err as { message?: string }).message ?? '';
+      if (msg.includes('all predefined address pools have been fully subnetted')) {
+        // Docker's default subnet pool is exhausted by orphaned autopod networks.
+        // Prune any autopod network that has no containers attached (safe to
+        // remove — active networks always have at least the pod or a sidecar).
+        this.logger.warn({ podId }, 'Subnet pool exhausted — pruning unattached autopod networks');
+        const nets = await this.docker.listNetworks({
+          filters: JSON.stringify({ label: ['com.autopod.pod-network=true'] }),
+        });
+        await Promise.all(
+          nets
+            .filter((n) => !n.Containers || Object.keys(n.Containers).length === 0)
+            .map(async (n) => {
+              try {
+                await this.docker.getNetwork(n.Id).remove();
+              } catch {
+                // best effort
+              }
+            }),
+        );
+        await this.docker.createNetwork(networkConfig);
+      } else {
+        throw err;
+      }
+    }
     return name;
+  }
+
+  /**
+   * Remove orphaned pod networks left behind by a crashed daemon. Called on
+   * startup after pod reconciliation so we know which pod IDs are still active.
+   * Networks whose pod ID is not in `activePodIds` have no living pod and are
+   * safe to prune.
+   */
+  async reconcileOrphanNetworks(activePodIds: Set<string>): Promise<number> {
+    const networks = await this.docker.listNetworks({
+      filters: JSON.stringify({ label: ['com.autopod.pod-network=true'] }),
+    });
+    let pruned = 0;
+    await Promise.all(
+      networks.map(async (net) => {
+        const podId = net.Labels?.['com.autopod.pod-id'];
+        if (!podId || activePodIds.has(podId)) return;
+        try {
+          await this.docker.getNetwork(net.Id).remove();
+          this.logger.info({ network: net.Name, podId }, 'Pruned orphan pod network');
+          pruned++;
+        } catch (err) {
+          this.logger.warn({ err, network: net.Name, podId }, 'Failed to prune orphan pod network');
+        }
+      }),
+    );
+    return pruned;
   }
 
   /**
