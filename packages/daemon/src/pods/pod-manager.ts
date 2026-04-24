@@ -358,6 +358,9 @@ export interface PodManager {
   approveAllValidated(): Promise<{ approved: string[] }>;
   killAllFailed(): Promise<{ killed: string[] }>;
   extendAttempts(podId: string, additionalAttempts: number): Promise<void>;
+  /** Apply queued overrides to the last validation result without re-running validation.
+   *  If overrides make the result pass, transitions review_required → validated. */
+  applyOverridesInstant(podId: string): Promise<{ advanced: boolean }>;
   extendPrAttempts(podId: string, additionalAttempts: number): Promise<void>;
   pauseSession(podId: string): Promise<void>;
   nudgeSession(podId: string, message: string): void;
@@ -4251,7 +4254,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Build correction message with structured feedback for the agent
           emitActivityStatus(podId, 'Sending validation feedback to agent…');
           const cm = containerManagerFactory.get(s2.executionTarget);
-          const correctionMessage = await buildCorrectionMessage(s2, profile, result, cm);
+          const correctionMessage = await buildCorrectionMessage(s2, profile, effectiveResult, cm);
           podRepo.update(podId, { lastCorrectionMessage: correctionMessage });
 
           // Transition back to running for retry
@@ -4926,7 +4929,63 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Extended validation attempts',
       );
       emitActivityStatus(podId, `Validation attempts extended to ${newMax} — resuming validation`);
+      // Container was stopped when pod transitioned to review_required — restart it
+      if (pod.containerId) {
+        const cm = containerManagerFactory.get(pod.executionTarget);
+        try {
+          await cm.start(pod.containerId);
+        } catch {
+          // Container may already be running or removed — let triggerValidation handle it
+        }
+      }
       await this.triggerValidation(podId);
+    },
+
+    async applyOverridesInstant(podId: string): Promise<{ advanced: boolean }> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.status !== 'review_required') {
+        throw new AutopodError(
+          `Cannot apply overrides instantly for pod ${podId} in status ${pod.status} — only review_required pods`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!pod.lastValidationResult) {
+        return { advanced: false };
+      }
+
+      // Flush pending overrides and merge into permanent overrides
+      const pendingOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
+      const existingOverrides = pod.validationOverrides ?? [];
+      const currentOverrides =
+        pendingOverrides.length > 0
+          ? mergeOverrides(existingOverrides, pendingOverrides)
+          : existingOverrides;
+
+      if (currentOverrides.length === 0) {
+        return { advanced: false };
+      }
+
+      podRepo.update(podId, { validationOverrides: currentOverrides });
+
+      // Re-evaluate the cached result with overrides applied
+      const patched = applyOverrides(pod.lastValidationResult, currentOverrides);
+      podRepo.update(podId, { lastValidationResult: patched });
+
+      emitActivityStatus(podId, 'Human overrides applied — re-evaluating cached result…');
+
+      if (patched.overall === 'pass') {
+        transition(pod, 'validated');
+        emitActivityStatus(podId, 'All findings resolved — validation passed');
+        logger.info(
+          { podId, overrideCount: currentOverrides.length },
+          'Instant override advanced pod to validated',
+        );
+        return { advanced: true };
+      }
+
+      emitActivityStatus(podId, 'Some findings remain — pod still needs review');
+      return { advanced: false };
     },
 
     async extendPrAttempts(podId: string, additionalAttempts: number): Promise<void> {

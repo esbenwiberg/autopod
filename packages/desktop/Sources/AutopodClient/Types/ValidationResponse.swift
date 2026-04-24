@@ -1,5 +1,14 @@
 import Foundation
 
+// MARK: - Validation finding (mirrors ValidationFinding in validation.ts)
+
+public struct ValidationFindingResponse: Codable, Sendable {
+  public let id: String
+  public let source: String  // "ac_validation" | "task_review" | "requirements_check"
+  public let description: String
+  public let reasoning: String?
+}
+
 // MARK: - Validation result (mirrors packages/shared/src/types/validation.ts)
 
 public struct ValidationResponse: Codable, Sendable {

@@ -5,7 +5,7 @@ import type { PodOptions } from './pod-options.js';
 import type { ExecutionTarget, PimGroupConfig, Profile } from './profile.js';
 import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
-import type { ValidationOverride, ValidationResult } from './validation.js';
+import type { ValidationFinding, ValidationOverride, ValidationResult } from './validation.js';
 
 export interface ReferenceRepo {
   url: string;
@@ -44,6 +44,7 @@ export interface Pod {
   validationAttempts: number;
   maxValidationAttempts: number;
   lastValidationResult: ValidationResult | null;
+  lastValidationFindings: ValidationFinding[] | null;
   lastCorrectionMessage: string | null;
   pendingEscalation: EscalationRequest | null;
   escalationCount: number;

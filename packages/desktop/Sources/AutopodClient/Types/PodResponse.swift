@@ -65,6 +65,7 @@ public struct SessionResponse: Codable, Sendable {
   public let validationAttempts: Int
   public let maxValidationAttempts: Int
   public let lastValidationResult: ValidationResponse?
+  public let lastValidationFindings: [ValidationFindingResponse]?
   public let pendingEscalation: EscalationResponse?
   public let escalationCount: Int
   public let skipValidation: Bool
@@ -122,7 +123,7 @@ public struct SessionResponse: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts
-    case lastValidationResult, pendingEscalation, escalationCount, skipValidation
+    case lastValidationResult, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, completedAt, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, prUrl
     case mergeBlockReason, plan, progress, acceptanceCriteria, claudeSessionId

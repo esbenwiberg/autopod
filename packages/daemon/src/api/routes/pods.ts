@@ -419,6 +419,29 @@ export function podRoutes(
       guidance: body.guidance,
     });
 
+    const pod = podManager.getSession(podId);
+
+    if (pod.status === 'running') {
+      // Nudge the in-flight agent so it can skip the dismissed finding immediately
+      const nudgeLines = [
+        'A human has overridden a validation finding — you do NOT need to address it.',
+        `Finding: ${body.description}`,
+      ];
+      if (body.reason) nudgeLines.push(`Reason: ${body.reason}`);
+      if (body.guidance) nudgeLines.push(`Guidance: ${body.guidance}`);
+      try {
+        podManager.nudgeSession(podId, nudgeLines.join('\n'));
+      } catch {
+        // Pod may have transitioned between check and nudge — not fatal
+      }
+    } else if (pod.status === 'review_required') {
+      // Instantly re-evaluate the cached validation result with the new override applied.
+      // Avoids a full re-run when only subjective review findings need dismissing.
+      podManager.applyOverridesInstant(podId).catch((err: unknown) => {
+        app.log.warn({ err, podId }, 'Failed to apply instant override');
+      });
+    }
+
     reply.status(204);
   });
 }

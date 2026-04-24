@@ -21,6 +21,7 @@ public struct ValidationTab: View {
   @State private var overrideAction: String = "dismiss"
   @State private var overrideReason: String = ""
   @State private var overrideGuidance: String = ""
+  @State private var dismissedFindingIds: Set<String> = []
 
   public init(pod: Pod, checks: ValidationChecks? = nil, actions: PodActions = .preview) {
     self.pod = pod
@@ -34,6 +35,24 @@ public struct ValidationTab: View {
 
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
   private var displayPhase: ValidationPhase? { selectedPhase ?? progress?.activePhase }
+
+  /// Context-aware label for the override confirm button.
+  private var overrideConfirmLabel: String {
+    switch pod.status {
+    case .running, .awaitingInput, .paused: return "Dismiss & Notify Agent"
+    case .reviewRequired:                   return "Dismiss Finding"
+    case .validating:                       return "Queue for Next Run"
+    default:                                return "Dismiss"
+    }
+  }
+
+  /// Whether to show the Guidance option — only meaningful when an agent will run again.
+  private var showGuidanceOption: Bool {
+    switch pod.status {
+    case .running, .awaitingInput, .paused, .validating: return true
+    default: return false
+    }
+  }
 
   /// Per-phase status, derived from either live progress or the final checks result.
   private func phaseStatus(_ phase: ValidationPhase) -> PhaseStatus {
@@ -461,28 +480,41 @@ public struct ValidationTab: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
           ForEach(Array(issues.enumerated()), id: \.offset) { idx, issue in
-            let findingId = "review-issue-\(idx)"
+            let findingId = checks?.reviewFindings?.first(where: { $0.description == issue })?.id
+              ?? "review-issue-\(idx)"
+            let isDismissed = dismissedFindingIds.contains(findingId)
             HStack(alignment: .top, spacing: 6) {
-              Image(systemName: "exclamationmark.triangle")
+              Image(systemName: isDismissed ? "checkmark.circle.fill" : "exclamationmark.triangle")
                 .font(.system(size: 9))
-                .foregroundStyle(.red)
+                .foregroundStyle(isDismissed ? .green : .red)
                 .padding(.top, 2)
-              Text(issue).font(.caption)
+              Text(issue)
+                .font(.caption)
+                .foregroundStyle(isDismissed ? .secondary : .primary)
+                .strikethrough(isDismissed)
               Spacer()
-              Button("Override") {
-                overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = ""
-                overridePopoverFindingId = findingId
-              }
-              .font(.caption2)
-              .buttonStyle(.bordered)
-              .controlSize(.mini)
-              .popover(isPresented: Binding(
-                get: { overridePopoverFindingId == findingId },
-                set: { if !$0 { overridePopoverFindingId = nil } }
-              )) {
-                overridePopover(findingId: findingId, description: issue)
+              if isDismissed {
+                Text("Dismissed")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              } else {
+                Button("Dismiss") {
+                  // Always reset to dismiss when opening — don't leak guidance state from prior use
+                  overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = ""
+                  overridePopoverFindingId = findingId
+                }
+                .font(.caption2)
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .popover(isPresented: Binding(
+                  get: { overridePopoverFindingId == findingId },
+                  set: { if !$0 { overridePopoverFindingId = nil } }
+                )) {
+                  overridePopover(findingId: findingId, description: issue)
+                }
               }
             }
+            .opacity(isDismissed ? 0.6 : 1)
           }
         }
       }
@@ -591,13 +623,15 @@ public struct ValidationTab: View {
   @ViewBuilder
   private func overridePopover(findingId: String, description: String) -> some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("Override Finding").font(.headline)
-      Picker("Action", selection: $overrideAction) {
-        Text("Dismiss").tag("dismiss")
-        Text("Guidance").tag("guidance")
+      Text("Dismiss Finding").font(.headline)
+      if showGuidanceOption {
+        Picker("Action", selection: $overrideAction) {
+          Text("Dismiss").tag("dismiss")
+          Text("Give Guidance").tag("guidance")
+        }
+        .pickerStyle(.segmented)
       }
-      .pickerStyle(.segmented)
-      if overrideAction == "dismiss" {
+      if overrideAction == "dismiss" || !showGuidanceOption {
         TextField("Reason (optional)", text: $overrideReason).textFieldStyle(.roundedBorder)
       } else {
         TextField("Guidance for the agent", text: $overrideGuidance, axis: .vertical)
@@ -608,21 +642,23 @@ public struct ValidationTab: View {
         Button("Cancel") { overridePopoverFindingId = nil }
           .buttonStyle(.plain).foregroundStyle(.secondary)
         Spacer()
-        Button("Queue Override") {
+        Button(overrideConfirmLabel) {
           let fid = findingId; let desc = description
-          let action = overrideAction
+          let action = showGuidanceOption ? overrideAction : "dismiss"
           let reason = overrideReason.isEmpty ? nil : overrideReason
           let guidance = overrideGuidance.isEmpty ? nil : overrideGuidance
           overridePopoverFindingId = nil
+          dismissedFindingIds.insert(fid)
           Task { await actions.addValidationOverride(pod.id, fid, desc, action, reason, guidance) }
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
-        .disabled(overrideAction == "guidance" && overrideGuidance.isEmpty)
+        .disabled(overrideAction == "guidance" && overrideGuidance.isEmpty && showGuidanceOption)
       }
     }
     .padding(16)
     .frame(width: 280)
+    .onDisappear { overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = "" }
   }
 
   @ViewBuilder

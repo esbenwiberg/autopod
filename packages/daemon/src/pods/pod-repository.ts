@@ -12,6 +12,7 @@ import type {
   ReferenceRepo,
   TaskSummary,
   ValidationOverride,
+  ValidationResult,
 } from '@autopod/shared';
 import {
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
@@ -20,6 +21,7 @@ import {
   podOptionsFromOutputMode,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { extractFindings } from '../validation/finding-fingerprint.js';
 
 export interface NewPod {
   id: string;
@@ -224,6 +226,16 @@ function rowToSession(row: Record<string, unknown>): Pod {
     lastValidationResult: row.last_validation_result
       ? JSON.parse(row.last_validation_result as string)
       : null,
+    lastValidationFindings: (() => {
+      if (!row.last_validation_result) return null;
+      try {
+        const r = JSON.parse(row.last_validation_result as string) as ValidationResult;
+        const findings = extractFindings(r);
+        return findings.length > 0 ? findings : null;
+      } catch {
+        return null;
+      }
+    })(),
     lastCorrectionMessage: (row.last_correction_message as string) ?? null,
     pendingEscalation: row.pending_escalation ? JSON.parse(row.pending_escalation as string) : null,
     escalationCount: row.escalation_count as number,

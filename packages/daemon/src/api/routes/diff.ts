@@ -256,13 +256,22 @@ function parseDiff(raw: string): DiffFile[] {
       }
     }
 
-    // If path is empty (deleted file), try extracting from --- line
+    // If path is still empty, try extracting from --- line (deleted files)
     if (!path) {
       for (const line of lines) {
         if (line.startsWith('--- a/')) {
           path = line.slice(6);
           break;
         }
+      }
+    }
+
+    // Mode-only changes (e.g. chmod) have no +++ or --- lines — extract path from the
+    // "a/<path> b/<path>" header that follows "diff --git "
+    if (!path) {
+      const modeOnlyMatch = headerLine.match(/^a\/(.+) b\/.+$/);
+      if (modeOnlyMatch?.[1]) {
+        path = modeOnlyMatch[1];
       }
     }
 

@@ -122,6 +122,7 @@ public enum PodMapper {
         buildOutput: buildOutput,
         testOutput: testOutput,
         reviewIssues: v.taskReview?.issues,
+        reviewFindings: response.lastValidationFindings,
         reviewReasoning: v.taskReview?.reasoning,
         reviewSkipReason: v.reviewSkipReason,
         healthCheck: healthCheck,

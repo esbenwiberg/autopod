@@ -166,6 +166,7 @@ public struct ValidationChecks: Sendable {
     public let buildOutput: String?
     public let testOutput: String?
     public let reviewIssues: [String]?
+    public let reviewFindings: [ValidationFindingResponse]?
     public let reviewReasoning: String?
     public let reviewSkipReason: String?
     public let healthCheck: HealthCheckDetail?
@@ -181,7 +182,8 @@ public struct ValidationChecks: Sendable {
     public init(
         smoke: Bool, tests: Bool? = nil, review: Bool? = nil,
         buildOutput: String? = nil, testOutput: String? = nil,
-        reviewIssues: [String]? = nil, reviewReasoning: String? = nil,
+        reviewIssues: [String]? = nil, reviewFindings: [ValidationFindingResponse]? = nil,
+        reviewReasoning: String? = nil,
         reviewSkipReason: String? = nil,
         healthCheck: HealthCheckDetail? = nil,
         pages: [PageDetail]? = nil,
@@ -194,7 +196,8 @@ public struct ValidationChecks: Sendable {
     ) {
         self.smoke = smoke; self.tests = tests; self.review = review
         self.buildOutput = buildOutput; self.testOutput = testOutput
-        self.reviewIssues = reviewIssues; self.reviewReasoning = reviewReasoning
+        self.reviewIssues = reviewIssues; self.reviewFindings = reviewFindings
+        self.reviewReasoning = reviewReasoning
         self.reviewSkipReason = reviewSkipReason
         self.healthCheck = healthCheck; self.pages = pages
         self.acValidation = acValidation; self.acChecks = acChecks
