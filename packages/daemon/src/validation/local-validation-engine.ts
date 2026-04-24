@@ -747,24 +747,86 @@ function mapBriefType(t: AcType): AcValidationType {
   return t === 'web' ? 'web-ui' : t;
 }
 
+const COMMAND_LIKE_AC_PATTERNS: RegExp[] = [
+  /^run\s+`/i, // run `some command`
+  /^execute\s+`/i, // execute `some command`
+  /^`[^`]+`$/, // entire criterion is a backtick-quoted command
+  /^dotnet\s/i, // dotnet build / test / run
+  /^npm\s/i, // npm run / test / build
+  /^npx\s/i, // npx ...
+  /^pnpm\s/i, // pnpm ...
+  /^yarn\s/i, // yarn ...
+  /^cargo\s/i, // cargo build / test
+  /^make\s/i, // make <target>
+  /^\.\/\S/, // ./script.sh
+  /^\/[a-z]/i, // /simplify, /review, /fix etc. (slash commands)
+];
+
+/**
+ * Returns true when an AC text describes a shell command or slash-command step
+ * rather than a testable behavioural outcome. These are always classified 'none'.
+ */
+export function isCommandLikeAc(text: string): boolean {
+  const t = text.trim();
+  return COMMAND_LIKE_AC_PATTERNS.some((re) => re.test(t));
+}
+
 /**
  * Assign a validation type to each AC. Brief-declared types are authoritative —
  * the LLM classifier is only invoked for legacy paths where `type` is absent.
+ *
+ * Command-like ACs (shell commands, slash commands) are always forced to 'none'
+ * regardless of any declared type, since they describe procedural steps rather
+ * than testable behavioural outcomes.
  */
 export async function classifyAcTypes(
   config: ValidationEngineConfig,
   log?: Logger,
 ): Promise<ClassifiedAc[] | null> {
-  const acs = config.acceptanceCriteria ?? [];
-  if (acs.length === 0) return [];
+  const allAcs = config.acceptanceCriteria ?? [];
+  if (allAcs.length === 0) return [];
+
+  const hasWebUi = config.hasWebUi ?? true;
+
+  // Pre-pass: force command-like ACs to 'none' regardless of any declared type.
+  const commandResults: ClassifiedAc[] = [];
+  const acs = allAcs.filter((ac) => {
+    if (isCommandLikeAc(ac.test)) {
+      log?.info({ criterion: ac.test }, 'AC is command-like — forcing to none');
+      commandResults.push({
+        criterion: ac.test,
+        validationType: 'none',
+        reason: 'Command-like criterion — evaluated by diff reviewer',
+        pass: ac.pass,
+        fail: ac.fail,
+      });
+      return false;
+    }
+    return true;
+  });
+
+  if (acs.length === 0) {
+    const byText = new Map(commandResults.map((r) => [r.criterion, r]));
+    return allAcs.map(
+      (ac) =>
+        byText.get(ac.test) ?? {
+          criterion: ac.test,
+          validationType: 'none' as const,
+          reason: 'Command-like criterion — evaluated by diff reviewer',
+        },
+    );
+  }
 
   // Brief frontmatter and the pod repository both produce `AcDefinition` with a
   // declared `type` — trust it and skip the LLM classification entirely.
-  const hasWebUi = config.hasWebUi ?? true;
-  const allDeclared = acs.every((ac) => ac.type === 'none' || ac.type === 'api' || ac.type === 'web');
+  const allDeclared = acs.every(
+    (ac) => ac.type === 'none' || ac.type === 'api' || ac.type === 'web',
+  );
+
+  let classifiedRemaining: ClassifiedAc[];
   if (allDeclared) {
     log?.info({ acCount: acs.length }, 'using brief-declared AC types, skipping LLM classifier');
-    return acs.map((ac) => {
+    classifiedRemaining = acs.map((ac) => {
       let validationType = mapBriefType(ac.type);
       // Respect `hasWebUi: false` — downgrade to 'none' rather than run a
       // browser phase against a project that has no frontend.
@@ -777,16 +839,15 @@ export async function classifyAcTypes(
         fail: ac.fail,
       };
     });
-  }
+  } else {
+    // Fallback: ask the LLM when types weren't declared (reserved for future
+    // ingestion paths that produce `AcDefinition`s without a type).
+    const acList = acs.map((ac, i) => `${i + 1}. ${ac.test}`).join('\n');
+    const webUiRestriction = hasWebUi
+      ? ''
+      : '\nIMPORTANT: This project has NO web frontend. Do not classify any criterion as "web-ui". Use "api" or "none" only.\n';
 
-  // Fallback: ask the LLM when types weren't declared (reserved for future
-  // ingestion paths that produce `AcDefinition`s without a type).
-  const acList = acs.map((ac, i) => `${i + 1}. ${ac.test}`).join('\n');
-  const webUiRestriction = hasWebUi
-    ? ''
-    : '\nIMPORTANT: This project has NO web frontend. Do not classify any criterion as "web-ui". Use "api" or "none" only.\n';
-
-  const prompt = `You are a QA automation planner. For each acceptance criterion, decide how it should be validated automatically by a test harness that can only make synchronous HTTP requests to a running server.
+    const prompt = `You are a QA automation planner. For each acceptance criterion, decide how it should be validated automatically by a test harness that can only make synchronous HTTP requests to a running server.
 
 ## Validation types
 
@@ -823,19 +884,35 @@ Respond with a JSON array. Each element must have:
 
 Respond ONLY with the JSON array, no markdown fences or extra text.`;
 
-  try {
-    const reviewTimeout = config.reviewTimeout ?? 300_000;
-    const { stdout } = await runClaudeCli({
-      model: config.reviewerModel ?? 'sonnet',
-      input: prompt,
-      timeout: reviewTimeout,
-    });
+    try {
+      const reviewTimeout = config.reviewTimeout ?? 300_000;
+      const { stdout } = await runClaudeCli({
+        model: config.reviewerModel ?? 'sonnet',
+        input: prompt,
+        timeout: reviewTimeout,
+      });
 
-    return parseClassificationJson(stdout.trim(), acs);
-  } catch (err) {
-    log?.warn({ err }, 'failed to classify AC types, falling back to none');
-    return null;
+      const llmResult = parseClassificationJson(stdout.trim(), acs);
+      if (llmResult === null) return null;
+      classifiedRemaining = llmResult;
+    } catch (err) {
+      log?.warn({ err }, 'failed to classify AC types, falling back to none');
+      return null;
+    }
   }
+
+  // Merge command-forced results with the classified remainder, restoring original order.
+  const byText = new Map<string, ClassifiedAc>();
+  for (const r of commandResults) byText.set(r.criterion, r);
+  for (const r of classifiedRemaining) byText.set(r.criterion, r);
+  return allAcs.map(
+    (ac) =>
+      byText.get(ac.test) ?? {
+        criterion: ac.test,
+        validationType: 'none' as const,
+        reason: 'Classification unavailable — falling back to diff reviewer',
+      },
+  );
 }
 
 /** Parse and validate the classification JSON response from the LLM. */
@@ -1648,7 +1725,7 @@ async function executeAcInContainer(
     { cwd: '/workspace', timeout },
   );
 
-  const parsed = parseAcResults(result.stdout, instructions);
+  const parsed = parseAcResults(result.stdout, instructions, result.stderr);
 
   for (let i = 0; i < parsed.length; i++) {
     try {
@@ -1696,10 +1773,14 @@ export function parseAcInstructionsJson(
   }
 }
 
-/** @internal Exported for testing. Parse AC results from the Playwright script's stdout markers. */
+/** @internal Exported for testing. Parse AC results from the Playwright script's stdout markers.
+ *  `rawOutput` (stderr or combined output) is included in the fallback reasoning when the script
+ *  crashes before emitting markers, so the agent knows why validation failed.
+ */
 export function parseAcResults(
   stdout: string,
   instructions: Array<{ criterion: string; instruction: string }>,
+  rawOutput?: string,
 ): AcCheckResult[] {
   const startMarker = '__AUTOPOD_AC_RESULTS_START__';
   const endMarker = '__AUTOPOD_AC_RESULTS_END__';
@@ -1708,11 +1789,16 @@ export function parseAcResults(
   const endIdx = stdout.indexOf(endMarker);
 
   if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
-    // Script didn't output proper markers — treat all as failed
+    // Script crashed before writing result markers — include raw output so the
+    // agent can diagnose whether the app was unreachable, Playwright failed, etc.
+    const detail = rawOutput?.trim().slice(0, 400);
+    const reasoning = detail
+      ? `Script produced no result markers. Output: ${detail}`
+      : 'Script did not produce parseable results';
     return instructions.map((inst) => ({
       criterion: inst.criterion,
       passed: false,
-      reasoning: 'Script did not produce parseable results',
+      reasoning,
     }));
   }
 

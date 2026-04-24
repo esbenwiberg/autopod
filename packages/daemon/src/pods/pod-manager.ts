@@ -1638,10 +1638,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const all = [...globalMems, ...profileMems];
 
       const formatted = all
-        .map(
-          (m) =>
-            `### ${m.path}\n${m.rationale ? `Why: ${m.rationale}\n\n` : ''}${m.content}`,
-        )
+        .map((m) => `### ${m.path}\n${m.rationale ? `Why: ${m.rationale}\n\n` : ''}${m.content}`)
         .join('\n\n---\n\n');
 
       const task = [

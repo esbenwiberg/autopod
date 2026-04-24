@@ -409,6 +409,14 @@ export function podRoutes(
     reply.status(204);
   });
 
+  // POST /pods/:podId/force-approve — bypass validation and transition pod to validated
+  app.post('/pods/:podId/force-approve', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const body = request.body as { reason?: string } | undefined;
+    await podManager.forceApprove(podId, body?.reason);
+    reply.status(204);
+  });
+
   // POST /pods/:podId/validation-overrides — enqueue a finding override
   app.post('/pods/:podId/validation-overrides', async (request, reply) => {
     const { podId } = request.params as { podId: string };

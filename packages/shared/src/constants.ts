@@ -41,7 +41,7 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   paused: ['running', 'killing'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
   validated: ['approved', 'running', 'validating', 'killing', 'queued'],
-  failed: ['running', 'validating', 'killing', 'queued', 'merge_pending'],
+  failed: ['running', 'validating', 'validated', 'killing', 'queued', 'merge_pending'],
   review_required: ['running', 'validating', 'validated', 'killing'],
   approved: ['merging'],
   merging: ['complete', 'merge_pending'],
