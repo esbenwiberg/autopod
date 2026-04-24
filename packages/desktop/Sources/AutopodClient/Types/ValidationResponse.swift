@@ -1,5 +1,16 @@
 import Foundation
 
+// MARK: - Validation override (mirrors ValidationOverride in validation.ts)
+
+public struct ValidationOverrideResponse: Codable, Sendable {
+  public let findingId: String
+  public let description: String
+  public let action: String  // "dismiss" | "guidance"
+  public let reason: String?
+  public let guidance: String?
+  public let createdAt: String
+}
+
 // MARK: - Validation finding (mirrors ValidationFinding in validation.ts)
 
 public struct ValidationFindingResponse: Codable, Sendable {

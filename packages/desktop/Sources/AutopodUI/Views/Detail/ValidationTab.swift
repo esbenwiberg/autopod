@@ -17,6 +17,9 @@ public struct ValidationTab: View {
   @State private var expandedTestOutput = false
   @State private var isOpeningApp = false
   @State private var isInterrupting = false
+  @State private var isForceApproving = false
+  @State private var showForceApprovePopover = false
+  @State private var forceApproveReason: String = ""
   @State private var overridePopoverFindingId: String? = nil
   @State private var overrideAction: String = "dismiss"
   @State private var overrideReason: String = ""
@@ -197,7 +200,57 @@ public struct ValidationTab: View {
         .tint(.orange)
         .disabled(isInterrupting)
       }
+      if pod.status == .failed || pod.status == .reviewRequired {
+        Button {
+          showForceApprovePopover = true
+        } label: {
+          if isForceApproving {
+            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Approving…") }
+          } else {
+            Label("Force Approve", systemImage: "checkmark.seal.fill")
+          }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(.green)
+        .disabled(isForceApproving)
+        .popover(isPresented: $showForceApprovePopover) {
+          forceApprovePopover
+        }
+      }
     }
+  }
+
+  @ViewBuilder
+  private var forceApprovePopover: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Force Approve").font(.headline)
+      Text("Bypass validation and mark this pod as validated. Use when the fix is clearly correct but validation is flaky.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      TextField("Reason (optional)", text: $forceApproveReason).textFieldStyle(.roundedBorder)
+      HStack {
+        Button("Cancel") { showForceApprovePopover = false }
+          .buttonStyle(.plain).foregroundStyle(.secondary)
+        Spacer()
+        Button("Force Approve") {
+          let reason = forceApproveReason.isEmpty ? nil : forceApproveReason
+          showForceApprovePopover = false
+          forceApproveReason = ""
+          isForceApproving = true
+          Task {
+            await actions.forceApprove(pod.id, reason)
+            isForceApproving = false
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .tint(.green)
+      }
+    }
+    .padding(16)
+    .frame(width: 300)
   }
 
   // MARK: - Phase chip row
@@ -430,6 +483,7 @@ public struct ValidationTab: View {
           }
         }
       }
+      correctionMessageBlock
     }
   }
 
@@ -483,6 +537,7 @@ public struct ValidationTab: View {
             let findingId = checks?.reviewFindings?.first(where: { $0.description == issue })?.id
               ?? "review-issue-\(idx)"
             let isDismissed = dismissedFindingIds.contains(findingId)
+              || (checks?.dismissedFindingIds.contains(findingId) ?? false)
             HStack(alignment: .top, spacing: 6) {
               Image(systemName: isDismissed ? "checkmark.circle.fill" : "exclamationmark.triangle")
                 .font(.system(size: 9))
@@ -549,27 +604,32 @@ public struct ValidationTab: View {
           }
         }
       }
-      if let msg = checks?.correctionMessage {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Feedback Sent to Agent")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-          ScrollView {
-            Text(msg)
-              .font(.system(.caption2, design: .monospaced))
-              .textSelection(.enabled)
-              .frame(maxWidth: .infinity, alignment: .leading)
-          }
-          .frame(maxHeight: 300)
-          .padding(8)
-          .background(Color.black.opacity(0.2))
-          .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
-      }
+      correctionMessageBlock
     }
   }
 
   // MARK: - Shared helpers
+
+  @ViewBuilder
+  private var correctionMessageBlock: some View {
+    if let msg = checks?.correctionMessage {
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Feedback Sent to Agent")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+        ScrollView {
+          Text(msg)
+            .font(.system(.caption2, design: .monospaced))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: 300)
+        .padding(8)
+        .background(Color.black.opacity(0.2))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+      }
+    }
+  }
 
   @ViewBuilder
   private func phaseStatusRow(status: PhaseStatus, passLabel: String, failLabel: String,

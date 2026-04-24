@@ -117,6 +117,7 @@ public struct SessionResponse: Codable, Sendable {
   /// actions would commit a phantom mass-deletion. Optional for back-compat
   /// with pre-#056 daemon responses; nil is treated as false.
   public let worktreeCompromised: Bool?
+  public let validationOverrides: [ValidationOverrideResponse]?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
@@ -136,6 +137,7 @@ public struct SessionResponse: Codable, Sendable {
     case artifactsPath
     case requireSidecars, sidecarContainerIds, testRunBranches
     case worktreeCompromised
+    case validationOverrides
   }
 }
 

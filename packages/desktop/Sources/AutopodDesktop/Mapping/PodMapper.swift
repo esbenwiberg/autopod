@@ -115,6 +115,11 @@ public enum PodMapper {
         }
         return shots.isEmpty ? nil : shots
       }()
+      let dismissedFindingIds = Set(
+        (response.validationOverrides ?? [])
+          .filter { $0.action == "dismiss" }
+          .map { $0.findingId }
+      )
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
         tests: mapTriState(v.test?.status),
@@ -123,6 +128,7 @@ public enum PodMapper {
         testOutput: testOutput,
         reviewIssues: v.taskReview?.issues,
         reviewFindings: response.lastValidationFindings,
+        dismissedFindingIds: dismissedFindingIds,
         reviewReasoning: v.taskReview?.reasoning,
         reviewSkipReason: v.reviewSkipReason,
         healthCheck: healthCheck,
