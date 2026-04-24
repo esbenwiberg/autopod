@@ -56,6 +56,9 @@ public final class ActionHandler {
       createHistoryWorkspace: { [weak self] profile, limit in
         await self?.createHistoryWorkspace(profileName: profile, limit: limit)
       },
+      createMemoryWorkspace: { [weak self] profile in
+        await self?.createMemoryWorkspace(profileName: profile)
+      },
       openLiveApp: { [weak self] id in await self?.openLiveApp(id) },
       workerProfileForProfile: { [weak self] name in
         self?.profileStore.profiles.first(where: { $0.name == name })?.workerProfile
@@ -64,6 +67,7 @@ public final class ActionHandler {
       addValidationOverride: { [weak self] id, fid, desc, action, reason, guidance in
         await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
       },
+      forceApprove: { [weak self] id, reason in await self?.forceApprove(id, reason: reason) },
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       previewSeriesFolder: { [weak self] path in
@@ -362,6 +366,19 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
+  public func createMemoryWorkspace(profileName: String) async {
+    pendingAction = "memory-workspace"
+    do {
+      let response = try await api.createMemoryWorkspace(profileName: profileName)
+      let pod = PodMapper.map(response)
+      podStore.upsertSession(pod)
+      podStore.selectedSessionId = pod.id
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
   public func createHistoryWorkspace(profileName: String?, limit: Int) async {
     pendingAction = "history-workspace"
     do {
@@ -413,6 +430,14 @@ public final class ActionHandler {
         reason: reason,
         guidance: guidance
       )
+    } catch {
+      lastError = error.localizedDescription
+    }
+  }
+
+  public func forceApprove(_ podId: String, reason: String?) async {
+    do {
+      try await api.forceApprove(podId, reason: reason)
     } catch {
       lastError = error.localizedDescription
     }

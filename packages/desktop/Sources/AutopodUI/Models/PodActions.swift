@@ -28,6 +28,7 @@ public struct PodActions: Sendable {
   public var delete: @MainActor @Sendable (String) async -> Void
   public var deleteSeries: @MainActor @Sendable (String) async -> Void
   public var createHistoryWorkspace: @MainActor @Sendable (String?, Int) async -> Void
+  public var createMemoryWorkspace: @MainActor @Sendable (String) async -> Void
   /// Start/restart the preview container and open the app URL
   public var openLiveApp: @MainActor @Sendable (String) async -> Void
   /// Look up the workerProfile for a given profile name (returns nil if not set)
@@ -36,6 +37,8 @@ public struct PodActions: Sendable {
   public var interruptValidation: @MainActor @Sendable (String) async -> Void
   /// Enqueue a finding override — params: podId, findingId, description, action, reason?, guidance?
   public var addValidationOverride: @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void
+  /// Bypass validation and push the pod to validated — params: podId, reason?
+  public var forceApprove: @MainActor @Sendable (String, String?) async -> Void
   /// Manually force-spawn a fix pod for a merge_pending/complete pod. Optional message is forwarded
   /// to the fix pod as explicit reviewer instructions alongside auto-detected CI/review failures.
   public var spawnFix: @MainActor @Sendable (String, String?) async -> Void
@@ -87,10 +90,12 @@ public struct PodActions: Sendable {
     delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     deleteSeries: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     createHistoryWorkspace: @escaping @MainActor @Sendable (String?, Int) async -> Void = { _, _ in },
+    createMemoryWorkspace: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     openLiveApp: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     workerProfileForProfile: @escaping @MainActor @Sendable (String) -> String? = { _ in nil },
     interruptValidation: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
+    forceApprove: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
@@ -120,10 +125,12 @@ public struct PodActions: Sendable {
     self.delete = delete
     self.deleteSeries = deleteSeries
     self.createHistoryWorkspace = createHistoryWorkspace
+    self.createMemoryWorkspace = createMemoryWorkspace
     self.openLiveApp = openLiveApp
     self.workerProfileForProfile = workerProfileForProfile
     self.interruptValidation = interruptValidation
     self.addValidationOverride = addValidationOverride
+    self.forceApprove = forceApprove
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
     self.previewSeriesFolder = previewSeriesFolder

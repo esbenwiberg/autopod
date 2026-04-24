@@ -12,12 +12,16 @@ public struct MemoryManagementView: View {
     public var onEdit: ((String, String) -> Void)?
     public var onCreateMemory: ((MemoryScope, String?, String, String) -> Void)?
     public var scopeNameLookup: ((MemoryScope, String) -> String?)?
+    public var profileNames: [String]
+    public var onScanMemories: ((String) -> Void)?
 
     @State private var selectedScope: MemoryScope = .global
     @State private var showingCreate = false
     @State private var editingEntry: MemoryEntry?
     @State private var viewingEntry: MemoryEntry?
     @State private var copiedId: String?
+    @State private var scanProfile: String?
+    @State private var isLaunchingScan = false
 
     public init(
         entries: [MemoryEntry],
@@ -27,7 +31,9 @@ public struct MemoryManagementView: View {
         onDelete: @escaping (String) -> Void = { _ in },
         onEdit: ((String, String) -> Void)? = nil,
         onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
-        scopeNameLookup: ((MemoryScope, String) -> String?)? = nil
+        scopeNameLookup: ((MemoryScope, String) -> String?)? = nil,
+        profileNames: [String] = [],
+        onScanMemories: ((String) -> Void)? = nil
     ) {
         self.entries = entries
         self.scopeFilter = scopeFilter
@@ -37,6 +43,8 @@ public struct MemoryManagementView: View {
         self.onEdit = onEdit
         self.onCreateMemory = onCreateMemory
         self.scopeNameLookup = scopeNameLookup
+        self.profileNames = profileNames
+        self.onScanMemories = onScanMemories
     }
 
     private var displayedScope: MemoryScope {
@@ -100,6 +108,14 @@ public struct MemoryManagementView: View {
                     }
                     .padding(16)
                 }
+            }
+            if onScanMemories != nil && scopeFilter == nil && !profileNames.isEmpty && !entries.isEmpty {
+                Divider()
+                ScrollView {
+                    scanSection
+                        .padding(16)
+                }
+                .frame(maxHeight: 180)
             }
         }
         .sheet(isPresented: $showingCreate) {
@@ -170,6 +186,38 @@ public struct MemoryManagementView: View {
         .padding(.vertical, 4)
     }
 
+    // MARK: - Origin grouping
+
+    private func groupedByOrigin(_ entries: [MemoryEntry]) -> [(key: String, entries: [MemoryEntry])] {
+        let grouped = Dictionary(grouping: entries) { $0.createdBySessionId ?? "Manual" }
+        return grouped
+            .map { (key: $0.key, entries: $0.value) }
+            .sorted { a, b in
+                let aLatest = a.entries.map(\.updatedAt).max() ?? ""
+                let bLatest = b.entries.map(\.updatedAt).max() ?? ""
+                return aLatest > bLatest
+            }
+    }
+
+    private func originHeader(_ label: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+            Text(label)
+                .font(.system(.caption2, design: .monospaced).weight(.medium))
+                .foregroundStyle(.secondary)
+            Text("\(count)")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(.quaternary, in: Capsule())
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+    }
+
     // MARK: - Pending suggestions
 
     private var pendingSection: some View {
@@ -186,8 +234,11 @@ public struct MemoryManagementView: View {
                     .padding(.vertical, 1)
                     .background(.orange.opacity(0.1), in: Capsule())
             }
-            ForEach(pending) { entry in
-                memoryCard(entry, isPending: true)
+            ForEach(groupedByOrigin(pending), id: \.key) { group in
+                originHeader(group.key, count: group.entries.count)
+                ForEach(group.entries) { entry in
+                    memoryCard(entry, isPending: true)
+                }
             }
         }
     }
@@ -208,9 +259,58 @@ public struct MemoryManagementView: View {
                     .padding(.vertical, 1)
                     .background(.quaternary, in: Capsule())
             }
-            ForEach(approved) { entry in
-                memoryCard(entry, isPending: false)
+            ForEach(groupedByOrigin(approved), id: \.key) { group in
+                originHeader(group.key, count: group.entries.count)
+                ForEach(group.entries) { entry in
+                    memoryCard(entry, isPending: false)
+                }
             }
+        }
+    }
+
+    // MARK: - Scan & Fix section
+
+    private var scanSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Analyze & Fix")
+                .font(.subheadline.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Launch a workspace pod that reviews all memories and drafts a fix plan for gotchas and issues in your repos.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    Picker("Profile", selection: $scanProfile) {
+                        Text("Select a profile…").tag(nil as String?)
+                        ForEach(profileNames, id: \.self) { name in
+                            Text(name).tag(name as String?)
+                        }
+                    }
+                    .frame(width: 180)
+
+                    Button {
+                        guard let profile = scanProfile else { return }
+                        isLaunchingScan = true
+                        onScanMemories?(profile)
+                        isLaunchingScan = false
+                    } label: {
+                        if isLaunchingScan {
+                            ProgressView()
+                                .controlSize(.small)
+                                .padding(.horizontal, 4)
+                        } else {
+                            Label("Open Memory Workspace", systemImage: "brain")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .disabled(isLaunchingScan || scanProfile == nil)
+                }
+            }
+            .padding(16)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 

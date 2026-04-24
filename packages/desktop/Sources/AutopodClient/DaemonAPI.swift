@@ -100,6 +100,13 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/validate")
   }
 
+  public func forceApprove(_ id: String, reason: String? = nil) async throws {
+    let _: OkResponse = try await request(
+      "POST", "/pods/\(id)/force-approve",
+      body: try encode(ForceApproveBody(reason: reason))
+    )
+  }
+
   public func startPreview(_ id: String) async throws -> String {
     let res: PreviewResponse = try await request("POST", "/pods/\(id)/preview")
     return res.previewUrl
@@ -322,6 +329,11 @@ public actor DaemonAPI {
 
   // MARK: - Memory
 
+  public func createMemoryWorkspace(profileName: String) async throws -> SessionResponse {
+    let body = try JSONSerialization.data(withJSONObject: ["profileName": profileName])
+    return try await request("POST", "/pods/memory-workspace", body: body)
+  }
+
   public func listMemories(
     scope: String,
     scopeId: String? = nil,
@@ -533,6 +545,10 @@ struct ApproveBody: Codable {
 
 struct RejectBody: Codable {
   let feedback: String?
+}
+
+struct ForceApproveBody: Codable {
+  let reason: String?
 }
 
 struct CompleteBody: Codable {

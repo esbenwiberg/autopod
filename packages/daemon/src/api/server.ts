@@ -42,6 +42,7 @@ import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
 import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryRoutes } from './routes/memory.js';
+import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
 import { podRoutes } from './routes/pods.js';
 import { profileRoutes } from './routes/profiles.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
@@ -146,6 +147,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     } as unknown as WorktreeManager);
   }
   historyRoutes(app, deps.podManager);
+  memoryWorkspaceRoutes(app, deps.podManager);
   profileRoutes(
     app,
     deps.profileStore,

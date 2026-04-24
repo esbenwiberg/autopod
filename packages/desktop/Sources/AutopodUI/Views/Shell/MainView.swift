@@ -274,6 +274,10 @@ public struct MainView: View {
                         case .global:
                             return nil
                         }
+                    },
+                    profileNames: profileNames,
+                    onScanMemories: { profile in
+                        Task { await wiredActions.createMemoryWorkspace(profile) }
                     }
                 )
                 .frame(minWidth: 600)
