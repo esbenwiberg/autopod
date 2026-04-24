@@ -38,6 +38,7 @@ public struct SeriesListView: View {
         var runningCount: Int
         var queuedCount: Int
         var completedCount: Int
+        var failedCount: Int
         var totalCost: Double
     }
 
@@ -50,14 +51,15 @@ public struct SeriesListView: View {
             let running = group.filter { $0.status.isActive || $0.status.needsAttention }.count
             let queued = group.filter { $0.status == .queued || $0.status == .paused }.count
             let completed = group.filter { terminalStatuses.contains($0.status) }.count
+            let failed = group.filter { $0.status == .failed || $0.status == .killed }.count
             let cost = group.reduce(0.0) { $0 + $1.costUsd }
             return SeriesGroup(
                 id: sid, name: name, pods: group.sorted { $0.startedAt < $1.startedAt },
                 isActive: isActive, runningCount: running, queuedCount: queued,
-                completedCount: completed, totalCost: cost
+                completedCount: completed, failedCount: failed, totalCost: cost
             )
         }
-        .filter { showCompleted || $0.isActive }
+        .filter { showCompleted || $0.isActive || $0.failedCount > 0 }
         .sorted { a, b in
             if a.isActive != b.isActive { return a.isActive }
             guard let aDate = a.pods.first?.startedAt, let bDate = b.pods.first?.startedAt else { return false }
@@ -142,7 +144,7 @@ public struct SeriesListView: View {
                         .frame(width: 12)
 
                     Image(systemName: "rectangle.3.group.fill")
-                        .foregroundStyle(group.isActive ? Color.accentColor : .secondary)
+                        .foregroundStyle(group.isActive ? Color.accentColor : (group.failedCount > 0 ? .red : .secondary))
                         .font(.system(size: 13))
 
                     Text(group.name)
@@ -157,6 +159,8 @@ public struct SeriesListView: View {
                         if group.queuedCount > 0 {
                             statusChip("\(group.queuedCount) queued", color: .gray)
                         }
+                    } else if group.failedCount > 0 {
+                        statusChip("failed", color: .red)
                     } else {
                         statusChip("complete", color: .green)
                     }
