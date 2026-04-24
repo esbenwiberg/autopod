@@ -84,15 +84,15 @@ export function terminalRoutes(
       // Create exec with TTY
       const startTerminal = async () => {
         try {
-          // Use tmux if available — `new-pod -A -s main` creates or reattaches
-          // to a persistent pod named "main". This means WebSocket reconnects
+          // Use tmux if available — `new-session -A -s main` creates or reattaches
+          // to a persistent session named "main". This means WebSocket reconnects
           // pick up right where the user left off instead of losing shell state.
           // Falls back to plain bash if tmux isn't installed.
           const exec = await container.exec({
             Cmd: [
               '/bin/sh',
               '-c',
-              'command -v tmux >/dev/null 2>&1 && exec tmux new-pod -A -s main \\; set -g mouse on || exec /bin/bash -l',
+              'command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s main \\; set -g mouse on || exec /bin/bash -l',
             ],
             AttachStdin: true,
             AttachStdout: true,

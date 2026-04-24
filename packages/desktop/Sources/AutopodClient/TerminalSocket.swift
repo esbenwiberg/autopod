@@ -182,6 +182,11 @@ public actor TerminalSocket {
       return
     }
 
+    // Cancel any in-flight reconnect loop before creating a new one. Without
+    // this, a failed receiveLoop spawned mid-attempt would create a parallel
+    // reconnect task — doubling up connections on every failure and causing
+    // endless GET requests after a daemon restart.
+    reconnectTask?.cancel()
     reconnectTask = Task { [weak self] in
       guard let self else { return }
       for attempt in 1...Self.maxReconnectAttempts {
@@ -204,8 +209,16 @@ public actor TerminalSocket {
           if case .error = currentState { break }
         }
       }
-      await self.setState(.error("Connection lost — could not reconnect"))
+      // Bump generation before giving up — the last doConnect()'s receiveLoop
+      // is still alive and would otherwise see generation == connectionGeneration
+      // and trigger yet another reconnect cycle.
+      await self.exhaustReconnect()
     }
+  }
+
+  private func exhaustReconnect() {
+    connectionGeneration &+= 1
+    setState(.error("Connection lost — could not reconnect"))
   }
 
   private func setState(_ newState: State) {
