@@ -26,9 +26,20 @@ export interface PrBodyConfig {
    * Defaults to true.
    */
   inlineImages?: boolean;
+  /** Series-level description (from context.md). When set, replaces task in the "Why" section. */
+  seriesDescription?: string;
+  /** Human-readable series name. Used with seriesDescription to build the PR title. */
+  seriesName?: string;
 }
 
-export function buildPrTitle(task: string): string {
+export function buildPrTitle(task: string, seriesName?: string, seriesDescription?: string): string {
+  // For series PRs with a description, use the series name as a clean short title
+  if (seriesDescription && seriesName) {
+    const clean = seriesName.replace(/[-_]/g, ' ').trim();
+    const hasPrefix = /^(feat|fix|chore|refactor|docs|test|ci|style|perf)(\(.+\))?:/i.test(clean);
+    const titled = hasPrefix ? clean : `feat: ${clean}`;
+    return titled.length > 70 ? `${titled.slice(0, 67)}...` : titled;
+  }
   // Truncate at 70 chars, prefix with "feat:" if not already prefixed
   const clean = task.replace(/\n/g, ' ').trim();
   const hasPrefix = /^(feat|fix|chore|refactor|docs|test|ci|style|perf)(\(.+\))?:/i.test(clean);
@@ -48,13 +59,14 @@ export function buildPrBody(config: PrBodyConfig): string {
     previewUrl,
     taskSummary,
     inlineImages = true,
+    seriesDescription,
   } = config;
 
   const sections: string[] = [];
 
   // ── Narrative: Why / What / How ──────────────────────────────────────────
 
-  sections.push(`## Why\n\n${task}`);
+  sections.push(`## Why\n\n${seriesDescription ?? task}`);
 
   if (taskSummary) {
     sections.push(`## What\n\n${taskSummary.actualSummary}`);

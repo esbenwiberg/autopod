@@ -34,6 +34,8 @@ interface CreateSeriesRequest {
   autoApprove?: boolean;
   /** Redirect agent ask_human calls to the reviewer AI model instead of blocking. */
   disableAskHuman?: boolean;
+  /** Overall spec description (from context.md). Used as the PR "Why" section instead of the final pod's task. */
+  seriesDescription?: string;
 }
 
 interface PreviewSeriesFolderRequest {
@@ -122,6 +124,7 @@ export function seriesRoutes(
             branch: prMode === 'single' && !isRoot ? singleModeBranch : undefined,
             seriesId,
             seriesName: body.seriesName,
+            seriesDescription: body.seriesDescription ?? null,
             acceptanceCriteria: brief.acceptanceCriteria,
             options: { agentMode: 'auto', output },
             // Per-brief sidecars (e.g. Dagger engine for a pipeline-wiring pod).
@@ -239,7 +242,7 @@ export function seriesRoutes(
     const folderBase = basename(folderPath);
     const seriesName = folderBase === 'briefs' ? basename(resolve(folderPath, '..')) : folderBase;
 
-    return { seriesName, briefs };
+    return { seriesName, briefs, seriesDescription: sharedContext || undefined };
   });
 
   // POST /pods/series/preview-branch — parse a brief folder directly from a
@@ -286,7 +289,11 @@ export function seriesRoutes(
       const parentPart = parts[parts.length - 2];
       const seriesName = lastPart === 'briefs' && parentPart ? parentPart : lastPart;
 
-      return { seriesName, briefs };
+      return {
+        seriesName,
+        briefs,
+        seriesDescription: contents.sharedContext || undefined,
+      };
     } catch (err) {
       reply.status(400);
       return {

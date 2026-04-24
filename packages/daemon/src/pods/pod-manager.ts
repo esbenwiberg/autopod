@@ -2555,11 +2555,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         await this.handleCompletion(podId);
       } catch (err) {
         logger.error({ err, podId }, 'Pod processing error');
-        // Try to transition to failed if possible
+        // Transition to failed — keeps series dependents queued so they can run once the parent
+        // is recovered/retried. 'killed' is reserved for explicit user termination only.
         try {
           pod = podRepo.getOrThrow(podId);
           if (!isTerminalState(pod.status)) {
-            if (canKill(pod.status)) {
+            if (canFail(pod.status)) {
+              transition(pod, 'failed', { completedAt: new Date().toISOString() });
+            } else if (canKill(pod.status)) {
+              // Fallback for states not yet reachable via 'failed' (validated, review_required, etc.)
               transition(pod, 'killing');
               pod = podRepo.getOrThrow(podId);
               transition(pod, 'killed', { completedAt: new Date().toISOString() });

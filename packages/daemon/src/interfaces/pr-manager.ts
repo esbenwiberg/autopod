@@ -27,6 +27,10 @@ export interface CreatePrConfig {
   screenshots?: Array<{ pagePath: string; imageUrl: string }>;
   /** Agent-reported task summary (what was done + deviations from plan) */
   taskSummary?: TaskSummary;
+  /** Series-level description (from context.md). When set, used instead of task for the PR title and "Why" section. */
+  seriesDescription?: string;
+  /** Human-readable series name. Used with seriesDescription to build the PR title. */
+  seriesName?: string;
 }
 
 export interface MergePrConfig {

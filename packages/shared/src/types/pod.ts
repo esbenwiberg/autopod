@@ -128,6 +128,8 @@ export interface Pod {
   seriesId: string | null;
   /** Human-readable series name (null for standalone pods). */
   seriesName: string | null;
+  /** Overall spec description (from context.md) for series pods. Used as the PR "Why" section and title instead of the individual brief task. */
+  seriesDescription: string | null;
   /** When the dependency pod reached validated and this pod was enqueued. */
   dependencyStartedAt: string | null;
   /**
@@ -221,6 +223,8 @@ export interface CreatePodRequest {
   seriesId?: string | null;
   /** Human-readable series name. */
   seriesName?: string | null;
+  /** Overall spec description (from context.md) to use as the PR body "Why" section. */
+  seriesDescription?: string | null;
   /**
    * Gate the next pod in a stacked series on this pod's PR being merged (complete).
    * Defaults to false — set to true for stacked-series non-root pods.

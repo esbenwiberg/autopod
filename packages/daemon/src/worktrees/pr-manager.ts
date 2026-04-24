@@ -33,7 +33,7 @@ export class GhPrManager implements PrManager {
   }
 
   async createPr(config: CreatePrConfig): Promise<string> {
-    const title = buildPrTitle(config.task);
+    const title = buildPrTitle(config.task, config.seriesName, config.seriesDescription);
     const body = buildPrBody({
       task: config.task,
       podId: config.podId,
@@ -45,6 +45,8 @@ export class GhPrManager implements PrManager {
       previewUrl: config.previewUrl,
       screenshots: config.screenshots,
       taskSummary: config.taskSummary,
+      seriesDescription: config.seriesDescription,
+      seriesName: config.seriesName,
     });
 
     this.logger.info(
@@ -261,7 +263,7 @@ export class GitHubApiPrManager implements PrManager {
   async createPr(config: CreatePrConfig): Promise<string> {
     if (!config.repoUrl) throw new Error('repoUrl is required for GitHubApiPrManager');
     const { owner, repo } = parseGitHubRepoUrl(config.repoUrl);
-    const title = buildPrTitle(config.task);
+    const title = buildPrTitle(config.task, config.seriesName, config.seriesDescription);
     const body = buildPrBody({
       task: config.task,
       podId: config.podId,
@@ -273,6 +275,8 @@ export class GitHubApiPrManager implements PrManager {
       previewUrl: config.previewUrl,
       screenshots: config.screenshots,
       taskSummary: config.taskSummary,
+      seriesDescription: config.seriesDescription,
+      seriesName: config.seriesName,
     });
 
     this.logger.info(

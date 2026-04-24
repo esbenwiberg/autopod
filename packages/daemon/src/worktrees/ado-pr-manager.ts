@@ -144,7 +144,7 @@ export class AdoPrManager implements PrManager {
   }
 
   async createPr(config: CreatePrConfig): Promise<string> {
-    const title = buildPrTitle(config.task);
+    const title = buildPrTitle(config.task, config.seriesName, config.seriesDescription);
     const description = buildPrBody({
       task: config.task,
       podId: config.podId,
@@ -157,6 +157,8 @@ export class AdoPrManager implements PrManager {
       screenshots: config.screenshots,
       taskSummary: config.taskSummary,
       inlineImages: false,
+      seriesDescription: config.seriesDescription,
+      seriesName: config.seriesName,
     });
 
     this.logger.info(
