@@ -6,8 +6,12 @@ import type { AuthModule } from '../../interfaces/index.js';
 /**
  * Route-level auth config:
  *  - `auth: false`           — no auth required
- *  - `auth: 'pod-token'` — accepts Bearer token OR ?token= pod-scoped query param
+ *  - `auth: 'pod-token'` — accepts Bearer pod-scoped HMAC token or regular user Bearer token
  *  - default (omitted)       — requires Bearer token
+ *
+ * Note: ?token= query-param auth is NOT supported here. Routes that require browser-initiated
+ * access (e.g. the report page GET) use `auth: false` and validate manually so they can
+ * restrict to pod HMAC tokens and avoid exposing user tokens in URLs.
  */
 export function authPlugin(
   app: FastifyInstance,
@@ -24,16 +28,13 @@ export function authPlugin(
     // Skip auth entirely
     if (routeConfig?.auth === false) return;
 
-    // Pod-token mode: accept HMAC pod token (Bearer or ?token=) or regular user token.
+    // Pod-token mode: accept HMAC pod token or regular user token — Bearer header only.
     // Containers use HMAC tokens issued by sessionTokenIssuer; human callers use Entra tokens.
     if (routeConfig?.auth === 'pod-token') {
       const routeSessionId = (request.params as Record<string, string>)?.podId;
 
-      // Extract token from Bearer header or ?token= query param
       const authHeader = request.headers.authorization;
-      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
-      const queryToken = (request.query as Record<string, string>)?.token;
-      const token = bearerToken ?? queryToken;
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
 
       if (!token) {
         throw new AuthError('Missing or invalid Authorization header');

@@ -46,10 +46,11 @@ export function generateValidationReport(
 
     // ── Preview controls ──
     var _sessionToken = ${podToken ? `'${escapeHtml(podToken)}'` : 'null'};
-    function _previewUrl(path) {
+    function _previewFetch(path, opts) {
       var url = window.location.origin + path;
-      if (_sessionToken) url += (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(_sessionToken);
-      return url;
+      var headers = Object.assign({}, (opts && opts.headers) || {});
+      if (_sessionToken) headers['Authorization'] = 'Bearer ' + _sessionToken;
+      return fetch(url, Object.assign({}, opts, { headers: headers }));
     }
 
     async function startPreview() {
@@ -58,7 +59,7 @@ export function generateValidationReport(
       if (btn) btn.disabled = true;
       if (btn) btn.textContent = 'Starting…';
       try {
-        const res = await fetch(_previewUrl('/pods/${escapeHtml(pod.id)}/preview'), { method: 'POST' });
+        const res = await _previewFetch('/pods/${escapeHtml(pod.id)}/preview', { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed to start preview');
         if (status) status.innerHTML = 'Preview running at <a href="' + data.previewUrl + '" target="_blank" class="text-blue-600 underline">' + data.previewUrl + '</a>';
@@ -79,7 +80,7 @@ export function generateValidationReport(
       if (btn) btn.disabled = true;
       if (btn) btn.textContent = 'Stopping…';
       try {
-        const res = await fetch(_previewUrl('/pods/${escapeHtml(pod.id)}/preview'), { method: 'DELETE' });
+        const res = await _previewFetch('/pods/${escapeHtml(pod.id)}/preview', { method: 'DELETE' });
         if (!res.ok) { const data = await res.json(); throw new Error(data.message || 'Failed to stop preview'); }
         if (status) status.textContent = 'Preview stopped';
         if (btn) btn.textContent = 'Stop Preview';

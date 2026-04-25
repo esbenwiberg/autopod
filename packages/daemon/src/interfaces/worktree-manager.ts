@@ -65,8 +65,8 @@ export interface WorktreeManager {
     podTask: string | undefined,
     options?: { maxDeletions?: number },
   ): Promise<boolean>;
-  /** Push the current branch to origin. */
-  pushBranch(worktreePath: string): Promise<void>;
+  /** Push the current branch to origin. Verifies HEAD is on `expectedBranch` before pushing. */
+  pushBranch(worktreePath: string, expectedBranch: string): Promise<void>;
   /** Pull latest changes from origin for the current branch. */
   pullBranch(worktreePath: string): Promise<{ newCommits: boolean }>;
   /** Get commit log between current HEAD and a base branch (or a specific commit). */

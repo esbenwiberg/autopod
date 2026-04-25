@@ -431,8 +431,21 @@ export class LocalWorktreeManager implements WorktreeManager {
     // Push using auth URL so the PAT is never stored in git config.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
     const authUrl = await this.getAuthUrl(worktreePath);
+    const { stdout: actualBranch } = await execFileAsync(
+      'git',
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      { cwd: worktreePath },
+    );
+    if (actualBranch.trim() !== targetBranch) {
+      throw new Error(
+        `Expected HEAD to be on branch '${targetBranch}' but it is on '${actualBranch.trim()}'`,
+      );
+    }
     try {
-      await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath, env: GIT_ENV });
+      await execFileAsync('git', ['push', authUrl, `HEAD:refs/heads/${targetBranch}`], {
+        cwd: worktreePath,
+        env: GIT_ENV,
+      });
     } catch (err) {
       throw sanitizeGitError(err);
     }
@@ -521,11 +534,24 @@ export class LocalWorktreeManager implements WorktreeManager {
     return stdout.trim().split('\n').filter(Boolean).length;
   }
 
-  async pushBranch(worktreePath: string): Promise<void> {
-    this.logger.info({ worktreePath }, 'Pushing branch to origin');
+  async pushBranch(worktreePath: string, expectedBranch: string): Promise<void> {
+    this.logger.info({ worktreePath, expectedBranch }, 'Pushing branch to origin');
+    const { stdout: actualBranch } = await execFileAsync(
+      'git',
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      { cwd: worktreePath },
+    );
+    if (actualBranch.trim() !== expectedBranch) {
+      throw new Error(
+        `Expected HEAD to be on branch '${expectedBranch}' but it is on '${actualBranch.trim()}'`,
+      );
+    }
     const authUrl = await this.getAuthUrl(worktreePath);
     try {
-      await execFileAsync('git', ['push', authUrl, 'HEAD'], { cwd: worktreePath, env: GIT_ENV });
+      await execFileAsync('git', ['push', authUrl, `HEAD:refs/heads/${expectedBranch}`], {
+        cwd: worktreePath,
+        env: GIT_ENV,
+      });
     } catch (err) {
       throw sanitizeGitError(err);
     }

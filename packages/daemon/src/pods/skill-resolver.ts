@@ -82,6 +82,14 @@ async function resolveGithub(
   logger: Logger,
 ): Promise<ResolvedSkill | null> {
   const ref = source.ref ?? 'main';
+  // Only full 40-char commit SHAs are accepted. Branch names and tags can be force-pushed
+  // to point at malicious content; a pinned SHA is immutable.
+  if (!/^[0-9a-f]{40}$/.test(ref)) {
+    logger.warn(
+      { skill: skill.name, repo: source.repo, ref },
+      'Skill ref is not a full 40-character commit SHA — future releases will reject non-SHA refs. Pin to a commit SHA to silence this warning.',
+    );
+  }
   const filePath = source.path ?? `${skill.name}.md`;
   const url = `https://api.github.com/repos/${source.repo}/contents/${filePath}?ref=${encodeURIComponent(ref)}`;
 

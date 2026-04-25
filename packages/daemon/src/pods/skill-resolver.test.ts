@@ -186,6 +186,86 @@ describe('resolveSkills', () => {
       const result = await resolveSkills(skills, logger);
       expect(result).toHaveLength(0);
     });
+
+    describe('ref validation — fix 3.1', () => {
+      it('warns when ref is a branch name', async () => {
+        const mockFetch = vi.fn().mockResolvedValue({
+          ok: true,
+          text: () => Promise.resolve('content'),
+        });
+        vi.stubGlobal('fetch', mockFetch);
+        const warnSpy = vi.spyOn(logger, 'warn');
+
+        await resolveSkills(
+          [{ name: 'skill', source: { type: 'github', repo: 'org/repo', ref: 'main' } }],
+          logger,
+        );
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ ref: 'main' }),
+          expect.stringContaining('not a full 40-character commit SHA'),
+        );
+      });
+
+      it('warns when ref is a short SHA', async () => {
+        const mockFetch = vi.fn().mockResolvedValue({
+          ok: true,
+          text: () => Promise.resolve('content'),
+        });
+        vi.stubGlobal('fetch', mockFetch);
+        const warnSpy = vi.spyOn(logger, 'warn');
+
+        await resolveSkills(
+          [{ name: 'skill', source: { type: 'github', repo: 'org/repo', ref: 'abc1234' } }],
+          logger,
+        );
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ ref: 'abc1234' }),
+          expect.stringContaining('not a full 40-character commit SHA'),
+        );
+      });
+
+      it('does not warn when ref is a full 40-char commit SHA', async () => {
+        const mockFetch = vi.fn().mockResolvedValue({
+          ok: true,
+          text: () => Promise.resolve('content'),
+        });
+        vi.stubGlobal('fetch', mockFetch);
+        const warnSpy = vi.spyOn(logger, 'warn');
+
+        const fullSha = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+        await resolveSkills(
+          [{ name: 'skill', source: { type: 'github', repo: 'org/repo', ref: fullSha } }],
+          logger,
+        );
+
+        const shaCalls = warnSpy.mock.calls.filter(
+          ([, msg]) =>
+            typeof msg === 'string' && msg.includes('not a full 40-character commit SHA'),
+        );
+        expect(shaCalls).toHaveLength(0);
+      });
+
+      it('warns when no ref is provided (defaults to "main")', async () => {
+        const mockFetch = vi.fn().mockResolvedValue({
+          ok: true,
+          text: () => Promise.resolve('content'),
+        });
+        vi.stubGlobal('fetch', mockFetch);
+        const warnSpy = vi.spyOn(logger, 'warn');
+
+        await resolveSkills(
+          [{ name: 'skill', source: { type: 'github', repo: 'org/repo' } }],
+          logger,
+        );
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ ref: 'main' }),
+          expect.stringContaining('not a full 40-character commit SHA'),
+        );
+      });
+    });
   });
 
   describe('mixed sources', () => {
