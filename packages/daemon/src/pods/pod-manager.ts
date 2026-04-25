@@ -2129,16 +2129,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // syncWorkspaceBack() clears + re-copies the host bind-mount; if it dies mid-flight
           // (OOM, Docker crash, Azure SMB error) the host worktree loses files while the git
           // index still references them. Recovery mode then copies that partial tree into the
-          // container. `git restore .` is idempotent — a no-op when the tree is clean.
-          const restore = await containerManager.execInContainer(
+          // container. Skipped when the index is empty (new branch / unborn HEAD) — `git restore .`
+          // errors with "pathspec '.' did not match any file(s) known to git" in that case.
+          const hasTrackedFiles = await containerManager.execInContainer(
             containerId,
-            ['git', '-C', '/workspace', 'restore', '.'],
-            { timeout: 30_000 },
+            ['sh', '-c', 'git -C /workspace ls-files | head -1 | grep -q .'],
+            { timeout: 5_000 },
           );
-          if (restore.exitCode !== 0) {
-            throw new Error(
-              `Git workspace restore failed (exit ${restore.exitCode}): ${restore.stderr}`,
+          if (hasTrackedFiles.exitCode === 0) {
+            const restore = await containerManager.execInContainer(
+              containerId,
+              ['git', '-C', '/workspace', 'restore', '.'],
+              { timeout: 30_000 },
             );
+            if (restore.exitCode !== 0) {
+              throw new Error(
+                `Git workspace restore failed (exit ${restore.exitCode}): ${restore.stderr}`,
+              );
+            }
           }
         }
 
