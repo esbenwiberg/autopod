@@ -347,6 +347,8 @@ export interface PodManagerDependencies {
   getSecret: (ref: string) => string | undefined;
   /** Optional repo content scanner — runs at provisioning to flag secrets/PII/injection. */
   repoScanner?: import('../security/index.js').RepoScanner;
+  /** Optional scan repository — used to query the latest push scan when building PR bodies. */
+  scanRepo?: import('../security/index.js').ScanRepository;
   logger: Logger;
 }
 
@@ -464,6 +466,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validationRepo,
     progressEventRepo,
     repoScanner,
+    scanRepo,
   } = deps;
 
   /** Destroy the per-pod Docker bridge. Must be called AFTER the pod + all
@@ -476,6 +479,74 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       await networkManager.destroyNetworkForPod(podId);
     } catch (err) {
       logger.warn({ err, podId }, 'Failed to destroy pod network');
+    }
+  }
+
+  /** Pre-push security scan helper. Runs the repo scanner at the `push`
+   *  checkpoint and acts on the decision:
+   *   - `block` (non-workspace) → throws AutopodError; the pod's outer handler
+   *     fails the pod and the operator sees the findings in the audit table.
+   *   - `block` for workspace pods → engine rewrites to `escalate`; we log
+   *     loudly but do not fail the push.
+   *   - `warn`/`escalate` → emit a status event; PR-body integration picks up
+   *     the persisted findings via scanRepo at createPr time.
+   *  No-ops when the scanner is not wired or the pod has no worktree. */
+  async function runPushCheckpointScan(pod: Pod, profile: Profile): Promise<void> {
+    if (!repoScanner || !pod.worktreePath) return;
+    try {
+      const baseRef = `origin/${pod.baseBranch ?? profile.defaultBranch ?? 'main'}`;
+      const isWorkspacePod = pod.options.agentMode === 'interactive';
+      emitActivityStatus(pod.id, 'Running pre-push security scan…');
+      const scan = await repoScanner.scan('push', {
+        podId: pod.id,
+        workdir: pod.worktreePath,
+        baseRef,
+        profile,
+        isWorkspacePod,
+      });
+      logger.info(
+        {
+          podId: pod.id,
+          decision: scan.decision,
+          findings: scan.findings.length,
+          filesScanned: scan.filesScanned,
+          filesSkipped: scan.filesSkipped,
+        },
+        'Pre-push security scan completed',
+      );
+      if (scan.decision === 'block') {
+        throw new AutopodError(
+          `Pre-push security scan blocked (${scan.findings.length} finding(s))`,
+          'SECURITY_SCAN_BLOCKED',
+          400,
+        );
+      }
+      if (scan.decision === 'escalate') {
+        logger.warn(
+          { podId: pod.id, findings: scan.findings.length },
+          'Pre-push security scan flagged content; review the PR body and security_scans table',
+        );
+      }
+    } catch (err) {
+      if (err instanceof AutopodError) throw err;
+      // Fail open — scanner errors must not gate validation entry.
+      logger.warn({ err, podId: pod.id }, 'Pre-push security scan errored — proceeding');
+    }
+  }
+
+  /** Look up persisted security findings from the most recent push-checkpoint
+   *  scan for a pod, for inclusion in the PR body. Returns [] when the scanRepo
+   *  is not wired or no scan ran. */
+  function getLatestPushFindings(podId: string): import('@autopod/shared').ScanFinding[] {
+    if (!scanRepo) return [];
+    try {
+      const scans = scanRepo.getForPod(podId);
+      const pushScans = scans.filter((s) => s.checkpoint === 'push');
+      const latest = pushScans[pushScans.length - 1];
+      return latest?.findings ?? [];
+    } catch (err) {
+      logger.warn({ err, podId }, 'Failed to load security findings for PR body');
+      return [];
     }
   }
 
@@ -3258,6 +3329,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             taskSummary: pod.taskSummary ?? undefined,
             seriesDescription: pod.seriesDescription ?? undefined,
             seriesName: pod.seriesName ?? undefined,
+            securityFindings: getLatestPushFindings(podId),
           });
           podRepo.update(podId, { prUrl: newPrUrl });
           emitActivityStatus(podId, `PR created: ${newPrUrl}`);
@@ -3689,6 +3761,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Only remove the worktree if push succeeds — don't lose uncommitted work.
         if (pod.worktreePath) {
           try {
+            // Pre-push security scan for workspace-pod auto-push. The engine
+            // rewrites block→escalate for workspace pods at the push checkpoint
+            // so the human at the keyboard sees the warning rather than a hard
+            // fail; runPushCheckpointScan only throws when block stays a block,
+            // which happens for non-workspace pods (handled at validating entry).
+            const pushScanProfile = profileStore.get(pod.profileName);
+            await runPushCheckpointScan(pod, pushScanProfile);
             // mergeBranch auto-commits any remaining uncommitted changes before pushing.
             // If sync-back failed, the host worktree may be missing files the index still
             // references — tighten the deletion guard so a ghost mass-delete cannot ship.
@@ -3864,6 +3943,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       const profile = profileStore.get(pod.profileName);
+
+      // Pre-push security scan: inspect the diff for secrets / PII / injection
+      // before running validation. block decision throws and the pod's outer
+      // error handler transitions to failed; warn / escalate findings ride
+      // along into the PR body via scanRepo lookup at PR creation time.
+      await runPushCheckpointScan(pod, profile);
 
       // Reset attempt counter when re-validating from a terminal/failed/validated state
       if (fromTerminal) {
@@ -4321,6 +4406,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   taskSummary: s3.taskSummary ?? undefined,
                   seriesDescription: s2.seriesDescription ?? undefined,
                   seriesName: s2.seriesName ?? undefined,
+                  securityFindings: getLatestPushFindings(podId),
                 });
                 if (prUrl) {
                   emitActivityStatus(podId, `PR created: ${prUrl}`);
@@ -4476,11 +4562,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Reset validation attempts for the fresh human-driven validation
       podRepo.update(podId, { validationAttempts: 0 });
 
+      // Pre-push security scan: human-pushed fixes also need to clear the gate.
+      const profile = profileStore.get(pod.profileName);
+      await runPushCheckpointScan(pod, profile);
+
       // Transition to validating
       transition(pod, 'validating');
 
       // Re-run validation (force=true restarts container, but we don't want agent retry on failure)
-      const profile = profileStore.get(pod.profileName);
       const attempt = 1;
       podRepo.update(podId, { validationAttempts: attempt });
 
@@ -4661,6 +4750,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   previewUrl: s2.previewUrl,
                   screenshots: [],
                   taskSummary: s3.taskSummary ?? undefined,
+                  securityFindings: getLatestPushFindings(podId),
                 });
                 if (prUrl) emitActivityStatus(podId, `PR created: ${prUrl}`);
               } catch (err) {
@@ -5420,6 +5510,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           taskSummary: pod.taskSummary ?? undefined,
           seriesDescription: pod.seriesDescription ?? undefined,
           seriesName: pod.seriesName ?? undefined,
+          securityFindings: getLatestPushFindings(podId),
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

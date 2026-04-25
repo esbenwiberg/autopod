@@ -159,6 +159,7 @@ export class AdoPrManager implements PrManager {
       inlineImages: false,
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
+      securityFindings: config.securityFindings,
     });
 
     this.logger.info(

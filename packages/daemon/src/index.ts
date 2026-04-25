@@ -384,6 +384,7 @@ podManager = createPodManager({
   pendingOverrideRepo,
   getSecret: (ref: string) => process.env[ref],
   repoScanner,
+  scanRepo,
   logger,
 });
 
