@@ -54,7 +54,7 @@ import {
 import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
-import { createRepoScanner, createScanRepository } from './security/index.js';
+import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
@@ -114,7 +114,12 @@ const memoryRepo = createMemoryRepository(db);
 const pendingOverrideRepo = createPendingOverrideRepository(db);
 const qualityScoreRepo = createQualityScoreRepository(db);
 const scanRepo = createScanRepository(db);
-const repoScanner = createRepoScanner({ scanRepo, logger });
+// ML detectors are opt-in via env. Set AUTOPOD_SECURITY_ML=true to enable
+// the prompt-injection and PII classifiers (ONNX, lazy-loaded). Disabled
+// by default to keep daemon RAM low and avoid first-run model downloads.
+const securityMlEnabled = process.env.AUTOPOD_SECURITY_ML === 'true';
+const modelManager = securityMlEnabled ? createModelManager({ logger }) : undefined;
+const repoScanner = createRepoScanner({ scanRepo, modelManager, logger });
 
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);

@@ -7,7 +7,9 @@ import type {
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { Detector } from './detectors/detector.js';
+import { createInjectionDetector } from './detectors/injection-detector.js';
 import { createSecretlintDetector } from './detectors/secretlint-detector.js';
+import type { ModelManager } from './model-manager.js';
 import { type RepoScanResult, type ScanEngine, createScanEngine } from './scan-engine.js';
 import { resolvePolicy } from './scan-policy.js';
 import type { ScanRepository } from './scan-repository.js';
@@ -15,6 +17,12 @@ import type { ScanRepository } from './scan-repository.js';
 export interface RepoScannerDeps {
   detectors?: Detector[];
   scanRepo?: ScanRepository;
+  /**
+   * Optional ModelManager — if provided, the default detector list adds
+   * ML-backed PII and prompt-injection detectors. Without it, only the
+   * regex/secretlint detector is wired.
+   */
+  modelManager?: ModelManager;
   logger: Logger;
 }
 
@@ -31,15 +39,17 @@ export interface RepoScanner {
 }
 
 /**
- * Construct a `RepoScanner`. Default detector set is [secretlint] only —
- * ML detectors (pii, injection) ship in later phases and would be added here.
+ * Construct a `RepoScanner`. The default detector set is built like so:
+ *   - secretlint always
+ *   - injection (ONNX) when `modelManager` is provided
+ *   - pii (ONNX) when `modelManager` is provided
  *
- * If a `scanRepo` is provided, every run is persisted (one row per scan,
- * N rows per finding). The persistence is best-effort: a DB error is logged
- * but does not change the returned result.
+ * Caller can override entirely via `detectors`. If a `scanRepo` is provided,
+ * every run is persisted (one row per scan, N rows per finding). Persistence
+ * is best-effort — DB errors are logged but don't change the returned result.
  */
 export function createRepoScanner(deps: RepoScannerDeps): RepoScanner {
-  const detectors = deps.detectors ?? [createSecretlintDetector()];
+  const detectors = deps.detectors ?? defaultDetectors(deps);
   const engine: ScanEngine = createScanEngine({ detectors, logger: deps.logger });
 
   return {
@@ -75,6 +85,14 @@ export function createRepoScanner(deps: RepoScannerDeps): RepoScanner {
       return result;
     },
   };
+}
+
+function defaultDetectors(deps: RepoScannerDeps): Detector[] {
+  const list: Detector[] = [createSecretlintDetector()];
+  if (deps.modelManager) {
+    list.push(createInjectionDetector({ modelManager: deps.modelManager }));
+  }
+  return list;
 }
 
 export type { RepoScanResult, ScanCheckpoint, ScanDecision, ScanFinding, InjectedClaudeMdSection };

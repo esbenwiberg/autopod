@@ -13,7 +13,17 @@ export {
 export type { PolicyPreset } from './scan-policy.js';
 export { buildWarningSection } from './warning-section.js';
 export { createSecretlintDetector } from './detectors/secretlint-detector.js';
+export { createInjectionDetector } from './detectors/injection-detector.js';
 export type { Detector } from './detectors/detector.js';
+export { createModelManager } from './model-manager.js';
+export type {
+  ModelManager,
+  ModelManagerConfig,
+  TextClassifier,
+  TokenClassifier,
+  TextClassificationOutput,
+  TokenClassificationOutput,
+} from './model-manager.js';
 export {
   type ScanFile,
   globToRegex,
