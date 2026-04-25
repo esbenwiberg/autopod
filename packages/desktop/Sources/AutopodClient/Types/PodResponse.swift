@@ -104,6 +104,8 @@ public struct SessionResponse: Codable, Sendable {
   public let dependsOnPodIds: [String]?
   public let seriesId: String?
   public let seriesName: String?
+  /// Overall spec description (from context.md) shared across all pods in a series.
+  public let seriesDescription: String?
   public let dependencyStartedAt: String?
   public let artifactsPath: String?
   /// Names of sidecars this pod requested (e.g. ["dagger"]).
@@ -133,7 +135,7 @@ public struct SessionResponse: Codable, Sendable {
     case baseBranch, acFrom, recoveryWorktreePath, lastHeartbeatAt
     case inputTokens, outputTokens, costUsd, commitCount, lastCommitAt
     case linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
-    case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, dependencyStartedAt
+    case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, dependencyStartedAt
     case artifactsPath
     case requireSidecars, sidecarContainerIds, testRunBranches
     case worktreeCompromised

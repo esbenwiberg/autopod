@@ -248,6 +248,7 @@ public enum PodMapper {
       profileSnapshot: response.profileSnapshot.map { ProfileMapper.map($0) },
       seriesId: response.seriesId,
       seriesName: response.seriesName,
+      seriesDescription: response.seriesDescription,
       dependsOnPodIds: response.dependsOnPodIds
         ?? (response.dependsOnPodId.map { [$0] } ?? []),
       dependencyStartedAt: response.dependencyStartedAt.map { parseDate($0) },

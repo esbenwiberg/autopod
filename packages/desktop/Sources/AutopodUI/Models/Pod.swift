@@ -537,6 +537,8 @@ public struct Pod: Identifiable, Sendable {
     public var seriesId: String?
     /// Human-readable series name (shared across all pods in a series).
     public var seriesName: String?
+    /// Overall spec description (from context.md), shared across all pods in a series.
+    public var seriesDescription: String?
     /// Pod IDs this pod depends on. Fan-in supported: a pod is only enqueued
     /// when *all* listed parents reach `validated`.
     public var dependsOnPodIds: [String]
@@ -609,6 +611,7 @@ public struct Pod: Identifiable, Sendable {
         profileSnapshot: Profile? = nil,
         seriesId: String? = nil,
         seriesName: String? = nil,
+        seriesDescription: String? = nil,
         dependsOnPodIds: [String] = [],
         dependencyStartedAt: Date? = nil,
         artifactsPath: String? = nil,
@@ -633,7 +636,7 @@ public struct Pod: Identifiable, Sendable {
         self.costUsd = costUsd; self.commitCount = commitCount
         self.taskSummary = taskSummary; self.linkedSessionId = linkedSessionId
         self.profileSnapshot = profileSnapshot
-        self.seriesId = seriesId; self.seriesName = seriesName
+        self.seriesId = seriesId; self.seriesName = seriesName; self.seriesDescription = seriesDescription
         self.dependsOnPodIds = dependsOnPodIds
         self.dependencyStartedAt = dependencyStartedAt
         self.artifactsPath = artifactsPath
@@ -680,6 +683,7 @@ public struct Pod: Identifiable, Sendable {
         profileSnapshot: Profile? = nil,
         seriesId: String? = nil,
         seriesName: String? = nil,
+        seriesDescription: String? = nil,
         dependsOnPodIds: [String] = [],
         dependencyStartedAt: Date? = nil
     ) {
@@ -701,7 +705,7 @@ public struct Pod: Identifiable, Sendable {
             costUsd: costUsd, commitCount: commitCount,
             taskSummary: taskSummary, linkedSessionId: linkedSessionId,
             profileSnapshot: profileSnapshot,
-            seriesId: seriesId, seriesName: seriesName,
+            seriesId: seriesId, seriesName: seriesName, seriesDescription: seriesDescription,
             dependsOnPodIds: dependsOnPodIds,
             dependencyStartedAt: dependencyStartedAt
         )

@@ -33,7 +33,9 @@ public struct SeriesListView: View {
     private struct SeriesGroup: Identifiable {
         let id: String
         let name: String
+        let description: String?
         let pods: [Pod]
+        let podsWithPRs: [Pod]
         var isActive: Bool
         var runningCount: Int
         var queuedCount: Int
@@ -53,8 +55,11 @@ public struct SeriesListView: View {
             let completed = group.filter { terminalStatuses.contains($0.status) }.count
             let failed = group.filter { $0.status == .failed || $0.status == .killed }.count
             let cost = group.reduce(0.0) { $0 + $1.costUsd }
+            let sortedPods = group.sorted { $0.startedAt < $1.startedAt }
+            let description = sortedPods.compactMap(\.seriesDescription).first { !$0.isEmpty }
+            let podsWithPRs = sortedPods.filter { $0.prUrl != nil }
             return SeriesGroup(
-                id: sid, name: name, pods: group.sorted { $0.startedAt < $1.startedAt },
+                id: sid, name: name, description: description, pods: sortedPods, podsWithPRs: podsWithPRs,
                 isActive: isActive, runningCount: running, queuedCount: queued,
                 completedCount: completed, failedCount: failed, totalCost: cost
             )
@@ -171,6 +176,26 @@ public struct SeriesListView: View {
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
 
+                    if !group.podsWithPRs.isEmpty {
+                        Menu {
+                            ForEach(group.podsWithPRs) { pod in
+                                Button {
+                                    if let url = pod.prUrl { NSWorkspace.shared.open(url) }
+                                } label: {
+                                    Text(prMenuLabel(for: pod))
+                                }
+                            }
+                        } label: {
+                            Label("PR", systemImage: "arrow.up.right.square")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .onTapGesture {} // prevent card toggle
+                    }
+
                     Button(role: .destructive) {
                         showDeleteConfirmation = group.id
                     } label: {
@@ -202,6 +227,16 @@ public struct SeriesListView: View {
             // Inline DAG — visible when expanded
             if isExpanded {
                 Divider()
+                if let description = group.description, !description.isEmpty {
+                    Text(description)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    Divider()
+                }
                 SeriesPipelineView(
                     pods: group.pods,
                     selectedPodId: selectedPodId,
@@ -218,6 +253,13 @@ public struct SeriesListView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.primary.opacity(0.07), lineWidth: 1)
         )
+    }
+
+    private func prMenuLabel(for pod: Pod) -> String {
+        let raw = pod.taskSummary?.actualSummary ?? pod.task
+        let firstLine = raw.split(whereSeparator: { $0.isNewline }).first.map(String.init) ?? raw
+        let truncated = firstLine.count > 60 ? String(firstLine.prefix(57)) + "…" : firstLine
+        return "\(truncated) — \(pod.status.label)"
     }
 
     private func statusChip(_ text: String, color: Color) -> some View {
