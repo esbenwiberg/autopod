@@ -493,6 +493,94 @@ describe('DockerNetworkManager', () => {
       await expect(manager.reconcileOrphanNetworks(new Set())).resolves.toBe(0);
     });
 
+    it('force-disconnects stale endpoints before removing the network', async () => {
+      const removeFn = vi.fn().mockResolvedValue(undefined);
+      const disconnectFn = vi.fn().mockResolvedValue(undefined);
+      const inspectFn = vi.fn().mockResolvedValue({
+        Containers: { 'container-1': {}, 'container-2': {} },
+      });
+      docker.mock.listNetworks.mockResolvedValueOnce([
+        {
+          Id: 'net-orphan',
+          Name: 'autopod-yappy-goat',
+          Labels: { 'com.autopod.pod-id': 'yappy-goat' },
+          Containers: {},
+        },
+      ]);
+      docker.mock.getNetwork.mockReturnValue({
+        remove: removeFn,
+        inspect: inspectFn,
+        disconnect: disconnectFn,
+      });
+
+      const pruned = await manager.reconcileOrphanNetworks(new Set());
+      expect(pruned).toBe(1);
+      expect(disconnectFn).toHaveBeenCalledTimes(2);
+      expect(disconnectFn).toHaveBeenCalledWith({ Container: 'container-1', Force: true });
+      expect(disconnectFn).toHaveBeenCalledWith({ Container: 'container-2', Force: true });
+      expect(removeFn).toHaveBeenCalledTimes(1);
+      // disconnect must run before remove, otherwise Docker returns 403
+      expect(disconnectFn.mock.invocationCallOrder[0]).toBeLessThan(
+        removeFn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+    });
+
+    it('still removes the network when one disconnect fails', async () => {
+      const removeFn = vi.fn().mockResolvedValue(undefined);
+      const disconnectFn = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('container gone'))
+        .mockResolvedValueOnce(undefined);
+      const inspectFn = vi.fn().mockResolvedValue({
+        Containers: { 'container-1': {}, 'container-2': {} },
+      });
+      docker.mock.listNetworks.mockResolvedValueOnce([
+        {
+          Id: 'net-orphan',
+          Name: 'autopod-bad',
+          Labels: { 'com.autopod.pod-id': 'bad' },
+          Containers: {},
+        },
+      ]);
+      docker.mock.getNetwork.mockReturnValue({
+        remove: removeFn,
+        inspect: inspectFn,
+        disconnect: disconnectFn,
+      });
+
+      const pruned = await manager.reconcileOrphanNetworks(new Set());
+      expect(pruned).toBe(1);
+      expect(disconnectFn).toHaveBeenCalledTimes(2);
+      expect(removeFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to listNetworks endpoints when inspect fails', async () => {
+      const removeFn = vi.fn().mockResolvedValue(undefined);
+      const disconnectFn = vi.fn().mockResolvedValue(undefined);
+      const inspectFn = vi.fn().mockRejectedValue(new Error('inspect blew up'));
+      docker.mock.listNetworks.mockResolvedValueOnce([
+        {
+          Id: 'net-orphan',
+          Name: 'autopod-fallback',
+          Labels: { 'com.autopod.pod-id': 'fallback' },
+          Containers: { 'container-from-list': {} },
+        },
+      ]);
+      docker.mock.getNetwork.mockReturnValue({
+        remove: removeFn,
+        inspect: inspectFn,
+        disconnect: disconnectFn,
+      });
+
+      const pruned = await manager.reconcileOrphanNetworks(new Set());
+      expect(pruned).toBe(1);
+      expect(disconnectFn).toHaveBeenCalledWith({
+        Container: 'container-from-list',
+        Force: true,
+      });
+      expect(removeFn).toHaveBeenCalledTimes(1);
+    });
+
     it('continues and returns partial count when a remove fails', async () => {
       const removeFail = vi.fn().mockRejectedValue(new Error('busy'));
       const removeOk = vi.fn().mockResolvedValue(undefined);

@@ -154,8 +154,14 @@ export class DockerNetworkManager {
       networks.map(async (net) => {
         const podId = net.Labels?.['com.autopod.pod-id'];
         if (!podId || activePodIds.has(podId)) return;
+        const network = this.docker.getNetwork(net.Id);
         try {
-          await this.docker.getNetwork(net.Id).remove();
+          // A previous daemon crash can leave containers attached to the network.
+          // Docker rejects `network rm` with 403 ("has active endpoints") until
+          // every endpoint is detached, so force-disconnect each one first. The
+          // containers themselves get reaped by the sidecar/local reconcilers.
+          await this.detachEndpoints(network, net);
+          await network.remove();
           this.logger.info({ network: net.Name, podId }, 'Pruned orphan pod network');
           pruned++;
         } catch (err) {
@@ -164,6 +170,45 @@ export class DockerNetworkManager {
       }),
     );
     return pruned;
+  }
+
+  /**
+   * Force-disconnect every container currently attached to `network`. Used by
+   * the orphan reconciler to clear stale endpoints left behind by a crashed
+   * daemon so the network can subsequently be removed.
+   */
+  private async detachEndpoints(
+    network: ReturnType<Dockerode['getNetwork']>,
+    listEntry: Dockerode.NetworkInspectInfo,
+  ): Promise<void> {
+    // Prefer the live inspection — `listNetworks` returns containers only when
+    // the network is on the same node as the daemon, and the data can lag.
+    let containerIds: string[] = [];
+    try {
+      const info = (await network.inspect()) as
+        | { Containers?: Record<string, unknown> }
+        | undefined;
+      containerIds = Object.keys(info?.Containers ?? {});
+    } catch {
+      containerIds = Object.keys(listEntry.Containers ?? {});
+    }
+    if (containerIds.length === 0) return;
+    await Promise.all(
+      containerIds.map(async (containerId) => {
+        try {
+          await network.disconnect({ Container: containerId, Force: true });
+          this.logger.info(
+            { network: listEntry.Name, containerId },
+            'Force-disconnected stale endpoint from orphan pod network',
+          );
+        } catch (err) {
+          this.logger.warn(
+            { err, network: listEntry.Name, containerId },
+            'Failed to force-disconnect stale endpoint',
+          );
+        }
+      }),
+    );
   }
 
   /**
