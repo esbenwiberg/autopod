@@ -1,3 +1,4 @@
+import AutopodClient
 import SwiftUI
 
 /// Top-level DAG view for a pod series. Renders nodes via `PipelineNodeView`,
@@ -17,19 +18,39 @@ public struct SeriesPipelineView: View {
     /// immediately navigating via `onSelectPod`.
     public var panelEnabled: Bool
     public var actions: PodActions
+    /// Returns the agent event stream for the pod opened in the slide-in panel.
+    /// Only invoked when `panelEnabled` is true. Closure form (rather than a passed-in
+    /// dict) so SwiftUI doesn't observe the entire `EventStream.sessionEvents` map.
+    public var eventsForPod: ((String) -> [AgentEvent])?
+    /// Triggers a historical event fetch for `panelPodId` when the panel opens
+    /// a sibling pod whose events haven't been loaded yet.
+    public var loadEventsForPod: ((String) -> Void)?
+    /// Quality-signals fetcher passed through to the slide-in panel.
+    public var loadQuality: ((String) async throws -> PodQualitySignals)?
+    /// Lets the slide-in panel switch the main detail to a specific tab
+    /// (e.g. "Full validation →").
+    public var requestTab: ((DetailTab) -> Void)?
 
     public init(
         pods: [Pod],
         selectedPodId: String? = nil,
         onSelectPod: @escaping (String) -> Void = { _ in },
         panelEnabled: Bool = false,
-        actions: PodActions = .preview
+        actions: PodActions = .preview,
+        eventsForPod: ((String) -> [AgentEvent])? = nil,
+        loadEventsForPod: ((String) -> Void)? = nil,
+        loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
+        requestTab: ((DetailTab) -> Void)? = nil
     ) {
         self.pods = pods
         self.selectedPodId = selectedPodId
         self.onSelectPod = onSelectPod
         self.panelEnabled = panelEnabled
         self.actions = actions
+        self.eventsForPod = eventsForPod
+        self.loadEventsForPod = loadEventsForPod
+        self.loadQuality = loadQuality
+        self.requestTab = requestTab
     }
 
     @State private var panelPodId: String?
@@ -60,17 +81,25 @@ public struct SeriesPipelineView: View {
                     Divider()
                     PodActivityPanel(
                         pod: pod,
+                        events: eventsForPod?(pod.id) ?? [],
                         actions: actions,
                         onNavigate: {
                             panelPodId = nil
                             onSelectPod(pod.id)
-                        }
+                        },
+                        loadQuality: loadQuality,
+                        requestTab: requestTab
                     )
-                    .frame(width: 280)
+                    .frame(width: 380)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .animation(.easeOut(duration: 0.18), value: panelPodId)
+            .onChange(of: panelPodId) { _, newId in
+                if let id = newId {
+                    loadEventsForPod?(id)
+                }
+            }
             Divider()
             footer
         }

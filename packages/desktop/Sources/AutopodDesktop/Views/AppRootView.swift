@@ -74,6 +74,13 @@ public struct AppRootView: View {
       profileNames: profileStore.profileNames,
       profileDetails: profileStore.profiles,
       selectedSessionEvents: selectedSessionEvents,
+      eventsForPod: { [eventStream] id in
+        eventStream?.sessionEvents[id] ?? []
+      },
+      loadEventsForPod: { [connectionManager, eventStream] id in
+        guard let api = connectionManager.api else { return }
+        eventStream?.loadHistoricalEvents(podId: id, api: api)
+      },
       isLoadingLogs: selectedSessionIsLoadingLogs,
       logsLoadError: selectedSessionLogsError,
       onReloadLogs: {

@@ -15,6 +15,13 @@ public struct MainView: View {
     /// per-profile UI (e.g. the Dagger sidecar toggle). Empty = name-only fallback.
     public var profileDetails: [Profile]
     public var selectedSessionEvents: [AgentEvent]
+    /// Returns the cached event stream for any pod id — used by the Series tab
+    /// slide-in panel so it can show events for sibling pods without making the
+    /// whole view observe `EventStream.sessionEvents` mutations.
+    public var eventsForPod: ((String) -> [AgentEvent])?
+    /// Triggers a historical event fetch for a pod whose events haven't been
+    /// loaded yet (e.g. when the user opens the slide-in panel for a sibling).
+    public var loadEventsForPod: ((String) -> Void)?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
     public var onReloadLogs: (() -> Void)?
@@ -69,6 +76,8 @@ public struct MainView: View {
         profileNames: [String] = ["my-app", "webapp", "backend"],
         profileDetails: [Profile] = [],
         selectedSessionEvents: [AgentEvent] = [],
+        eventsForPod: ((String) -> [AgentEvent])? = nil,
+        loadEventsForPod: ((String) -> Void)? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
         onReloadLogs: (() -> Void)? = nil,
@@ -114,6 +123,8 @@ public struct MainView: View {
         self.profileNames = profileNames
         self.profileDetails = profileDetails
         self.selectedSessionEvents = selectedSessionEvents
+        self.eventsForPod = eventsForPod
+        self.loadEventsForPod = loadEventsForPod
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
         self.onReloadLogs = onReloadLogs
@@ -363,6 +374,8 @@ public struct MainView: View {
                     actions: wiredActions,
                     seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
                     onSelectPod: { selectedSessionId = $0 },
+                    eventsForPod: eventsForPod,
+                    loadEventsForPod: loadEventsForPod,
                     diffString: sessionDiffs[pod.id],
                     terminalState: terminalState,
                     terminalDataPipe: terminalDataPipe,

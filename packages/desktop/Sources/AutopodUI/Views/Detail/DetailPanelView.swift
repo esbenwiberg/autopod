@@ -12,6 +12,12 @@ public struct DetailPanelView: View {
     public var seriesPods: [Pod]
     /// Callback invoked when a node is tapped in the Series tab's pipeline view.
     public var onSelectPod: ((String) -> Void)?
+    /// Returns the cached event stream for any pod id — used by the Series tab's
+    /// slide-in panel so it can show the activity feed for a sibling pod.
+    public var eventsForPod: ((String) -> [AgentEvent])?
+    /// Triggers a historical event fetch for a pod whose events haven't been
+    /// loaded yet (e.g. when the user opens the panel for a sibling).
+    public var loadEventsForPod: ((String) -> Void)?
     public var diffString: String?
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
@@ -32,6 +38,8 @@ public struct DetailPanelView: View {
         pod: Pod, events: [AgentEvent], actions: PodActions = .preview,
         seriesPods: [Pod] = [],
         onSelectPod: ((String) -> Void)? = nil,
+        eventsForPod: ((String) -> [AgentEvent])? = nil,
+        loadEventsForPod: ((String) -> Void)? = nil,
         diffString: String? = nil,
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
@@ -51,6 +59,8 @@ public struct DetailPanelView: View {
         self.pod = pod; self.events = events; self.actions = actions
         self.seriesPods = seriesPods
         self.onSelectPod = onSelectPod
+        self.eventsForPod = eventsForPod
+        self.loadEventsForPod = loadEventsForPod
         self.diffString = diffString
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
@@ -117,7 +127,16 @@ public struct DetailPanelView: View {
                         selectedPodId: pod.id,
                         onSelectPod: { onSelectPod?($0) },
                         panelEnabled: true,
-                        actions: actions
+                        actions: actions,
+                        eventsForPod: { id in
+                            // For the currently-focused pod, prefer the live events array
+                            // (it's already being streamed). For siblings, fall back to the
+                            // store lookup.
+                            id == pod.id ? events : (eventsForPod?(id) ?? [])
+                        },
+                        loadEventsForPod: loadEventsForPod,
+                        loadQuality: loadQuality,
+                        requestTab: { tab in requestedTab = tab }
                     )
                 }
 

@@ -1,24 +1,55 @@
+import AutopodClient
 import SwiftUI
 
-/// Slide-in activity panel shown when a pipeline node is selected in SeriesPipelineView.
+/// Slide-in detail panel shown when a pipeline node is selected in `SeriesPipelineView`.
+///
+/// Sections (top → bottom):
+///   - Header: pod id, status dot, navigate-↗ to make this pod the main detail.
+///   - Meta row: status, duration, profile, model, cost.
+///   - Phase progress bar (if `pod.phase` is set).
+///   - Session Quality card (when `loadQuality` returns signals): grade dot + score
+///     + 9 `StatTile`s covering interrupts, churn, tells, PR fixes, smoke tests,
+///     browser checks, cost, blind edits, read/edit ratio.
+///   - "Full validation →" link (when `requestTab` is wired).
+///   - Activity feed: last 10 overview-worthy events with tap-to-expand detail.
+///   - Action buttons: Nudge / Pause when active or attention-needed.
 struct PodActivityPanel: View {
     let pod: Pod
+    var events: [AgentEvent] = []
     var actions: PodActions
     var onNavigate: (() -> Void)?
+    var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
+    var requestTab: ((DetailTab) -> Void)? = nil
+
+    @State private var quality: PodQualitySignals? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             panelHeader
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
                     metaRow
-                    if let activity = pod.latestActivity {
-                        activitySection(activity)
-                    }
                     if let phase = pod.phase {
                         phaseSection(phase)
                     }
+                    if let q = quality {
+                        SessionQualityCard(signals: q)
+                        if let requestTab {
+                            Button {
+                                requestTab(.validation)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("Full validation")
+                                    Image(systemName: "arrow.right")
+                                }
+                                .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
+                        }
+                    }
+                    ActivityFeedList(events: events, maxCount: 10)
                     if pod.status.isActive || pod.status.needsAttention {
                         actionButtons
                     }
@@ -27,6 +58,19 @@ struct PodActivityPanel: View {
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
+        .task(id: pod.id) {
+            await fetchQuality()
+        }
+    }
+
+    private func fetchQuality() async {
+        guard let loadQuality else { return }
+        do {
+            quality = try await loadQuality(pod.id)
+        } catch {
+            // Non-fatal: pod may have died early or daemon route may not be wired.
+            quality = nil
+        }
     }
 
     private var panelHeader: some View {
@@ -78,19 +122,6 @@ struct PodActivityPanel: View {
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
-        }
-    }
-
-    private func activitySection(_ activity: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Activity")
-                .font(.system(.caption2).weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .textCase(.uppercase)
-            Text(activity)
-                .font(.system(.caption))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
