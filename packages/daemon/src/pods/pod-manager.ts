@@ -41,6 +41,7 @@ import {
   generatePodId,
   outputModeFromPodOptions,
   podOptionsFromOutputMode,
+  processContent,
   resolvePodOptions,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -147,11 +148,18 @@ exec "$@"
 /**
  * Build the task string for a PR fix pod, injecting CI failure details and
  * review comments so the agent knows exactly what to fix.
+ *
+ * Review comments and CI annotations are attacker-controlled (any GitHub user
+ * can post a review). Run them through the PI + PII pipeline before embedding
+ * so a malicious reviewer cannot inject instructions into the fix pod.
+ *
+ * Exported for unit testing only.
  */
-function buildPrFixTask(
+export function buildPrFixTask(
   pod: Pod,
   status: PrMergeStatus,
   podRepo: PodRepository,
+  profile: Profile,
   userMessage?: string,
 ): string {
   const attempt = (pod.prFixAttempts ?? 0) + 1;
@@ -171,6 +179,15 @@ function buildPrFixTask(
     }
   }
 
+  // Sanitize a reviewer-supplied string: quarantine PI, strip PII.
+  // Uses the profile's content-processing config when set; falls back to a
+  // safe default that enables both PI detection and standard PII removal.
+  const sanitizeExternal = (text: string): string =>
+    processContent(text, {
+      quarantine: profile.contentProcessing?.quarantine ?? { enabled: true },
+      sanitization: profile.contentProcessing?.sanitization ?? { preset: 'standard' },
+    }).text;
+
   const sections: string[] = [
     `[PR FIX] The pull request at ${pod.prUrl} needs fixes (attempt ${attempt}).`,
     '',
@@ -189,7 +206,7 @@ function buildPrFixTask(
       if (ci.annotations.length > 0) {
         sections.push('Annotations:');
         for (const ann of ci.annotations) {
-          sections.push(`  - ${ann.path}: ${ann.message} [${ann.annotationLevel}]`);
+          sections.push(`  - ${sanitizeExternal(ann.path)}: ${sanitizeExternal(ann.message)} [${ann.annotationLevel}]`);
         }
       }
       sections.push('');
@@ -199,8 +216,8 @@ function buildPrFixTask(
   if (status.reviewComments.length > 0) {
     sections.push('## Review Comments\n');
     for (const rc of status.reviewComments) {
-      const prefix = rc.path ? `\`${rc.path}\`: ` : '';
-      sections.push(`${prefix}${rc.body}`);
+      const prefix = rc.path ? `\`${sanitizeExternal(rc.path)}\`: ` : '';
+      sections.push(`${prefix}${sanitizeExternal(rc.body)}`);
       sections.push('');
     }
   }
@@ -742,8 +759,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     // Build fix task and create child pod directly using closure deps
     const newAttempt = (parent.prFixAttempts ?? 0) + 1;
-    const fixTask = buildPrFixTask(parent, status, podRepo, userMessage);
     const profile = profileStore.get(parent.profileName);
+    const fixTask = buildPrFixTask(parent, status, podRepo, profile, userMessage);
 
     let fixId = '';
     for (let attempt = 0; attempt < 10; attempt++) {
