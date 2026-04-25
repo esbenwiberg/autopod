@@ -116,6 +116,10 @@ describe('review tool runner - tool implementations', () => {
     await execFileAsync('git', ['init', '--initial-branch=main'], { cwd: tmpDir });
     await execFileAsync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir });
     await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir });
+    // Disable commit/tag signing locally so tests don't depend on the host's
+    // global gpg.format / gpg.ssh.program configuration.
+    await execFileAsync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmpDir });
+    await execFileAsync('git', ['config', 'tag.gpgsign', 'false'], { cwd: tmpDir });
     await fs.mkdir(path.join(tmpDir, 'src'), { recursive: true });
     await fs.writeFile(path.join(tmpDir, 'src/index.ts'), 'export const hello = "world";');
     await fs.writeFile(path.join(tmpDir, 'package.json'), '{"name": "test"}');

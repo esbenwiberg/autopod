@@ -79,6 +79,10 @@ describe('gatherReviewContext', () => {
     await execFileAsync('git', ['init', '--initial-branch=main'], { cwd: tmpDir });
     await execFileAsync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir });
     await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir });
+    // Disable commit/tag signing locally so tests don't depend on the host's
+    // global gpg.format / gpg.ssh.program configuration.
+    await execFileAsync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmpDir });
+    await execFileAsync('git', ['config', 'tag.gpgsign', 'false'], { cwd: tmpDir });
   });
 
   afterEach(async () => {
