@@ -14,6 +14,7 @@ export type { PolicyPreset } from './scan-policy.js';
 export { buildWarningSection } from './warning-section.js';
 export { createSecretlintDetector } from './detectors/secretlint-detector.js';
 export { createInjectionDetector } from './detectors/injection-detector.js';
+export { createPiiDetector } from './detectors/pii-detector.js';
 export type { Detector } from './detectors/detector.js';
 export { createModelManager } from './model-manager.js';
 export type {

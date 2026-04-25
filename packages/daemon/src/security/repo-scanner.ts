@@ -8,6 +8,7 @@ import type {
 import type { Logger } from 'pino';
 import type { Detector } from './detectors/detector.js';
 import { createInjectionDetector } from './detectors/injection-detector.js';
+import { createPiiDetector } from './detectors/pii-detector.js';
 import { createSecretlintDetector } from './detectors/secretlint-detector.js';
 import type { ModelManager } from './model-manager.js';
 import { type RepoScanResult, type ScanEngine, createScanEngine } from './scan-engine.js';
@@ -91,6 +92,7 @@ function defaultDetectors(deps: RepoScannerDeps): Detector[] {
   const list: Detector[] = [createSecretlintDetector()];
   if (deps.modelManager) {
     list.push(createInjectionDetector({ modelManager: deps.modelManager }));
+    list.push(createPiiDetector({ modelManager: deps.modelManager }));
   }
   return list;
 }
