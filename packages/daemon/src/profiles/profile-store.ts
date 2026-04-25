@@ -13,6 +13,7 @@ import type {
   PrivateRegistry,
   Profile,
   ProviderCredentials,
+  SecurityScanPolicy,
   SidecarsConfig,
   SmokePage,
   TestPipelineConfig,
@@ -159,6 +160,9 @@ export function rowToProfile(
     testPipeline: row.test_pipeline
       ? (JSON.parse(row.test_pipeline as string) as TestPipelineConfig)
       : null,
+    securityScan: row.security_scan
+      ? (JSON.parse(row.security_scan as string) as SecurityScanPolicy)
+      : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -278,7 +282,7 @@ export function createProfileStore(
           issue_watcher_enabled, issue_watcher_label_prefix,
           pim_activations,
           merge_strategy,
-          sidecars, trusted_source, test_pipeline,
+          sidecars, trusted_source, test_pipeline, security_scan,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand, @buildWorkDir,
@@ -294,7 +298,7 @@ export function createProfileStore(
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
           @pimActivations,
           @mergeStrategy,
-          @sidecars, @trustedSource, @testPipeline,
+          @sidecars, @trustedSource, @testPipeline, @securityScan,
           @createdAt, @updatedAt
         )
       `).run({
@@ -357,6 +361,7 @@ export function createProfileStore(
               ? 1
               : 0,
         testPipeline: parsed.testPipeline ? JSON.stringify(parsed.testPipeline) : null,
+        securityScan: parsed.securityScan ? JSON.stringify(parsed.securityScan) : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -652,6 +657,10 @@ export function createProfileStore(
       if (parsed.testPipeline !== undefined) {
         setClauses.push('test_pipeline = @testPipeline');
         fieldMap.testPipeline = parsed.testPipeline ? JSON.stringify(parsed.testPipeline) : null;
+      }
+      if (parsed.securityScan !== undefined) {
+        setClauses.push('security_scan = @securityScan');
+        fieldMap.securityScan = parsed.securityScan ? JSON.stringify(parsed.securityScan) : null;
       }
 
       if (setClauses.length === 0) {

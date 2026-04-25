@@ -113,6 +113,12 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.27.1
         version: 1.27.1(zod@3.25.76)
+      '@secretlint/core':
+        specifier: ^12.2.0
+        version: 12.2.0
+      '@secretlint/secretlint-rule-preset-recommend':
+        specifier: ^12.2.0
+        version: 12.2.0
       better-sqlite3:
         specifier: ^11.7.0
         version: 11.10.0
@@ -774,6 +780,21 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@secretlint/core@12.2.0':
+    resolution: {integrity: sha512-ZT4irO8fPUg2810kcnfNQZ+AHIIYLFKyEqR91aSDl3g/RFOOLC66CAzGmMA1OuMc+sx9XE9TnM/IpLmLVvUSnA==}
+    engines: {node: '>=22.0.0'}
+
+  '@secretlint/profiler@12.2.0':
+    resolution: {integrity: sha512-tB1NhUbCWH+32wSx6xE+Uj7nTUkidYEyW6B6pdGxsiZSM4SGz+FuKpr9OcylGsEphkkz1cQA3P9CjwCHcQqrnw==}
+
+  '@secretlint/secretlint-rule-preset-recommend@12.2.0':
+    resolution: {integrity: sha512-n4qknL6vYRelmyrAyV/Z8I85c6jS6yF/ZxpgcqebjJuECIiel8OT2wIVIq9vk0MwlQN35skaQu0KvfM8uuGeyA==}
+    engines: {node: '>=22.0.0'}
+
+  '@secretlint/types@12.2.0':
+    resolution: {integrity: sha512-pIqhdWTFMN/cBfpZkAX1A8dqavsFvAdLobbxyMUHBUn/sUgXzyvUp7I52iyTr21EPc/BvOT9lDWdJBkcNz+n7Q==}
+    engines: {node: '>=22.0.0'}
+
   '@types/better-sqlite3@7.6.13':
     resolution: {integrity: sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==}
 
@@ -960,6 +981,9 @@ packages:
   body-parser@2.2.2:
     resolution: {integrity: sha512-oP5VkATKlNwcgvxi0vM0p/D3n2C3EReYVX+DNYs5TjZFn/oQt2j+4sVJtSMr18pdRr8wjTcBl6LoV+FUwzPmNA==}
     engines: {node: '>=18'}
+
+  boundary@2.0.0:
+    resolution: {integrity: sha512-rJKn5ooC9u8q13IMCrW0RSp31pxBCHE3y9V/tp3TdWSLf8Em3p6Di4NBpfzbJge9YjjFEsD0RtFEjtvHL5VyEA==}
 
   buffer-equal-constant-time@1.0.1:
     resolution: {integrity: sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA==}
@@ -1949,6 +1973,9 @@ packages:
   strip-literal@3.1.0:
     resolution: {integrity: sha512-8r3mkIM/2+PpjHoOtiAW8Rg3jJLHaV7xPwG+YRGrv6FP0wwk/toTpATxWYOW0BKdWwl82VT2tFYi5DlROa0Mxg==}
 
+  structured-source@4.0.0:
+    resolution: {integrity: sha512-qGzRFNJDjFieQkl/sVOI2dUjHKRyL9dAJi2gCPGJLbJHBIkyOHxjuocpIEfbLioX+qSJpvbYdT49/YCdMznKxA==}
+
   sucrase@3.35.1:
     resolution: {integrity: sha512-DhuTmvZWux4H1UOnWMB3sk0sbaCVOoQZjv8u1rDoTV0HTdGem9hkAZtl4JZy8P2z4Bg0nT+YMeOFyVr4zcG5Tw==}
     engines: {node: '>=16 || 14 >=14.17'}
@@ -2716,6 +2743,21 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.59.0':
     optional: true
 
+  '@secretlint/core@12.2.0':
+    dependencies:
+      '@secretlint/profiler': 12.2.0
+      '@secretlint/types': 12.2.0
+      debug: 4.4.3
+      structured-source: 4.0.0
+    transitivePeerDependencies:
+      - supports-color
+
+  '@secretlint/profiler@12.2.0': {}
+
+  '@secretlint/secretlint-rule-preset-recommend@12.2.0': {}
+
+  '@secretlint/types@12.2.0': {}
+
   '@types/better-sqlite3@7.6.13':
     dependencies:
       '@types/node': 22.19.15
@@ -2924,6 +2966,8 @@ snapshots:
       type-is: 2.0.1
     transitivePeerDependencies:
       - supports-color
+
+  boundary@2.0.0: {}
 
   buffer-equal-constant-time@1.0.1: {}
 
@@ -3971,6 +4015,10 @@ snapshots:
   strip-literal@3.1.0:
     dependencies:
       js-tokens: 9.0.1
+
+  structured-source@4.0.0:
+    dependencies:
+      boundary: 2.0.0
 
   sucrase@3.35.1:
     dependencies:

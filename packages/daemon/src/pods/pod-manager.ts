@@ -345,6 +345,8 @@ export interface PodManagerDependencies {
   sessionTokenIssuer?: PodTokenIssuer;
   /** Resolve environment variable or secret by name (e.g. AZURE_GRAPH_TOKEN). */
   getSecret: (ref: string) => string | undefined;
+  /** Optional repo content scanner — runs at provisioning to flag secrets/PII/injection. */
+  repoScanner?: import('../security/index.js').RepoScanner;
   logger: Logger;
 }
 
@@ -461,6 +463,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     logger,
     validationRepo,
     progressEventRepo,
+    repoScanner,
   } = deps;
 
   /** Destroy the per-pod Docker bridge. Must be called AFTER the pod + all
@@ -1764,6 +1767,53 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             { podId, acFrom: pod.acFrom, count: criteria.length },
             'Loaded acceptance criteria from file',
           );
+        }
+
+        // Security scan: inspect cloned worktree for secrets / PII / prompt
+        // injection before the container starts. The scanner is best-effort —
+        // when not wired (older deployments / tests), we proceed silently.
+        if (repoScanner && worktreePath) {
+          try {
+            const baseRef = `origin/${pod.baseBranch ?? profile.defaultBranch ?? 'main'}`;
+            const isWorkspacePod = pod.options.agentMode === 'interactive';
+            emitStatus('Running security scan…');
+            const scan = await repoScanner.scan('provisioning', {
+              podId,
+              workdir: worktreePath,
+              baseRef,
+              profile,
+              isWorkspacePod,
+            });
+            logger.info(
+              {
+                podId,
+                decision: scan.decision,
+                findings: scan.findings.length,
+                filesScanned: scan.filesScanned,
+                filesSkipped: scan.filesSkipped,
+                scanIncomplete: scan.scanIncomplete,
+              },
+              'Security scan completed',
+            );
+            if (scan.decision === 'block') {
+              throw new AutopodError(
+                `Security scan blocked pod creation (${scan.findings.length} finding(s))`,
+                'SECURITY_SCAN_BLOCKED',
+                400,
+              );
+            }
+            // For warn / escalate, inject the warning section so the agent sees
+            // the flagged regions in its CLAUDE.md. Escalation as a true pause
+            // ships in a later phase — for now the agent gets the warning
+            // and an instruction to ask_human if a flagged region is relevant.
+            if (scan.warningSection) {
+              profile.claudeMdSections = [...profile.claudeMdSections, scan.warningSection];
+            }
+          } catch (err) {
+            if (err instanceof AutopodError) throw err;
+            // Fail open: scanner errors must not block pod creation.
+            logger.warn({ err, podId }, 'Security scan errored — proceeding without scan');
+          }
         }
 
         // Select container manager based on execution target

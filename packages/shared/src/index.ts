@@ -33,6 +33,18 @@ export type {
 } from './types/profile.js';
 
 export type {
+  SecurityScanPolicy,
+  SecurityScanDetectors,
+  CheckpointPolicy,
+  ScanOutcome,
+  ScanCheckpoint,
+  ScanDecision,
+  ScanDetectorName,
+  ScanSeverity,
+  ScanFinding,
+} from './types/security-scan.js';
+
+export type {
   SidecarType,
   SidecarHealthCheck,
   SidecarResources,

@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import type { InjectedSkill } from '@autopod/shared';
+import { type InjectedSkill, processContent } from '@autopod/shared';
 import type { Logger } from 'pino';
 
 export interface ResolvedSkill {
@@ -7,6 +7,20 @@ export interface ResolvedSkill {
   name: string;
   /** Markdown content of the skill */
   content: string;
+}
+
+/**
+ * Sanitize fetched skill content. Local skills are operator-controlled; GitHub
+ * skills are fetched over the network and may carry prompt-injection or PII.
+ * We quarantine but don't drop — a flagged skill is still injected so the
+ * agent can see the warning markers.
+ */
+function sanitizeSkillContent(content: string): string {
+  const result = processContent(content, {
+    sanitization: { preset: 'standard' },
+    quarantine: { enabled: true },
+  });
+  return result.text;
 }
 
 /**
@@ -52,7 +66,7 @@ async function resolveLocal(
   try {
     const content = await fs.readFile(filePath, 'utf-8');
     logger.debug({ skill: skill.name, path: filePath }, 'Local skill resolved');
-    return { name: skill.name, content };
+    return { name: skill.name, content: sanitizeSkillContent(content) };
   } catch (err) {
     logger.warn(
       { err, skill: skill.name, path: filePath },
@@ -99,7 +113,7 @@ async function resolveGithub(
       { skill: skill.name, repo: source.repo, ref, path: filePath },
       'GitHub skill resolved',
     );
-    return { name: skill.name, content };
+    return { name: skill.name, content: sanitizeSkillContent(content) };
   } catch (err) {
     clearTimeout(timeout);
     logger.warn(

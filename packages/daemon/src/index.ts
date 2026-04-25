@@ -54,6 +54,7 @@ import {
 import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
+import { createRepoScanner, createScanRepository } from './security/index.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
@@ -112,6 +113,8 @@ const progressEventRepo = createProgressEventRepository(db);
 const memoryRepo = createMemoryRepository(db);
 const pendingOverrideRepo = createPendingOverrideRepository(db);
 const qualityScoreRepo = createQualityScoreRepository(db);
+const scanRepo = createScanRepository(db);
+const repoScanner = createRepoScanner({ scanRepo, logger });
 
 // Event bus
 const eventBus = createEventBus(eventRepo, logger);
@@ -380,6 +383,7 @@ podManager = createPodManager({
   memoryRepo,
   pendingOverrideRepo,
   getSecret: (ref: string) => process.env[ref],
+  repoScanner,
   logger,
 });
 

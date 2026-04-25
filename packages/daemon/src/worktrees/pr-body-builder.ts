@@ -32,7 +32,11 @@ export interface PrBodyConfig {
   seriesName?: string;
 }
 
-export function buildPrTitle(task: string, seriesName?: string, seriesDescription?: string): string {
+export function buildPrTitle(
+  task: string,
+  seriesName?: string,
+  seriesDescription?: string,
+): string {
   // For series PRs with a description, use the series name as a clean short title
   if (seriesDescription && seriesName) {
     const clean = seriesName.replace(/[-_]/g, ' ').trim();
