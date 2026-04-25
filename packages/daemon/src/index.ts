@@ -126,10 +126,15 @@ const eventBus = createEventBus(eventRepo, logger);
 
 // Auth module (dev stub — real Entra ID module plugs in for production)
 //
-// In dev mode a random token is generated on first run and written to
+// Dev auth requires AUTOPOD_ALLOW_DEV_AUTH=1 to be set explicitly.
+// Without the flag, even NODE_ENV=development requests are rejected so
+// that accidentally-started dev daemons don't become open relays.
+//
+// When enabled, a random token is generated on first run and written to
 // ~/.autopod/dev-token (chmod 600). The CLI reads it automatically so
-// `ap` commands work without `ap login`. Any other caller must present
-// the same token — "accept any Bearer string" is no longer allowed.
+// `ap` commands work without `ap login`.
+const ALLOW_DEV_AUTH = IS_DEV && process.env.AUTOPOD_ALLOW_DEV_AUTH === '1';
+
 function getOrCreateDevToken(): string {
   const dir = path.join(os.homedir(), '.autopod');
   const tokenPath = path.join(dir, 'dev-token');
@@ -143,11 +148,15 @@ function getOrCreateDevToken(): string {
   }
 }
 
-// In dev mode, create the token file so the CLI can read it as a convenience credential.
-// The daemon itself no longer validates against this specific token — any Bearer string is accepted.
 if (IS_DEV) {
-  getOrCreateDevToken();
-  logger.info({ path: path.join(os.homedir(), '.autopod', 'dev-token') }, 'Dev auth token path');
+  if (ALLOW_DEV_AUTH) {
+    getOrCreateDevToken();
+    logger.info({ path: path.join(os.homedir(), '.autopod', 'dev-token') }, 'Dev auth token path');
+  } else {
+    logger.warn(
+      'Dev auth is disabled — set AUTOPOD_ALLOW_DEV_AUTH=1 to accept dev tokens. All API requests will be rejected.',
+    );
+  }
 }
 
 const devPayload = () => ({
@@ -163,13 +172,14 @@ const devPayload = () => ({
 
 const authModule: AuthModule = {
   async validateToken(token: string) {
-    if (!IS_DEV) {
+    if (!ALLOW_DEV_AUTH) {
       const { AuthError } = await import('@autopod/shared');
-      throw new AuthError('Auth module not configured');
+      throw new AuthError(
+        IS_DEV
+          ? 'Dev auth not enabled — set AUTOPOD_ALLOW_DEV_AUTH=1'
+          : 'Auth module not configured',
+      );
     }
-    // In dev mode, accept any non-empty Bearer token (documented behaviour).
-    // The CLI stores the dev token at ~/.autopod/dev-token for convenience,
-    // but the daemon does not enforce it — any caller with any Bearer string is accepted.
     if (!token) {
       const { AuthError } = await import('@autopod/shared');
       throw new AuthError('Missing token');
@@ -177,8 +187,12 @@ const authModule: AuthModule = {
     return devPayload();
   },
   validateTokenSync(token: string) {
-    if (!IS_DEV) {
-      throw new Error('Auth module not configured');
+    if (!ALLOW_DEV_AUTH) {
+      throw new Error(
+        IS_DEV
+          ? 'Dev auth not enabled — set AUTOPOD_ALLOW_DEV_AUTH=1'
+          : 'Auth module not configured',
+      );
     }
     if (!token) {
       throw new Error('Missing token');

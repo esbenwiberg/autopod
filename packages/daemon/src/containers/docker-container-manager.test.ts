@@ -209,7 +209,7 @@ describe('DockerContainerManager', () => {
       );
     });
 
-    it('continues without isolation when firewall application fails', async () => {
+    it('continues without isolation when firewall application fails (allow-all / no mode)', async () => {
       container.exec.mockRejectedValue(new Error('iptables not found'));
 
       const id = await manager.spawn({
@@ -218,6 +218,92 @@ describe('DockerContainerManager', () => {
       });
 
       // Should still return container ID (graceful degradation)
+      expect(id).toBe('abc123deadbeef');
+    });
+
+    it('continues without isolation when firewall fails for allow-all mode (AUTOPOD_FAIL_CLOSED_FIREWALL=1)', async () => {
+      const originalEnv = process.env.AUTOPOD_FAIL_CLOSED_FIREWALL;
+      process.env.AUTOPOD_FAIL_CLOSED_FIREWALL = '1';
+      try {
+        container.exec.mockRejectedValue(new Error('iptables not found'));
+
+        const id = await manager.spawn({
+          ...baseConfig,
+          firewallScript: '#!/bin/sh\nexit 1',
+          networkPolicyMode: 'allow-all',
+        });
+
+        expect(id).toBe('abc123deadbeef');
+      } finally {
+        if (originalEnv === undefined) {
+          Reflect.deleteProperty(process.env, 'AUTOPOD_FAIL_CLOSED_FIREWALL');
+        } else {
+          process.env.AUTOPOD_FAIL_CLOSED_FIREWALL = originalEnv;
+        }
+      }
+    });
+
+    it('aborts spawn and removes container when firewall fails for deny-all mode with AUTOPOD_FAIL_CLOSED_FIREWALL=1 (fix 2.3)', async () => {
+      const originalEnv = process.env.AUTOPOD_FAIL_CLOSED_FIREWALL;
+      process.env.AUTOPOD_FAIL_CLOSED_FIREWALL = '1';
+      try {
+        container.exec.mockRejectedValue(new Error('ip6tables not found'));
+        docker.getContainer.mockReturnValue(container);
+
+        await expect(
+          manager.spawn({
+            ...baseConfig,
+            firewallScript: '#!/bin/sh\nexit 1',
+            networkPolicyMode: 'deny-all',
+          }),
+        ).rejects.toThrow(/Firewall setup failed for deny-all pod/);
+
+        // Container must have been force-removed
+        expect(container.remove).toHaveBeenCalledWith({ force: true });
+      } finally {
+        if (originalEnv === undefined) {
+          Reflect.deleteProperty(process.env, 'AUTOPOD_FAIL_CLOSED_FIREWALL');
+        } else {
+          process.env.AUTOPOD_FAIL_CLOSED_FIREWALL = originalEnv;
+        }
+      }
+    });
+
+    it('aborts spawn and removes container when firewall fails for restricted mode with AUTOPOD_FAIL_CLOSED_FIREWALL=1 (fix 2.3)', async () => {
+      const originalEnv = process.env.AUTOPOD_FAIL_CLOSED_FIREWALL;
+      process.env.AUTOPOD_FAIL_CLOSED_FIREWALL = '1';
+      try {
+        container.exec.mockRejectedValue(new Error('iptables failure'));
+        docker.getContainer.mockReturnValue(container);
+
+        await expect(
+          manager.spawn({
+            ...baseConfig,
+            firewallScript: '#!/bin/sh\nexit 1',
+            networkPolicyMode: 'restricted',
+          }),
+        ).rejects.toThrow(/Firewall setup failed for restricted pod/);
+
+        expect(container.remove).toHaveBeenCalledWith({ force: true });
+      } finally {
+        if (originalEnv === undefined) {
+          Reflect.deleteProperty(process.env, 'AUTOPOD_FAIL_CLOSED_FIREWALL');
+        } else {
+          process.env.AUTOPOD_FAIL_CLOSED_FIREWALL = originalEnv;
+        }
+      }
+    });
+
+    it('gracefully continues for deny-all mode when AUTOPOD_FAIL_CLOSED_FIREWALL is not set', async () => {
+      container.exec.mockRejectedValue(new Error('iptables not found'));
+
+      const id = await manager.spawn({
+        ...baseConfig,
+        firewallScript: '#!/bin/sh\nexit 1',
+        networkPolicyMode: 'deny-all',
+      });
+
+      // Flag not set → graceful degradation still applies
       expect(id).toBe('abc123deadbeef');
     });
 

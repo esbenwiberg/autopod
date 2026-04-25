@@ -160,4 +160,53 @@ describe('ProfileValidator', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThanOrEqual(7);
   });
+
+  describe('ACI + network policy guard (fix 2.4)', () => {
+    it('rejects ACI profile with restricted network policy', () => {
+      const result = validateProfile({
+        ...validInput,
+        executionTarget: 'aci',
+        networkPolicy: { enabled: true, mode: 'restricted' },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => e.includes("'restricted'") && e.includes('ACI'))).toBe(true);
+    });
+
+    it('rejects ACI profile with deny-all network policy', () => {
+      const result = validateProfile({
+        ...validInput,
+        executionTarget: 'aci',
+        networkPolicy: { enabled: true, mode: 'deny-all' },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => e.includes("'deny-all'") && e.includes('ACI'))).toBe(true);
+    });
+
+    it('accepts ACI profile with allow-all network policy', () => {
+      const result = validateProfile({
+        ...validInput,
+        executionTarget: 'aci',
+        networkPolicy: { enabled: true, mode: 'allow-all' },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts ACI profile with network policy disabled', () => {
+      const result = validateProfile({
+        ...validInput,
+        executionTarget: 'aci',
+        networkPolicy: { enabled: false, mode: 'restricted' },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts Docker profile with restricted network policy', () => {
+      const result = validateProfile({
+        ...validInput,
+        executionTarget: 'local',
+        networkPolicy: { enabled: true, mode: 'restricted' },
+      });
+      expect(result.valid).toBe(true);
+    });
+  });
 });

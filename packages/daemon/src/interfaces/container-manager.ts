@@ -10,6 +10,12 @@ export interface ContainerSpawnConfig {
   networkName?: string;
   /** Firewall script to execute after container start (iptables rules) */
   firewallScript?: string;
+  /**
+   * Network policy mode — controls fail-closed behaviour on firewall errors.
+   * When AUTOPOD_FAIL_CLOSED_FIREWALL=1, spawn is aborted for deny-all and
+   * restricted pods if the firewall script fails; allow-all pods still start.
+   */
+  networkPolicyMode?: 'allow-all' | 'deny-all' | 'restricted';
   /** Hard memory limit in bytes. Omit for no limit. */
   memoryBytes?: number;
 }

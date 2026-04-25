@@ -98,10 +98,22 @@ export class DockerContainerManager implements ContainerManager {
 
     // Apply firewall rules if provided
     if (config.firewallScript) {
+      const failClosed =
+        process.env.AUTOPOD_FAIL_CLOSED_FIREWALL === '1' &&
+        (config.networkPolicyMode === 'deny-all' || config.networkPolicyMode === 'restricted');
       try {
         await this.refreshFirewall(container.id, config.firewallScript);
       } catch (err) {
-        // Graceful degradation — log warning but don't fail the spawn
+        if (failClosed) {
+          // Tear down the container before surfacing the error so it doesn't leak.
+          await this.docker
+            .getContainer(container.id)
+            .remove({ force: true })
+            .catch(() => {});
+          throw new Error(
+            `Firewall setup failed for ${config.networkPolicyMode} pod — aborting spawn: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         this.logger.warn(
           { err, containerId: container.id },
           'Failed to apply firewall rules, continuing without network isolation',

@@ -28,7 +28,7 @@ Four CRITICALs that are exploitable by an adversarial agent on a current
 deployment. Each is small, no migration, no infra change. Should ship as
 four small PRs.
 
-### 1.1 SSRF in generic HTTP action handler  🔴
+### 1.1 SSRF in generic HTTP action handler  🟢
 - **Files:** `packages/daemon/src/actions/generic-http-handler.ts`,
   `packages/daemon/src/api/mcp-proxy-handler.ts` (existing `isPrivateUrl` is
   the seed for a shared util).
@@ -70,14 +70,14 @@ four small PRs.
 
 ## Wave 2 — Auth & network egress hardening
 
-### 2.1 Dev-mode auth must be opt-in  🔴
+### 2.1 Dev-mode auth must be opt-in  🟢
 - **File:** `packages/daemon/src/index.ts:165–177`.
 - **Change:** Replace "if `IS_DEV` accept any token" with: "if `IS_DEV` **and**
   `AUTOPOD_ALLOW_DEV_AUTH=1` accept any token". Otherwise refuse all requests
   on startup until the flag is set or a real `AuthModule` is wired.
 - **Test:** integration test in dev mode without flag → 401; with flag → 200.
 
-### 2.2 IPv6 firewall rules  🔴
+### 2.2 IPv6 firewall rules  🟢
 - **File:** `packages/daemon/src/containers/docker-network-manager.ts`.
 - **Change:** Emit a parallel `ip6tables` ruleset for every mode. For
   `restricted` and `deny-all`, default-deny IPv6 outbound and allow only
@@ -85,7 +85,7 @@ four small PRs.
 - **Test:** unit test that the generated script contains `ip6tables`
   invocations for every `iptables` rule in deny/restricted modes.
 
-### 2.3 Fail closed on firewall errors  🔴
+### 2.3 Fail closed on firewall errors  🟢
 - **File:** `packages/daemon/src/containers/docker-container-manager.ts:105–109`
   and pod-manager spawn path.
 - **Change:** If `refreshFirewall()` throws or its child exec returns
@@ -97,7 +97,7 @@ four small PRs.
 - **Test:** mock the network manager to throw; assert the pod fails;
   `allow-all` still spawns.
 
-### 2.4 ACI: refuse adversarial profiles until parity  🔴
+### 2.4 ACI: refuse adversarial profiles until parity  🟢
 - **Files:** `packages/daemon/src/containers/aci-container-manager.ts`,
   `packages/daemon/src/profiles/profile-validator.ts`.
 - **Change:** Refuse to spawn pods on the ACI backend with
@@ -106,7 +106,7 @@ four small PRs.
 - **Test:** profile-validator test for the rejection; aci spawn test
   for the rejection.
 
-### 2.5 Tighten CIDR-fallback /24 expansion  🔴
+### 2.5 Tighten CIDR-fallback /24 expansion  🟢
 - **File:** `docker-network-manager.ts:393`.
 - **Change:** When dnsmasq+ipset is unavailable, resolve to `/32` instead
   of `/24`. Use periodic re-resolution for IP rotation.

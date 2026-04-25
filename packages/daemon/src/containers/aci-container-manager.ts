@@ -84,6 +84,16 @@ export class AciContainerManager implements ContainerManager {
    * giving us a real interactive stream just like Docker exec.
    */
   async spawn(config: ContainerSpawnConfig): Promise<string> {
+    // Defence-in-depth: ACI does not support iptables-based network isolation.
+    // The profile-validator rejects these combinations at profile-write time, but
+    // we also guard at spawn time in case a pod was created before the validator
+    // rule was in place or a profile was imported directly.
+    if (config.networkPolicyMode === 'deny-all' || config.networkPolicyMode === 'restricted') {
+      throw new Error(
+        `ACI does not support network_policy mode '${config.networkPolicyMode}' — iptables-based isolation requires the Docker backend`,
+      );
+    }
+
     const containerGroupName = `autopod-${config.podId}`;
     const imageName = this.resolveImage(config.image);
 
