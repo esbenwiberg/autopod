@@ -6,10 +6,12 @@ import {
   classifyAcTypes,
   deduplicateAcsByBaseText,
   enforceRequirementsStatus,
+  normalizeReviewIssue,
   parseAcInstructionsJson,
   parseAcResults,
   parseApiCheckSpecs,
   parseClassificationJson,
+  parseReviewJson,
   stripMarkdownFences,
 } from './local-validation-engine.js';
 
@@ -673,5 +675,114 @@ describe('buildReviewPrompt', () => {
     const prompt = buildReviewPrompt(config, undefined, noneAcs);
     expect(prompt).toContain('Include ONLY the "DIFF VERIFICATION REQUIRED" criteria');
     expect(prompt).toContain('Do NOT include auto-verified');
+  });
+});
+
+describe('normalizeReviewIssue', () => {
+  it('passes plain strings through trimmed', () => {
+    expect(normalizeReviewIssue('  unhandled null in foo()  ')).toBe('unhandled null in foo()');
+  });
+
+  it('drops empty strings', () => {
+    expect(normalizeReviewIssue('   ')).toBeNull();
+    expect(normalizeReviewIssue('')).toBeNull();
+  });
+
+  it('formats {severity, message} objects as "[SEVERITY] message"', () => {
+    expect(normalizeReviewIssue({ severity: 'high', message: 'Captive dependency' })).toBe(
+      '[HIGH] Captive dependency',
+    );
+  });
+
+  it('falls back to description / issue / text fields when message is missing', () => {
+    expect(normalizeReviewIssue({ severity: 'medium', description: 'Missing await' })).toBe(
+      '[MEDIUM] Missing await',
+    );
+    expect(normalizeReviewIssue({ severity: 'critical', issue: 'SQL injection' })).toBe(
+      '[CRITICAL] SQL injection',
+    );
+    expect(normalizeReviewIssue({ severity: 'high', text: 'Unsafe cast' })).toBe(
+      '[HIGH] Unsafe cast',
+    );
+  });
+
+  it('omits severity prefix when no severity field is present', () => {
+    expect(normalizeReviewIssue({ message: 'just a note' })).toBe('just a note');
+  });
+
+  it('accepts level as a synonym for severity', () => {
+    expect(normalizeReviewIssue({ level: 'medium', message: 'foo' })).toBe('[MEDIUM] foo');
+  });
+
+  it('returns null for objects with no renderable content', () => {
+    expect(normalizeReviewIssue({})).toBeNull();
+    expect(normalizeReviewIssue({ severity: 'high' })).toBeNull();
+    expect(normalizeReviewIssue({ message: 42 })).toBeNull();
+  });
+
+  it('returns null for non-string non-object inputs', () => {
+    expect(normalizeReviewIssue(null)).toBeNull();
+    expect(normalizeReviewIssue(undefined)).toBeNull();
+    expect(normalizeReviewIssue(42)).toBeNull();
+    expect(normalizeReviewIssue(true)).toBeNull();
+  });
+
+  it('never produces "[object Object]"', () => {
+    // The regression we are guarding against: prior code did
+    // `parsed.issues.map(String)` which turned every object into the literal
+    // string `[object Object]`. normalizeReviewIssue must never do that.
+    const result = normalizeReviewIssue({ severity: 'high', message: 'real content' });
+    expect(result).not.toContain('[object Object]');
+    expect(String({})).toBe('[object Object]'); // sanity-check the JS behaviour we're guarding against
+  });
+});
+
+describe('parseReviewJson — issues normalization', () => {
+  const baseShape = (issues: unknown[]) =>
+    JSON.stringify({
+      status: 'fail',
+      reasoning: 'overall summary',
+      issues,
+    });
+
+  it('passes plain string issues through unchanged', () => {
+    const parsed = parseReviewJson(baseShape(['simple issue', 'second issue']));
+    expect(parsed?.issues).toEqual(['simple issue', 'second issue']);
+  });
+
+  it('formats object-shaped issues into "[SEVERITY] message" strings', () => {
+    const parsed = parseReviewJson(
+      baseShape([
+        { severity: 'high', message: 'Captive dependency' },
+        { severity: 'medium', message: 'Missing test coverage' },
+      ]),
+    );
+    expect(parsed?.issues).toEqual(['[HIGH] Captive dependency', '[MEDIUM] Missing test coverage']);
+  });
+
+  it('handles a mixed array of strings and objects', () => {
+    const parsed = parseReviewJson(
+      baseShape(['a plain string finding', { severity: 'high', message: 'an object finding' }]),
+    );
+    expect(parsed?.issues).toEqual(['a plain string finding', '[HIGH] an object finding']);
+  });
+
+  it('drops un-renderable entries from a mixed array but keeps the parse', () => {
+    const parsed = parseReviewJson(
+      baseShape(['   ', { irrelevant: true }, { severity: 'high', message: 'real one' }]),
+    );
+    expect(parsed?.issues).toEqual(['[HIGH] real one']);
+  });
+
+  it('rejects the parse when issues are present but every entry is un-renderable', () => {
+    // Better to fail loud than to silently report "no issues" when the model
+    // clearly tried to flag problems.
+    const parsed = parseReviewJson(baseShape([{}, null, 42]));
+    expect(parsed).toBeNull();
+  });
+
+  it('accepts an empty issues array', () => {
+    const parsed = parseReviewJson(baseShape([]));
+    expect(parsed?.issues).toEqual([]);
   });
 });

@@ -2170,7 +2170,7 @@ Respond ONLY with a JSON object — no markdown fences, no extra text:
 {
   "status": "pass" | "fail" | "uncertain",
   "reasoning": "one or two sentence summary of the overall assessment",
-  ${noneAcCriteria.length > 0 ? '"requirementsCheck": [\n    // Include ONLY the "DIFF VERIFICATION REQUIRED" criteria. Do NOT include auto-verified ones.\n    { "criterion": "...", "met": true|false, "note": "optional" }\n  ],\n  ' : acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["specific medium/high/critical severity issues only — omit anything below medium"]
+  ${noneAcCriteria.length > 0 ? '"requirementsCheck": [\n    // Include ONLY the "DIFF VERIFICATION REQUIRED" criteria. Do NOT include auto-verified ones.\n    { "criterion": "...", "met": true|false, "note": "optional" }\n  ],\n  ' : acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["[SEVERITY] short description — each entry MUST be a plain string, not an object. Format: \\"[HIGH] Missing null check in foo()\\". Allowed severities: MEDIUM, HIGH, CRITICAL. Omit anything below medium."]
 }
 
 Status rules:
@@ -2483,10 +2483,41 @@ async function runTaskReview(
 }
 
 /**
+ * Coerces a single review issue (which the model may emit as a plain string OR a
+ * structured object like `{ severity, message }`) into a human-readable string.
+ * Returns null for entries that have no renderable content. Without this, an
+ * object would slip through `String(obj)` as the literal `"[object Object]"`.
+ */
+export function normalizeReviewIssue(raw: unknown): string | null {
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (raw && typeof raw === 'object') {
+    const r = raw as Record<string, unknown>;
+    const severityRaw =
+      (typeof r.severity === 'string' && r.severity) ||
+      (typeof r.level === 'string' && r.level) ||
+      null;
+    const severity = severityRaw ? severityRaw.trim().toUpperCase() : null;
+    const messageRaw =
+      (typeof r.message === 'string' && r.message) ||
+      (typeof r.description === 'string' && r.description) ||
+      (typeof r.issue === 'string' && r.issue) ||
+      (typeof r.text === 'string' && r.text) ||
+      null;
+    const message = messageRaw ? messageRaw.trim() : null;
+    if (!message) return null;
+    return severity ? `[${severity}] ${message}` : message;
+  }
+  return null;
+}
+
+/**
  * Attempts to parse the reviewer's JSON response, tolerating markdown fences
  * and other common LLM output quirks.
  */
-function parseReviewJson(raw: string): {
+export function parseReviewJson(raw: string): {
   status: 'pass' | 'fail' | 'uncertain';
   reasoning: string;
   issues: string[];
@@ -2532,10 +2563,17 @@ function parseReviewJson(raw: string): {
 
     const deviationsAssessment = parseDeviationsAssessment(parsed.deviationsAssessment);
 
+    const normalizedIssues = (parsed.issues as unknown[])
+      .map(normalizeReviewIssue)
+      .filter((s): s is string => s !== null);
+    // If the model returned issues but every one was un-renderable, treat the
+    // response as malformed instead of silently dropping all flagged problems.
+    if (parsed.issues.length > 0 && normalizedIssues.length === 0) return null;
+
     return {
       status: parsed.status,
       reasoning: parsed.reasoning,
-      issues: parsed.issues.map(String),
+      issues: normalizedIssues,
       requirementsCheck,
       deviationsAssessment,
     };
