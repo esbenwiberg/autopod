@@ -148,7 +148,14 @@ export class GhPrManager implements PrManager {
     };
 
     if (pr.state === 'MERGED') {
-      return { merged: true, open: false, blockReason: null, ciFailures: [], reviewComments: [] };
+      return {
+        merged: true,
+        open: false,
+        blockReason: null,
+        ciFailures: [],
+        reviewComments: [],
+        reviewDecision: 'APPROVED',
+      };
     }
 
     if (pr.state === 'CLOSED') {
@@ -222,6 +229,7 @@ export class GhPrManager implements PrManager {
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
       ciFailures,
       reviewComments,
+      reviewDecision: pr.reviewDecision || undefined,
     };
   }
 }
@@ -377,7 +385,14 @@ export class GitHubApiPrManager implements PrManager {
     };
 
     if (pr.merged) {
-      return { merged: true, open: false, blockReason: null, ciFailures: [], reviewComments: [] };
+      return {
+        merged: true,
+        open: false,
+        blockReason: null,
+        ciFailures: [],
+        reviewComments: [],
+        reviewDecision: 'APPROVED',
+      };
     }
     if (pr.state === 'closed') {
       return {
@@ -456,8 +471,9 @@ export class GitHubApiPrManager implements PrManager {
       }
     }
 
-    // Collect review comments for CHANGES_REQUESTED decisions
+    // Collect review comments and compute overall review decision
     const reviewComments: ReviewCommentDetail[] = [];
+    let reviewDecision: string | undefined;
     try {
       const reviewsResp = await fetch(
         `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/reviews`,
@@ -469,6 +485,21 @@ export class GitHubApiPrManager implements PrManager {
           user: { login: string };
           body: string;
         }>;
+
+        // Compute overall decision from most recent review per reviewer
+        const latestByUser = new Map<string, string>();
+        for (const r of reviews) {
+          if (r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED') {
+            latestByUser.set(r.user.login, r.state);
+          }
+        }
+        const decisions = [...latestByUser.values()];
+        if (decisions.includes('CHANGES_REQUESTED')) {
+          reviewDecision = 'CHANGES_REQUESTED';
+        } else if (decisions.includes('APPROVED')) {
+          reviewDecision = 'APPROVED';
+        }
+
         for (const r of reviews) {
           if (r.state === 'CHANGES_REQUESTED' && r.body) {
             reviewComments.push({ author: r.user.login, body: r.body, path: null });
@@ -479,7 +510,7 @@ export class GitHubApiPrManager implements PrManager {
         }
       }
     } catch {
-      // Best-effort — leave reviewComments empty
+      // Best-effort — leave reviewComments and reviewDecision empty
     }
 
     return {
@@ -488,6 +519,7 @@ export class GitHubApiPrManager implements PrManager {
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
       ciFailures,
       reviewComments,
+      reviewDecision,
     };
   }
 }

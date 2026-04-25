@@ -31,7 +31,9 @@ function setupDb(): InstanceType<typeof Database> {
       action_name TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}',
       response_summary TEXT DEFAULT NULL, pii_detected INTEGER NOT NULL DEFAULT 0,
       quarantine_score REAL NOT NULL DEFAULT 0.0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      prev_hash TEXT DEFAULT NULL,
+      entry_hash TEXT DEFAULT NULL
     );
 
     INSERT INTO profiles (name, repo_url, build_command, start_command)
@@ -168,5 +170,93 @@ describe('ActionAuditRepository', () => {
 
     expect(repo.countBySession(POD_ID)).toBe(1);
     expect(repo.countBySession(otherSessionId)).toBe(1);
+  });
+});
+
+describe('ActionAuditRepository — hash chain', () => {
+  let db: InstanceType<typeof Database>;
+  let repo: ReturnType<typeof createActionAuditRepository>;
+
+  beforeEach(() => {
+    db = setupDb();
+    repo = createActionAuditRepository(db);
+  });
+
+  it('first entry has null prevHash and a non-null entryHash', () => {
+    repo.insert(makeEntry());
+    const [row] = repo.listBySession(POD_ID);
+    expect(row.prevHash).toBeNull();
+    expect(row.entryHash).toBeTypeOf('string');
+    expect(row.entryHash).toHaveLength(64); // hex SHA-256
+  });
+
+  it('second entry prevHash equals first entry entryHash', () => {
+    repo.insert(makeEntry({ actionName: 'first' }));
+    repo.insert(makeEntry({ actionName: 'second' }));
+
+    const rows = repo.listBySession(POD_ID, 10);
+    // listBySession returns DESC; reverse to get insertion order
+    const [first, second] = rows.reverse();
+    expect(second.prevHash).toBe(first.entryHash);
+  });
+
+  it('verifyAuditChain returns valid for empty pod', () => {
+    const result = repo.verifyAuditChain(POD_ID);
+    expect(result.valid).toBe(true);
+    expect(result.rowCount).toBe(0);
+  });
+
+  it('verifyAuditChain passes for a clean sequence', () => {
+    repo.insert(makeEntry({ actionName: 'a' }));
+    repo.insert(makeEntry({ actionName: 'b' }));
+    repo.insert(makeEntry({ actionName: 'c' }));
+
+    const result = repo.verifyAuditChain(POD_ID);
+    expect(result.valid).toBe(true);
+    expect(result.rowCount).toBe(3);
+  });
+
+  it('verifyAuditChain detects a tampered entry_hash', () => {
+    repo.insert(makeEntry({ actionName: 'legit' }));
+
+    // Simulate a direct-DB tamper (immutability enforced at app layer; this tests
+    // that verifyAuditChain catches such tampering).
+    db.prepare('UPDATE action_audit SET entry_hash = @bad WHERE pod_id = @podId').run({
+      bad: 'deadbeef'.repeat(8),
+      podId: POD_ID,
+    });
+
+    const result = repo.verifyAuditChain(POD_ID);
+    expect(result.valid).toBe(false);
+    expect(result.firstBadId).toBeTypeOf('number');
+  });
+
+  it('repository interface has no update or delete methods (application-layer immutability)', () => {
+    // The ActionAuditRepository interface intentionally exposes no update/delete —
+    // immutability is enforced by the absence of mutating methods. verifyAuditChain()
+    // detects any tampering done directly against the database.
+    expect(typeof (repo as Record<string, unknown>).update).toBe('undefined');
+    expect(typeof (repo as Record<string, unknown>).delete).toBe('undefined');
+  });
+
+  it('hash chains are independent across pods', () => {
+    const OTHER = 'sess-002';
+    db.exec(
+      `INSERT INTO pods (id, profile_name, task) VALUES ('${OTHER}', '${PROFILE_NAME}', 'other')`,
+    );
+
+    repo.insert(makeEntry({ actionName: 'pod1-first' }));
+    repo.insert(makeEntry({ podId: OTHER, actionName: 'pod2-first' }));
+
+    const r1 = repo.verifyAuditChain(POD_ID);
+    const r2 = repo.verifyAuditChain(OTHER);
+    expect(r1.valid).toBe(true);
+    expect(r2.valid).toBe(true);
+
+    // First entries of each pod both have null prevHash (independent chains)
+    const rows1 = repo.listBySession(POD_ID);
+    const rows2 = repo.listBySession(OTHER);
+    expect(rows1[0].prevHash).toBeNull();
+    expect(rows2[0].prevHash).toBeNull();
   });
 });

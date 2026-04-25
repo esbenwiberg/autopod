@@ -39,6 +39,10 @@ export async function validateInBrowser(
     );
   }
 
+  // Daemon-side gate: validates the URL independently of the client-side check
+  // above (defence-in-depth). Throws if the URL fails daemon policy.
+  bridge.validateBrowserUrl(podId, input.url);
+
   if (input.checks.length === 0) {
     throw new Error('At least one check is required.');
   }

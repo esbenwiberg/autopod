@@ -78,6 +78,12 @@ export interface PrMergeStatus {
   open: boolean;
   /** Human-readable reason the merge is blocked, if known */
   blockReason: string | null;
+  /**
+   * The overall review decision for the PR, if the platform exposes it.
+   * GitHub: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED'
+   * ADO / platforms without a unified review decision: undefined.
+   */
+  reviewDecision?: string;
   /** Failed CI checks with detail — populated only when there are actionable failures */
   ciFailures: CiFailureDetail[];
   /** Review comments from CHANGES_REQUESTED reviews — populated only when actionable */

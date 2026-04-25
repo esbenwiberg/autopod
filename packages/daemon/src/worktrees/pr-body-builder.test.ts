@@ -1,6 +1,6 @@
 import type { ValidationResult } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { type PrBodyConfig, buildPrBody, buildPrTitle } from './pr-body-builder.js';
+import { type PrBodyConfig, buildPrBody, buildPrTitle, escapeMd } from './pr-body-builder.js';
 
 describe('buildPrTitle', () => {
   it('prefixes with feat: when no conventional commit prefix', () => {
@@ -441,5 +441,84 @@ describe('buildPrBody', () => {
     expect(body).toContain('confidence 0.94');
     // Security Notice appears before Stats so the reviewer sees it before the meta block
     expect(body.indexOf('Security Notice')).toBeLessThan(body.indexOf('## Stats'));
+  });
+});
+
+describe('escapeMd', () => {
+  it('neutralises @mentions with a zero-width space', () => {
+    expect(escapeMd('@security-team URGENT')).toContain('@​security');
+    expect(escapeMd('@security-team URGENT')).not.toContain('@security-team');
+  });
+
+  it('escapes HTML angle brackets', () => {
+    expect(escapeMd('<script>alert(1)</script>')).toBe('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('escapes markdown link syntax', () => {
+    const result = escapeMd('[click me](http://evil.com)');
+    expect(result).toContain('\\[click me\\]');
+    expect(result).not.toMatch(/\[click me\]\(http/);
+  });
+
+  it('escapes pipe characters that would break tables', () => {
+    expect(escapeMd('foo | bar')).toBe('foo \\| bar');
+  });
+
+  it('escapes backticks', () => {
+    expect(escapeMd('`rm -rf /`')).toBe('\\`rm -rf /\\`');
+  });
+
+  it('leaves normal prose untouched', () => {
+    const text = 'Implemented the login flow using OAuth 2.0.';
+    expect(escapeMd(text)).toBe(text);
+  });
+
+  it('agent-supplied task summary is escaped in PR body', () => {
+    const body = buildPrBody({
+      task: 'build a thing',
+      podId: 'abc123',
+      profileName: 'test',
+      validationResult: null,
+      filesChanged: 1,
+      linesAdded: 10,
+      linesRemoved: 0,
+      previewUrl: null,
+      taskSummary: {
+        actualSummary: '@security-team URGENT: [click me](http://evil.com)',
+        deviations: [],
+      },
+    });
+    // @mention neutralised
+    expect(body).not.toMatch(/@security-team/);
+    // link syntax escaped
+    expect(body).toContain('\\[click me\\]');
+  });
+
+  it('deviation table cells are escaped', () => {
+    const body = buildPrBody({
+      task: 'build a thing',
+      podId: 'abc123',
+      profileName: 'test',
+      validationResult: null,
+      filesChanged: 1,
+      linesAdded: 10,
+      linesRemoved: 0,
+      previewUrl: null,
+      taskSummary: {
+        actualSummary: 'done',
+        deviations: [
+          {
+            step: 'Step | 1',
+            planned: 'planned | task',
+            actual: 'actual`thing`',
+            reason: '<injected>',
+          },
+        ],
+      },
+    });
+    expect(body).toContain('Step \\| 1');
+    expect(body).toContain('planned \\| task');
+    expect(body).toContain('actual\\`thing\\`');
+    expect(body).toContain('&lt;injected&gt;');
   });
 });

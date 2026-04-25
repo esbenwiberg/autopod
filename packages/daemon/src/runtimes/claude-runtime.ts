@@ -134,10 +134,14 @@ export class ClaudeRuntime implements Runtime {
     });
 
     const shimPath = '/run/autopod/agent-shim.sh';
-    const handle = await this.containerManager.execStreaming(containerId, [shimPath, 'claude', ...args], {
-      cwd: '/workspace',
-      ...(env ? { env } : {}),
-    });
+    const handle = await this.containerManager.execStreaming(
+      containerId,
+      [shimPath, 'claude', ...args],
+      {
+        cwd: '/workspace',
+        ...(env ? { env } : {}),
+      },
+    );
 
     this.handles.set(podId, handle);
 

@@ -104,4 +104,21 @@ export interface PodBridge {
   revalidateLinkedPod(
     linkedPodId: string,
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
+
+  /**
+   * Daemon-side gate for validate_in_browser URLs.
+   *
+   * Throws if the URL is not a safe browser validation target. The daemon
+   * validates independently of the escalation-mcp package to provide
+   * defence-in-depth: even if the client-side check is bypassed, the daemon
+   * will still refuse to generate/execute the Playwright script.
+   *
+   * Rules:
+   *  - Only http(s) protocols are accepted.
+   *  - Only localhost / 127.0.0.1 hostnames are allowed (the tool is meant to
+   *    test the application running inside the container).
+   *  - All other hostnames — including private IP ranges and cloud metadata
+   *    services — are blocked to prevent SSRF via URL rewriting.
+   */
+  validateBrowserUrl(podId: string, url: string): void;
 }
