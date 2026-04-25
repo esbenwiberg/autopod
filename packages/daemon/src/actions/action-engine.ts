@@ -30,6 +30,12 @@ export interface ActionEngineDependencies {
   auditRepo: ActionAuditRepository;
   logger: Logger;
   getSecret: (ref: string) => string | undefined;
+  /**
+   * Override for the SSRF guard used by the generic HTTP handler. Defaults to
+   * `assertPublicUrl` (rejects private/loopback/metadata addresses). Tests
+   * that hit a localhost mock server may pass a permissive override.
+   */
+  ssrfGuard?: (url: string) => Promise<{ ok: boolean; reason?: string }>;
   /** Optional — required only when the `test-pipeline` handler is used. */
   podRepo?: PodRepository;
   /** Optional — required only when the `test-pipeline` handler is used. */
@@ -37,11 +43,11 @@ export interface ActionEngineDependencies {
 }
 
 export function createActionEngine(deps: ActionEngineDependencies): ActionEngine {
-  const { registry, auditRepo, logger, getSecret, podRepo, profileStore } = deps;
+  const { registry, auditRepo, logger, getSecret, ssrfGuard, podRepo, profileStore } = deps;
   const log = logger.child({ component: 'action-engine' });
 
   // Create handler instances
-  const handlerConfig: HandlerConfig = { logger: log, getSecret };
+  const handlerConfig: HandlerConfig = { logger: log, getSecret, ssrfGuard };
   const handlers: Record<string, ActionHandler> = {
     github: createGitHubHandler(handlerConfig),
     ado: createAdoHandler(handlerConfig),

@@ -23,6 +23,12 @@ export interface ActionHandlerContext {
 export interface HandlerConfig {
   logger: Logger;
   getSecret: (ref: string) => string | undefined;
+  /**
+   * SSRF guard hook. Returns `{ ok: false, reason }` to abort an HTTP call.
+   * Defaults to `assertPublicUrl` from `api/ssrf-guard.ts`. Override in tests
+   * that hit a localhost mock server.
+   */
+  ssrfGuard?: (url: string) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 /**

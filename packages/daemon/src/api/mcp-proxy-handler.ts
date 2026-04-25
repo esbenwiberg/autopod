@@ -2,20 +2,7 @@ import type { InjectedMcpServer } from '@autopod/shared';
 import { type ProcessContentConfig, processContent } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
-
-// Private / link-local IPv4 ranges and localhost that must not be reachable via the proxy.
-const PRIVATE_HOST_REGEX =
-  /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|10(\.\d{1,3}){3}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|192\.168(\.\d{1,3}){2}|169\.254(\.\d{1,3}){2}|::1|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:)$/i;
-
-/** Returns true if the URL resolves to a private/loopback address (SSRF guard). */
-function isPrivateUrl(rawUrl: string): boolean {
-  try {
-    const { hostname } = new URL(rawUrl);
-    return PRIVATE_HOST_REGEX.test(hostname);
-  } catch {
-    return true; // Malformed URL — block it
-  }
-}
+import { isPrivateUrl } from './ssrf-guard.js';
 
 export interface McpProxyConfig {
   /** Map of podId → injected MCP servers for that pod */

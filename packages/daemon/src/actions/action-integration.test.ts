@@ -115,6 +115,8 @@ describe('Action Control Plane Integration', () => {
         registry,
         auditRepo,
         logger,
+        // Tests hit a localhost mock server; the production guard rejects loopback.
+        ssrfGuard: async () => ({ ok: true }),
         getSecret: (ref) => (ref === 'TEST_KEY' ? 'test-secret' : undefined),
       });
 
@@ -211,6 +213,8 @@ describe('Action Control Plane Integration', () => {
         registry,
         auditRepo,
         logger,
+        // Tests hit a localhost mock server; the production guard rejects loopback.
+        ssrfGuard: async () => ({ ok: true }),
         getSecret: () => 'test',
       });
 
@@ -422,6 +426,8 @@ describe('Action Control Plane Integration', () => {
         registry,
         auditRepo,
         logger,
+        // Tests hit a localhost mock server; the production guard rejects loopback.
+        ssrfGuard: async () => ({ ok: true }),
         getSecret: () => 'key',
       });
 

@@ -1,4 +1,5 @@
 import type { ActionDefinition, AuthConfig } from '@autopod/shared';
+import { assertPublicUrl } from '../api/ssrf-guard.js';
 import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
 import {
   fetchWithTimeout,
@@ -9,8 +10,9 @@ import {
 } from './handlers/handler.js';
 
 export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
-  const { logger, getSecret } = config;
+  const { logger, getSecret, ssrfGuard } = config;
   const log = logger.child({ handler: 'http' });
+  const guard = ssrfGuard ?? ((url: string) => assertPublicUrl(url));
 
   function resolveSecret(ref: string): string {
     // Supports ${ENV_VAR} syntax
@@ -95,6 +97,21 @@ export function createGenericHttpHandler(config: HandlerConfig): ActionHandler {
           const mapped = applyMappings(action.request.bodyMapping, params);
           body = JSON.stringify(mapped);
         }
+      }
+
+      // SSRF guard: refuse to fetch URLs that resolve to private/loopback/
+      // link-local/metadata addresses. Action endpoint URLs are admin-defined
+      // but their `{{params}}` are agent-supplied — without this, an agent
+      // can template `{{host}}=169.254.169.254` and exfiltrate cloud metadata.
+      const guardResult = await guard(url);
+      if (!guardResult.ok) {
+        log.warn(
+          { action: action.name, url, reason: guardResult.reason },
+          'HTTP action blocked by SSRF guard',
+        );
+        throw new Error(
+          `HTTP action '${action.name}' blocked: ${guardResult.reason ?? 'private address'}`,
+        );
       }
 
       log.debug({ action: action.name, url, method }, 'Executing HTTP action');
