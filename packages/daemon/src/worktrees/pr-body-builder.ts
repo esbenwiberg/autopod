@@ -1,4 +1,4 @@
-import type { TaskSummary, ValidationResult } from '@autopod/shared';
+import type { ScanFinding, TaskSummary, ValidationResult } from '@autopod/shared';
 
 export interface ScreenshotRef {
   /** Page path (e.g. '/', '/about') */
@@ -30,9 +30,15 @@ export interface PrBodyConfig {
   seriesDescription?: string;
   /** Human-readable series name. Used with seriesDescription to build the PR title. */
   seriesName?: string;
+  /** Security scan findings to render as a Security Notice section. */
+  securityFindings?: ScanFinding[];
 }
 
-export function buildPrTitle(task: string, seriesName?: string, seriesDescription?: string): string {
+export function buildPrTitle(
+  task: string,
+  seriesName?: string,
+  seriesDescription?: string,
+): string {
   // For series PRs with a description, use the series name as a clean short title
   if (seriesDescription && seriesName) {
     const clean = seriesName.replace(/[-_]/g, ' ').trim();
@@ -188,6 +194,12 @@ export function buildPrBody(config: PrBodyConfig): string {
     sections.push(validationSection);
   }
 
+  // ── Security findings (pre-push scan) ─────────────────────────────────────
+
+  if (config.securityFindings && config.securityFindings.length > 0) {
+    sections.push(formatSecurityNotice(config.securityFindings));
+  }
+
   // ── Meta ──────────────────────────────────────────────────────────────────
 
   sections.push(
@@ -221,4 +233,48 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatSecurityNotice(findings: ScanFinding[]): string {
+  const byDetector = new Map<string, ScanFinding[]>();
+  for (const f of findings) {
+    const list = byDetector.get(f.detector) ?? [];
+    list.push(f);
+    byDetector.set(f.detector, list);
+  }
+
+  const lines: string[] = [
+    '## ⚠️ Security Notice',
+    '',
+    'Automated pre-push scanning flagged the following content. Reviewers should',
+    'verify that no real secrets, PII, or prompt-injection payloads land in the',
+    'merged branch.',
+  ];
+
+  for (const detector of ['secrets', 'pii', 'injection'] as const) {
+    const list = byDetector.get(detector);
+    if (!list || list.length === 0) continue;
+    lines.push('', `### ${labelFor(detector)}`);
+    for (const f of list) {
+      const safePath = f.file.replace(/[`*_[\]<>]/g, (c) => `\\${c}`);
+      const loc = f.line !== undefined ? `:${f.line}` : '';
+      const confidence =
+        f.confidence !== undefined ? ` (confidence ${f.confidence.toFixed(2)})` : '';
+      const rule = f.ruleId ? ` — ${f.ruleId}` : '';
+      lines.push(`- \`${safePath}${loc}\`${confidence}${rule}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function labelFor(detector: 'secrets' | 'pii' | 'injection'): string {
+  switch (detector) {
+    case 'secrets':
+      return 'Potential secrets';
+    case 'pii':
+      return 'Potential PII';
+    case 'injection':
+      return 'Potential prompt injection';
+  }
 }

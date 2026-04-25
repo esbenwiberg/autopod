@@ -351,9 +351,7 @@ describe('DockerNetworkManager', () => {
         ),
         { statusCode: 400 },
       );
-      docker.mock.createNetwork
-        .mockRejectedValueOnce(exhaustedError)
-        .mockResolvedValueOnce({});
+      docker.mock.createNetwork.mockRejectedValueOnce(exhaustedError).mockResolvedValueOnce({});
 
       const removeFn = vi.fn().mockResolvedValue(undefined);
       docker.mock.listNetworks.mockResolvedValueOnce([
@@ -396,10 +394,23 @@ describe('DockerNetworkManager', () => {
     it('removes networks whose pod ID is not in the active set', async () => {
       const removeFn = vi.fn().mockResolvedValue(undefined);
       docker.mock.listNetworks.mockResolvedValueOnce([
-        { Id: 'net-a', Name: 'autopod-aaa', Labels: { 'com.autopod.pod-id': 'aaa' }, Containers: {} },
-        { Id: 'net-b', Name: 'autopod-bbb', Labels: { 'com.autopod.pod-id': 'bbb' }, Containers: {} },
+        {
+          Id: 'net-a',
+          Name: 'autopod-aaa',
+          Labels: { 'com.autopod.pod-id': 'aaa' },
+          Containers: {},
+        },
+        {
+          Id: 'net-b',
+          Name: 'autopod-bbb',
+          Labels: { 'com.autopod.pod-id': 'bbb' },
+          Containers: {},
+        },
       ]);
-      docker.mock.getNetwork.mockImplementation((id: string) => ({ remove: removeFn, inspect: vi.fn() }));
+      docker.mock.getNetwork.mockImplementation((id: string) => ({
+        remove: removeFn,
+        inspect: vi.fn(),
+      }));
 
       const pruned = await manager.reconcileOrphanNetworks(new Set(['aaa']));
       expect(pruned).toBe(1);
@@ -410,7 +421,12 @@ describe('DockerNetworkManager', () => {
     it('preserves networks whose pod ID is active', async () => {
       const removeFn = vi.fn().mockResolvedValue(undefined);
       docker.mock.listNetworks.mockResolvedValueOnce([
-        { Id: 'net-a', Name: 'autopod-aaa', Labels: { 'com.autopod.pod-id': 'aaa' }, Containers: {} },
+        {
+          Id: 'net-a',
+          Name: 'autopod-aaa',
+          Labels: { 'com.autopod.pod-id': 'aaa' },
+          Containers: {},
+        },
       ]);
       docker.mock.getNetwork.mockReturnValue({ remove: removeFn, inspect: vi.fn() });
 
@@ -440,8 +456,18 @@ describe('DockerNetworkManager', () => {
       const removeFail = vi.fn().mockRejectedValue(new Error('busy'));
       const removeOk = vi.fn().mockResolvedValue(undefined);
       docker.mock.listNetworks.mockResolvedValueOnce([
-        { Id: 'net-a', Name: 'autopod-aaa', Labels: { 'com.autopod.pod-id': 'aaa' }, Containers: {} },
-        { Id: 'net-b', Name: 'autopod-bbb', Labels: { 'com.autopod.pod-id': 'bbb' }, Containers: {} },
+        {
+          Id: 'net-a',
+          Name: 'autopod-aaa',
+          Labels: { 'com.autopod.pod-id': 'aaa' },
+          Containers: {},
+        },
+        {
+          Id: 'net-b',
+          Name: 'autopod-bbb',
+          Labels: { 'com.autopod.pod-id': 'bbb' },
+          Containers: {},
+        },
       ]);
       docker.mock.getNetwork.mockImplementation((id: string) => ({
         remove: id === 'net-a' ? removeFail : removeOk,

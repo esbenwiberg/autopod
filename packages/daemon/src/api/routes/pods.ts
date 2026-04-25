@@ -2,6 +2,7 @@ import {
   AutopodError,
   type PodStatus,
   createPodRequestSchema,
+  processContent,
   sendMessageSchema,
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
@@ -42,8 +43,21 @@ export function podRoutes(
       }
     }
 
+    // Sanitize human-authored free-text fields. Findings are quarantined into
+    // the text (replaced with a marker) but never block pod creation — the
+    // scan layer at provisioning is the gate.
+    const sanitizeOpts = {
+      sanitization: { preset: 'standard' as const },
+      quarantine: { enabled: true },
+    };
+    const sanitized = { ...body };
+    if (body.task) sanitized.task = processContent(body.task, sanitizeOpts).text;
+    if (body.seriesName) sanitized.seriesName = processContent(body.seriesName, sanitizeOpts).text;
+    if (body.seriesDescription)
+      sanitized.seriesDescription = processContent(body.seriesDescription, sanitizeOpts).text;
+
     try {
-      const pod = podManager.createSession(body, request.user.oid);
+      const pod = podManager.createSession(sanitized, request.user.oid);
       reply.status(201);
       return pod;
     } catch (err) {

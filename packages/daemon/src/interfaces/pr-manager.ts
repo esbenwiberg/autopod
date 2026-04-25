@@ -1,4 +1,4 @@
-import type { TaskSummary, ValidationResult } from '@autopod/shared';
+import type { ScanFinding, TaskSummary, ValidationResult } from '@autopod/shared';
 
 export interface CreatePrConfig {
   /** Worktree path to run `gh` from (inherits git remote context) */
@@ -31,6 +31,8 @@ export interface CreatePrConfig {
   seriesDescription?: string;
   /** Human-readable series name. Used with seriesDescription to build the PR title. */
   seriesName?: string;
+  /** Security scan findings to surface in the PR body. */
+  securityFindings?: ScanFinding[];
 }
 
 export interface MergePrConfig {

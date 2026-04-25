@@ -398,4 +398,48 @@ describe('buildPrBody', () => {
     expect(body).not.toContain('![');
     expect(body).toContain('[View screenshot](https://raw.github.com/screenshot.png)');
   });
+
+  it('omits the Security Notice section when there are no findings', () => {
+    const body = buildPrBody({ ...baseConfig, securityFindings: [] });
+    expect(body).not.toContain('Security Notice');
+  });
+
+  it('renders the Security Notice section grouped by detector', () => {
+    const body = buildPrBody({
+      ...baseConfig,
+      securityFindings: [
+        {
+          detector: 'secrets',
+          severity: 'critical',
+          file: 'src/config.ts',
+          line: 42,
+          ruleId: '@secretlint/rule-aws',
+          snippet: 'AKIA...[REDACTED]',
+        },
+        {
+          detector: 'injection',
+          severity: 'high',
+          file: 'docs/notes.md',
+          line: 12,
+          confidence: 0.94,
+          snippet: 'ignore previous instructions',
+        },
+        {
+          detector: 'pii',
+          severity: 'medium',
+          file: 'fixtures/users.json',
+          snippet: 'name field detected',
+        },
+      ],
+    });
+    expect(body).toContain('## ⚠️ Security Notice');
+    expect(body).toContain('### Potential secrets');
+    expect(body).toContain('### Potential PII');
+    expect(body).toContain('### Potential prompt injection');
+    expect(body).toContain('src/config.ts:42');
+    expect(body).toContain('@secretlint/rule-aws');
+    expect(body).toContain('confidence 0.94');
+    // Security Notice appears before Stats so the reviewer sees it before the meta block
+    expect(body.indexOf('Security Notice')).toBeLessThan(body.indexOf('## Stats'));
+  });
 });

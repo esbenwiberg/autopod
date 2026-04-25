@@ -3,6 +3,7 @@ import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from '
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
 import type { PodOptions } from './pod-options.js';
 import type { RuntimeType } from './runtime.js';
+import type { SecurityScanPolicy } from './security-scan.js';
 import type { SidecarsConfig } from './sidecar.js';
 
 export type ExecutionTarget = 'local' | 'aci';
@@ -172,6 +173,12 @@ export interface Profile {
    * inherit from parent / feature disabled.
    */
   testPipeline: TestPipelineConfig | null;
+  /**
+   * Security scan policy — controls how the daemon scans the cloned repo for
+   * secrets, PII, and prompt injection at provisioning and pre-push. Null =
+   * inherit from parent or fall back to the bundled `default` preset.
+   */
+  securityScan: SecurityScanPolicy | null;
   createdAt: string;
   updatedAt: string;
 }

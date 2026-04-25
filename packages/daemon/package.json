@@ -19,6 +19,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
     "@autopod/escalation-mcp": "workspace:^",
     "@autopod/shared": "workspace:*",
     "@autopod/validator": "workspace:*",
@@ -28,8 +29,10 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/websocket": "^11.2.0",
-    "@anthropic-ai/sdk": "^0.52.0",
+    "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@secretlint/core": "^12.2.0",
+    "@secretlint/secretlint-rule-preset-recommend": "^12.2.0",
     "better-sqlite3": "^11.7.0",
     "cron-parser": "^4.9.0",
     "dockerode": "^4.0.4",

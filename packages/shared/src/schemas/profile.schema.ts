@@ -143,6 +143,33 @@ const testPipelineConfigSchema = z.object({
     .optional(),
 });
 
+const scanOutcomeSchema = z.enum(['block', 'warn', 'escalate']);
+
+const checkpointPolicySchema = z.object({
+  enabled: z.boolean(),
+  scope: z.enum(['full', 'diff', 'auto']),
+  onSecret: scanOutcomeSchema,
+  onPii: scanOutcomeSchema,
+  onInjection: scanOutcomeSchema,
+});
+
+const securityScanPolicySchema = z.object({
+  detectors: z.object({
+    secrets: z.object({ enabled: z.boolean() }),
+    pii: z.object({
+      enabled: z.boolean(),
+      threshold: z.number().min(0).max(1).optional(),
+    }),
+    injection: z.object({
+      enabled: z.boolean(),
+      threshold: z.number().min(0).max(1).optional(),
+    }),
+  }),
+  provisioning: checkpointPolicySchema,
+  push: checkpointPolicySchema,
+  alwaysScanPaths: z.array(z.string().min(1).max(256)).max(64).optional(),
+});
+
 const mergeableFieldSchema = z.enum([
   'smokePages',
   'customInstructions',
@@ -263,6 +290,7 @@ const createProfileBaseSchema = z.object({
   // sidecars won't be spawned until the profile author explicitly sets true.
   trustedSource: z.boolean().nullable().default(false),
   testPipeline: testPipelineConfigSchema.nullable().default(null),
+  securityScan: securityScanPolicySchema.nullable().default(null),
 });
 
 // Every nullable field on the base schema except identity/metadata. On a

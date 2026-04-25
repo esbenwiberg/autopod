@@ -47,6 +47,7 @@ export class GhPrManager implements PrManager {
       taskSummary: config.taskSummary,
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
+      securityFindings: config.securityFindings,
     });
 
     this.logger.info(
@@ -277,6 +278,7 @@ export class GitHubApiPrManager implements PrManager {
       taskSummary: config.taskSummary,
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
+      securityFindings: config.securityFindings,
     });
 
     this.logger.info(

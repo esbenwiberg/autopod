@@ -218,6 +218,36 @@ export function createMockValidationEngine(
   };
 }
 
+export function createMockRepoScanner(opts?: {
+  decision?: 'pass' | 'warn' | 'block' | 'escalate';
+  findings?: import('@autopod/shared').ScanFinding[];
+  warningSection?: import('@autopod/shared').InjectedClaudeMdSection | null;
+}): import('../security/index.js').RepoScanner {
+  const decision = opts?.decision ?? 'pass';
+  const findings = opts?.findings ?? [];
+  const warningSection =
+    opts?.warningSection !== undefined
+      ? opts.warningSection
+      : decision === 'pass'
+        ? null
+        : { heading: 'Security Notice', priority: 5, content: '- mock finding' };
+
+  return {
+    scan: vi.fn(async (checkpoint, ctx) => ({
+      podId: ctx.podId,
+      checkpoint,
+      startedAt: Date.now(),
+      completedAt: Date.now(),
+      filesScanned: 0,
+      filesSkipped: 0,
+      scanIncomplete: false,
+      findings,
+      decision,
+      warningSection,
+    })),
+  };
+}
+
 export function createMockProfileStore(db: Database.Database): ProfileStore {
   return {
     create: vi.fn(),
@@ -282,6 +312,7 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
           row.trusted_source === null || row.trusted_source === undefined
             ? null
             : Boolean(row.trusted_source),
+        securityScan: row.security_scan ? JSON.parse(row.security_scan as string) : null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
