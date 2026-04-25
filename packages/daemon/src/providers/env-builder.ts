@@ -84,19 +84,28 @@ export async function buildProviderEnv(
   }
 }
 
+const SECRET_DIR = '/run/autopod';
+
 /**
  * Anthropic API key provider — uses daemon env var.
+ * The key is written to a 0400 secret file inside the container; the exec env
+ * carries only the _FILE pointer so the raw key never appears in env dumps.
  */
 function buildAnthropicEnv(): ProviderEnvResult {
   const env: Record<string, string> = {};
+  const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
-  if (process.env.ANTHROPIC_API_KEY) {
-    env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (apiKey) {
+    const filePath = `${SECRET_DIR}/anthropic-api-key`;
+    secretFiles.push({ path: filePath, content: apiKey });
+    env.ANTHROPIC_API_KEY_FILE = filePath;
   }
 
   return {
     env,
     containerFiles: buildClaudeConfigFiles(),
+    secretFiles,
     requiresPostExecPersistence: false,
   };
 }
@@ -145,12 +154,14 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
   return {
     env: {},
     containerFiles: [{ path: credPath, content: credentialsFile }, ...buildClaudeConfigFiles()],
+    secretFiles: [],
     requiresPostExecPersistence: true,
   };
 }
 
 /**
- * GitHub Copilot CLI provider — injects COPILOT_GITHUB_TOKEN env var.
+ * GitHub Copilot CLI provider — token written to a 0400 secret file; env carries
+ * only COPILOT_GITHUB_TOKEN_FILE so the raw token stays out of env dumps.
  */
 function buildCopilotEnv(profile: Profile): ProviderEnvResult {
   const creds = profile.providerCredentials;
@@ -161,18 +172,21 @@ function buildCopilotEnv(profile: Profile): ProviderEnvResult {
     );
   }
 
-  const env: Record<string, string> = { COPILOT_GITHUB_TOKEN: creds.token };
+  const filePath = `${SECRET_DIR}/copilot-token`;
+  const env: Record<string, string> = { COPILOT_GITHUB_TOKEN_FILE: filePath };
   if (creds.model) env.COPILOT_MODEL = creds.model;
 
   return {
     env,
     containerFiles: buildClaudeConfigFiles(),
+    secretFiles: [{ path: filePath, content: creds.token }],
     requiresPostExecPersistence: false,
   };
 }
 
 /**
  * Azure Foundry provider — sets env vars for Foundry endpoint.
+ * API key (if present) written to a 0400 secret file.
  */
 function buildFoundryEnv(profile: Profile): ProviderEnvResult {
   const creds = profile.providerCredentials;
@@ -188,14 +202,18 @@ function buildFoundryEnv(profile: Profile): ProviderEnvResult {
     ANTHROPIC_BASE_URL: creds.endpoint,
     CLAUDE_FOUNDRY_PROJECT: creds.projectId,
   };
+  const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
   if (creds.apiKey) {
-    env.ANTHROPIC_API_KEY = creds.apiKey;
+    const filePath = `${SECRET_DIR}/foundry-api-key`;
+    secretFiles.push({ path: filePath, content: creds.apiKey });
+    env.ANTHROPIC_API_KEY_FILE = filePath;
   }
 
   return {
     env,
     containerFiles: buildClaudeConfigFiles(),
+    secretFiles,
     requiresPostExecPersistence: false,
   };
 }

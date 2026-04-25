@@ -6,6 +6,7 @@ import {
   NPM_RC_PATH,
   NUGET_CONFIG_PATH,
   buildNuGetCredentialEnv,
+  buildNuGetSecretFile,
   buildRegistryFiles,
   ensureNuGetCredentialProvider,
   generateNpmrc,
@@ -233,28 +234,30 @@ describe('generateNuGetConfig', () => {
   });
 });
 
-describe('buildNuGetCredentialEnv', () => {
-  it('returns empty object when no PAT', () => {
+describe('buildNuGetSecretFile', () => {
+  it('returns null when no PAT', () => {
     const regs: PrivateRegistry[] = [
       { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
     ];
-    expect(buildNuGetCredentialEnv(regs, null)).toEqual({});
+    expect(buildNuGetSecretFile(regs, null)).toBeNull();
   });
 
-  it('returns empty object when no NuGet registries', () => {
+  it('returns null when no NuGet registries', () => {
     const regs: PrivateRegistry[] = [
       { type: 'npm', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/npm/registry/' },
     ];
-    expect(buildNuGetCredentialEnv(regs, 'my-pat')).toEqual({});
+    expect(buildNuGetSecretFile(regs, 'my-pat')).toBeNull();
   });
 
-  it('returns VSS_NUGET_EXTERNAL_FEED_ENDPOINTS for NuGet registries', () => {
+  it('returns secret file with credentials JSON for NuGet registries', () => {
     const regs: PrivateRegistry[] = [
       { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
     ];
-    const env = buildNuGetCredentialEnv(regs, 'my-pat');
-    expect(env).toHaveProperty('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
-    const parsed = JSON.parse(env.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS);
+    const sf = buildNuGetSecretFile(regs, 'my-pat');
+    expect(sf).not.toBeNull();
+    expect(sf?.path).toBe('/run/autopod/nuget-endpoints');
+    expect(sf?.envFileKey).toBe('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE');
+    const parsed = JSON.parse(sf?.content ?? '{}');
     expect(parsed.endpointCredentials).toHaveLength(1);
     expect(parsed.endpointCredentials[0].endpoint).toBe(
       'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json',
@@ -263,7 +266,7 @@ describe('buildNuGetCredentialEnv', () => {
     expect(parsed.endpointCredentials[0].password).toBe('my-pat');
   });
 
-  it('includes multiple NuGet feeds in single env var', () => {
+  it('includes multiple NuGet feeds', () => {
     const regs: PrivateRegistry[] = [
       {
         type: 'nuget',
@@ -274,8 +277,8 @@ describe('buildNuGetCredentialEnv', () => {
         url: 'https://pkgs.dev.azure.com/org/_packaging/feed-b/nuget/v3/index.json',
       },
     ];
-    const env = buildNuGetCredentialEnv(regs, 'pat');
-    const parsed = JSON.parse(env.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS);
+    const sf = buildNuGetSecretFile(regs, 'pat');
+    const parsed = JSON.parse(sf?.content ?? '{}');
     expect(parsed.endpointCredentials).toHaveLength(2);
   });
 
@@ -284,10 +287,29 @@ describe('buildNuGetCredentialEnv', () => {
       { type: 'npm', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/npm/registry/' },
       { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
     ];
-    const env = buildNuGetCredentialEnv(regs, 'pat');
-    const parsed = JSON.parse(env.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS);
+    const sf = buildNuGetSecretFile(regs, 'pat');
+    const parsed = JSON.parse(sf?.content ?? '{}');
     expect(parsed.endpointCredentials).toHaveLength(1);
     expect(parsed.endpointCredentials[0].endpoint).toContain('nuget');
+  });
+});
+
+describe('buildNuGetCredentialEnv (image-build only)', () => {
+  it('returns VSS_NUGET_EXTERNAL_FEED_ENDPOINTS for Docker build args', () => {
+    const regs: PrivateRegistry[] = [
+      { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
+    ];
+    const env = buildNuGetCredentialEnv(regs, 'my-pat');
+    expect(env).toHaveProperty('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
+    const parsed = JSON.parse(env.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS ?? '{}');
+    expect(parsed.endpointCredentials[0].password).toBe('my-pat');
+  });
+
+  it('returns empty object when no PAT', () => {
+    const regs: PrivateRegistry[] = [
+      { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
+    ];
+    expect(buildNuGetCredentialEnv(regs, null)).toEqual({});
   });
 });
 

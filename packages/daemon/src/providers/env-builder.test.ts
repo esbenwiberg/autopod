@@ -63,24 +63,31 @@ describe('buildProviderEnv', () => {
   });
 
   describe('anthropic provider (default)', () => {
-    it('uses ANTHROPIC_API_KEY from daemon env when no provider is set', async () => {
+    it('writes API key to a secret file (not in env) when ANTHROPIC_API_KEY is set', async () => {
       process.env.ANTHROPIC_API_KEY = 'sk-ant-test123';
       const profile = makeProfile();
 
       const result = await buildProviderEnv(profile, 'pod-1', logger);
 
-      expect(result.env.ANTHROPIC_API_KEY).toBe('sk-ant-test123');
+      // Raw key must NOT be in env — only the file pointer
+      expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBe('/run/autopod/anthropic-api-key');
+      // Secret file must hold the raw key
+      expect(result.secretFiles).toHaveLength(1);
+      expect(result.secretFiles[0]?.content).toBe('sk-ant-test123');
       expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
       expect(result.requiresPostExecPersistence).toBe(false);
     });
 
-    it('returns empty env when no API key is set', async () => {
+    it('returns empty secretFiles when no API key is set', async () => {
       process.env.ANTHROPIC_API_KEY = undefined;
       const profile = makeProfile();
 
       const result = await buildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBeUndefined();
+      expect(result.secretFiles).toHaveLength(0);
       expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
     });
 
@@ -90,7 +97,8 @@ describe('buildProviderEnv', () => {
 
       const result = await buildProviderEnv(profile, 'pod-1', logger);
 
-      expect(result.env.ANTHROPIC_API_KEY).toBe('sk-ant-explicit');
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBe('/run/autopod/anthropic-api-key');
+      expect(result.secretFiles[0]?.content).toBe('sk-ant-explicit');
     });
   });
 
@@ -185,7 +193,10 @@ describe('buildProviderEnv', () => {
       expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBe('1');
       expect(result.env.ANTHROPIC_BASE_URL).toBe('https://foundry.azure.com/v1');
       expect(result.env.CLAUDE_FOUNDRY_PROJECT).toBe('my-project');
-      expect(result.env.ANTHROPIC_API_KEY).toBe('foundry-key-123');
+      // Raw key must NOT be in env — written to a secret file
+      expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBe('/run/autopod/foundry-api-key');
+      expect(result.secretFiles[0]?.content).toBe('foundry-key-123');
       expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
       expect(result.requiresPostExecPersistence).toBe(false);
     });

@@ -32,9 +32,10 @@ export class CodexRuntime implements Runtime {
       msg: 'Spawning codex in container',
     });
 
+    const shimPath = '/run/autopod/agent-shim.sh';
     const handle = await this.containerManager.execStreaming(
       config.containerId,
-      ['codex', ...args],
+      [shimPath, 'codex', ...args],
       { cwd: config.workDir, env: config.env },
     );
 
@@ -75,7 +76,8 @@ export class CodexRuntime implements Runtime {
       msg: 'Resuming codex with follow-up message in container',
     });
 
-    const handle = await this.containerManager.execStreaming(containerId, ['codex', ...args], {
+    const shimPath = '/run/autopod/agent-shim.sh';
+    const handle = await this.containerManager.execStreaming(containerId, [shimPath, 'codex', ...args], {
       cwd: '/workspace',
       ...(env ? { env } : {}),
     });

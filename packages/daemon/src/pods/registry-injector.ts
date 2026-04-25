@@ -147,15 +147,45 @@ export function generateNuGetConfig(registries: PrivateRegistry[]): string {
   return lines.join('\n');
 }
 
+const NUGET_SECRET_PATH = '/run/autopod/nuget-endpoints';
+
 /**
- * Build the VSS_NUGET_EXTERNAL_FEED_ENDPOINTS environment variable value
- * for the Azure Artifacts Credential Provider.
+ * Build the NuGet credential payload and return it as a secret file entry
+ * (written to 0400) rather than an environment variable. The exec shim reads
+ * the file and exports VSS_NUGET_EXTERNAL_FEED_ENDPOINTS before the runtime
+ * starts, so the PAT is never in the container's process env at rest.
  *
- * The credential provider intercepts NuGet auth challenges at the HTTP layer
- * and supplies credentials from this env var — no cleartext passwords in
- * config files.
- *
- * Returns an empty object when there are no NuGet registries.
+ * Returns null when there are no NuGet registries or no PAT.
+ */
+export function buildNuGetSecretFile(
+  registries: PrivateRegistry[],
+  pat: string | null,
+): { path: string; content: string; envKey: string; envFileKey: string } | null {
+  if (!pat) return null;
+  const nugetRegs = registries.filter((r) => r.type === 'nuget');
+  if (nugetRegs.length === 0) return null;
+
+  const payload = {
+    endpointCredentials: nugetRegs.map((r) => ({
+      endpoint: r.url,
+      username: 'VssSessionToken',
+      password: pat,
+    })),
+  };
+
+  return {
+    path: NUGET_SECRET_PATH,
+    content: JSON.stringify(payload),
+    envKey: 'VSS_NUGET_EXTERNAL_FEED_ENDPOINTS',
+    envFileKey: 'VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE',
+  };
+}
+
+/**
+ * Build the VSS_NUGET_EXTERNAL_FEED_ENDPOINTS build-arg value for Docker image
+ * builds. Used only during `docker build` (pre-warm) where the env is cleared at
+ * the end of the Dockerfile. Do NOT use this for pod exec env — use
+ * buildNuGetSecretFile() instead which writes to a 0400 file.
  */
 export function buildNuGetCredentialEnv(
   registries: PrivateRegistry[],

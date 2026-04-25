@@ -58,9 +58,10 @@ export class CopilotRuntime implements Runtime {
       msg: 'Spawning copilot in container',
     });
 
+    const shimPath = '/run/autopod/agent-shim.sh';
     const handle = await this.containerManager.execStreaming(
       config.containerId,
-      ['copilot', ...args],
+      [shimPath, 'copilot', ...args],
       { cwd: config.workDir, env },
     );
 
