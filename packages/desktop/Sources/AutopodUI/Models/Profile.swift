@@ -10,7 +10,12 @@ public struct Profile: Identifiable, Sendable {
     public var template: StackTemplate
     public var buildCommand: String
     public var startCommand: String
+    public var buildWorkDir: String?
     public var testCommand: String?
+    public var lintCommand: String?
+    public var lintTimeout: Int?
+    public var sastCommand: String?
+    public var sastTimeout: Int?
     public var healthPath: String
     public var healthTimeout: Int
     public var buildTimeout: Int
@@ -109,6 +114,9 @@ public struct Profile: Identifiable, Sendable {
     // Test pipeline (ADO)
     public var testPipeline: TestPipelineConfig?
 
+    // Security scan policy (repo content scan at provisioning + push)
+    public var securityScan: SecurityScanPolicy?
+
     // Provider credentials (read-only indicator)
     public var providerCredentialsType: String?
 
@@ -131,7 +139,10 @@ public struct Profile: Identifiable, Sendable {
         name: String, repoUrl: String, defaultBranch: String = "main",
         template: StackTemplate = .node22,
         buildCommand: String = "npm run build", startCommand: String = "npm start",
+        buildWorkDir: String? = nil,
         testCommand: String? = nil,
+        lintCommand: String? = nil, lintTimeout: Int? = nil,
+        sastCommand: String? = nil, sastTimeout: Int? = nil,
         healthPath: String = "/", healthTimeout: Int = 120,
         buildTimeout: Int = 300, testTimeout: Int = 600,
         maxValidationAttempts: Int = 3,
@@ -174,13 +185,17 @@ public struct Profile: Identifiable, Sendable {
         trustedSource: Bool = false,
         sidecars: SidecarsSnapshot? = nil,
         testPipeline: TestPipelineConfig? = nil,
+        securityScan: SecurityScanPolicy? = nil,
         providerCredentialsType: String? = nil,
         version: Int = 1,
         createdAt: Date = Date(), updatedAt: Date = Date()
     ) {
         self.name = name; self.repoUrl = repoUrl; self.defaultBranch = defaultBranch
         self.template = template; self.buildCommand = buildCommand
-        self.startCommand = startCommand; self.testCommand = testCommand
+        self.startCommand = startCommand; self.buildWorkDir = buildWorkDir
+        self.testCommand = testCommand
+        self.lintCommand = lintCommand; self.lintTimeout = lintTimeout
+        self.sastCommand = sastCommand; self.sastTimeout = sastTimeout
         self.healthPath = healthPath; self.healthTimeout = healthTimeout
         self.buildTimeout = buildTimeout; self.testTimeout = testTimeout
         self.maxValidationAttempts = maxValidationAttempts
@@ -228,6 +243,7 @@ public struct Profile: Identifiable, Sendable {
         self.trustedSource = trustedSource
         self.sidecars = sidecars
         self.testPipeline = testPipeline
+        self.securityScan = securityScan
         self.providerCredentialsType = providerCredentialsType
         self.version = version
         self.createdAt = createdAt; self.updatedAt = updatedAt
@@ -290,6 +306,85 @@ public struct TestPipelineConfig: Sendable, Equatable {
         self.testPipelineId = testPipelineId
         self.rateLimitPerHour = rateLimitPerHour
         self.branchPrefix = branchPrefix
+    }
+}
+
+// MARK: - Security scan policy
+
+public enum ScanOutcome: String, CaseIterable, Sendable, Equatable {
+    case block, warn, escalate
+    public var label: String {
+        switch self {
+        case .block:    "Block"
+        case .warn:     "Warn"
+        case .escalate: "Escalate"
+        }
+    }
+}
+
+public enum ScanScope: String, CaseIterable, Sendable, Equatable {
+    case full, diff, auto
+    public var label: String {
+        switch self {
+        case .full: "Full Tree"
+        case .diff: "Diff Only"
+        case .auto: "Auto"
+        }
+    }
+}
+
+public struct DetectorConfig: Sendable, Equatable {
+    public var enabled: Bool
+    public var threshold: Double?
+    public init(enabled: Bool = true, threshold: Double? = nil) {
+        self.enabled = enabled; self.threshold = threshold
+    }
+}
+
+public struct CheckpointPolicy: Sendable, Equatable {
+    public var enabled: Bool
+    public var scope: ScanScope
+    public var onSecret: ScanOutcome
+    public var onPii: ScanOutcome
+    public var onInjection: ScanOutcome
+
+    public init(
+        enabled: Bool = true,
+        scope: ScanScope = .auto,
+        onSecret: ScanOutcome = .block,
+        onPii: ScanOutcome = .warn,
+        onInjection: ScanOutcome = .warn
+    ) {
+        self.enabled = enabled
+        self.scope = scope
+        self.onSecret = onSecret
+        self.onPii = onPii
+        self.onInjection = onInjection
+    }
+}
+
+public struct SecurityScanPolicy: Sendable, Equatable {
+    public var secretsDetector: DetectorConfig
+    public var piiDetector: DetectorConfig
+    public var injectionDetector: DetectorConfig
+    public var provisioning: CheckpointPolicy
+    public var push: CheckpointPolicy
+    public var alwaysScanPaths: [String]
+
+    public init(
+        secretsDetector: DetectorConfig = DetectorConfig(enabled: true),
+        piiDetector: DetectorConfig = DetectorConfig(enabled: true, threshold: 0.7),
+        injectionDetector: DetectorConfig = DetectorConfig(enabled: true, threshold: 0.7),
+        provisioning: CheckpointPolicy = CheckpointPolicy(),
+        push: CheckpointPolicy = CheckpointPolicy(),
+        alwaysScanPaths: [String] = []
+    ) {
+        self.secretsDetector = secretsDetector
+        self.piiDetector = piiDetector
+        self.injectionDetector = injectionDetector
+        self.provisioning = provisioning
+        self.push = push
+        self.alwaysScanPaths = alwaysScanPaths
     }
 }
 

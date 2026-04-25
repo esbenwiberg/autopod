@@ -38,7 +38,12 @@ public enum ProfileMapper {
       template: template,
       buildCommand: response.buildCommand ?? "",
       startCommand: response.startCommand ?? "",
+      buildWorkDir: response.buildWorkDir,
       testCommand: response.testCommand,
+      lintCommand: response.lintCommand,
+      lintTimeout: response.lintTimeout,
+      sastCommand: response.sastCommand,
+      sastTimeout: response.sastTimeout,
       healthPath: response.healthPath ?? "/",
       healthTimeout: response.healthTimeout ?? 120,
       buildTimeout: response.buildTimeout ?? 300,
@@ -136,15 +141,8 @@ public enum ProfileMapper {
           )
         )
       },
-      testPipeline: response.testPipeline.map { t in
-        TestPipelineConfig(
-          enabled: t.enabled,
-          testRepo: t.testRepo,
-          testPipelineId: t.testPipelineId,
-          rateLimitPerHour: t.rateLimitPerHour,
-          branchPrefix: t.branchPrefix
-        )
-      },
+      testPipeline: response.testPipeline.map(mapTestPipeline),
+      securityScan: response.securityScan.map(mapSecurityScan),
       providerCredentialsType: response.providerCredentials?.provider,
       version: response.version,
       createdAt: PodMapper.parseDate(response.createdAt),
@@ -238,6 +236,23 @@ public enum ProfileMapper {
     // Optional fields — only include if set
     if let v = profile.customInstructions { d["customInstructions"] = v }
     if let v = profile.testCommand { d["testCommand"] = v }
+    if let v = profile.buildWorkDir, !v.isEmpty {
+      d["buildWorkDir"] = v
+    } else {
+      d["buildWorkDir"] = NSNull()
+    }
+    if let v = profile.lintCommand, !v.isEmpty {
+      d["lintCommand"] = v
+      if let t = profile.lintTimeout { d["lintTimeout"] = t }
+    } else {
+      d["lintCommand"] = NSNull()
+    }
+    if let v = profile.sastCommand, !v.isEmpty {
+      d["sastCommand"] = v
+      if let t = profile.sastTimeout { d["sastTimeout"] = t }
+    } else {
+      d["sastCommand"] = NSNull()
+    }
     if let v = profile.containerMemoryGb { d["containerMemoryGb"] = v }
     if let v = profile.githubPat { d["githubPat"] = v }
     if let v = profile.adoPat { d["adoPat"] = v }
@@ -309,6 +324,40 @@ public enum ProfileMapper {
     } else {
       d["testPipeline"] = NSNull()
     }
+    // Security scan policy
+    if let s = profile.securityScan {
+      var detectors: [String: Any] = [
+        "secrets": ["enabled": s.secretsDetector.enabled] as [String: Any],
+      ]
+      var pii: [String: Any] = ["enabled": s.piiDetector.enabled]
+      if let t = s.piiDetector.threshold { pii["threshold"] = t }
+      detectors["pii"] = pii
+      var injection: [String: Any] = ["enabled": s.injectionDetector.enabled]
+      if let t = s.injectionDetector.threshold { injection["threshold"] = t }
+      detectors["injection"] = injection
+
+      func checkpointDict(_ c: CheckpointPolicy) -> [String: Any] {
+        return [
+          "enabled": c.enabled,
+          "scope": c.scope.rawValue,
+          "onSecret": c.onSecret.rawValue,
+          "onPii": c.onPii.rawValue,
+          "onInjection": c.onInjection.rawValue,
+        ]
+      }
+      var scan: [String: Any] = [
+        "detectors": detectors,
+        "provisioning": checkpointDict(s.provisioning),
+        "push": checkpointDict(s.push),
+      ]
+      if !s.alwaysScanPaths.isEmpty {
+        scan["alwaysScanPaths"] = s.alwaysScanPaths
+      }
+      d["securityScan"] = scan
+    } else {
+      d["securityScan"] = NSNull()
+    }
+
     // Sidecars: preserved verbatim so write operations don't wipe fields the
     // editor doesn't surface yet (dagger engine digest/version/etc.).
     if let s = profile.sidecars {
@@ -365,5 +414,47 @@ public enum ProfileMapper {
     }
 
     return d
+  }
+
+  // MARK: - Helpers for type-checker performance
+
+  fileprivate static func mapTestPipeline(_ t: TestPipelineResponse) -> TestPipelineConfig {
+    TestPipelineConfig(
+      enabled: t.enabled,
+      testRepo: t.testRepo,
+      testPipelineId: t.testPipelineId,
+      rateLimitPerHour: t.rateLimitPerHour,
+      branchPrefix: t.branchPrefix
+    )
+  }
+
+  fileprivate static func mapSecurityScan(_ s: SecurityScanPolicyResponse) -> SecurityScanPolicy {
+    SecurityScanPolicy(
+      secretsDetector: DetectorConfig(
+        enabled: s.detectors.secrets.enabled,
+        threshold: s.detectors.secrets.threshold
+      ),
+      piiDetector: DetectorConfig(
+        enabled: s.detectors.pii.enabled,
+        threshold: s.detectors.pii.threshold
+      ),
+      injectionDetector: DetectorConfig(
+        enabled: s.detectors.injection.enabled,
+        threshold: s.detectors.injection.threshold
+      ),
+      provisioning: mapCheckpoint(s.provisioning),
+      push: mapCheckpoint(s.push),
+      alwaysScanPaths: s.alwaysScanPaths ?? []
+    )
+  }
+
+  fileprivate static func mapCheckpoint(_ c: CheckpointPolicyResponse) -> CheckpointPolicy {
+    CheckpointPolicy(
+      enabled: c.enabled,
+      scope: ScanScope(rawValue: c.scope) ?? .auto,
+      onSecret: ScanOutcome(rawValue: c.onSecret) ?? .block,
+      onPii: ScanOutcome(rawValue: c.onPii) ?? .warn,
+      onInjection: ScanOutcome(rawValue: c.onInjection) ?? .warn
+    )
   }
 }

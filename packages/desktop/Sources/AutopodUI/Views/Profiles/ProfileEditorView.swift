@@ -2422,6 +2422,14 @@ public struct ProfileEditorView: View {
             stringCard(field, value: $profile.startCommand,
                        parent: editorPayload?.parent?.startCommand ?? "",
                        placeholder: "npm start")
+        case "buildWorkDir":
+            nullableStringCard(field,
+                value: Binding(
+                    get: { profile.buildWorkDir ?? "" },
+                    set: { profile.buildWorkDir = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.buildWorkDir ?? "",
+                placeholder: "apps/web")
         case "testCommand":
             nullableStringCard(field,
                 value: Binding(
@@ -2430,6 +2438,38 @@ public struct ProfileEditorView: View {
                 ),
                 parent: editorPayload?.parent?.testCommand ?? "",
                 placeholder: "pnpm test")
+        case "lintCommand":
+            nullableStringCard(field,
+                value: Binding(
+                    get: { profile.lintCommand ?? "" },
+                    set: { profile.lintCommand = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.lintCommand ?? "",
+                placeholder: "biome lint .")
+        case "lintTimeout":
+            nullableIntCard(field,
+                value: Binding(
+                    get: { profile.lintTimeout },
+                    set: { profile.lintTimeout = $0 }
+                ),
+                parent: editorPayload?.parent?.lintTimeout,
+                placeholder: "120")
+        case "sastCommand":
+            nullableStringCard(field,
+                value: Binding(
+                    get: { profile.sastCommand ?? "" },
+                    set: { profile.sastCommand = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.sastCommand ?? "",
+                placeholder: "semgrep --config=p/security-audit .")
+        case "sastTimeout":
+            nullableIntCard(field,
+                value: Binding(
+                    get: { profile.sastTimeout },
+                    set: { profile.sastTimeout = $0 }
+                ),
+                parent: editorPayload?.parent?.sastTimeout,
+                placeholder: "300")
         case "healthPath":
             stringCard(field, value: $profile.healthPath,
                        parent: editorPayload?.parent?.healthPath ?? "/",
@@ -2520,6 +2560,8 @@ public struct ProfileEditorView: View {
         // MARK: Network & Security / Actions (composite — full editors)
         case "networkPolicy":
             networkPolicyOverrideCard(field: field)
+        case "securityScan":
+            securityScanOverrideCard(field: field)
         case "actionPolicy":
             actionPolicyOverrideCard(field: field)
         case "pimActivations":
@@ -2825,6 +2867,174 @@ public struct ProfileEditorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// Security Scan card — summary + collapsed details. Detector toggles
+    /// (with thresholds) and per-checkpoint policy (provisioning/push) with
+    /// scope + per-finding outcome (block/warn/escalate).
+    private func securityScanOverrideCard(field: ProfileOverrideField) -> some View {
+        overrideCardShell(field: field) {
+            Text(securityScanSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DisclosureGroup {
+                securityScanFields
+                    .padding(.top, 6)
+            } label: {
+                Text("Edit details")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var securityScanSummary: String {
+        guard let s = profile.securityScan else { return "Not configured (inherits)" }
+        var parts: [String] = []
+        if s.secretsDetector.enabled { parts.append("Secrets") }
+        if s.piiDetector.enabled { parts.append("PII") }
+        if s.injectionDetector.enabled { parts.append("Injection") }
+        let detectors = parts.isEmpty ? "no detectors" : parts.joined(separator: " · ")
+        let cps = [
+            s.provisioning.enabled ? "provision" : nil,
+            s.push.enabled ? "push" : nil,
+        ].compactMap { $0 }.joined(separator: "+")
+        return "\(detectors) @ \(cps.isEmpty ? "no checkpoints" : cps)"
+    }
+
+    @ViewBuilder
+    private var securityScanFields: some View {
+        let binding = Binding<SecurityScanPolicy>(
+            get: { profile.securityScan ?? SecurityScanPolicy() },
+            set: { profile.securityScan = $0 }
+        )
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Detectors").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            detectorRow(label: "Secrets",
+                        config: Binding(get: { binding.wrappedValue.secretsDetector },
+                                        set: { binding.wrappedValue.secretsDetector = $0 }),
+                        showThreshold: false)
+            detectorRow(label: "PII",
+                        config: Binding(get: { binding.wrappedValue.piiDetector },
+                                        set: { binding.wrappedValue.piiDetector = $0 }),
+                        showThreshold: true)
+            detectorRow(label: "Prompt Injection",
+                        config: Binding(get: { binding.wrappedValue.injectionDetector },
+                                        set: { binding.wrappedValue.injectionDetector = $0 }),
+                        showThreshold: true)
+
+            Divider().padding(.vertical, 4)
+
+            Text("Checkpoints").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            checkpointRow(label: "Provisioning",
+                          policy: Binding(get: { binding.wrappedValue.provisioning },
+                                          set: { binding.wrappedValue.provisioning = $0 }))
+            checkpointRow(label: "Push",
+                          policy: Binding(get: { binding.wrappedValue.push },
+                                          set: { binding.wrappedValue.push = $0 }))
+        }
+    }
+
+    @ViewBuilder
+    private func detectorRow(
+        label: String,
+        config: Binding<DetectorConfig>,
+        showThreshold: Bool
+    ) -> some View {
+        HStack(spacing: 10) {
+            Toggle(label, isOn: Binding(
+                get: { config.wrappedValue.enabled },
+                set: { config.wrappedValue.enabled = $0 }
+            ))
+            .toggleStyle(.switch)
+            .frame(width: 180, alignment: .leading)
+            if showThreshold {
+                Text("Threshold")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Slider(
+                    value: Binding(
+                        get: { config.wrappedValue.threshold ?? 0.7 },
+                        set: { config.wrappedValue.threshold = $0 }
+                    ),
+                    in: 0.0...1.0
+                )
+                .frame(width: 160)
+                .disabled(!config.wrappedValue.enabled)
+                Text(String(format: "%.2f", config.wrappedValue.threshold ?? 0.7))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40, alignment: .leading)
+            }
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private func checkpointRow(
+        label: String,
+        policy: Binding<CheckpointPolicy>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Toggle(label, isOn: Binding(
+                    get: { policy.wrappedValue.enabled },
+                    set: { policy.wrappedValue.enabled = $0 }
+                ))
+                .toggleStyle(.switch)
+                .frame(width: 180, alignment: .leading)
+                Text("Scope").font(.caption).foregroundStyle(.tertiary)
+                Picker("", selection: Binding(
+                    get: { policy.wrappedValue.scope },
+                    set: { policy.wrappedValue.scope = $0 }
+                )) {
+                    ForEach(ScanScope.allCases, id: \.self) { s in
+                        Text(s.label).tag(s)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 140)
+                .disabled(!policy.wrappedValue.enabled)
+                Spacer()
+            }
+            HStack(spacing: 10) {
+                outcomePicker(label: "Secret",
+                              binding: Binding(get: { policy.wrappedValue.onSecret },
+                                               set: { policy.wrappedValue.onSecret = $0 }),
+                              enabled: policy.wrappedValue.enabled)
+                outcomePicker(label: "PII",
+                              binding: Binding(get: { policy.wrappedValue.onPii },
+                                               set: { policy.wrappedValue.onPii = $0 }),
+                              enabled: policy.wrappedValue.enabled)
+                outcomePicker(label: "Injection",
+                              binding: Binding(get: { policy.wrappedValue.onInjection },
+                                               set: { policy.wrappedValue.onInjection = $0 }),
+                              enabled: policy.wrappedValue.enabled)
+                Spacer()
+            }
+            .padding(.leading, 16)
+        }
+    }
+
+    @ViewBuilder
+    private func outcomePicker(
+        label: String,
+        binding: Binding<ScanOutcome>,
+        enabled: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption2).foregroundStyle(.tertiary)
+            Picker("", selection: binding) {
+                ForEach(ScanOutcome.allCases, id: \.self) { o in
+                    Text(o.label).tag(o)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 200)
+            .disabled(!enabled)
         }
     }
 

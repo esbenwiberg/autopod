@@ -11,6 +11,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var template: String?
   public var buildCommand: String?
   public var startCommand: String?
+  public var buildWorkDir: String?
   public var healthPath: String?
   public var healthTimeout: Int?
   public var smokePages: [SmokePageResponse]
@@ -37,6 +38,10 @@ public struct ProfileResponse: Codable, Sendable {
   public var testCommand: String?
   public var buildTimeout: Int?
   public var testTimeout: Int?
+  public var lintCommand: String?
+  public var lintTimeout: Int?
+  public var sastCommand: String?
+  public var sastTimeout: Int?
   public var prProvider: String?
   public var adoPat: String?
   public var githubPat: String?
@@ -62,6 +67,8 @@ public struct ProfileResponse: Codable, Sendable {
   public var trustedSource: Bool?
   /// Pre-configured ADO test pipeline for the `ado_run_test_pipeline` action.
   public var testPipeline: TestPipelineResponse?
+  /// Repo content scan policy. Null = inherit from parent / fall back to bundled `default`.
+  public var securityScan: SecurityScanPolicyResponse?
   public var version: Int
   public var createdAt: String
   public var updatedAt: String
@@ -77,6 +84,7 @@ public struct ProfileResponse: Codable, Sendable {
     template = try c.decodeIfPresent(String.self, forKey: .template)
     buildCommand = try c.decodeIfPresent(String.self, forKey: .buildCommand)
     startCommand = try c.decodeIfPresent(String.self, forKey: .startCommand)
+    buildWorkDir = try c.decodeIfPresent(String.self, forKey: .buildWorkDir)
     healthPath = try c.decodeIfPresent(String.self, forKey: .healthPath)
     healthTimeout = try c.decodeIfPresent(Int.self, forKey: .healthTimeout)
     smokePages = (try c.decodeIfPresent([SmokePageResponse].self, forKey: .smokePages)) ?? []
@@ -103,6 +111,10 @@ public struct ProfileResponse: Codable, Sendable {
     testCommand = try c.decodeIfPresent(String.self, forKey: .testCommand)
     buildTimeout = try c.decodeIfPresent(Int.self, forKey: .buildTimeout)
     testTimeout = try c.decodeIfPresent(Int.self, forKey: .testTimeout)
+    lintCommand = try c.decodeIfPresent(String.self, forKey: .lintCommand)
+    lintTimeout = try c.decodeIfPresent(Int.self, forKey: .lintTimeout)
+    sastCommand = try c.decodeIfPresent(String.self, forKey: .sastCommand)
+    sastTimeout = try c.decodeIfPresent(Int.self, forKey: .sastTimeout)
     prProvider = try c.decodeIfPresent(String.self, forKey: .prProvider)
     adoPat = try c.decodeIfPresent(String.self, forKey: .adoPat)
     githubPat = try c.decodeIfPresent(String.self, forKey: .githubPat)
@@ -122,6 +134,7 @@ public struct ProfileResponse: Codable, Sendable {
     sidecars = try c.decodeIfPresent(SidecarsResponse.self, forKey: .sidecars)
     trustedSource = try decodeBoolOrIntIfPresent(c, key: .trustedSource)
     testPipeline = try c.decodeIfPresent(TestPipelineResponse.self, forKey: .testPipeline)
+    securityScan = try c.decodeIfPresent(SecurityScanPolicyResponse.self, forKey: .securityScan)
     version = try c.decode(Int.self, forKey: .version)
     createdAt = try c.decode(String.self, forKey: .createdAt)
     updatedAt = try c.decode(String.self, forKey: .updatedAt)
@@ -396,6 +409,87 @@ public struct TestPipelineResponse: Codable, Sendable {
     testPipelineId = try c.decode(Int.self, forKey: .testPipelineId)
     rateLimitPerHour = try c.decodeIfPresent(Int.self, forKey: .rateLimitPerHour)
     branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix)
+  }
+}
+
+// MARK: - Security scan policy
+
+public struct SecurityScanPolicyResponse: Codable, Sendable {
+  public var detectors: SecurityScanDetectorsResponse
+  public var provisioning: CheckpointPolicyResponse
+  public var push: CheckpointPolicyResponse
+  public var alwaysScanPaths: [String]?
+
+  public init(
+    detectors: SecurityScanDetectorsResponse,
+    provisioning: CheckpointPolicyResponse,
+    push: CheckpointPolicyResponse,
+    alwaysScanPaths: [String]? = nil
+  ) {
+    self.detectors = detectors
+    self.provisioning = provisioning
+    self.push = push
+    self.alwaysScanPaths = alwaysScanPaths
+  }
+}
+
+public struct SecurityScanDetectorsResponse: Codable, Sendable {
+  public var secrets: SecurityDetectorEntryResponse
+  public var pii: SecurityDetectorEntryResponse
+  public var injection: SecurityDetectorEntryResponse
+
+  public init(
+    secrets: SecurityDetectorEntryResponse,
+    pii: SecurityDetectorEntryResponse,
+    injection: SecurityDetectorEntryResponse
+  ) {
+    self.secrets = secrets; self.pii = pii; self.injection = injection
+  }
+}
+
+public struct SecurityDetectorEntryResponse: Codable, Sendable {
+  public var enabled: Bool
+  public var threshold: Double?
+
+  public init(enabled: Bool, threshold: Double? = nil) {
+    self.enabled = enabled; self.threshold = threshold
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
+    threshold = try c.decodeIfPresent(Double.self, forKey: .threshold)
+  }
+}
+
+public struct CheckpointPolicyResponse: Codable, Sendable {
+  public var enabled: Bool
+  public var scope: String
+  public var onSecret: String
+  public var onPii: String
+  public var onInjection: String
+
+  public init(
+    enabled: Bool,
+    scope: String,
+    onSecret: String,
+    onPii: String,
+    onInjection: String
+  ) {
+    self.enabled = enabled
+    self.scope = scope
+    self.onSecret = onSecret
+    self.onPii = onPii
+    self.onInjection = onInjection
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
+    scope = try c.decode(String.self, forKey: .scope)
+    onSecret = try c.decode(String.self, forKey: .onSecret)
+    onPii = try c.decode(String.self, forKey: .onPii)
+    onInjection = try c.decode(String.self, forKey: .onInjection)
   }
 }
 

@@ -132,6 +132,10 @@ export function rowToProfile(
     modelProvider: nullableStr(row.model_provider) as Profile['modelProvider'],
     providerCredentials: decryptCreds(row.provider_credentials),
     testCommand: nullableStr(row.test_command),
+    lintCommand: nullableStr(row.lint_command),
+    lintTimeout: nullableNum(row.lint_timeout),
+    sastCommand: nullableStr(row.sast_command),
+    sastTimeout: nullableNum(row.sast_timeout),
     prProvider: nullableStr(row.pr_provider) as Profile['prProvider'],
     adoPat: decryptPat(row.ado_pat),
     githubPat: decryptPat(row.github_pat),
@@ -277,6 +281,7 @@ export function createProfileStore(
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
           private_registries, registry_pat, branch_prefix, container_memory_gb,
           build_timeout, test_timeout,
+          lint_command, lint_timeout, sast_command, sast_timeout,
           token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
           has_web_ui,
           issue_watcher_enabled, issue_watcher_label_prefix,
@@ -293,6 +298,7 @@ export function createProfileStore(
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
           @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout,
+          @lintCommand, @lintTimeout, @sastCommand, @sastTimeout,
           @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
           @hasWebUi,
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
@@ -334,6 +340,10 @@ export function createProfileStore(
         modelProvider: parsed.modelProvider,
         providerCredentials: encryptCreds(parsed.providerCredentials),
         testCommand: parsed.testCommand ?? null,
+        lintCommand: parsed.lintCommand ?? null,
+        lintTimeout: parsed.lintTimeout ?? null,
+        sastCommand: parsed.sastCommand ?? null,
+        sastTimeout: parsed.sastTimeout ?? null,
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
         githubPat: encryptPat(parsed.githubPat),
@@ -605,6 +615,22 @@ export function createProfileStore(
       if (parsed.testTimeout !== undefined) {
         setClauses.push('test_timeout = @testTimeout');
         fieldMap.testTimeout = parsed.testTimeout;
+      }
+      if (parsed.lintCommand !== undefined) {
+        setClauses.push('lint_command = @lintCommand');
+        fieldMap.lintCommand = parsed.lintCommand ?? null;
+      }
+      if (parsed.lintTimeout !== undefined) {
+        setClauses.push('lint_timeout = @lintTimeout');
+        fieldMap.lintTimeout = parsed.lintTimeout ?? null;
+      }
+      if (parsed.sastCommand !== undefined) {
+        setClauses.push('sast_command = @sastCommand');
+        fieldMap.sastCommand = parsed.sastCommand ?? null;
+      }
+      if (parsed.sastTimeout !== undefined) {
+        setClauses.push('sast_timeout = @sastTimeout');
+        fieldMap.sastTimeout = parsed.sastTimeout ?? null;
       }
       if (parsed.tokenBudget !== undefined) {
         setClauses.push('token_budget = @tokenBudget');

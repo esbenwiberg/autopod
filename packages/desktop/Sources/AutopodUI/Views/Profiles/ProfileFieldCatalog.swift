@@ -89,10 +89,40 @@ public enum ProfileOverrideCatalog {
             help: "Starts the app for health checks and smoke testing."
         ),
         .init(
+            key: "buildWorkDir",
+            label: "Build Working Dir",
+            section: .buildRun,
+            help: "Optional subdirectory under /workspace where build / test / start commands run. Useful for monorepos. Leave empty to use the repo root."
+        ),
+        .init(
             key: "testCommand",
             label: "Test Command",
             section: .buildRun,
             help: "Runs after build. Leave empty to skip."
+        ),
+        .init(
+            key: "lintCommand",
+            label: "Lint Command",
+            section: .buildRun,
+            help: "Optional lint command run before build (e.g. `biome lint .`). Leave empty to skip lint phase."
+        ),
+        .init(
+            key: "lintTimeout",
+            label: "Lint Timeout",
+            section: .buildRun,
+            help: "Seconds to wait for the lint command. Default 120s."
+        ),
+        .init(
+            key: "sastCommand",
+            label: "SAST Command",
+            section: .buildRun,
+            help: "Optional static analysis command (e.g. `semgrep --config=p/security-audit .`). Runs after lint, before build. Leave empty to skip."
+        ),
+        .init(
+            key: "sastTimeout",
+            label: "SAST Timeout",
+            section: .buildRun,
+            help: "Seconds to wait for the SAST command. Default 300s."
         ),
         .init(
             key: "healthPath",
@@ -211,6 +241,12 @@ public enum ProfileOverrideCatalog {
             label: "Network Policy",
             section: .network,
             help: "Firewall mode + allowlist of hosts the container can reach."
+        ),
+        .init(
+            key: "securityScan",
+            label: "Security Scan",
+            section: .network,
+            help: "Repo content scan at provisioning + push. Detects secrets, PII, prompt injection."
         ),
 
         // MARK: Actions

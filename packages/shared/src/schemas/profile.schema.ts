@@ -232,6 +232,13 @@ const createProfileBaseSchema = z.object({
     .default('node22'),
   buildCommand: z.string().min(1).nullable().default(null),
   startCommand: z.string().min(1).nullable().default(null),
+  /** Optional subdirectory under /workspace where build/test/start commands run. */
+  buildWorkDir: z
+    .string()
+    .max(256)
+    .regex(/^[A-Za-z0-9._\-/]+$/, 'buildWorkDir contains invalid characters')
+    .nullable()
+    .default(null),
   healthPath: z.string().nullable().default('/'),
   healthTimeout: z.number().int().min(10).max(600).nullable().default(120),
   // Nullable on the wire so derived profiles can signal "inherit from parent".
@@ -257,6 +264,12 @@ const createProfileBaseSchema = z.object({
   testCommand: z.string().nullable().optional().default(null),
   buildTimeout: z.number().int().min(30).max(1800).nullable().default(300),
   testTimeout: z.number().int().min(30).max(3600).nullable().default(600),
+  /** Optional lint command run before build. */
+  lintCommand: z.string().nullable().optional().default(null),
+  lintTimeout: z.number().int().min(10).max(600).nullable().optional().default(120),
+  /** Optional SAST command run after lint. */
+  sastCommand: z.string().nullable().optional().default(null),
+  sastTimeout: z.number().int().min(10).max(1800).nullable().optional().default(300),
   prProvider: z.enum(['github', 'ado']).nullable().default('github'),
   adoPat: z.string().min(1).nullable().default(null),
   githubPat: z.string().min(1).nullable().default(null),
