@@ -87,8 +87,9 @@ async function resolveGithub(
   if (!/^[0-9a-f]{40}$/.test(ref)) {
     logger.warn(
       { skill: skill.name, repo: source.repo, ref },
-      'Skill ref is not a full 40-character commit SHA — future releases will reject non-SHA refs. Pin to a commit SHA to silence this warning.',
+      'Skill ref is not a full 40-character commit SHA — skipping skill. Pin to a commit SHA.',
     );
+    return null;
   }
   const filePath = source.path ?? `${skill.name}.md`;
   const url = `https://api.github.com/repos/${source.repo}/contents/${filePath}?ref=${encodeURIComponent(ref)}`;

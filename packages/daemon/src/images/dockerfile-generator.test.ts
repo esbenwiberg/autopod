@@ -59,8 +59,17 @@ describe('getBaseImage', () => {
     ['go124-pw', 'autopod-go124-pw:latest'],
     ['python-node', 'autopod-python-node:latest'],
     ['custom', 'autopod-node22:latest'],
-  ] as const)('maps %s → %s', (template, expected) => {
+  ] as const)('maps %s → %s (no digest)', (template, expected) => {
     expect(getBaseImage(template)).toBe(expected);
+  });
+
+  it('uses sha256 digest when provided in digest map', () => {
+    const digest = `sha256:${'a'.repeat(64)}`;
+    expect(getBaseImage('node22', { node22: digest })).toBe(`autopod-node22@${digest}`);
+  });
+
+  it('falls back to :latest when digest is null', () => {
+    expect(getBaseImage('node22', { node22: null })).toBe('autopod-node22:latest');
   });
 });
 
@@ -202,6 +211,17 @@ describe('generateDockerfile', () => {
     expect(df).toContain('npm ci');
     expect(df).toContain('npm run build || true');
     expect(df).toContain('USER autopod');
+  });
+
+  it('uses sha256 digest in FROM when imageDigests map is provided', () => {
+    const digest = `sha256:${'f'.repeat(64)}`;
+    const df = generateDockerfile({
+      profile: mockProfile({ template: 'node22' }),
+      gitCredentials: 'none',
+      imageDigests: { node22: digest },
+    });
+    expect(df).toContain(`FROM autopod-node22@${digest}`);
+    expect(df).not.toContain('autopod-node22:latest');
   });
 
   it('generates Dockerfile for pnpm project', () => {
@@ -412,7 +432,36 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('NuGet.config');
   });
 
-  it('installs the Dagger CLI when profile has a dagger sidecar enabled', () => {
+  it('installs the Dagger CLI via pinned download when version config is provided', () => {
+    const daggerCliVersion = {
+      version: '0.15.3',
+      linuxAmd64Digest: `sha256:${'a'.repeat(64)}`,
+    };
+    const df = generateDockerfile({
+      profile: mockProfile({
+        sidecars: {
+          dagger: {
+            enabled: true,
+            engineImageDigest: `registry.dagger.io/engine@sha256:${'b'.repeat(64)}`,
+            engineVersion: 'v0.15.3',
+          },
+        },
+      }),
+      gitCredentials: 'none',
+      daggerCliVersion,
+    });
+    expect(df).toContain('github.com/dagger/dagger/releases/download/v0.15.3');
+    expect(df).toContain(`sha256:${'a'.repeat(64)}  /tmp/dagger.tar.gz`);
+    expect(df).toContain('sha256sum -c');
+    expect(df).toContain('tar -xz -C /usr/local/bin');
+    // Must not use the curl-pipe-sh installer
+    expect(df).not.toContain('install.sh');
+    // Must not leak docker-cli — the pod talks to the engine via TCP, not docker.sock
+    expect(df).not.toContain('docker-cli');
+    expect(df).not.toContain('docker-ce-cli');
+  });
+
+  it('falls back to install.sh when dagger version config is absent', () => {
     const df = generateDockerfile({
       profile: mockProfile({
         sidecars: {
@@ -424,12 +473,10 @@ describe('generateDockerfile', () => {
         },
       }),
       gitCredentials: 'none',
+      daggerCliVersion: undefined,
     });
     expect(df).toContain('dl.dagger.io');
     expect(df).toContain('install.sh');
-    // Must not leak docker-cli — the pod talks to the engine via TCP, not docker.sock
-    expect(df).not.toContain('docker-cli');
-    expect(df).not.toContain('docker-ce-cli');
   });
 
   it('does not install the Dagger CLI when the dagger sidecar is disabled', () => {
