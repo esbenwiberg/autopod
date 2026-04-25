@@ -4,6 +4,7 @@ import type {
   AgentFileChangeEvent,
   AgentTaskSummaryEvent,
   AgentToolUseEvent,
+  EscalationType,
   QualityGrade,
   QualitySignals,
 } from '@autopod/shared';
@@ -47,6 +48,16 @@ function detectTells(texts: string[]): number {
   return count;
 }
 
+// Escalation types that pull a human into the loop. `ask_ai` is agent-to-agent
+// and intentionally excluded.
+const HUMAN_INTERRUPT_TYPES: EscalationType[] = [
+  'ask_human',
+  'report_blocker',
+  'request_credential',
+  'action_approval',
+  'validation_override',
+];
+
 export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): QualitySignals {
   // Throws PodNotFoundError if the id is unknown — let routes/callers surface it.
   const pod = deps.podRepo.getOrThrow(podId);
@@ -58,6 +69,9 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   const readPaths = new Set<string>();
   const fileModifyCounts = new Map<string, number>();
   const textSamples: string[] = [];
+  let browserCalls = 0;
+  let browserTotalChecks = 0;
+  let browserPassedChecks = 0;
 
   for (const stored of events) {
     if (stored.type !== 'pod.agent_activity') continue;
@@ -70,6 +84,21 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
         readCount += 1;
         const p = extractPath(tool.input);
         if (p) readPaths.add(p);
+      }
+      if (tool.tool === 'validate_in_browser' && tool.output) {
+        browserCalls += 1;
+        try {
+          const parsed = JSON.parse(tool.output) as {
+            passed?: boolean;
+            results?: { passed?: boolean }[];
+          };
+          const results = parsed.results ?? [];
+          browserTotalChecks += results.length;
+          browserPassedChecks += results.filter((r) => r.passed === true).length;
+        } catch {
+          // Tool output may be a raw error string instead of JSON — count the
+          // call but don't increment check counts.
+        }
       }
       if (tool.output) textSamples.push(tool.output);
     } else if (event.type === 'file_change') {
@@ -101,9 +130,9 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     if (count >= 3) editChurnCount += 1;
   }
 
-  const askHumanCount = deps.escalationRepo.countBySessionAndType(podId, 'ask_human');
+  const escalationCount = deps.escalationRepo.countBySessionAndTypes(podId, HUMAN_INTERRUPT_TYPES);
   const killed = pod.status === 'killed' ? 1 : 0;
-  const userInterrupts = askHumanCount + killed;
+  const userInterrupts = escalationCount + killed;
 
   const readEditRatio = editCount > 0 ? readCount / editCount : readCount;
 
@@ -123,6 +152,15 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   // until the recorder writes a row on PodCompletedEvent.
   const persisted = deps.qualityScoreRepo?.get(podId) ?? null;
 
+  const browserChecks =
+    browserCalls === 0
+      ? null
+      : {
+          calls: browserCalls,
+          totalChecks: browserTotalChecks,
+          passedChecks: browserPassedChecks,
+        };
+
   return {
     podId,
     readCount,
@@ -134,6 +172,7 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     tellsCount,
     prFixAttempts,
     validationPassed,
+    browserChecks,
     tokens: {
       input: pod.inputTokens,
       output: pod.outputTokens,
@@ -146,11 +185,12 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
 }
 
 function extractPath(input: Record<string, unknown>): string | null {
-  // Claude's Read tool uses `file_path`; be defensive about shape drift.
-  const fp = input.file_path;
-  if (typeof fp === 'string' && fp.length > 0) return fp;
-  const p = input.path;
-  if (typeof p === 'string' && p.length > 0) return p;
+  // Claude's Read tool uses `file_path`; be defensive about shape drift across
+  // runtimes (camelCase / generic `path`).
+  for (const key of ['file_path', 'path', 'filePath']) {
+    const v = input[key];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
   return null;
 }
 

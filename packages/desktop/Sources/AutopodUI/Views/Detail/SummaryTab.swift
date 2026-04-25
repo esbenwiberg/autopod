@@ -76,58 +76,37 @@ struct SummaryTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(alignment: .top, spacing: 24) {
-                qualityMetric(
-                    label: "Read / Edit",
-                    value: s.editCount == 0 ? "—" : String(format: "%.1f", s.readEditRatio),
-                    hint: "\(s.readCount) reads vs \(s.editCount) edits. Higher is better."
-                )
-                qualityMetric(
-                    label: "Blind Edits",
-                    value: "\(s.editsWithoutPriorRead)",
-                    hint: "Modifies to files that were never read earlier in the session."
-                )
-                qualityMetric(
-                    label: "Interrupts",
-                    value: "\(s.userInterrupts)",
-                    hint: "ask_human escalations + kill, if any."
-                )
-                qualityMetric(
-                    label: "Cost",
-                    value: String(format: "$%.2f", s.tokens.costUsd),
-                    hint: "\(s.tokens.input) in / \(s.tokens.output) out tokens."
-                )
-            }
-
-            HStack(alignment: .top, spacing: 24) {
-                qualityMetric(
-                    label: "Churn",
-                    value: "\(s.editChurnCount)",
-                    hint: "Files edited 3+ times — indicates thrashing."
-                )
-                qualityMetric(
-                    label: "Tells",
-                    value: "\(s.tellsCount)",
-                    hint: "Hedging / give-up phrases detected in agent output."
-                )
-                qualityMetric(
-                    label: "PR Fixes",
-                    value: "\(s.prFixAttempts)",
-                    hint: "Number of PR fix cycles."
-                )
-                if let passed = s.validationPassed {
-                    qualityMetric(
-                        label: "Validation",
-                        value: passed ? "✓" : "✗",
-                        hint: passed ? "Smoke tests passed." : "Smoke tests failed."
-                    )
-                } else {
-                    qualityMetric(
-                        label: "Validation",
-                        value: "—",
-                        hint: "No validation ran for this pod."
-                    )
-                }
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 110), spacing: 8)],
+                spacing: 8
+            ) {
+                let readEdit = s.readEditTile
+                StatTile(icon: "doc.text.magnifyingglass", label: "Read / Edit",
+                         value: readEdit.value, health: readEdit.health, hint: readEdit.hint)
+                let blind = s.blindEditsTile
+                StatTile(icon: "eye.slash", label: "Blind Edits",
+                         value: blind.value, health: blind.health, hint: blind.hint)
+                let interrupts = s.interruptsTile
+                StatTile(icon: "hand.raised", label: "Interrupts",
+                         value: interrupts.value, health: interrupts.health, hint: interrupts.hint)
+                let cost = s.costTile
+                StatTile(icon: "dollarsign.circle", label: "Cost",
+                         value: cost.value, health: cost.health, hint: cost.hint)
+                let churn = s.churnTile
+                StatTile(icon: "arrow.triangle.2.circlepath", label: "Churn",
+                         value: churn.value, health: churn.health, hint: churn.hint)
+                let tells = s.tellsTile
+                StatTile(icon: "quote.bubble", label: "Tells",
+                         value: tells.value, health: tells.health, hint: tells.hint)
+                let prFixes = s.prFixesTile
+                StatTile(icon: "wrench.and.screwdriver", label: "PR Fixes",
+                         value: prFixes.value, health: prFixes.health, hint: prFixes.hint)
+                let smoke = s.smokeTestsTile
+                StatTile(icon: "checkmark.seal", label: "Smoke Tests",
+                         value: smoke.value, health: smoke.health, hint: smoke.hint)
+                let browser = s.browserChecksTile
+                StatTile(icon: "globe", label: "Browser Checks",
+                         value: browser.value, health: browser.health, hint: browser.hint)
             }
 
             if let model = s.model, !model.isEmpty {
@@ -140,17 +119,6 @@ struct SummaryTab: View {
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func qualityMetric(label: String, value: String, hint: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(.callout, design: .monospaced).weight(.medium))
-        }
-        .help(hint)
     }
 
     private func qualityColor(_ grade: String) -> Color {

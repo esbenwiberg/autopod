@@ -5,6 +5,8 @@ import type {
   AgentTaskSummaryEvent,
   AgentToolUseEvent,
   EscalationRequest,
+  EscalationType,
+  ValidationResult,
 } from '@autopod/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
@@ -15,6 +17,8 @@ import type { EventRepository } from './event-repository.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { computeQualitySignals } from './quality-signals.js';
+import { createValidationRepository } from './validation-repository.js';
+import type { ValidationRepository } from './validation-repository.js';
 
 const POD_ID = 'pod-quality-01';
 
@@ -74,6 +78,60 @@ function askHuman(id: string): EscalationRequest {
     timestamp: new Date().toISOString(),
     payload: { question: 'stuck' },
     response: null,
+  };
+}
+
+function escalation(id: string, type: EscalationType): EscalationRequest {
+  // Minimal payloads — `computeQualitySignals` only counts rows by type, the
+  // payload contents aren't read.
+  const payloadByType: Record<EscalationType, EscalationRequest['payload']> = {
+    ask_human: { question: 'stuck' },
+    ask_ai: { question: 'design choice' },
+    report_blocker: { description: 'blocked', attempted: [], needs: 'help' },
+    action_approval: { actionName: 'do_thing', params: {}, description: 'do it' },
+    validation_override: { findings: [], attempt: 1, maxAttempts: 3 },
+    request_credential: { service: 'github', reason: 'private repo' },
+  };
+  return {
+    id,
+    podId: POD_ID,
+    type,
+    timestamp: new Date().toISOString(),
+    payload: payloadByType[type],
+    response: null,
+  };
+}
+
+function validateInBrowserCall(output: string): AgentActivityEvent {
+  const event: AgentToolUseEvent = {
+    type: 'tool_use',
+    timestamp: new Date().toISOString(),
+    tool: 'validate_in_browser',
+    input: { url: 'http://localhost:3000', checks: ['something'] },
+    output,
+  };
+  return {
+    type: 'pod.agent_activity',
+    timestamp: event.timestamp,
+    podId: POD_ID,
+    event,
+  };
+}
+
+function validationResult(overall: 'pass' | 'fail'): ValidationResult {
+  return {
+    podId: POD_ID,
+    attempt: 1,
+    timestamp: new Date().toISOString(),
+    smoke: {
+      status: overall,
+      build: { status: overall, output: '', duration: 0 },
+      health: { status: overall, url: '', responseCode: 200, duration: 0 },
+      pages: [],
+    },
+    taskReview: null,
+    overall,
+    duration: 0,
   };
 }
 
@@ -269,5 +327,144 @@ describe('computeQualitySignals', () => {
     const signals = computeQualitySignals(POD_ID, deps);
 
     expect(signals.prFixAttempts).toBe(2);
+  });
+
+  describe('userInterrupts (widened)', () => {
+    it('counts each human-attention escalation type', () => {
+      podRepo.insert(basePod());
+      escalationRepo.insert(escalation('e1', 'ask_human'));
+      escalationRepo.insert(escalation('e2', 'report_blocker'));
+      escalationRepo.insert(escalation('e3', 'request_credential'));
+      escalationRepo.insert(escalation('e4', 'action_approval'));
+      escalationRepo.insert(escalation('e5', 'validation_override'));
+
+      const signals = computeQualitySignals(POD_ID, deps);
+
+      expect(signals.userInterrupts).toBe(5);
+    });
+
+    it('does not count ask_ai (agent-to-agent, no human in the loop)', () => {
+      podRepo.insert(basePod());
+      escalationRepo.insert(escalation('e1', 'ask_ai'));
+      escalationRepo.insert(escalation('e2', 'ask_human'));
+
+      const signals = computeQualitySignals(POD_ID, deps);
+
+      expect(signals.userInterrupts).toBe(1);
+    });
+  });
+
+  describe('browserChecks', () => {
+    it('returns null when no validate_in_browser calls happened', () => {
+      podRepo.insert(basePod());
+      eventRepo.insert(readTool('src/a.ts'));
+
+      const signals = computeQualitySignals(POD_ID, deps);
+
+      expect(signals.browserChecks).toBeNull();
+    });
+
+    it('aggregates calls and pass/fail across multiple invocations', () => {
+      podRepo.insert(basePod());
+      // Run 1: 2 of 2 pass
+      eventRepo.insert(
+        validateInBrowserCall(
+          JSON.stringify({
+            passed: true,
+            results: [
+              { check: 'a', passed: true },
+              { check: 'b', passed: true },
+            ],
+          }),
+        ),
+      );
+      // Run 2: 1 of 3 pass
+      eventRepo.insert(
+        validateInBrowserCall(
+          JSON.stringify({
+            passed: false,
+            results: [
+              { check: 'a', passed: true },
+              { check: 'b', passed: false },
+              { check: 'c', passed: false },
+            ],
+          }),
+        ),
+      );
+      // Run 3: 0 of 1 pass
+      eventRepo.insert(
+        validateInBrowserCall(
+          JSON.stringify({
+            passed: false,
+            results: [{ check: 'a', passed: false }],
+          }),
+        ),
+      );
+
+      const signals = computeQualitySignals(POD_ID, deps);
+
+      expect(signals.browserChecks).toEqual({
+        calls: 3,
+        totalChecks: 6,
+        passedChecks: 3,
+      });
+    });
+
+    it('counts the call but not checks when output is malformed JSON', () => {
+      podRepo.insert(basePod());
+      eventRepo.insert(validateInBrowserCall('Error: connection refused'));
+
+      const signals = computeQualitySignals(POD_ID, deps);
+
+      expect(signals.browserChecks).toEqual({
+        calls: 1,
+        totalChecks: 0,
+        passedChecks: 0,
+      });
+    });
+  });
+
+  describe('validationPassed (multi-run reduction)', () => {
+    let validationRepo: ValidationRepository;
+    let depsWithValidation: typeof deps & { validationRepo: ValidationRepository };
+
+    beforeEach(() => {
+      const db = createTestDb();
+      insertTestProfile(db);
+      podRepo = createPodRepository(db);
+      eventRepo = createEventRepository(db);
+      escalationRepo = createEscalationRepository(db);
+      validationRepo = createValidationRepository(db);
+      depsWithValidation = { podRepo, eventRepo, escalationRepo, validationRepo };
+    });
+
+    it('returns null when no validation rows exist', () => {
+      podRepo.insert(basePod());
+
+      const signals = computeQualitySignals(POD_ID, depsWithValidation);
+
+      expect(signals.validationPassed).toBeNull();
+    });
+
+    it('returns true when at least one of multiple runs passed', () => {
+      podRepo.insert(basePod());
+      validationRepo.insert(POD_ID, 1, validationResult('fail'));
+      validationRepo.insert(POD_ID, 2, validationResult('fail'));
+      validationRepo.insert(POD_ID, 3, validationResult('pass'));
+
+      const signals = computeQualitySignals(POD_ID, depsWithValidation);
+
+      expect(signals.validationPassed).toBe(true);
+    });
+
+    it('returns false when all runs failed', () => {
+      podRepo.insert(basePod());
+      validationRepo.insert(POD_ID, 1, validationResult('fail'));
+      validationRepo.insert(POD_ID, 2, validationResult('fail'));
+
+      const signals = computeQualitySignals(POD_ID, depsWithValidation);
+
+      expect(signals.validationPassed).toBe(false);
+    });
   });
 });

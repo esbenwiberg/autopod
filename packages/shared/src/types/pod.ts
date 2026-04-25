@@ -282,6 +282,18 @@ export interface QualitySignals {
   prFixAttempts: number;
   /** Whether smoke validation passed (null = no validation ran). */
   validationPassed: boolean | null;
+  /**
+   * Aggregate of agent-driven `validate_in_browser` MCP calls, parsed from
+   * tool_use events. `null` when the agent never invoked the tool.
+   */
+  browserChecks: {
+    /** Number of `validate_in_browser` invocations. */
+    calls: number;
+    /** Sum of individual checks across all invocations. */
+    totalChecks: number;
+    /** Sum of passing checks across all invocations. */
+    passedChecks: number;
+  } | null;
   tokens: { input: number; output: number; costUsd: number };
   grade: QualityGrade;
   /**

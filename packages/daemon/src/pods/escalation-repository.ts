@@ -18,6 +18,7 @@ export interface EscalationRepository {
   update(id: string, response: EscalationResponse): void;
   listBySession(podId: string): EscalationRow[];
   countBySessionAndType(podId: string, type: EscalationType): number;
+  countBySessionAndTypes(podId: string, types: EscalationType[]): number;
 }
 
 function rowToEscalation(row: Record<string, unknown>): EscalationRow {
@@ -82,6 +83,17 @@ export function createEscalationRepository(db: Database.Database): EscalationRep
       const row = db
         .prepare('SELECT COUNT(*) as count FROM escalations WHERE pod_id = @podId AND type = @type')
         .get({ podId, type }) as { count: number };
+      return row.count;
+    },
+
+    countBySessionAndTypes(podId: string, types: EscalationType[]): number {
+      if (types.length === 0) return 0;
+      const placeholders = types.map(() => '?').join(',');
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) as count FROM escalations WHERE pod_id = ? AND type IN (${placeholders})`,
+        )
+        .get(podId, ...types) as { count: number };
       return row.count;
     },
   };
