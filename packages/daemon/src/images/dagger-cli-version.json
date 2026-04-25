@@ -1,0 +1,5 @@
+{
+  "_comment": "Pinned Dagger CLI version for image builds. Update version + digest together when upgrading. linux/amd64 tar.gz sha256 digest from https://github.com/dagger/dagger/releases.",
+  "version": "0.15.3",
+  "linuxAmd64Digest": "sha256:PLACEHOLDER_UPDATE_WITH_REAL_DIGEST_FROM_RELEASE_PAGE"
+}

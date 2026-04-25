@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -23,6 +23,17 @@ export function loadOrCreateKey(keyPath: string): CredentialsCipher {
     key = readFileSync(keyPath);
     if (key.length !== KEY_LENGTH) {
       throw new Error(`Key file at ${keyPath} is ${key.length} bytes, expected ${KEY_LENGTH}`);
+    }
+    // Enforce strict permissions — key must not be readable by group or others.
+    // Mode 0o600 (owner rw only) is required; wider permissions risk credential
+    // exfiltration if another user on the host can read the key.
+    const stat = statSync(keyPath);
+    const mode = stat.mode & 0o777;
+    if (mode !== 0o600) {
+      throw new Error(
+        `Secrets key file ${keyPath} has permissions ${mode.toString(8).padStart(4, '0')} — must be 0600. ` +
+          `Run: chmod 600 ${keyPath}`,
+      );
     }
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;

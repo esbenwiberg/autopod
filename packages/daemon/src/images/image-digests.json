@@ -1,0 +1,13 @@
+{
+  "_comment": "Populated by the image-warming pipeline. Null = not yet pinned (falls back to :latest). Update via scripts/update-image-digests.sh after pushing new base images to ACR.",
+  "node22": null,
+  "node22-pw": null,
+  "dotnet9": null,
+  "dotnet10": null,
+  "dotnet10-go": null,
+  "python312": null,
+  "python-node": null,
+  "go124": null,
+  "go124-pw": null,
+  "custom": null
+}

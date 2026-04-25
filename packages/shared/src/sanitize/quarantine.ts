@@ -31,6 +31,9 @@ const DEFAULT_CONFIG: QuarantineConfig = {
  * - score < threshold: pass through unchanged
  * - threshold <= score < blockThreshold: wrap in quarantine markers
  * - score >= blockThreshold: block entirely (fail-closed)
+ *
+ * Fails closed: any unexpected error during scanning blocks the content rather
+ * than letting it through unexamined.
  */
 export function quarantine(text: string, config?: Partial<QuarantineConfig>): QuarantineResult {
   const cfg = { ...DEFAULT_CONFIG, ...config };
@@ -39,8 +42,21 @@ export function quarantine(text: string, config?: Partial<QuarantineConfig>): Qu
     return { safe: true, threatScore: 0, threats: [], sanitized: text };
   }
 
-  const threats = detectThreats(text);
-  const threatScore = aggregateScore(threats);
+  let threats: ThreatIndicator[];
+  let threatScore: number;
+  try {
+    threats = detectThreats(text);
+    threatScore = aggregateScore(threats);
+  } catch {
+    // Fail closed: scanner error → treat content as blocked
+    return {
+      safe: false,
+      threatScore: 1,
+      threats: [],
+      sanitized:
+        '[CONTENT_BLOCKED: Injection scanner error. Content omitted as a safety precaution.]',
+    };
+  }
 
   // High severity — block
   if (threatScore >= cfg.blockThreshold) {

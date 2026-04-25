@@ -84,7 +84,7 @@ import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import {
   CREDENTIAL_GUARD_HOOK,
-  buildNuGetCredentialEnv,
+  buildNuGetSecretFile,
   buildRegistryFiles,
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
@@ -118,6 +118,31 @@ function allocateHostPort(): number {
 
 /** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
 const CONTAINER_APP_PORT = 3000;
+
+/** Path to the agent shim script inside every pod container. */
+const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
+
+/**
+ * Shim script written to every pod container before the agent exec.
+ * Reads *_FILE env vars and exports the real credential values so that SDKs
+ * without native _FILE support still get the secret — but the raw value is
+ * never present in the exec's initial environment visible to `docker inspect`
+ * or a process-level env dump of the container's main entrypoint.
+ */
+const AGENT_SHIM_SCRIPT = `#!/bin/sh
+# Autopod agent shim — expand *_FILE env vars before exec-ing the agent
+_read_file_var() {
+  local var_name="$1" file_var="${1}_FILE"
+  local path
+  eval "path=\${$file_var:-}"
+  [ -n "$path" ] && [ -f "$path" ] && export "$var_name=$(cat "$path")" && unset "$file_var"
+}
+_read_file_var ANTHROPIC_API_KEY
+_read_file_var OPENAI_API_KEY
+_read_file_var COPILOT_GITHUB_TOKEN
+_read_file_var VSS_NUGET_EXTERNAL_FEED_ENDPOINTS
+exec "$@"
+`;
 
 /**
  * Build the task string for a PR fix pod, injecting CI failure details and
@@ -2060,8 +2085,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 MSBUILDTERMINALLOGGER: 'false',
               }
             : {}),
-          // NuGet credential provider env — auth handled via env var, not config files
-          ...buildNuGetCredentialEnv(profile.privateRegistries, effectiveRegistryPat),
           ...sidecarEnv,
         };
 
@@ -2176,19 +2199,41 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           for (const repo of referenceRepos) {
             const destPath = `/repos/${repo.mountPath}`;
             const refPat = pod.referenceRepoPat ?? undefined;
-            const authUrl = refPat ? injectPatIntoUrl(repo.url, refPat) : repo.url;
             try {
-              await containerManager.execInContainer(
-                containerId,
-                ['git', 'clone', '--depth', '1', authUrl, destPath],
-                { timeout: 60_000 },
-              );
               if (refPat) {
-                // Strip the PAT from the remote so it cannot be read inside the container
+                // Use a git credential helper script to avoid embedding the PAT in the
+                // clone URL (which would expose it in /proc/<pid>/cmdline). The script
+                // is written to a tmpfs path, used for the single clone, then deleted.
+                const credHelper = `/tmp/.autopod-refcred-${generateId(8)}`;
+                // Write a store-format credentials line for git credential-store
+                const { hostname } = new URL(repo.url);
+                const credLine = `https://x-access-token:${refPat}@${hostname}`;
+                await containerManager.writeFile(containerId, credHelper, `${credLine}\n`);
+                try {
+                  await containerManager.execInContainer(
+                    containerId,
+                    [
+                      'git',
+                      '-c',
+                      `credential.helper=store --file ${credHelper}`,
+                      'clone',
+                      '--depth',
+                      '1',
+                      repo.url,
+                      destPath,
+                    ],
+                    { timeout: 60_000 },
+                  );
+                } finally {
+                  await containerManager.execInContainer(containerId, ['rm', '-f', credHelper], {
+                    timeout: 5_000,
+                  });
+                }
+              } else {
                 await containerManager.execInContainer(
                   containerId,
-                  ['git', 'remote', 'set-url', 'origin', repo.url],
-                  { cwd: destPath, timeout: 5_000 },
+                  ['git', 'clone', '--depth', '1', repo.url, destPath],
+                  { timeout: 60_000 },
                 );
               }
             } catch (err) {
@@ -2511,9 +2556,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ...providerResult.env,
         };
 
-        // Codex runtime uses its own key from daemon env
+        // Codex runtime: write OPENAI_API_KEY to a secret file, pass file path in env.
         if (pod.runtime === 'codex' && process.env.OPENAI_API_KEY) {
-          secretEnv.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+          const oaiFilePath = '/run/autopod/openai-api-key';
+          providerResult.secretFiles.push({ path: oaiFilePath, content: process.env.OPENAI_API_KEY });
+          secretEnv.OPENAI_API_KEY_FILE = oaiFilePath;
+        }
+
+        // NuGet PAT: write to a 0400 secret file instead of passing in exec env.
+        const nugetSecret = buildNuGetSecretFile(profile.privateRegistries, effectiveRegistryPat);
+        if (nugetSecret) {
+          providerResult.secretFiles.push({ path: nugetSecret.path, content: nugetSecret.content });
+          secretEnv[nugetSecret.envFileKey] = nugetSecret.path;
         }
 
         // Write provider credential files to container (e.g., OAuth .credentials.json for MAX)
@@ -2524,6 +2578,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Wrote provider credential file to container',
           );
         }
+
+        // Write secret files (API keys, tokens) to /run/autopod/ with mode 0400.
+        // These are referenced by *_FILE env vars in secretEnv — the exec shim reads
+        // them and sets the real env var before starting the agent process.
+        await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
+          timeout: 5_000,
+        });
+        for (const sf of providerResult.secretFiles) {
+          await containerManager.writeFile(containerId, sf.path, sf.content);
+          await containerManager.execInContainer(containerId, ['chmod', '0400', sf.path], {
+            timeout: 5_000,
+          });
+          logger.info({ podId, path: sf.path }, 'Wrote secret file to container (mode 0400)');
+        }
+        // Write the agent shim that reads *_FILE env vars and sets the real env var
+        // before exec-ing the runtime. SDKs that don't support the _FILE convention
+        // get the value via this shim so the raw secret is never in the exec's initial env.
+        await containerManager.writeFile(containerId, AGENT_SHIM_PATH, AGENT_SHIM_SCRIPT);
+        await containerManager.execInContainer(containerId, ['chmod', '0500', AGENT_SHIM_PATH], {
+          timeout: 5_000,
+        });
 
         // Verify credential files are readable by the container user
         if (providerResult.containerFiles.length > 0) {

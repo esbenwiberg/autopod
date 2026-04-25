@@ -13,5 +13,10 @@ export default defineConfig({
     cpSync('src/db/migrations', 'dist/db/migrations', { recursive: true });
     mkdirSync('dist/actions/defaults', { recursive: true });
     cpSync('src/actions/defaults', 'dist/actions/defaults', { recursive: true });
+    mkdirSync('dist/containers', { recursive: true });
+    cpSync('src/containers/seccomp-profile.json', 'dist/containers/seccomp-profile.json');
+    mkdirSync('dist/images', { recursive: true });
+    cpSync('src/images/image-digests.json', 'dist/images/image-digests.json');
+    cpSync('src/images/dagger-cli-version.json', 'dist/images/dagger-cli-version.json');
   },
 });

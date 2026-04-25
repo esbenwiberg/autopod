@@ -188,6 +188,16 @@ describe('DockerContainerManager', () => {
       expect(createCall.HostConfig.CapAdd).toBeUndefined();
     });
 
+    it('always sets CapDrop=ALL and no-new-privileges', async () => {
+      await manager.spawn(baseConfig);
+
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
+      expect(createCall.HostConfig.CapDrop).toEqual(['ALL']);
+      expect(createCall.HostConfig.SecurityOpt).toEqual(
+        expect.arrayContaining(['no-new-privileges:true']),
+      );
+    });
+
     it('applies firewall script after container starts', async () => {
       // Mock the exec for applyFirewall
       const execObj = createMockExec(0);
@@ -698,6 +708,10 @@ describe('DockerContainerManager', () => {
       // Network isolation
       expect(createCall.HostConfig.NetworkMode).toBe('autopod-net');
       expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN']);
+      expect(createCall.HostConfig.CapDrop).toEqual(['ALL']);
+      expect(createCall.HostConfig.SecurityOpt).toEqual(
+        expect.arrayContaining(['no-new-privileges:true']),
+      );
 
       // Container was started
       expect(container.start).toHaveBeenCalledTimes(1);

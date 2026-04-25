@@ -1,21 +1,31 @@
+import { createRequire } from 'node:module';
 import type { PrivateRegistry, Profile, StackTemplate } from '@autopod/shared';
 
 export interface DockerfileOptions {
   profile: Profile;
   gitCredentials: 'pat' | 'ssh' | 'none';
+  /** Override image digests for tests. Production code loads from image-digests.json. */
+  imageDigests?: Partial<Record<StackTemplate, string | null>>;
+  /** Override Dagger CLI version config for tests. */
+  daggerCliVersion?: DaggerCliVersion;
 }
 
-const BASE_IMAGE_MAP: Record<StackTemplate, string> = {
-  node22: 'autopod-node22:latest',
-  'node22-pw': 'autopod-node22-pw:latest',
-  dotnet9: 'autopod-dotnet9:latest',
-  dotnet10: 'autopod-dotnet10:latest',
-  'dotnet10-go': 'autopod-dotnet10-go:latest',
-  python312: 'autopod-python312:latest',
-  'python-node': 'autopod-python-node:latest',
-  go124: 'autopod-go124:latest',
-  'go124-pw': 'autopod-go124-pw:latest',
-  custom: 'autopod-node22:latest',
+export interface DaggerCliVersion {
+  version: string;
+  linuxAmd64Digest: string;
+}
+
+const BASE_IMAGE_NAMES: Record<StackTemplate, string> = {
+  node22: 'autopod-node22',
+  'node22-pw': 'autopod-node22-pw',
+  dotnet9: 'autopod-dotnet9',
+  dotnet10: 'autopod-dotnet10',
+  'dotnet10-go': 'autopod-dotnet10-go',
+  python312: 'autopod-python312',
+  'python-node': 'autopod-python-node',
+  go124: 'autopod-go124',
+  'go124-pw': 'autopod-go124-pw',
+  custom: 'autopod-node22',
 };
 
 // Base images that ship with the Dagger CLI already installed in /usr/local/bin.
@@ -28,9 +38,25 @@ const DAGGER_PREINSTALLED: ReadonlySet<StackTemplate> = new Set([
   'go124-pw',
 ]);
 
+// Load digests + Dagger version at module init. Graceful fallback for dev/test.
+const _require = createRequire(import.meta.url);
+
+function loadJsonConfig<T>(filename: string): T | null {
+  try {
+    return _require(`./${filename}`) as T;
+  } catch {
+    return null;
+  }
+}
+
+const _imageDigestsConfig = loadJsonConfig<Record<string, string | null>>('image-digests.json');
+const _daggerCliVersionConfig = loadJsonConfig<DaggerCliVersion>('dagger-cli-version.json');
+
 export function generateDockerfile(options: DockerfileOptions): string {
   const { profile } = options;
-  const baseImage = getBaseImage(profile.template ?? 'node22');
+  const digestMap = options.imageDigests ?? _imageDigestsConfig ?? {};
+  const daggerVersion = options.daggerCliVersion ?? _daggerCliVersionConfig ?? null;
+  const baseImage = getBaseImage(profile.template ?? 'node22', digestMap);
   const installCommand = getInstallCommand(profile);
 
   const lines: string[] = [
@@ -86,13 +112,22 @@ export function generateDockerfile(options: DockerfileOptions): string {
   // unless the base image already ships it.
   const template = profile.template ?? 'node22';
   if (profile.sidecars?.dagger?.enabled && !DAGGER_PREINSTALLED.has(template)) {
-    lines.push(
-      '',
-      '# Dagger CLI — talks to the dagger-engine sidecar over TCP',
-      'USER root',
-      'RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh',
-      'USER autopod',
-    );
+    lines.push('', '# Dagger CLI — talks to the dagger-engine sidecar over TCP', 'USER root');
+    if (daggerVersion && !daggerVersion.linuxAmd64Digest.includes('PLACEHOLDER')) {
+      const { version, linuxAmd64Digest } = daggerVersion;
+      const tarUrl = `https://github.com/dagger/dagger/releases/download/v${version}/dagger_v${version}_linux_amd64.tar.gz`;
+      lines.push(
+        `RUN set -eux; \\`,
+        `    curl -fsSL ${tarUrl} -o /tmp/dagger.tar.gz && \\`,
+        `    echo "${linuxAmd64Digest}  /tmp/dagger.tar.gz" | sha256sum -c && \\`,
+        '    tar -xz -C /usr/local/bin -f /tmp/dagger.tar.gz dagger && \\',
+        '    rm /tmp/dagger.tar.gz',
+      );
+    } else {
+      // Fallback: install script — use only until dagger-cli-version.json is populated
+      lines.push('RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh');
+    }
+    lines.push('USER autopod');
   }
 
   // Pre-warm build caches (buildCommand may be null on derived profiles that
@@ -143,8 +178,13 @@ export function generateDockerfile(options: DockerfileOptions): string {
   return lines.join('\n');
 }
 
-export function getBaseImage(template: StackTemplate): string {
-  return BASE_IMAGE_MAP[template];
+export function getBaseImage(
+  template: StackTemplate,
+  digestMap: Partial<Record<StackTemplate, string | null>> = {},
+): string {
+  const name = BASE_IMAGE_NAMES[template];
+  const digest = digestMap[template];
+  return digest ? `${name}@${digest}` : `${name}:latest`;
 }
 
 export function getInstallCommand(profile: Profile): string {

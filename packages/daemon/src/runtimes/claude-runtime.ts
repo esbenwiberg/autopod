@@ -47,9 +47,12 @@ export class ClaudeRuntime implements Runtime {
       msg: 'Spawning claude in container',
     });
 
+    // Use the agent shim so *_FILE env vars are expanded before claude starts.
+    // This keeps raw API keys out of the exec's initial environment.
+    const shimPath = '/run/autopod/agent-shim.sh';
     const handle = await this.containerManager.execStreaming(
       config.containerId,
-      ['claude', ...args],
+      [shimPath, 'claude', ...args],
       { cwd: config.workDir, env: config.env },
     );
 
@@ -130,7 +133,8 @@ export class ClaudeRuntime implements Runtime {
       msg: 'Resuming claude pod in container',
     });
 
-    const handle = await this.containerManager.execStreaming(containerId, ['claude', ...args], {
+    const shimPath = '/run/autopod/agent-shim.sh';
+    const handle = await this.containerManager.execStreaming(containerId, [shimPath, 'claude', ...args], {
       cwd: '/workspace',
       ...(env ? { env } : {}),
     });

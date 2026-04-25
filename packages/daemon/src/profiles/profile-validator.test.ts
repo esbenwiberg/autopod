@@ -209,4 +209,59 @@ describe('ProfileValidator', () => {
       expect(result.valid).toBe(true);
     });
   });
+
+  describe('private registry SSRF guard', () => {
+    it('rejects a registry URL pointing at the AWS/GCP/Azure metadata endpoint', () => {
+      const result = validateProfile({
+        ...validInput,
+        privateRegistries: [{ type: 'npm', url: 'http://169.254.169.254/latest/feed/' }],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => e.includes('SSRF'))).toBe(true);
+    });
+
+    it('rejects a registry URL pointing at localhost', () => {
+      const result = validateProfile({
+        ...validInput,
+        privateRegistries: [{ type: 'npm', url: 'http://localhost/registry/' }],
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it('rejects a registry URL pointing at a private RFC-1918 address', () => {
+      const result = validateProfile({
+        ...validInput,
+        privateRegistries: [{ type: 'npm', url: 'http://10.0.0.1/feed/' }],
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it('rejects a registry URL using metadata.google.internal', () => {
+      const result = validateProfile({
+        ...validInput,
+        privateRegistries: [
+          { type: 'npm', url: 'http://metadata.google.internal/computeMetadata/v1/project/' },
+        ],
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it('accepts a legitimate Azure DevOps registry URL', () => {
+      const result = validateProfile({
+        ...validInput,
+        privateRegistries: [
+          {
+            type: 'npm',
+            url: 'https://pkgs.dev.azure.com/myorg/_packaging/shared/npm/registry/',
+          },
+        ],
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts an empty privateRegistries array', () => {
+      const result = validateProfile({ ...validInput, privateRegistries: [] });
+      expect(result.valid).toBe(true);
+    });
+  });
 });

@@ -1,4 +1,5 @@
 import type { StackTemplate } from '@autopod/shared';
+import { isPrivateUrl } from '../api/ssrf-guard.js';
 
 export interface ProfileValidationResult {
   valid: boolean;
@@ -242,6 +243,23 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     errors.push(
       `network_policy mode '${networkPolicy.mode}' is not supported on the ACI execution target — iptables-based isolation requires the Docker backend`,
     );
+  }
+
+  // Reject private registry URLs that resolve to loopback/private/metadata addresses.
+  // Prevents an attacker with profile-write access from pointing a registry at the cloud
+  // metadata endpoint (169.254.169.254) to exfiltrate credentials at image-build time.
+  const privateRegistries = input.privateRegistries;
+  if (Array.isArray(privateRegistries)) {
+    for (const reg of privateRegistries) {
+      const regUrl = (reg as Record<string, unknown>).url;
+      if (typeof regUrl === 'string' && regUrl.length > 0) {
+        if (isPrivateUrl(regUrl)) {
+          errors.push(
+            `privateRegistries[].url '${regUrl}' resolves to a private/loopback/metadata address — SSRF not allowed`,
+          );
+        }
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors };

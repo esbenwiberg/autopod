@@ -99,7 +99,7 @@ describe('CodexRuntime', () => {
 
       expect(cm.execStreaming).toHaveBeenCalledWith(
         'container-123',
-        ['codex', 'exec', 'Do the thing', '--model', 'o3-mini', '--full-auto', '--json'],
+        ['/run/autopod/agent-shim.sh', 'codex', 'exec', 'Do the thing', '--model', 'o3-mini', '--full-auto', '--json'],
         expect.objectContaining({ cwd: '/workspace' }),
       );
     });
@@ -185,7 +185,7 @@ describe('CodexRuntime', () => {
 
       expect(cm.execStreaming).toHaveBeenCalledWith(
         'container-123',
-        ['codex', 'exec', 'Fix the validation errors', '--full-auto', '--json'],
+        ['/run/autopod/agent-shim.sh', 'codex', 'exec', 'Fix the validation errors', '--full-auto', '--json'],
         expect.any(Object),
       );
       expect(events).toHaveLength(1);
