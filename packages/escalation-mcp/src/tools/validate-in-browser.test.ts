@@ -208,6 +208,8 @@ describe('validateInBrowser', () => {
       runBrowserOnHost: vi.fn().mockResolvedValue(null),
       readHostScreenshot: vi.fn().mockResolvedValue(null),
       getHostScreenshotDir: vi.fn().mockReturnValue(null),
+      // Daemon-side URL gate — no-op in tests (real implementation is in pod-bridge-impl)
+      validateBrowserUrl: vi.fn(),
     };
   }
 
@@ -307,6 +309,7 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
         .mockResolvedValue({ stdout: scriptOutput, stderr: '', exitCode: 0 }),
       readHostScreenshot: vi.fn().mockResolvedValue('hostbase64'),
       getHostScreenshotDir: vi.fn().mockReturnValue('/tmp/autopod-browser/sess-1/screenshots'),
+      validateBrowserUrl: vi.fn(),
     };
 
     const result = await validateInBrowser(
@@ -406,6 +409,7 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
       runBrowserOnHost: vi.fn().mockResolvedValue(null),
       readHostScreenshot: vi.fn().mockResolvedValue(null),
       getHostScreenshotDir: vi.fn().mockReturnValue(null),
+      validateBrowserUrl: vi.fn(),
     };
 
     const result = await validateInBrowser(

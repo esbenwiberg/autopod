@@ -2,7 +2,7 @@ import type { PodStatus } from './types/pod.js';
 
 export const POD_ID_LENGTH = 8;
 export const DEFAULT_MAX_VALIDATION_ATTEMPTS = 3;
-export const DEFAULT_MAX_PR_FIX_ATTEMPTS = 3;
+export const DEFAULT_MAX_PR_FIX_ATTEMPTS = 2;
 export const DEFAULT_HEALTH_TIMEOUT = 120;
 export const DEFAULT_HUMAN_RESPONSE_TIMEOUT = 3600;
 export const DEFAULT_MAX_AI_ESCALATIONS = 5;

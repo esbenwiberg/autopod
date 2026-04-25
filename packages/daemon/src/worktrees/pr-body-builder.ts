@@ -34,6 +34,36 @@ export interface PrBodyConfig {
   securityFindings?: ScanFinding[];
 }
 
+/**
+ * Escape agent-supplied text before embedding it in a GitHub/ADO PR body.
+ *
+ * Prevents the agent from injecting markdown that could mislead reviewers:
+ *   - @mentions that notify teams (e.g. `@security-team`)
+ *   - link syntax that could redirect reviewers ([legit text](evil-url))
+ *   - HTML tags that some renderers pass through (<script>, <img ...>)
+ *   - Backtick/pipe/underscore/asterisk that break table or code formatting
+ *   - Heading markers that would create unexpected structure
+ *
+ * This is intentionally narrow: it escapes inline injection vectors without
+ * stripping all markdown (we still want the agent's prose to render naturally).
+ */
+export function escapeMd(text: string): string {
+  return (
+    text
+      // @ mentions: neutralise with a zero-width space after the @
+      .replace(/@([A-Za-z0-9_-])/g, '@​$1')
+      // HTML tags
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      // Link syntax [text](url) — escape the bracket pair
+      .replace(/\[([^\]]*)\]\(([^)]*)\)/g, '\\[$1\\]($2)')
+      // Pipe character breaks table cells
+      .replace(/\|/g, '\\|')
+      // Backtick (inline code injection)
+      .replace(/`/g, '\\`')
+  );
+}
+
 export function buildPrTitle(
   task: string,
   seriesName?: string,
@@ -72,13 +102,13 @@ export function buildPrBody(config: PrBodyConfig): string {
 
   // ── Narrative: Why / What / How ──────────────────────────────────────────
 
-  sections.push(`## Why\n\n${seriesDescription ?? task}`);
+  sections.push(`## Why\n\n${escapeMd(seriesDescription ?? task)}`);
 
   if (taskSummary) {
-    sections.push(`## What\n\n${taskSummary.actualSummary}`);
+    sections.push(`## What\n\n${escapeMd(taskSummary.actualSummary)}`);
 
     if (taskSummary.how) {
-      sections.push(`## How\n\n${taskSummary.how}`);
+      sections.push(`## How\n\n${escapeMd(taskSummary.how)}`);
     }
   }
 
@@ -89,7 +119,7 @@ export function buildPrBody(config: PrBodyConfig): string {
 
   const aiIssues = validationResult?.taskReview?.issues ?? [];
   for (const issue of aiIssues) {
-    concernLines.push(`- ⚠️ ${issue}`);
+    concernLines.push(`- ⚠️ ${escapeMd(issue)}`);
   }
 
   const deviationsAssessment = validationResult?.taskReview?.deviationsAssessment;
@@ -97,11 +127,13 @@ export function buildPrBody(config: PrBodyConfig): string {
     for (const d of deviationsAssessment.disclosedDeviations) {
       if (d.verdict === 'questionable' || d.verdict === 'unjustified') {
         const icon = d.verdict === 'unjustified' ? '❌' : '⚠️';
-        concernLines.push(`- ${icon} **${d.step}** (${d.verdict}): ${d.reasoning}`);
+        concernLines.push(
+          `- ${icon} **${escapeMd(d.step)}** (${d.verdict}): ${escapeMd(d.reasoning)}`,
+        );
       }
     }
     for (const u of deviationsAssessment.undisclosedDeviations) {
-      concernLines.push(`- ⚠️ Undisclosed deviation: ${u}`);
+      concernLines.push(`- ⚠️ Undisclosed deviation: ${escapeMd(u)}`);
     }
   }
 
@@ -115,8 +147,8 @@ export function buildPrBody(config: PrBodyConfig): string {
     const checklistLines = requirementsCheck.map((req) => {
       const check = req.met ? '[x]' : '[ ]';
       const icon = req.met ? '✅' : '❌';
-      const note = req.note ? ` — ${req.note}` : '';
-      return `- ${check} ${icon} ${req.criterion}${note}`;
+      const note = req.note ? ` — ${escapeMd(req.note)}` : '';
+      return `- ${check} ${icon} ${escapeMd(req.criterion)}${note}`;
     });
     sections.push(`## Review Checklist\n\n${checklistLines.join('\n')}`);
   }
@@ -150,9 +182,13 @@ export function buildPrBody(config: PrBodyConfig): string {
         const verdictCell = v
           ? `${v.verdict === 'justified' ? '✅' : v.verdict === 'questionable' ? '⚠️' : '❌'} ${v.verdict}`
           : '—';
-        lines.push(`| ${d.step} | ${d.planned} | ${d.actual} | ${d.reason} | ${verdictCell} |`);
+        lines.push(
+          `| ${escapeMd(d.step)} | ${escapeMd(d.planned)} | ${escapeMd(d.actual)} | ${escapeMd(d.reason)} | ${verdictCell} |`,
+        );
       } else {
-        lines.push(`| ${d.step} | ${d.planned} | ${d.actual} | ${d.reason} |`);
+        lines.push(
+          `| ${escapeMd(d.step)} | ${escapeMd(d.planned)} | ${escapeMd(d.actual)} | ${escapeMd(d.reason)} |`,
+        );
       }
     }
 

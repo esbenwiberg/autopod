@@ -119,6 +119,7 @@ export interface PodUpdates {
   prFixAttempts?: number;
   maxPrFixAttempts?: number;
   fixPodId?: string | null;
+  lastFixPodSpawnedAt?: string | null;
   tokenBudget?: number | null;
   budgetExtensionsUsed?: number;
   pauseReason?: 'budget' | 'manual' | null;
@@ -285,6 +286,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     prFixAttempts: (row.pr_fix_attempts as number) ?? 0,
     maxPrFixAttempts: (row.max_pr_fix_attempts as number) ?? DEFAULT_MAX_PR_FIX_ATTEMPTS,
     fixPodId: (row.fix_pod_id as string) ?? null,
+    lastFixPodSpawnedAt: (row.last_fix_pod_spawned_at as string) ?? null,
     tokenBudget: (row.token_budget as number | null) ?? null,
     budgetExtensionsUsed: (row.budget_extensions_used as number) ?? 0,
     pauseReason: (row.pause_reason as 'budget' | 'manual' | null) ?? null,
@@ -559,6 +561,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.fixPodId !== undefined) {
         setClauses.push('fix_pod_id = @fixPodId');
         params.fixPodId = changes.fixPodId;
+      }
+      if (changes.lastFixPodSpawnedAt !== undefined) {
+        setClauses.push('last_fix_pod_spawned_at = @lastFixPodSpawnedAt');
+        params.lastFixPodSpawnedAt = changes.lastFixPodSpawnedAt ?? null;
       }
       if (changes.tokenBudget !== undefined) {
         setClauses.push('token_budget = @tokenBudget');

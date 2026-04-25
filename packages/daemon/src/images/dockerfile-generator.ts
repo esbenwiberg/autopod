@@ -117,7 +117,7 @@ export function generateDockerfile(options: DockerfileOptions): string {
       const { version, linuxAmd64Digest } = daggerVersion;
       const tarUrl = `https://github.com/dagger/dagger/releases/download/v${version}/dagger_v${version}_linux_amd64.tar.gz`;
       lines.push(
-        `RUN set -eux; \\`,
+        'RUN set -eux; \\',
         `    curl -fsSL ${tarUrl} -o /tmp/dagger.tar.gz && \\`,
         `    echo "${linuxAmd64Digest}  /tmp/dagger.tar.gz" | sha256sum -c && \\`,
         '    tar -xz -C /usr/local/bin -f /tmp/dagger.tar.gz dagger && \\',
@@ -125,7 +125,9 @@ export function generateDockerfile(options: DockerfileOptions): string {
       );
     } else {
       // Fallback: install script — use only until dagger-cli-version.json is populated
-      lines.push('RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh');
+      lines.push(
+        'RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh',
+      );
     }
     lines.push('USER autopod');
   }

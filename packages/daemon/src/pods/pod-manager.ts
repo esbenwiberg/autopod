@@ -725,6 +725,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return;
     }
 
+    // Guard: per-parent cooldown (10 minutes between fix-pod spawns)
+    // Prevents a fast-failing CI from burning all fix attempts in a single burst.
+    const FIX_POD_COOLDOWN_MS = 10 * 60 * 1_000;
+    if (parent.lastFixPodSpawnedAt) {
+      const elapsed = Date.now() - new Date(parent.lastFixPodSpawnedAt).getTime();
+      if (elapsed < FIX_POD_COOLDOWN_MS) {
+        const remainingSec = Math.ceil((FIX_POD_COOLDOWN_MS - elapsed) / 1_000);
+        logger.debug(
+          { podId: parentSessionId, remainingSec },
+          'Merge polling: fix-pod cooldown active — skipping spawn',
+        );
+        return;
+      }
+    }
+
     // Build fix task and create child pod directly using closure deps
     const newAttempt = (parent.prFixAttempts ?? 0) + 1;
     const fixTask = buildPrFixTask(parent, status, podRepo, userMessage);
@@ -783,10 +798,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       },
     });
 
-    // Record fix pod on parent
+    // Record fix pod on parent (including cooldown timestamp)
     podRepo.update(parentSessionId, {
       prFixAttempts: newAttempt,
       fixPodId: fixId,
+      lastFixPodSpawnedAt: new Date().toISOString(),
       mergeBlockReason: `Fix attempt ${newAttempt}/${maxAttempts} in progress (pod ${fixId})`,
     });
 
@@ -2559,7 +2575,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Codex runtime: write OPENAI_API_KEY to a secret file, pass file path in env.
         if (pod.runtime === 'codex' && process.env.OPENAI_API_KEY) {
           const oaiFilePath = '/run/autopod/openai-api-key';
-          providerResult.secretFiles.push({ path: oaiFilePath, content: process.env.OPENAI_API_KEY });
+          providerResult.secretFiles.push({
+            path: oaiFilePath,
+            content: process.env.OPENAI_API_KEY,
+          });
           secretEnv.OPENAI_API_KEY_FILE = oaiFilePath;
         }
 
@@ -3341,6 +3360,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Pre-merge push failed — proceeding with merge attempt',
           );
         }
+
+        // Daemon-side approval gate: check the PR's review decision before attempting
+        // to merge. If the platform reports that a review is still required or changes
+        // were requested, enter merge_pending and let the poller wait for approval.
+        // This ensures the daemon never bypasses required review gates even when
+        // GitHub auto-merge is enabled.
+        try {
+          const prStatus = await prManager.getPrStatus({
+            prUrl: pod.prUrl,
+            worktreePath: pod.worktreePath,
+          });
+          if (prStatus.reviewDecision && prStatus.reviewDecision !== 'APPROVED') {
+            const blockReason = `Waiting for PR review approval (current decision: ${prStatus.reviewDecision})`;
+            emitActivityStatus(podId, `Merge pending: ${blockReason}`);
+            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
+            startMergePolling(podId);
+            logger.info(
+              { podId, prUrl: pod.prUrl, reviewDecision: prStatus.reviewDecision },
+              'Merge deferred — PR requires explicit approval before daemon will merge',
+            );
+            return;
+          }
+        } catch (statusErr) {
+          // Non-fatal: if we can't determine review status, proceed with the merge attempt
+          logger.warn(
+            { err: statusErr, podId, prUrl: pod.prUrl },
+            'Failed to check PR review decision before merge — proceeding anyway',
+          );
+        }
+
         emitActivityStatus(podId, `Merging PR: ${pod.prUrl}`);
         try {
           const mergeResult = await prManager.mergePr({

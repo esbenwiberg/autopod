@@ -130,4 +130,8 @@ export interface ActionAuditEntry {
   piiDetected: boolean;
   quarantineScore: number;
   createdAt: string;
+  /** SHA-256 of the preceding entry's entryHash (null for the first entry per pod). */
+  prevHash: string | null;
+  /** SHA-256(prevHash || podId || actionName || params || responseSummary || quarantineScore || createdAt) */
+  entryHash: string | null;
 }

@@ -13,6 +13,7 @@ import type {
 import { generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
+import { isPrivateIp } from '../api/ssrf-guard.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -530,6 +531,36 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         'Memory suggestion created',
       );
       return entry.id;
+    },
+
+    validateBrowserUrl(_podId: string, url: string): void {
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        throw new Error(`validate_in_browser: invalid URL: ${url}`);
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(
+          `validate_in_browser: only http(s) URLs are allowed. Got: ${parsed.protocol}`,
+        );
+      }
+      const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+      // Allow only localhost / 127.0.0.1; block all other addresses including
+      // private IP ranges and cloud metadata services.
+      const isLoopbackFqdn = hostname === 'localhost';
+      const isLoopbackIpv4 = /^\d+\.\d+\.\d+\.\d+$/.test(hostname) && hostname.startsWith('127.');
+      const isPrivate = isPrivateIp(hostname);
+      if (!isLoopbackFqdn && !isLoopbackIpv4) {
+        if (isPrivate) {
+          throw new Error(
+            `validate_in_browser: private/metadata addresses are not allowed. Got: ${hostname}`,
+          );
+        }
+        throw new Error(
+          `validate_in_browser: only localhost or 127.x addresses are allowed. Got: ${hostname}`,
+        );
+      }
     },
   };
 }

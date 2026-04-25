@@ -125,6 +125,7 @@ describe('GhPrManager', () => {
       blockReason: null,
       ciFailures: [],
       reviewComments: [],
+      reviewDecision: 'APPROVED',
     });
   });
 
