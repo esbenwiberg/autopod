@@ -1,9 +1,14 @@
 import type { AcDefinition } from '@autopod/shared';
-import { describe, expect, it } from 'vitest';
-import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
+import { describe, expect, it, vi } from 'vitest';
+import type { ContainerManager } from '../interfaces/container-manager.js';
+import type {
+  ValidationEngineConfig,
+  ValidationPhaseCallbacks,
+} from '../interfaces/validation-engine.js';
 import {
   buildReviewPrompt,
   classifyAcTypes,
+  createLocalValidationEngine,
   deduplicateAcsByBaseText,
   enforceRequirementsStatus,
   normalizeReviewIssue,
@@ -784,5 +789,96 @@ describe('parseReviewJson — issues normalization', () => {
   it('accepts an empty issues array', () => {
     const parsed = parseReviewJson(baseShape([]));
     expect(parsed?.issues).toEqual([]);
+  });
+});
+
+describe('validate() — hasWebUi gating', () => {
+  /** Minimal ContainerManager stub — every method throws unless explicitly invoked. */
+  function stubContainerManager(): ContainerManager {
+    const fail = (name: string) =>
+      vi.fn(() => Promise.reject(new Error(`stub: ${name} unexpectedly called`)));
+    return {
+      spawn: fail('spawn'),
+      kill: fail('kill'),
+      refreshFirewall: fail('refreshFirewall'),
+      stop: fail('stop'),
+      start: fail('start'),
+      writeFile: fail('writeFile'),
+      readFile: fail('readFile'),
+      extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
+      getStatus: fail('getStatus'),
+      execInContainer: fail('execInContainer'),
+      execStreaming: fail('execStreaming'),
+    } as unknown as ContainerManager;
+  }
+
+  /** Minimal config — no build/test/lint/sast/start commands and empty diff so all
+   *  command-driven phases (and the AI review) short-circuit without touching the
+   *  container or spawning a CLI. Only the in-memory phase logic runs. */
+  function baseConfig(overrides: Partial<ValidationEngineConfig> = {}): ValidationEngineConfig {
+    return {
+      podId: 'pod-test',
+      containerId: 'container-test',
+      previewUrl: 'http://127.0.0.1:9999',
+      buildCommand: '',
+      startCommand: 'node server.js',
+      healthPath: '/',
+      healthTimeout: 1,
+      smokePages: [{ path: '/' }],
+      attempt: 1,
+      task: 'test task',
+      diff: '',
+      ...overrides,
+    };
+  }
+
+  it('skips Health and Pages when hasWebUi is false', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const completed: Array<{ phase: string; status: string }> = [];
+    const callbacks: ValidationPhaseCallbacks = {
+      onPhaseCompleted: (phase, status) => completed.push({ phase, status }),
+    };
+
+    const result = await engine.validate(
+      baseConfig({ hasWebUi: false }),
+      undefined,
+      undefined,
+      callbacks,
+    );
+
+    // execInContainer should never be called — buildCommand is empty (skip),
+    // and Health is short-circuited before runHealthCheck would exec the start command.
+    expect(cm.execInContainer).not.toHaveBeenCalled();
+
+    expect(result.smoke.health.status).toBe('skip');
+    expect(result.smoke.health.responseCode).toBeNull();
+    expect(result.smoke.pages).toEqual([]);
+    expect(result.smoke.status).toBe('pass');
+
+    const healthEvent = completed.find((c) => c.phase === 'health');
+    const pagesEvent = completed.find((c) => c.phase === 'pages');
+    expect(healthEvent?.status).toBe('skip');
+    expect(pagesEvent?.status).toBe('skip');
+  });
+
+  it('reports Health as fail when hasWebUi is true and build fails', async () => {
+    // Sanity check: existing behaviour (synthetic-fail health when build fails)
+    // is preserved when hasWebUi is left at its default. Here build is skipped (no
+    // command) so it actually passes, meaning runHealthCheck would be invoked —
+    // and would throw via the stub, which is what we want to verify the gate flips.
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    // Use a non-empty buildCommand so runBuild calls execInContainer and our stub
+    // rejects → buildResult is 'fail' → health falls to the synthetic-fail branch.
+    const result = await engine.validate(
+      baseConfig({ hasWebUi: true, buildCommand: 'npm run build' }),
+    );
+
+    expect(result.smoke.build.status).toBe('fail');
+    expect(result.smoke.health.status).toBe('fail');
+    expect(result.smoke.health.url).toBe('http://127.0.0.1:9999/');
   });
 });

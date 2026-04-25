@@ -43,7 +43,7 @@ export interface SastResult {
 }
 
 export interface HealthResult {
-  status: 'pass' | 'fail';
+  status: 'pass' | 'fail' | 'skip';
   url: string;
   responseCode: number | null;
   duration: number;

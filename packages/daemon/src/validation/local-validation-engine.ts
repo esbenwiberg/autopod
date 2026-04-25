@@ -6,6 +6,7 @@ import type {
   AcType,
   AcValidationResult,
   DeviationsAssessment,
+  HealthResult,
   PageResult,
   TaskReviewResult,
   ValidationOverride,
@@ -178,15 +179,25 @@ export function createLocalValidationEngine(
         callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
         // ── Phase 5: Health check ──────────────────────────────────────
+        // Skipped when the profile has no web UI — there's nothing to start,
+        // no endpoint to poll, and downstream Pages/AC web-ui phases are
+        // inapplicable too.
         checkAbort();
         callbacks?.onPhaseStarted?.('health');
-        if (buildResult.status === 'pass' && config.startCommand)
+        const skipForNoWebUi = config.hasWebUi === false;
+        if (!skipForNoWebUi && buildResult.status === 'pass' && config.startCommand)
           onProgress?.('Running health check…');
-        const healthResult =
-          buildResult.status === 'pass'
+        const healthResult: HealthResult = skipForNoWebUi
+          ? {
+              status: 'skip',
+              url: '',
+              responseCode: null,
+              duration: 0,
+            }
+          : buildResult.status === 'pass'
             ? await runHealthCheck(containerManager, config, log)
             : {
-                status: 'fail' as const,
+                status: 'fail',
                 url: config.previewUrl + config.healthPath,
                 responseCode: null,
                 duration: 0,
@@ -216,7 +227,7 @@ export function createLocalValidationEngine(
             ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
             : [];
         const pagesStatus: 'pass' | 'fail' | 'skip' =
-          config.smokePages.length === 0
+          healthResult.status === 'skip' || config.smokePages.length === 0
             ? 'skip'
             : pages.every((p) => p.status === 'pass')
               ? 'pass'
@@ -224,20 +235,23 @@ export function createLocalValidationEngine(
         callbacks?.onPhaseCompleted?.('pages', pagesStatus, pages);
 
         // ── Phase 7: AC Validation ────────────────────────────────────
+        // Run when health passed, or when health was skipped because the
+        // profile has no web UI — in the latter case web-ui criteria are
+        // auto-downgraded to 'none' and routed through the diff reviewer.
         checkAbort();
         callbacks?.onPhaseStarted?.('ac');
-        if (healthResult.status === 'pass' && config.acceptanceCriteria?.length)
+        const acGateOk = healthResult.status === 'pass' || healthResult.status === 'skip';
+        if (acGateOk && config.acceptanceCriteria?.length)
           onProgress?.('Checking acceptance criteria…');
-        const acValidation =
-          healthResult.status === 'pass'
-            ? await runAcValidation(
-                containerManager,
-                config,
-                log,
-                hostBrowserRunner,
-                acClassificationCache,
-              )
-            : null;
+        const acValidation = acGateOk
+          ? await runAcValidation(
+              containerManager,
+              config,
+              log,
+              hostBrowserRunner,
+              acClassificationCache,
+            )
+          : null;
         const acStatus: 'pass' | 'fail' | 'skip' = acValidation?.status ?? 'skip';
         callbacks?.onPhaseCompleted?.('ac', acStatus, acValidation);
 
@@ -279,8 +293,9 @@ export function createLocalValidationEngine(
 
         // ── Phase 9: Overall result ────────────────────────────────────
         const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
+        const healthOk = healthResult.status === 'pass' || healthResult.status === 'skip';
         const smokeStatus =
-          buildResult.status === 'pass' && healthResult.status === 'pass' && pagesPass
+          buildResult.status === 'pass' && healthOk && pagesPass
             ? ('pass' as const)
             : ('fail' as const);
 

@@ -73,11 +73,21 @@ public struct ValidationTab: View {
     case .sast:
       return switch c.sast { case true: .passed; case false: .failed; default: .skipped }
     case .health:
-      if !c.smoke, let h = c.healthCheck { return h.status == "fail" ? .failed : .passed }
+      if let h = c.healthCheck {
+        switch h.status {
+        case "fail": return .failed
+        case "skip": return .skipped
+        default: return .passed
+        }
+      }
       return c.smoke ? .passed : .notStarted
     case .pages:
-      if let pages = c.pages { return pages.allSatisfy { $0.status == "pass" } ? .passed : .failed }
-      return c.smoke ? .passed : .skipped
+      // When the profile has no web UI, health is skipped and pages don't apply.
+      if let h = c.healthCheck, h.status == "skip" { return .skipped }
+      if let pages = c.pages, !pages.isEmpty {
+        return pages.allSatisfy { $0.status == "pass" } ? .passed : .failed
+      }
+      return .skipped
     case .ac:
       return switch c.acValidation { case true: .passed; case false: .failed; default: .skipped }
     case .review:
@@ -405,7 +415,7 @@ public struct ValidationTab: View {
       phaseStatusRow(status: status, passLabel: "Health check passed",
                      failLabel: "Health check failed", skipLabel: "Health check skipped",
                      duration: dur)
-      if let h = health {
+      if let h = health, h.status != "skip" {
         VStack(alignment: .leading, spacing: 6) {
           Label(h.url, systemImage: "link")
             .font(.system(.caption, design: .monospaced))
