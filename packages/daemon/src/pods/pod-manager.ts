@@ -2078,6 +2078,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             ],
             networkName,
             firewallScript,
+            networkPolicyMode: profile.networkPolicy?.mode,
             memoryBytes:
               (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
           });

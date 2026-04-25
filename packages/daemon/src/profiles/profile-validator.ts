@@ -226,5 +226,23 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
+  // ACI backend does not support iptables-based network isolation.
+  // Reject restricted/deny-all network policies for ACI profiles at write time
+  // so operators get a clear error instead of a silently open container.
+  const executionTarget = input.executionTarget;
+  const networkPolicy = input.networkPolicy as
+    | { mode?: string; enabled?: boolean }
+    | null
+    | undefined;
+  if (
+    executionTarget === 'aci' &&
+    networkPolicy?.enabled === true &&
+    (networkPolicy.mode === 'restricted' || networkPolicy.mode === 'deny-all')
+  ) {
+    errors.push(
+      `network_policy mode '${networkPolicy.mode}' is not supported on the ACI execution target — iptables-based isolation requires the Docker backend`,
+    );
+  }
+
   return { valid: errors.length === 0, errors };
 }

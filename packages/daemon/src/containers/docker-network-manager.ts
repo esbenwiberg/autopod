@@ -360,6 +360,12 @@ export class DockerNetworkManager {
       );
       lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
       lines.push('');
+      lines.push('# IPv6: deny all outbound (mirrors IPv4 deny-all)');
+      lines.push('ip6tables -F OUTPUT 2>/dev/null || true');
+      lines.push('ip6tables -A OUTPUT -o lo -j ACCEPT');
+      lines.push('ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
+      lines.push('ip6tables -A OUTPUT -j REJECT --reject-with icmp6-port-unreachable');
+      lines.push('');
       lines.push('echo "Firewall: deny-all mode — all outbound blocked (daemon gateway allowed)"');
       return lines.join('\n');
     }
@@ -389,8 +395,7 @@ export class DockerNetworkManager {
           const { resolve4 } = await import('node:dns/promises');
           const ips = await resolve4(host);
           for (const ip of ips) {
-            const parts = ip.split('.');
-            cidrs.add(`${parts[0]}.${parts[1]}.${parts[2]}.0/24`);
+            cidrs.add(`${ip}/32`);
           }
         } catch {
           this.logger.warn({ host }, 'Failed to resolve host for firewall allowlist');
@@ -535,7 +540,7 @@ export class DockerNetworkManager {
       lines.push(
         '      for ip in $(getent ahostsv4 "$host" 2>/dev/null | awk \'{print $1}\' | sort -u); do',
       );
-      lines.push('        cidr="$(echo "$ip" | awk -F. \'{print $1"."$2"."$3".0/24"}\')"');
+      lines.push('        cidr="${ip}/32"');
       lines.push('        iptables -C OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || \\');
       lines.push('          iptables -I OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true');
       lines.push('      done');
@@ -553,6 +558,19 @@ export class DockerNetworkManager {
     lines.push(`  echo "Firewall: restricted mode (CIDR fallback) — ${cidrs.size} CIDRs"`);
     lines.push('');
     lines.push('fi');
+
+    // IPv6: deny all outbound in restricted mode.
+    // Domain-based IPv6 filtering is not implemented (ipset is IPv4-only by default,
+    // and dnsmasq --ipset does not support IPv6 sets). Block all IPv6 egress to prevent
+    // bypass of the IPv4 allowlist via IPv6 dual-stack routes.
+    lines.push('');
+    lines.push(
+      '# IPv6: deny all outbound (domain-based IPv6 filtering not supported; fail closed)',
+    );
+    lines.push('ip6tables -F OUTPUT 2>/dev/null || true');
+    lines.push('ip6tables -A OUTPUT -o lo -j ACCEPT');
+    lines.push('ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
+    lines.push('ip6tables -A OUTPUT -j REJECT --reject-with icmp6-port-unreachable');
 
     return lines.join('\n');
   }

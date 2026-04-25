@@ -157,6 +157,40 @@ describe('AciContainerManager', () => {
       const call = mockBeginCreateOrUpdateAndWait.mock.calls[0]?.[2];
       expect(call.containers[0].resources.requests).toEqual({ cpu: 2, memoryInGB: 4 });
     });
+
+    it('rejects spawn with deny-all network policy mode (fix 2.4)', async () => {
+      const manager = createManager();
+      await expect(
+        manager.spawn({ image: 'node22', podId: 'sess-1', env: {}, networkPolicyMode: 'deny-all' }),
+      ).rejects.toThrow(/ACI does not support network_policy mode 'deny-all'/);
+      expect(mockBeginCreateOrUpdateAndWait).not.toHaveBeenCalled();
+    });
+
+    it('rejects spawn with restricted network policy mode (fix 2.4)', async () => {
+      const manager = createManager();
+      await expect(
+        manager.spawn({
+          image: 'node22',
+          podId: 'sess-1',
+          env: {},
+          networkPolicyMode: 'restricted',
+        }),
+      ).rejects.toThrow(/ACI does not support network_policy mode 'restricted'/);
+      expect(mockBeginCreateOrUpdateAndWait).not.toHaveBeenCalled();
+    });
+
+    it('allows spawn with allow-all network policy mode', async () => {
+      mockBeginCreateOrUpdateAndWait.mockResolvedValue({ provisioningState: 'Succeeded' });
+      const manager = createManager();
+      await expect(
+        manager.spawn({
+          image: 'node22',
+          podId: 'sess-1',
+          env: {},
+          networkPolicyMode: 'allow-all',
+        }),
+      ).resolves.toBeDefined();
+    });
   });
 
   // -------------------------------------------------------------------------

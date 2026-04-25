@@ -307,15 +307,56 @@ describe('DockerNetworkManager', () => {
       });
     });
 
-    it('resolves real hostnames to /24 CIDRs for pre-seeding', async () => {
+    it('resolves real hostnames to /32 CIDRs for pre-seeding (fix 2.5)', async () => {
       const script = await manager.generateFirewallScript(['api.nuget.org']);
-      expect(script).toContain('.0/24');
+      // Exact /32 host routes — not the former /24 subnet expansion
+      expect(script).toContain('/32');
+      expect(script).not.toContain('.0/24');
     });
 
     it('gracefully skips unresolvable hostnames', async () => {
       const script = await manager.generateFirewallScript(['this-host-does-not-exist.invalid']);
       // Should still produce a valid script
       expect(script).toContain('iptables -A OUTPUT -j REJECT');
+    });
+
+    describe('ip6tables rules (fix 2.2)', () => {
+      it('deny-all mode includes ip6tables REJECT rule', async () => {
+        const script = await manager.generateFirewallScript([], 'deny-all');
+        expect(script).toContain('ip6tables -F OUTPUT');
+        expect(script).toContain(
+          'ip6tables -A OUTPUT -j REJECT --reject-with icmp6-port-unreachable',
+        );
+      });
+
+      it('deny-all ip6tables rules appear before the final echo', async () => {
+        const script = await manager.generateFirewallScript([], 'deny-all');
+        const ip6tablesIdx = script.indexOf('ip6tables -A OUTPUT -j REJECT');
+        const echoIdx = script.lastIndexOf('echo "Firewall:');
+        expect(ip6tablesIdx).toBeGreaterThan(0);
+        expect(ip6tablesIdx).toBeLessThan(echoIdx);
+      });
+
+      it('restricted mode includes ip6tables REJECT rule', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('ip6tables -F OUTPUT');
+        expect(script).toContain(
+          'ip6tables -A OUTPUT -j REJECT --reject-with icmp6-port-unreachable',
+        );
+      });
+
+      it('restricted mode ip6tables rules appear after the fi closing the dnsmasq/CIDR if-else', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        const fiIdx = script.lastIndexOf('\nfi\n');
+        const ip6tablesIdx = script.indexOf('ip6tables -F OUTPUT');
+        expect(fiIdx).toBeGreaterThan(0);
+        expect(ip6tablesIdx).toBeGreaterThan(fiIdx);
+      });
+
+      it('allow-all mode does NOT include ip6tables rules', async () => {
+        const script = await manager.generateFirewallScript([], 'allow-all');
+        expect(script).not.toContain('ip6tables');
+      });
     });
   });
 
