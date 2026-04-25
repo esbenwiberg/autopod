@@ -1,6 +1,7 @@
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import * as tar from 'tar-stream';
@@ -16,6 +17,17 @@ import {
   createContainerWithStaleRetry,
   isExpectedDockerError,
 } from './docker-helpers.js';
+
+const _dirname = dirname(fileURLToPath(import.meta.url));
+
+// Load seccomp profile once at module init. If missing (e.g., test env), fall back to Docker default.
+let SECCOMP_JSON: string | undefined;
+try {
+  SECCOMP_JSON = readFileSync(join(_dirname, 'seccomp-profile.json'), 'utf-8');
+} catch {
+  // Seccomp profile file not found — Docker will use its built-in default.
+  SECCOMP_JSON = undefined;
+}
 
 interface DockerContainerManagerOptions {
   docker?: Dockerode;
@@ -59,18 +71,26 @@ export class DockerContainerManager implements ContainerManager {
       'Creating Docker container',
     );
 
-    // Network isolation: attach to named network + add NET_ADMIN for iptables
+    // Build security options: always block privilege escalation; add seccomp if available.
+    const securityOpt: string[] = ['no-new-privileges:true'];
+    if (SECCOMP_JSON) {
+      securityOpt.push(`seccomp=${SECCOMP_JSON}`);
+    }
+
     const hostConfig: Record<string, unknown> = {
       Binds: binds.length > 0 ? binds : undefined,
       PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
       AutoRemove: false,
       // Hard memory cap — prevents OOM kills from taking down the whole Docker VM.
       Memory: config.memoryBytes ? alignMemoryToPageSize(config.memoryBytes) : undefined,
+      // Drop ALL capabilities — re-add only what is needed per use-case.
+      CapDrop: ['ALL'],
+      SecurityOpt: securityOpt,
     };
 
     if (config.networkName) {
       hostConfig.NetworkMode = config.networkName;
-      // NET_ADMIN required for iptables firewall rules inside the container
+      // NET_ADMIN required for iptables firewall rules inside the container.
       hostConfig.CapAdd = ['NET_ADMIN'];
       // On Linux, host.docker.internal is not auto-added for custom bridge networks.
       // Inject it so containers can always reach the daemon's MCP endpoint.

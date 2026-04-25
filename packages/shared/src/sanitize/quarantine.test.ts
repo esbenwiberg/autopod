@@ -97,10 +97,10 @@ describe('quarantine', () => {
 
   describe('threshold boundaries', () => {
     it('score below threshold is safe', () => {
-      // encoding-trick has severity 0.4, which is below default threshold 0.5
+      // encoding-trick now has severity 0.65, which is ABOVE default threshold 0.5 → wrapped
       const result = quarantine('&#x41;&#x42;&#x43;');
-      expect(result.threatScore).toBe(0.4);
-      expect(result.safe).toBe(true);
+      expect(result.threatScore).toBe(0.65);
+      expect(result.safe).toBe(false);
     });
 
     it('score at or above threshold is unsafe', () => {

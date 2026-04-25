@@ -1,0 +1,29 @@
+{
+  "_comment": "Autopod container seccomp profile. defaultAction ALLOW keeps compatibility with Docker's built-in default while explicitly blocking namespace/mount syscalls that are most useful for container escapes. Combined with CapDrop=ALL this significantly reduces the attack surface.",
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "syscalls": [
+    {
+      "names": [
+        "unshare",
+        "setns",
+        "pivot_root",
+        "mount",
+        "umount2",
+        "sysfs",
+        "kexec_load",
+        "kexec_file_load",
+        "open_by_handle_at",
+        "init_module",
+        "finit_module",
+        "delete_module",
+        "request_key",
+        "add_key",
+        "keyctl",
+        "syslog",
+        "acct"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
+    }
+  ]
+}

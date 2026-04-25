@@ -74,10 +74,37 @@ const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
 
+// Fields to redact from all log records — covers common credential field names.
+const LOG_REDACT_PATHS = [
+  '*.token',
+  '*.pat',
+  '*.apiKey',
+  '*.api_key',
+  '*.password',
+  '*.secret',
+  '*.accessToken',
+  '*.access_token',
+  '*.refreshToken',
+  '*.refresh_token',
+  '*.authToken',
+  '*.auth_token',
+  '*.privateKey',
+  '*.private_key',
+  'token',
+  'pat',
+  'password',
+  'secret',
+];
+
+const PINO_BASE_OPTIONS = {
+  level: LOG_LEVEL,
+  redact: { paths: LOG_REDACT_PATHS, censor: '[REDACTED]' },
+};
+
 // Logger — use pino-pretty as a direct stream (not a transport) to avoid worker-thread issues
 const logger = IS_DEV
-  ? pino({ level: LOG_LEVEL }, buildPrettyStream({ colorize: true }))
-  : pino({ level: LOG_LEVEL });
+  ? pino(PINO_BASE_OPTIONS, buildPrettyStream({ colorize: true }))
+  : pino(PINO_BASE_OPTIONS);
 
 // Database
 const db = createDatabase(DB_PATH, logger);

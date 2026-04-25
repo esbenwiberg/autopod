@@ -138,8 +138,9 @@ export const INJECTION_PATTERNS: InjectionPattern[] = [
   },
   {
     name: 'encoding-trick',
-    regex: /(?:&#x?[0-9a-f]+;|%[0-9a-f]{2}|\\u[0-9a-f]{4}|\\x[0-9a-f]{2}){3,}/i,
-    severity: 0.4,
+    // 2+ consecutive encoded chars is suspicious — reduced from 3 to catch shorter sequences
+    regex: /(?:&#x?[0-9a-f]+;|%[0-9a-f]{2}|\\u[0-9a-f]{4}|\\x[0-9a-f]{2}){2,}/i,
+    severity: 0.65,
     description: 'Encoded content that may hide injection',
   },
   {
@@ -147,5 +148,13 @@ export const INJECTION_PATTERNS: InjectionPattern[] = [
     regex: /<\s*(?:system-prompt|instructions|claude|anthropic|tool_call|function_call)\s*>/i,
     severity: 0.8,
     description: 'XML tag mimicking system/tool boundaries',
+  },
+  {
+    name: 'env-dump',
+    // Attempts to exfiltrate environment variables or sensitive files
+    regex:
+      /(?:\bprintenv\b|\bcat\s+\/etc\/(?:passwd|shadow|hosts)\b|\benv\s*[|>]|\/proc\/\d+\/environ|\bgetenv\s*\()/i,
+    severity: 0.7,
+    description: 'Attempt to dump environment variables or sensitive system files',
   },
 ];
