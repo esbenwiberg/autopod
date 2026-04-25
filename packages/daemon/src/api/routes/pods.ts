@@ -181,13 +181,34 @@ export function podRoutes(
     });
   });
 
-  // GET /pods/:podId/report — HTML validation report (pod-token auth)
-  app.get('/pods/:podId/report', { config: { auth: 'pod-token' } }, async (request, reply) => {
+  // GET /pods/:podId/report — HTML validation report.
+  // Uses auth: false + manual token validation so the browser page-load can authenticate
+  // via ?token= (pod HMAC only — not user tokens, which must never appear in URLs).
+  app.get('/pods/:podId/report', { config: { auth: false } }, async (request, reply) => {
     const { podId } = request.params as { podId: string };
+
+    // Accept token from ?token= (browser page-load) or Authorization: Bearer (API clients).
+    // Only pod-scoped HMAC tokens are accepted — Entra user tokens are rejected here.
     const queryToken = (request.query as Record<string, string>)?.token;
+    const authHeader = request.headers.authorization;
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+    const token = bearerToken ?? queryToken;
+
+    if (sessionTokenIssuer) {
+      if (!token) {
+        reply.status(401).send({ error: 'Missing token' });
+        return;
+      }
+      const verifiedPodId = sessionTokenIssuer.verify(token);
+      if (!verifiedPodId || verifiedPodId !== podId) {
+        reply.status(403).send({ error: 'Invalid or mismatched pod token' });
+        return;
+      }
+    }
+
     const pod = podManager.getSession(podId);
     const validations = podManager.getValidationHistory(podId);
-    const html = generateValidationReport(pod, validations, queryToken);
+    const html = generateValidationReport(pod, validations, token);
     reply.type('text/html').send(html);
   });
 

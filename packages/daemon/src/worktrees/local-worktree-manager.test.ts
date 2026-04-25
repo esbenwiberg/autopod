@@ -551,6 +551,88 @@ describe('LocalWorktreeManager', () => {
   });
 
   // -------------------------------------------------------------------------
+  // pushBranch — explicit refspec + branch guard (fix 1.3)
+  // -------------------------------------------------------------------------
+
+  describe('pushBranch', () => {
+    it('rejects when HEAD is on a different branch than expectedBranch', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
+            cb(null, { stdout: 'main\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(manager.pushBranch('/tmp/worktree/sess', 'feat/security')).rejects.toThrow(
+        "Expected HEAD to be on branch 'feat/security' but it is on 'main'",
+      );
+    });
+
+    it('pushes with explicit HEAD:refs/heads/<branch> refspec when branch matches', async () => {
+      const pushedArgs: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
+            cb(null, { stdout: 'feat/security\n', stderr: '' });
+          } else if (cmd.includes('rev-parse --git-common-dir')) {
+            cb(null, { stdout: '.git\n', stderr: '' });
+          } else if (cmd.includes('config --get remote.origin.url')) {
+            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
+          } else {
+            pushedArgs.push(args);
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await manager.pushBranch('/tmp/worktree/sess', 'feat/security');
+
+      const pushCall = pushedArgs.find((a) => a.includes('push'));
+      expect(pushCall).toBeDefined();
+      expect(pushCall).toContain('HEAD:refs/heads/feat/security');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // mergeBranch — explicit refspec + branch guard (fix 1.3)
+  // -------------------------------------------------------------------------
+
+  describe('mergeBranch explicit refspec', () => {
+    it('rejects when HEAD is on a different branch than targetBranch', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('diff --cached --quiet')) {
+            // nothing staged → early exit from commitPendingChanges, falls through to push
+            cb(null, { stdout: '', stderr: '' });
+          } else if (cmd.includes('rev-parse HEAD')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
+            cb(null, { stdout: 'main\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(
+        manager.mergeBranch({ worktreePath: '/tmp/worktree/sess', targetBranch: 'feat/security' }),
+      ).rejects.toThrow("Expected HEAD to be on branch 'feat/security' but it is on 'main'");
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // getCommitLog
   // -------------------------------------------------------------------------
 

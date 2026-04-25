@@ -41,7 +41,7 @@ four small PRs.
   `metadata.google.internal` is rejected; that DNS-rebinding double-resolution
   is closed.
 
-### 1.2 Shell injection in workspace sync-back  🔴
+### 1.2 Shell injection in workspace sync-back  🟢
 - **File:** `packages/daemon/src/pods/pod-manager.ts:1091–1095`.
 - **Change:** Drop `sh -c`. Use array-form exec
   (`['git', '-C', '/workspace', 'push', bareRepoPath, 'HEAD']`). Validate
@@ -50,7 +50,7 @@ four small PRs.
 - **Test:** unit test that an alternates file with shell metacharacters does
   not execute a side effect.
 
-### 1.3 `git push HEAD` with no refspec  🔴
+### 1.3 `git push HEAD` with no refspec  🟢
 - **File:** `packages/daemon/src/worktrees/local-worktree-manager.ts:435,528`.
 - **Change:** Both push sites take an explicit `expectedBranch` and push as
   `HEAD:refs/heads/${expectedBranch}`. Before pushing, run
@@ -59,7 +59,7 @@ four small PRs.
 - **Test:** unit test that `git checkout main && pushBranch(branch='feature/x')`
   throws; integration test that pushing a clean feature worktree still works.
 
-### 1.4 Drop `?token=` query-param auth fallback  🔴
+### 1.4 Drop `?token=` query-param auth fallback  🟢
 - **File:** `packages/daemon/src/api/plugins/auth.ts:35–36`.
 - **Change:** Remove `queryToken` fallback. Bearer-only.
 - **Test:** existing auth tests; add a negative test that `?token=` returns 401.
@@ -116,7 +116,7 @@ four small PRs.
 
 ## Wave 3 — Supply chain integrity
 
-### 3.1 Pin skills to commit SHAs  🔴
+### 3.1 Pin skills to commit SHAs  🟡
 - **File:** `packages/daemon/src/pods/skill-resolver.ts:84–86`.
 - **Change:** Validate `source.ref` matches `^[0-9a-f]{40}$`. Reject `main`,
   tags, short SHAs. One-pod warning period; then flip to reject.

@@ -1088,16 +1088,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Push new commits to the bare before clearing the bind mount, so any commits made
       // inside the container are visible to host-side git operations after sync.
       if (bareRepoPath) {
-        const push = await cm.execInContainer(
-          containerId,
-          ['sh', '-c', `git -C /workspace push "${bareRepoPath}" HEAD`],
-          { timeout: 30_000 },
-        );
-        if (push.exitCode !== 0) {
+        // Validate the container-supplied path against the daemon-derived path to
+        // prevent an adversarial agent from injecting a different remote via the alternates file.
+        let expectedBareRepoPath: string | null = null;
+        try {
+          expectedBareRepoPath = await deriveBareRepoPath(worktreePath);
+        } catch {
+          // If we can't derive the expected path, skip the push (fail safe).
+        }
+        if (!expectedBareRepoPath || bareRepoPath !== expectedBareRepoPath) {
           logger.warn(
-            { worktreePath, stderr: push.stderr },
-            'Git push to bare during sync-back failed — new commits may not be visible on host',
+            { worktreePath, bareRepoPath, expectedBareRepoPath },
+            'Bare repo path from container does not match daemon-derived path — skipping in-container push',
           );
+        } else {
+          const push = await cm.execInContainer(
+            containerId,
+            ['git', '-C', '/workspace', 'push', bareRepoPath, 'HEAD'],
+            { timeout: 30_000 },
+          );
+          if (push.exitCode !== 0) {
+            logger.warn(
+              { worktreePath, stderr: push.stderr },
+              'Git push to bare during sync-back failed — new commits may not be visible on host',
+            );
+          }
         }
       }
 
@@ -2932,7 +2947,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               `research: ${pod.task.slice(0, 72)}`,
               { maxDeletions: 1000 },
             );
-            await worktreeManager.pushBranch(worktreeResult.worktreePath);
+            await worktreeManager.pushBranch(worktreeResult.worktreePath, repoBranch);
             logger.info({ podId, branch: repoBranch }, 'Artifact branch pushed');
           } catch (err) {
             logger.warn(
@@ -3242,7 +3257,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Push explicitly here before attempting to complete the PR so any local
         // commits the agent forgot (or failed) to push are flushed to the remote.
         try {
-          await worktreeManager.pushBranch(pod.worktreePath);
+          await worktreeManager.pushBranch(pod.worktreePath, pod.branch ?? '');
           emitActivityStatus(podId, 'Branch pushed');
         } catch (pushErr) {
           logger.warn(
