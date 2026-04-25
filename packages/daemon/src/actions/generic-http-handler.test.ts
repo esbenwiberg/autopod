@@ -1,6 +1,7 @@
 import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { assertPublicUrl } from '../api/ssrf-guard.js';
 import { createGenericHttpHandler } from './generic-http-handler.js';
 
 function mockResponse(
@@ -15,6 +16,9 @@ function mockResponse(
 }
 
 const logger = pino({ level: 'silent' });
+
+/** Permissive SSRF guard for tests — production uses assertPublicUrl. */
+const allowAllGuard = async (_url: string) => ({ ok: true });
 
 function makeAction(overrides: Partial<ActionDefinition> = {}): ActionDefinition {
   return {
@@ -42,6 +46,7 @@ describe('createGenericHttpHandler', () => {
   it('throws when endpoint config is missing', async () => {
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -53,6 +58,7 @@ describe('createGenericHttpHandler', () => {
   it('has handlerType "http"', () => {
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
     expect(handler.handlerType).toBe('http');
@@ -63,6 +69,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: (ref) => (ref === 'MY_API_KEY' ? 'secret-token-xyz' : undefined),
     });
 
@@ -88,6 +95,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: (ref) => {
         if (ref === 'USER') return 'admin';
         if (ref === 'PASS') return 'hunter2';
@@ -118,6 +126,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: (ref) => (ref === 'KEY' ? 'api-key-123' : undefined),
     });
 
@@ -143,6 +152,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -167,6 +177,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -195,6 +206,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -225,6 +237,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -264,6 +277,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -297,6 +311,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -320,6 +335,7 @@ describe('createGenericHttpHandler', () => {
   it('throws when secret reference cannot be resolved', async () => {
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -345,6 +361,7 @@ describe('createGenericHttpHandler', () => {
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
@@ -363,11 +380,131 @@ describe('createGenericHttpHandler', () => {
     ).rejects.toThrow(/500/);
   });
 
+  describe('SSRF guard', () => {
+    // These tests use the default guard (assertPublicUrl) — the URLs they
+    // submit are blocked synchronously by hostname pattern, no DNS needed.
+    it('blocks an agent-templated URL pointing at the cloud metadata service', async () => {
+      const handler = createGenericHttpHandler({
+        logger,
+        getSecret: () => undefined,
+      });
+
+      await expect(
+        handler.execute(
+          makeAction({
+            endpoint: {
+              url: 'http://{{host}}/latest/meta-data/iam/security-credentials/',
+              method: 'GET',
+              auth: { type: 'none' },
+            },
+            response: { fields: [] },
+          }),
+          { host: '169.254.169.254' },
+        ),
+      ).rejects.toThrow(/blocked/i);
+
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('blocks a URL whose hostname resolves to a private IP (DNS pointer attack)', async () => {
+      // Stub DNS to return a private IP for the attacker hostname.
+      const handler = createGenericHttpHandler({
+        logger,
+        ssrfGuard: (url) => assertPublicUrl(url, { resolver: async () => ['127.0.0.1'] }),
+        getSecret: () => undefined,
+      });
+
+      await expect(
+        handler.execute(
+          makeAction({
+            endpoint: {
+              url: 'https://attacker.example/exfil',
+              method: 'GET',
+              auth: { type: 'none' },
+            },
+            response: { fields: [] },
+          }),
+          {},
+        ),
+      ).rejects.toThrow(/blocked/i);
+
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('blocks localhost', async () => {
+      const handler = createGenericHttpHandler({
+        logger,
+        getSecret: () => undefined,
+      });
+
+      await expect(
+        handler.execute(
+          makeAction({
+            endpoint: {
+              url: 'http://localhost:3100/internal',
+              method: 'GET',
+              auth: { type: 'none' },
+            },
+            response: { fields: [] },
+          }),
+          {},
+        ),
+      ).rejects.toThrow(/blocked/i);
+    });
+
+    it('blocks .internal TLD', async () => {
+      const handler = createGenericHttpHandler({
+        logger,
+        getSecret: () => undefined,
+      });
+
+      await expect(
+        handler.execute(
+          makeAction({
+            endpoint: {
+              url: 'http://service.internal/api',
+              method: 'GET',
+              auth: { type: 'none' },
+            },
+            response: { fields: [] },
+          }),
+          {},
+        ),
+      ).rejects.toThrow(/blocked/i);
+    });
+
+    it('allows a public URL through to fetch', async () => {
+      vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse({ ok: true }));
+
+      const handler = createGenericHttpHandler({
+        logger,
+        // Stub DNS to return a public IP so the test does not hit real DNS.
+        ssrfGuard: (url) => assertPublicUrl(url, { resolver: async () => ['8.8.8.8'] }),
+        getSecret: () => undefined,
+      });
+
+      await handler.execute(
+        makeAction({
+          endpoint: {
+            url: 'https://api.example.com/data',
+            method: 'GET',
+            auth: { type: 'none' },
+          },
+          response: { fields: [] },
+        }),
+        {},
+      );
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('GET requests do not include a body', async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse({ ok: true }));
 
     const handler = createGenericHttpHandler({
       logger,
+      ssrfGuard: allowAllGuard,
       getSecret: () => undefined,
     });
 
