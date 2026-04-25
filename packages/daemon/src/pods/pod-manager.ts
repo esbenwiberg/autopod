@@ -2964,9 +2964,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // partially-synced worktree that looks like mass file deletions.
       if (pod.worktreePath) {
         try {
-          const committed = await worktreeManager.commitPendingChanges(
+          const committed = await worktreeManager.commitPendingChangesWithGeneratedMessage(
             pod.worktreePath,
-            'chore: auto-commit uncommitted agent changes',
+            pod.task,
             { maxDeletions: syncSucceeded ? 100 : 0 },
           );
           if (committed) {

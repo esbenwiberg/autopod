@@ -12,6 +12,7 @@ import type {
   WorktreeManager,
   WorktreeResult,
 } from '../interfaces/worktree-manager.js';
+import { generateAutoCommitMessage } from './auto-commit-message.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -465,28 +466,50 @@ export class LocalWorktreeManager implements WorktreeManager {
     message: string,
     options?: { maxDeletions?: number },
   ): Promise<boolean> {
-    const maxDeletions = options?.maxDeletions ?? 100;
+    const hasStaged = await this.stageAllChanges(worktreePath);
+    if (!hasStaged) return false;
+    return this.commitStagedChanges(worktreePath, message, options?.maxDeletions ?? 100);
+  }
 
+  async commitPendingChangesWithGeneratedMessage(
+    worktreePath: string,
+    podTask: string | undefined,
+    options?: { maxDeletions?: number },
+  ): Promise<boolean> {
+    const hasStaged = await this.stageAllChanges(worktreePath);
+    if (!hasStaged) return false;
+    const message = await generateAutoCommitMessage(worktreePath, podTask, this.logger);
+    return this.commitStagedChanges(worktreePath, message, options?.maxDeletions ?? 100);
+  }
+
+  private async stageAllChanges(worktreePath: string): Promise<boolean> {
     await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
     try {
       await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: worktreePath });
       // Exit 0 → nothing staged
       return false;
     } catch {
-      // Staged changes exist — check deletion count before committing
-      const deletionCount = await this.getStagedDeletionCount(worktreePath);
-      if (deletionCount > maxDeletions) {
-        await execFileAsync('git', ['reset', 'HEAD'], { cwd: worktreePath });
-        this.logger.error(
-          { worktreePath, deletionCount, maxDeletions },
-          'Auto-commit aborted: staged deletions exceed safety threshold',
-        );
-        throw new DeletionGuardError(deletionCount, maxDeletions);
-      }
-      await execFileAsync('git', ['commit', '-m', message], { cwd: worktreePath });
-      this.logger.info({ worktreePath, deletionCount }, 'Auto-committed pending changes');
       return true;
     }
+  }
+
+  private async commitStagedChanges(
+    worktreePath: string,
+    message: string,
+    maxDeletions: number,
+  ): Promise<boolean> {
+    const deletionCount = await this.getStagedDeletionCount(worktreePath);
+    if (deletionCount > maxDeletions) {
+      await execFileAsync('git', ['reset', 'HEAD'], { cwd: worktreePath });
+      this.logger.error(
+        { worktreePath, deletionCount, maxDeletions },
+        'Auto-commit aborted: staged deletions exceed safety threshold',
+      );
+      throw new DeletionGuardError(deletionCount, maxDeletions);
+    }
+    await execFileAsync('git', ['commit', '-m', message], { cwd: worktreePath });
+    this.logger.info({ worktreePath, deletionCount }, 'Auto-committed pending changes');
+    return true;
   }
 
   private async getStagedDeletionCount(worktreePath: string): Promise<number> {

@@ -54,6 +54,17 @@ export interface WorktreeManager {
     message: string,
     options?: { maxDeletions?: number },
   ): Promise<boolean>;
+  /**
+   * Stage all changes and commit using a message generated from the staged diff
+   * (Claude Haiku, with a heuristic fallback). Returns true if a commit was
+   * created, false if the working tree was clean. The `podTask` is used as
+   * extra context when generating the message.
+   */
+  commitPendingChangesWithGeneratedMessage(
+    worktreePath: string,
+    podTask: string | undefined,
+    options?: { maxDeletions?: number },
+  ): Promise<boolean>;
   /** Push the current branch to origin. */
   pushBranch(worktreePath: string): Promise<void>;
   /** Pull latest changes from origin for the current branch. */
