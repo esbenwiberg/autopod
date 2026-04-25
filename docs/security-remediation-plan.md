@@ -273,20 +273,20 @@ four small PRs.
 
 ## Wave 7 — Docs & operational policy
 
-### 7.1 Production deployment checklist  🔴
+### 7.1 Production deployment checklist  🟢
 - **File:** `docs/production-checklist.md` (new).
 - **Content:** required env (`NODE_ENV=production`, no
   `AUTOPOD_ALLOW_DEV_AUTH`, `ENTRA_*` set); required filesystem (secrets.key
   0600, owned by daemon user); required network posture; required GitHub
   branch-protection rules.
 
-### 7.2 Secrets-key backup & rotation runbook  🔴
+### 7.2 Secrets-key backup & rotation runbook  🟢
 - **File:** `docs/secrets-key.md` (new).
 - **Content:** offline encrypted backup procedure; rotation: stand up new
   key, decrypt-then-re-encrypt all rows in `profiles.provider_credentials`
   and `profiles.private_registries` in a single transaction, swap key file.
 
-### 7.3 Threat model doc  🔴
+### 7.3 Threat model doc  🟢
 - **File:** `docs/threat-model.md` (new).
 - **Content:** assumptions (agent untrusted; profile authors partially
   trusted; operator fully trusted) and residual risks after Wave 1–6.
