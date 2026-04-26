@@ -3549,7 +3549,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const retryDefaultBranch = retryProfile.defaultBranch ?? 'main';
           await worktreeManager.mergeBranch({
             worktreePath: pod.worktreePath,
-            targetBranch: retryDefaultBranch,
+            // Push the feature branch up so the PR can be opened against retryDefaultBranch.
+            targetBranch: pod.branch,
             // Post-container retry: sync-back already happened (or failed silently) upstream;
             // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
             maxDeletions: 0,
@@ -3607,7 +3608,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const profile = profileStore.get(pod.profileName);
           await worktreeManager.mergeBranch({
             worktreePath: pod.worktreePath,
-            targetBranch: profile.defaultBranch ?? 'main',
+            // Push the feature branch up to origin — no PR manager configured, so this is the
+            // last step. Pushing onto profile.defaultBranch would force-push the feature work
+            // straight onto main, which is never what we want.
+            targetBranch: pod.branch,
             // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
             maxDeletions: 0,
           });
@@ -4586,7 +4590,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             try {
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
-                targetBranch: passDefaultBranch,
+                // Push the feature branch up so `gh pr create --head <branch>` can reference it.
+                // The PR is opened against passDefaultBranch separately by prManager.createPr.
+                targetBranch: s2.branch,
                 maxDeletions: validationSyncOk ? 100 : 0,
               });
             } catch (err) {
@@ -4948,7 +4954,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // not real work; block it.
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
-                targetBranch: revalDefaultBranch,
+                // Push the feature branch up — the PR is opened against revalDefaultBranch
+                // separately by the PR manager.
+                targetBranch: s2.branch,
                 maxDeletions: 0,
               });
             } catch (err) {
@@ -5713,7 +5721,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       try {
         await worktreeManager.mergeBranch({
           worktreePath: pod.worktreePath,
-          targetBranch: baseBranch,
+          // Push the feature branch up to origin so the PR can be opened against baseBranch.
+          // mergeBranch verifies HEAD is on targetBranch and pushes to refs/heads/<targetBranch>;
+          // passing baseBranch here would force-push the feature work onto main.
+          targetBranch: pod.branch,
           pat: retryPat,
           // retryCreatePr runs post-container with no fresh sync-back: if the worktree is
           // missing files, it's almost certainly a ghost from an earlier sync failure.

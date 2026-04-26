@@ -689,11 +689,12 @@ describe('PodManager', () => {
 
       await manager.approveSession(pod.id);
 
-      // Branch is pushed first, then PR is created and merged
+      // Branch is pushed first, then PR is created and merged. The push must target the
+      // feature branch (pod.branch) — not the base branch — or it would force-push onto main.
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/wt',
-          targetBranch: 'main',
+          targetBranch: pod.branch,
         }),
       );
       expect(ctx.prManager.createPr).toHaveBeenCalled();
@@ -722,7 +723,7 @@ describe('PodManager', () => {
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/wt',
-          targetBranch: 'main',
+          targetBranch: pod.branch,
         }),
       );
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
@@ -1511,11 +1512,12 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      // Branch was pushed
+      // Branch was pushed — must target the feature branch so `gh pr create --head` can
+      // reference it; the PR itself targets baseBranch separately via prManager.createPr.
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/wt',
-          targetBranch: 'main',
+          targetBranch: pod.branch,
         }),
       );
 
@@ -2233,6 +2235,28 @@ describe('PodManager', () => {
         expect.objectContaining({
           worktreePath: '/tmp/worktree/abc',
           maxDeletions: 0,
+        }),
+      );
+    });
+
+    it('pushes the feature branch (not the base branch) so the PR can be opened against main', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+
+      await manager.retryCreatePr(pod.id);
+
+      // Regression guard: mergeBranch verifies HEAD == targetBranch and pushes
+      // HEAD:refs/heads/<targetBranch>. Passing the base branch here would force-push the
+      // feature work onto main and fail the HEAD assertion.
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetBranch: pod.branch,
+        }),
+      );
+      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branch: pod.branch,
+          baseBranch: 'main',
         }),
       );
     });
