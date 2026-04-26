@@ -704,7 +704,13 @@ async function runHealthCheck(
         log?.info({ url, status: response.status, duration }, 'health check passed');
         const rawBody = await response.text().catch(() => '');
         const responseBody = rawBody.slice(0, 2_000) || undefined;
-        return { status: 'pass' as const, url, responseCode: response.status, duration, responseBody };
+        return {
+          status: 'pass' as const,
+          url,
+          responseCode: response.status,
+          duration,
+          responseBody,
+        };
       }
 
       log?.debug({ url, status: response.status }, 'health check got non-2xx, retrying');
