@@ -75,8 +75,12 @@ describe('CodexRuntime', () => {
       const runtime = new CodexRuntime(logger, cm);
 
       setTimeout(() => {
-        (handle.stdout as PassThrough).write('{"type":"task_start","message":"Starting"}\n');
-        (handle.stdout as PassThrough).write('{"type":"task_complete","result":"Done"}\n');
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ id: '1', msg: { type: 'agent_message', message: 'Starting' } })}\n`,
+        );
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ id: '2', msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'Done' } })}\n`,
+        );
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
         (handle as any).finish(0);
       }, 10);
@@ -176,7 +180,9 @@ describe('CodexRuntime', () => {
       const runtime = new CodexRuntime(logger, cm);
 
       setTimeout(() => {
-        (handle.stdout as PassThrough).write('{"type":"task_complete","result":"Fixed"}\n');
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ id: '1', msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'Fixed' } })}\n`,
+        );
         (handle.stdout as PassThrough).push(null);
         // Resolve exitCode after stdout ends
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
