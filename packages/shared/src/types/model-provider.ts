@@ -43,18 +43,40 @@ export interface MaxCredentials {
 }
 
 /**
+ * Foundry exposes models behind two protocol surfaces:
+ *  - `anthropic` — Anthropic Messages API (Claude on Foundry, or any backend
+ *    behind an Anthropic-compatible endpoint). Default — preserves the
+ *    legacy single-surface behavior.
+ *  - `openai` — OpenAI Chat/Responses API (GPT, plus any model the deployment
+ *    exposes via the OpenAI-compatible surface). Routes through the Codex
+ *    runtime instead of the Claude CLI.
+ */
+export type FoundryApiSurface = 'anthropic' | 'openai';
+
+/**
  * Azure Foundry provider credentials.
  *
- * Sets `CLAUDE_CODE_USE_FOUNDRY=1` plus endpoint config env vars.
+ * Auth is either via `apiKey` (encrypted at rest) or — when omitted — a bearer
+ * token acquired at exec time from `DefaultAzureCredential` (managed identity
+ * in hosted envs, `az login` session locally). The bearer token never leaves
+ * the daemon's `getAzureToken` helper plus the secret-file write into the
+ * container.
  */
 export interface FoundryCredentials {
   provider: 'foundry';
-  /** Azure Foundry endpoint URL. */
+  /** Foundry endpoint URL (Azure-AI / Cognitive Services region root). */
   endpoint: string;
   /** Foundry project identifier. */
   projectId: string;
-  /** Optional API key (omit if using managed identity). */
+  /** Optional API key. Omit to use managed identity / az-login bearer tokens. */
   apiKey?: string;
+  /**
+   * Protocol surface the deployment exposes. Defaults to `anthropic` when
+   * unset so existing profiles keep their pre-existing behavior.
+   */
+  apiSurface?: FoundryApiSurface;
+  /** Optional API version pinned by the deployment (used for `openai` surface). */
+  apiVersion?: string;
 }
 
 /**

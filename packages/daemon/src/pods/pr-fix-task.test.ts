@@ -1,8 +1,8 @@
 import type { Pod, Profile } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrMergeStatus } from '../interfaces/pr-manager.js';
-import type { PodRepository } from './pod-repository.js';
 import { buildPrFixTask } from './pod-manager.js';
+import type { PodRepository } from './pod-repository.js';
 
 function makePod(overrides: Partial<Pod> = {}): Pod {
   return {
@@ -84,8 +84,8 @@ describe('buildPrFixTask — PI + PII sanitization of reviewer-controlled conten
 
   it('strips real-format API keys and GitHub tokens from review comment bodies (PII)', () => {
     // PII regex: sk-[a-zA-Z0-9]{20,} (no hyphens after sk-); ghp_[a-zA-Z0-9]{36,}
-    const apiKey = 'sk-' + 'A'.repeat(25);
-    const githubToken = 'ghp_' + 'B'.repeat(36);
+    const apiKey = `sk-${'A'.repeat(25)}`;
+    const githubToken = `ghp_${'B'.repeat(36)}`;
     const body = `Found an issue.\nAPI_KEY=${apiKey}\nGITHUB_TOKEN=${githubToken}`;
     const task = buildPrFixTask(
       makePod(),
@@ -203,13 +203,7 @@ describe('buildPrFixTask — PI + PII sanitization of reviewer-controlled conten
 
   it('does not sanitize the operator-supplied userMessage (trusted path)', () => {
     const msg = 'Please also update the README with the new API surface.';
-    const task = buildPrFixTask(
-      makePod(),
-      makeStatus(),
-      makePodRepo(),
-      makeProfile(),
-      msg,
-    );
+    const task = buildPrFixTask(makePod(), makeStatus(), makePodRepo(), makeProfile(), msg);
     expect(task).toContain(msg);
   });
 });

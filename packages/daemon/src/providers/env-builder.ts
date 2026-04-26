@@ -1,6 +1,7 @@
 import { CONTAINER_HOME_DIR } from '@autopod/shared';
-import type { MaxCredentials, Profile } from '@autopod/shared';
+import type { FoundryCredentials, Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { getAzureToken } from './azure-token.js';
 import { refreshOAuthToken } from './credential-refresh.js';
 import type { ProviderEnvResult } from './types.js';
 
@@ -73,7 +74,7 @@ export async function buildProviderEnv(
       return buildMaxEnv(profile, logger);
 
     case 'foundry':
-      return buildFoundryEnv(profile);
+      return buildFoundryEnv(profile, logger);
 
     case 'copilot':
       return buildCopilotEnv(profile);
@@ -185,10 +186,24 @@ function buildCopilotEnv(profile: Profile): ProviderEnvResult {
 }
 
 /**
- * Azure Foundry provider — sets env vars for Foundry endpoint.
- * API key (if present) written to a 0400 secret file.
+ * Azure Foundry scope for `cognitiveservices.azure.com` data-plane access.
+ * Used when no apiKey is configured — the daemon acquires a bearer token via
+ * `DefaultAzureCredential` (managed identity in hosted envs, az-login session
+ * locally) and writes it to a secret file the agent CLI reads as its API key.
+ *
+ * Tokens last ~60-90 minutes; long-running pods refresh them via
+ * `getResumeEnv()` on each agent resume — same approach as MAX OAuth.
  */
-function buildFoundryEnv(profile: Profile): ProviderEnvResult {
+const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
+
+/**
+ * Azure Foundry provider — sets endpoint env vars and writes either the
+ * configured API key or a freshly-acquired Entra bearer token into the
+ * container as a secret file. Branches on `apiSurface` so OpenAI-protocol
+ * deployments (GPT, Qwen, etc.) route through Codex's env vars instead of
+ * Claude's.
+ */
+async function buildFoundryEnv(profile: Profile, logger: Logger): Promise<ProviderEnvResult> {
   const creds = profile.providerCredentials;
 
   if (!creds || creds.provider !== 'foundry') {
@@ -197,23 +212,63 @@ function buildFoundryEnv(profile: Profile): ProviderEnvResult {
     );
   }
 
+  const surface = creds.apiSurface ?? 'anthropic';
+  const secretValue = await resolveFoundrySecret(creds, logger);
+
+  return surface === 'openai'
+    ? buildFoundryOpenAiEnv(creds, secretValue)
+    : buildFoundryAnthropicEnv(creds, secretValue);
+}
+
+/**
+ * Acquire the bearer value to inject — explicit apiKey wins; otherwise pull
+ * a short-lived Entra token via the shared helper. Returns `null` only when
+ * an apiKey was explicitly intended to be omitted AND token acquisition
+ * fails — that's a fatal misconfiguration, so we throw instead of silently
+ * spawning an unauthenticated pod.
+ */
+async function resolveFoundrySecret(creds: FoundryCredentials, logger: Logger): Promise<string> {
+  if (creds.apiKey) return creds.apiKey;
+
+  const token = await getAzureToken(FOUNDRY_TOKEN_SCOPE, logger);
+  return token.token;
+}
+
+function buildFoundryAnthropicEnv(creds: FoundryCredentials, secret: string): ProviderEnvResult {
+  const filePath = `${SECRET_DIR}/foundry-api-key`;
   const env: Record<string, string> = {
     CLAUDE_CODE_USE_FOUNDRY: '1',
     ANTHROPIC_BASE_URL: creds.endpoint,
     CLAUDE_FOUNDRY_PROJECT: creds.projectId,
+    ANTHROPIC_API_KEY_FILE: filePath,
   };
-  const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
-  if (creds.apiKey) {
-    const filePath = `${SECRET_DIR}/foundry-api-key`;
-    secretFiles.push({ path: filePath, content: creds.apiKey });
-    env.ANTHROPIC_API_KEY_FILE = filePath;
+  return {
+    env,
+    containerFiles: buildClaudeConfigFiles(),
+    secretFiles: [{ path: filePath, content: secret }],
+    requiresPostExecPersistence: false,
+  };
+}
+
+function buildFoundryOpenAiEnv(creds: FoundryCredentials, secret: string): ProviderEnvResult {
+  const filePath = `${SECRET_DIR}/foundry-openai-key`;
+  const env: Record<string, string> = {
+    OPENAI_BASE_URL: creds.endpoint,
+    OPENAI_API_KEY_FILE: filePath,
+    AZURE_OPENAI_ENDPOINT: creds.endpoint,
+    AZURE_OPENAI_API_KEY_FILE: filePath,
+    CLAUDE_FOUNDRY_PROJECT: creds.projectId,
+  };
+  if (creds.apiVersion) {
+    env.OPENAI_API_VERSION = creds.apiVersion;
+    env.AZURE_OPENAI_API_VERSION = creds.apiVersion;
   }
 
   return {
     env,
     containerFiles: buildClaudeConfigFiles(),
-    secretFiles,
+    secretFiles: [{ path: filePath, content: secret }],
     requiresPostExecPersistence: false,
   };
 }
