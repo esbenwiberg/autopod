@@ -82,5 +82,6 @@ exec env \
   LOG_LEVEL="${LOG_LEVEL:-debug}" \
   ENTRA_CLIENT_ID="${ENTRA_CLIENT_ID:-placeholder}" \
   ENTRA_TENANT_ID="${ENTRA_TENANT_ID:-placeholder}" \
+  AUTOPOD_ALLOW_DEV_AUTH="${AUTOPOD_ALLOW_DEV_AUTH:-1}" \
   AUTOPOD_MOCK_DOCKER="$MOCK_DOCKER" \
   node "$ROOT/packages/daemon/dist/index.js"
