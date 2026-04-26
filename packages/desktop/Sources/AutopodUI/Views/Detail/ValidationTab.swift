@@ -435,6 +435,19 @@ public struct ValidationTab: View {
               .font(.caption2)
               .foregroundStyle(.tertiary)
           }
+          if let body = h.responseBody, !body.isEmpty {
+            ScrollView([.vertical, .horizontal], showsIndicators: true) {
+              Text(body)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 160)
+            .padding(8)
+            .background(Color.black.opacity(0.2))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+          }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -812,6 +825,12 @@ public struct ValidationTab: View {
                 if criterion.type != .none { acTypeBadge(criterion.type) }
                 if let type = result?.validationType { triageBadge(type) }
               }
+              if let reasoning = result?.reasoning, !reasoning.isEmpty {
+                Text(reasoning)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+              screenshotThumbnail(result?.screenshot)
             }
           }
         }
