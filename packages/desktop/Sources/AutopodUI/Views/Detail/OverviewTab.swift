@@ -13,6 +13,7 @@ struct OverviewTab: View {
     var onRejectMemory: (String) -> Void = { _ in }
 
     @State private var replyText = ""
+    @State private var infrastructureExpanded = false
 
     var body: some View {
         ScrollView {
@@ -53,8 +54,8 @@ struct OverviewTab: View {
                     infrastructureSection
                 }
 
-                // Metrics row
-                metricsRow
+                // Metrics
+                metricsCard
 
                 // Commit activity (running/paused or any pod with commits)
                 if pod.commitCount > 0 || pod.status == .running || pod.status == .paused {
@@ -309,32 +310,51 @@ struct OverviewTab: View {
     // MARK: - Profile metadata
 
     private var profileMetadataRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "person.text.rectangle")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-            Text(pod.profileName)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-            if let version = pod.profileSnapshot?.version {
-                Text("v\(version)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(.quaternary, in: Capsule())
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.text.rectangle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
+                Text("Profile")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 42, alignment: .leading)
+                Text(pod.profileName)
+                    .font(.system(.caption, design: .monospaced).weight(.medium))
+                    .foregroundStyle(.primary)
+                if let version = pod.profileSnapshot?.version {
+                    Text("v\(version)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
+                }
+                Spacer()
             }
-            Spacer()
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-            Text(pod.branch)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            .padding(.vertical, 7)
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
+                Text("Branch")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 42, alignment: .leading)
+                Text(pod.branch)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.vertical, 7)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
@@ -378,65 +398,69 @@ struct OverviewTab: View {
     // MARK: - Infrastructure (sidecars + test-pipeline branches)
 
     private var infrastructureSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "cube.box.fill")
-                    .foregroundStyle(.purple)
-                Text("Infrastructure")
-                    .font(.system(.subheadline).weight(.semibold))
-            }
-
-            if !pod.requireSidecars.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sidecars requested")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 6) {
-                        ForEach(pod.requireSidecars, id: \.self) { name in
-                            Text(name)
-                                .font(.system(.caption, design: .monospaced))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.purple.opacity(0.12))
-                                .clipShape(Capsule())
+        DisclosureGroup(isExpanded: $infrastructureExpanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                if !pod.requireSidecars.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Sidecars requested")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            ForEach(pod.requireSidecars, id: \.self) { name in
+                                Text(name)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.purple.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
                         }
                     }
                 }
-            }
 
-            if !pod.sidecarContainerIds.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Running containers")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ForEach(pod.sidecarContainerIds.sorted(by: { $0.key < $1.key }), id: \.key) { name, id in
-                        HStack(spacing: 6) {
-                            Text(name)
-                                .font(.caption.weight(.medium))
-                                .frame(width: 70, alignment: .leading)
-                            Text(String(id.prefix(12)))
+                if !pod.sidecarContainerIds.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Running containers")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(pod.sidecarContainerIds.sorted(by: { $0.key < $1.key }), id: \.key) { name, id in
+                            HStack(spacing: 6) {
+                                Text(name)
+                                    .font(.caption.weight(.medium))
+                                    .frame(width: 70, alignment: .leading)
+                                Text(String(id.prefix(12)))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+
+                if !pod.testRunBranches.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Active test-run branches")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(pod.testRunBranches, id: \.self) { branch in
+                            Text(branch)
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                                 .textSelection(.enabled)
                         }
                     }
                 }
             }
-
-            if !pod.testRunBranches.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Active test-run branches")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ForEach(pod.testRunBranches, id: \.self) { branch in
-                        Text(branch)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-                    }
-                }
+            .padding(.top, 8)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "cube.box.fill")
+                    .foregroundStyle(.purple)
+                    .font(.system(size: 12))
+                Text("Infrastructure")
+                    .font(.system(.subheadline).weight(.semibold))
             }
         }
         .padding(14)
@@ -450,33 +474,70 @@ struct OverviewTab: View {
 
     // MARK: - Metrics
 
-    private var metricsRow: some View {
-        let metrics: [(icon: String, value: String, label: String, color: Color)] = {
-            var items: [(String, String, String, Color)] = [
-                ("clock", pod.duration, "Duration", .primary),
-            ]
-            if let diff = pod.diffStats {
-                items.append(("doc.text", "\(diff.files)", "Files", .primary))
-                items.append(("plus", "\(diff.added)", "Added", .green))
-                items.append(("minus", "\(diff.removed)", "Removed", .red))
-            }
-            items.append(("wrench", "\(events.filter { $0.type == .toolUse }.count)", "Tool calls", .primary))
-            if pod.inputTokens > 0 || pod.costUsd > 0 || pod.status == .running || pod.status == .paused {
-                items.append(("arrow.up.circle", formatTokens(pod.inputTokens), "In tokens", pod.inputTokens > 0 ? .primary : .secondary))
-                items.append(("arrow.down.circle", formatTokens(pod.outputTokens), "Out tokens", pod.outputTokens > 0 ? .primary : .secondary))
-                let costKnown = pod.costUsd > 0
-                let costInProgress = pod.status == .running || pod.status == .paused
-                let costDisplay = (!costKnown && costInProgress) ? "—" : String(format: "$%.3f", pod.costUsd)
-                items.append(("dollarsign.circle", costDisplay, "Cost", costKnown ? .primary : .secondary))
-            }
-            return items
-        }()
+    private var metricsCard: some View {
+        let hasCostData = pod.inputTokens > 0 || pod.costUsd > 0
+            || pod.status == .running || pod.status == .paused
+        let toolCallCount = events.filter { $0.type == .toolUse }.count
 
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
-            ForEach(Array(metrics.enumerated()), id: \.offset) { _, metric in
-                metricItem(icon: metric.icon, value: metric.value, label: metric.label, color: metric.color)
+        return HStack(alignment: .top, spacing: 0) {
+            // Effort column
+            VStack(alignment: .leading, spacing: 8) {
+                Text("EFFORT")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .tracking(0.5)
+
+                metricRow(icon: "clock", value: pod.duration, label: "Duration")
+
+                if let diff = pod.diffStats {
+                    metricRow(icon: "doc.text", value: "\(diff.files)", label: "Files")
+                    metricRow(icon: "plus", value: "+\(diff.added)", label: "Lines added", color: .green)
+                    metricRow(icon: "minus", value: "\(diff.removed)", label: "Lines removed", color: .red)
+                }
+
+                metricRow(icon: "wrench", value: "\(toolCallCount)", label: "Tool calls")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+
+            Divider()
+
+            // Cost column
+            VStack(alignment: .leading, spacing: 8) {
+                Text("COST")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .tracking(0.5)
+
+                if hasCostData {
+                    let costKnown = pod.costUsd > 0
+                    let costInProgress = pod.status == .running || pod.status == .paused
+                    let costDisplay = (!costKnown && costInProgress) ? "—" : String(format: "$%.3f", pod.costUsd)
+
+                    metricRow(icon: "arrow.up.circle",
+                              value: formatTokens(pod.inputTokens),
+                              label: "Tokens in",
+                              color: pod.inputTokens > 0 ? .primary : .secondary)
+                    metricRow(icon: "arrow.down.circle",
+                              value: formatTokens(pod.outputTokens),
+                              label: "Tokens out",
+                              color: pod.outputTokens > 0 ? .primary : .secondary)
+                    metricRow(icon: "dollarsign.circle",
+                              value: costDisplay,
+                              label: "Cost",
+                              color: costKnown ? .primary : .secondary)
+                } else {
+                    Text("No cost data yet")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
         }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func formatTokens(_ count: Int) -> String {
@@ -485,26 +546,22 @@ struct OverviewTab: View {
         return "\(count)"
     }
 
-    private func metricItem(icon: String, value: String, label: String, color: Color = .primary) -> some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+    private func metricRow(icon: String, value: String, label: String, color: Color = .primary) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 0) {
                 Text(value)
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(color)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 8)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Commits
@@ -571,12 +628,17 @@ struct OverviewTab: View {
 
     private func validationSummary(_ checks: ValidationChecks) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Validation")
-                .font(.system(.subheadline).weight(.semibold))
-            HStack(spacing: 16) {
-                validationRow("Smoke Tests", status: checks.smoke, icon: "flame")
-                validationRow("Test Suite", status: checks.tests, icon: "testtube.2")
-                validationRow("Code Review", status: checks.review, icon: "eye")
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal")
+                    .foregroundStyle(.secondary)
+                Text("Validation")
+                    .font(.system(.subheadline).weight(.semibold))
+            }
+            HStack(spacing: 8) {
+                validationChip("Smoke Tests", status: checks.smoke, icon: "flame")
+                validationChip("Test Suite", status: checks.tests, icon: "testtube.2")
+                validationChip("Code Review", status: checks.review, icon: "eye")
+                Spacer()
             }
         }
         .padding(14)
@@ -584,31 +646,29 @@ struct OverviewTab: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    private func validationRow(_ label: String, status: Bool?, icon: String) -> some View {
+    private func validationChip(_ label: String, status: Bool?, icon: String) -> some View {
         let color: Color = switch status {
         case true: .green
         case false: .red
-        case nil: .gray
+        case nil: Color.secondary
         }
         let iconName: String = switch status {
-        case true: "checkmark"
-        case false: "xmark"
-        case nil: "minus"
+        case true: "checkmark.circle.fill"
+        case false: "xmark.circle.fill"
+        case nil: "minus.circle"
         }
-        return VStack(spacing: 6) {
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.1))
-                    .frame(width: 36, height: 36)
-                Image(systemName: iconName)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(color)
-            }
+        return HStack(spacing: 5) {
+            Image(systemName: iconName)
+                .font(.system(size: 11))
+                .foregroundStyle(color)
             Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(.caption)
+                .foregroundStyle(color)
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - Error
