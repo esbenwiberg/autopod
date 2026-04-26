@@ -553,21 +553,92 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
+  @ViewBuilder
   private func acCheckRow(_ check: AcCheckDetail) -> some View {
-    HStack(alignment: .top, spacing: 8) {
-      Image(systemName: check.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-        .font(.system(size: 11))
-        .foregroundStyle(check.passed ? .green : .red)
-        .padding(.top, 1)
-      VStack(alignment: .leading, spacing: 3) {
-        Text(check.criterion).font(.callout)
-        if let type = check.validationType { triageBadge(type) }
-        Text(check.reasoning)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+    let statusColor: Color = check.passed ? .green : .red
+    HStack(alignment: .top, spacing: 0) {
+      Rectangle()
+        .fill(statusColor.opacity(0.7))
+        .frame(width: 3)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
+          Image(systemName: check.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+            .font(.system(size: 13))
+            .foregroundStyle(check.passed ? .green : .red)
+            .padding(.top, 1)
+          Text(check.criterion)
+            .font(.callout.weight(.medium))
+            .fixedSize(horizontal: false, vertical: true)
+          Spacer(minLength: 4)
+          if let type = check.validationType { triageBadge(type) }
+        }
+        if !check.reasoning.isEmpty {
+          Text(check.reasoning)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
         screenshotThumbnail(check.screenshot)
       }
+      .padding(10)
     }
+    .background(Color(nsColor: .controlBackgroundColor))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(statusColor.opacity(0.15), lineWidth: 1))
+  }
+
+  @ViewBuilder
+  private func acCriterionCard(criterion: AcDefinition, result: AcCheckDetail?, index _: Int) -> some View {
+    let statusColor: Color = result.map { $0.passed ? .green : .red } ?? Color.secondary
+    HStack(alignment: .top, spacing: 0) {
+      Rectangle()
+        .fill(statusColor.opacity(0.7))
+        .frame(width: 3)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
+          if let result {
+            Image(systemName: result.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+              .font(.system(size: 13))
+              .foregroundStyle(result.passed ? .green : .red)
+              .padding(.top, 1)
+          } else {
+            Image(systemName: "circle.dashed")
+              .font(.system(size: 13))
+              .foregroundStyle(Color.secondary)
+              .padding(.top, 1)
+          }
+          Text(criterion.test)
+            .font(.callout.weight(.medium))
+            .fixedSize(horizontal: false, vertical: true)
+          Spacer(minLength: 4)
+          HStack(spacing: 4) {
+            if criterion.type != .none { acTypeBadge(criterion.type) }
+            if let type = result?.validationType { triageBadge(type) }
+          }
+        }
+        if let reasoning = result?.reasoning, !reasoning.isEmpty {
+          Text(reasoning)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        screenshotThumbnail(result?.screenshot)
+      }
+      .padding(10)
+    }
+    .background(Color(nsColor: .controlBackgroundColor))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(statusColor.opacity(0.15), lineWidth: 1))
   }
 
   @ViewBuilder
@@ -807,32 +878,7 @@ public struct ValidationTab: View {
             return acChecks.first(where: { $0.criterion == criterion.test })
                 ?? (idx < acChecks.count ? acChecks[idx] : nil)
           }()
-          HStack(alignment: .top, spacing: 8) {
-            if let result {
-              Image(systemName: result.passed ? "checkmark.square.fill" : "xmark.square.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(result.passed ? .green : .red)
-                .padding(.top, 1)
-            } else {
-              Image(systemName: "square")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .padding(.top, 1)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-              Text(criterion.test).font(.callout)
-              HStack(spacing: 6) {
-                if criterion.type != .none { acTypeBadge(criterion.type) }
-                if let type = result?.validationType { triageBadge(type) }
-              }
-              if let reasoning = result?.reasoning, !reasoning.isEmpty {
-                Text(reasoning)
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-              screenshotThumbnail(result?.screenshot)
-            }
-          }
+          acCriterionCard(criterion: criterion, result: result, index: idx)
         }
       }
     }
