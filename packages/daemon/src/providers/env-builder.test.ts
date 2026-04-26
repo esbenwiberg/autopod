@@ -1,6 +1,7 @@
 import type { Profile } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearAzureTokenCache } from './azure-token.js';
 import { buildProviderEnv } from './env-builder.js';
 
 const logger = pino({ level: 'silent' });
@@ -201,23 +202,6 @@ describe('buildProviderEnv', () => {
       expect(result.requiresPostExecPersistence).toBe(false);
     });
 
-    it('omits API key when using managed identity', async () => {
-      const profile = makeProfile({
-        modelProvider: 'foundry',
-        providerCredentials: {
-          provider: 'foundry',
-          endpoint: 'https://foundry.azure.com/v1',
-          projectId: 'my-project',
-          // No apiKey — using managed identity
-        },
-      });
-
-      const result = await buildProviderEnv(profile, 'pod-1', logger);
-
-      expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBe('1');
-      expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
-    });
-
     it('throws when credentials mismatch provider', async () => {
       const profile = makeProfile({
         modelProvider: 'foundry',
@@ -227,6 +211,100 @@ describe('buildProviderEnv', () => {
       await expect(buildProviderEnv(profile, 'pod-1', logger)).rejects.toThrow(
         'missing or mismatched providerCredentials',
       );
+    });
+  });
+
+  describe('foundry provider — managed-identity (no static apiKey)', () => {
+    beforeEach(() => {
+      clearAzureTokenCache();
+      vi.resetModules();
+      vi.doMock('@azure/identity', () => ({
+        DefaultAzureCredential: vi.fn().mockImplementation(() => ({
+          getToken: vi.fn().mockResolvedValue({
+            token: 'entra-bearer-xyz',
+            expiresOnTimestamp: Date.now() + 3600_000,
+          }),
+        })),
+      }));
+    });
+
+    afterEach(() => {
+      vi.doUnmock('@azure/identity');
+    });
+
+    it('acquires an Entra bearer token and writes it to the secret file', async () => {
+      const profile = makeProfile({
+        modelProvider: 'foundry',
+        providerCredentials: {
+          provider: 'foundry',
+          endpoint: 'https://foundry.azure.com/v1',
+          projectId: 'my-project',
+          // No apiKey — should trigger getAzureToken
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBe('1');
+      expect(result.env.ANTHROPIC_BASE_URL).toBe('https://foundry.azure.com/v1');
+      expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBe('/run/autopod/foundry-api-key');
+      expect(result.secretFiles).toHaveLength(1);
+      expect(result.secretFiles[0]?.content).toBe('entra-bearer-xyz');
+    });
+  });
+
+  describe('foundry provider — openai surface', () => {
+    it('routes through OpenAI env vars instead of Anthropic when apiSurface=openai', async () => {
+      const profile = makeProfile({
+        modelProvider: 'foundry',
+        providerCredentials: {
+          provider: 'foundry',
+          endpoint: 'https://my-foundry.openai.azure.com',
+          projectId: 'gpt-deployment',
+          apiKey: 'foundry-openai-key',
+          apiSurface: 'openai',
+          apiVersion: '2024-12-01-preview',
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      // Anthropic env vars must NOT be set on the openai surface
+      expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBeUndefined();
+      expect(result.env.ANTHROPIC_BASE_URL).toBeUndefined();
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBeUndefined();
+
+      // OpenAI/Azure-OpenAI env vars set instead
+      expect(result.env.OPENAI_BASE_URL).toBe('https://my-foundry.openai.azure.com');
+      expect(result.env.AZURE_OPENAI_ENDPOINT).toBe('https://my-foundry.openai.azure.com');
+      expect(result.env.OPENAI_API_KEY_FILE).toBe('/run/autopod/foundry-openai-key');
+      expect(result.env.AZURE_OPENAI_API_KEY_FILE).toBe('/run/autopod/foundry-openai-key');
+      expect(result.env.OPENAI_API_VERSION).toBe('2024-12-01-preview');
+      expect(result.env.AZURE_OPENAI_API_VERSION).toBe('2024-12-01-preview');
+      expect(result.env.CLAUDE_FOUNDRY_PROJECT).toBe('gpt-deployment');
+
+      expect(result.secretFiles).toHaveLength(1);
+      expect(result.secretFiles[0]?.path).toBe('/run/autopod/foundry-openai-key');
+      expect(result.secretFiles[0]?.content).toBe('foundry-openai-key');
+    });
+
+    it('omits api-version env vars when not configured', async () => {
+      const profile = makeProfile({
+        modelProvider: 'foundry',
+        providerCredentials: {
+          provider: 'foundry',
+          endpoint: 'https://my-foundry.openai.azure.com',
+          projectId: 'gpt-deployment',
+          apiKey: 'k',
+          apiSurface: 'openai',
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_API_VERSION).toBeUndefined();
+      expect(result.env.AZURE_OPENAI_API_VERSION).toBeUndefined();
     });
   });
 });

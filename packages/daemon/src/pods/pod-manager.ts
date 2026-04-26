@@ -206,7 +206,9 @@ export function buildPrFixTask(
       if (ci.annotations.length > 0) {
         sections.push('Annotations:');
         for (const ann of ci.annotations) {
-          sections.push(`  - ${sanitizeExternal(ann.path)}: ${sanitizeExternal(ann.message)} [${ann.annotationLevel}]`);
+          sections.push(
+            `  - ${sanitizeExternal(ann.path)}: ${sanitizeExternal(ann.message)} [${ann.annotationLevel}]`,
+          );
         }
       }
       sections.push('');
@@ -1052,24 +1054,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /**
    * Build provider env for resume calls.
-   * Needed because OAuth tokens may have been rotated since the initial spawn.
    *
-   * Before refreshing via the OAuth endpoint, we attempt to recover the latest
-   * credentials directly from the container filesystem — Claude Code writes
-   * rotated tokens there, and our post-exec persistence may have silently failed.
+   * Two providers need fresh env on resume:
+   *  - `max` — Claude Code rotates OAuth tokens during use; persist the
+   *    container's latest creds back to the store, then re-issue.
+   *  - `foundry` (token-auth) — Entra access tokens last ~60-90 minutes,
+   *    so for long-running pods the secret file goes stale. Re-acquire via
+   *    `getAzureToken` (cached if still valid) and rewrite the secret file.
+   *    Only kicks in when the profile has no static apiKey configured.
    */
   async function getResumeEnv(pod: Pod): Promise<Record<string, string> | undefined> {
     const profile = profileStore.get(pod.profileName);
     const provider = profile.modelProvider;
-    // Only MAX provider needs fresh env on resume (token rotation)
-    if (provider !== 'max') return undefined;
+    if (provider !== 'max' && provider !== 'foundry') return undefined;
 
-    // Recover latest tokens from the container before we try to refresh.
+    // Foundry only needs refresh when using bearer-token auth (no static apiKey).
+    if (provider === 'foundry') {
+      const creds = profile.providerCredentials;
+      if (!creds || creds.provider !== 'foundry' || creds.apiKey) {
+        return undefined;
+      }
+    }
+
+    // MAX-specific: recover rotated tokens from the container before refresh.
     // The container is the source of truth — Claude Code rotates tokens during use
     // and writes them to ~/.claude/.credentials.json. If our earlier persistence
     // missed the update, the profile store has a stale (already-invalidated) refresh
     // token and the OAuth refresh will fail with invalid_grant.
-    if (pod.containerId) {
+    if (provider === 'max' && pod.containerId) {
       try {
         await persistRefreshedCredentials(
           pod.containerId,
@@ -1087,11 +1099,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     const result = await buildProviderEnv(profile, pod.id, logger);
-    // Also re-write credential files to container in case tokens were rotated
-    if (result.containerFiles.length > 0 && pod.containerId) {
+    // Re-write credential files to container in case tokens were rotated.
+    // For Foundry token-auth this also rewrites the bearer-token secret file
+    // with whatever getAzureToken returned (cached if still valid, else fresh).
+    if (pod.containerId) {
       const cm = containerManagerFactory.get(pod.executionTarget);
       for (const file of result.containerFiles) {
         await cm.writeFile(pod.containerId, file.path, file.content);
+      }
+      for (const sf of result.secretFiles) {
+        await cm.writeFile(pod.containerId, sf.path, sf.content);
+        await cm.execInContainer(pod.containerId, ['chmod', '0400', sf.path], { timeout: 5_000 });
       }
     }
     return { POD_ID: pod.id, ...result.env };

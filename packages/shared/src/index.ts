@@ -99,6 +99,7 @@ export type {
   AnthropicCredentials,
   MaxCredentials,
   FoundryCredentials,
+  FoundryApiSurface,
 } from './types/model-provider.js';
 
 export type {
