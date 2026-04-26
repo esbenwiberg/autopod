@@ -207,3 +207,80 @@ describe('buildPrFixTask — PI + PII sanitization of reviewer-controlled conten
     expect(task).toContain(msg);
   });
 });
+
+describe('buildPrFixTask — Original task resolution', () => {
+  it('uses seriesDescription for a single-PR series pod (not the per-brief task)', () => {
+    const task = buildPrFixTask(
+      makePod({
+        prMode: 'single',
+        seriesId: 'ser-1',
+        seriesDescription: 'Build OAuth across the auth + profile services',
+        task: 'Brief 3: wire OAuth into profile service',
+      }),
+      makeStatus(),
+      makePodRepo(),
+      makeProfile(),
+    );
+    expect(task).toContain('Original task: Build OAuth across the auth + profile services');
+    expect(task).not.toContain('Brief 3:');
+  });
+
+  it('uses the per-brief task for a stacked-PR series pod (each pod owns its own PR)', () => {
+    const task = buildPrFixTask(
+      makePod({
+        prMode: 'stacked',
+        seriesId: 'ser-2',
+        seriesDescription: 'Whole-feature description',
+        task: 'Brief body for this PR',
+      }),
+      makeStatus(),
+      makePodRepo(),
+      makeProfile(),
+    );
+    expect(task).toContain('Original task: Brief body for this PR');
+    expect(task).not.toContain('Whole-feature description');
+  });
+
+  it('walks linkedPodId to a single-PR series ancestor and uses its seriesDescription', () => {
+    const seriesPod = makePod({
+      id: 'ser-pod-1',
+      prMode: 'single',
+      seriesId: 'ser-3',
+      seriesDescription: 'Series-level overview the fixer needs',
+      task: 'Brief task on the series pod',
+      linkedPodId: null,
+    });
+    const fixPod = makePod({
+      id: 'fix-1',
+      linkedPodId: 'ser-pod-1',
+      prMode: null,
+      seriesId: null,
+      seriesDescription: null,
+      task: 'irrelevant fix-pod task',
+    });
+    const task = buildPrFixTask(fixPod, makeStatus(), makePodRepo([seriesPod]), makeProfile());
+    expect(task).toContain('Original task: Series-level overview the fixer needs');
+    expect(task).not.toContain('irrelevant fix-pod task');
+    expect(task).not.toContain('Brief task on the series pod');
+  });
+
+  it('falls back to the per-pod task when single-PR series has null seriesDescription', () => {
+    const task = buildPrFixTask(
+      makePod({
+        prMode: 'single',
+        seriesId: 'ser-4',
+        seriesDescription: null,
+        task: 'Brief body fallback',
+      }),
+      makeStatus(),
+      makePodRepo(),
+      makeProfile(),
+    );
+    expect(task).toContain('Original task: Brief body fallback');
+  });
+
+  it('uses the pod task for a standalone non-series pod (regression guard)', () => {
+    const task = buildPrFixTask(makePod(), makeStatus(), makePodRepo(), makeProfile());
+    expect(task).toContain('Original task: Add OAuth support');
+  });
+});

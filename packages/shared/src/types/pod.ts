@@ -130,6 +130,12 @@ export interface Pod {
   seriesName: string | null;
   /** Overall spec description (from context.md) for series pods. Used as the PR "Why" section and title instead of the individual brief task. */
   seriesDescription: string | null;
+  /**
+   * Series PR mode this pod participates in: 'single' (all series pods share
+   * one branch + one PR), 'stacked' (each pod owns its own PR), or 'none'
+   * (push branches, no PR). null for non-series pods.
+   */
+  prMode: 'single' | 'stacked' | 'none' | null;
   /** When the dependency pod reached validated and this pod was enqueued. */
   dependencyStartedAt: string | null;
   /**
@@ -225,6 +231,8 @@ export interface CreatePodRequest {
   seriesName?: string | null;
   /** Overall spec description (from context.md) to use as the PR body "Why" section. */
   seriesDescription?: string | null;
+  /** Series PR mode (single / stacked / none). Set by the series route on each created pod. */
+  prMode?: 'single' | 'stacked' | 'none' | null;
   /**
    * Gate the next pod in a stacked series on this pod's PR being merged (complete).
    * Defaults to false — set to true for stacked-series non-root pods.

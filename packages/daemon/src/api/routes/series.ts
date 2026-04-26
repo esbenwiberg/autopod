@@ -126,6 +126,7 @@ export function seriesRoutes(
             seriesId,
             seriesName: body.seriesName,
             seriesDescription: body.seriesDescription ?? null,
+            prMode,
             acceptanceCriteria: brief.acceptanceCriteria,
             options: { agentMode: 'auto', output },
             // Per-brief sidecars (e.g. Dagger engine for a pipeline-wiring pod).

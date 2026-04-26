@@ -62,6 +62,12 @@ export interface NewPod {
   seriesId?: string | null;
   /** Human-readable series name. */
   seriesName?: string | null;
+  /** Overall spec description (from context.md) for series pods. */
+  seriesDescription?: string | null;
+  /** Series PR mode (single / stacked / none). null for non-series pods. */
+  prMode?: 'single' | 'stacked' | 'none' | null;
+  /** Stacked-series gate: wait for parent PR to merge before starting. */
+  waitForMerge?: boolean;
   /** Names of sidecars to spawn for this pod (e.g. `['dagger']`). */
   requireSidecars?: string[] | null;
   /** Auto-approve on validate. */
@@ -301,6 +307,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     seriesId: (row.series_id as string) ?? null,
     seriesName: (row.series_name as string) ?? null,
     seriesDescription: (row.series_description as string) ?? null,
+    prMode: (row.pr_mode as 'single' | 'stacked' | 'none' | null) ?? null,
     dependencyStartedAt: (row.dependency_started_at as string) ?? null,
     waitForMerge: Boolean(row.wait_for_merge),
     autoApprove: Boolean(row.auto_approve),
@@ -341,7 +348,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           output_mode, agent_mode, output_target, validate, promotable,
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, reference_repo_pat, scheduled_job_id,
-          depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description, wait_for_merge,
+          depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description, pr_mode, wait_for_merge,
           require_sidecars, auto_approve, disable_ask_human
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
@@ -349,7 +356,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId,
-          @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription, @waitForMerge,
+          @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription, @prMode, @waitForMerge,
           @requireSidecars, @autoApprove, @disableAskHuman
         )
       `).run({
@@ -384,6 +391,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         seriesId: pod.seriesId ?? null,
         seriesName: pod.seriesName ?? null,
         seriesDescription: pod.seriesDescription ?? null,
+        prMode: pod.prMode ?? null,
         waitForMerge: pod.waitForMerge ? 1 : 0,
         requireSidecars:
           pod.requireSidecars && pod.requireSidecars.length > 0
