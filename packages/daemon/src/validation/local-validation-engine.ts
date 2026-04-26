@@ -468,7 +468,11 @@ async function runBuild(
     result = await containerManager.execInContainer(
       config.containerId,
       ['sh', '-c', config.buildCommand],
-      { cwd: buildCwd, timeout: config.buildTimeout ?? 300_000 },
+      {
+        cwd: buildCwd,
+        timeout: config.buildTimeout ?? 300_000,
+        ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+      },
     );
   } catch (err) {
     const duration = Date.now() - buildStart;
@@ -520,7 +524,11 @@ async function runTests(
     result = await containerManager.execInContainer(
       config.containerId,
       ['sh', '-c', config.testCommand],
-      { cwd: testCwd, timeout: config.testTimeout ?? 600_000 },
+      {
+        cwd: testCwd,
+        timeout: config.testTimeout ?? 600_000,
+        ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+      },
     );
   } catch (err) {
     const duration = Date.now() - testStart;
@@ -573,7 +581,11 @@ async function runLint(
     result = await containerManager.execInContainer(
       config.containerId,
       ['sh', '-c', config.lintCommand],
-      { cwd, timeout: config.lintTimeout ?? 120_000 },
+      {
+        cwd,
+        timeout: config.lintTimeout ?? 120_000,
+        ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+      },
     );
   } catch (err) {
     const duration = Date.now() - lintStart;
@@ -621,7 +633,11 @@ async function runSast(
     result = await containerManager.execInContainer(
       config.containerId,
       ['sh', '-c', config.sastCommand],
-      { cwd, timeout: config.sastTimeout ?? 300_000 },
+      {
+        cwd,
+        timeout: config.sastTimeout ?? 300_000,
+        ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+      },
     );
   } catch (err) {
     const duration = Date.now() - sastStart;

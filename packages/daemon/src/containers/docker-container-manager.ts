@@ -344,12 +344,17 @@ export class DockerContainerManager implements ContainerManager {
   ): Promise<ExecResult> {
     const container = this.docker.getContainer(containerId);
 
+    const envList = options?.env
+      ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
+      : undefined;
+
     const execCreateOptions: Dockerode.ExecCreateOptions = {
       Cmd: command,
       AttachStdout: true,
       AttachStderr: true,
       ...(options?.cwd ? { WorkingDir: options.cwd } : {}),
       ...(options?.user ? { User: options.user } : {}),
+      ...(envList ? { Env: envList } : {}),
     };
 
     const exec = await container.exec(execCreateOptions);
@@ -367,7 +372,7 @@ export class DockerContainerManager implements ContainerManager {
   async execStreaming(
     containerId: string,
     command: string[],
-    options?: ExecOptions & { env?: Record<string, string> },
+    options?: ExecOptions,
   ): Promise<StreamingExecResult> {
     const container = this.docker.getContainer(containerId);
 

@@ -573,6 +573,45 @@ describe('DockerContainerManager', () => {
       );
     });
 
+    it('passes env option as Env array of KEY=VALUE strings', async () => {
+      const muxStream = createMockMuxStream();
+      const mockExec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+      };
+      container.exec.mockResolvedValue(mockExec);
+
+      await manager.execInContainer('abc123', ['env'], {
+        env: {
+          VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: '{"endpointCredentials":[]}',
+          OTHER_VAR: 'value',
+        },
+      });
+
+      expect(container.exec).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Env: expect.arrayContaining([
+            'VSS_NUGET_EXTERNAL_FEED_ENDPOINTS={"endpointCredentials":[]}',
+            'OTHER_VAR=value',
+          ]),
+        }),
+      );
+    });
+
+    it('does not include Env field when env option is omitted', async () => {
+      const muxStream = createMockMuxStream();
+      const mockExec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+      };
+      container.exec.mockResolvedValue(mockExec);
+
+      await manager.execInContainer('abc123', ['ls']);
+
+      const call = container.exec.mock.calls[0][0];
+      expect(call).not.toHaveProperty('Env');
+    });
+
     it('returns exit code from exec inspection', async () => {
       const muxStream = createMockMuxStream('', 'error occurred');
       const mockExec = {

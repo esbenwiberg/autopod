@@ -282,14 +282,16 @@ export async function validateRegistryFiles(
   containerManager: ContainerManager,
   containerId: string,
   registryFiles: RegistryFile[],
+  extraEnv?: Record<string, string>,
 ): Promise<void> {
+  const envOption = extraEnv ? { env: extraEnv } : {};
   for (const file of registryFiles) {
     if (file.path.endsWith('.npmrc')) {
       // Quick check: npm config parse
       const result = await containerManager.execInContainer(
         containerId,
         ['sh', '-c', 'npm config list --location=project 2>&1'],
-        { cwd: '/workspace', timeout: 15_000 },
+        { cwd: '/workspace', timeout: 15_000, ...envOption },
       );
       if (result.exitCode !== 0) {
         throw new Error(
@@ -303,7 +305,7 @@ export async function validateRegistryFiles(
       const result = await containerManager.execInContainer(
         containerId,
         ['sh', '-c', `dotnet nuget list source --configfile ${file.path} 2>&1`],
-        { cwd: '/workspace', timeout: 30_000 },
+        { cwd: '/workspace', timeout: 30_000, ...envOption },
       );
       if (result.exitCode !== 0) {
         const output = `${result.stdout}\n${result.stderr}`.trim();
@@ -328,7 +330,7 @@ export async function validateRegistryFiles(
           // or 0 (empty result). If auth fails, dotnet prints NU1301 and exits non-zero.
           `dotnet nuget search "__autopod_auth_probe__" --configfile ${file.path} --take 1 2>&1`,
         ],
-        { cwd: '/workspace', timeout: 60_000 },
+        { cwd: '/workspace', timeout: 60_000, ...envOption },
       );
       // NU1301 = "Unable to load the service index" (auth failure or unreachable)
       if (authCheck.stdout.includes('NU1301') || authCheck.stderr.includes('NU1301')) {

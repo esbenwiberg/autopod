@@ -241,10 +241,16 @@ export class AciContainerManager implements ContainerManager {
     // ACI exec API: runs a command inside a running container
     const terminalSize = { rows: 24, cols: 80 };
 
+    // Build environment prefix for per-call env vars (mirrors execStreaming).
+    const envPrefix = options?.env
+      ? `${Object.entries(options.env)
+          .map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`)
+          .join(' && ')} && `
+      : '';
+
     // Build the full command — if cwd is specified, wrap with cd
-    const fullCommand = options?.cwd
-      ? `cd ${options.cwd} && ${command.join(' ')}`
-      : command.join(' ');
+    const cwdPrefix = options?.cwd ? `cd ${options.cwd} && ` : '';
+    const fullCommand = `${envPrefix}${cwdPrefix}${command.join(' ')}`;
 
     const execResult = await this.client.containers.executeCommand(
       this.config.resourceGroup,
@@ -279,7 +285,7 @@ export class AciContainerManager implements ContainerManager {
   async execStreaming(
     containerId: string,
     command: string[],
-    options?: ExecOptions & { env?: Record<string, string> },
+    options?: ExecOptions,
   ): Promise<StreamingExecResult> {
     const stdoutStream = new PassThrough();
     const stderrStream = new PassThrough();

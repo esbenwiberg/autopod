@@ -88,6 +88,7 @@ import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import {
   CREDENTIAL_GUARD_HOOK,
+  buildNuGetCredentialEnv,
   buildNuGetSecretFile,
   buildRegistryFiles,
   ensureNuGetCredentialProvider,
@@ -2810,10 +2811,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        // Early validation: verify registry configs are parseable before agent starts
+        // Early validation: verify registry configs are parseable before agent starts.
+        // Pass the NuGet credential env so the auth probe (`dotnet nuget search`) can
+        // actually authenticate against the private feed — execInContainer otherwise
+        // inherits an empty VSS_NUGET_EXTERNAL_FEED_ENDPOINTS from the image and
+        // silently 401s.
         if (registryFiles.length > 0) {
+          const probeEnv = buildNuGetCredentialEnv(profile.privateRegistries, effectiveRegistryPat);
           try {
-            await validateRegistryFiles(containerManager, containerId, registryFiles);
+            await validateRegistryFiles(
+              containerManager,
+              containerId,
+              registryFiles,
+              Object.keys(probeEnv).length > 0 ? probeEnv : undefined,
+            );
             logger.info({ podId }, 'Registry config validation passed');
           } catch (regErr) {
             logger.error(
@@ -4373,6 +4384,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
           hasWebUi: profile.hasWebUi ?? true,
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
+          // Inject NuGet credential env so validation's `dotnet build`/`dotnet test` can
+          // authenticate against private feeds. Without this, cold-cache restores
+          // hit Azure Artifacts without a PAT and fail with NU1301 401. The agent
+          // path gets the same value via the agent shim; this restores parity for
+          // direct execInContainer calls in the validation engine.
+          extraExecEnv: ((): Record<string, string> | undefined => {
+            const pat = profile.registryPat ?? profile.adoPat ?? null;
+            const env = buildNuGetCredentialEnv(profile.privateRegistries, pat);
+            return Object.keys(env).length > 0 ? env : undefined;
+          })(),
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;

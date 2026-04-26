@@ -397,6 +397,20 @@ describe('validateRegistryFiles', () => {
     // npm config + dotnet nuget list + dotnet nuget search = 3 calls
     expect(cm.execInContainer).toHaveBeenCalledTimes(3);
   });
+
+  it('forwards extraEnv to every execInContainer call so the auth probe sees creds', async () => {
+    const cm = mockCm({
+      'dotnet nuget list': { stdout: 'Sources', stderr: '', exitCode: 0 },
+      'dotnet nuget search': { stdout: 'No results found.', stderr: '', exitCode: 0 },
+    });
+    const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
+    const env = { VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: '{"endpointCredentials":[]}' };
+    await validateRegistryFiles(cm, 'ctr-1', files, env);
+    const calls = (cm.execInContainer as ReturnType<typeof vi.fn>).mock.calls;
+    for (const [, , options] of calls) {
+      expect(options.env).toEqual(env);
+    }
+  });
 });
 
 describe('ensureNuGetCredentialProvider', () => {

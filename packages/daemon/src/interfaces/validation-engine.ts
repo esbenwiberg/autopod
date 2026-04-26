@@ -64,6 +64,16 @@ export interface ValidationEngineConfig {
   /** Whether the project has a web frontend. When false, the AC classifier will not
    *  produce web-ui checks and agents are not told to use validate_in_browser. Default true. */
   hasWebUi?: boolean;
+  /**
+   * Per-exec env vars injected into build/test/lint/SAST commands.
+   *
+   * Used to pass private-feed credentials (e.g. VSS_NUGET_EXTERNAL_FEED_ENDPOINTS for
+   * the Azure Artifacts Credential Provider) without baking them into the container's
+   * creation env, which would expose them via `docker inspect`. The runtime/agent path
+   * already gets these via the agent shim; validation runs `dotnet build` directly via
+   * execInContainer and would otherwise see no creds — causing NU1301 on cold caches.
+   */
+  extraExecEnv?: Record<string, string>;
 }
 
 export interface ValidationPhaseCallbacks {

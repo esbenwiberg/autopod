@@ -31,6 +31,13 @@ export interface ExecOptions {
   timeout?: number;
   /** Run the command as this user inside the container (e.g. 'root'). */
   user?: string;
+  /**
+   * Extra env vars to set on the exec'd process (in addition to the container's
+   * main-process env). Used to inject per-call secrets like the NuGet credential
+   * provider's VSS_NUGET_EXTERNAL_FEED_ENDPOINTS without baking them into the
+   * container's creation env (which would expose them via `docker inspect`).
+   */
+  env?: Record<string, string>;
 }
 
 export interface StreamingExecResult {
@@ -72,6 +79,6 @@ export interface ContainerManager {
   execStreaming(
     containerId: string,
     command: string[],
-    options?: ExecOptions & { env?: Record<string, string> },
+    options?: ExecOptions,
   ): Promise<StreamingExecResult>;
 }
