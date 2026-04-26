@@ -291,6 +291,35 @@ describe('ProfileStore', () => {
       const result = store.update('my-app', {});
       expect(result.name).toBe('my-app');
     });
+
+    it('should persist codeIntelligence flags through update', () => {
+      store.create(validInput);
+      const updated = store.update('my-app', {
+        codeIntelligence: { serena: true, roslynCodeLens: false },
+      });
+      expect(updated.codeIntelligence).toEqual({ serena: true, roslynCodeLens: false });
+      // Round-trip via get to confirm it was actually written, not just echoed
+      expect(store.get('my-app').codeIntelligence).toEqual({
+        serena: true,
+        roslynCodeLens: false,
+      });
+    });
+
+    it('should clear codeIntelligence when set to null', () => {
+      store.create({
+        ...validInput,
+        codeIntelligence: { serena: true },
+      });
+      const updated = store.update('my-app', { codeIntelligence: null });
+      expect(updated.codeIntelligence).toBeNull();
+    });
+
+    it('should persist reviewerModel through update', () => {
+      store.create(validInput);
+      const updated = store.update('my-app', { reviewerModel: 'sonnet' });
+      expect(updated.reviewerModel).toBe('sonnet');
+      expect(store.get('my-app').reviewerModel).toBe('sonnet');
+    });
   });
 
   describe('delete', () => {

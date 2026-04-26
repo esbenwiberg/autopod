@@ -855,6 +855,22 @@ public struct ProfileEditorView: View {
             .textFieldStyle(.roundedBorder)
             .font(.system(.callout, design: .monospaced))
         }
+        fieldRow("Lint Command", help: "Runs before build. Common: 'npm run lint', 'biome check'. Leave empty to skip.") {
+            TextField("Optional", text: Binding(
+                get: { profile.lintCommand ?? "" },
+                set: { profile.lintCommand = $0.isEmpty ? nil : $0 }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(.callout, design: .monospaced))
+        }
+        fieldRow("SAST Command", help: "Static security analysis. Runs after lint. Common: 'semgrep ci', 'snyk test'. Leave empty to skip.") {
+            TextField("Optional", text: Binding(
+                get: { profile.sastCommand ?? "" },
+                set: { profile.sastCommand = $0.isEmpty ? nil : $0 }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(.callout, design: .monospaced))
+        }
         fieldRow("Health Path", help: "HTTP endpoint polled to determine when the app is ready (expects 200 OK).") {
             TextField("/", text: $profile.healthPath)
                 .textFieldStyle(.roundedBorder)
@@ -878,6 +894,22 @@ public struct ProfileEditorView: View {
             }
             fieldRow("Test", help: "Max seconds for the test command before it's killed.") {
                 Stepper("\(profile.testTimeout)s", value: $profile.testTimeout, in: 60...3600, step: 60)
+                    .frame(width: 110)
+            }
+        }
+        HStack(spacing: 24) {
+            fieldRow("Lint", help: "Max seconds for the lint command before it's killed.") {
+                Stepper("\(profile.lintTimeout ?? 120)s", value: Binding(
+                    get: { profile.lintTimeout ?? 120 },
+                    set: { profile.lintTimeout = $0 }
+                ), in: 10...600, step: 10)
+                    .frame(width: 110)
+            }
+            fieldRow("SAST", help: "Max seconds for the SAST command before it's killed.") {
+                Stepper("\(profile.sastTimeout ?? 300)s", value: Binding(
+                    get: { profile.sastTimeout ?? 300 },
+                    set: { profile.sastTimeout = $0 }
+                ), in: 10...1800, step: 30)
                     .frame(width: 110)
             }
         }

@@ -153,6 +153,11 @@ const checkpointPolicySchema = z.object({
   onInjection: scanOutcomeSchema,
 });
 
+const codeIntelligenceConfigSchema = z.object({
+  serena: z.boolean().optional(),
+  roslynCodeLens: z.boolean().optional(),
+});
+
 const securityScanPolicySchema = z.object({
   detectors: z.object({
     secrets: z.object({ enabled: z.boolean() }),
@@ -246,6 +251,8 @@ const createProfileBaseSchema = z.object({
   smokePages: z.array(smokePageSchema).nullable().default([]),
   maxValidationAttempts: z.number().int().min(1).max(10).nullable().default(3),
   defaultModel: z.string().nullable().default('opus'),
+  /** Optional reviewer model for AC validation / task review. Falls back to defaultModel when null. */
+  reviewerModel: z.string().nullable().default(null),
   defaultRuntime: z.enum(['claude', 'codex', 'copilot']).nullable().default('claude'),
   executionTarget: z.enum(['local', 'aci']).nullable().default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),
@@ -304,6 +311,7 @@ const createProfileBaseSchema = z.object({
   trustedSource: z.boolean().nullable().default(false),
   testPipeline: testPipelineConfigSchema.nullable().default(null),
   securityScan: securityScanPolicySchema.nullable().default(null),
+  codeIntelligence: codeIntelligenceConfigSchema.nullable().default(null),
 });
 
 // Every nullable field on the base schema except identity/metadata. On a
