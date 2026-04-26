@@ -2655,6 +2655,8 @@ public struct ProfileEditorView: View {
             skillsOverrideCard(field: field)
         case "privateRegistries":
             privateRegistriesOverrideCard(field: field)
+        case "codeIntelligence":
+            codeIntelligenceOverrideCard(field: field)
 
         default:
             // Placeholder for unmapped keys — shouldn't fire with a full catalog.
@@ -3332,6 +3334,30 @@ public struct ProfileEditorView: View {
                 }
             }
         )
+    }
+
+    private func codeIntelligenceOverrideCard(field: ProfileOverrideField) -> some View {
+        let parentCi = editorPayload?.parent?.codeIntelligence
+        let parentSerena = parentCi?.serena ?? false
+        let parentRoslyn = parentCi?.roslynCodeLens ?? false
+        return overrideCardShell(field: field) {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $profile.codeIntelligenceSerena) {
+                    HStack(spacing: 4) {
+                        Text("Serena (LSP navigation)")
+                        HelpBadge(text: "Installs Serena via pip and injects it as a stdio MCP server.")
+                    }
+                }
+                Toggle(isOn: $profile.codeIntelligenceRoslynCodeLens) {
+                    HStack(spacing: 4) {
+                        Text("Roslyn CodeLens (C# DI analysis)")
+                        HelpBadge(text: "Installs roslyn-codelens-mcp and injects it as a stdio MCP server. Requires a dotnet template.")
+                    }
+                }
+                .disabled(profile.template != .dotnet9 && profile.template != .dotnet10 && profile.template != .dotnet10Go)
+            }
+            parentLine("Parent: Serena \(parentSerena ? "on" : "off") · Roslyn \(parentRoslyn ? "on" : "off")")
+        }
     }
 
     /// Generic card for merge-special arrays: header badge + mode picker +
