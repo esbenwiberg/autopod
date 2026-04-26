@@ -14,13 +14,13 @@ struct SummaryTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Task brief — anchors everything else
-                promptCard
-
-                // Session quality — behavioural telemetry
+                // Session quality — behavioural telemetry, headline signal
                 if let signals = quality {
                     SessionQualityCard(signals: signals)
                 }
+
+                // Task brief — anchors everything else
+                promptCard
 
                 // Plan
                 if let plan = pod.plan {

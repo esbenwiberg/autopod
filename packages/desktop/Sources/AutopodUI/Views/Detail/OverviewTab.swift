@@ -11,9 +11,13 @@ struct OverviewTab: View {
     var pendingMemories: [MemoryEntry] = []
     var onApproveMemory: (String) -> Void = { _ in }
     var onRejectMemory: (String) -> Void = { _ in }
+    /// Optional closure for fetching session-quality signals. When nil
+    /// (previews, tests without daemon), the Quality column shows an empty state.
+    var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
 
     @State private var replyText = ""
     @State private var infrastructureExpanded = false
+    @State private var quality: PodQualitySignals? = nil
 
     var body: some View {
         ScrollView {
@@ -81,6 +85,20 @@ struct OverviewTab: View {
                 activityFeed
             }
             .padding(20)
+        }
+        .task(id: pod.id) {
+            await fetchQuality()
+        }
+    }
+
+    // MARK: - Quality
+
+    private func fetchQuality() async {
+        guard let loadQuality else { return }
+        do {
+            quality = try await loadQuality(pod.id)
+        } catch {
+            quality = nil
         }
     }
 
@@ -535,9 +553,60 @@ struct OverviewTab: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
+
+            Divider()
+
+            // Quality column
+            VStack(alignment: .leading, spacing: 8) {
+                Text("QUALITY")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .tracking(0.5)
+
+                if let signals = quality {
+                    let scoreDisplay = signals.score.map { "\($0)/100" } ?? "—"
+                    metricRow(icon: "checkmark.seal",
+                              value: scoreDisplay,
+                              label: "Score",
+                              color: qualityColor(signals.grade))
+
+                    let readEditDisplay = signals.editCount == 0
+                        ? "—"
+                        : String(format: "%.1f", signals.readEditRatio)
+                    metricRow(icon: "doc.text.magnifyingglass",
+                              value: readEditDisplay,
+                              label: "Read / Edit")
+
+                    metricRow(icon: "eye.slash",
+                              value: "\(signals.editsWithoutPriorRead)",
+                              label: "Blind edits")
+                    metricRow(icon: "arrow.triangle.2.circlepath",
+                              value: "\(signals.editChurnCount)",
+                              label: "Churn")
+                    metricRow(icon: "hand.raised",
+                              value: "\(signals.userInterrupts)",
+                              label: "Interrupts")
+                } else {
+                    Text("No quality data yet")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
         }
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func qualityColor(_ grade: String) -> Color {
+        switch grade.lowercased() {
+        case "green": return .green
+        case "yellow": return .yellow
+        case "red": return .red
+        default: return .secondary
+        }
     }
 
     private func formatTokens(_ count: Int) -> String {

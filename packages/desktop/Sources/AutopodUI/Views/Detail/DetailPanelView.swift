@@ -108,7 +108,7 @@ public struct DetailPanelView: View {
             // SwiftTerm NSView (and its scrollback buffer) isn't destroyed.
             ZStack {
                 switch selectedTab {
-                case .overview:   OverviewTab(pod: pod, events: events, actions: actions)
+                case .overview:   OverviewTab(pod: pod, events: events, actions: actions, loadQuality: loadQuality)
                 case .logs:       LogStreamView(
                     events: events,
                     sessionBranch: pod.branch,
