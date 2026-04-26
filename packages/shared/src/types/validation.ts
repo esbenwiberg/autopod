@@ -47,6 +47,8 @@ export interface HealthResult {
   url: string;
   responseCode: number | null;
   duration: number;
+  /** Response body from the health endpoint (truncated to 2 KB, only on pass) */
+  responseBody?: string;
   /** Stdout/stderr captured from the start command (only populated on failure for diagnostics) */
   startOutput?: string;
 }

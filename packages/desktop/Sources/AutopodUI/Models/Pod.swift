@@ -93,9 +93,11 @@ public struct HealthCheckDetail: Sendable {
     public let url: String
     public let responseCode: Int?
     public let duration: Int
-    public init(status: String, url: String, responseCode: Int?, duration: Int) {
+    public let responseBody: String?
+    public init(status: String, url: String, responseCode: Int?, duration: Int, responseBody: String? = nil) {
         self.status = status; self.url = url
         self.responseCode = responseCode; self.duration = duration
+        self.responseBody = responseBody
     }
 }
 
@@ -371,7 +373,8 @@ public struct ValidationProgress: Sendable {
             if let h = result.healthResult {
                 healthDetail = HealthCheckDetail(
                     status: h.status, url: h.url,
-                    responseCode: h.responseCode, duration: h.duration
+                    responseCode: h.responseCode, duration: h.duration,
+                    responseBody: h.responseBody
                 )
             }
         case .pages:

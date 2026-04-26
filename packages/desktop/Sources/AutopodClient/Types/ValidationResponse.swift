@@ -57,6 +57,7 @@ public struct HealthResultResponse: Codable, Sendable {
   public let url: String
   public let responseCode: Int?
   public let duration: Int
+  public let responseBody: String?
 }
 
 public struct PageResultResponse: Codable, Sendable {

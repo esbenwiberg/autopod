@@ -702,7 +702,9 @@ async function runHealthCheck(
       if (response.status >= 200 && response.status < 300) {
         const duration = Date.now() - healthStart;
         log?.info({ url, status: response.status, duration }, 'health check passed');
-        return { status: 'pass' as const, url, responseCode: response.status, duration };
+        const rawBody = await response.text().catch(() => '');
+        const responseBody = rawBody.slice(0, 2_000) || undefined;
+        return { status: 'pass' as const, url, responseCode: response.status, duration, responseBody };
       }
 
       log?.debug({ url, status: response.status }, 'health check got non-2xx, retrying');
