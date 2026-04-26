@@ -1,6 +1,7 @@
 import type {
   ActionPolicy,
   AgentMode,
+  CodeIntelligenceConfig,
   EscalationConfig,
   InjectedClaudeMdSection,
   InjectedMcpServer,
@@ -167,6 +168,9 @@ export function rowToProfile(
     securityScan: row.security_scan
       ? (JSON.parse(row.security_scan as string) as SecurityScanPolicy)
       : null,
+    codeIntelligence: row.code_intelligence
+      ? (JSON.parse(row.code_intelligence as string) as CodeIntelligenceConfig)
+      : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -287,7 +291,7 @@ export function createProfileStore(
           issue_watcher_enabled, issue_watcher_label_prefix,
           pim_activations,
           merge_strategy,
-          sidecars, trusted_source, test_pipeline, security_scan,
+          sidecars, trusted_source, test_pipeline, security_scan, code_intelligence,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand, @buildWorkDir,
@@ -304,7 +308,7 @@ export function createProfileStore(
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
           @pimActivations,
           @mergeStrategy,
-          @sidecars, @trustedSource, @testPipeline, @securityScan,
+          @sidecars, @trustedSource, @testPipeline, @securityScan, @codeIntelligence,
           @createdAt, @updatedAt
         )
       `).run({
@@ -372,6 +376,7 @@ export function createProfileStore(
               : 0,
         testPipeline: parsed.testPipeline ? JSON.stringify(parsed.testPipeline) : null,
         securityScan: parsed.securityScan ? JSON.stringify(parsed.securityScan) : null,
+        codeIntelligence: parsed.codeIntelligence ? JSON.stringify(parsed.codeIntelligence) : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -687,6 +692,12 @@ export function createProfileStore(
       if (parsed.securityScan !== undefined) {
         setClauses.push('security_scan = @securityScan');
         fieldMap.securityScan = parsed.securityScan ? JSON.stringify(parsed.securityScan) : null;
+      }
+      if (parsed.codeIntelligence !== undefined) {
+        setClauses.push('code_intelligence = @codeIntelligence');
+        fieldMap.codeIntelligence = parsed.codeIntelligence
+          ? JSON.stringify(parsed.codeIntelligence)
+          : null;
       }
 
       if (setClauses.length === 0) {

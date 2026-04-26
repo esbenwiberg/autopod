@@ -26,6 +26,7 @@ import type {
   ReferenceRepo,
   RequestCredentialPayload,
   SastResult,
+  StdioInjectedMcpServer,
   TaskReviewResult,
   ValidationFinding,
   ValidationOverride,
@@ -2460,17 +2461,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // path; settings.json mcpServers is not loaded by the Claude Code version in containers.
           try {
             const wsMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
-            const wsProxiedServers = wsMcpServers.map((s) => ({
+            const wsHttpServers = wsMcpServers.filter((s) => s.type !== 'stdio');
+            const wsProxiedServers = wsHttpServers.map((s) => ({
               name: s.name,
               url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(s.name)}/${podId}`,
             }));
             const wsToken = deps.sessionTokenIssuer?.generate(podId);
             const wsAuthHeader = wsToken ? { Authorization: `Bearer ${wsToken}` } : undefined;
 
-            const injectedServers: Record<
-              string,
-              { type: string; url: string; headers?: Record<string, string> }
-            > = {
+            const wsStdioServers = buildCodeIntelligenceServers(profile);
+            const injectedServers: Record<string, unknown> = {
               escalation: {
                 type: 'http',
                 url: `${mcpBaseUrl}/mcp/${podId}`,
@@ -2480,6 +2480,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 wsProxiedServers.map((s) => [
                   s.name,
                   { type: 'http', url: s.url, ...(wsAuthHeader && { headers: wsAuthHeader }) },
+                ]),
+              ),
+              ...Object.fromEntries(
+                wsStdioServers.map((s) => [
+                  s.name,
+                  {
+                    type: 'stdio',
+                    command: s.command,
+                    ...(s.args && { args: s.args }),
+                    ...(s.env && { env: s.env }),
+                  },
                 ]),
               ),
             };
@@ -2528,9 +2539,58 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profile.claudeMdSections,
         );
 
-        // Rewrite injected MCP server URLs to route through daemon proxy
+        // Build stdio MCP servers from codeIntelligence profile flags.
+        // These run as local subprocesses inside the container and bypass the daemon proxy.
+        const stdioMcpServers = buildCodeIntelligenceServers(profile);
+
+        // Write stdio servers to /workspace/.mcp.json so Claude Code picks them up automatically.
+        if (stdioMcpServers.length > 0) {
+          try {
+            let existingMcp: Record<string, unknown> = {};
+            try {
+              const raw = await containerManager.readFile(containerId, '/workspace/.mcp.json');
+              existingMcp = JSON.parse(raw) as Record<string, unknown>;
+            } catch {
+              // File absent or unreadable — start fresh
+            }
+            const existingServers =
+              existingMcp.mcpServers && typeof existingMcp.mcpServers === 'object'
+                ? (existingMcp.mcpServers as Record<string, unknown>)
+                : {};
+            const stdioEntries = Object.fromEntries(
+              stdioMcpServers.map((s) => [
+                s.name,
+                {
+                  type: 'stdio',
+                  command: s.command,
+                  ...(s.args && { args: s.args }),
+                  ...(s.env && { env: s.env }),
+                },
+              ]),
+            );
+            await containerManager.writeFile(
+              containerId,
+              '/workspace/.mcp.json',
+              JSON.stringify(
+                { ...existingMcp, mcpServers: { ...existingServers, ...stdioEntries } },
+                null,
+                2,
+              ),
+            );
+            logger.info(
+              { podId, servers: stdioMcpServers.map((s) => s.name) },
+              'Stdio MCP servers written to .mcp.json',
+            );
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to write stdio MCP servers to .mcp.json');
+          }
+        }
+
+        // Rewrite injected MCP server URLs to route through daemon proxy.
+        // Only HTTP servers go through the proxy — stdio servers are handled above.
         // Agent sees proxy URLs, daemon handles auth injection + PII stripping
-        const proxiedMcpServers = mergedMcpServers.map((s) => ({
+        const httpMcpServers = mergedMcpServers.filter((s) => s.type !== 'stdio');
+        const proxiedMcpServers = httpMcpServers.map((s) => ({
           ...s,
           url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(s.name)}/${podId}`,
           // Don't expose auth headers to agent — proxy injects them
@@ -2562,7 +2622,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const systemInstructions = generateSystemInstructions(profile, pod, mcpUrl, {
           injectedSections: resolvedSections,
-          injectedMcpServers: proxiedMcpServers,
+          injectedMcpServers: [...proxiedMcpServers, ...stdioMcpServers],
           availableActions,
           injectedSkills: mergedSkills.filter((s) => resolvedSkillNames.includes(s.name)),
           memories: sessionMemories.length > 0 ? sessionMemories : undefined,
@@ -5706,4 +5766,43 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
     },
   };
+}
+
+/**
+ * Translate profile.codeIntelligence flags into StdioInjectedMcpServer entries.
+ * These are written directly to /workspace/.mcp.json — they bypass the daemon proxy
+ * because they are local subprocesses inside the container, not remote HTTP servers.
+ */
+function buildCodeIntelligenceServers(profile: Profile): StdioInjectedMcpServer[] {
+  const servers: StdioInjectedMcpServer[] = [];
+  if (profile.codeIntelligence?.serena) {
+    servers.push({
+      type: 'stdio',
+      name: 'serena',
+      command: 'serena',
+      args: ['--project', '/workspace'],
+      description:
+        'LSP-backed semantic code navigation. Provides go-to-definition, find-references, ' +
+        'type hierarchy, and barrel-export resolution for TypeScript (tsserver) and C# (Roslyn).',
+      toolHints: [
+        'Use for cross-file type navigation, resolving barrel exports, and finding all callers of a symbol',
+        'Prefer over grep for type-aware queries — tsserver resolves path aliases and declaration merging',
+      ],
+    });
+  }
+  if (profile.codeIntelligence?.roslynCodeLens) {
+    servers.push({
+      type: 'stdio',
+      name: 'roslyn-codelens',
+      command: 'roslyn-codelens-mcp',
+      description:
+        'Roslyn-backed C# DI analysis. Use get_di_registrations to trace which concrete type ' +
+        'the DI container injects for an interface, and find_implementations for interface resolution.',
+      toolHints: [
+        'Call get_di_registrations before navigating DI-heavy code — saves tracing through registrations manually',
+        'Use find_implementations to resolve interface → concrete type across the full solution',
+      ],
+    });
+  }
+  return servers;
 }
