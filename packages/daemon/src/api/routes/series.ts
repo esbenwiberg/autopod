@@ -10,6 +10,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { WorktreeManager } from '../../interfaces/worktree-manager.js';
 import type { PodManager } from '../../pods/index.js';
+import { selectGitPat } from '../../profiles/profile-pat.js';
 import type { ProfileStore } from '../../profiles/profile-store.js';
 
 interface ParsedBrief {
@@ -273,7 +274,7 @@ export function seriesRoutes(
         repoUrl: profile.repoUrl,
         branch: body.branch,
         relPath: body.path,
-        pat: profile.adoPat ?? profile.githubPat ?? undefined,
+        pat: selectGitPat(profile),
       });
 
       if (contents.files.length === 0) {

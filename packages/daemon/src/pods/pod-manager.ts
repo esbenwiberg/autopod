@@ -62,6 +62,7 @@ import type {
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
+import { selectGitPat } from '../profiles/index.js';
 import type { ProfileStore } from '../profiles/index.js';
 import {
   buildClaudeConfigFiles,
@@ -1905,7 +1906,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               repoUrl: profile.repoUrl,
               branch: pod.branch,
               baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
-              pat: profile.adoPat ?? profile.githubPat ?? undefined,
+              pat: selectGitPat(profile),
               sessionId: pod.id,
             });
             worktreePath = result.worktreePath;
@@ -3119,7 +3120,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitActivityStatus(podId, 'Pushing artifact branch…');
             const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
             await mkdir(tempWorktreeParent, { recursive: true });
-            const pat = profile.adoPat ?? profile.githubPat ?? undefined;
+            const pat = selectGitPat(profile);
             const worktreeResult = await worktreeManager.create({
               repoUrl: profile.repoUrl,
               branch: repoBranch,
@@ -5717,7 +5718,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Push the branch to the remote — intermediate series pods (output='branch') skip this
       // during normal completion, so the branch may only exist locally. Pass the PAT explicitly
       // because the in-memory cache may be cold after a daemon restart.
-      const retryPat = profile.adoPat ?? profile.githubPat ?? undefined;
+      const retryPat = selectGitPat(profile);
       try {
         await worktreeManager.mergeBranch({
           worktreePath: pod.worktreePath,
