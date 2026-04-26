@@ -553,7 +553,6 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
-  @ViewBuilder
   private func acCheckRow(_ check: AcCheckDetail) -> some View {
     let statusColor: Color = check.passed ? .green : .red
     HStack(alignment: .top, spacing: 0) {

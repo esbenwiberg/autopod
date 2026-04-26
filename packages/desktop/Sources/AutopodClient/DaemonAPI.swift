@@ -492,7 +492,7 @@ public actor DaemonAPI {
       if let empty = EmptyResponse() as? T { return empty }
       throw DaemonError.decodingError("Expected empty response for 204")
     case 401:
-      throw DaemonError.unauthorized
+      throw DaemonError.unauthorized(decodeErrorMessage(data))
     case 404:
       throw DaemonError.notFound(path)
     case 400:
@@ -502,6 +502,24 @@ public actor DaemonAPI {
       let msg = String(data: data, encoding: .utf8) ?? "Unknown error"
       throw DaemonError.serverError(http.statusCode, msg)
     }
+  }
+
+  /// Extract a human-readable message from a daemon error body shaped as
+  /// `{"error": "...", "message": "..."}`. Falls back to the raw body string
+  /// if it isn't JSON, or nil if there's nothing usable.
+  private func decodeErrorMessage(_ data: Data) -> String? {
+    struct ErrorBody: Decodable { let message: String? }
+    if let body = try? decoder.decode(ErrorBody.self, from: data),
+       let message = body.message,
+       !message.isEmpty {
+      return message
+    }
+    if let text = String(data: data, encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines),
+      !text.isEmpty {
+      return text
+    }
+    return nil
   }
 }
 

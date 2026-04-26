@@ -1,7 +1,7 @@
 import Foundation
 
 public enum DaemonError: Error, LocalizedError, Sendable {
-  case unauthorized
+  case unauthorized(String?)
   case notFound(String)
   case badRequest(String)
   case serverError(Int, String)
@@ -10,8 +10,12 @@ public enum DaemonError: Error, LocalizedError, Sendable {
 
   public var errorDescription: String? {
     switch self {
-    case .unauthorized:
-      "Unauthorized — check your token"
+    case .unauthorized(let message):
+      if let message, !message.isEmpty {
+        "Unauthorized — \(message)"
+      } else {
+        "Unauthorized — check your token"
+      }
     case .notFound(let path):
       "Not found: \(path)"
     case .badRequest(let message):
