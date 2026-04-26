@@ -697,6 +697,64 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const validationAbortControllers = new Map<string, AbortController>();
 
   /**
+   * Returns the pod whose branch/baseBranch/prUrl a fix pod should inherit.
+   *
+   * In single-PR series, the triggering pod (`parent`) may not be the PR
+   * owner — the PR was opened by one specific pod in the series, and the
+   * fix pod must operate on that pod's branch or its commits land
+   * on a branch that isn't attached to the PR. Throws if the series has
+   * no PR-owning pod yet (fix-spawn is meaningless in that case).
+   *
+   * For non-`single` modes, returns `parent` unchanged: stacked pods own
+   * their own PR per pod, and standalone pods are their own PR owner.
+   */
+  const resolveBranchSource = (parent: Pod): Pod => {
+    if (parent.prMode !== 'single') return parent;
+    if (!parent.seriesId) {
+      throw new AutopodError(
+        `Pod ${parent.id} has prMode='single' but no seriesId — cannot resolve PR owner`,
+        'INVALID_STATE',
+        500,
+      );
+    }
+    const seriesPods = podRepo.getPodsBySeries(parent.seriesId);
+    const prOwners = seriesPods.filter((p) => p.prUrl);
+    if (prOwners.length === 0) {
+      throw new AutopodError(
+        `Cannot spawn fix pod for pod ${parent.id}: no pod in series ${parent.seriesId} owns a PR yet`,
+        'INVALID_STATE',
+        409,
+      );
+    }
+    let prOwner = prOwners[0] as Pod;
+    if (prOwners.length > 1) {
+      const matching = parent.prUrl ? prOwners.find((p) => p.prUrl === parent.prUrl) : undefined;
+      prOwner = matching ?? prOwner;
+      logger.warn(
+        {
+          podId: parent.id,
+          seriesId: parent.seriesId,
+          prOwnerCount: prOwners.length,
+          chosenPodId: prOwner.id,
+        },
+        'Single-mode series has multiple PR-owning pods — picked one deterministically',
+      );
+    }
+    if (prOwner.id !== parent.id) {
+      logger.info(
+        {
+          podId: parent.id,
+          prOwnerId: prOwner.id,
+          prOwnerBranch: prOwner.branch,
+          triggeringBranch: parent.branch,
+        },
+        'Fix pod redirected to PR-owning pod in single-mode series',
+      );
+    }
+    return prOwner;
+  };
+
+  /**
    * Spawns a new child fix pod on the same branch when the PR has actionable
    * failures (CI check failures or CHANGES_REQUESTED review comments).
    * Guards against double-spawning and enforces maxPrFixAttempts.
@@ -781,6 +839,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const profile = profileStore.get(parent.profileName);
     const fixTask = buildPrFixTask(parent, status, podRepo, profile, userMessage);
 
+    // In a single-PR series, all pods share the root's branch but only the
+    // PR-owning pod has prUrl set. The triggering pod's `branch` field can
+    // diverge from the PR's actual source branch (e.g. last pod was created
+    // with its own branch instead of inheriting), so resolve the PR owner
+    // and take branch/baseBranch/prUrl from it. Other prModes own their own
+    // PR per pod, so the parent's fields are correct.
+    const branchSource = resolveBranchSource(parent);
+
     let fixId = '';
     for (let attempt = 0; attempt < 10; attempt++) {
       fixId = generatePodId();
@@ -793,16 +859,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           model: parent.model,
           runtime: parent.runtime,
           executionTarget: parent.executionTarget,
-          branch: parent.branch,
+          branch: branchSource.branch,
           userId: parent.userId,
           maxValidationAttempts: profile.maxValidationAttempts ?? 3,
           skipValidation: false,
           options: parent.options,
           outputMode: parent.outputMode,
-          baseBranch: parent.baseBranch ?? null,
+          baseBranch: branchSource.baseBranch ?? null,
           linkedPodId: parent.id,
           pimGroups: parent.pimGroups ?? null,
-          prUrl: parent.prUrl ?? null,
+          prUrl: branchSource.prUrl ?? null,
         });
         break;
       } catch (err: unknown) {
@@ -4587,6 +4653,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Push branch so `gh pr create --head` can reference it. If sync-back failed
             // earlier in this validation run, tighten the deletion guard so a ghost
             // mass-deletion cannot ship as "chore: auto-commit …".
+            // Rethrow on non-guard errors: a swallowed push lets the carry-forward
+            // path approve & merge a PR whose tip never advanced (real bug from
+            // misrouted fix pods writing to the wrong branch).
             try {
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
@@ -4597,7 +4666,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
-              handleDeletionGuardError(podId, err);
+              if (!handleDeletionGuardError(podId, err)) {
+                throw err;
+              }
             }
 
             // Re-compute diff stats now that auto-commit has run.
@@ -4961,7 +5032,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
-              handleDeletionGuardError(podId, err);
+              if (!handleDeletionGuardError(podId, err)) {
+                throw err;
+              }
             }
 
             try {
@@ -5631,7 +5704,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           409,
         );
       }
-      if (!pod.prUrl) {
+      // In a single-PR series only the PR-owning pod has prUrl set, but the user
+      // may legitimately click a sibling. resolveBranchSource will route the fix
+      // pod to the PR owner; we just need a series anchor here.
+      const isSingleSeriesMember = pod.prMode === 'single' && Boolean(pod.seriesId);
+      if (!pod.prUrl && !isSingleSeriesMember) {
         throw new AutopodError(`Pod ${podId} has no PR URL`, 'INVALID_STATE', 409);
       }
 
@@ -5650,9 +5727,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Clear any stale fixPodId so maybeSpawnFixSession won't wait a cycle
       podRepo.update(podId, { fixPodId: null });
 
-      // Fetch current PR status to build a meaningful fix task
+      // Fetch current PR status to build a meaningful fix task. For single-mode
+      // siblings the PR lives on a different pod — resolve it so we fetch the
+      // real PR's status instead of skipping.
       const profile = profileStore.get(pod.profileName);
       const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+      const prUrlForStatus = pod.prUrl ?? resolveBranchSource(pod).prUrl ?? null;
       let status: PrMergeStatus = {
         merged: false,
         open: true,
@@ -5660,10 +5740,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ciFailures: [],
         reviewComments: [],
       };
-      if (prManager) {
+      if (prManager && prUrlForStatus) {
         try {
           status = await prManager.getPrStatus({
-            prUrl: pod.prUrl,
+            prUrl: prUrlForStatus,
             worktreePath: pod.worktreePath ?? undefined,
           });
         } catch (err) {

@@ -2330,4 +2330,322 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).toContain(fixPod?.id);
     });
   });
+
+  describe('spawnFixSession — single-mode series branch redirect', () => {
+    /**
+     * Stand up a 3-pod single-PR series where the *first* pod owns the PR
+     * (branch `feature/series-root`, prUrl set) and the other two are
+     * non-PR-owning siblings sharing the same branch.
+     */
+    function setupSingleSeries(ctx: TestContext) {
+      const manager = createPodManager(ctx.deps);
+      const seriesId = 'series-abc';
+      const sharedBranch = 'feature/series-root';
+      const prOwnerUrl = 'https://github.com/org/repo/pull/100';
+
+      const root = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Brief 1',
+          seriesId,
+          seriesName: 'My series',
+          prMode: 'single',
+          branch: sharedBranch,
+          options: { agentMode: 'auto', output: 'branch' },
+        },
+        'user-1',
+      );
+      const middle = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Brief 2',
+          seriesId,
+          seriesName: 'My series',
+          prMode: 'single',
+          branch: sharedBranch,
+          options: { agentMode: 'auto', output: 'branch' },
+          dependsOnPodIds: [root.id],
+        },
+        'user-1',
+      );
+      const last = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Brief 3',
+          seriesId,
+          seriesName: 'My series',
+          prMode: 'single',
+          branch: sharedBranch,
+          options: { agentMode: 'auto', output: 'pr' },
+          dependsOnPodIds: [middle.id],
+        },
+        'user-1',
+      );
+
+      // Drive each pod into a terminal state.
+      // The PR-owner is the *root* (last pod actually opens PRs in real flows,
+      // but the redirect logic only requires "the pod with prUrl set" — pin
+      // the PR onto root to make sure the test exercises a real redirect: the
+      // user clicks `last`, but the branch must come from `root`).
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(root.id, { status });
+        ctx.podRepo.update(middle.id, { status });
+        ctx.podRepo.update(last.id, { status });
+      }
+
+      // Pin PR onto root only. Last and middle share the branch but have no PR.
+      ctx.podRepo.update(root.id, {
+        prUrl: prOwnerUrl,
+        worktreePath: '/tmp/wt/root',
+      });
+      ctx.podRepo.update(middle.id, {
+        worktreePath: '/tmp/wt/middle',
+      });
+      // Drive `last` into merge_pending so spawnFixSession's status guard
+      // accepts it (it normally requires merge_pending or complete).
+      ctx.podRepo.update(last.id, {
+        status: 'merge_pending',
+        worktreePath: '/tmp/wt/last',
+      });
+
+      return { manager, root, middle, last, sharedBranch, prOwnerUrl };
+    }
+
+    it('redirects fix pod to PR-owning sibling branch when user spawns from non-PR pod', async () => {
+      const ctx = createTestContext();
+      // Tighten guard so the prUrl-less sibling's spawnFixSession path is covered:
+      // status fetch should use the PR-owner's URL even though `last.prUrl` is null.
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        merged: false,
+        open: true,
+        blockReason: 'CI failed',
+        ciFailures: [{ name: 'lint', conclusion: 'failure', detailsUrl: null, annotations: [] }],
+        reviewComments: [],
+      });
+
+      const { manager, root, last, sharedBranch, prOwnerUrl } = setupSingleSeries(ctx);
+
+      // User clicks the LAST (non-PR-owning) sibling
+      await manager.spawnFixSession(last.id);
+
+      const fixPod = ctx.podRepo.list({}).find((p) => p.linkedPodId === last.id);
+      expect(fixPod, 'fix pod should be created off the user-clicked sibling').toBeDefined();
+
+      // The fix pod must take its branch + prUrl from the PR-owner (root),
+      // not from the triggering pod (last). This is the regression — without
+      // the redirect the fix pod would inherit `last.branch` and its commits
+      // would never reach the PR.
+      expect(fixPod?.branch).toBe(sharedBranch);
+      expect(fixPod?.prUrl).toBe(prOwnerUrl);
+
+      // Audit trail (cooldown / fixPodId / prFixAttempts) must stay attached
+      // to the user-clicked pod, not the redirected branch source.
+      const reread = manager.getSession(last.id);
+      expect(reread.fixPodId).toBe(fixPod?.id);
+      expect(reread.prFixAttempts).toBe(1);
+
+      // The redirect must not move audit state onto the PR owner.
+      const rootAfter = manager.getSession(root.id);
+      expect(rootAfter.fixPodId).toBeNull();
+    });
+
+    it('still resolves the PR owner even when the triggering pod has its own (mismatched) branch', async () => {
+      const ctx = createTestContext();
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        merged: false,
+        open: true,
+        blockReason: 'CI failed',
+        ciFailures: [{ name: 'lint', conclusion: 'failure', detailsUrl: null, annotations: [] }],
+        reviewComments: [],
+      });
+
+      const { manager, last, sharedBranch, prOwnerUrl } = setupSingleSeries(ctx);
+
+      // Simulate the bug condition: triggering pod's branch diverged from the
+      // PR's actual branch. The redirect must still target the PR-owner branch.
+      ctx.podRepo.update(last.id, { worktreePath: '/tmp/wt/last' });
+      // Override branch directly via SQL — PodUpdates doesn't expose branch.
+      ctx.db
+        .prepare('UPDATE pods SET branch = ? WHERE id = ?')
+        .run('feature/wrong-branch', last.id);
+
+      await manager.spawnFixSession(last.id);
+
+      const fixPod = ctx.podRepo.list({}).find((p) => p.linkedPodId === last.id);
+      expect(fixPod?.branch).toBe(sharedBranch);
+      expect(fixPod?.prUrl).toBe(prOwnerUrl);
+      expect(fixPod?.branch).not.toBe('feature/wrong-branch');
+    });
+
+    it('throws when no pod in the series owns a PR yet', async () => {
+      const ctx = createTestContext();
+
+      const { manager, root, last } = setupSingleSeries(ctx);
+
+      // Strip the PR off the would-be owner so the series has no PR-owning pod.
+      ctx.podRepo.update(root.id, { prUrl: null });
+      // Ensure spawnFixSession's own prUrl guard doesn't short-circuit first —
+      // it accepts single-mode siblings even without prUrl.
+      ctx.podRepo.update(last.id, { prUrl: null });
+
+      await expect(manager.spawnFixSession(last.id)).rejects.toMatchObject({
+        statusCode: 409,
+      });
+    });
+
+    it('falls through to parent branch for non-single (stacked) series pods', async () => {
+      const ctx = createTestContext();
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        merged: false,
+        open: true,
+        blockReason: 'CI failed',
+        ciFailures: [{ name: 'lint', conclusion: 'failure', detailsUrl: null, annotations: [] }],
+        reviewComments: [],
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const stackedPod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Stacked feature',
+          seriesId: 'series-stacked',
+          prMode: 'stacked',
+          options: { agentMode: 'auto', output: 'pr' },
+        },
+        'user-1',
+      );
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(stackedPod.id, { status });
+      }
+      ctx.podRepo.update(stackedPod.id, {
+        prUrl: 'https://github.com/org/repo/pull/200',
+        worktreePath: '/tmp/wt/stacked',
+      });
+
+      await manager.spawnFixSession(stackedPod.id);
+
+      const fixPod = ctx.podRepo.list({}).find((p) => p.linkedPodId === stackedPod.id);
+      expect(fixPod?.branch).toBe(stackedPod.branch);
+      expect(fixPod?.prUrl).toBe('https://github.com/org/repo/pull/200');
+    });
+
+    it('falls through to parent for non-series (standalone) pods', async () => {
+      const ctx = createTestContext();
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        merged: false,
+        open: true,
+        blockReason: 'CI failed',
+        ciFailures: [{ name: 'lint', conclusion: 'failure', detailsUrl: null, annotations: [] }],
+        reviewComments: [],
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const standalone = manager.createSession(
+        { profileName: 'test-profile', task: 'Standalone' },
+        'user-1',
+      );
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(standalone.id, { status });
+      }
+      ctx.podRepo.update(standalone.id, {
+        prUrl: 'https://github.com/org/repo/pull/300',
+        worktreePath: '/tmp/wt/standalone',
+      });
+
+      await manager.spawnFixSession(standalone.id);
+
+      const fixPod = ctx.podRepo.list({}).find((p) => p.linkedPodId === standalone.id);
+      expect(fixPod?.branch).toBe(standalone.branch);
+      expect(fixPod?.prUrl).toBe('https://github.com/org/repo/pull/300');
+    });
+  });
+
+  describe('triggerValidation — loud-fail on push', () => {
+    it('transitions pod to failed when mergeBranch throws a non-guard error (no silent merge)', async () => {
+      // Regression: previously the validation pass path swallowed mergeBranch
+      // failures, then carried forward an existing prUrl into Approved → Merging.
+      // For misrouted fix pods that meant a stale PR could merge with no new
+      // commits. Loud-fail: the rethrow must abort the validated transition.
+      const ctx = createTestContext({ overall: 'pass' });
+      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('ssh: connection refused'),
+      );
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        // Pre-existing prUrl simulates a fix-pod carry-forward — without the
+        // loud-fail this is exactly where "Approved → Merging" got triggered
+        // with no new commits.
+        prUrl: 'https://github.com/org/repo/pull/999',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const result = manager.getSession(pod.id);
+      // Loud-fail: outer catch flips the pod to failed instead of validated.
+      expect(result.status).toBe('failed');
+      // Must NOT have created a PR or carried forward — the push didn't land.
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it('still flags worktreeCompromised (not failed) on DeletionGuardError', async () => {
+      // The deletion guard has its own quarantine path — keep that behavior
+      // intact instead of regressing to plain "failed".
+      const ctx = createTestContext({ overall: 'pass' });
+      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new DeletionGuardError(2000, 100),
+      );
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.worktreeCompromised).toBe(true);
+      // Guard caught the error: no rethrow, validation pass path continues.
+      // The pod still reaches `validated` (no PR though, since createPr was
+      // not invoked because the push failed).
+      expect(result.status).toBe('validated');
+    });
+  });
 });
