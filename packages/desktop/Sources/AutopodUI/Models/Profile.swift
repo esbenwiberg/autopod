@@ -117,6 +117,10 @@ public struct Profile: Identifiable, Sendable {
     // Security scan policy (repo content scan at provisioning + push)
     public var securityScan: SecurityScanPolicy?
 
+    // Code intelligence (LSP-backed tools injected as stdio MCP servers)
+    public var codeIntelligenceSerena: Bool
+    public var codeIntelligenceRoslynCodeLens: Bool
+
     // Provider credentials (read-only indicator)
     public var providerCredentialsType: String?
 
@@ -186,6 +190,8 @@ public struct Profile: Identifiable, Sendable {
         sidecars: SidecarsSnapshot? = nil,
         testPipeline: TestPipelineConfig? = nil,
         securityScan: SecurityScanPolicy? = nil,
+        codeIntelligenceSerena: Bool = false,
+        codeIntelligenceRoslynCodeLens: Bool = false,
         providerCredentialsType: String? = nil,
         version: Int = 1,
         createdAt: Date = Date(), updatedAt: Date = Date()
@@ -244,6 +250,8 @@ public struct Profile: Identifiable, Sendable {
         self.sidecars = sidecars
         self.testPipeline = testPipeline
         self.securityScan = securityScan
+        self.codeIntelligenceSerena = codeIntelligenceSerena
+        self.codeIntelligenceRoslynCodeLens = codeIntelligenceRoslynCodeLens
         self.providerCredentialsType = providerCredentialsType
         self.version = version
         self.createdAt = createdAt; self.updatedAt = updatedAt

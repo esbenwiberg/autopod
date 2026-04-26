@@ -362,6 +362,12 @@ public enum ProfileOverrideCatalog {
             section: .injections,
             help: "npm / NuGet feeds added to the container."
         ),
+        .init(
+            key: "codeIntelligence",
+            label: "Code Intelligence",
+            section: .injections,
+            help: "LSP-backed code navigation tools (Serena, roslyn-codelens-mcp) injected as stdio MCP servers."
+        ),
     ]
 
     /// Field keys that are always visible on derived profiles (never hidden

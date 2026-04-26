@@ -65,6 +65,8 @@ public struct ProfileResponse: Codable, Sendable {
   public var sidecars: SidecarsResponse?
   /// Gate for privileged sidecars. Null = inherit.
   public var trustedSource: Bool?
+  /// Code intelligence tools injected into the agent container. Null = inherit.
+  public var codeIntelligence: CodeIntelligenceResponse?
   /// Pre-configured ADO test pipeline for the `ado_run_test_pipeline` action.
   public var testPipeline: TestPipelineResponse?
   /// Repo content scan policy. Null = inherit from parent / fall back to bundled `default`.
@@ -135,6 +137,7 @@ public struct ProfileResponse: Codable, Sendable {
     trustedSource = try decodeBoolOrIntIfPresent(c, key: .trustedSource)
     testPipeline = try c.decodeIfPresent(TestPipelineResponse.self, forKey: .testPipeline)
     securityScan = try c.decodeIfPresent(SecurityScanPolicyResponse.self, forKey: .securityScan)
+    codeIntelligence = try c.decodeIfPresent(CodeIntelligenceResponse.self, forKey: .codeIntelligence)
     version = try c.decode(Int.self, forKey: .version)
     createdAt = try c.decode(String.self, forKey: .createdAt)
     updatedAt = try c.decode(String.self, forKey: .updatedAt)
@@ -490,6 +493,19 @@ public struct CheckpointPolicyResponse: Codable, Sendable {
     onSecret = try c.decode(String.self, forKey: .onSecret)
     onPii = try c.decode(String.self, forKey: .onPii)
     onInjection = try c.decode(String.self, forKey: .onInjection)
+  }
+}
+
+// MARK: - Code intelligence
+
+public struct CodeIntelligenceResponse: Codable, Sendable {
+  /// Inject Serena (LSP-backed semantic code navigation) as a stdio MCP server.
+  public var serena: Bool?
+  /// Inject roslyn-codelens-mcp (C# DI analysis) as a stdio MCP server. Requires a dotnet template.
+  public var roslynCodeLens: Bool?
+
+  public init(serena: Bool? = nil, roslynCodeLens: Bool? = nil) {
+    self.serena = serena; self.roslynCodeLens = roslynCodeLens
   }
 }
 

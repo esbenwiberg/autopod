@@ -1992,6 +1992,42 @@ public struct ProfileEditorView: View {
                 .buttonStyle(.borderless)
             }
         }
+
+        Divider().padding(.vertical, 8)
+
+        // Code intelligence — LSP-backed stdio MCP servers pre-installed in the image
+        Text("Code Intelligence")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        Toggle(isOn: $profile.codeIntelligenceSerena) {
+            HStack(spacing: 4) {
+                Text("Serena (LSP navigation)")
+                HelpBadge(text: "Installs Serena via pip and injects it as a stdio MCP server. Provides cross-file type navigation, go-to-definition, find-all-references, and barrel-export resolution for TypeScript, C#, and Python. Requires Python in the container image.")
+            }
+        }
+
+        Toggle(isOn: $profile.codeIntelligenceRoslynCodeLens) {
+            HStack(spacing: 4) {
+                Text("Roslyn CodeLens (C# DI analysis)")
+                HelpBadge(text: "Installs roslyn-codelens-mcp and injects it as a stdio MCP server. Exposes get_di_registrations and find_implementations for DI-heavy C# codebases. Requires a dotnet template.")
+            }
+        }
+        .disabled(profile.template != .dotnet9 && profile.template != .dotnet10 && profile.template != .dotnet10Go)
+
+        if profile.codeIntelligenceRoslynCodeLens && profile.template != .dotnet9 && profile.template != .dotnet10 && profile.template != .dotnet10Go {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Roslyn CodeLens requires a dotnet template (dotnet9, dotnet10, or dotnet10-go).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
     }
 
     // MARK: - Field row helper
