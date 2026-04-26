@@ -245,6 +245,29 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     );
   }
 
+  // Code intelligence config
+  const codeIntelligence = input.codeIntelligence;
+  if (codeIntelligence !== null && codeIntelligence !== undefined) {
+    if (typeof codeIntelligence !== 'object' || Array.isArray(codeIntelligence)) {
+      errors.push('codeIntelligence must be an object or null');
+    } else {
+      const ci = codeIntelligence as Record<string, unknown>;
+      if (ci.serena !== undefined && typeof ci.serena !== 'boolean') {
+        errors.push('codeIntelligence.serena must be a boolean');
+      }
+      if (ci.roslynCodeLens !== undefined && typeof ci.roslynCodeLens !== 'boolean') {
+        errors.push('codeIntelligence.roslynCodeLens must be a boolean');
+      }
+      const tmpl = input.template as string | undefined;
+      const isDotnet = tmpl === 'dotnet9' || tmpl === 'dotnet10' || tmpl === 'dotnet10-go';
+      if (ci.roslynCodeLens === true && !isDotnet) {
+        errors.push(
+          'codeIntelligence.roslynCodeLens requires a dotnet template (dotnet9, dotnet10, or dotnet10-go)',
+        );
+      }
+    }
+  }
+
   // Reject private registry URLs that resolve to loopback/private/metadata addresses.
   // Prevents an attacker with profile-write access from pointing a registry at the cloud
   // metadata endpoint (169.254.169.254) to exfiltrate credentials at image-build time.

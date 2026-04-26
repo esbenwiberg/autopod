@@ -132,6 +132,26 @@ export function generateDockerfile(options: DockerfileOptions): string {
     lines.push('USER autopod');
   }
 
+  // Code intelligence tools (Serena + roslyn-codelens-mcp) — installed before pre-warm
+  // so the tools are available from first container start with no cold-install penalty.
+  if (profile.codeIntelligence?.serena) {
+    lines.push(
+      '',
+      '# Serena — LSP-backed semantic code navigation (MCP stdio server)',
+      'USER root',
+      'RUN pip install serena 2>/dev/null || pip3 install serena 2>/dev/null || true',
+      'USER autopod',
+    );
+  }
+  if (profile.codeIntelligence?.roslynCodeLens) {
+    lines.push(
+      '',
+      '# roslyn-codelens-mcp — Roslyn-backed DI registration analysis (MCP stdio server)',
+      'RUN dotnet tool install -g roslyn-codelens-mcp 2>/dev/null || true',
+      'ENV PATH="$PATH:/home/autopod/.dotnet/tools"',
+    );
+  }
+
   // Pre-warm build caches (buildCommand may be null on derived profiles that
   // only inherit; skip the pre-warm step in that case).
   if (profile.buildCommand) {

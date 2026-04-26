@@ -143,6 +143,8 @@ public enum ProfileMapper {
       },
       testPipeline: response.testPipeline.map(mapTestPipeline),
       securityScan: response.securityScan.map(mapSecurityScan),
+      codeIntelligenceSerena: response.codeIntelligence?.serena ?? false,
+      codeIntelligenceRoslynCodeLens: response.codeIntelligence?.roslynCodeLens ?? false,
       providerCredentialsType: response.providerCredentials?.provider,
       version: response.version,
       createdAt: PodMapper.parseDate(response.createdAt),
@@ -377,6 +379,16 @@ public enum ProfileMapper {
       d["sidecars"] = sidecars
     } else {
       d["sidecars"] = NSNull()
+    }
+
+    // Code intelligence
+    if profile.codeIntelligenceSerena || profile.codeIntelligenceRoslynCodeLens {
+      var ci: [String: Any] = [:]
+      if profile.codeIntelligenceSerena { ci["serena"] = true }
+      if profile.codeIntelligenceRoslynCodeLens { ci["roslynCodeLens"] = true }
+      d["codeIntelligence"] = ci
+    } else {
+      d["codeIntelligence"] = NSNull()
     }
 
     // Action policy

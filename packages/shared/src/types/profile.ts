@@ -179,6 +179,12 @@ export interface Profile {
    * inherit from parent or fall back to the bundled `default` preset.
    */
   securityScan: SecurityScanPolicy | null;
+  /**
+   * Code intelligence tools to inject into agent containers as stdio MCP servers.
+   * Null = feature disabled (default). Tools are installed in the container image
+   * and configured automatically — no manual MCP server setup required.
+   */
+  codeIntelligence: CodeIntelligenceConfig | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -265,6 +271,22 @@ export type PimActivationConfig =
       duration?: string;
       justification?: string;
     };
+
+export interface CodeIntelligenceConfig {
+  /**
+   * Inject Serena (LSP-backed semantic navigation) as a stdio MCP server.
+   * Requires Python in the container image. Provides go-to-definition,
+   * find-references, type hierarchy, and barrel-export resolution for
+   * TypeScript and C# via tsserver / Roslyn language servers.
+   */
+  serena?: boolean;
+  /**
+   * Inject roslyn-codelens-mcp as a stdio MCP server.
+   * Requires .NET SDK in the container image (dotnet9/dotnet10 templates).
+   * Provides get_di_registrations and find_implementations for DI-heavy C# codebases.
+   */
+  roslynCodeLens?: boolean;
+}
 
 export interface EscalationConfig {
   askHuman: boolean;

@@ -319,6 +319,22 @@ In dev mode (`NODE_ENV !== 'production'`), auth is stubbed to accept all tokens.
 - **PII sanitization** — `shared/src/sanitize/` strips PII + prompt injection patterns from agent output before storage
 - **Git PAT stripping** — bare repos mounted into containers have PATs stripped from remote URLs
 
+## Adding New Profile Fields — Checklist
+
+When adding a new field to `Profile` in `packages/shared/src/types/profile.ts`, every layer must be updated. Work through this list completely before considering the task done:
+
+1. **shared** — add field to `Profile` type; export any new types from `src/index.ts`
+2. **daemon migration** — `ALTER TABLE profiles ADD COLUMN ...` in a new `packages/daemon/src/db/migrations/0NN_*.sql` (never reuse a prefix)
+3. **daemon profile-store** — `rowToProfile`, INSERT, and UPDATE in `packages/daemon/src/profiles/profile-store.ts`
+4. **daemon profile-validator** — add validation rules in `packages/daemon/src/profiles/profile-validator.ts`
+5. **desktop API layer** — add field + any new struct to `packages/desktop/Sources/AutopodClient/Types/ProfileResponse.swift`; decode in `init(from decoder:)`
+6. **desktop UI model** — add field to `Profile.swift` in `packages/desktop/Sources/AutopodUI/Models/Profile.swift`; update `init()`
+7. **desktop mapper** — map response → UI model and UI model → patch dict in `packages/desktop/Sources/AutopodDesktop/Mapping/ProfileMapper.swift`
+8. **desktop field catalog** — add entry to `ProfileOverrideCatalog.all` in `ProfileFieldCatalog.swift` so derived profiles can override the field
+9. **desktop override card** — add a `case "fieldKey":` branch in `overrideCard(for:)` in `ProfileEditorView.swift` and implement the card renderer; without this derived-profile editors show a "no editor available" placeholder
+10. **desktop editor UI** — add controls in the relevant `ProfileEditorView` section (base profile editor)
+11. **CLI** — if the field is user-facing, expose it in `packages/cli/src/commands/profile.ts`
+
 ## Code Style
 
 - Biome: 2-space indent, 100-char lines, single quotes, trailing commas, always semicolons

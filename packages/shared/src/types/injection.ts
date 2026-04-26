@@ -1,14 +1,37 @@
 /**
  * An MCP server to inject into agent sessions.
  * Configured at daemon level (applies to all sessions) or profile level (repo-specific).
+ *
+ * Two transports are supported:
+ * - 'http' (default): daemon proxies the server URL into the container; auth headers injected by proxy
+ * - 'stdio': a local binary spawned inside the container by Claude Code; written to .mcp.json directly
  */
-export interface InjectedMcpServer {
+export type InjectedMcpServer = HttpInjectedMcpServer | StdioInjectedMcpServer;
+
+export interface HttpInjectedMcpServer {
+  type?: 'http';
   /** Unique name — used as key for merge/override between daemon and profile */
   name: string;
   /** MCP server URL (Streamable HTTP transport) */
   url: string;
   /** Optional auth/custom headers */
   headers?: Record<string, string>;
+  /** Human-readable description of what this server provides (injected into CLAUDE.md) */
+  description?: string;
+  /** Tool usage hints for the agent (injected into CLAUDE.md guidelines) */
+  toolHints?: string[];
+}
+
+export interface StdioInjectedMcpServer {
+  type: 'stdio';
+  /** Unique name — used as key for merge/override between daemon and profile */
+  name: string;
+  /** Binary command to execute inside the container */
+  command: string;
+  /** Arguments passed to the command */
+  args?: string[];
+  /** Additional environment variables for the subprocess */
+  env?: Record<string, string>;
   /** Human-readable description of what this server provides (injected into CLAUDE.md) */
   description?: string;
   /** Tool usage hints for the agent (injected into CLAUDE.md guidelines) */

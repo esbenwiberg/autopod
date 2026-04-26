@@ -30,6 +30,7 @@ export type {
   MergeMode,
   MergeStrategy,
   TestPipelineConfig,
+  CodeIntelligenceConfig,
 } from './types/profile.js';
 
 export type {
@@ -87,6 +88,8 @@ export {
 
 export type {
   InjectedMcpServer,
+  HttpInjectedMcpServer,
+  StdioInjectedMcpServer,
   InjectedClaudeMdSection,
   InjectedSkill,
   LocalSkillSource,

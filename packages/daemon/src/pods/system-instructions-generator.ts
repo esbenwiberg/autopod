@@ -118,7 +118,11 @@ export function generateSystemInstructions(
     if (server.description) {
       lines.push(server.description);
     }
-    lines.push(`- URL: ${server.url}`);
+    if (server.type === 'stdio') {
+      lines.push(`- Transport: stdio (local subprocess — \`${server.command}\`)`);
+    } else {
+      lines.push(`- URL: ${server.url}`);
+    }
     if (server.toolHints) {
       for (const hint of server.toolHints) {
         lines.push(`- ${hint}`);
