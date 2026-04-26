@@ -24,10 +24,21 @@ export interface SpawnConfig {
   mcpServers?: McpServerConfig[];
 }
 
-export interface McpServerConfig {
+export type McpServerConfig = HttpMcpServerConfig | StdioMcpServerConfig;
+
+export interface HttpMcpServerConfig {
+  type?: 'http';
   name: string;
   url: string;
   headers?: Record<string, string>;
+}
+
+export interface StdioMcpServerConfig {
+  type: 'stdio';
+  name: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
 }
 
 export type AgentEvent =

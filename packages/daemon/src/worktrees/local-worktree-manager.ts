@@ -263,9 +263,51 @@ export class LocalWorktreeManager implements WorktreeManager {
           throw addErr;
         }
       }
+
+      // Defense-in-depth against daemon-injected tooling artifacts leaking into PRs.
+      // For workspace pods we still write /workspace/.mcp.json (the user's interactive
+      // claude needs project-level discovery); the per-worktree info/exclude makes git
+      // ignore it so it can never be staged. This is per-clone, not committed, and
+      // invisible to the user.
+      await this.appendWorktreeExcludes(worktreePath, ['.mcp.json']).catch((err) => {
+        this.logger.warn(
+          { err, worktreePath },
+          'Failed to write info/exclude — daemon artifacts may leak into commits',
+        );
+      });
     });
 
     return { worktreePath, bareRepoPath };
+  }
+
+  /**
+   * Append entries to the per-worktree git info/exclude file. Resolves the path via
+   * `git rev-parse --git-path info/exclude` so worktree mode (where .git is a file)
+   * is handled correctly.
+   */
+  private async appendWorktreeExcludes(worktreePath: string, entries: string[]): Promise<void> {
+    if (entries.length === 0) return;
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', 'info/exclude'], {
+      cwd: worktreePath,
+    });
+    const excludePath = path.resolve(worktreePath, stdout.trim());
+    await fs.mkdir(path.dirname(excludePath), { recursive: true });
+    let existing = '';
+    try {
+      existing = await fs.readFile(excludePath, 'utf8');
+    } catch {
+      // File absent — first write
+    }
+    const existingLines = new Set(
+      existing
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean),
+    );
+    const toAppend = entries.filter((e) => !existingLines.has(e));
+    if (toAppend.length === 0) return;
+    const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
+    await fs.writeFile(excludePath, `${existing}${prefix}${toAppend.join('\n')}\n`, 'utf8');
   }
 
   async cleanup(worktreePath: string): Promise<void> {

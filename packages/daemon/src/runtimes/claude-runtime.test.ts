@@ -262,6 +262,71 @@ describe('ClaudeRuntime', () => {
       });
     });
 
+    it('emits stdio entries with command/args/env (not http url)', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      await (
+        runtime as unknown as {
+          writeMcpConfig: (
+            containerId: string,
+            mcpServers: SpawnConfig['mcpServers'],
+          ) => Promise<void>;
+        }
+      ).writeMcpConfig('c1', [
+        {
+          type: 'stdio',
+          name: 'serena',
+          command: 'serena',
+          args: ['--project', '/workspace'],
+        },
+        {
+          type: 'stdio',
+          name: 'roslyn-codelens',
+          command: 'roslyn-codelens-mcp',
+          env: { LOG_LEVEL: 'info' },
+        },
+      ]);
+
+      const written = (cm.writeFile as ReturnType<typeof vi.fn>).mock.calls[0]?.[2];
+      const parsed = JSON.parse(written);
+      expect(parsed.mcpServers.serena).toEqual({
+        type: 'stdio',
+        command: 'serena',
+        args: ['--project', '/workspace'],
+      });
+      expect(parsed.mcpServers['roslyn-codelens']).toEqual({
+        type: 'stdio',
+        command: 'roslyn-codelens-mcp',
+        env: { LOG_LEVEL: 'info' },
+      });
+      expect(parsed.mcpServers.serena.url).toBeUndefined();
+    });
+
+    it('mixes http and stdio entries in the same config file', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      await (
+        runtime as unknown as {
+          writeMcpConfig: (
+            containerId: string,
+            mcpServers: SpawnConfig['mcpServers'],
+          ) => Promise<void>;
+        }
+      ).writeMcpConfig('c1', [
+        { type: 'http', name: 'escalation', url: 'http://host/mcp/abc' },
+        { type: 'stdio', name: 'serena', command: 'serena', args: ['--project', '/workspace'] },
+      ]);
+
+      const written = (cm.writeFile as ReturnType<typeof vi.fn>).mock.calls[0]?.[2];
+      const parsed = JSON.parse(written);
+      expect(parsed.mcpServers.escalation.type).toBe('http');
+      expect(parsed.mcpServers.serena.type).toBe('stdio');
+    });
+
     it('skips writing when mcpServers is empty', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);

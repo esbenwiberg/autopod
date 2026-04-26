@@ -110,6 +110,8 @@ export type {
   Runtime,
   SpawnConfig,
   McpServerConfig,
+  HttpMcpServerConfig,
+  StdioMcpServerConfig,
   AgentEvent,
   AgentStatusEvent,
   AgentToolUseEvent,

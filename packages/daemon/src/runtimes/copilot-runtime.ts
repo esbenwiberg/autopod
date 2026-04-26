@@ -203,13 +203,17 @@ export class CopilotRuntime implements Runtime {
   }
 
   private async writeConfigFiles(config: SpawnConfig): Promise<void> {
-    // Write MCP config
-    if (config.mcpServers && config.mcpServers.length > 0) {
+    // Write MCP config — Copilot only supports HTTP transports today; stdio
+    // entries (serena, roslyn-codelens) are silently dropped here.
+    const httpServers = (config.mcpServers ?? []).filter(
+      (s): s is Extract<typeof s, { url: string }> => s.type !== 'stdio',
+    );
+    if (httpServers.length > 0) {
       const mcpConfig: Record<
         string,
         { type: string; url: string; headers?: Record<string, string> }
       > = {};
-      for (const server of config.mcpServers) {
+      for (const server of httpServers) {
         mcpConfig[server.name] = {
           type: 'http',
           url: server.url,

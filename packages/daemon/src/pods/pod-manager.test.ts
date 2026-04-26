@@ -957,6 +957,22 @@ describe('PodManager', () => {
       expect(result.status).toBe('failed');
     });
 
+    it('never writes /workspace/.mcp.json for agent pods (stdio servers route via runtime --mcp-config)', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const writeCalls = vi.mocked(ctx.containerManager.writeFile).mock.calls;
+      const workspaceMcpWrites = writeCalls.filter(([, path]) => path === '/workspace/.mcp.json');
+      expect(workspaceMcpWrites).toHaveLength(0);
+    });
+
     it('writes .npmrc to container when profile has npm registry', async () => {
       const registries = [
         {
@@ -2259,6 +2275,59 @@ describe('PodManager', () => {
           baseBranch: 'main',
         }),
       );
+    });
+  });
+
+  describe('spawnFixSession — userMessage delivery under cooldown', () => {
+    it('bypasses the 10-minute cooldown and delivers userMessage into the new fix pod task', async () => {
+      const ctx = createTestContext();
+      // PR status fetch — return a CHANGES_REQUESTED with a review comment so
+      // the build path emits a real fix task (not just headers).
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        merged: false,
+        open: true,
+        blockReason: 'CHANGES_REQUESTED',
+        ciFailures: [],
+        reviewComments: [{ body: 'Please rename foo to bar.', path: null }],
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Original work' },
+        'user-1',
+      );
+      // Drive the pod into `complete` with a prUrl and an active cooldown
+      // (lastFixPodSpawnedAt = now would normally block any further spawn).
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-xyz',
+        startedAt: new Date().toISOString(),
+      });
+      for (const status of [
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(pod.id, { status });
+      }
+      ctx.podRepo.update(pod.id, {
+        prUrl: 'https://github.com/org/repo/pull/42',
+        lastFixPodSpawnedAt: new Date().toISOString(),
+      });
+
+      await manager.spawnFixSession(pod.id, 'please use option B');
+
+      // The fix pod is the one with linkedPodId === parent.id
+      const allPods = ctx.podRepo.list({});
+      const fixPod = allPods.find((p) => p.linkedPodId === pod.id);
+      expect(fixPod, 'cooldown should be bypassed and a fix pod created').toBeDefined();
+      expect(fixPod?.task).toContain('## Instructions from Reviewer');
+      expect(fixPod?.task).toContain('please use option B');
+      expect(ctx.enqueuedSessions).toContain(fixPod?.id);
     });
   });
 });

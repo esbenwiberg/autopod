@@ -227,21 +227,35 @@ export class ClaudeRuntime implements Runtime {
     this.claudeSessionIds.set(podId, claudeSessionId);
   }
 
-  /** Write MCP server config to a JSON file inside the container. */
+  /**
+   * Write MCP server config to a JSON file inside the container.
+   *
+   * Both http and stdio transports go through this single config — keeping the
+   * file outside /workspace means daemon-injected tooling (serena, roslyn-codelens)
+   * can never be picked up by `git add` and committed to the repo.
+   */
   private async writeMcpConfig(
     containerId: string,
     mcpServers: SpawnConfig['mcpServers'],
   ): Promise<void> {
     if (!mcpServers || mcpServers.length === 0) return;
 
-    const servers: Record<string, { type: string; url: string; headers?: Record<string, string> }> =
-      {};
+    const servers: Record<string, Record<string, unknown>> = {};
     for (const server of mcpServers) {
-      servers[server.name] = {
-        type: 'http',
-        url: server.url,
-        ...(server.headers && { headers: server.headers }),
-      };
+      if (server.type === 'stdio') {
+        servers[server.name] = {
+          type: 'stdio',
+          command: server.command,
+          ...(server.args && { args: server.args }),
+          ...(server.env && { env: server.env }),
+        };
+      } else {
+        servers[server.name] = {
+          type: 'http',
+          url: server.url,
+          ...(server.headers && { headers: server.headers }),
+        };
+      }
     }
 
     await this.containerManager.writeFile(

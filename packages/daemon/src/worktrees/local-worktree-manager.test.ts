@@ -13,10 +13,12 @@ const logger = pino({ level: 'silent' });
 // Hoist mock fns so they're available inside vi.mock factories
 // ---------------------------------------------------------------------------
 
-const { execFileMock, fsMkdirMock, fsRmMock } = vi.hoisted(() => ({
+const { execFileMock, fsMkdirMock, fsRmMock, fsReadFileMock, fsWriteFileMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
   fsMkdirMock: vi.fn().mockResolvedValue(undefined),
   fsRmMock: vi.fn().mockResolvedValue(undefined),
+  fsReadFileMock: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+  fsWriteFileMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('node:child_process', async () => {
@@ -30,10 +32,14 @@ vi.mock('node:fs/promises', async () => {
       mkdir: fsMkdirMock,
       rm: fsRmMock,
       access: vi.fn().mockResolvedValue(undefined),
+      readFile: fsReadFileMock,
+      writeFile: fsWriteFileMock,
     },
     mkdir: fsMkdirMock,
     rm: fsRmMock,
     access: vi.fn().mockResolvedValue(undefined),
+    readFile: fsReadFileMock,
+    writeFile: fsWriteFileMock,
   };
 });
 
@@ -93,6 +99,8 @@ describe('LocalWorktreeManager', () => {
     // Re-apply default implementations after clear
     fsMkdirMock.mockResolvedValue(undefined);
     fsRmMock.mockResolvedValue(undefined);
+    fsReadFileMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    fsWriteFileMock.mockResolvedValue(undefined);
     manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger });
   });
 
@@ -917,6 +925,63 @@ describe('LocalWorktreeManager', () => {
       // Should use the local ref, not refs/remotes/origin/...
       expect(worktreeAddCmd).toContain('refs/heads/autopod/parent-branch');
       expect(result.worktreePath).toContain('autopod_forked-pod');
+    });
+
+    it('appends .mcp.json to per-worktree info/exclude after worktree add', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-dir')) {
+            cb(null, { stdout: '.', stderr: '' });
+          } else if (cmd === 'rev-parse --git-path info/exclude') {
+            cb(null, { stdout: '.git/worktrees/feat_excludes/info/exclude\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await manager.create({
+        repoUrl: 'https://github.com/org/repo.git',
+        branch: 'feat/excludes',
+        baseBranch: 'main',
+      });
+
+      const writeCalls = fsWriteFileMock.mock.calls;
+      const excludeWrite = writeCalls.find((c) =>
+        String(c[0]).endsWith('worktrees/feat_excludes/info/exclude'),
+      );
+      expect(excludeWrite).toBeDefined();
+      expect(String(excludeWrite?.[1])).toContain('.mcp.json');
+    });
+
+    it('does not duplicate .mcp.json when info/exclude already lists it', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-dir')) {
+            cb(null, { stdout: '.', stderr: '' });
+          } else if (cmd === 'rev-parse --git-path info/exclude') {
+            cb(null, { stdout: '.git/info/exclude\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+      fsReadFileMock.mockResolvedValueOnce('# pre-existing\n.mcp.json\n');
+
+      await manager.create({
+        repoUrl: 'https://github.com/org/repo.git',
+        branch: 'feat/dedupe',
+        baseBranch: 'main',
+      });
+
+      // Already listed → no write needed
+      expect(fsWriteFileMock).not.toHaveBeenCalled();
     });
 
     it('throws when baseBranch not found on remote or locally', async () => {

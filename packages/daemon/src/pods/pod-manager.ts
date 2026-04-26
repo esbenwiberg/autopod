@@ -16,6 +16,7 @@ import type {
   HistoryQuery,
   InjectedMcpServer,
   LintResult,
+  McpServerConfig,
   NetworkPolicy,
   PageResult,
   Pod,
@@ -123,7 +124,7 @@ function allocateHostPort(): number {
 const CONTAINER_APP_PORT = 3000;
 
 /** Path to the agent shim script inside every pod container. */
-const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
+export const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
 
 /**
  * Shim script written to every pod container before the agent exec.
@@ -132,12 +133,16 @@ const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
  * never present in the exec's initial environment visible to `docker inspect`
  * or a process-level env dump of the container's main entrypoint.
  */
-const AGENT_SHIM_SCRIPT = `#!/bin/sh
+// NOTE: this is a JS template literal. Bare `${...}` gets interpolated by JS at
+// compile time, so every occurrence the shell needs to see literally must be
+// escaped (`\${...}`). Likewise, when the shell needs to see a literal
+// backslash before a `$`, the source needs `\\` (one for JS, one survives).
+export const AGENT_SHIM_SCRIPT = `#!/bin/sh
 # Autopod agent shim — expand *_FILE env vars before exec-ing the agent
 _read_file_var() {
-  local var_name="$1" file_var="${1}_FILE"
+  local var_name="$1" file_var="\${1}_FILE"
   local path
-  eval "path=\${$file_var:-}"
+  eval "path=\\\${$file_var:-}"
   [ -n "$path" ] && [ -f "$path" ] && export "$var_name=$(cat "$path")" && unset "$file_var"
 }
 _read_file_var ANTHROPIC_API_KEY
@@ -166,20 +171,27 @@ export function buildPrFixTask(
 ): string {
   const attempt = (pod.prFixAttempts ?? 0) + 1;
 
-  // Resolve the root original task by following linkedPodId back to the source.
+  // Walk linkedPodId back to the originating pod (fix→fix→…→original).
   // Prevents nested [PR FIX] boilerplate + duplicate review-comment blocks when a
-  // fix pod somehow ends up spawning a sub-fixer.
-  let rootTask = pod.task;
-  let cursor: Pod = pod;
-  while (cursor.linkedPodId) {
+  // fix pod somehow ends up spawning a sub-fixer. Series pods don't use
+  // linkedPodId (they use dependsOnPodIds), so this loop is a no-op for them.
+  let ancestor: Pod = pod;
+  while (ancestor.linkedPodId) {
     try {
-      const parent = podRepo.getOrThrow(cursor.linkedPodId);
-      rootTask = parent.task;
-      cursor = parent;
+      ancestor = podRepo.getOrThrow(ancestor.linkedPodId);
     } catch {
       break;
     }
   }
+
+  // Single-PR series pods share one branch and one PR, so the per-pod `task`
+  // only describes one brief — the cross-brief framing the fixer needs lives
+  // in seriesDescription (sourced from briefs/context.md). Stacked-PR series
+  // keep their per-pod task because each pod owns its own scoped PR.
+  const rootTask =
+    ancestor.prMode === 'single' && ancestor.seriesDescription
+      ? ancestor.seriesDescription
+      : ancestor.task;
 
   // Sanitize a reviewer-supplied string: quarantine PI, strip PII.
   // Uses the profile's content-processing config when set; falls back to a
@@ -694,6 +706,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     parentSessionId: string,
     status: PrMergeStatus,
     userMessage?: string,
+    bypassCooldown = false,
   ): Promise<void> => {
     // Re-read from DB to avoid stale closure state across 60s intervals
     const parent = podRepo.getOrThrow(parentSessionId);
@@ -748,8 +761,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     // Guard: per-parent cooldown (10 minutes between fix-pod spawns)
     // Prevents a fast-failing CI from burning all fix attempts in a single burst.
+    // Manual user-triggered spawns bypass — the user is the explicit override,
+    // and skipping silently here would also drop their userMessage on the floor.
     const FIX_POD_COOLDOWN_MS = 10 * 60 * 1_000;
-    if (parent.lastFixPodSpawnedAt) {
+    if (!bypassCooldown && parent.lastFixPodSpawnedAt) {
       const elapsed = Date.now() - new Date(parent.lastFixPodSpawnedAt).getTime();
       if (elapsed < FIX_POD_COOLDOWN_MS) {
         const remainingSec = Math.ceil((FIX_POD_COOLDOWN_MS - elapsed) / 1_000);
@@ -1724,6 +1739,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             dependsOnPodId: request.dependsOnPodId ?? null,
             seriesId: request.seriesId ?? null,
             seriesName: request.seriesName ?? null,
+            seriesDescription: request.seriesDescription ?? null,
+            prMode: request.prMode ?? null,
+            waitForMerge: request.waitForMerge ?? false,
             requireSidecars: requireSidecars.length > 0 ? requireSidecars : null,
             autoApprove: request.autoApprove ?? false,
             disableAskHuman: request.disableAskHuman ?? false,
@@ -2541,55 +2559,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
 
         // Build stdio MCP servers from codeIntelligence profile flags.
-        // These run as local subprocesses inside the container and bypass the daemon proxy.
+        // These run as local subprocesses inside the container, started by the
+        // agent CLI itself. They flow into SpawnConfig.mcpServers (alongside
+        // HTTP entries) so the runtime writes them into its out-of-tree config
+        // file (e.g. /home/autopod/.autopod/mcp-config.json for Claude). We
+        // intentionally do NOT touch /workspace/.mcp.json here — that file
+        // belongs to the user's repo, and any daemon-injected entry would
+        // get swept up by `git add` and committed.
         const stdioMcpServers = buildCodeIntelligenceServers(profile);
 
-        // Write stdio servers to /workspace/.mcp.json so Claude Code picks them up automatically.
-        if (stdioMcpServers.length > 0) {
-          try {
-            let existingMcp: Record<string, unknown> = {};
-            try {
-              const raw = await containerManager.readFile(containerId, '/workspace/.mcp.json');
-              existingMcp = JSON.parse(raw) as Record<string, unknown>;
-            } catch {
-              // File absent or unreadable — start fresh
-            }
-            const existingServers =
-              existingMcp.mcpServers && typeof existingMcp.mcpServers === 'object'
-                ? (existingMcp.mcpServers as Record<string, unknown>)
-                : {};
-            const stdioEntries = Object.fromEntries(
-              stdioMcpServers.map((s) => [
-                s.name,
-                {
-                  type: 'stdio',
-                  command: s.command,
-                  ...(s.args && { args: s.args }),
-                  ...(s.env && { env: s.env }),
-                },
-              ]),
-            );
-            await containerManager.writeFile(
-              containerId,
-              '/workspace/.mcp.json',
-              JSON.stringify(
-                { ...existingMcp, mcpServers: { ...existingServers, ...stdioEntries } },
-                null,
-                2,
-              ),
-            );
-            logger.info(
-              { podId, servers: stdioMcpServers.map((s) => s.name) },
-              'Stdio MCP servers written to .mcp.json',
-            );
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to write stdio MCP servers to .mcp.json');
-          }
-        }
-
         // Rewrite injected MCP server URLs to route through daemon proxy.
-        // Only HTTP servers go through the proxy — stdio servers are handled above.
-        // Agent sees proxy URLs, daemon handles auth injection + PII stripping
+        // Only HTTP servers go through the proxy — stdio servers run as local
+        // subprocesses in the container and are appended to mcpServers below.
+        // Agent sees proxy URLs, daemon handles auth injection + PII stripping.
         const httpMcpServers = mergedMcpServers.filter((s) => s.type !== 'stdio');
         const proxiedMcpServers = httpMcpServers.map((s) => ({
           ...s,
@@ -2651,13 +2633,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // The pod token authenticates BOTH the escalation endpoint and the
         // proxied-MCP endpoints — without it a pod on another pod could
         // impersonate this pod and abuse its injected MCP credentials.
-        const mcpServers = [
-          { name: 'escalation', url: mcpUrl, headers: escalationHeaders },
-          ...proxiedMcpServers.map((s) => ({
-            name: s.name,
-            url: s.url,
-            headers: escalationHeaders,
-          })),
+        // Stdio servers (serena, roslyn-codelens) are included here so the
+        // runtime emits them into its out-of-tree config file. They never
+        // touch the user's working tree.
+        const mcpServers: McpServerConfig[] = [
+          { type: 'http', name: 'escalation', url: mcpUrl, headers: escalationHeaders },
+          ...proxiedMcpServers.map(
+            (s) =>
+              ({
+                type: 'http',
+                name: s.name,
+                url: s.url,
+                headers: escalationHeaders,
+              }) satisfies McpServerConfig,
+          ),
+          ...stdioMcpServers.map(
+            (s) =>
+              ({
+                type: 'stdio',
+                name: s.name,
+                command: s.command,
+                ...(s.args && { args: s.args }),
+                ...(s.env && { env: s.env }),
+              }) satisfies McpServerConfig,
+          ),
         ];
 
         // Build provider-aware env (API keys, OAuth creds, Foundry config)
@@ -5675,7 +5674,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
-      await maybeSpawnFixSession(podId, status, userMessage);
+      await maybeSpawnFixSession(podId, status, userMessage, true);
       logger.info(
         { podId, hasUserMessage: Boolean(userMessage) },
         'Manual fix pod spawn triggered',
