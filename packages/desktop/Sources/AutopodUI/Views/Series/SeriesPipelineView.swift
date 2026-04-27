@@ -1,4 +1,5 @@
 import AutopodClient
+import MarkdownUI
 import SwiftUI
 
 /// Top-level DAG view for a pod series. Renders nodes via `PipelineNodeView`,
@@ -107,84 +108,13 @@ public struct SeriesPipelineView: View {
         .padding(.vertical, 6)
     }
 
-    // MARK: - Markdown rendering
-
-    private struct MdBlock: Identifiable {
-        enum Kind { case h1(String), h2(String), h3(String), bullet(String), code(String), text(String), spacer }
-        let id: Int
-        let kind: Kind
-    }
-
-    private func parseBlocks(_ raw: String) -> [MdBlock] {
-        var result: [MdBlock] = []
-        var inFence = false
-        var fenceLines: [String] = []
-        for (i, line) in raw.components(separatedBy: "\n").enumerated() {
-            if line.hasPrefix("```") {
-                if inFence {
-                    result.append(MdBlock(id: i, kind: .code(fenceLines.joined(separator: "\n"))))
-                    fenceLines = []; inFence = false
-                } else { inFence = true }
-            } else if inFence {
-                fenceLines.append(line)
-            } else if line.hasPrefix("### ") {
-                result.append(MdBlock(id: i, kind: .h3(String(line.dropFirst(4)))))
-            } else if line.hasPrefix("## ") {
-                result.append(MdBlock(id: i, kind: .h2(String(line.dropFirst(3)))))
-            } else if line.hasPrefix("# ") {
-                result.append(MdBlock(id: i, kind: .h1(String(line.dropFirst(2)))))
-            } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                result.append(MdBlock(id: i, kind: .bullet(String(line.dropFirst(2)))))
-            } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                result.append(MdBlock(id: i, kind: .spacer))
-            } else {
-                result.append(MdBlock(id: i, kind: .text(line)))
-            }
-        }
-        return result
-    }
-
-    private func inlineText(_ raw: String) -> Text {
-        (try? Text(AttributedString(markdown: raw, options: .init(interpretedSyntax: .full)))) ?? Text(raw)
-    }
-
-    @ViewBuilder
-    private func blockView(_ block: MdBlock) -> some View {
-        switch block.kind {
-        case .h1(let s):
-            inlineText(s).font(.title3.bold()).padding(.top, 10)
-        case .h2(let s):
-            inlineText(s).font(.headline).padding(.top, 8)
-        case .h3(let s):
-            inlineText(s).font(.subheadline.bold()).padding(.top, 6)
-        case .bullet(let s):
-            HStack(alignment: .top, spacing: 5) {
-                Text("•").font(.callout).foregroundStyle(.secondary).frame(width: 12)
-                inlineText(s).font(.callout)
-            }
-        case .code(let s):
-            Text(s)
-                .font(.system(.caption, design: .monospaced))
-                .padding(8)
-                .background(Color.primary.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-        case .text(let s):
-            inlineText(s).font(.callout)
-        case .spacer:
-            Spacer().frame(height: 4)
-        }
-    }
-
     private func markdownView(_ text: String) -> some View {
         ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(parseBlocks(text)) { block in
-                    blockView(block)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-            }
-            .padding(14)
+            Markdown(text)
+                .markdownTheme(.autopod)
+                .textSelection(.enabled)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
