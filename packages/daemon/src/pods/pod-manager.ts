@@ -2764,10 +2764,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           timeout: 3_000,
         });
 
-        // Detect 0-byte .bin/ stubs before the agent starts. These are a symptom of
-        // `npm install --ignore-scripts` overwriting valid stubs without running
-        // postinstall hooks. Surface them early so the agent (and operator) don't have
-        // to diagnose the resulting "Permission denied" errors from scratch.
+        // Detect and auto-heal 0-byte .bin/ stubs before the agent starts. These are a
+        // symptom of `npm install --ignore-scripts` overwriting valid stubs without running
+        // postinstall hooks, leaving empty files that can't be executed.
         const stubScan = await containerManager
           .execInContainer(
             containerId,
@@ -2783,10 +2782,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (brokenStubs) {
           const first5 = brokenStubs.split('\n').slice(0, 5).join(', ');
           logger.warn({ podId }, `0-byte .bin stubs detected before agent start: ${first5}`);
-          emitStatus(
-            `⚠️ 0-byte .bin stubs detected (${first5}…). ` +
-              'Likely cause: npm install --ignore-scripts in your start/build script. Fix: add `npm rebuild` after the install.',
-          );
+          emitStatus(`⚠️ 0-byte .bin stubs detected — running npm rebuild to restore them…`);
+          const rebuildResult = await containerManager
+            .execInContainer(containerId, ['sh', '-c', 'cd /workspace && npm rebuild 2>&1'], {
+              timeout: 120_000,
+            })
+            .catch((err: unknown) => ({
+              stdout: '',
+              stderr: err instanceof Error ? err.message : String(err),
+              exitCode: 1,
+            }));
+          if (rebuildResult.exitCode === 0) {
+            logger.info({ podId }, 'npm rebuild completed — bin stubs restored');
+            emitStatus('✅ npm rebuild completed — bin stubs restored');
+          } else {
+            logger.warn({ podId }, `npm rebuild failed: ${rebuildResult.stdout?.slice(0, 300)}`);
+            emitStatus(`⚠️ npm rebuild failed. Agent may encounter "Permission denied" errors for node_modules/.bin tools.`);
+          }
         }
 
         // Rewrite injected MCP server URLs to route through daemon proxy.

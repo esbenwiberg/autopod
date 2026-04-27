@@ -463,6 +463,28 @@ async function runBuild(
   log?.info({ buildCommand: config.buildCommand }, 'running build');
 
   const buildCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
+
+  // Heal 0-byte .bin stubs before the build — the agent may have run
+  // `npm install --ignore-scripts` which leaves empty, non-executable stubs.
+  const stubCheck = await containerManager
+    .execInContainer(
+      config.containerId,
+      ['sh', '-c', `find ${buildCwd} -path "*/node_modules/.bin/*" -empty -print 2>/dev/null | head -1`],
+      { timeout: 5_000 },
+    )
+    .catch(() => null);
+  if (stubCheck?.stdout?.trim()) {
+    log?.info('0-byte .bin stubs found before build — running npm rebuild');
+    await containerManager
+      .execInContainer(config.containerId, ['sh', '-c', `cd ${buildCwd} && npm rebuild 2>&1`], {
+        timeout: 120_000,
+        ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+      })
+      .catch((err: unknown) =>
+        log?.warn({ err }, 'pre-build npm rebuild failed — build may still encounter Permission denied errors'),
+      );
+  }
+
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
     result = await containerManager.execInContainer(
