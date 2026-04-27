@@ -170,11 +170,13 @@ async function tryWorktreeDiff(
         ? `${committedDiff}\n${uncommittedDiff}`
         : committedDiff;
 
-      if (combined.trim()) {
-        return combined;
-      }
+      // Return even if empty — the pod hasn't committed yet or its commits
+      // are in the container (not the host worktree). Never fall through to
+      // the merge-base loop when sinceCommit is known: that would surface the
+      // entire PR branch vs main as the pod's "work".
+      return combined;
     } catch {
-      // sinceCommit may be invalid — fall through to merge-base
+      // sinceCommit is unknown to this worktree — fall through to merge-base
     }
   }
 
