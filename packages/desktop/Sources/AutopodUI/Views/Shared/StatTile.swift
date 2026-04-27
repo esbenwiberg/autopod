@@ -22,19 +22,24 @@ public struct StatTile: View {
     public let value: String
     public let health: StatHealth
     public let hint: String
+    public let description: String
+
+    @State private var showingInfo = false
 
     public init(
         icon: String,
         label: String,
         value: String,
         health: StatHealth,
-        hint: String
+        hint: String,
+        description: String = ""
     ) {
         self.icon = icon
         self.label = label
         self.value = value
         self.health = health
         self.hint = hint
+        self.description = description
     }
 
     public var body: some View {
@@ -47,6 +52,23 @@ public struct StatTile: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                Spacer()
+                Button {
+                    showingInfo.toggle()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showingInfo, arrowEdge: .bottom) {
+                    Text(description.isEmpty ? hint : description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: 240)
+                        .padding(12)
+                        .textSelection(.enabled)
+                }
             }
 
             Text(value)
