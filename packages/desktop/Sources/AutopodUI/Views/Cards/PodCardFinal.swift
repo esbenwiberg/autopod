@@ -440,17 +440,18 @@ public struct SessionCardFinal: View {
                     Image(systemName: "doc.text")
                         .font(.system(size: 8))
                         .foregroundStyle(.tertiary)
-                    Text("+\(diff.added)")
+                    Text(verbatim: "+\(diff.added)")
                         .foregroundStyle(.green)
-                    Text("-\(diff.removed)")
+                    Text(verbatim: "-\(diff.removed)")
                         .foregroundStyle(.red)
                     Text("·")
                         .foregroundStyle(.quaternary)
-                    Text("\(diff.files) files")
+                    Text(verbatim: "\(diff.files) files")
                         .foregroundStyle(.secondary)
                 }
                 .font(.system(.caption2, design: .monospaced))
                 .monospacedDigit()
+                .lineLimit(1)
             }
         }
     }

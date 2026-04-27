@@ -163,7 +163,7 @@ public struct DetailPanelView: View {
         .onChange(of: requestedTab) { _, tab in
             guard let tab else { return }
             guard tab != .terminal || isTerminalAvailable else { requestedTab = nil; return }
-            withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
+            selectedTab = tab
             requestedTab = nil
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
@@ -194,6 +194,7 @@ public struct DetailPanelView: View {
                         Text(pod.id)
                             .font(.system(.title3, design: .monospaced).weight(.semibold))
                             .foregroundStyle(pod.status == .complete ? .green : pod.status == .killed ? .red.opacity(0.6) : .primary)
+                            .lineLimit(1)
                         Image(systemName: didCopyName ? "checkmark" : "doc.on.doc")
                             .font(.system(size: 10))
                             .foregroundStyle(didCopyName ? Color.green : Color.secondary.opacity(0.6))
@@ -204,18 +205,22 @@ public struct DetailPanelView: View {
                     .help(didCopyName ? "Copied!" : "Click to copy name")
                     HStack(spacing: 6) {
                         Text(pod.profileName)
+                            .lineLimit(1)
                         Text("·")
                             .foregroundStyle(.quaternary)
                         Text(pod.model)
+                            .lineLimit(1)
                         Text("·")
                             .foregroundStyle(.quaternary)
                         Text(pod.duration)
                             .contentTransition(.numericText())
+                            .lineLimit(1)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
-                Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
                 headerActions
             }
 
@@ -223,9 +228,12 @@ public struct DetailPanelView: View {
                 Text(pod.task)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(isTaskExpanded ? nil : 2)
+                    .lineLimit(isTaskExpanded ? 8 : 2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 8)
-                    .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { isTaskExpanded.toggle() } }
+                    .onTapGesture { isTaskExpanded.toggle() }
                     .help("Click to \(isTaskExpanded ? "collapse" : "expand") task")
             }
 
@@ -236,7 +244,7 @@ public struct DetailPanelView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.regularMaterial)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var worktreeCompromisedBanner: some View {
@@ -673,7 +681,7 @@ public struct DetailPanelView: View {
                     return ""
                 }()
                 Button {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { selectedTab = tab }
+                    selectedTab = tab
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: tab.icon)

@@ -626,9 +626,12 @@ struct OverviewTab: View {
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(label)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
         }
     }

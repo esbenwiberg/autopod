@@ -392,6 +392,7 @@ public struct MainView: View {
                     onReloadLogs: onReloadLogs,
                     requestedTab: $requestedDetailTab
                 )
+                .id(pod.id)
             } else {
                 emptyDetail
             }
@@ -706,12 +707,13 @@ struct SessionListRow: View {
             Spacer()
             if let diff = pod.diffStats {
                 HStack(spacing: 3) {
-                    Text("+\(diff.added)")
+                    Text(verbatim: "+\(diff.added)")
                         .foregroundStyle(.green)
-                    Text("-\(diff.removed)")
+                    Text(verbatim: "-\(diff.removed)")
                         .foregroundStyle(.red)
                 }
                 .font(.system(.caption2, design: .monospaced))
+                .lineLimit(1)
             }
             Text(pod.duration)
                 .font(.system(.caption2, design: .monospaced))
