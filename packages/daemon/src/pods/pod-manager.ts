@@ -2784,9 +2784,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           logger.warn({ podId }, `0-byte .bin stubs detected before agent start: ${first5}`);
           emitStatus(`⚠️ 0-byte .bin stubs detected — running npm rebuild to restore them…`);
           const rebuildResult = await containerManager
-            .execInContainer(containerId, ['sh', '-c', 'cd /workspace && npm rebuild 2>&1'], {
-              timeout: 120_000,
-            })
+            .execInContainer(
+              containerId,
+              [
+                'sh',
+                '-c',
+                "find /workspace -path '*/node_modules/.bin/*' -empty -print 2>/dev/null | awk -F'/node_modules/' '{print $1}' | sort -u | while read -r dir; do [ -f \"$dir/package.json\" ] && (cd \"$dir\" && npm rebuild 2>&1); done",
+              ],
+              { timeout: 120_000 },
+            )
             .catch((err: unknown) => ({
               stdout: '',
               stderr: err instanceof Error ? err.message : String(err),

@@ -476,10 +476,15 @@ async function runBuild(
   if (stubCheck?.stdout?.trim()) {
     log?.info('0-byte .bin stubs found before build — running npm rebuild');
     await containerManager
-      .execInContainer(config.containerId, ['sh', '-c', `cd ${buildCwd} && npm rebuild 2>&1`], {
-        timeout: 120_000,
-        ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
-      })
+      .execInContainer(
+        config.containerId,
+        [
+          'sh',
+          '-c',
+          "find /workspace -path '*/node_modules/.bin/*' -empty -print 2>/dev/null | awk -F'/node_modules/' '{print $1}' | sort -u | while read -r dir; do [ -f \"$dir/package.json\" ] && (cd \"$dir\" && npm rebuild 2>&1); done",
+        ],
+        { timeout: 120_000, ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}) },
+      )
       .catch((err: unknown) =>
         log?.warn({ err }, 'pre-build npm rebuild failed — build may still encounter Permission denied errors'),
       );
