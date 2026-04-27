@@ -638,4 +638,67 @@ describe('generateDockerfile', () => {
       expect(roslynBlock).not.toContain('2>/dev/null');
     });
   });
+
+  describe('serena language-server pre-warm', () => {
+    it('emits a C# warmup block for dotnet10 template', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({ template: 'dotnet10', codeIntelligence: { serena: true } }),
+        gitCredentials: 'none',
+      });
+      expect(df).toContain('serena-warmup');
+      expect(df).toContain('C# language-server pre-warm');
+      // Dummy project is a minimal .csproj
+      expect(df).toContain('WarmupClass.cs');
+      // Non-fatal: warmup failure must not break the build
+      expect(df).toContain('WARN: pre-warm failed');
+      // Cleanup always runs (unconditional semicolon)
+      expect(df).toContain('; rm -rf /tmp/serena-warmup');
+    });
+
+    it('emits a C# warmup block for dotnet9 template', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({ template: 'dotnet9', codeIntelligence: { serena: true } }),
+        gitCredentials: 'none',
+      });
+      expect(df).toContain('C# language-server pre-warm');
+    });
+
+    it('emits a TypeScript warmup block for node22 template', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({ template: 'node22', codeIntelligence: { serena: true } }),
+        gitCredentials: 'none',
+      });
+      expect(df).toContain('serena-warmup');
+      expect(df).toContain('TypeScript language-server pre-warm');
+      expect(df).toContain('tsconfig.json');
+      expect(df).toContain('warmup.ts');
+    });
+
+    it('omits warmup block when serena is not enabled', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({ template: 'dotnet10', codeIntelligence: null }),
+        gitCredentials: 'none',
+      });
+      expect(df).not.toContain('serena-warmup');
+    });
+
+    it('omits warmup block for templates with no known language-server strategy (go124)', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({ template: 'go124', codeIntelligence: { serena: true } }),
+        gitCredentials: 'none',
+      });
+      // serena binary install still happens, but no warmup block
+      expect(df).toContain('serena-agent@latest');
+      expect(df).not.toContain('serena-warmup');
+    });
+
+    it('encodes the warmup script as base64 (no heredoc quoting issues)', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({ template: 'dotnet10', codeIntelligence: { serena: true } }),
+        gitCredentials: 'none',
+      });
+      // base64 decode approach: no single/double quote nesting issues
+      expect(df).toContain("| base64 -d > /tmp/serena-warmup.py");
+    });
+  });
 });

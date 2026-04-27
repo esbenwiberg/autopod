@@ -158,6 +158,19 @@ export function generateDockerfile(options: DockerfileOptions): string {
       ' && uv tool install -p 3.13 serena-agent@latest --prerelease=allow \\',
       ' && command -v serena',
     );
+
+    // Pre-warm the Serena language-server cache. Serena downloads language-server
+    // binaries (TypeScript via npm, C# via NuGet) on first use and caches them in
+    // ~/.serena/language_servers/. In a network-restricted pod that download is
+    // blocked, so the MCP server starts but silently fails to analyse code.
+    // Running the warmup here — at image build time, when network is available —
+    // bakes the cache into the image layer so containers never need runtime downloads.
+    // Non-fatal: if the warmup fails (network glitch, NuGet/npm outage) the build
+    // continues; the first pod run will attempt the download on demand.
+    const warmupLang = serenaWarmupLanguage(profile.template);
+    if (warmupLang) {
+      lines.push(...buildSerenaWarmupBlock(warmupLang));
+    }
   }
   if (profile.codeIntelligence?.roslynCodeLens) {
     // NuGet package id is `RoslynCodeLens.Mcp` (CamelCase); the resulting
@@ -361,6 +374,104 @@ function generateNuGetDockerLines(registries: PrivateRegistry[]): string[] {
   parts.push('echo "</configuration>" >> /workspace/NuGet.config');
 
   return [`RUN ${parts.join(' && \\\n    ')}`];
+}
+
+/**
+ * Returns the language to pre-warm for Serena based on the stack template, or
+ * null when the template has no known warmup strategy (Go, Python standalone).
+ */
+function serenaWarmupLanguage(template: StackTemplate | null): 'csharp' | 'typescript' | null {
+  if (!template) return null;
+  if (template === 'dotnet9' || template === 'dotnet10' || template === 'dotnet10-go') {
+    return 'csharp';
+  }
+  if (template === 'node22' || template === 'node22-pw' || template === 'python-node') {
+    return 'typescript';
+  }
+  return null;
+}
+
+/**
+ * Generates Dockerfile RUN lines that pre-warm the Serena language-server cache
+ * for the given language. The warmup:
+ * 1. Creates a minimal dummy project in /tmp/serena-warmup
+ * 2. Starts serena as an MCP stdio server against it
+ * 3. Performs the JSON-RPC initialize + notifications/initialized + find_symbol handshake
+ * 4. This triggers the language-server binary download into ~/.serena/language_servers/
+ * 5. Cleans up the dummy project (cache directory is kept)
+ *
+ * The Python warmup script is base64-encoded at generation time to avoid shell
+ * quoting and heredoc portability issues in the Dockerfile.
+ */
+function buildSerenaWarmupBlock(lang: 'csharp' | 'typescript'): string[] {
+  // Compact MCP stdio client: initialises serena and fires a find_symbol call,
+  // which is enough to trigger the language-server download. select() provides
+  // per-read timeouts so a hung/crashing server doesn't block the build forever.
+  const script = [
+    'import subprocess,json,sys,select as sel',
+    'def f(m):',
+    '    b=json.dumps(m).encode()',
+    '    return b"Content-Length: "+str(len(b)).encode()+b"\\r\\n\\r\\n"+b',
+    'def r(p,t=120):',
+    '    h=b""',
+    '    while b"\\r\\n\\r\\n" not in h:',
+    '        if not sel.select([p.stdout],[],[],t)[0]:sys.exit(1)',
+    '        c=p.stdout.read(1)',
+    '        if not c:sys.exit(1)',
+    '        h+=c',
+    '    n=int(h.split(b"Content-Length: ")[1].split(b"\\r\\n")[0])',
+    '    b=b""',
+    '    while len(b)<n:',
+    '        if not sel.select([p.stdout],[],[],t)[0]:sys.exit(1)',
+    '        chunk=p.stdout.read(n-len(b))',
+    '        if not chunk:sys.exit(1)',
+    '        b+=chunk',
+    '    return json.loads(b)',
+    'p=subprocess.Popen(["serena","start-mcp-server","--context=claude-code","--project=/tmp/serena-warmup"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)',
+    'try:',
+    '    p.stdin.write(f({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"warmup","version":"1.0"}}}))',
+    '    p.stdin.flush()',
+    '    r(p)',
+    '    p.stdin.write(f({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}))',
+    '    p.stdin.flush()',
+    '    p.stdin.write(f({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"query":"WarmupClass","context_above_below":0}}}))',
+    '    p.stdin.flush()',
+    '    r(p)',
+    '    print("[serena-warmup] language server cached ok")',
+    'finally:',
+    '    p.terminate()',
+    '    p.wait()',
+  ].join('\n');
+
+  const scriptB64 = Buffer.from(script).toString('base64');
+
+  const projectSetup =
+    lang === 'csharp'
+      ? [
+          // Minimal classlib — just needs to be a valid .csproj + .cs so the
+          // Roslyn language server initialises and downloads its binary.
+          ' && printf \'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\' > /tmp/serena-warmup/Warmup.csproj \\',
+          " && printf 'namespace Warmup { public class WarmupClass {} }' > /tmp/serena-warmup/WarmupClass.cs \\",
+        ]
+      : [
+          // Minimal TypeScript project — tsconfig + a type declaration is enough
+          // for the TypeScript language server to initialise.
+          ' && printf \'{"compilerOptions":{"strict":true}}\' > /tmp/serena-warmup/tsconfig.json \\',
+          " && printf 'export class WarmupClass {}' > /tmp/serena-warmup/warmup.ts \\",
+        ];
+
+  return [
+    '',
+    `# Serena ${lang === 'csharp' ? 'C#' : 'TypeScript'} language-server pre-warm`,
+    '# Populates ~/.serena/language_servers/ at image build time so network-restricted',
+    '# pods never need a runtime download. Non-fatal if the warmup fails.',
+    `RUN echo '${scriptB64}' | base64 -d > /tmp/serena-warmup.py \\`,
+    ' && mkdir -p /tmp/serena-warmup \\',
+    ...projectSetup,
+    ' && python3 /tmp/serena-warmup.py \\',
+    ' || echo "[serena-warmup] WARN: pre-warm failed — first pod run will download language server on demand" \\',
+    ' ; rm -rf /tmp/serena-warmup /tmp/serena-warmup.py',
+  ];
 }
 
 /** Derive an XML-safe feed name from an Azure DevOps feed URL */
