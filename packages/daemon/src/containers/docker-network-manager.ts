@@ -467,10 +467,34 @@ export class DockerNetworkManager {
       }
     }
 
-    // --- dnsmasq+ipset mode ---
+    // --- Probe dnsmasq+ipset+iptables-set integration ---
+    // The binaries can exist while the kernel lacks `xt_set` (e.g. Docker
+    // Desktop's LinuxKit VM). In that case `iptables -m set` fails at runtime
+    // with "Can't open socket to ipset" — the binary check alone isn't enough.
+    // Probe end-to-end: create a throwaway set, try a real `-m set` rule, then
+    // tear it down. Only if the probe succeeds do we commit to dnsmasq mode.
     lines.push('');
-    lines.push('# Attempt dnsmasq+ipset mode (domain-based filtering)');
+    lines.push('# Probe dnsmasq + ipset + iptables-set integration end-to-end.');
+    lines.push('# Binaries can exist without the xt_set kernel module (Docker Desktop).');
+    lines.push('AUTOPOD_USE_DNSMASQ=0');
     lines.push('if command -v dnsmasq >/dev/null 2>&1 && command -v ipset >/dev/null 2>&1; then');
+    lines.push('  if ipset create _autopod_probe hash:net 2>/dev/null; then');
+    lines.push(
+      '    if iptables -A OUTPUT -m set --match-set _autopod_probe dst -j ACCEPT 2>/dev/null; then',
+    );
+    lines.push('      AUTOPOD_USE_DNSMASQ=1');
+    lines.push('    fi');
+    lines.push(
+      '    iptables -D OUTPUT -m set --match-set _autopod_probe dst -j ACCEPT 2>/dev/null || true',
+    );
+    lines.push('    ipset destroy _autopod_probe 2>/dev/null || true');
+    lines.push('  fi');
+    lines.push('fi');
+    lines.push('');
+
+    // --- dnsmasq+ipset mode ---
+    lines.push('# Attempt dnsmasq+ipset mode (domain-based filtering)');
+    lines.push('if [ "$AUTOPOD_USE_DNSMASQ" = "1" ]; then');
     lines.push('');
     lines.push('  # Stop any running dnsmasq (SIGKILL via PID file, then killall as fallback)');
     lines.push(
@@ -504,9 +528,19 @@ export class DockerNetworkManager {
     lines.push('  done');
     lines.push('');
 
-    // Write dnsmasq config
+    // Resolve nobody's primary group at runtime — dnsmasq's compile-time default
+    // group varies by distro (`dip` on Debian, `nogroup` on some Ubuntu builds,
+    // `nobody` on Alpine) and the wrong choice causes dnsmasq to exit during
+    // privilege drop. Pinning `group=` to the actual primary group of the
+    // `nobody` user makes the config portable.
+    lines.push('  # Resolve nobody primary group (varies: nogroup on Debian, nobody on Alpine)');
+    lines.push('  NOBODY_GROUP=$(id -gn nobody 2>/dev/null || echo nobody)');
+    lines.push('');
+
+    // Write dnsmasq config (unquoted heredoc so $NOBODY_GROUP expands;
+    // SAFE_HOST_REGEX guarantees no other shell metachars in interpolated values).
     lines.push('  # Write dnsmasq config');
-    lines.push("  cat > /tmp/dnsmasq-firewall.conf << 'DNSCONF'");
+    lines.push('  cat > /tmp/dnsmasq-firewall.conf << DNSCONF');
     lines.push('no-resolv');
     lines.push('no-hosts');
     lines.push(`listen-address=${DNSMASQ_LISTEN}`);
@@ -514,6 +548,7 @@ export class DockerNetworkManager {
     // dnsmasq drops privileges to the dnsmasq user if it exists, otherwise nobody.
     // We need a known user for the iptables owner match.
     lines.push('user=nobody');
+    lines.push('group=$NOBODY_GROUP');
     lines.push('');
     lines.push('# Allowed domains — forward to Docker DNS and populate ipset');
     for (const domain of dnsmasqDomains) {
@@ -563,7 +598,9 @@ export class DockerNetworkManager {
     // --- CIDR fallback mode ---
     lines.push('else');
     lines.push('');
-    lines.push('  echo "dnsmasq/ipset not available — falling back to CIDR mode"');
+    lines.push(
+      '  echo "dnsmasq+ipset+iptables-set integration unavailable — falling back to CIDR mode"',
+    );
     lines.push('');
     lines.push('  # Allow DNS');
     lines.push('  iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');

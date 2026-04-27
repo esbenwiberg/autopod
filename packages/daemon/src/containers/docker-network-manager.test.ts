@@ -213,6 +213,29 @@ describe('DockerNetworkManager', () => {
         expect(script).toContain('command -v ipset');
       });
 
+      it('probes iptables-set integration end-to-end (xt_set kernel module)', async () => {
+        // Regression: binary check alone is insufficient — Docker Desktop's
+        // LinuxKit VM ships ipset + iptables but lacks `xt_set`, so
+        // `iptables -m set` fails at runtime with "Can't open socket to ipset".
+        // The probe creates a throwaway set, tries a real -m set rule, and
+        // gates dnsmasq mode on the result.
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('AUTOPOD_USE_DNSMASQ=0');
+        expect(script).toContain('ipset create _autopod_probe hash:net');
+        expect(script).toContain(
+          'iptables -A OUTPUT -m set --match-set _autopod_probe dst -j ACCEPT',
+        );
+        expect(script).toContain('AUTOPOD_USE_DNSMASQ=1');
+        // Cleanup must happen unconditionally so a partially-applied probe
+        // can't leave orphan rules in the chain.
+        expect(script).toContain(
+          'iptables -D OUTPUT -m set --match-set _autopod_probe dst -j ACCEPT 2>/dev/null || true',
+        );
+        expect(script).toContain('ipset destroy _autopod_probe 2>/dev/null || true');
+        // The dnsmasq branch is gated on the probe result, not on binary existence.
+        expect(script).toContain('if [ "$AUTOPOD_USE_DNSMASQ" = "1" ]; then');
+      });
+
       it('creates ipset named allowed_ips', async () => {
         const script = await manager.generateFirewallScript(['example.com']);
         expect(script).toContain('ipset create allowed_ips hash:net');
@@ -257,6 +280,18 @@ describe('DockerNetworkManager', () => {
         const script = await manager.generateFirewallScript(['example.com']);
         expect(script).toContain('nameserver 127.0.0.53');
         expect(script).toContain('/etc/resolv.conf');
+      });
+
+      it('pins dnsmasq group to nobody primary group (avoids dip default)', async () => {
+        // Regression: dnsmasq's compile-time default group ("dip" on Debian) is
+        // not portable. Resolving nobody's primary group at runtime keeps the
+        // config working across Debian/Ubuntu/Alpine base images.
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('NOBODY_GROUP=$(id -gn nobody');
+        expect(script).toContain('group=$NOBODY_GROUP');
+        // Heredoc must be unquoted so $NOBODY_GROUP expands.
+        expect(script).toContain('cat > /tmp/dnsmasq-firewall.conf << DNSCONF');
+        expect(script).not.toContain("cat > /tmp/dnsmasq-firewall.conf << 'DNSCONF'");
       });
 
       it('restricts Docker DNS access to dnsmasq user only', async () => {

@@ -29,6 +29,33 @@ try {
   SECCOMP_JSON = undefined;
 }
 
+// Top-level directories that exist in every base image with carefully chosen
+// permissions. writeFile() must NOT include these as tar entries — doing so
+// overwrites their ownership and mode (e.g. /tmp loses its 1777 sticky bit and
+// becomes autopod-owned 0755), which combined with CapDrop=ALL (no
+// CAP_DAC_OVERRIDE) prevents root inside the container from writing to them.
+const SYSTEM_TOP_LEVEL_DIRS = new Set([
+  'tmp',
+  'etc',
+  'var',
+  'proc',
+  'sys',
+  'dev',
+  'run',
+  'root',
+  'home',
+  'usr',
+  'bin',
+  'sbin',
+  'lib',
+  'lib64',
+  'boot',
+  'mnt',
+  'media',
+  'srv',
+  'opt',
+]);
+
 interface DockerContainerManagerOptions {
   docker?: Dockerode;
   logger: Logger;
@@ -90,8 +117,14 @@ export class DockerContainerManager implements ContainerManager {
 
     if (config.networkName) {
       hostConfig.NetworkMode = config.networkName;
-      // NET_ADMIN required for iptables firewall rules inside the container.
-      hostConfig.CapAdd = ['NET_ADMIN'];
+      // NET_ADMIN: iptables firewall rules.
+      // SETGID/SETUID: dnsmasq drops privileges to `nobody` via setgroups +
+      // setgid + setuid. Without these caps, dnsmasq exits at startup with
+      // "failed to change group-id ...: Operation not permitted" — which makes
+      // the firewall script fail (exit 5) and, with fail-closed mode, the pod
+      // never spawns. The same caps are in Docker's default capability set;
+      // we just have to add them back after CapDrop=ALL.
+      hostConfig.CapAdd = ['NET_ADMIN', 'SETGID', 'SETUID'];
       // On Linux, host.docker.internal is not auto-added for custom bridge networks.
       // Inject it so containers can always reach the daemon's MCP endpoint.
       hostConfig.ExtraHosts = ['host.docker.internal:host-gateway'];
@@ -237,11 +270,21 @@ export class DockerContainerManager implements ContainerManager {
     // Build a tar archive with the single file, including parent directory entries.
     // uid/gid 1000 = autopod user — without this Docker extracts as root and the
     // process can't create new files in those directories (config updates, pod state).
+    //
+    // Exception: skip top-level system dirs (/tmp, /etc, ...). They already exist
+    // in the base image with carefully chosen permissions (e.g. /tmp is 1777
+    // sticky). Re-emitting them as autopod:1000 mode 0755 strips the sticky bit
+    // and world-writable permission. Combined with CapDrop=ALL (which removes
+    // CAP_DAC_OVERRIDE), root inside the container can no longer write to /tmp,
+    // breaking the firewall script that runs as root.
     const pack = tar.pack();
     const normalizedPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
     const parts = normalizedPath.split('/');
     // Add each intermediate directory as an explicit entry so they're owned by autopod
     for (let i = 1; i < parts.length; i++) {
+      // Top-level system dir — leave it alone (see comment above).
+      const firstPart = parts[0];
+      if (i === 1 && firstPart !== undefined && SYSTEM_TOP_LEVEL_DIRS.has(firstPart)) continue;
       const dirPath = parts.slice(0, i).join('/');
       pack.entry({ name: dirPath, type: 'directory', uid: 1000, gid: 1000, mode: 0o755 });
     }

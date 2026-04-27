@@ -169,7 +169,7 @@ describe('DockerContainerManager', () => {
       expect(createCall.HostConfig.Binds).toBeUndefined();
     });
 
-    it('sets NetworkMode and NET_ADMIN when networkName provided', async () => {
+    it('sets NetworkMode and adds NET_ADMIN/SETGID/SETUID when networkName provided', async () => {
       await manager.spawn({
         ...baseConfig,
         networkName: 'autopod-net',
@@ -177,7 +177,8 @@ describe('DockerContainerManager', () => {
 
       const createCall = docker.createContainer.mock.calls[0]?.[0];
       expect(createCall.HostConfig.NetworkMode).toBe('autopod-net');
-      expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN']);
+      // SETGID/SETUID are required for dnsmasq to drop privileges to `nobody`.
+      expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN', 'SETGID', 'SETUID']);
     });
 
     it('does NOT set NetworkMode when networkName absent', async () => {
@@ -500,6 +501,45 @@ describe('DockerContainerManager', () => {
 
       expect(container.putArchive).toHaveBeenCalledTimes(1);
     });
+
+    it('does not include top-level system dirs (e.g. /tmp) as tar entries', async () => {
+      // Regression: emitting a `tmp` directory entry overwrites /tmp's 1777
+      // sticky permissions with autopod:1000 0755, breaking root writes inside
+      // the container (CapDrop=ALL removes CAP_DAC_OVERRIDE) — which made the
+      // firewall script fail at `cat > /tmp/dnsmasq-firewall.conf`.
+      await manager.writeFile('abc123', '/tmp/firewall.sh', '#!/bin/sh\n');
+
+      const [tarBuffer] = container.putArchive.mock.calls[0] ?? [];
+      const entries = await readTarEntries(tarBuffer as Buffer);
+      expect(entries).toEqual([{ name: 'tmp/firewall.sh', type: 'file' }]);
+    });
+
+    it('still emits autopod-owned entries for non-system top-level dirs', async () => {
+      // /workspace is created by the Dockerfile as root — without an explicit
+      // dir entry the autopod user cannot write into it.
+      await manager.writeFile('abc123', '/workspace/sub/foo.txt', 'x');
+
+      const [tarBuffer] = container.putArchive.mock.calls[0] ?? [];
+      const entries = await readTarEntries(tarBuffer as Buffer);
+      expect(entries).toEqual([
+        { name: 'workspace', type: 'directory' },
+        { name: 'workspace/sub', type: 'directory' },
+        { name: 'workspace/sub/foo.txt', type: 'file' },
+      ]);
+    });
+
+    it('emits subdir entries under system dirs but skips the system dir itself', async () => {
+      // For /run/autopod/agent-shim.sh: skip `run` (system dir, owned by root)
+      // but emit `run/autopod` as autopod-owned so files can be written there.
+      await manager.writeFile('abc123', '/run/autopod/agent-shim.sh', '#!/bin/sh\n');
+
+      const [tarBuffer] = container.putArchive.mock.calls[0] ?? [];
+      const entries = await readTarEntries(tarBuffer as Buffer);
+      expect(entries).toEqual([
+        { name: 'run/autopod', type: 'directory' },
+        { name: 'run/autopod/agent-shim.sh', type: 'file' },
+      ]);
+    });
   });
 
   // ─── readFile() ─────────────────────────────────────────
@@ -726,7 +766,7 @@ describe('DockerContainerManager', () => {
 
       // Network isolation
       expect(createCall.HostConfig.NetworkMode).toBe('autopod-net');
-      expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN']);
+      expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN', 'SETGID', 'SETUID']);
       expect(createCall.HostConfig.CapDrop).toEqual(['ALL']);
       expect(createCall.HostConfig.SecurityOpt).toEqual(
         expect.arrayContaining(['no-new-privileges:true']),
@@ -752,4 +792,27 @@ async function createTarStream(filename: string, content: string): Promise<NodeJ
   p.entry({ name: filename }, content);
   p.finalize();
   return p;
+}
+
+async function readTarEntries(
+  buffer: Buffer,
+): Promise<Array<{ name: string; type: 'file' | 'directory' }>> {
+  const { extract } = await import('tar-stream');
+  const entries: Array<{ name: string; type: 'file' | 'directory' }> = [];
+  const ext = extract();
+  const stream = new PassThrough();
+  return new Promise((resolve, reject) => {
+    ext.on('entry', (header, body, next) => {
+      entries.push({
+        name: header.name,
+        type: header.type === 'directory' ? 'directory' : 'file',
+      });
+      body.resume();
+      body.on('end', next);
+    });
+    ext.on('finish', () => resolve(entries));
+    ext.on('error', reject);
+    stream.pipe(ext);
+    stream.end(buffer);
+  });
 }
