@@ -133,6 +133,9 @@ export function rowToProfile(
     modelProvider: nullableStr(row.model_provider) as Profile['modelProvider'],
     providerCredentials: decryptCreds(row.provider_credentials),
     testCommand: nullableStr(row.test_command),
+    buildEnv: row.build_env
+      ? (JSON.parse(row.build_env as string) as Record<string, string>)
+      : null,
     lintCommand: nullableStr(row.lint_command),
     lintTimeout: nullableNum(row.lint_timeout),
     sastCommand: nullableStr(row.sast_command),
@@ -284,7 +287,7 @@ export function createProfileStore(
           agent_mode, output_target, validate, promotable,
           model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
           private_registries, registry_pat, branch_prefix, container_memory_gb,
-          build_timeout, test_timeout,
+          build_timeout, test_timeout, build_env,
           lint_command, lint_timeout, sast_command, sast_timeout,
           token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
           has_web_ui,
@@ -301,7 +304,7 @@ export function createProfileStore(
           @agentMode, @outputTarget, @validate, @promotable,
           @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
           @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
-          @buildTimeout, @testTimeout,
+          @buildTimeout, @testTimeout, @buildEnv,
           @lintCommand, @lintTimeout, @sastCommand, @sastTimeout,
           @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
           @hasWebUi,
@@ -357,6 +360,7 @@ export function createProfileStore(
         containerMemoryGb: parsed.containerMemoryGb ?? null,
         buildTimeout: parsed.buildTimeout,
         testTimeout: parsed.testTimeout,
+        buildEnv: parsed.buildEnv ? JSON.stringify(parsed.buildEnv) : null,
         tokenBudget: parsed.tokenBudget ?? null,
         tokenBudgetWarnAt: parsed.tokenBudgetWarnAt,
         tokenBudgetPolicy: parsed.tokenBudgetPolicy,
@@ -620,6 +624,10 @@ export function createProfileStore(
       if (parsed.testTimeout !== undefined) {
         setClauses.push('test_timeout = @testTimeout');
         fieldMap.testTimeout = parsed.testTimeout;
+      }
+      if (parsed.buildEnv !== undefined) {
+        setClauses.push('build_env = @buildEnv');
+        fieldMap.buildEnv = parsed.buildEnv ? JSON.stringify(parsed.buildEnv) : null;
       }
       if (parsed.lintCommand !== undefined) {
         setClauses.push('lint_command = @lintCommand');

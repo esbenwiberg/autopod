@@ -269,6 +269,12 @@ const createProfileBaseSchema = z.object({
   modelProvider: modelProviderSchema.nullable().default('anthropic'),
   providerCredentials: providerCredentialsSchema.nullable().default(null),
   testCommand: z.string().nullable().optional().default(null),
+  /**
+   * Extra env vars merged into validation phase execs (build/test/lint/sast).
+   * Common use: `{ NODE_OPTIONS: "--max-old-space-size=4096" }` to raise V8
+   * heap for memory-heavy production bundles. Does not affect agent runtime env.
+   */
+  buildEnv: z.record(z.string()).nullable().default(null),
   buildTimeout: z.number().int().min(30).max(1800).nullable().default(300),
   testTimeout: z.number().int().min(30).max(3600).nullable().default(600),
   /** Optional lint command run before build. */

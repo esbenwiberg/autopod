@@ -871,6 +871,9 @@ public struct ProfileEditorView: View {
             .textFieldStyle(.roundedBorder)
             .font(.system(.callout, design: .monospaced))
         }
+        fieldRow("Build Env", help: "Env vars merged into validation phase execs (build/test/lint/sast). Common use: NODE_OPTIONS=--max-old-space-size=4096 for memory-heavy production bundles. Does not affect the agent's runtime env.") {
+            BuildEnvEditor(env: $profile.buildEnv)
+        }
         fieldRow("Health Path", help: "HTTP endpoint polled to determine when the app is ready (expects 200 OK).") {
             TextField("/", text: $profile.healthPath)
                 .textFieldStyle(.roundedBorder)
@@ -2506,6 +2509,8 @@ public struct ProfileEditorView: View {
                 ),
                 parent: editorPayload?.parent?.testCommand ?? "",
                 placeholder: "pnpm test")
+        case "buildEnv":
+            buildEnvOverrideCard(field: field)
         case "lintCommand":
             nullableStringCard(field,
                 value: Binding(
@@ -3502,6 +3507,31 @@ public struct ProfileEditorView: View {
     }
 
     /// Card for smokePages — the canonical merge-special flow.
+    private func buildEnvOverrideCard(field: ProfileOverrideField) -> some View {
+        let parentEnv = editorPayload?.parent?.buildEnv ?? [:]
+        return overrideCardShell(field: field) {
+            if !parentEnv.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("From \(parentDisplayName ?? "parent")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    ForEach(parentEnv.sorted(by: { $0.key < $1.key }), id: \.key) { entry in
+                        Text("\(entry.key)=\(entry.value)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 1)
+                    }
+                }
+                .padding(.top, 2)
+                Divider().padding(.vertical, 2)
+                Text("Your overrides (replaces parent values entirely)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            BuildEnvEditor(env: $profile.buildEnv)
+        }
+    }
+
     private func smokePagesOverrideCard(field: ProfileOverrideField) -> some View {
         let mode = mergeStrategyDraft["smokePages"] ?? .merge
         let parentPages = editorPayload?.parent?.smokePages ?? []
@@ -4155,6 +4185,72 @@ private struct PimActivationRow: View {
     }
 }
 
+
+// MARK: - BuildEnv editor
+
+/// Inline key/value editor over a `[String: String]` binding. Holds a
+/// stable-id row list internally so editing a key doesn't re-key the
+/// dictionary mid-keystroke and lose focus. Empty keys are skipped when
+/// syncing back so users can stage a new entry without polluting the dict.
+private struct BuildEnvEditor: View {
+    @Binding var env: [String: String]
+    @State private var rows: [Row] = []
+
+    private struct Row: Identifiable {
+        let id: UUID = UUID()
+        var key: String
+        var value: String
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach($rows) { $row in
+                HStack(spacing: 6) {
+                    TextField("KEY", text: $row.key)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .onChange(of: row.key) { _, _ in sync() }
+                    Text("=").foregroundStyle(.secondary)
+                    TextField("value", text: $row.value)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .onChange(of: row.value) { _, _ in sync() }
+                    Button {
+                        rows.removeAll { $0.id == row.id }
+                        sync()
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.red.opacity(0.6))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            Button {
+                rows.append(Row(key: "", value: ""))
+            } label: {
+                Label("Add variable", systemImage: "plus")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+        }
+        .onAppear { populate() }
+    }
+
+    private func populate() {
+        rows = env.sorted(by: { $0.key < $1.key })
+            .map { Row(key: $0.key, value: $0.value) }
+    }
+
+    private func sync() {
+        var d: [String: String] = [:]
+        for r in rows where !r.key.isEmpty {
+            d[r.key] = r.value
+        }
+        if d != env { env = d }
+    }
+}
 
 // MARK: - Previews
 

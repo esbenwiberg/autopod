@@ -36,6 +36,10 @@ public struct ProfileResponse: Codable, Sendable {
   public var modelProvider: String?
   public var providerCredentials: ProviderCredentialsResponse?
   public var testCommand: String?
+  /// Extra env vars merged into validation phase execs (build/test/lint/sast).
+  /// Common use: `NODE_OPTIONS=--max-old-space-size=4096` for memory-heavy
+  /// production bundles. Does not affect the agent's runtime env.
+  public var buildEnv: [String: String]?
   public var buildTimeout: Int?
   public var testTimeout: Int?
   public var lintCommand: String?
@@ -111,6 +115,7 @@ public struct ProfileResponse: Codable, Sendable {
     modelProvider = try c.decodeIfPresent(String.self, forKey: .modelProvider)
     providerCredentials = try c.decodeIfPresent(ProviderCredentialsResponse.self, forKey: .providerCredentials)
     testCommand = try c.decodeIfPresent(String.self, forKey: .testCommand)
+    buildEnv = try c.decodeIfPresent([String: String].self, forKey: .buildEnv)
     buildTimeout = try c.decodeIfPresent(Int.self, forKey: .buildTimeout)
     testTimeout = try c.decodeIfPresent(Int.self, forKey: .testTimeout)
     lintCommand = try c.decodeIfPresent(String.self, forKey: .lintCommand)

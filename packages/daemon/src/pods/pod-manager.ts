@@ -91,6 +91,7 @@ import {
   buildNuGetCredentialEnv,
   buildNuGetSecretFile,
   buildRegistryFiles,
+  buildValidationExecEnv,
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
@@ -4394,21 +4395,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
           hasWebUi: profile.hasWebUi ?? true,
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
-          // Validation phase exec env. Two sources are merged:
-          //  1) NuGet credential env (so `dotnet build`/`dotnet test` can auth against
-          //     private feeds — without this, cold-cache restores hit Azure Artifacts
-          //     without a PAT and fail NU1301 401).
-          //  2) profile.buildEnv (free-form user-supplied env, primary use:
-          //     NODE_OPTIONS=--max-old-space-size=4096 for memory-heavy production
-          //     bundles like Vite/Rollup on large monorepos).
-          // profile.buildEnv wins on key collision — explicit user config beats
-          // inferred creds. Agent runtime env is unaffected.
-          extraExecEnv: ((): Record<string, string> | undefined => {
-            const pat = profile.registryPat ?? profile.adoPat ?? null;
-            const nugetEnv = buildNuGetCredentialEnv(profile.privateRegistries, pat);
-            const merged = { ...nugetEnv, ...(profile.buildEnv ?? {}) };
-            return Object.keys(merged).length > 0 ? merged : undefined;
-          })(),
+          extraExecEnv: buildValidationExecEnv(
+            profile.privateRegistries,
+            profile.registryPat ?? profile.adoPat ?? null,
+            profile.buildEnv,
+          ),
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;

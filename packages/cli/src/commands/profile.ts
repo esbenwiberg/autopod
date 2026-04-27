@@ -70,6 +70,14 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
             `${chalk.bold('Pages:')}      ${data.smokePages.map((p) => p.path).join(', ')}`,
           );
         }
+        if (data.buildEnv && Object.keys(data.buildEnv).length > 0) {
+          console.log(`${chalk.bold('Build env:')}`);
+          for (const [k, v] of Object.entries(data.buildEnv).sort(([a], [b]) =>
+            a.localeCompare(b),
+          )) {
+            console.log(`  ${chalk.cyan(k)}=${v}`);
+          }
+        }
         if (data.mcpServers && data.mcpServers.length > 0) {
           console.log(`${chalk.bold('MCP servers:')}`);
           for (const s of data.mcpServers) {
@@ -342,6 +350,50 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         }),
       );
       console.log(chalk.green(`Override for "${actionName}" removed.`));
+    });
+
+  // ─── build-env subcommands ──────────────────────────────────────────────────
+
+  profile
+    .command('env-set <name> <pairs...>')
+    .description(
+      'Set build env vars (KEY=VALUE) injected into validation phase execs (build/test/lint/sast). ' +
+        'Common: NODE_OPTIONS=--max-old-space-size=4096 for memory-heavy production bundles.',
+    )
+    .action(async (name: string, pairs: string[]) => {
+      const client = getClient();
+      const p = await withSpinner('Fetching profile...', () => client.getProfile(name));
+      const env: Record<string, string> = { ...(p.buildEnv ?? {}) };
+      for (const pair of pairs) {
+        const eq = pair.indexOf('=');
+        if (eq <= 0) {
+          console.error(chalk.red(`Invalid KEY=VALUE pair: "${pair}"`));
+          process.exit(1);
+        }
+        const k = pair.slice(0, eq);
+        const v = pair.slice(eq + 1);
+        env[k] = v;
+      }
+      await withSpinner('Saving build env...', () => client.updateProfile(name, { buildEnv: env }));
+      console.log(chalk.green(`Updated build env for "${name}":`));
+      for (const [k, v] of Object.entries(env).sort(([a], [b]) => a.localeCompare(b))) {
+        console.log(`  ${chalk.cyan(k)}=${v}`);
+      }
+    });
+
+  profile
+    .command('env-unset <name> <keys...>')
+    .description('Remove build env vars from a profile')
+    .action(async (name: string, keys: string[]) => {
+      const client = getClient();
+      const p = await withSpinner('Fetching profile...', () => client.getProfile(name));
+      const env: Record<string, string> = { ...(p.buildEnv ?? {}) };
+      for (const k of keys) delete env[k];
+      const next = Object.keys(env).length > 0 ? env : null;
+      await withSpinner('Saving build env...', () =>
+        client.updateProfile(name, { buildEnv: next }),
+      );
+      console.log(chalk.green(`Updated build env for "${name}".`));
     });
 
   // ────────────────────────────────────────────────────────────────────────────

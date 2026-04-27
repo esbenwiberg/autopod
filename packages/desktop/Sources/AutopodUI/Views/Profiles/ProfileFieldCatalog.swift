@@ -101,6 +101,12 @@ public enum ProfileOverrideCatalog {
             help: "Runs after build. Leave empty to skip."
         ),
         .init(
+            key: "buildEnv",
+            label: "Build Env",
+            section: .buildRun,
+            help: "Env vars merged into validation phase execs (build/test/lint/sast). Common use: NODE_OPTIONS=--max-old-space-size=4096 for memory-heavy production bundles. Does not affect the agent's runtime env."
+        ),
+        .init(
             key: "lintCommand",
             label: "Lint Command",
             section: .buildRun,

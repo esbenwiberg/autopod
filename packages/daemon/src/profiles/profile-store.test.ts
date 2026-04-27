@@ -439,6 +439,29 @@ describe('ProfileStore', () => {
       expect(profile.registryPat).toBeNull();
     });
 
+    it('should preserve buildEnv through create/get', () => {
+      const buildEnv = { NODE_OPTIONS: '--max-old-space-size=4096', CI: 'true' };
+      store.create({ ...validInput, buildEnv });
+      const profile = store.get('my-app');
+      expect(profile.buildEnv).toEqual(buildEnv);
+    });
+
+    it('should default buildEnv to null', () => {
+      store.create(validInput);
+      const profile = store.get('my-app');
+      expect(profile.buildEnv).toBeNull();
+    });
+
+    it('should update buildEnv and clear it back to null', () => {
+      store.create(validInput);
+      const set = store.update('my-app', {
+        buildEnv: { NODE_OPTIONS: '--max-old-space-size=8192' },
+      });
+      expect(set.buildEnv).toEqual({ NODE_OPTIONS: '--max-old-space-size=8192' });
+      const cleared = store.update('my-app', { buildEnv: null });
+      expect(cleared.buildEnv).toBeNull();
+    });
+
     it('should update privateRegistries and registryPat', () => {
       store.create(validInput);
       const registries = [

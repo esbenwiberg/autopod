@@ -8,6 +8,7 @@ import {
   buildNuGetCredentialEnv,
   buildNuGetSecretFile,
   buildRegistryFiles,
+  buildValidationExecEnv,
   ensureNuGetCredentialProvider,
   generateNpmrc,
   generateNuGetConfig,
@@ -310,6 +311,48 @@ describe('buildNuGetCredentialEnv (image-build only)', () => {
       { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
     ];
     expect(buildNuGetCredentialEnv(regs, null)).toEqual({});
+  });
+});
+
+describe('buildValidationExecEnv', () => {
+  const nugetRegs: PrivateRegistry[] = [
+    { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
+  ];
+
+  it('returns undefined when no NuGet creds and no buildEnv', () => {
+    expect(buildValidationExecEnv([], null, null)).toBeUndefined();
+    expect(buildValidationExecEnv([], null, undefined)).toBeUndefined();
+    expect(buildValidationExecEnv([], null, {})).toBeUndefined();
+  });
+
+  it('returns just NuGet env when buildEnv is null', () => {
+    const env = buildValidationExecEnv(nugetRegs, 'my-pat', null);
+    expect(env).toBeDefined();
+    expect(env).toHaveProperty('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
+    expect(Object.keys(env ?? {})).toHaveLength(1);
+  });
+
+  it('returns just buildEnv when no NuGet PAT', () => {
+    const env = buildValidationExecEnv([], null, { NODE_OPTIONS: '--max-old-space-size=4096' });
+    expect(env).toEqual({ NODE_OPTIONS: '--max-old-space-size=4096' });
+  });
+
+  it('merges NuGet env and buildEnv when both present', () => {
+    const env = buildValidationExecEnv(nugetRegs, 'my-pat', {
+      NODE_OPTIONS: '--max-old-space-size=4096',
+      CI: 'true',
+    });
+    expect(env).toBeDefined();
+    expect(env?.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS).toBeDefined();
+    expect(env?.NODE_OPTIONS).toBe('--max-old-space-size=4096');
+    expect(env?.CI).toBe('true');
+  });
+
+  it('lets buildEnv override NuGet env on key collision (explicit wins)', () => {
+    const env = buildValidationExecEnv(nugetRegs, 'my-pat', {
+      VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: 'override-value',
+    });
+    expect(env?.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS).toBe('override-value');
   });
 });
 
