@@ -331,6 +331,21 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('https://https://');
   });
 
+  it('strips embedded userinfo from ADO-style repo URLs in PAT clone', () => {
+    // Azure DevOps repo URLs often embed the org as a username
+    // (e.g. https://365projectum@dev.azure.com/...). Without stripping the
+    // userinfo segment, the generated clone URL has TWO `@` signs and git
+    // rejects it with exit 128.
+    const df = generateDockerfile({
+      profile: mockProfile({
+        repoUrl: 'https://365projectum@dev.azure.com/365projectum/Foo/_git/Bar',
+      }),
+      gitCredentials: 'pat',
+    });
+    expect(df).toContain('x-access-token:${GIT_PAT}@dev.azure.com/365projectum/Foo/_git/Bar');
+    expect(df).not.toContain('@365projectum@');
+  });
+
   it('uses plain git clone for public repos', () => {
     const df = generateDockerfile({
       profile: mockProfile({ repoUrl: 'https://github.com/org/repo' }),
@@ -552,7 +567,7 @@ describe('generateDockerfile', () => {
     const nugetEnvIdx = lines.findIndex((l) => l.includes('ARG VSS_NUGET_EXTERNAL_FEED_ENDPOINTS'));
     const npmrcIdx = lines.findIndex((l) => l.includes('.npmrc'));
     const nugetIdx = lines.findIndex((l) => l.includes('NuGet.config'));
-    const installIdx = lines.findIndex((l) => l.includes('Install dependencies'));
+    const installIdx = lines.findIndex((l) => l.includes('Pre-warm dependency caches'));
     const cleanupIdx = lines.findIndex((l) => l.includes('Remove registry config'));
     const userIdx = lines.findIndex((l) => l === 'USER autopod');
 
@@ -589,12 +604,15 @@ describe('generateDockerfile', () => {
         gitCredentials: 'none',
       });
       expect(df).toContain('uv tool install -p 3.13 serena-agent@latest --prerelease=allow');
-      expect(df).toContain('serena --help');
+      // Verify the binary exists, but don't invoke it — MCP CLIs commonly
+      // SIGABRT when launched without a JSON-RPC stdin stream, so `--help`
+      // is not a safe verification step.
+      expect(df).toContain('command -v serena');
       // Loud failure: the Serena install block must NOT swallow errors silently —
       // that is what hid the entire feature from working for weeks. Scope the
       // assertion to the install block itself (other lines, e.g. agent CLI bulk
       // install + pre-warm build, legitimately use `|| true`).
-      const serenaBlock = extractBlock(df, '# Serena —', 'serena --help');
+      const serenaBlock = extractBlock(df, '# Serena —', 'command -v serena');
       expect(serenaBlock).not.toContain('|| true');
       expect(serenaBlock).not.toContain('2>/dev/null');
     });
@@ -608,8 +626,14 @@ describe('generateDockerfile', () => {
         gitCredentials: 'none',
       });
       expect(df).toContain('dotnet tool install -g RoslynCodeLens.Mcp');
-      expect(df).toContain('roslyn-codelens-mcp --help');
-      const roslynBlock = extractBlock(df, '# roslyn-codelens-mcp', 'roslyn-codelens-mcp --help');
+      // Verify by file existence — `--help` SIGABRTs because the MCP server
+      // crashes when launched without a JSON-RPC stdin stream.
+      expect(df).toContain('test -x /home/autopod/.dotnet/tools/roslyn-codelens-mcp');
+      const roslynBlock = extractBlock(
+        df,
+        '# roslyn-codelens-mcp',
+        'test -x /home/autopod/.dotnet/tools/roslyn-codelens-mcp',
+      );
       expect(roslynBlock).not.toContain('|| true');
       expect(roslynBlock).not.toContain('2>/dev/null');
     });

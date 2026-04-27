@@ -41,6 +41,13 @@ export interface ProfileStore {
   getRaw(name: string): Profile;
   list(): Profile[];
   update(name: string, changes: Record<string, unknown>): Profile;
+  /**
+   * System-managed write for the warm-image bookkeeping fields. These are not
+   * exposed via `update()` because they aren't part of the user-facing profile
+   * schema — only the image builder writes them after a successful build.
+   * Bumps `version` and `updated_at` like a normal update.
+   */
+  setWarmImage(name: string, tag: string, builtAt: string): Profile;
   delete(name: string): void;
   exists(name: string): boolean;
   /**
@@ -727,6 +734,20 @@ export function createProfileStore(
         },
         'Profile updated',
       );
+      return this.get(name);
+    },
+
+    setWarmImage(name: string, tag: string, builtAt: string): Profile {
+      fetchRaw(name);
+      db.prepare(
+        `UPDATE profiles
+         SET warm_image_tag = @tag,
+             warm_image_built_at = @builtAt,
+             version = version + 1,
+             updated_at = @updatedAt
+         WHERE name = @name`,
+      ).run({ tag, builtAt, updatedAt: new Date().toISOString(), name });
+      logger.info({ name, tag, builtAt }, 'Profile warm image updated');
       return this.get(name);
     },
 

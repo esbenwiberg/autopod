@@ -71,6 +71,7 @@ function createMockDeps() {
 
   const mockProfileStore = {
     update: vi.fn(),
+    setWarmImage: vi.fn(),
     get: vi.fn(),
   } as unknown as ProfileStore;
 
@@ -103,10 +104,11 @@ describe('ImageBuilder', () => {
     expect(mockAcr.push).toHaveBeenCalledWith('autopod/test-app:latest');
 
     // Should update profile in DB
-    expect(mockProfileStore.update).toHaveBeenCalledWith('test-app', {
-      warmImageTag: 'autopod/test-app:latest',
-      warmImageBuiltAt: expect.any(String),
-    });
+    expect(mockProfileStore.setWarmImage).toHaveBeenCalledWith(
+      'test-app',
+      'autopod/test-app:latest',
+      expect.any(String),
+    );
   });
 
   it('refuses to build if image is fresh and no --rebuild', async () => {

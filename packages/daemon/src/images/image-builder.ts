@@ -106,10 +106,7 @@ export class ImageBuilder {
     const size = inspectInfo.Size ?? 0;
 
     // 6. Update profile in database
-    this.profileStore.update(profile.name, {
-      warmImageTag: tag,
-      warmImageBuiltAt: new Date().toISOString(),
-    } as Record<string, unknown>);
+    this.profileStore.setWarmImage(profile.name, tag, new Date().toISOString());
 
     logger.info(
       { tag, sizeMb: Math.floor(size / 1_048_576), buildDuration: buildDuration.toFixed(1) },

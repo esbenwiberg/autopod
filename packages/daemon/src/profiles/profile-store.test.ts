@@ -322,6 +322,32 @@ describe('ProfileStore', () => {
     });
   });
 
+  describe('setWarmImage', () => {
+    it('persists warmImageTag and warmImageBuiltAt', () => {
+      store.create(validInput);
+      const builtAt = new Date('2026-04-27T10:00:00.000Z').toISOString();
+      const updated = store.setWarmImage('my-app', 'autopod/my-app:latest', builtAt);
+      expect(updated.warmImageTag).toBe('autopod/my-app:latest');
+      expect(updated.warmImageBuiltAt).toBe(builtAt);
+      const reread = store.get('my-app');
+      expect(reread.warmImageTag).toBe('autopod/my-app:latest');
+      expect(reread.warmImageBuiltAt).toBe(builtAt);
+    });
+
+    it('bumps version', () => {
+      store.create(validInput);
+      const before = store.get('my-app').version;
+      store.setWarmImage('my-app', 'autopod/my-app:latest', new Date().toISOString());
+      expect(store.get('my-app').version).toBe(before + 1);
+    });
+
+    it('throws ProfileNotFoundError for unknown profile', () => {
+      expect(() => store.setWarmImage('nope', 'tag', new Date().toISOString())).toThrow(
+        ProfileNotFoundError,
+      );
+    });
+  });
+
   describe('delete', () => {
     it('should remove the profile', () => {
       store.create(validInput);

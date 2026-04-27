@@ -96,8 +96,14 @@ export function generateDockerfile(options: DockerfileOptions): string {
     lines.push(...generateNuGetDockerLines(nugetRegs));
   }
 
-  // Install dependencies
-  lines.push('', '# Install dependencies', `RUN ${installCommand}`);
+  // Pre-warm dependency caches — best-effort. The auto-detected install command
+  // can't always know the right working directory for monorepo-style projects
+  // (e.g. dotnet at root + npm under `Client/`), and the project's actual
+  // buildCommand re-runs the install at pod-start anyway. So a failure here is
+  // a missed cache, not a runtime breakage. Critical installs (code-intel
+  // tools below, agent CLIs) must NOT use `|| true` — those are runtime
+  // requirements, not caches.
+  lines.push('', '# Pre-warm dependency caches (best-effort)', `RUN ${installCommand} || true`);
 
   // Install agent CLIs so they're ready at container start (zero cold-start)
   lines.push(
@@ -141,24 +147,29 @@ export function generateDockerfile(options: DockerfileOptions): string {
     // is `serena`. Install via `uv` (per upstream docs) into the autopod user's
     // home so the runtime user can spawn it as a stdio MCP subprocess.
     // PATH is extended inline because subsequent RUN layers don't see the
-    // updated ENV until after this block.
+    // updated ENV until after this block. Verify the binary by resolving its
+    // path — invoking `--help` on MCP CLIs can SIGABRT if the binary expects
+    // stdio rather than CLI args.
     lines.push(
       '',
       '# Serena — LSP-backed semantic code navigation (MCP stdio server)',
       'ENV PATH="/home/autopod/.local/bin:$PATH"',
       'RUN pip install --no-cache-dir --user uv \\',
       ' && uv tool install -p 3.13 serena-agent@latest --prerelease=allow \\',
-      ' && serena --help > /dev/null',
+      ' && command -v serena',
     );
   }
   if (profile.codeIntelligence?.roslynCodeLens) {
     // NuGet package id is `RoslynCodeLens.Mcp` (CamelCase); the resulting
-    // binary is `roslyn-codelens-mcp` under ~/.dotnet/tools.
+    // binary is `roslyn-codelens-mcp` under ~/.dotnet/tools. Verify by file
+    // existence rather than `--help` — the latter SIGABRTs because the binary
+    // is an MCP stdio server and crashes when invoked without a JSON-RPC
+    // stdin stream.
     lines.push(
       '',
       '# roslyn-codelens-mcp — Roslyn-backed DI / find-implementations (MCP stdio server)',
       'RUN dotnet tool install -g RoslynCodeLens.Mcp \\',
-      ' && /home/autopod/.dotnet/tools/roslyn-codelens-mcp --help > /dev/null',
+      ' && test -x /home/autopod/.dotnet/tools/roslyn-codelens-mcp',
       'ENV PATH="/home/autopod/.dotnet/tools:$PATH"',
     );
   }
@@ -285,7 +296,12 @@ export function getInstallCommand(profile: Profile): string {
 }
 
 function stripProtocol(url: string): string {
-  return url.replace(/^https?:\/\//, '');
+  // Drop scheme AND any embedded `user[:pass]@` userinfo. Azure DevOps repo
+  // URLs commonly embed the org name as the username (e.g.
+  // `https://365projectum@dev.azure.com/...`); leaving it in produces a
+  // double-`@` URL when the Dockerfile prepends `x-access-token:${PAT}@`,
+  // which git rejects with exit 128.
+  return url.replace(/^https?:\/\//, '').replace(/^[^/@]+(?::[^/@]*)?@/, '');
 }
 
 /**

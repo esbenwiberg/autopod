@@ -67,7 +67,11 @@ export function profileRoutes(
   // POST /profiles/:name/warm — build warm Docker image
   app.post('/profiles/:name/warm', async (request, _reply) => {
     const { name } = request.params as { name: string };
-    const { rebuild, gitPat } = (request.body ?? {}) as { rebuild?: boolean; gitPat?: string };
+    const body = (request.body ?? {}) as {
+      rebuild?: boolean;
+      gitPat?: string;
+      registryPat?: string;
+    };
     const profile = profileStore.get(name);
 
     if (!imageBuilder) {
@@ -78,12 +82,34 @@ export function profileRoutes(
       );
     }
 
-    const result = await imageBuilder.buildWarmImage(profile, { rebuild, gitPat });
-    return {
-      tag: result.tag,
-      digest: result.digest,
-      sizeMb: Math.floor(result.size / 1_048_576),
-      buildDuration: result.buildDuration,
-    };
+    // The image build runs `git clone` inside the Dockerfile and (for some
+    // templates) authenticates against private package registries. Both PATs
+    // are already stored on the profile — fall back to those when the caller
+    // doesn't pass them in the body, so the CLI never has to handle secrets.
+    const gitPat =
+      body.gitPat ??
+      (profile.prProvider === 'github' ? profile.githubPat : profile.adoPat) ??
+      undefined;
+    const registryPat = body.registryPat ?? profile.registryPat ?? undefined;
+
+    try {
+      const result = await imageBuilder.buildWarmImage(profile, {
+        rebuild: body.rebuild,
+        gitPat: gitPat ?? undefined,
+        registryPat: registryPat ?? undefined,
+      });
+      return {
+        tag: result.tag,
+        digest: result.digest,
+        sizeMb: Math.floor(result.size / 1_048_576),
+        buildDuration: result.buildDuration,
+      };
+    } catch (err) {
+      // Re-throw as an AutopodError carrying the underlying message so the
+      // caller sees the actual failure (auth, docker, etc.) instead of the
+      // generic INTERNAL_ERROR Fastify maps unknown throws to.
+      const message = err instanceof Error ? err.message : String(err);
+      throw new AutopodError(`Warm image build failed: ${message}`, 'WARM_BUILD_FAILED', 500);
+    }
   });
 }

@@ -322,6 +322,7 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
     getRaw: vi.fn(),
     list: vi.fn(() => []),
     update: vi.fn(),
+    setWarmImage: vi.fn(),
     delete: vi.fn(),
     exists: vi.fn(() => true),
     resolveCredentialOwner: vi.fn((name: string) => name),
