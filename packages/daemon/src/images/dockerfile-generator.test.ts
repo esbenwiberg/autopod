@@ -2,6 +2,14 @@ import type { Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { generateDockerfile, getBaseImage, getInstallCommand } from './dockerfile-generator.js';
 
+function extractBlock(dockerfile: string, startMarker: string, endMarker: string): string {
+  const start = dockerfile.indexOf(startMarker);
+  if (start === -1) throw new Error(`startMarker not found: ${startMarker}`);
+  const end = dockerfile.indexOf(endMarker, start);
+  if (end === -1) throw new Error(`endMarker not found after start: ${endMarker}`);
+  return dockerfile.slice(start, end + endMarker.length);
+}
+
 function mockProfile(overrides: Partial<Profile> = {}): Profile {
   return {
     name: 'test-app',
@@ -563,5 +571,47 @@ describe('generateDockerfile', () => {
     expect(df).toContain('ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS=');
     // Git credentials are also cleaned up
     expect(df).toContain('git remote set-url origin');
+  });
+
+  describe('codeIntelligence install steps', () => {
+    it('omits both blocks when codeIntelligence is null', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({ codeIntelligence: null }),
+        gitCredentials: 'none',
+      });
+      expect(df).not.toContain('serena');
+      expect(df).not.toContain('RoslynCodeLens.Mcp');
+    });
+
+    it('installs Serena via uv with the canonical PyPI package and verifies the binary', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({ codeIntelligence: { serena: true } }),
+        gitCredentials: 'none',
+      });
+      expect(df).toContain('uv tool install -p 3.13 serena-agent@latest --prerelease=allow');
+      expect(df).toContain('serena --help');
+      // Loud failure: the Serena install block must NOT swallow errors silently —
+      // that is what hid the entire feature from working for weeks. Scope the
+      // assertion to the install block itself (other lines, e.g. agent CLI bulk
+      // install + pre-warm build, legitimately use `|| true`).
+      const serenaBlock = extractBlock(df, '# Serena —', 'serena --help');
+      expect(serenaBlock).not.toContain('|| true');
+      expect(serenaBlock).not.toContain('2>/dev/null');
+    });
+
+    it('installs RoslynCodeLens.Mcp with the correct CamelCase package id', () => {
+      const df = generateDockerfile({
+        profile: mockProfile({
+          template: 'dotnet9',
+          codeIntelligence: { roslynCodeLens: true },
+        }),
+        gitCredentials: 'none',
+      });
+      expect(df).toContain('dotnet tool install -g RoslynCodeLens.Mcp');
+      expect(df).toContain('roslyn-codelens-mcp --help');
+      const roslynBlock = extractBlock(df, '# roslyn-codelens-mcp', 'roslyn-codelens-mcp --help');
+      expect(roslynBlock).not.toContain('|| true');
+      expect(roslynBlock).not.toContain('2>/dev/null');
+    });
   });
 });

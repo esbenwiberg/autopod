@@ -128,6 +128,12 @@ export function generateSystemInstructions(
         lines.push(`- ${hint}`);
       }
     }
+    if (server.toolNames && server.toolNames.length > 0) {
+      // Concrete tool-name primer so the agent loads the schemas on turn 1
+      // via ToolSearch instead of falling back to bash because it didn't
+      // know the tools were available.
+      lines.push(`- First turn: \`ToolSearch select:${server.toolNames.join(',')}\``);
+    }
     lines.push('');
   }
 

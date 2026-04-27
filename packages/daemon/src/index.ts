@@ -280,12 +280,18 @@ if (sidecarManager) {
 }
 
 let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
-if (ACR_REGISTRY_URL && docker) {
-  const { AcrClient } = await import('./images/acr-client.js');
+if (docker) {
   const { ImageBuilder } = await import('./images/image-builder.js');
-  const acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, docker);
+  let acr: import('./images/acr-client.js').AcrClient | null = null;
+  if (ACR_REGISTRY_URL) {
+    const { AcrClient } = await import('./images/acr-client.js');
+    acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, docker);
+  }
   imageBuilder = new ImageBuilder({ docker, acr, profileStore });
-  logger.info({ acrRegistry: ACR_REGISTRY_URL }, 'Image warming enabled');
+  logger.info(
+    { acrRegistry: ACR_REGISTRY_URL ?? null, mode: acr ? 'acr-push' : 'local-only' },
+    'Image warming enabled',
+  );
 }
 
 const runtimeRegistry = createRuntimeRegistry([

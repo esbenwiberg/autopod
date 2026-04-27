@@ -20,6 +20,13 @@ export interface HttpInjectedMcpServer {
   description?: string;
   /** Tool usage hints for the agent (injected into CLAUDE.md guidelines) */
   toolHints?: string[];
+  /**
+   * Concrete tool names exposed by this server, in the `mcp__<server>__<tool>`
+   * form the agent uses to call them. Surfaced as a `ToolSearch select:` hint
+   * in the system instructions so the agent loads the schemas on its first
+   * turn instead of waiting to stumble into them.
+   */
+  toolNames?: string[];
 }
 
 export interface StdioInjectedMcpServer {
@@ -36,6 +43,13 @@ export interface StdioInjectedMcpServer {
   description?: string;
   /** Tool usage hints for the agent (injected into CLAUDE.md guidelines) */
   toolHints?: string[];
+  /**
+   * Concrete tool names exposed by this server, in the `mcp__<server>__<tool>`
+   * form the agent uses to call them. Surfaced as a `ToolSearch select:` hint
+   * in the system instructions so the agent loads the schemas on its first
+   * turn instead of waiting to stumble into them.
+   */
+  toolNames?: string[];
 }
 
 /**

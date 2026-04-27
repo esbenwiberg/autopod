@@ -134,21 +134,32 @@ export function generateDockerfile(options: DockerfileOptions): string {
 
   // Code intelligence tools (Serena + roslyn-codelens-mcp) — installed before pre-warm
   // so the tools are available from first container start with no cold-install penalty.
+  // Installs run loud — if they fail, the build fails. Silent `|| true` is what
+  // hid an entire feature from working for weeks.
   if (profile.codeIntelligence?.serena) {
+    // Serena ships as the `serena-agent` PyPI package; the entry-point binary
+    // is `serena`. Install via `uv` (per upstream docs) into the autopod user's
+    // home so the runtime user can spawn it as a stdio MCP subprocess.
+    // PATH is extended inline because subsequent RUN layers don't see the
+    // updated ENV until after this block.
     lines.push(
       '',
       '# Serena — LSP-backed semantic code navigation (MCP stdio server)',
-      'USER root',
-      'RUN pip install serena 2>/dev/null || pip3 install serena 2>/dev/null || true',
-      'USER autopod',
+      'ENV PATH="/home/autopod/.local/bin:$PATH"',
+      'RUN pip install --no-cache-dir --user uv \\',
+      ' && uv tool install -p 3.13 serena-agent@latest --prerelease=allow \\',
+      ' && serena --help > /dev/null',
     );
   }
   if (profile.codeIntelligence?.roslynCodeLens) {
+    // NuGet package id is `RoslynCodeLens.Mcp` (CamelCase); the resulting
+    // binary is `roslyn-codelens-mcp` under ~/.dotnet/tools.
     lines.push(
       '',
-      '# roslyn-codelens-mcp — Roslyn-backed DI registration analysis (MCP stdio server)',
-      'RUN dotnet tool install -g roslyn-codelens-mcp 2>/dev/null || true',
-      'ENV PATH="$PATH:/home/autopod/.dotnet/tools"',
+      '# roslyn-codelens-mcp — Roslyn-backed DI / find-implementations (MCP stdio server)',
+      'RUN dotnet tool install -g RoslynCodeLens.Mcp \\',
+      ' && /home/autopod/.dotnet/tools/roslyn-codelens-mcp --help > /dev/null',
+      'ENV PATH="/home/autopod/.dotnet/tools:$PATH"',
     );
   }
 

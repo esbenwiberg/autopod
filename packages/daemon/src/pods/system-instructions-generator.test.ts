@@ -149,6 +149,50 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('- /settings');
   });
 
+  it('emits a ToolSearch select line when an injected MCP server has toolNames', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+      {
+        injectedMcpServers: [
+          {
+            type: 'stdio',
+            name: 'serena',
+            command: 'serena',
+            description: 'LSP-backed semantic code navigation.',
+            toolNames: ['mcp__serena__find_symbol', 'mcp__serena__find_referencing_symbols'],
+          },
+        ],
+      },
+    );
+
+    expect(md).toContain('### serena');
+    expect(md).toContain(
+      'First turn: `ToolSearch select:mcp__serena__find_symbol,mcp__serena__find_referencing_symbols`',
+    );
+  });
+
+  it('omits the ToolSearch select line when toolNames is missing', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+      {
+        injectedMcpServers: [
+          {
+            type: 'stdio',
+            name: 'serena',
+            command: 'serena',
+          },
+        ],
+      },
+    );
+
+    expect(md).toContain('### serena');
+    expect(md).not.toContain('ToolSearch select:');
+  });
+
   it('omits validation pages section when empty', () => {
     const md = generateSystemInstructions(
       makeProfile(),

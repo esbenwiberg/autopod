@@ -2220,7 +2220,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Spawn container with port mapping so daemon + user can reach the app
+        // Prefer the per-profile warm image when one has been built — that's
+        // where customisations like Serena / roslyn-codelens-mcp live. Fall
+        // back to the bare base image only when no warm image exists.
+        const spawnImage = profile.warmImageTag ?? getBaseImage(template);
         emitStatus(`Spawning container (${profile.template})…`);
+        logger.info(
+          { podId, image: spawnImage, warm: Boolean(profile.warmImageTag) },
+          'Spawning pod container',
+        );
 
         const containerEnv: Record<string, string> = {
           POD_ID: podId,
@@ -2240,7 +2248,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let containerId: string;
         try {
           containerId = await containerManager.spawn({
-            image: getBaseImage(template),
+            image: spawnImage,
             podId,
             env: containerEnv,
             ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
@@ -2645,6 +2653,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // belongs to the user's repo, and any daemon-injected entry would
         // get swept up by `git add` and committed.
         const stdioMcpServers = buildCodeIntelligenceServers(profile);
+
+        // Preflight: when codeIntelligence is enabled, confirm the binary
+        // exists in the container. Without this check, the agent CLI tries
+        // to spawn a missing subprocess, the stdio MCP server fails silently,
+        // the agent never sees the tool, and we get 300+ events of grep/find
+        // with no signal that anything is wrong.
+        for (const server of stdioMcpServers) {
+          const probe = await containerManager.execInContainer(
+            containerId,
+            ['sh', '-c', `command -v ${server.command} >/dev/null 2>&1`],
+            { timeout: 5_000 },
+          );
+          if (probe.exitCode !== 0) {
+            const msg = `Code-intel MCP "${server.name}" requested by profile but binary "${server.command}" not found in container — agent will fall back to grep/find. Rebuild the warm image: \`ap profile warm ${profile.name} --rebuild\`.`;
+            logger.error({ podId, server: server.name, command: server.command }, msg);
+            emitStatus(`⚠️ ${msg}`);
+          }
+        }
 
         // Rewrite injected MCP server URLs to route through daemon proxy.
         // Only HTTP servers go through the proxy — stdio servers run as local
@@ -5894,17 +5920,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 function buildCodeIntelligenceServers(profile: Profile): StdioInjectedMcpServer[] {
   const servers: StdioInjectedMcpServer[] = [];
   if (profile.codeIntelligence?.serena) {
+    // Upstream contract: `serena start-mcp-server --context=claude-code --project=<dir>`.
+    // The bare `--project /workspace` form (the previous version) silently failed
+    // because it skips the `start-mcp-server` subcommand entirely.
     servers.push({
       type: 'stdio',
       name: 'serena',
       command: 'serena',
-      args: ['--project', '/workspace'],
+      args: ['start-mcp-server', '--context=claude-code', '--project=/workspace'],
       description:
         'LSP-backed semantic code navigation. Provides go-to-definition, find-references, ' +
         'type hierarchy, and barrel-export resolution for TypeScript (tsserver) and C# (Roslyn).',
       toolHints: [
         'Use for cross-file type navigation, resolving barrel exports, and finding all callers of a symbol',
         'Prefer over grep for type-aware queries — tsserver resolves path aliases and declaration merging',
+      ],
+      toolNames: [
+        'mcp__serena__find_symbol',
+        'mcp__serena__find_referencing_symbols',
+        'mcp__serena__find_implementations',
+        'mcp__serena__symbol_overview',
+        'mcp__serena__type_hierarchy',
+        'mcp__serena__search_for_pattern',
       ],
     });
   }
@@ -5919,6 +5956,14 @@ function buildCodeIntelligenceServers(profile: Profile): StdioInjectedMcpServer[
       toolHints: [
         'Call get_di_registrations before navigating DI-heavy code — saves tracing through registrations manually',
         'Use find_implementations to resolve interface → concrete type across the full solution',
+      ],
+      toolNames: [
+        'mcp__roslyn-codelens__get_di_registrations',
+        'mcp__roslyn-codelens__find_implementations',
+        'mcp__roslyn-codelens__find_references',
+        'mcp__roslyn-codelens__find_callers',
+        'mcp__roslyn-codelens__go_to_definition',
+        'mcp__roslyn-codelens__get_type_hierarchy',
       ],
     });
   }

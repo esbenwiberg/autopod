@@ -21,13 +21,18 @@ export interface ImageBuildResult {
 
 export interface ImageBuilderDependencies {
   docker: Dockerode;
-  acr: AcrClient;
+  /**
+   * Optional Azure Container Registry client. When omitted, the warm image is
+   * built into the local Docker daemon only (no push) — useful for local dev
+   * where pods run on the same Docker host that builds the image.
+   */
+  acr: AcrClient | null;
   profileStore: ProfileStore;
 }
 
 export class ImageBuilder {
   private docker: Dockerode;
-  private acr: AcrClient;
+  private acr: AcrClient | null;
   private profileStore: ProfileStore;
 
   constructor(deps: ImageBuilderDependencies) {
@@ -81,10 +86,20 @@ export class ImageBuilder {
     const [repo = '', tsTag = 'latest'] = timestampTag.split(':');
     await image.tag({ repo, tag: tsTag });
 
-    // 4. Push to ACR (both latest + timestamped)
-    logger.info({ tag }, 'Pushing to ACR');
-    const digest = await this.acr.push(tag);
-    await this.acr.push(timestampTag);
+    // 4. Push to ACR (both latest + timestamped) — skipped in local-only mode.
+    // In local mode the image stays in the local Docker daemon and the digest
+    // is read from the local inspect; pods spawning on the same host pick it
+    // up by tag.
+    let digest: string;
+    if (this.acr) {
+      logger.info({ tag }, 'Pushing to ACR');
+      digest = await this.acr.push(tag);
+      await this.acr.push(timestampTag);
+    } else {
+      logger.info({ tag }, 'ACR not configured — keeping warm image local-only');
+      const localInspect = await image.inspect();
+      digest = localInspect.Id ?? '';
+    }
 
     // 5. Get image size
     const inspectInfo = await image.inspect();

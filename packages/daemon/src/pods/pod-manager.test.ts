@@ -940,6 +940,39 @@ describe('PodManager', () => {
       expect(ctx.containerManager.writeFile).toHaveBeenCalled();
     });
 
+    it('spawns from profile.warmImageTag when set, falling back to base image otherwise', async () => {
+      const ctx = createTestContext();
+
+      // Default profile has warmImageTag=null → spawn uses base image
+      let manager = createPodManager(ctx.deps);
+      let pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Bare image', skipValidation: true },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+      let spawnCalls = vi.mocked(ctx.containerManager.spawn).mock.calls;
+      expect(spawnCalls.at(-1)?.[0]?.image).toBe('autopod-node22:latest');
+
+      // Now patch profileStore.get to return a profile with warmImageTag set.
+      // Capture the original impl via getMockImplementation() — `ctx.profileStore.get`
+      // itself is the mock, so calling it after mockImplementation would recurse.
+      const originalGet = vi.mocked(ctx.profileStore.get).getMockImplementation();
+      if (!originalGet) throw new Error('profileStore.get has no mock implementation');
+      vi.mocked(ctx.profileStore.get).mockImplementation((name: string) => {
+        const base = originalGet(name);
+        return { ...base, warmImageTag: 'autopod/test-profile:latest' };
+      });
+
+      manager = createPodManager(ctx.deps);
+      pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Warm image', skipValidation: true },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+      spawnCalls = vi.mocked(ctx.containerManager.spawn).mock.calls;
+      expect(spawnCalls.at(-1)?.[0]?.image).toBe('autopod/test-profile:latest');
+    });
+
     it('persists startCommitSha from worktreeManager.create before the container starts (prevents diff route falling back to merge-base)', async () => {
       const ctx = createTestContext();
       (ctx.worktreeManager.create as ReturnType<typeof vi.fn>).mockResolvedValue({
