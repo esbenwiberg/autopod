@@ -534,6 +534,9 @@ public struct Pod: Identifiable, Sendable {
     /// real work may still live in the container.
     public var worktreeCompromised: Bool
 
+    /// Human-readable title from the brief's YAML frontmatter. Nil for standalone pods.
+    public var briefTitle: String?
+
     // MARK: - Series (pod dependency DAG)
 
     /// Series this pod belongs to, or nil for standalone pods.
@@ -542,6 +545,8 @@ public struct Pod: Identifiable, Sendable {
     public var seriesName: String?
     /// Overall spec description (from context.md), shared across all pods in a series.
     public var seriesDescription: String?
+    /// Series design notes (from design.md), shared across all pods in a series.
+    public var seriesDesign: String?
     /// Pod IDs this pod depends on. Fan-in supported: a pod is only enqueued
     /// when *all* listed parents reach `validated`.
     public var dependsOnPodIds: [String]
@@ -612,9 +617,11 @@ public struct Pod: Identifiable, Sendable {
         taskSummary: TaskSummary? = nil,
         linkedSessionId: String? = nil,
         profileSnapshot: Profile? = nil,
+        briefTitle: String? = nil,
         seriesId: String? = nil,
         seriesName: String? = nil,
         seriesDescription: String? = nil,
+        seriesDesign: String? = nil,
         dependsOnPodIds: [String] = [],
         dependencyStartedAt: Date? = nil,
         artifactsPath: String? = nil,
@@ -639,7 +646,9 @@ public struct Pod: Identifiable, Sendable {
         self.costUsd = costUsd; self.commitCount = commitCount
         self.taskSummary = taskSummary; self.linkedSessionId = linkedSessionId
         self.profileSnapshot = profileSnapshot
+        self.briefTitle = briefTitle
         self.seriesId = seriesId; self.seriesName = seriesName; self.seriesDescription = seriesDescription
+        self.seriesDesign = seriesDesign
         self.dependsOnPodIds = dependsOnPodIds
         self.dependencyStartedAt = dependencyStartedAt
         self.artifactsPath = artifactsPath

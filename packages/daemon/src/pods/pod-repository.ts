@@ -66,6 +66,8 @@ export interface NewPod {
   seriesDescription?: string | null;
   /** Series design (from `design.md`) for series pods. */
   seriesDesign?: string | null;
+  /** Brief title from frontmatter (shown in the pipeline DAG). */
+  briefTitle?: string | null;
   /** Per-brief advisory list of files this pod expects to modify. */
   touches?: string[] | null;
   /** Per-brief advisory list of files this pod should not modify. */
@@ -314,6 +316,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     seriesName: (row.series_name as string) ?? null,
     seriesDescription: (row.series_description as string) ?? null,
     seriesDesign: (row.series_design as string) ?? null,
+    briefTitle: (row.brief_title as string) ?? null,
     touches: row.touches ? (JSON.parse(row.touches as string) as string[]) : null,
     doesNotTouch: row.does_not_touch
       ? (JSON.parse(row.does_not_touch as string) as string[])
@@ -360,7 +363,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, reference_repo_pat, scheduled_job_id,
           depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description,
-          series_design, touches, does_not_touch, pr_mode, wait_for_merge,
+          series_design, brief_title, touches, does_not_touch, pr_mode, wait_for_merge,
           require_sidecars, auto_approve, disable_ask_human
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
@@ -369,7 +372,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId,
           @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription,
-          @seriesDesign, @touches, @doesNotTouch, @prMode, @waitForMerge,
+          @seriesDesign, @briefTitle, @touches, @doesNotTouch, @prMode, @waitForMerge,
           @requireSidecars, @autoApprove, @disableAskHuman
         )
       `).run({
@@ -405,6 +408,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         seriesName: pod.seriesName ?? null,
         seriesDescription: pod.seriesDescription ?? null,
         seriesDesign: pod.seriesDesign ?? null,
+        briefTitle: pod.briefTitle ?? null,
         touches: pod.touches && pod.touches.length > 0 ? JSON.stringify(pod.touches) : null,
         doesNotTouch:
           pod.doesNotTouch && pod.doesNotTouch.length > 0 ? JSON.stringify(pod.doesNotTouch) : null,

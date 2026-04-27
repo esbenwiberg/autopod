@@ -214,6 +214,14 @@ public enum PodMapper {
       return nil
     }()
 
+    let prUrl: URL? = response.prUrl.flatMap { URL(string: $0) }
+    let containerUrl: URL? = response.previewUrl.flatMap { URL(string: $0) }
+    let latestActivity: String? = response.mergeBlockReason ?? response.plan?.summary
+    let profileSnapshotMapped: Profile? = response.profileSnapshot.map { ProfileMapper.map($0) }
+    let dependsOnPodIds: [String] = response.dependsOnPodIds
+      ?? (response.dependsOnPodId.map { [$0] } ?? [])
+    let dependencyStartedAt: Date? = response.dependencyStartedAt.map { parseDate($0) }
+
     var result = Pod(
       id: response.id,
       status: status,
@@ -233,11 +241,11 @@ public enum PodMapper {
       escalationOptions: escalationOptions,
       escalationType: escalationType,
       validationChecks: validationChecks,
-      prUrl: response.prUrl.flatMap { URL(string: $0) },
-      containerUrl: response.previewUrl.flatMap { URL(string: $0) },
+      prUrl: prUrl,
+      containerUrl: containerUrl,
       plan: plan,
       phase: phase,
-      latestActivity: response.mergeBlockReason ?? response.plan?.summary,
+      latestActivity: latestActivity,
       errorSummary: errorSummary,
       attempts: attempts,
       inputTokens: response.inputTokens,
@@ -246,13 +254,14 @@ public enum PodMapper {
       commitCount: response.commitCount,
       taskSummary: taskSummary,
       linkedSessionId: response.linkedSessionId,
-      profileSnapshot: response.profileSnapshot.map { ProfileMapper.map($0) },
+      profileSnapshot: profileSnapshotMapped,
+      briefTitle: response.briefTitle,
       seriesId: response.seriesId,
       seriesName: response.seriesName,
       seriesDescription: response.seriesDescription,
-      dependsOnPodIds: response.dependsOnPodIds
-        ?? (response.dependsOnPodId.map { [$0] } ?? []),
-      dependencyStartedAt: response.dependencyStartedAt.map { parseDate($0) },
+      seriesDesign: response.seriesDesign,
+      dependsOnPodIds: dependsOnPodIds,
+      dependencyStartedAt: dependencyStartedAt,
       artifactsPath: response.artifactsPath,
       requireSidecars: response.requireSidecars ?? [],
       sidecarContainerIds: response.sidecarContainerIds ?? [:],

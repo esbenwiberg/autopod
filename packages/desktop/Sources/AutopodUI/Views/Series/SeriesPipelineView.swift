@@ -73,8 +73,53 @@ public struct SeriesPipelineView: View {
         return .gray.opacity(0.8)
     }
 
+    private var seriesDescription: String? {
+        pods.first(where: { $0.seriesDescription?.isEmpty == false })?.seriesDescription
+    }
+
+    private var seriesDesign: String? {
+        pods.first(where: { $0.seriesDesign?.isEmpty == false })?.seriesDesign
+    }
+
+    private var seriesInfoHeader: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 10) {
+                if let desc = seriesDescription {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Purpose")
+                            .font(.system(.caption2).weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(desc)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if let design = seriesDesign {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Design")
+                            .font(.system(.caption2).weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(design)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .frame(maxHeight: 180)
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
+            if seriesDescription != nil || seriesDesign != nil {
+                seriesInfoHeader
+                Divider()
+            }
             HStack(spacing: 0) {
                 dagCanvas
                 if panelEnabled, let pid = panelPodId, let pod = podsById[pid] {

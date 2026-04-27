@@ -144,6 +144,12 @@ export interface Pod {
    */
   seriesDesign: string | null;
   /**
+   * Human-readable title for this pod, sourced from the brief's frontmatter
+   * `title` field. Null for standalone (non-series) pods or briefs without a
+   * title in their frontmatter.
+   */
+  briefTitle: string | null;
+  /**
    * Per-brief advisory list of files this pod expects to modify. The reviewer
    * flags deviations as discussion items, not failures. Directory shorthand
    * (a path ending in `/`) means "anything under this directory".
@@ -257,6 +263,8 @@ export interface CreatePodRequest {
   seriesDescription?: string | null;
   /** Series design (from `design.md`). Rendered as `## Design` in CLAUDE.md. */
   seriesDesign?: string | null;
+  /** Brief title from frontmatter (shown in the pipeline DAG). */
+  briefTitle?: string | null;
   /** Per-brief advisory list of files this pod expects to modify. */
   touches?: string[];
   /** Per-brief advisory list of files this pod should not modify. */

@@ -106,6 +106,8 @@ public struct SessionResponse: Codable, Sendable {
   public let seriesName: String?
   /// Overall spec description (from context.md) shared across all pods in a series.
   public let seriesDescription: String?
+  /// Series design notes (from design.md) shared across all pods in a series.
+  public let seriesDesign: String?
   public let dependencyStartedAt: String?
   public let artifactsPath: String?
   /// Names of sidecars this pod requested (e.g. ["dagger"]).
@@ -120,6 +122,9 @@ public struct SessionResponse: Codable, Sendable {
   /// with pre-#056 daemon responses; nil is treated as false.
   public let worktreeCompromised: Bool?
   public let validationOverrides: [ValidationOverrideResponse]?
+  /// Human-readable title from the brief's YAML frontmatter `title` field.
+  /// Nil for standalone pods or briefs without an explicit title.
+  public let briefTitle: String?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
@@ -135,11 +140,12 @@ public struct SessionResponse: Codable, Sendable {
     case baseBranch, acFrom, recoveryWorktreePath, lastHeartbeatAt
     case inputTokens, outputTokens, costUsd, commitCount, lastCommitAt
     case linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
-    case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, dependencyStartedAt
+    case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, seriesDesign, dependencyStartedAt
     case artifactsPath
     case requireSidecars, sidecarContainerIds, testRunBranches
     case worktreeCompromised
     case validationOverrides
+    case briefTitle
   }
 }
 

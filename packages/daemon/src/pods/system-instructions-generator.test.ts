@@ -168,8 +168,17 @@ describe('generateSystemInstructions', () => {
     );
 
     expect(md).toContain('### serena');
+    // Consolidated first-turn block appears before the per-server section
     expect(md).toContain(
-      'First turn: `ToolSearch select:mcp__serena__find_symbol,mcp__serena__find_referencing_symbols`',
+      '**On your first turn, load all tool schemas before starting work:**',
+    );
+    // Both the consolidated block and the per-server reminder reference the tool names
+    expect(md).toContain(
+      'ToolSearch select:mcp__serena__find_symbol,mcp__serena__find_referencing_symbols',
+    );
+    // Per-server line uses "Load schemas:" not "First turn:"
+    expect(md).toContain(
+      'Load schemas: `ToolSearch select:mcp__serena__find_symbol,mcp__serena__find_referencing_symbols`',
     );
   });
 

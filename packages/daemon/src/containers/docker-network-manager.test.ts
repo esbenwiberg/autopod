@@ -315,6 +315,81 @@ describe('DockerNetworkManager', () => {
       });
     });
 
+    describe('restricted mode — dnsmasq DNS-only path (dnsmasq available, ipset/xt_set not)', () => {
+      it('probes for dnsmasq-only mode after ipset probe', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('AUTOPOD_USE_DNSMASQ_ONLY=0');
+        expect(script).toContain(
+          'if [ "$AUTOPOD_USE_DNSMASQ" = "0" ] && command -v dnsmasq >/dev/null 2>&1; then',
+        );
+        expect(script).toContain('AUTOPOD_USE_DNSMASQ_ONLY=1');
+      });
+
+      it('generates the elif branch for dnsmasq-only mode', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('elif [ "$AUTOPOD_USE_DNSMASQ_ONLY" = "1" ]; then');
+      });
+
+      it('writes dnsmasq config with server= lines but no ipset= lines', async () => {
+        const script = await manager.generateFirewallScript(['api.nuget.org']);
+        // In the elif block the server= line should appear (once for ipset mode, once for dns-only)
+        const serverCount = (script.match(/server=\/api\.nuget\.org\//g) || []).length;
+        expect(serverCount).toBe(2); // once per dnsmasq mode branch
+        // ipset= line must only appear in the ipset-mode block, not in the dns-only block
+        // Verify that the elif section does NOT add an extra ipset= line
+        // (The two blocks share dnsmasqDomains so each branch has server= lines; only ipset mode has ipset=)
+        const ipsetLineCount = (script.match(/ipset=\/api\.nuget\.org\//g) || []).length;
+        expect(ipsetLineCount).toBe(1); // only in dnsmasq+ipset mode
+      });
+
+      it('converts wildcards to dnsmasq suffix match in dnsmasq-only mode', async () => {
+        const script = await manager.generateFirewallScript(['*.blob.core.windows.net']);
+        // Both dnsmasq modes should have the suffix-matched server= entry
+        const serverCount = (script.match(/server=\/blob\.core\.windows\.net\//g) || []).length;
+        expect(serverCount).toBe(2);
+        // ipset= should only appear once (ipset mode only)
+        const ipsetCount = (script.match(/ipset=\/blob\.core\.windows\.net\//g) || []).length;
+        expect(ipsetCount).toBe(1);
+      });
+
+      it('allows TCP 443 and 80 outbound in dnsmasq-only mode', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        expect(script).toContain('iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT');
+      });
+
+      it('restricts Docker DNS to dnsmasq user in dnsmasq-only mode', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        // Same DNS restriction as ipset mode
+        const ownerCount = (
+          script.match(/--dport 53 -d 127\.0\.0\.11 -m owner --uid-owner nobody -j ACCEPT/g) || []
+        ).length;
+        expect(ownerCount).toBe(4); // UDP + TCP per each of the two dnsmasq branches
+      });
+
+      it('resolves daemon gateway in dnsmasq-only mode', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        // gateway resolution appears in both dnsmasq branches
+        const gatewayCount = (
+          script.match(/getent ahostsv4 host\.docker\.internal/g) || []
+        ).length;
+        expect(gatewayCount).toBe(2);
+      });
+
+      it('has REJECT rule in dnsmasq-only mode', async () => {
+        const script = await manager.generateFirewallScript(['example.com']);
+        // Three branches now each end with REJECT (ipset, dns-only, CIDR)
+        const rejectCount = (script.match(/iptables -A OUTPUT -j REJECT/g) || []).length;
+        expect(rejectCount).toBeGreaterThanOrEqual(3);
+      });
+
+      it('prints correct echo for dnsmasq-only mode', async () => {
+        const script = await manager.generateFirewallScript(['example.com', '*.blob.core.windows.net']);
+        expect(script).toContain('restricted mode (dnsmasq DNS-only)');
+        expect(script).toContain('port 443/80 open');
+      });
+    });
+
     describe('restricted mode — CIDR fallback path', () => {
       it('includes fallback in else branch', async () => {
         const script = await manager.generateFirewallScript(['example.com']);
@@ -336,9 +411,9 @@ describe('DockerNetworkManager', () => {
 
       it('fallback has REJECT rule', async () => {
         const script = await manager.generateFirewallScript(['example.com']);
-        // Both branches end with REJECT
+        // All three branches (dnsmasq+ipset, dnsmasq-only, CIDR) end with REJECT
         const rejectCount = (script.match(/iptables -A OUTPUT -j REJECT/g) || []).length;
-        expect(rejectCount).toBeGreaterThanOrEqual(2); // one per branch
+        expect(rejectCount).toBeGreaterThanOrEqual(3); // one per branch
       });
     });
 

@@ -173,7 +173,21 @@ export function generateSystemInstructions(
     lines.push(`  - ${action.name} — ${action.description}`);
   }
 
+  // Consolidated first-turn ToolSearch block — runs BEFORE per-server details so
+  // the agent loads all deferred schemas in a single pass before starting work.
+  // Only rendered when injected servers have toolNames to load.
   const injectedMcpServers = options?.injectedMcpServers ?? [];
+  const serversWithTools = injectedMcpServers.filter(
+    (s) => s.toolNames && s.toolNames.length > 0,
+  );
+  if (serversWithTools.length > 0) {
+    lines.push('**On your first turn, load all tool schemas before starting work:**');
+    for (const server of serversWithTools) {
+      lines.push(`- \`ToolSearch select:${server.toolNames!.join(',')}\``);
+    }
+    lines.push('');
+  }
+
   for (const server of injectedMcpServers) {
     lines.push(`### ${server.name}`);
     if (server.description) {
@@ -190,10 +204,7 @@ export function generateSystemInstructions(
       }
     }
     if (server.toolNames && server.toolNames.length > 0) {
-      // Concrete tool-name primer so the agent loads the schemas on turn 1
-      // via ToolSearch instead of falling back to bash because it didn't
-      // know the tools were available.
-      lines.push(`- First turn: \`ToolSearch select:${server.toolNames.join(',')}\``);
+      lines.push(`- Load schemas: \`ToolSearch select:${server.toolNames.join(',')}\``);
     }
     lines.push('');
   }

@@ -16,6 +16,7 @@ public struct PipelineNodeView: View {
     @State private var isHovered = false
 
     private var title: String {
+        if let t = pod.briefTitle, !t.isEmpty { return t }
         let first = pod.task.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         let trimmed = first.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? pod.branch : trimmed

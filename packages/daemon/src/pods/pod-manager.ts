@@ -1809,6 +1809,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             seriesName: request.seriesName ?? null,
             seriesDescription: request.seriesDescription ?? null,
             seriesDesign: request.seriesDesign ?? null,
+            briefTitle: request.briefTitle ?? null,
             touches: request.touches && request.touches.length > 0 ? request.touches : null,
             doesNotTouch:
               request.doesNotTouch && request.doesNotTouch.length > 0 ? request.doesNotTouch : null,
@@ -2658,11 +2659,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // get swept up by `git add` and committed.
         const stdioMcpServers = buildCodeIntelligenceServers(profile);
 
-        // Preflight: when codeIntelligence is enabled, confirm the binary
-        // exists in the container. Without this check, the agent CLI tries
-        // to spawn a missing subprocess, the stdio MCP server fails silently,
-        // the agent never sees the tool, and we get 300+ events of grep/find
-        // with no signal that anything is wrong.
+        // Preflight: confirm each code-intel binary exists before injecting it.
+        // Without this filter, a missing binary causes Claude CLI to silently
+        // fail the stdio MCP spawn, the tools are never registered, and the
+        // agent falls back to grep with no indication anything is wrong.
+        // Servers that fail the check are dropped here so they never appear in
+        // mcp-config.json or the CLAUDE.md — clean absence is less confusing
+        // than a registered-but-broken tool.
+        const workingStdioServers: StdioInjectedMcpServer[] = [];
         for (const server of stdioMcpServers) {
           const probe = await containerManager.execInContainer(
             containerId,
@@ -2673,6 +2677,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const msg = `Code-intel MCP "${server.name}" requested by profile but binary "${server.command}" not found in container — agent will fall back to grep/find. Rebuild the warm image: \`ap profile warm ${profile.name} --rebuild\`.`;
             logger.error({ podId, server: server.name, command: server.command }, msg);
             emitStatus(`⚠️ ${msg}`);
+          } else {
+            workingStdioServers.push(server);
           }
         }
 
@@ -2713,7 +2719,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const systemInstructions = generateSystemInstructions(profile, pod, mcpUrl, {
           injectedSections: resolvedSections,
-          injectedMcpServers: [...proxiedMcpServers, ...stdioMcpServers],
+          injectedMcpServers: [...proxiedMcpServers, ...workingStdioServers],
           availableActions,
           injectedSkills: mergedSkills.filter((s) => resolvedSkillNames.includes(s.name)),
           memories: sessionMemories.length > 0 ? sessionMemories : undefined,
@@ -2755,7 +2761,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 headers: escalationHeaders,
               }) satisfies McpServerConfig,
           ),
-          ...stdioMcpServers.map(
+          ...workingStdioServers.map(
             (s) =>
               ({
                 type: 'stdio',
@@ -5938,8 +5944,10 @@ function buildCodeIntelligenceServers(profile: Profile): StdioInjectedMcpServer[
         'LSP-backed semantic code navigation. Provides go-to-definition, find-references, ' +
         'type hierarchy, and barrel-export resolution for TypeScript (tsserver) and C# (Roslyn).',
       toolHints: [
-        'Use for cross-file type navigation, resolving barrel exports, and finding all callers of a symbol',
-        'Prefer over grep for type-aware queries — tsserver resolves path aliases and declaration merging',
+        'ALWAYS use instead of grep for symbol navigation — tsserver resolves path aliases and declaration merging that grep misses',
+        'Finding a symbol definition or all callers: use find_symbol / find_referencing_symbols — NOT grep',
+        'Resolving a barrel export or path-aliased import: use symbol_overview — NOT file reads',
+        'Understanding a class hierarchy: use type_hierarchy — NOT manual directory traversal',
       ],
       toolNames: [
         'mcp__serena__find_symbol',
@@ -5960,8 +5968,10 @@ function buildCodeIntelligenceServers(profile: Profile): StdioInjectedMcpServer[
         'Roslyn-backed C# DI analysis. Use get_di_registrations to trace which concrete type ' +
         'the DI container injects for an interface, and find_implementations for interface resolution.',
       toolHints: [
-        'Call get_di_registrations before navigating DI-heavy code — saves tracing through registrations manually',
-        'Use find_implementations to resolve interface → concrete type across the full solution',
+        'ALWAYS call get_di_registrations before reading service registration files — do NOT trace registrations manually',
+        'Resolving interface → concrete type: use find_implementations — NOT grep for class names',
+        'Finding all callers of a method: use find_callers — NOT grep',
+        'Navigating to a definition: use go_to_definition — NOT file reads',
       ],
       toolNames: [
         'mcp__roslyn-codelens__get_di_registrations',

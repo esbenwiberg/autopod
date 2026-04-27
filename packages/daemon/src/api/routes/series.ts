@@ -150,6 +150,7 @@ export function seriesRoutes(
           {
             profileName: body.profile,
             task: brief.task,
+            briefTitle: brief.title,
             baseBranch: isRoot ? (body.baseBranch ?? undefined) : undefined,
             dependsOnPodIds: dependsOnPodIds.length > 0 ? dependsOnPodIds : undefined,
             // Single mode: non-root pods reuse the root's branch so all commits

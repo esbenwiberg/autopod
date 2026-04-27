@@ -84,6 +84,7 @@ const networkPolicySchema = z.object({
     )
     .default([]),
   replaceDefaults: z.boolean().optional(),
+  allowPackageManagers: z.boolean().optional(),
 });
 
 const registryTypeSchema = z.enum(['npm', 'nuget']);

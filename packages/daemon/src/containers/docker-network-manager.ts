@@ -492,6 +492,16 @@ export class DockerNetworkManager {
     lines.push('fi');
     lines.push('');
 
+    // Probe dnsmasq-only mode: dnsmasq available but ipset/xt_set unavailable (e.g. Docker
+    // Desktop LinuxKit VM). DNS-level filtering with dnsmasq handles wildcards correctly;
+    // iptables allows TCP 443/80 to all IPs (weaker IP control but works for CDN redirects).
+    lines.push('# Probe dnsmasq-only mode: dnsmasq present but ipset/xt_set unavailable.');
+    lines.push('AUTOPOD_USE_DNSMASQ_ONLY=0');
+    lines.push('if [ "$AUTOPOD_USE_DNSMASQ" = "0" ] && command -v dnsmasq >/dev/null 2>&1; then');
+    lines.push('  AUTOPOD_USE_DNSMASQ_ONLY=1');
+    lines.push('fi');
+    lines.push('');
+
     // --- dnsmasq+ipset mode ---
     lines.push('# Attempt dnsmasq+ipset mode (domain-based filtering)');
     lines.push('if [ "$AUTOPOD_USE_DNSMASQ" = "1" ]; then');
@@ -592,6 +602,95 @@ export class DockerNetworkManager {
     lines.push('');
     lines.push(
       `  echo "Firewall: restricted mode (dnsmasq+ipset) — ${dnsmasqDomains.length} domains, ${cidrs.size} pre-seeded CIDRs"`,
+    );
+    lines.push('');
+
+    // --- dnsmasq-only mode (dnsmasq present, ipset/xt_set unavailable) ---
+    // Wildcards are handled natively by dnsmasq suffix matching. iptables allows
+    // TCP 443/80 to all destinations — DNS is the primary gate (non-allowed domains
+    // return NXDOMAIN). Less strict than ipset mode but fixes CDN wildcard subdomains
+    // that CIDR fallback cannot pre-resolve (e.g. *.blob.core.windows.net redirects).
+    lines.push('elif [ "$AUTOPOD_USE_DNSMASQ_ONLY" = "1" ]; then');
+    lines.push('');
+    lines.push('  echo "ipset/xt_set unavailable — dnsmasq DNS filtering + port 443/80 allowlist"');
+    lines.push('');
+    lines.push('  # Stop any running dnsmasq (SIGKILL via PID file, then killall as fallback)');
+    lines.push(
+      '  if [ -f /tmp/dnsmasq.pid ]; then kill -9 "$(cat /tmp/dnsmasq.pid)" 2>/dev/null; rm -f /tmp/dnsmasq.pid; fi',
+    );
+    lines.push('  killall -9 dnsmasq 2>/dev/null || true');
+    lines.push('  sleep 0.2  # let kernel release the listen socket');
+    lines.push('');
+
+    if (cidrs.size > 0) {
+      lines.push(`  # Pre-seed iptables with ${cidrs.size} daemon-resolved CIDRs`);
+      for (const cidr of cidrs) {
+        lines.push(`  iptables -A OUTPUT -d "${cidr}" -j ACCEPT`);
+      }
+      lines.push('');
+    }
+
+    lines.push('  # Ensure daemon gateway (host.docker.internal) is reachable for MCP');
+    lines.push(
+      "  for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
+    );
+    lines.push('    iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+    lines.push('  done');
+    lines.push('');
+
+    lines.push('  # Resolve nobody primary group (varies: nogroup on Debian, nobody on Alpine)');
+    lines.push('  NOBODY_GROUP=$(id -gn nobody 2>/dev/null || echo nobody)');
+    lines.push('');
+
+    // Unquoted heredoc so $NOBODY_GROUP expands; SAFE_HOST_REGEX ensures no shell metachars.
+    lines.push('  # Write dnsmasq config (no ipset — DNS sinkhole only)');
+    lines.push('  cat > /tmp/dnsmasq-firewall.conf << DNSCONF');
+    lines.push('no-resolv');
+    lines.push('no-hosts');
+    lines.push(`listen-address=${DNSMASQ_LISTEN}`);
+    lines.push('bind-interfaces');
+    lines.push('user=nobody');
+    lines.push('group=$NOBODY_GROUP');
+    lines.push('');
+    lines.push('# Allowed domains — forward to Docker DNS (no ipset population)');
+    for (const domain of dnsmasqDomains) {
+      lines.push(`server=/${domain}/${DOCKER_DNS}`);
+    }
+    lines.push('');
+    lines.push('# Block everything else');
+    lines.push('address=/#/');
+    lines.push('DNSCONF');
+    lines.push('');
+
+    lines.push('  # Start dnsmasq');
+    lines.push('  dnsmasq --conf-file=/tmp/dnsmasq-firewall.conf --pid-file=/tmp/dnsmasq.pid');
+    lines.push('');
+
+    lines.push('  # Point DNS to dnsmasq');
+    lines.push(`  echo "nameserver ${DNSMASQ_LISTEN}" > /etc/resolv.conf`);
+    lines.push('');
+
+    lines.push('  # DNS: only dnsmasq (nobody) can reach Docker DNS');
+    lines.push(
+      `  iptables -A OUTPUT -p udp --dport 53 -d ${DOCKER_DNS} -m owner --uid-owner nobody -j ACCEPT`,
+    );
+    lines.push(
+      `  iptables -A OUTPUT -p tcp --dport 53 -d ${DOCKER_DNS} -m owner --uid-owner nobody -j ACCEPT`,
+    );
+    lines.push('  # Block direct DNS to Docker resolver from other users');
+    lines.push(`  iptables -A OUTPUT -p udp --dport 53 -d ${DOCKER_DNS} -j REJECT`);
+    lines.push(`  iptables -A OUTPUT -p tcp --dport 53 -d ${DOCKER_DNS} -j REJECT`);
+    lines.push('');
+    lines.push('  # Allow HTTPS and HTTP outbound (domain filtering handled at DNS level;');
+    lines.push('  # wildcard CDN subdomains resolve correctly through dnsmasq)');
+    lines.push('  iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT');
+    lines.push('  iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT');
+    lines.push('');
+    lines.push('  # Reject everything else');
+    lines.push('  iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
+    lines.push('');
+    lines.push(
+      `  echo "Firewall: restricted mode (dnsmasq DNS-only) — ${dnsmasqDomains.length} domains, port 443/80 open"`,
     );
     lines.push('');
 
