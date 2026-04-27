@@ -30,6 +30,8 @@ public struct SeriesPipelineView: View {
     /// Lets the slide-in panel switch the main detail to a specific tab
     /// (e.g. "Full validation →").
     public var requestTab: ((DetailTab) -> Void)?
+    /// When false the Purpose/Design view-mode picker is hidden (e.g. inline DAG in SeriesListView).
+    public var showViewModePicker: Bool
 
     public init(
         pods: [Pod],
@@ -40,7 +42,8 @@ public struct SeriesPipelineView: View {
         eventsForPod: ((String) -> [AgentEvent])? = nil,
         loadEventsForPod: ((String) -> Void)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
-        requestTab: ((DetailTab) -> Void)? = nil
+        requestTab: ((DetailTab) -> Void)? = nil,
+        showViewModePicker: Bool = true
     ) {
         self.pods = pods
         self.selectedPodId = selectedPodId
@@ -51,6 +54,7 @@ public struct SeriesPipelineView: View {
         self.loadEventsForPod = loadEventsForPod
         self.loadQuality = loadQuality
         self.requestTab = requestTab
+        self.showViewModePicker = showViewModePicker
     }
 
     private enum ViewMode: String {
@@ -103,24 +107,90 @@ public struct SeriesPipelineView: View {
         .padding(.vertical, 6)
     }
 
+    // MARK: - Markdown rendering
+
+    private struct MdBlock: Identifiable {
+        enum Kind { case h1(String), h2(String), h3(String), bullet(String), code(String), text(String), spacer }
+        let id: Int
+        let kind: Kind
+    }
+
+    private func parseBlocks(_ raw: String) -> [MdBlock] {
+        var result: [MdBlock] = []
+        var inFence = false
+        var fenceLines: [String] = []
+        for (i, line) in raw.components(separatedBy: "\n").enumerated() {
+            if line.hasPrefix("```") {
+                if inFence {
+                    result.append(MdBlock(id: i, kind: .code(fenceLines.joined(separator: "\n"))))
+                    fenceLines = []; inFence = false
+                } else { inFence = true }
+            } else if inFence {
+                fenceLines.append(line)
+            } else if line.hasPrefix("### ") {
+                result.append(MdBlock(id: i, kind: .h3(String(line.dropFirst(4)))))
+            } else if line.hasPrefix("## ") {
+                result.append(MdBlock(id: i, kind: .h2(String(line.dropFirst(3)))))
+            } else if line.hasPrefix("# ") {
+                result.append(MdBlock(id: i, kind: .h1(String(line.dropFirst(2)))))
+            } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                result.append(MdBlock(id: i, kind: .bullet(String(line.dropFirst(2)))))
+            } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                result.append(MdBlock(id: i, kind: .spacer))
+            } else {
+                result.append(MdBlock(id: i, kind: .text(line)))
+            }
+        }
+        return result
+    }
+
+    private func inlineText(_ raw: String) -> Text {
+        (try? Text(AttributedString(markdown: raw, options: .init(interpretedSyntax: .full)))) ?? Text(raw)
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: MdBlock) -> some View {
+        switch block.kind {
+        case .h1(let s):
+            inlineText(s).font(.title3.bold()).padding(.top, 10)
+        case .h2(let s):
+            inlineText(s).font(.headline).padding(.top, 8)
+        case .h3(let s):
+            inlineText(s).font(.subheadline.bold()).padding(.top, 6)
+        case .bullet(let s):
+            HStack(alignment: .top, spacing: 5) {
+                Text("•").font(.callout).foregroundStyle(.secondary).frame(width: 12)
+                inlineText(s).font(.callout)
+            }
+        case .code(let s):
+            Text(s)
+                .font(.system(.caption, design: .monospaced))
+                .padding(8)
+                .background(Color.primary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        case .text(let s):
+            inlineText(s).font(.callout)
+        case .spacer:
+            Spacer().frame(height: 4)
+        }
+    }
+
     private func markdownView(_ text: String) -> some View {
         ScrollView(.vertical) {
-            let attributed = (try? AttributedString(
-                markdown: text,
-                options: .init(interpretedSyntax: .full)
-            )) ?? AttributedString(text)
-            Text(attributed)
-                .font(.callout)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(parseBlocks(text)) { block in
+                    blockView(block)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(14)
         }
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            if seriesDescription != nil || seriesDesign != nil {
+            if showViewModePicker && (seriesDescription != nil || seriesDesign != nil) {
                 viewModePicker
                 Divider()
             }

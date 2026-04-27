@@ -230,7 +230,8 @@ public struct SeriesListView: View {
                 SeriesPipelineView(
                     pods: group.pods,
                     selectedPodId: selectedPodId,
-                    onSelectPod: onSelectPod
+                    onSelectPod: onSelectPod,
+                    showViewModePicker: false
                 )
                 .frame(minHeight: 160, maxHeight: 320)
             }
