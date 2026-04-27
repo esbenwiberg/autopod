@@ -128,8 +128,32 @@ export interface Pod {
   seriesId: string | null;
   /** Human-readable series name (null for standalone pods). */
   seriesName: string | null;
-  /** Overall spec description (from context.md) for series pods. Used as the PR "Why" section and title instead of the individual brief task. */
+  /**
+   * Series purpose (from `purpose.md`) for series pods. Used as the PR "Why"
+   * section and title instead of the individual brief task, and rendered as
+   * `## Purpose` in the agent's CLAUDE.md.
+   *
+   * The wire/column name `seriesDescription` is preserved for backwards
+   * compatibility with desktop clients that decode this field directly.
+   */
   seriesDescription: string | null;
+  /**
+   * Series design (from `design.md`) for series pods. Rendered as `## Design`
+   * in the agent's CLAUDE.md alongside the purpose section. Carries seams,
+   * cross-pod contracts, UX flows, file map, and reference reading.
+   */
+  seriesDesign: string | null;
+  /**
+   * Per-brief advisory list of files this pod expects to modify. The reviewer
+   * flags deviations as discussion items, not failures. Directory shorthand
+   * (a path ending in `/`) means "anything under this directory".
+   */
+  touches: string[] | null;
+  /**
+   * Per-brief advisory list of files this pod should not modify. The reviewer
+   * flags deviations as discussion items, not failures.
+   */
+  doesNotTouch: string[] | null;
   /**
    * Series PR mode this pod participates in: 'single' (all series pods share
    * one branch + one PR), 'stacked' (each pod owns its own PR), or 'none'
@@ -229,8 +253,14 @@ export interface CreatePodRequest {
   seriesId?: string | null;
   /** Human-readable series name. */
   seriesName?: string | null;
-  /** Overall spec description (from context.md) to use as the PR body "Why" section. */
+  /** Series purpose (from `purpose.md`). Used as the PR "Why" section and rendered as `## Purpose` in CLAUDE.md. */
   seriesDescription?: string | null;
+  /** Series design (from `design.md`). Rendered as `## Design` in CLAUDE.md. */
+  seriesDesign?: string | null;
+  /** Per-brief advisory list of files this pod expects to modify. */
+  touches?: string[];
+  /** Per-brief advisory list of files this pod should not modify. */
+  doesNotTouch?: string[];
   /** Series PR mode (single / stacked / none). Set by the series route on each created pod. */
   prMode?: 'single' | 'stacked' | 'none' | null;
   /**

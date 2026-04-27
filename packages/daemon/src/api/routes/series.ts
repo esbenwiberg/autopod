@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import {
   type AcDefinition,
@@ -18,6 +18,10 @@ interface ParsedBrief {
   task: string;
   dependsOn: string[];
   acceptanceCriteria?: AcDefinition[];
+  /** Per-brief advisory list of files this pod expects to modify. */
+  touches?: string[];
+  /** Per-brief advisory list of files this pod should not modify. */
+  doesNotTouch?: string[];
   /**
    * Per-brief sidecar requests (e.g. `['dagger']`). Validated by the pod
    * manager at createSession against `profile.sidecars` and `trustedSource`.
@@ -35,8 +39,10 @@ interface CreateSeriesRequest {
   autoApprove?: boolean;
   /** Redirect agent ask_human calls to the reviewer AI model instead of blocking. */
   disableAskHuman?: boolean;
-  /** Overall spec description (from context.md). Used as the PR "Why" section instead of the final pod's task. */
+  /** Series purpose (from `purpose.md`). Used as the PR "Why" + `## Purpose` in CLAUDE.md. */
   seriesDescription?: string;
+  /** Series design (from `design.md`). Rendered as `## Design` in CLAUDE.md. */
+  seriesDesign?: string;
 }
 
 interface PreviewSeriesFolderRequest {
@@ -46,8 +52,34 @@ interface PreviewSeriesFolderRequest {
 interface PreviewSeriesOnBranchRequest {
   profileName: string;
   branch: string;
-  /** Relative path in the repo, e.g. `specs/my-feature/briefs`. */
+  /** Relative path in the repo, e.g. `specs/my-feature` or `specs/my-feature/briefs`. */
   path: string;
+}
+
+/**
+ * Resolve the spec layout for a folder argument. Accepts either the spec root
+ * (`specs/<feature>/` containing `briefs/`) or the briefs folder itself
+ * (`specs/<feature>/briefs/`).
+ */
+function resolveSpecLayout(folderPath: string): { specRoot: string; briefsDir: string } {
+  const abs = resolve(folderPath);
+  const folderName = basename(abs);
+  if (folderName === 'briefs') {
+    return { specRoot: resolve(abs, '..'), briefsDir: abs };
+  }
+  const briefsSubdir = join(abs, 'briefs');
+  if (existsSync(briefsSubdir) && statSync(briefsSubdir).isDirectory()) {
+    return { specRoot: abs, briefsDir: briefsSubdir };
+  }
+  return { specRoot: abs, briefsDir: abs };
+}
+
+function readSpecDoc(specRoot: string, name: string): string {
+  try {
+    return readFileSync(join(specRoot, name), 'utf-8').trim();
+  } catch {
+    return '';
+  }
 }
 
 export function seriesRoutes(
@@ -126,6 +158,9 @@ export function seriesRoutes(
             seriesId,
             seriesName: body.seriesName,
             seriesDescription: body.seriesDescription ?? null,
+            seriesDesign: body.seriesDesign ?? null,
+            touches: brief.touches,
+            doesNotTouch: brief.doesNotTouch,
             prMode,
             acceptanceCriteria: brief.acceptanceCriteria,
             options: { agentMode: 'auto', output },
@@ -177,7 +212,7 @@ export function seriesRoutes(
     };
   });
 
-  // POST /pods/series/preview — parse a brief folder on the daemon host and
+  // POST /pods/series/preview — parse a spec folder on the daemon host and
   // return the DAG for the desktop's "Create Series" sheet. Read-only.
   app.post('/pods/series/preview', async (request, reply) => {
     const body = request.body as PreviewSeriesFolderRequest;
@@ -203,53 +238,56 @@ export function seriesRoutes(
       return { error: `Not a directory: ${folderPath}` };
     }
 
+    const { specRoot, briefsDir } = resolveSpecLayout(folderPath);
+
     let filenames: string[];
     try {
-      filenames = readdirSync(folderPath)
-        .filter((f) => extname(f) === '.md' && f !== 'context.md')
+      filenames = readdirSync(briefsDir)
+        .filter((f) => extname(f) === '.md')
         .sort((a, b) => numericPrefix(a) - numericPrefix(b));
     } catch {
       reply.status(400);
-      return { error: `Cannot read folder: ${folderPath}` };
+      return { error: `Cannot read briefs folder: ${briefsDir}` };
     }
     if (filenames.length === 0) {
       reply.status(400);
-      return { error: 'No .md brief files found (excluding context.md)' };
+      return { error: `No .md brief files found in ${briefsDir}` };
     }
 
     const briefFiles = filenames.map((filename) => ({
       filename,
-      content: readFileSync(join(folderPath, filename), 'utf-8'),
+      content: readFileSync(join(briefsDir, filename), 'utf-8'),
     }));
 
-    let sharedContext = '';
-    try {
-      sharedContext = readFileSync(join(folderPath, 'context.md'), 'utf-8').trim();
-    } catch {
-      // no shared context — fine
-    }
+    const seriesDescription = readSpecDoc(specRoot, 'purpose.md');
+    const seriesDesign = readSpecDoc(specRoot, 'design.md');
 
-    // Resolve context_files relative to the folder — keeps the preview
-    // self-contained and prevents arbitrary path reads outside the folder.
+    // Resolve per-brief context_files relative to the spec root, restricted to
+    // paths that don't escape it. Prevents arbitrary file reads outside the
+    // spec.
     const loadContextFile = (p: string): string => {
       if (isAbsolute(p) || p.includes('..')) return '';
       try {
-        return readFileSync(resolve(folderPath, p), 'utf-8').trim();
+        return readFileSync(resolve(specRoot, p), 'utf-8').trim();
       } catch {
         return '';
       }
     };
 
-    const briefs = parseBriefs(briefFiles, sharedContext, loadContextFile);
-    const folderBase = basename(folderPath);
-    const seriesName = folderBase === 'briefs' ? basename(resolve(folderPath, '..')) : folderBase;
+    const briefs = parseBriefs(briefFiles, loadContextFile);
+    const seriesName = inferSeriesNameFromRoot(specRoot);
 
-    return { seriesName, briefs, seriesDescription: sharedContext || undefined };
+    return {
+      seriesName,
+      briefs,
+      seriesDescription: seriesDescription || undefined,
+      seriesDesign: seriesDesign || undefined,
+    };
   });
 
-  // POST /pods/series/preview-branch — parse a brief folder directly from a
-  // git branch (no local checkout). Use when the plan folder lives on the
-  // branch (`/prep` output, or an interactive pod's worktree).
+  // POST /pods/series/preview-branch — parse a spec folder directly from a
+  // git branch (no local checkout). Use when the spec lives on the branch
+  // (e.g. an interactive pod's worktree).
   app.post('/pods/series/preview-branch', async (request, reply) => {
     const body = request.body as PreviewSeriesOnBranchRequest;
     if (!body?.profileName || !body?.branch || !body?.path) {
@@ -285,7 +323,7 @@ export function seriesRoutes(
         };
       }
 
-      const briefs = parseBriefs(contents.files, contents.sharedContext);
+      const briefs = parseBriefs(contents.files);
       const parts = body.path.split('/').filter(Boolean);
       const lastPart = parts[parts.length - 1] ?? body.branch;
       const parentPart = parts[parts.length - 2];
@@ -294,7 +332,8 @@ export function seriesRoutes(
       return {
         seriesName,
         briefs,
-        seriesDescription: contents.sharedContext || undefined,
+        seriesDescription: contents.purposeMd || undefined,
+        seriesDesign: contents.designMd || undefined,
       };
     } catch (err) {
       reply.status(400);
@@ -343,4 +382,8 @@ export function seriesRoutes(
       statusCounts,
     };
   });
+}
+
+function inferSeriesNameFromRoot(specRoot: string): string {
+  return basename(resolve(specRoot));
 }

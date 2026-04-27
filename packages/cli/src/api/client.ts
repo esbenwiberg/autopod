@@ -26,10 +26,20 @@ export interface CreateSeriesRequest {
     task: string;
     dependsOn: string[];
     acceptanceCriteria?: AcDefinition[];
+    /** Per-brief advisory list of files this pod expects to modify. */
+    touches?: string[];
+    /** Per-brief advisory list of files this pod should not modify. */
+    doesNotTouch?: string[];
+    /** Per-brief sidecar requests (e.g. `['dagger']`). */
+    requireSidecars?: string[];
   }>;
   profile: string;
   baseBranch?: string;
   prMode?: 'single' | 'stacked' | 'none';
+  /** Series purpose (from `purpose.md`) — PR "Why" + `## Purpose` in CLAUDE.md. */
+  seriesDescription?: string;
+  /** Series design (from `design.md`) — `## Design` in CLAUDE.md. */
+  seriesDesign?: string;
 }
 
 export interface SeriesResponse {

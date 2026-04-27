@@ -746,15 +746,48 @@ export class LocalWorktreeManager implements WorktreeManager {
         }
       }
 
-      // List files under relPath on the branch. `git ls-tree --name-only` with
-      // a path ending in `/` forces tree-level listing; `-r` recurses into
-      // subdirs, but we filter to the top level to avoid picking up nested
-      // folders the user didn't mean to include.
+      // Resolve spec layout. The user may point either at the spec root
+      // (containing `briefs/`) or at the briefs folder itself. We detect
+      // which case applies by listing the path and looking for a `briefs/`
+      // entry.
+      const lsTreeAt = async (refPath: string): Promise<string> => {
+        try {
+          const { stdout } = await execFileAsync(
+            'git',
+            ['ls-tree', '--name-only', treeRef, `${refPath}/`],
+            { cwd: bareRepoPath },
+          );
+          return stdout;
+        } catch (err) {
+          throw sanitizeGitError(err);
+        }
+      };
+
+      const trimmedRelPath = relPath.replace(/\/+$/, '');
+      const baseName = trimmedRelPath.split('/').pop() ?? trimmedRelPath;
+
+      let specRootPath: string;
+      let briefsPath: string;
+      if (baseName === 'briefs') {
+        specRootPath = trimmedRelPath.split('/').slice(0, -1).join('/') || trimmedRelPath;
+        briefsPath = trimmedRelPath;
+      } else {
+        const rawAtRoot = await lsTreeAt(trimmedRelPath);
+        const rootEntries = rawAtRoot
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const hasBriefsSubdir = rootEntries.some((e) => e === `${trimmedRelPath}/briefs`);
+        specRootPath = trimmedRelPath;
+        briefsPath = hasBriefsSubdir ? `${trimmedRelPath}/briefs` : trimmedRelPath;
+      }
+
+      // List brief files under briefsPath.
       let rawNames: string;
       try {
         const { stdout } = await execFileAsync(
           'git',
-          ['ls-tree', '--name-only', treeRef, `${relPath}/`],
+          ['ls-tree', '--name-only', treeRef, `${briefsPath}/`],
           { cwd: bareRepoPath },
         );
         rawNames = stdout;
@@ -768,9 +801,13 @@ export class LocalWorktreeManager implements WorktreeManager {
         .filter(Boolean)
         .map((full) => ({ full, base: full.split('/').pop() ?? full }));
 
-      const mdEntries = entries.filter((e) => e.base.endsWith('.md') && e.base !== 'context.md');
+      // Top-level .md files only; exclude well-known non-brief docs that may
+      // sit alongside briefs in flat layouts.
+      const NON_BRIEF_DOCS = new Set(['purpose.md', 'design.md', 'context.md']);
+      const mdEntries = entries.filter(
+        (e) => e.base.endsWith('.md') && !NON_BRIEF_DOCS.has(e.base),
+      );
 
-      // Read each brief file.
       const files: Array<{ filename: string; content: string }> = [];
       for (const entry of mdEntries) {
         try {
@@ -787,20 +824,22 @@ export class LocalWorktreeManager implements WorktreeManager {
         }
       }
 
-      // Read context.md at the folder root if present.
-      let sharedContext = '';
-      try {
-        const { stdout } = await execFileAsync(
-          'git',
-          ['show', `${treeRef}:${relPath}/context.md`],
-          { cwd: bareRepoPath, maxBuffer: 2 * 1024 * 1024 },
-        );
-        sharedContext = stdout.trim();
-      } catch {
-        // No context.md — that's fine.
-      }
+      const readDoc = async (docPath: string): Promise<string> => {
+        try {
+          const { stdout } = await execFileAsync('git', ['show', `${treeRef}:${docPath}`], {
+            cwd: bareRepoPath,
+            maxBuffer: 2 * 1024 * 1024,
+          });
+          return stdout.trim();
+        } catch {
+          return '';
+        }
+      };
 
-      return { relPath, files, sharedContext };
+      const purposeMd = await readDoc(`${specRootPath}/purpose.md`);
+      const designMd = await readDoc(`${specRootPath}/design.md`);
+
+      return { relPath: trimmedRelPath, files, purposeMd, designMd };
     });
   }
 

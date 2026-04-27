@@ -2095,6 +2095,24 @@ export function buildReviewPrompt(
     ? `\n## COMMIT HISTORY\n\nCommits on this branch (most recent first — use to understand progression and intent):\n\n${config.commitLog}\n`
     : '';
 
+  // Brief scope hints are advisory — flag deviations as discussion items in
+  // your notes, never as failures. The agent is allowed to expand scope when
+  // the work clearly requires it; the human (or AI reviewer) adjudicates.
+  const touches = config.briefTouches ?? [];
+  const doesNotTouch = config.briefDoesNotTouch ?? [];
+  const briefScopeSection =
+    touches.length > 0 || doesNotTouch.length > 0
+      ? `\n## BRIEF SCOPE (ADVISORY)\n\nThe brief authored these scope hints. They are GUIDANCE, not enforcement. If the diff modifies files outside the "expected to modify" list or touches files in the "avoid" list, treat it as a DISCUSSION ITEM in your notes — never as a failure on its own. The agent is allowed to expand scope when the work requires it; the human reviewer decides whether the deviation is acceptable.\n${
+          touches.length > 0
+            ? `\nFiles this brief expected to modify (paths ending in \`/\` mean "anything under this directory"):\n${touches.map((p) => `- ${p}`).join('\n')}\n`
+            : ''
+        }${
+          doesNotTouch.length > 0
+            ? `\nFiles this brief was asked to avoid:\n${doesNotTouch.map((p) => `- ${p}`).join('\n')}\n`
+            : ''
+        }`
+      : '';
+
   // Build the enriched context section (Tier 0+1)
   const contextSection = reviewContext ? buildContextSection(reviewContext) : '';
 
@@ -2118,7 +2136,7 @@ ${repoRulesSection}
 ## TASK
 
 ${config.task}
-${autoSection}${noneSection}${planSection}${taskSummarySection}
+${autoSection}${noneSection}${planSection}${taskSummarySection}${briefScopeSection}
 ${commitLogSection}${contextSection}## DIFF
 
 ${config.diff}

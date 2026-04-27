@@ -53,6 +53,17 @@ export interface ValidationEngineConfig {
   plan?: { summary: string; steps: string[] };
   /** Task summary reported by the agent via report_task_summary */
   taskSummary?: TaskSummary;
+  /**
+   * Brief-level advisory: files this pod was scoped to modify. Surfaced to the
+   * reviewer as guidance, not enforcement — deviations become discussion items
+   * in the review, not failures.
+   */
+  briefTouches?: string[];
+  /**
+   * Brief-level advisory: files this pod was asked to avoid. Surfaced to the
+   * reviewer as guidance, not enforcement.
+   */
+  briefDoesNotTouch?: string[];
   /** Host worktree path for enriched review context. Enables Tier 0+1 context gathering and Tier 2/3 escalation. */
   worktreePath?: string;
   /** Base commit SHA for scoping diff annotations */

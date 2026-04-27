@@ -101,8 +101,10 @@ export interface WorktreeManager {
 export interface BranchFolderContents {
   /** The relative path that was read (normalized). */
   relPath: string;
-  /** Files under the path — only names ending in `.md`, recursive ONE level deep. */
+  /** Brief files under the path's `briefs/` subfolder (or the path itself if flat). */
   files: Array<{ filename: string; content: string }>;
-  /** Contents of `context.md` at the path root, or '' if not present. */
-  sharedContext: string;
+  /** Contents of `purpose.md` at the spec root, or '' if not present. */
+  purposeMd: string;
+  /** Contents of `design.md` at the spec root, or '' if not present. */
+  designMd: string;
 }
