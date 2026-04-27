@@ -262,6 +262,7 @@ const execFileAsync = promisify(execFile);
 // Exit 0 = server responded with a valid result; Exit 1 = timeout or error.
 const MCP_INIT_PROBE_SCRIPT = `import subprocess,json,sys,select as sel
 if len(sys.argv)<2:sys.exit(1)
+cmd=sys.argv[1]
 msg=json.dumps({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"1.0"}}})
 frame=b"Content-Length: "+str(len(msg.encode())).encode()+b"\\r\\n\\r\\n"+msg.encode()
 p=subprocess.Popen(sys.argv[1:],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -269,16 +270,16 @@ try:
   p.stdin.write(frame);p.stdin.flush()
   h=b""
   while b"\\r\\n\\r\\n" not in h:
-    if not sel.select([p.stdout],[],[],20)[0]:sys.exit(1)
+    if not sel.select([p.stdout],[],[],50)[0]:print(f"timeout: {cmd} did not respond to initialize",file=sys.stderr);sys.exit(1)
     c=p.stdout.read(1)
-    if not c:sys.exit(1)
+    if not c:print(f"eof: {cmd} closed stdout",file=sys.stderr);sys.exit(1)
     h+=c
   n=int(h.split(b"Content-Length: ")[1].split(b"\\r\\n")[0])
   b=b""
   while len(b)<n:
-    if not sel.select([p.stdout],[],[],20)[0]:sys.exit(1)
+    if not sel.select([p.stdout],[],[],50)[0]:print(f"timeout: {cmd} did not send body",file=sys.stderr);sys.exit(1)
     chunk=p.stdout.read(n-len(b))
-    if not chunk:sys.exit(1)
+    if not chunk:print(f"eof: {cmd} closed during body",file=sys.stderr);sys.exit(1)
     b+=chunk
   r=json.loads(b)
   sys.exit(0 if "result" in r else 1)
@@ -2702,47 +2703,91 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const MCP_PROBE_PATH = '/tmp/.autopod-mcp-probe.py';
         await containerManager.writeFile(containerId, MCP_PROBE_PATH, MCP_INIT_PROBE_SCRIPT);
 
-        const workingStdioServers: StdioInjectedMcpServer[] = [];
-        for (const server of stdioMcpServers) {
-          // Step 1: binary existence check — fast, catches missing warm image.
-          const binaryCheck = await containerManager.execInContainer(
-            containerId,
-            ['sh', '-c', `command -v ${server.command} >/dev/null 2>&1`],
-            { timeout: 5_000 },
-          );
-          if (binaryCheck.exitCode !== 0) {
-            const msg = `Code-intel MCP "${server.name}" requested by profile but binary "${server.command}" not found in container — agent will fall back to grep/find. Rebuild the warm image: \`ap profile warm ${profile.name} --rebuild\`.`;
-            logger.error({ podId, server: server.name, command: server.command }, msg);
-            emitStatus(`⚠️ ${msg}`);
-            continue;
-          }
-
-          // Step 2: MCP init probe — actually start the server and complete the
-          // JSON-RPC initialize handshake. This catches language-server issues
-          // (missing NuGet/npm cache, permission errors, broken installs) that
-          // the binary check alone cannot detect.
-          const probeCmd = ['python3', MCP_PROBE_PATH, server.command, ...(server.args ?? [])];
-          const mcpProbe = await containerManager.execInContainer(containerId, probeCmd, {
-            timeout: 25_000,
-          });
-
-          workingStdioServers.push(server);
-
-          if (mcpProbe.exitCode === 0) {
-            logger.info({ podId, server: server.name }, `Code-intel MCP "${server.name}" probe OK`);
-            emitStatus(`✅ Code-intel MCP "${server.name}" initialized and ready`);
-          } else {
-            const detail = (mcpProbe.stdout || mcpProbe.stderr || 'no output').trim().slice(0, 200);
-            logger.warn({ podId, server: server.name, detail }, `Code-intel MCP "${server.name}" probe failed — server may not work correctly`);
-            emitStatus(
-              `⚠️ Code-intel MCP "${server.name}" binary found but failed to initialize (${detail}). Rebuild: \`ap profile warm ${profile.name} --rebuild\``,
+        // Binary-check all servers first (fast) then probe survivors in parallel.
+        // Language servers (Roslyn, C# LS) can take 60-90s to initialize on a
+        // real project — sequential probing would add minutes to startup.
+        const binaryOkServers: StdioInjectedMcpServer[] = [];
+        await Promise.all(
+          stdioMcpServers.map(async (server) => {
+            const binaryCheck = await containerManager.execInContainer(
+              containerId,
+              ['sh', '-c', `command -v ${server.command} >/dev/null 2>&1`],
+              { timeout: 5_000 },
             );
-          }
-        }
+            if (binaryCheck.exitCode !== 0) {
+              const msg = `Code-intel MCP "${server.name}" requested by profile but binary "${server.command}" not found in container — agent will fall back to grep/find. Rebuild the warm image: \`ap profile warm ${profile.name} --rebuild\`.`;
+              logger.error({ podId, server: server.name, command: server.command }, msg);
+              emitStatus(`⚠️ ${msg}`);
+            } else {
+              binaryOkServers.push(server);
+            }
+          }),
+        );
+
+        // MCP init probe — actually start each server and complete the JSON-RPC
+        // initialize handshake. Catches language-server issues (missing NuGet/npm
+        // cache, permission errors) that the binary check alone cannot detect.
+        // Timeout = slow start (Roslyn on a large solution can take 90s+) — server
+        // is still included in config and will initialize lazily inside the container.
+        // Only a clean non-zero exit (server crashed or returned an error response)
+        // triggers a rebuild suggestion.
+        const workingStdioServers: StdioInjectedMcpServer[] = [...binaryOkServers];
+        await Promise.all(
+          binaryOkServers.map(async (server) => {
+            const probeCmd = ['python3', MCP_PROBE_PATH, server.command, ...(server.args ?? [])];
+            const mcpProbe = await containerManager.execInContainer(containerId, probeCmd, {
+              timeout: 100_000,
+              cwd: '/workspace',
+            });
+
+            if (mcpProbe.exitCode === 0) {
+              logger.info({ podId, server: server.name }, `Code-intel MCP "${server.name}" probe OK`);
+              emitStatus(`✅ Code-intel MCP "${server.name}" initialized and ready`);
+            } else {
+              const stderr = (mcpProbe.stderr || '').trim();
+              const isTimeout = stderr.startsWith('timeout:');
+              if (isTimeout) {
+                logger.info({ podId, server: server.name }, `Code-intel MCP "${server.name}" slow to start — will initialize inside container`);
+                emitStatus(`🔄 Code-intel MCP "${server.name}" is starting (language server initializing in background)`);
+              } else {
+                const detail = (mcpProbe.stdout || stderr || 'no output').slice(0, 200);
+                logger.warn({ podId, server: server.name, detail }, `Code-intel MCP "${server.name}" probe failed`);
+                emitStatus(
+                  `⚠️ Code-intel MCP "${server.name}" binary found but failed to respond (${detail}). If this persists, rebuild: \`ap profile warm ${profile.name} --rebuild\``,
+                );
+              }
+            }
+          }),
+        );
 
         await containerManager.execInContainer(containerId, ['rm', '-f', MCP_PROBE_PATH], {
           timeout: 3_000,
         });
+
+        // Detect 0-byte .bin/ stubs before the agent starts. These are a symptom of
+        // `npm install --ignore-scripts` overwriting valid stubs without running
+        // postinstall hooks. Surface them early so the agent (and operator) don't have
+        // to diagnose the resulting "Permission denied" errors from scratch.
+        const stubScan = await containerManager
+          .execInContainer(
+            containerId,
+            [
+              'sh',
+              '-c',
+              'find /workspace -path "*/node_modules/.bin/*" -empty -print 2>/dev/null | head -10',
+            ],
+            { timeout: 5_000 },
+          )
+          .catch(() => null);
+        const brokenStubs = stubScan?.stdout?.trim();
+        if (brokenStubs) {
+          const first5 = brokenStubs.split('\n').slice(0, 5).join(', ');
+          logger.warn({ podId }, `0-byte .bin stubs detected before agent start: ${first5}`);
+          emitStatus(
+            `⚠️ 0-byte .bin stubs detected (${first5}…). ` +
+              'Likely cause: npm install --ignore-scripts in your start/build script. Fix: add `npm rebuild` after the install.',
+          );
+        }
 
         // Rewrite injected MCP server URLs to route through daemon proxy.
         // Only HTTP servers go through the proxy — stdio servers run as local
