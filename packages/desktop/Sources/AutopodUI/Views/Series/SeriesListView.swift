@@ -227,16 +227,6 @@ public struct SeriesListView: View {
             // Inline DAG — visible when expanded
             if isExpanded {
                 Divider()
-                if let description = group.description, !description.isEmpty {
-                    Text(description)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                    Divider()
-                }
                 SeriesPipelineView(
                     pods: group.pods,
                     selectedPodId: selectedPodId,

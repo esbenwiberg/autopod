@@ -53,10 +53,25 @@ public struct SeriesPipelineView: View {
         self.requestTab = requestTab
     }
 
+    private enum ViewMode: String {
+        case dag = "Pipeline"
+        case purpose = "Purpose"
+        case design = "Design"
+    }
+
     @State private var panelPodId: String?
+    @State private var viewMode: ViewMode = .dag
 
     private var podsById: [String: Pod] {
         Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
+    }
+
+    private var seriesDescription: String? {
+        pods.first(where: { $0.seriesDescription?.isEmpty == false })?.seriesDescription
+    }
+
+    private var seriesDesign: String? {
+        pods.first(where: { $0.seriesDesign?.isEmpty == false })?.seriesDesign
     }
 
     private func edgeColor(parent: Pod?, child: Pod?) -> Color {
@@ -73,81 +88,78 @@ public struct SeriesPipelineView: View {
         return .gray.opacity(0.8)
     }
 
-    private var seriesDescription: String? {
-        pods.first(where: { $0.seriesDescription?.isEmpty == false })?.seriesDescription
-    }
-
-    private var seriesDesign: String? {
-        pods.first(where: { $0.seriesDesign?.isEmpty == false })?.seriesDesign
-    }
-
-    private var seriesInfoHeader: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 10) {
-                if let desc = seriesDescription {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Purpose")
-                            .font(.system(.caption2).weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(desc)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if let design = seriesDesign {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Design")
-                            .font(.system(.caption2).weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(design)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+    private var viewModePicker: some View {
+        HStack {
+            Picker("", selection: $viewMode) {
+                Text("Pipeline").tag(ViewMode.dag)
+                if seriesDescription != nil { Text("Purpose").tag(ViewMode.purpose) }
+                if seriesDesign != nil { Text("Design").tag(ViewMode.design) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .pickerStyle(.segmented)
+            .fixedSize()
         }
-        .frame(maxHeight: 180)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private func markdownView(_ text: String) -> some View {
+        ScrollView(.vertical) {
+            let attributed = (try? AttributedString(
+                markdown: text,
+                options: .init(interpretedSyntax: .full)
+            )) ?? AttributedString(text)
+            Text(attributed)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+        }
     }
 
     public var body: some View {
         VStack(spacing: 0) {
             if seriesDescription != nil || seriesDesign != nil {
-                seriesInfoHeader
+                viewModePicker
                 Divider()
             }
-            HStack(spacing: 0) {
-                dagCanvas
-                if panelEnabled, let pid = panelPodId, let pod = podsById[pid] {
-                    Divider()
-                    PodActivityPanel(
-                        pod: pod,
-                        events: eventsForPod?(pod.id) ?? [],
-                        actions: actions,
-                        onNavigate: {
-                            panelPodId = nil
-                            onSelectPod(pod.id)
-                        },
-                        loadQuality: loadQuality,
-                        requestTab: requestTab
-                    )
-                    .frame(width: 380)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
-            .animation(.easeOut(duration: 0.18), value: panelPodId)
-            .onChange(of: panelPodId) { _, newId in
-                if let id = newId {
-                    loadEventsForPod?(id)
+            Group {
+                switch viewMode {
+                case .dag:
+                    HStack(spacing: 0) {
+                        dagCanvas
+                        if panelEnabled, let pid = panelPodId, let pod = podsById[pid] {
+                            Divider()
+                            PodActivityPanel(
+                                pod: pod,
+                                events: eventsForPod?(pod.id) ?? [],
+                                actions: actions,
+                                onNavigate: {
+                                    panelPodId = nil
+                                    onSelectPod(pod.id)
+                                },
+                                loadQuality: loadQuality,
+                                requestTab: requestTab
+                            )
+                            .frame(width: 380)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.18), value: panelPodId)
+                    .onChange(of: panelPodId) { _, newId in
+                        if let id = newId { loadEventsForPod?(id) }
+                    }
+                case .purpose:
+                    markdownView(seriesDescription ?? "")
+                case .design:
+                    markdownView(seriesDesign ?? "")
                 }
             }
             Divider()
             footer
         }
+        .onChange(of: pods.first?.seriesId) { viewMode = .dag }
     }
 
     private func fittingMetrics(for size: CGSize) -> PipelineDAGLayout.Metrics {
