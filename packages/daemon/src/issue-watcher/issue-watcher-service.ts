@@ -1,4 +1,10 @@
-import type { CreatePodRequest, Pod, Profile, SystemEvent } from '@autopod/shared';
+import {
+  type CreatePodRequest,
+  type Pod,
+  type Profile,
+  type SystemEvent,
+  processContent,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
@@ -125,17 +131,48 @@ export function createIssueWatcherService(
       return;
     }
 
-    // Build pod request. Issue bodies supply plain-text criteria lines;
-    // wrap each as a minimal AcDefinition so downstream code can treat them
-    // uniformly with brief-parsed ACs.
-    const task = `${candidate.title}\n\n${candidate.body}`;
+    // Issue title/body/ACs come from anyone who can file or comment on an issue —
+    // treat as untrusted. Quarantine wraps prompt-injection patterns in markers
+    // the agent can recognize; PII sanitization strips secrets before storage.
+    const sanitizeUntrusted = (text: string) =>
+      processContent(text, {
+        sanitization: { preset: 'standard' },
+        quarantine: { enabled: true },
+      });
+
+    const titleResult = sanitizeUntrusted(candidate.title);
+    const bodyResult = sanitizeUntrusted(candidate.body);
+    const acResults = candidate.acceptanceCriteria?.map(sanitizeUntrusted);
+
+    const allThreats = [
+      ...titleResult.threats,
+      ...bodyResult.threats,
+      ...(acResults?.flatMap((r) => r.threats) ?? []),
+    ];
+    if (allThreats.length > 0) {
+      logger.warn(
+        {
+          issueId: candidate.id,
+          issueUrl: candidate.url,
+          quarantined:
+            titleResult.quarantined ||
+            bodyResult.quarantined ||
+            (acResults?.some((r) => r.quarantined) ?? false),
+          threatPatterns: [...new Set(allThreats.map((t) => t.pattern))],
+          threatCount: allThreats.length,
+        },
+        'Prompt-injection or PII patterns detected in issue content',
+      );
+    }
+
+    const task = `${titleResult.text}\n\n${bodyResult.text}`;
     const request: CreatePodRequest = {
       profileName: target.profileName,
       task,
       branchPrefix: `issue-${candidate.id}/`,
-      acceptanceCriteria: candidate.acceptanceCriteria?.map((test) => ({
+      acceptanceCriteria: acResults?.map((r) => ({
         type: 'none' as const,
-        test,
+        test: r.text,
         pass: 'criterion satisfied',
         fail: 'criterion not satisfied',
       })),

@@ -116,15 +116,33 @@ export class DockerContainerManager implements ContainerManager {
 
     this.logger.info({ containerId: container.id, containerName }, 'Docker container started');
 
-    // Apply firewall rules if provided
+    // Apply firewall rules if provided.
+    //
+    // Fail-closed by default for `restricted` and `deny-all`: if iptables setup
+    // fails, the container would otherwise run with unrestricted egress, which
+    // silently turns a network-isolated pod into an open one. Tear down and
+    // surface the error instead.
+    //
+    // `allow-all` always degrades gracefully — there is no isolation to lose.
+    // Set `AUTOPOD_FAIL_OPEN_FIREWALL=1` to opt out (e.g. dev hosts without
+    // iptables); doing so accepts the egress risk and is logged loudly.
     if (config.firewallScript) {
-      const failClosed =
-        process.env.AUTOPOD_FAIL_CLOSED_FIREWALL === '1' &&
-        (config.networkPolicyMode === 'deny-all' || config.networkPolicyMode === 'restricted');
+      const isolationMode =
+        config.networkPolicyMode === 'deny-all' || config.networkPolicyMode === 'restricted';
+      const failOpen = process.env.AUTOPOD_FAIL_OPEN_FIREWALL === '1';
+      const failClosed = isolationMode && !failOpen;
       try {
         await this.refreshFirewall(container.id, config.firewallScript);
       } catch (err) {
         if (failClosed) {
+          this.logger.error(
+            {
+              err,
+              containerId: container.id,
+              networkPolicyMode: config.networkPolicyMode,
+            },
+            'Firewall setup failed for isolated pod — aborting spawn (fail-closed)',
+          );
           // Tear down the container before surfacing the error so it doesn't leak.
           await this.docker
             .getContainer(container.id)
@@ -134,9 +152,18 @@ export class DockerContainerManager implements ContainerManager {
             `Firewall setup failed for ${config.networkPolicyMode} pod — aborting spawn: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-        this.logger.warn(
-          { err, containerId: container.id },
-          'Failed to apply firewall rules, continuing without network isolation',
+        const logFn = isolationMode ? this.logger.error : this.logger.warn;
+        logFn.call(
+          this.logger,
+          {
+            err,
+            containerId: container.id,
+            networkPolicyMode: config.networkPolicyMode,
+            failOpenOverride: isolationMode && failOpen,
+          },
+          isolationMode
+            ? 'Firewall setup failed but AUTOPOD_FAIL_OPEN_FIREWALL=1 — continuing with NO network isolation'
+            : 'Failed to apply firewall rules, continuing without network isolation',
         );
       }
     }
