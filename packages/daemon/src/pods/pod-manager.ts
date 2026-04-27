@@ -1996,6 +1996,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             });
             worktreePath = result.worktreePath;
             bareRepoPath = result.bareRepoPath;
+            // Persist startCommitSha now — before the container starts and before
+            // any /diff request can land. Without this, the diff route falls back
+            // to merge-base(HEAD, baseBranch), which for fix pods on a PR branch
+            // surfaces the entire PR's prior sibling commits as the fix pod's
+            // "work". captureStartSha (run later from agent-event consumption)
+            // early-returns when this is already set, and re-tries when this is empty.
+            if (!pod.startCommitSha && result.startCommitSha) {
+              podRepo.update(podId, { startCommitSha: result.startCommitSha });
+              pod = podRepo.getOrThrow(podId);
+            }
           }
         }
 
@@ -4384,15 +4394,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
           hasWebUi: profile.hasWebUi ?? true,
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
-          // Inject NuGet credential env so validation's `dotnet build`/`dotnet test` can
-          // authenticate against private feeds. Without this, cold-cache restores
-          // hit Azure Artifacts without a PAT and fail with NU1301 401. The agent
-          // path gets the same value via the agent shim; this restores parity for
-          // direct execInContainer calls in the validation engine.
+          // Validation phase exec env. Two sources are merged:
+          //  1) NuGet credential env (so `dotnet build`/`dotnet test` can auth against
+          //     private feeds — without this, cold-cache restores hit Azure Artifacts
+          //     without a PAT and fail NU1301 401).
+          //  2) profile.buildEnv (free-form user-supplied env, primary use:
+          //     NODE_OPTIONS=--max-old-space-size=4096 for memory-heavy production
+          //     bundles like Vite/Rollup on large monorepos).
+          // profile.buildEnv wins on key collision — explicit user config beats
+          // inferred creds. Agent runtime env is unaffected.
           extraExecEnv: ((): Record<string, string> | undefined => {
             const pat = profile.registryPat ?? profile.adoPat ?? null;
-            const env = buildNuGetCredentialEnv(profile.privateRegistries, pat);
-            return Object.keys(env).length > 0 ? env : undefined;
+            const nugetEnv = buildNuGetCredentialEnv(profile.privateRegistries, pat);
+            const merged = { ...nugetEnv, ...(profile.buildEnv ?? {}) };
+            return Object.keys(merged).length > 0 ? merged : undefined;
           })(),
         };
 

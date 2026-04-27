@@ -32,6 +32,14 @@ export interface DiffStats {
 export interface WorktreeResult {
   worktreePath: string;
   bareRepoPath: string;
+  /**
+   * SHA of HEAD immediately after the worktree was created (i.e. the resolved
+   * `startPoint`). Persist this on the pod row so the diff route has a stable
+   * base from the moment provisioning completes — eliminates a race where the
+   * diff endpoint falls back to merge-base-with-baseBranch and surfaces the
+   * entire PR's prior commits as the fix pod's "work".
+   */
+  startCommitSha: string;
 }
 
 export interface WorktreeManager {

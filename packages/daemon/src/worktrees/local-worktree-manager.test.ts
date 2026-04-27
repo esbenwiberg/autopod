@@ -1038,6 +1038,57 @@ describe('LocalWorktreeManager', () => {
       >;
       expect([...patCache.values()]).toContain('cached-pat');
     });
+
+    it('returns the resolved HEAD SHA so callers can persist startCommitSha before container start', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-dir')) {
+            cb(null, { stdout: '.', stderr: '' });
+          } else if (cmd === 'rev-parse HEAD') {
+            cb(null, { stdout: 'feedface1234567890abcdef1234567890abcdef\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.create({
+        repoUrl: 'https://github.com/org/repo.git',
+        branch: 'feat/sha-capture',
+        baseBranch: 'main',
+      });
+
+      expect(result.startCommitSha).toBe('feedface1234567890abcdef1234567890abcdef');
+    });
+
+    it('returns empty startCommitSha when HEAD resolution fails — caller will fall back to in-container poller', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-dir')) {
+            cb(null, { stdout: '.', stderr: '' });
+          } else if (cmd === 'rev-parse HEAD') {
+            cb(new Error('fatal: ambiguous argument HEAD'));
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.create({
+        repoUrl: 'https://github.com/org/repo.git',
+        branch: 'feat/sha-fail',
+        baseBranch: 'main',
+      });
+
+      expect(result.startCommitSha).toBe('');
+      expect(result.worktreePath).toContain('feat_sha-fail');
+    });
   });
 });
 

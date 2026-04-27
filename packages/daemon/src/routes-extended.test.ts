@@ -130,7 +130,11 @@ describe('Extended Route Tests', () => {
     const authModule = createMockAuthModule();
 
     const worktreeManager = {
-      create: vi.fn().mockResolvedValue({ worktreePath: '/tmp/wt', bareRepoPath: '/tmp/bare.git' }),
+      create: vi.fn().mockResolvedValue({
+        worktreePath: '/tmp/wt',
+        bareRepoPath: '/tmp/bare.git',
+        startCommitSha: 'abc1234567890abcdef1234567890abcdef1234',
+      }),
       cleanup: vi.fn().mockResolvedValue(undefined),
       getDiffStats: vi
         .fn()
@@ -707,12 +711,11 @@ describe('Extended Route Tests', () => {
       });
       const podId = createRes.json().id;
 
-      // Add a containerId to the pod
-      db.prepare('UPDATE pods SET container_id = ?, status = ? WHERE id = ?').run(
-        'container-123',
-        'running',
-        podId,
-      );
+      // Pod has containerId + startCommitSha (the latter is set at worktree
+      // create time, which the diff route prefers over the merge-base fallback).
+      db.prepare(
+        'UPDATE pods SET container_id = ?, status = ?, start_commit_sha = ? WHERE id = ?',
+      ).run('container-123', 'running', 'abc123def456abc123def456abc123def456abc1', podId);
 
       const unifiedDiff = [
         'diff --git a/src/app.ts b/src/app.ts',
@@ -726,15 +729,13 @@ describe('Extended Route Tests', () => {
         ' const app = express();',
       ].join('\n');
 
-      // First call: git merge-base HEAD main (returns a SHA)
-      // Second call: git diff <sha> HEAD (returns unified diff)
-      containerManager.execInContainer
-        .mockResolvedValueOnce({
-          stdout: 'abc123def456abc123def456abc123def456abc1',
-          stderr: '',
-          exitCode: 0,
-        }) // git merge-base
-        .mockResolvedValueOnce({ stdout: unifiedDiff, stderr: '', exitCode: 0 }); // git diff
+      // With startCommitSha already set, the route makes a single call:
+      // git diff <startCommitSha> HEAD
+      containerManager.execInContainer.mockResolvedValueOnce({
+        stdout: unifiedDiff,
+        stderr: '',
+        exitCode: 0,
+      });
 
       const res = await app.inject({
         method: 'GET',

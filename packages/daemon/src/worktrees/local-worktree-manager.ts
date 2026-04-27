@@ -277,7 +277,24 @@ export class LocalWorktreeManager implements WorktreeManager {
       });
     });
 
-    return { worktreePath, bareRepoPath };
+    // Resolve HEAD inside the worktree so callers (pod-manager) can persist
+    // startCommitSha *before* the container starts. Without this the diff
+    // endpoint would fall back to merge-base-with-baseBranch and surface the
+    // entire PR's prior sibling commits as the fix pod's "work". Best-effort:
+    // a failure here doesn't fail the whole create — the in-container poller
+    // will retry and persist later.
+    let startCommitSha = '';
+    try {
+      const result = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+      startCommitSha = result.stdout?.trim() ?? '';
+    } catch (err) {
+      this.logger.warn(
+        { err: sanitizeGitError(err), worktreePath },
+        'Failed to resolve worktree HEAD — startCommitSha will be captured later by the in-container poller',
+      );
+    }
+
+    return { worktreePath, bareRepoPath, startCommitSha };
   }
 
   /**

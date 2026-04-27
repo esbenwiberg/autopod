@@ -148,6 +148,7 @@ function createMockWorktreeManager(): WorktreeManager {
     create: vi.fn(async () => ({
       worktreePath: '/tmp/worktree/abc',
       bareRepoPath: '/tmp/bare/abc.git',
+      startCommitSha: 'abc1234567890abcdef1234567890abcdef1234',
     })),
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
@@ -937,6 +938,51 @@ describe('PodManager', () => {
       expect(ctx.containerManager.spawn).toHaveBeenCalled();
       expect(ctx.worktreeManager.create).toHaveBeenCalled();
       expect(ctx.containerManager.writeFile).toHaveBeenCalled();
+    });
+
+    it('persists startCommitSha from worktreeManager.create before the container starts (prevents diff route falling back to merge-base)', async () => {
+      const ctx = createTestContext();
+      (ctx.worktreeManager.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktreePath: '/tmp/worktree/abc',
+        bareRepoPath: '/tmp/bare/abc.git',
+        startCommitSha: 'cafebabe1111222233334444555566667777aaaa',
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature', skipValidation: true },
+        'user-1',
+      );
+
+      // Pod row must NOT have startCommitSha until provisioning runs.
+      const beforeProcess = manager.getSession(pod.id);
+      expect(beforeProcess.startCommitSha).toBeFalsy();
+
+      await manager.processPod(pod.id);
+
+      const after = manager.getSession(pod.id);
+      expect(after.startCommitSha).toBe('cafebabe1111222233334444555566667777aaaa');
+    });
+
+    it('does not persist startCommitSha when worktreeManager returns empty SHA — leaves capture to in-container poller', async () => {
+      const ctx = createTestContext();
+      (ctx.worktreeManager.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktreePath: '/tmp/worktree/abc',
+        bareRepoPath: '/tmp/bare/abc.git',
+        startCommitSha: '',
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const after = manager.getSession(pod.id);
+      // Stays falsy — captureStartSha will retry from inside the container later.
+      expect(after.startCommitSha).toBeFalsy();
     });
 
     it('fails the pod on unexpected errors (not killed — killed is reserved for user intent)', async () => {

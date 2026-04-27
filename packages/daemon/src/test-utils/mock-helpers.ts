@@ -149,6 +149,7 @@ export function createMockWorktreeManager(): WorktreeManager {
     create: vi.fn(async () => ({
       worktreePath: '/tmp/worktree/abc',
       bareRepoPath: '/tmp/bare/abc.git',
+      startCommitSha: 'abc1234567890abcdef1234567890abcdef1234',
     })),
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
