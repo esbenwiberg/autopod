@@ -92,8 +92,9 @@ four small PRs.
   non-zero in `restricted` or `deny-all` mode, abort spawn and transition
   the pod to `failed`. Only `allow-all` pods may continue on firewall
   failure.
-- **Caveat:** behind a `AUTOPOD_FAIL_CLOSED_FIREWALL` env flag for one
-  release so staging can validate.
+- **Status:** fail-closed is now the default for `restricted` and `deny-all`
+  pods. `AUTOPOD_FAIL_OPEN_FIREWALL=1` is the opt-out for dev hosts without
+  iptables and is logged at `error` level when used.
 - **Test:** mock the network manager to throw; assert the pod fails;
   `allow-all` still spawns.
 

@@ -12,8 +12,10 @@ export interface ContainerSpawnConfig {
   firewallScript?: string;
   /**
    * Network policy mode — controls fail-closed behaviour on firewall errors.
-   * When AUTOPOD_FAIL_CLOSED_FIREWALL=1, spawn is aborted for deny-all and
-   * restricted pods if the firewall script fails; allow-all pods still start.
+   * For `deny-all` and `restricted` pods, spawn aborts by default if the
+   * firewall script fails (the container is force-removed). `allow-all` pods
+   * always degrade gracefully. Set `AUTOPOD_FAIL_OPEN_FIREWALL=1` to opt out
+   * of fail-closed and allow degraded spawn for isolated pods.
    */
   networkPolicyMode?: 'allow-all' | 'deny-all' | 'restricted';
   /** Hard memory limit in bytes. Omit for no limit. */

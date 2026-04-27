@@ -25,7 +25,7 @@ Verify every item before going live. Items marked **REQUIRED** will prevent the 
 
 | Variable | Recommended value | Notes |
 |---|---|---|
-| `AUTOPOD_FAIL_CLOSED_FIREWALL` | `1` | Without this, a firewall setup failure leaves the pod's network open. With it, the pod is marked `failed` instead of running unprotected. Enable once staging has validated the iptables rules. |
+| `AUTOPOD_FAIL_OPEN_FIREWALL` | _unset_ | **Leave unset in production.** Fail-closed firewall handling is the default for `deny-all`/`restricted` pods: a firewall setup failure aborts the spawn instead of running with open egress. Setting this to `1` opts out and is logged at `error` level. Only useful on dev hosts without iptables. |
 | `LOG_LEVEL` | `warn` or `info` | `debug` logs raw request bodies — avoid in production. |
 | `MAX_CONCURRENCY` | ≤ number of CPU cores | Prevents resource exhaustion. Default is 3. |
 | `TEAMS_WEBHOOK_URL` | Your Teams channel webhook | Enables pod failure notifications. |
@@ -95,7 +95,7 @@ which ip6tables ipset dnsmasq
 
 - [ ] All profiles that handle sensitive data use `network_policy: deny-all` or `network_policy: restricted`, not `allow-all`.
 - [ ] ACI profiles do **not** use `deny-all` or `restricted` network policies (iptables parity not yet implemented for ACI — the daemon will reject such profiles at write time).
-- [ ] `AUTOPOD_FAIL_CLOSED_FIREWALL=1` is set so that firewall failures abort the pod rather than leaving it exposed.
+- [ ] `AUTOPOD_FAIL_OPEN_FIREWALL` is **unset** in production (fail-closed is the default; setting it to `1` re-enables degraded spawn on firewall errors and is logged at `error` level).
 
 ### Outbound from daemon
 

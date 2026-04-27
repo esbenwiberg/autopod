@@ -59,7 +59,7 @@ The critical security property is **containment**: an agent that has been compro
 - *PII/injection sanitisation* — all agent output passes through `shared/src/sanitize/processor.ts` before storage. Patterns matching prompt-injection phrases, env-dumps, and encoding tricks are quarantined. Content scoring ≥ 0.8 is dropped entirely.
 - *Action policy* — agents can only call actions explicitly listed in `profile.actions`. Each call is validated against the `ActionDefinition` schema and written to the append-only audit chain.
 - *SSRF defence* — the generic HTTP action handler resolves DNS before fetching and rejects private/loopback/metadata IP ranges including `169.254.169.254`, `10/8`, `172.16/12`, `192.168/16`, `::1`, `fe80::/10`, and `metadata.google.internal`. DNS rebinding is defeated by comparing every A/AAAA record.
-- *Network isolation* — pods with `deny-all` or `restricted` network policy have iptables + ip6tables rules applied before the agent starts. With `AUTOPOD_FAIL_CLOSED_FIREWALL=1`, a firewall error aborts the pod rather than leaving the network open.
+- *Network isolation* — pods with `deny-all` or `restricted` network policy have iptables + ip6tables rules applied before the agent starts. Firewall errors are fail-closed by default: the pod is force-removed and spawn aborts rather than leaving the network open. `AUTOPOD_FAIL_OPEN_FIREWALL=1` opts out for dev hosts and is logged at `error` level.
 - *MCP bridge authentication* — each container's MCP calls carry the pod-scoped HMAC token. The daemon validates the token and routes calls only to the correct pod's state.
 
 **Residual risk:**  
