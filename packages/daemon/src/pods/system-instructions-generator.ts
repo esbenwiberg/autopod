@@ -35,15 +35,76 @@ export function generateSystemInstructions(
   lines.push(`Pod ID: ${pod.id}`);
   lines.push(`Profile: ${pod.profileName}`);
   lines.push('');
+
+  // Series-level shared docs come BEFORE the per-brief task so the agent reads
+  // "why" + "how it fits" first, then the specific brief. Boundary markers
+  // scope the user-authored prose against prompt injection in the same way as
+  // the task block.
+  if (pod.seriesDescription) {
+    lines.push('## Purpose');
+    lines.push('');
+    lines.push(
+      'This pod belongs to a planned spec. Read this purpose every time you make a judgment call.',
+    );
+    lines.push('');
+    lines.push('<!-- BEGIN SPEC PURPOSE -->');
+    lines.push(pod.seriesDescription);
+    lines.push('<!-- END SPEC PURPOSE -->');
+    lines.push('');
+  }
+
+  if (pod.seriesDesign) {
+    lines.push('## Design');
+    lines.push('');
+    lines.push(
+      'Cross-pod contracts, seams, and reference reading for this spec. Honor the contracts; deviations are reviewer-flagged.',
+    );
+    lines.push('');
+    lines.push('<!-- BEGIN SPEC DESIGN -->');
+    lines.push(pod.seriesDesign);
+    lines.push('<!-- END SPEC DESIGN -->');
+    lines.push('');
+  }
+
   // Wrap the user-supplied task in explicit boundary markers so the LLM can distinguish
   // it from system instructions. This is a prompt-injection mitigation: even if the task
   // text contains adversarial instructions they are clearly scoped as user-provided data.
-  lines.push('## Task');
+  lines.push('## Brief');
   lines.push('');
   lines.push('<!-- BEGIN USER TASK -->');
   lines.push(pod.task);
   lines.push('<!-- END USER TASK -->');
   lines.push('');
+
+  // Advisory scope hints from the brief frontmatter. The reviewer sees the
+  // same lists and treats deviations as discussion items, not failures —
+  // explicit here so the agent knows what it was authorized for and where
+  // to justify a deviation if it makes one.
+  if (
+    (pod.touches && pod.touches.length > 0) ||
+    (pod.doesNotTouch && pod.doesNotTouch.length > 0)
+  ) {
+    lines.push('## Files in scope (advisory)');
+    lines.push('');
+    lines.push(
+      'These lists are guidance, not enforcement. You may deviate when the work clearly requires it — when you do, explain the deviation in your commit message so the reviewer can adjudicate.',
+    );
+    lines.push('');
+    if (pod.touches && pod.touches.length > 0) {
+      lines.push('**Files this brief expects to modify:**');
+      for (const path of pod.touches) {
+        lines.push(`- ${path}`);
+      }
+      lines.push('');
+    }
+    if (pod.doesNotTouch && pod.doesNotTouch.length > 0) {
+      lines.push("**Files outside this brief's scope (avoid unless necessary):**");
+      for (const path of pod.doesNotTouch) {
+        lines.push(`- ${path}`);
+      }
+      lines.push('');
+    }
+  }
 
   // Injected sections (sorted by priority — earlier = higher in document)
   const injectedSections = options?.injectedSections ?? [];
@@ -278,12 +339,30 @@ export function generateSystemInstructions(
       `This pod is part of series **${pod.seriesName ?? pod.seriesId}**. The next pod in the series will stack its branch on top of yours and read your handover file.`,
     );
     lines.push('');
-    if (pod.dependsOnPodId) {
+
+    // Read every parent's handover, not "the most recent file" — when a brief
+    // depends on multiple parents (fan-in) the previous behaviour was ambiguous.
+    const parentIds = pod.dependsOnPodIds?.length
+      ? pod.dependsOnPodIds
+      : pod.dependsOnPodId
+        ? [pod.dependsOnPodId]
+        : [];
+    if (parentIds.length === 1) {
+      const [parentId] = parentIds;
       lines.push(
-        `Before starting, read the handover file from the previous pod in this series: \`specs/${pod.seriesId}/handovers/\` — look for the most recent \`.md\` file committed there.`,
+        `Before starting, read the handover file from your parent pod: \`specs/${pod.seriesId}/handovers/${parentId}.md\`.`,
       );
       lines.push('');
+    } else if (parentIds.length > 1) {
+      lines.push(
+        'Before starting, read the handover file from EACH of your parent pods (one per dependency):',
+      );
+      for (const parentId of parentIds) {
+        lines.push(`- \`specs/${pod.seriesId}/handovers/${parentId}.md\``);
+      }
+      lines.push('');
     }
+
     lines.push(
       `Before finishing, write a handover summary to \`specs/${pod.seriesId}/handovers/${pod.id}.md\` and commit it. Include:`,
     );

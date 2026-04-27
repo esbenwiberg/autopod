@@ -163,7 +163,8 @@ export function createMockWorktreeManager(): WorktreeManager {
     readBranchFolder: vi.fn(async ({ relPath }) => ({
       relPath,
       files: [],
-      sharedContext: '',
+      purposeMd: '',
+      designMd: '',
     })),
   };
 }

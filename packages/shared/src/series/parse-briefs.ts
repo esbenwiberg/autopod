@@ -3,19 +3,30 @@ import { parseAcList } from '../parse-ac-list.js';
 import type { AcDefinition } from '../types/ac.js';
 
 /**
- * YAML frontmatter shape for a brief markdown file. All fields are optional
- * — a body-only brief is still valid and gets its title from the filename.
+ * YAML frontmatter shape for a brief markdown file. All fields are optional —
+ * a body-only brief is still valid and gets its title from the filename.
  *
- * Sidecar fields accept both `require_sidecars` (YAML-idiomatic snake_case)
- * and `requireSidecars` (matches the daemon wire name) so spec authors can
- * use whichever reads best. When both are set, `require_sidecars` wins.
+ * Fields that have both a snake_case and a camelCase spelling (`require_sidecars`,
+ * `does_not_touch`) accept either; snake_case wins when both are set.
  */
 export interface BriefFrontmatter {
   title?: string;
   depends_on?: string[];
   context_files?: string[];
-  handover_from?: string[];
   acceptance_criteria?: AcDefinition[];
+  /**
+   * Files this brief expects to modify. Advisory — the reviewer flags
+   * deviations as discussion items, not failures. Use directory shorthand
+   * (path ending in `/`) to mean "anything under this directory".
+   */
+  touches?: string[];
+  /**
+   * Files outside this brief's scope. Advisory — the reviewer flags
+   * deviations as discussion items, not failures. Use directory shorthand
+   * (path ending in `/`) to mean "anything under this directory".
+   */
+  does_not_touch?: string[];
+  doesNotTouch?: string[];
   /**
    * Companion sidecars to spawn for this brief's pod (e.g. `[dagger]`). The
    * daemon validates each name against `profile.sidecars` and the profile's
@@ -36,6 +47,10 @@ export interface ParsedBrief {
   task: string;
   dependsOn: string[];
   acceptanceCriteria?: AcDefinition[];
+  /** Files this brief expects to modify (advisory). */
+  touches?: string[];
+  /** Files outside this brief's scope (advisory). */
+  doesNotTouch?: string[];
   /** Per-pod sidecar requests (e.g. `['dagger']`). Undefined = no sidecars. */
   requireSidecars?: string[];
 }
@@ -88,22 +103,38 @@ export function numericPrefix(filename: string): number {
 }
 
 /**
+ * Normalize an array of file/directory paths from frontmatter. Trims whitespace,
+ * drops empty/non-string entries, and returns `undefined` for empty/missing input.
+ * Directory shorthand (a trailing `/`) is preserved — the reviewer interprets it.
+ */
+function normalizePathList(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const cleaned = raw
+    .filter((x): x is string => typeof x === 'string')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+/**
  * Given a list of brief files, return parsed briefs with dependencies inferred
  * from either explicit `depends_on` frontmatter or the numeric-prefix order.
  * Does NOT perform any filesystem I/O — callers load files first.
  *
+ * Series-level shared context (`purpose.md`, `design.md`) is NOT prepended here
+ * — those are sent to the daemon as separate fields and rendered as labeled
+ * sections in the agent's CLAUDE.md by `system-instructions-generator.ts`.
+ *
  * @param files Brief files, ALREADY sorted in the desired topological order
  *              (typically by `numericPrefix`).
- * @param sharedContext Optional shared context (e.g. contents of a sibling
- *                      `context.md`) prepended to every brief's task body
- *                      unless the brief sets its own `context_files`.
- * @param loadContextFile Optional resolver for `context_files` frontmatter —
- *                        returns the file content as a string, or '' if not
- *                        found. Daemons should restrict path access here.
+ * @param loadContextFile Optional resolver for per-brief `context_files`
+ *                        frontmatter — returns the file content as a string,
+ *                        or '' if not found. Daemons should restrict path
+ *                        access here. When a brief lists `context_files`,
+ *                        their content is prepended to that brief's task body.
  */
 export function parseBriefs(
   files: BriefFile[],
-  sharedContext = '',
   loadContextFile?: (path: string) => string,
 ): ParsedBrief[] {
   // Pre-parse every file once so dependency resolution can look up titles
@@ -128,11 +159,10 @@ export function parseBriefs(
     }
     const { frontmatter, body, title } = entry;
 
-    // Build the task body: [shared context] + [explicit context_files] + body.
+    // Per-brief `context_files` are optional supplementary reads — load each
+    // and prepend to the brief body. Series-level shared docs are handled
+    // separately by the daemon (rendered as labeled CLAUDE.md sections).
     const contextParts: string[] = [];
-    if (sharedContext && !frontmatter.context_files) {
-      contextParts.push(sharedContext);
-    }
     if (loadContextFile && frontmatter.context_files) {
       for (const cf of frontmatter.context_files) {
         const cfContent = loadContextFile(cf);
@@ -173,18 +203,20 @@ export function parseBriefs(
       }
     }
 
-    // Accept either the snake_case or camelCase spelling in YAML. Normalize
-    // to camelCase for the ParsedBrief. Empty arrays become undefined so the
-    // wire payload omits the field when no sidecars are requested.
+    // Accept either snake_case or camelCase spellings; snake_case wins when both
+    // are set. Normalize to camelCase for the ParsedBrief.
     const sidecarsRaw = frontmatter.require_sidecars ?? frontmatter.requireSidecars;
-    const requireSidecars =
-      Array.isArray(sidecarsRaw) && sidecarsRaw.length > 0 ? sidecarsRaw : undefined;
+    const requireSidecars = normalizePathList(sidecarsRaw);
+    const touches = normalizePathList(frontmatter.touches);
+    const doesNotTouch = normalizePathList(frontmatter.does_not_touch ?? frontmatter.doesNotTouch);
 
     return {
       title,
       task,
       dependsOn,
       acceptanceCriteria,
+      touches,
+      doesNotTouch,
       requireSidecars,
     };
   });

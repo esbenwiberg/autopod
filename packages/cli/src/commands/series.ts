@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs';
-import { basename, extname, join, resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { numericPrefix, parseBriefs } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -7,20 +7,42 @@ import type { AutopodClient } from '../api/client.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
 
-/** Infer series name from folder path: parent dir if folder is named 'briefs', else folder name. */
-function inferSeriesName(folderPath: string): string {
-  const abs = resolve(folderPath);
-  const name = basename(abs);
-  if (name === 'briefs' || name === 'briefs/') {
-    return basename(resolve(abs, '..'));
+/**
+ * Resolve the spec layout for a folder argument. The user may point either
+ * at the spec root (`specs/<feature>/`, containing `briefs/`) or at the
+ * briefs folder itself (`specs/<feature>/briefs/`). Returns the resolved
+ * spec root and briefs folder so the caller can read shared docs from the
+ * root and brief files from the briefs folder.
+ */
+function resolveSpecLayout(folderArg: string): { specRoot: string; briefsDir: string } {
+  const abs = resolve(folderArg);
+  const folderName = basename(abs);
+
+  // Case A: user pointed at `briefs/` — spec root is the parent.
+  if (folderName === 'briefs') {
+    return { specRoot: resolve(abs, '..'), briefsDir: abs };
   }
-  return name;
+
+  // Case B: user pointed at the spec root — briefs/ is a subfolder.
+  const briefsSubdir = join(abs, 'briefs');
+  if (existsSync(briefsSubdir) && statSync(briefsSubdir).isDirectory()) {
+    return { specRoot: abs, briefsDir: briefsSubdir };
+  }
+
+  // Case C: flat layout — same folder for both. Used by ad-hoc one-off briefs.
+  return { specRoot: abs, briefsDir: abs };
 }
 
-/** Read a context file relative to cwd and return its content, or '' on error. */
-function readContextFile(path: string): string {
+/** Infer series name from a spec root folder path. */
+function inferSeriesName(specRoot: string): string {
+  return basename(resolve(specRoot));
+}
+
+/** Read a UTF-8 file relative to a base directory; return '' on any error. */
+function readMaybe(baseDir: string, relPath: string): string {
+  if (isAbsolute(relPath) || relPath.includes('..')) return '';
   try {
-    return readFileSync(resolve(path), 'utf-8').trim();
+    return readFileSync(join(baseDir, relPath), 'utf-8').trim();
   } catch {
     return '';
   }
@@ -32,7 +54,9 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
   // ap series create <folder>
   series
     .command('create <folder>')
-    .description('Create a series of pods from a folder of markdown briefs')
+    .description(
+      'Create a series of pods from a spec folder (containing purpose.md, design.md, and briefs/).',
+    )
     .requiredOption('-p, --profile <name>', 'Profile to use for all pods')
     .option('-b, --base-branch <branch>', 'Base branch (default: profile default)')
     .option(
@@ -52,41 +76,40 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         },
       ) => {
         const client = getClient();
-        const folderPath = resolve(folder);
+        const { specRoot, briefsDir } = resolveSpecLayout(folder);
 
-        // Read brief files sorted by numeric prefix
-        let files: string[];
+        // Read brief files sorted by numeric prefix.
+        let briefFilenames: string[];
         try {
-          files = readdirSync(folderPath)
-            .filter((f) => extname(f) === '.md' && f !== 'context.md')
+          briefFilenames = readdirSync(briefsDir)
+            .filter((f) => extname(f) === '.md')
             .sort((a, b) => numericPrefix(a) - numericPrefix(b));
         } catch {
-          console.error(chalk.red(`Cannot read folder: ${folderPath}`));
+          console.error(chalk.red(`Cannot read briefs folder: ${briefsDir}`));
           process.exit(1);
         }
 
-        if (files.length === 0) {
-          console.error(chalk.red('No .md brief files found in folder (excluding context.md)'));
+        if (briefFilenames.length === 0) {
+          console.error(chalk.red(`No .md brief files found in ${briefsDir}`));
           process.exit(1);
         }
 
-        // Read shared context.md if present
-        const contextMdPath = join(folderPath, 'context.md');
-        let sharedContext = '';
-        try {
-          sharedContext = readFileSync(contextMdPath, 'utf-8').trim();
-        } catch {
-          // no context.md — that's fine
-        }
+        // Shared spec docs live at the spec root (parent of briefs/).
+        const seriesDescription = readMaybe(specRoot, 'purpose.md');
+        const seriesDesign = readMaybe(specRoot, 'design.md');
 
-        const seriesName = opts.seriesName ?? inferSeriesName(folderPath);
+        const seriesName = opts.seriesName ?? inferSeriesName(specRoot);
         const prMode = opts.prMode as 'single' | 'stacked' | 'none';
 
-        const briefFiles = files.map((filename) => ({
+        const briefFiles = briefFilenames.map((filename) => ({
           filename,
-          content: readFileSync(join(folderPath, filename), 'utf-8'),
+          content: readFileSync(join(briefsDir, filename), 'utf-8'),
         }));
-        const briefs = parseBriefs(briefFiles, sharedContext, readContextFile);
+
+        // `context_files` paths in brief frontmatter are resolved relative to
+        // the spec root so a brief can pull in `decisions/...` or files at
+        // the repo root via relative paths from there.
+        const briefs = parseBriefs(briefFiles, (path) => readMaybe(specRoot, path));
 
         console.log(
           chalk.cyan(`\nCreating series "${seriesName}" with ${briefs.length} pods...\n`),
@@ -99,6 +122,8 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
             profile: opts.profile,
             baseBranch: opts.baseBranch,
             prMode,
+            seriesDescription: seriesDescription || undefined,
+            seriesDesign: seriesDesign || undefined,
           }),
         );
 

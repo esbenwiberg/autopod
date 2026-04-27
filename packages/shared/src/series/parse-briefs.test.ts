@@ -101,12 +101,20 @@ describe('parseBriefs', () => {
     expect(briefs[1]?.dependsOn).toEqual(['first']);
   });
 
-  it('prepends shared context to task body', () => {
+  it('does NOT prepend any series-level context to task body', () => {
+    // Series-level shared docs (purpose.md, design.md) are now rendered as
+    // labeled CLAUDE.md sections by the daemon, not concatenated into the
+    // brief task body.
+    const briefs = parseBriefs([{ filename: '01-task.md', content: 'Do this' }]);
+    expect(briefs[0]?.task).toBe('Do this');
+  });
+
+  it('prepends per-brief context_files to task body when callback resolves them', () => {
     const briefs = parseBriefs(
-      [{ filename: '01-task.md', content: 'Do this' }],
-      'Shared context here',
+      [{ filename: '01-task.md', content: '---\ncontext_files: [extra.md]\n---\nDo this' }],
+      (path) => (path === 'extra.md' ? 'Extra reading content' : ''),
     );
-    expect(briefs[0]?.task).toContain('Shared context here');
+    expect(briefs[0]?.task).toContain('Extra reading content');
     expect(briefs[0]?.task).toContain('Do this');
   });
 
@@ -208,6 +216,47 @@ acceptance_criteria:
     const content = '---\nrequire_sidecars: [dagger]\nrequireSidecars: [postgres]\n---\nBody';
     const briefs = parseBriefs([{ filename: '01-task.md', content }]);
     expect(briefs[0]?.requireSidecars).toEqual(['dagger']);
+  });
+
+  it('parses touches and does_not_touch lists', () => {
+    const content = `---
+touches:
+  - packages/daemon/src/pods/event-stream.ts
+  - packages/daemon/src/db/migrations/
+does_not_touch:
+  - packages/daemon/src/pods/pod-manager.ts
+---
+Body`;
+    const briefs = parseBriefs([{ filename: '01-task.md', content }]);
+    expect(briefs[0]?.touches).toEqual([
+      'packages/daemon/src/pods/event-stream.ts',
+      'packages/daemon/src/db/migrations/',
+    ]);
+    expect(briefs[0]?.doesNotTouch).toEqual(['packages/daemon/src/pods/pod-manager.ts']);
+  });
+
+  it('also accepts doesNotTouch (camelCase) spelling', () => {
+    const content = '---\ndoesNotTouch: [src/foo.ts]\n---\nBody';
+    const briefs = parseBriefs([{ filename: '01-task.md', content }]);
+    expect(briefs[0]?.doesNotTouch).toEqual(['src/foo.ts']);
+  });
+
+  it('snake_case does_not_touch wins over camelCase when both are set', () => {
+    const content = '---\ndoes_not_touch: [a.ts]\ndoesNotTouch: [b.ts]\n---\nBody';
+    const briefs = parseBriefs([{ filename: '01-task.md', content }]);
+    expect(briefs[0]?.doesNotTouch).toEqual(['a.ts']);
+  });
+
+  it('normalizes empty/missing touches and does_not_touch to undefined', () => {
+    const noField = parseBriefs([{ filename: '01-a.md', content: 'Body' }]);
+    expect(noField[0]?.touches).toBeUndefined();
+    expect(noField[0]?.doesNotTouch).toBeUndefined();
+
+    const emptyLists = parseBriefs([
+      { filename: '01-b.md', content: '---\ntouches: []\ndoes_not_touch: []\n---\nBody' },
+    ]);
+    expect(emptyLists[0]?.touches).toBeUndefined();
+    expect(emptyLists[0]?.doesNotTouch).toBeUndefined();
   });
 
   it('parses real-world style brief with checkbox ACs matching spec format', () => {
