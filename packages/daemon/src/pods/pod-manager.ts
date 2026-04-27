@@ -255,6 +255,37 @@ const PREVIEW_AUTO_STOP_MS = 10 * 60 * 1000;
 
 const execFileAsync = promisify(execFile);
 
+// Compact Python script that performs a real MCP JSON-RPC initialize handshake
+// against a stdio MCP server. Called at pod startup to verify each code-intel
+// server actually starts and responds — not just that the binary exists.
+// Usage: python3 <script> <command> [arg...]
+// Exit 0 = server responded with a valid result; Exit 1 = timeout or error.
+const MCP_INIT_PROBE_SCRIPT = `import subprocess,json,sys,select as sel
+if len(sys.argv)<2:sys.exit(1)
+msg=json.dumps({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"1.0"}}})
+frame=b"Content-Length: "+str(len(msg.encode())).encode()+b"\\r\\n\\r\\n"+msg.encode()
+p=subprocess.Popen(sys.argv[1:],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+try:
+  p.stdin.write(frame);p.stdin.flush()
+  h=b""
+  while b"\\r\\n\\r\\n" not in h:
+    if not sel.select([p.stdout],[],[],20)[0]:sys.exit(1)
+    c=p.stdout.read(1)
+    if not c:sys.exit(1)
+    h+=c
+  n=int(h.split(b"Content-Length: ")[1].split(b"\\r\\n")[0])
+  b=b""
+  while len(b)<n:
+    if not sel.select([p.stdout],[],[],20)[0]:sys.exit(1)
+    chunk=p.stdout.read(n-len(b))
+    if not chunk:sys.exit(1)
+    b+=chunk
+  r=json.loads(b)
+  sys.exit(0 if "result" in r else 1)
+finally:
+  p.terminate();p.wait()
+`;
+
 /** Load a repo-specific code-review skill from standard locations in the worktree. */
 async function loadCodeReviewSkill(
   worktreePath: string,
@@ -2666,31 +2697,52 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Servers that fail the check are dropped here so they never appear in
         // mcp-config.json or the CLAUDE.md — clean absence is less confusing
         // than a registered-but-broken tool.
+        // Write the MCP init probe script once; each server test runs it with its
+        // own command + args. Cleaned up after the loop.
+        const MCP_PROBE_PATH = '/tmp/.autopod-mcp-probe.py';
+        await containerManager.writeFile(containerId, MCP_PROBE_PATH, MCP_INIT_PROBE_SCRIPT);
+
         const workingStdioServers: StdioInjectedMcpServer[] = [];
         for (const server of stdioMcpServers) {
-          const probe = await containerManager.execInContainer(
+          // Step 1: binary existence check — fast, catches missing warm image.
+          const binaryCheck = await containerManager.execInContainer(
             containerId,
             ['sh', '-c', `command -v ${server.command} >/dev/null 2>&1`],
             { timeout: 5_000 },
           );
-          if (probe.exitCode !== 0) {
+          if (binaryCheck.exitCode !== 0) {
             const msg = `Code-intel MCP "${server.name}" requested by profile but binary "${server.command}" not found in container — agent will fall back to grep/find. Rebuild the warm image: \`ap profile warm ${profile.name} --rebuild\`.`;
             logger.error({ podId, server: server.name, command: server.command }, msg);
             emitStatus(`⚠️ ${msg}`);
+            continue;
+          }
+
+          // Step 2: MCP init probe — actually start the server and complete the
+          // JSON-RPC initialize handshake. This catches language-server issues
+          // (missing NuGet/npm cache, permission errors, broken installs) that
+          // the binary check alone cannot detect.
+          const probeCmd = ['python3', MCP_PROBE_PATH, server.command, ...(server.args ?? [])];
+          const mcpProbe = await containerManager.execInContainer(containerId, probeCmd, {
+            timeout: 25_000,
+          });
+
+          workingStdioServers.push(server);
+
+          if (mcpProbe.exitCode === 0) {
+            logger.info({ podId, server: server.name }, `Code-intel MCP "${server.name}" probe OK`);
+            emitStatus(`✅ Code-intel MCP "${server.name}" initialized and ready`);
           } else {
-            workingStdioServers.push(server);
-            // Serena downloads language-server binaries (TypeScript via npm, C# via NuGet)
-            // on first use and caches them in ~/.serena/language_servers/. In a network-
-            // restricted pod the download is blocked and the server starts but silently
-            // fails to analyse code. Pre-bake the cache in the warm image to avoid this.
-            const networkNote =
-              server.name === 'serena'
-                ? ' (⚠️ first-run language-server download needs network — pre-warm image if pod is restricted)'
-                : '';
-            logger.info({ podId, server: server.name }, `Code-intel MCP "${server.name}" ready — will be injected as stdio server`);
-            emitStatus(`🔬 Code-intel MCP "${server.name}" ready${networkNote}`);
+            const detail = (mcpProbe.stdout || mcpProbe.stderr || 'no output').trim().slice(0, 200);
+            logger.warn({ podId, server: server.name, detail }, `Code-intel MCP "${server.name}" probe failed — server may not work correctly`);
+            emitStatus(
+              `⚠️ Code-intel MCP "${server.name}" binary found but failed to initialize (${detail}). Rebuild: \`ap profile warm ${profile.name} --rebuild\``,
+            );
           }
         }
+
+        await containerManager.execInContainer(containerId, ['rm', '-f', MCP_PROBE_PATH], {
+          timeout: 3_000,
+        });
 
         // Rewrite injected MCP server URLs to route through daemon proxy.
         // Only HTTP servers go through the proxy — stdio servers run as local

@@ -55,7 +55,7 @@ describe('E2E: happy path lifecycle', () => {
     // Verify infrastructure was wired up
     expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(1);
     expect(ctx.worktreeManager.create).toHaveBeenCalledTimes(1);
-    expect(ctx.containerManager.writeFile).toHaveBeenCalledTimes(5); // system-instructions.md + .claude.json + settings.json + credential guard hook + agent shim
+    expect(ctx.containerManager.writeFile).toHaveBeenCalledTimes(6); // mcp-probe.py + system-instructions.md + .claude.json + settings.json + credential guard hook + agent shim
     expect(runtime.spawn).toHaveBeenCalledTimes(1);
     expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
 
