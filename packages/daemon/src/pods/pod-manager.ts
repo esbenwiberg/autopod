@@ -2679,6 +2679,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitStatus(`⚠️ ${msg}`);
           } else {
             workingStdioServers.push(server);
+            // Serena downloads language-server binaries (TypeScript via npm, C# via NuGet)
+            // on first use and caches them in ~/.serena/language_servers/. In a network-
+            // restricted pod the download is blocked and the server starts but silently
+            // fails to analyse code. Pre-bake the cache in the warm image to avoid this.
+            const networkNote =
+              server.name === 'serena'
+                ? ' (⚠️ first-run language-server download needs network — pre-warm image if pod is restricted)'
+                : '';
+            logger.info({ podId, server: server.name }, `Code-intel MCP "${server.name}" ready — will be injected as stdio server`);
+            emitStatus(`🔬 Code-intel MCP "${server.name}" ready${networkNote}`);
           }
         }
 
