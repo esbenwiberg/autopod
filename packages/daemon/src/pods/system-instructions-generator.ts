@@ -133,6 +133,11 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
+  // Code Navigation Rules — only when code-intel MCPs are active.
+  // Placed before Operating Environment so the agent sees it immediately after
+  // the task, not buried in the MCP server catalogue.
+  generateCodeNavigationRules(lines, options?.injectedMcpServers ?? []);
+
   // Operating Environment section (adapts to profile config)
   generateOperatingEnvironment(lines, profile, options?.availableActions ?? []);
 
@@ -731,6 +736,41 @@ function generateOperatingEnvironment(
     lines.push('  in case of interruptions.');
     lines.push('- Do NOT run `git push` — the system pushes and creates PRs on your behalf');
   }
+  lines.push('');
+}
+
+const CODE_INTEL_TOOL_ROWS: Array<{ task: string; tool: string; server: string }> = [
+  { task: 'Find a class / method / symbol by name', tool: 'mcp__serena__find_symbol', server: 'serena' },
+  { task: 'Find all callers of a method', tool: 'mcp__serena__find_referencing_symbols', server: 'serena' },
+  { task: 'Find implementations of a symbol', tool: 'mcp__serena__find_implementations', server: 'serena' },
+  { task: 'Search for a code pattern', tool: 'mcp__serena__search_for_pattern', server: 'serena' },
+  { task: 'List implementations of an interface', tool: 'mcp__roslyn-codelens__find_implementations', server: 'roslyn-codelens' },
+  { task: 'Trace DI container registrations', tool: 'mcp__roslyn-codelens__get_di_registrations', server: 'roslyn-codelens' },
+  { task: 'Find all references to a symbol', tool: 'mcp__roslyn-codelens__find_references', server: 'roslyn-codelens' },
+  { task: 'Find all callers of a method (C#)', tool: 'mcp__roslyn-codelens__find_callers', server: 'roslyn-codelens' },
+  { task: 'Navigate to a definition', tool: 'mcp__roslyn-codelens__go_to_definition', server: 'roslyn-codelens' },
+];
+
+function generateCodeNavigationRules(lines: string[], injectedMcpServers: InjectedMcpServer[]): void {
+  const activeServerNames = new Set(injectedMcpServers.map((s) => s.name));
+  const rows = CODE_INTEL_TOOL_ROWS.filter((r) => activeServerNames.has(r.server));
+  if (rows.length === 0) return;
+
+  lines.push('## Code Navigation Rules');
+  lines.push('');
+  lines.push(
+    'Code-intel MCPs are active. Use them for ALL symbol navigation and code exploration. ' +
+      'Do NOT use grep, find, cat, or file reads to discover symbols, callers, or implementations — ' +
+      'the semantic tools are faster and more accurate.',
+  );
+  lines.push('');
+  lines.push('| Task | Tool |');
+  lines.push('|------|------|');
+  for (const row of rows) {
+    lines.push(`| ${row.task} | \`${row.tool}\` |`);
+  }
+  lines.push('');
+  lines.push('Only fall back to grep/find if a code-intel tool returns empty results or explicitly errors.');
   lines.push('');
 }
 

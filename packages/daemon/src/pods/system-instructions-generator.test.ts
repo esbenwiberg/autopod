@@ -202,6 +202,82 @@ describe('generateSystemInstructions', () => {
     expect(md).not.toContain('ToolSearch select:');
   });
 
+  it('renders Code Navigation Rules when serena is injected', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+      {
+        injectedMcpServers: [
+          {
+            type: 'stdio',
+            name: 'serena',
+            command: 'serena',
+            toolNames: ['mcp__serena__find_symbol'],
+          },
+        ],
+      },
+    );
+
+    expect(md).toContain('## Code Navigation Rules');
+    expect(md).toContain('mcp__serena__find_symbol');
+    expect(md).toContain('mcp__serena__find_referencing_symbols');
+    // roslyn rows must be absent when only serena is active
+    expect(md).not.toContain('mcp__roslyn-codelens__find_implementations');
+    // Section appears before Operating Environment
+    expect(md.indexOf('## Code Navigation Rules')).toBeLessThan(
+      md.indexOf('## Operating Environment'),
+    );
+  });
+
+  it('renders Code Navigation Rules with roslyn rows when roslyn-codelens is injected', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+      {
+        injectedMcpServers: [
+          {
+            type: 'stdio',
+            name: 'roslyn-codelens',
+            command: 'roslyn-codelens-mcp',
+            toolNames: ['mcp__roslyn-codelens__find_implementations'],
+          },
+        ],
+      },
+    );
+
+    expect(md).toContain('## Code Navigation Rules');
+    expect(md).toContain('mcp__roslyn-codelens__find_implementations');
+    expect(md).toContain('mcp__roslyn-codelens__get_di_registrations');
+    // serena rows must be absent when only roslyn is active
+    expect(md).not.toContain('mcp__serena__find_symbol');
+  });
+
+  it('omits Code Navigation Rules when no code-intel servers are injected', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+      {
+        injectedMcpServers: [
+          {
+            type: 'http',
+            name: 'some-other-mcp',
+            url: 'http://localhost:9000/mcp',
+          },
+        ],
+      },
+    );
+
+    expect(md).not.toContain('## Code Navigation Rules');
+  });
+
+  it('omits Code Navigation Rules when no servers are injected', () => {
+    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    expect(md).not.toContain('## Code Navigation Rules');
+  });
+
   it('omits validation pages section when empty', () => {
     const md = generateSystemInstructions(
       makeProfile(),
