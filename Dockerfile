@@ -1,3 +1,27 @@
+# ─── PII model preparation ─────────────────────────────────
+# Convert Piiranha (PyTorch-only on HF) → quantized ONNX once at image build
+# time, and stage at the on-disk layout @huggingface/transformers expects
+# (<root>/onnx/model_quantized.onnx + tokenizer files at <root>/).
+# This stage runs only at image build time; runtime never hits HuggingFace.
+# Output is ~280MB after int8 quantization (down from ~1GB at fp32).
+FROM python:3.11-slim AS pii-model
+RUN pip install --no-cache-dir "optimum[onnxruntime]" transformers
+RUN optimum-cli export onnx \
+    --model iiiorg/piiranha-v1-detect-personal-information \
+    --task token-classification \
+    /tmp/raw
+RUN python -c "from optimum.onnxruntime import ORTQuantizer; \
+from optimum.onnxruntime.configuration import AutoQuantizationConfig; \
+q = ORTQuantizer.from_pretrained('/tmp/raw'); \
+qc = AutoQuantizationConfig.avx2(is_static=False, per_channel=False); \
+q.quantize(save_dir='/tmp/quant', quantization_config=qc)"
+RUN mkdir -p /models/piiranha/onnx \
+    && cp /tmp/raw/*.json /models/piiranha/ \
+    && (cp /tmp/raw/spm.model /models/piiranha/ 2>/dev/null || true) \
+    && (cp /tmp/raw/sentencepiece.bpe.model /models/piiranha/ 2>/dev/null || true) \
+    && (cp /tmp/raw/tokenizer* /models/piiranha/ 2>/dev/null || true) \
+    && cp /tmp/quant/model_quantized.onnx /models/piiranha/onnx/model.onnx
+
 # ─── Build stage ────────────────────────────────────────────
 FROM node:22-alpine AS builder
 
@@ -48,12 +72,19 @@ COPY --from=builder /app/pnpm-lock.yaml ./
 # Install production dependencies only
 RUN corepack enable pnpm && pnpm install --frozen-lockfile --prod
 
+# Bake the PII model into the image (see the pii-model stage above).
+# Runtime is opted in via AUTOPOD_SECURITY_ML=true; AUTOPOD_PII_MODEL_PATH
+# tells model-manager to load from disk instead of HuggingFace.
+COPY --from=pii-model /models/piiranha /opt/autopod/models/piiranha
+ENV AUTOPOD_PII_MODEL_PATH=/opt/autopod/models/piiranha
+
 # Create non-root user
 RUN addgroup -g 1000 autopod && \
     adduser -u 1000 -G autopod -s /bin/sh -D autopod
 
 # Create data directory for SQLite
 RUN mkdir -p /data && chown autopod:autopod /data
+RUN chown -R autopod:autopod /opt/autopod
 
 USER autopod
 

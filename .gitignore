@@ -14,6 +14,8 @@ coverage/
 .DS_Store
 *.key
 .autopod-data/
+tmp/
+*.onnx
 packages/desktop/.build/
 packages/desktop/.swiftpm/xcode/xcuserdata/
 packages/desktop/.swiftpm/xcode/package.xcworkspace/xcuserdata/

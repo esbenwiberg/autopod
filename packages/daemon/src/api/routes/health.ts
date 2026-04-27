@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import type { FastifyInstance } from 'fastify';
 import type { PodQueue } from '../../pods/index.js';
+import type { ModelManager } from '../../security/model-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,10 +42,13 @@ export interface HealthDeps {
   db?: Database.Database;
   podQueue?: PodQueue;
   maxConcurrency?: number;
+  modelManager?: ModelManager;
+  securityMlEnabled?: boolean;
 }
 
 export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void {
-  const { onShutdown, docker, db, podQueue, maxConcurrency } = deps;
+  const { onShutdown, docker, db, podQueue, maxConcurrency, modelManager, securityMlEnabled } =
+    deps;
 
   app.get('/health', { config: { auth: false } }, async (request, reply) => {
     const { detail } = request.query as { detail?: string };
@@ -100,8 +104,18 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
     const activeSessions = podQueue?.processing ?? 0;
     const queuedSessions = podQueue?.pending ?? 0;
 
+    // Surface ML detector load status. When the flag is on, any classifier in
+    // 'failed' state is degraded coverage that an operator should see — this
+    // is the "shout when a model didn't load" signal.
+    const securityMlStatus = securityMlEnabled
+      ? (modelManager?.getStatus() ?? { injection: 'unloaded', pii: 'unloaded' })
+      : null;
+    const securityMlDegraded =
+      securityMlStatus !== null &&
+      (securityMlStatus.injection === 'failed' || securityMlStatus.pii === 'failed');
+
     return {
-      status: 'ok',
+      status: securityMlDegraded ? 'degraded' : 'ok',
       version: VERSION,
       uptime_seconds: Math.floor(process.uptime()),
       docker: {
@@ -117,6 +131,13 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
         queued_sessions: queuedSessions,
         max_concurrency: maxConcurrency ?? 3,
       },
+      security_ml: securityMlEnabled
+        ? {
+            enabled: true,
+            degraded: securityMlDegraded,
+            detectors: securityMlStatus,
+          }
+        : { enabled: false },
     };
   });
 

@@ -79,6 +79,8 @@ export interface ServerDependencies {
   logLevel?: string;
   prettyLog?: boolean;
   onShutdown?: () => void;
+  modelManager?: import('../security/model-manager.js').ModelManager;
+  securityMlEnabled?: boolean;
 }
 
 export async function createServer(deps: ServerDependencies): Promise<FastifyInstance> {
@@ -123,6 +125,8 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     db: deps.db,
     podQueue: deps.podQueue,
     maxConcurrency: deps.maxConcurrency,
+    modelManager: deps.modelManager,
+    securityMlEnabled: deps.securityMlEnabled,
   });
   podRoutes(
     app,

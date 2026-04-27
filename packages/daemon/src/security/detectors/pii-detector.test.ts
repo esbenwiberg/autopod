@@ -6,11 +6,22 @@ function fakeModelManager(classifier: TokenClassifier | null): ModelManager {
   return {
     getInjectionClassifier: vi.fn(async () => null),
     getPiiClassifier: vi.fn(async () => classifier),
+    getStatus: () => ({
+      injection: 'unloaded' as const,
+      pii: classifier ? ('loaded' as const) : ('failed' as const),
+    }),
   };
 }
 
-function tok(entity: string, word: string, score: number, index: number): TokenClassificationItem {
-  return { entity, word, score, index };
+function tok(
+  entity: string,
+  word: string,
+  score: number,
+  index: number,
+  start?: number,
+  end?: number,
+): TokenClassificationItem {
+  return { entity, word, score, index, start, end };
 }
 
 describe('mergeSpans', () => {
@@ -30,16 +41,27 @@ describe('mergeSpans', () => {
     expect(spans[1]?.word).toBe('Paris');
   });
 
-  it('drops tokens below the floor and breaks the span', () => {
+  it('drops a span whose mean score is below the floor', () => {
     const tokens: TokenClassificationItem[] = [
-      tok('B-PERSON', 'Alice', 0.99, 0),
-      tok('I-PERSON', 'Smith', 0.4, 1), // below floor
-      tok('I-PERSON', 'Jr', 0.95, 2),
+      tok('B-PERSON', 'Es', 0.55, 0),
+      tok('I-PERSON', 'ben', 0.45, 1),
+    ];
+    // mean = 0.50, below floor of 0.6 → no span
+    expect(mergeSpans(tokens, 0.6)).toHaveLength(0);
+  });
+
+  it('keeps a span whose mean score clears the floor even if a token is low', () => {
+    // Real-world piiranha behavior: first wordpiece of a name scores high,
+    // later wordpieces score lower. The whole entity should still emit.
+    const tokens: TokenClassificationItem[] = [
+      tok('B-PERSON', 'Es', 0.82, 0),
+      tok('I-PERSON', '##ben', 0.5, 1),
+      tok('I-PERSON', 'Wi', 0.71, 2),
+      tok('I-PERSON', '##berg', 0.51, 3),
     ];
     const spans = mergeSpans(tokens, 0.6);
-    expect(spans).toHaveLength(2);
-    expect(spans[0]?.word).toBe('Alice');
-    expect(spans[1]?.word).toBe('Jr');
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.word).toBe('Esben Wiberg');
   });
 
   it('returns no spans when every token is non-PII', () => {
@@ -51,13 +73,27 @@ describe('mergeSpans', () => {
     expect(mergeSpans(tokens, 0.6)).toHaveLength(0);
   });
 
-  it('takes the minimum score across a merged span', () => {
+  it('reports the mean score across a merged span', () => {
     const tokens: TokenClassificationItem[] = [
       tok('B-PERSON', 'Bob', 0.99, 0),
       tok('I-PERSON', 'X', 0.7, 1),
     ];
     const spans = mergeSpans(tokens, 0.6);
-    expect(spans[0]?.score).toBeCloseTo(0.7, 2);
+    expect(spans[0]?.score).toBeCloseTo(0.845, 3);
+  });
+
+  it('treats contiguous offsets as wordpieces without spaces (SentencePiece path)', () => {
+    // SentencePiece tokenizers (e.g. mDeBERTa) don't use ## prefix — they
+    // signal continuation via offset adjacency.
+    const tokens: TokenClassificationItem[] = [
+      tok('B-PERSON', 'Es', 0.9, 0, 0, 2),
+      tok('I-PERSON', 'ben', 0.8, 1, 2, 5),
+    ];
+    const spans = mergeSpans(tokens, 0.6);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.word).toBe('Esben');
+    expect(spans[0]?.start).toBe(0);
+    expect(spans[0]?.end).toBe(5);
   });
 
   it('handles wordpiece tokens (## prefix) without spaces', () => {

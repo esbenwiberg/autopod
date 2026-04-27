@@ -63,6 +63,14 @@ export function createPiiDetector(config: PiiDetectorConfig): Detector {
           const tokens = await c(chunk.text);
           const spans = mergeSpans(tokens, floor);
           for (const span of spans) {
+            // Prefer slicing the original chunk text by start/end offsets:
+            // it preserves the literal substring (correct casing, internal
+            // punctuation, no wordpiece artifacts like "Amp hi theatre kw y")
+            // and works for both BERT-style and SentencePiece tokenizers.
+            const snippet =
+              span.start !== undefined && span.end !== undefined
+                ? chunk.text.slice(span.start, span.end)
+                : span.word;
             findings.push({
               detector: 'pii',
               severity: severityFromScore(span.score),
@@ -70,7 +78,7 @@ export function createPiiDetector(config: PiiDetectorConfig): Detector {
               line: chunk.line,
               ruleId: span.label,
               confidence: span.score,
-              snippet: truncate(span.word, 80),
+              snippet: truncate(snippet, 80),
             });
           }
         } catch {
@@ -86,38 +94,80 @@ interface SpanFinding {
   label: string;
   word: string;
   score: number;
+  start?: number;
+  end?: number;
+}
+
+interface InProgressSpan {
+  label: string;
+  parts: string[];
+  scores: number[];
+  start?: number;
+  end?: number;
 }
 
 /**
- * Merge consecutive same-label tokens into a single span, taking the minimum
- * score across the span (so we only report when the model is consistently
- * confident). Tokens whose top label is `O`/non-PII or below the floor are
- * skipped and break any in-progress span.
+ * Merge consecutive same-label tokens into a single span. Floor is applied
+ * to the *aggregate* span score (mean across tokens), not per-token: the
+ * underlying model assigns high confidence to the first wordpiece of a name
+ * and lower confidence to subsequent wordpieces. A per-token floor would
+ * truncate "Esben" → "Es" and drop "Wiberg" entirely. Filtering at the span
+ * level keeps the full entity intact while still rejecting weak guesses.
+ *
+ * Tokens whose top label is `O`/non-PII or empty break any in-progress span.
  */
 export function mergeSpans(tokens: TokenClassificationItem[], floor: number): SpanFinding[] {
   const out: SpanFinding[] = [];
-  let current: SpanFinding | null = null;
+  let current: InProgressSpan | null = null;
+
+  function commit() {
+    if (!current) return;
+    const meanScore = current.scores.reduce((a, b) => a + b, 0) / current.scores.length;
+    if (meanScore >= floor) {
+      out.push({
+        label: current.label,
+        word: current.parts.join(''),
+        score: meanScore,
+        start: current.start,
+        end: current.end,
+      });
+    }
+    current = null;
+  }
 
   for (const tok of tokens) {
     const rawLabel = tok.entity ?? '';
     const label = stripBio(rawLabel);
     const isPii = !NON_PII_LABELS.has(label) && rawLabel !== '';
-    if (!isPii || tok.score < floor) {
-      if (current) {
-        out.push(current);
-        current = null;
-      }
+    if (!isPii) {
+      commit();
       continue;
     }
+    const word = tok.word.startsWith('##') ? tok.word.slice(2) : tok.word;
+    // Detect contiguous wordpieces via offsets — works for BERT (##) and
+    // SentencePiece tokenizers alike. Falls back to the ## marker when
+    // offsets are missing.
+    const isContinuation =
+      current &&
+      current.label === label &&
+      ((tok.start !== undefined && current.end === tok.start) || tok.word.startsWith('##'));
     if (current && current.label === label) {
-      current.word = `${current.word}${tok.word.startsWith('##') ? tok.word.slice(2) : ` ${tok.word}`}`;
-      current.score = Math.min(current.score, tok.score);
+      const piece = isContinuation ? word : ` ${word}`;
+      current.parts.push(piece);
+      current.scores.push(tok.score);
+      if (tok.end !== undefined) current.end = tok.end;
     } else {
-      if (current) out.push(current);
-      current = { label, word: tok.word.replace(/^##/, ''), score: tok.score };
+      commit();
+      current = {
+        label,
+        parts: [word],
+        scores: [tok.score],
+        start: tok.start,
+        end: tok.end,
+      };
     }
   }
-  if (current) out.push(current);
+  commit();
   return out;
 }
 

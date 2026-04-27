@@ -564,6 +564,8 @@ const app = await createServer({
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),
+  modelManager,
+  securityMlEnabled,
 });
 
 // Start listening
@@ -573,6 +575,28 @@ try {
 } catch (err) {
   app.log.fatal(err, 'Failed to start daemon');
   process.exit(1);
+}
+
+// Background warmup of ML detectors so /health reports a real status and the
+// first scan doesn't pay the model-load cost. Errors are already logged inside
+// model-manager; we just emit a single line summary on completion so an
+// operator who didn't read the warn lines still sees what loaded.
+if (securityMlEnabled && modelManager) {
+  void Promise.allSettled([
+    modelManager.getInjectionClassifier(),
+    modelManager.getPiiClassifier(),
+  ]).then(() => {
+    const status = modelManager.getStatus();
+    const degraded = status.injection === 'failed' || status.pii === 'failed';
+    if (degraded) {
+      logger.error(
+        { detectors: status },
+        'Security ML degraded — at least one classifier failed to load. Coverage is reduced.',
+      );
+    } else {
+      logger.info({ detectors: status }, 'Security ML detectors loaded');
+    }
+  });
 }
 
 // Start scheduled job scheduler AFTER server is listening
