@@ -9,6 +9,7 @@ import {
   listDiffFiles,
   listTrackedFiles,
   loadScanFiles,
+  resolveBaseRef,
 } from './file-walker.js';
 
 describe('globToRegex', () => {
@@ -76,17 +77,17 @@ describe('file-walker against a real git repo', () => {
   });
 
   it('listDiffFiles returns the changed paths against a base ref', async () => {
+    // Capture the actual default branch (master or main, depending on git
+    // version) before we cut a feature branch.
+    const baseBranch = execSync('git symbolic-ref --short HEAD', { cwd: workdir })
+      .toString()
+      .trim();
     execSync('git checkout -q -b feature', { cwd: workdir });
     writeFileSync(path.join(workdir, 'src/b.ts'), 'export const y = 2;');
     execSync('git add -A', { cwd: workdir });
     execSync('git commit -q -m feature', { cwd: workdir });
-    const files = await listDiffFiles(workdir, 'master');
-    // newer git defaults to "main" — accept either base ref name
-    let resolved = files;
-    if (resolved.length === 0) {
-      resolved = await listDiffFiles(workdir, 'main').catch(() => [] as string[]);
-    }
-    expect(resolved).toContain('src/b.ts');
+    const files = await listDiffFiles(workdir, baseBranch);
+    expect(files).toContain('src/b.ts');
   });
 
   it('loadScanFiles skips files larger than the limit', async () => {
@@ -103,5 +104,40 @@ describe('file-walker against a real git repo', () => {
     const { files, skipped } = await loadScanFiles(workdir, ['blob.bin']);
     expect(files).toHaveLength(0);
     expect(skipped).toBe(1);
+  });
+
+  it('resolveBaseRef returns the candidate when it exists locally', async () => {
+    // The repo's initial commit lives on whichever default branch git picked.
+    const head = execSync('git symbolic-ref --short HEAD', { cwd: workdir }).toString().trim();
+    const ref = await resolveBaseRef(workdir, head);
+    expect(ref).toBe(head);
+  });
+
+  it('resolveBaseRef strips a missing origin/ prefix and finds the local branch', async () => {
+    const head = execSync('git symbolic-ref --short HEAD', { cwd: workdir }).toString().trim();
+    // No `origin/` remote exists — resolver should drop the prefix and find
+    // the local branch instead.
+    const ref = await resolveBaseRef(workdir, `origin/${head}`);
+    expect(ref).toBe(head);
+  });
+
+  it('resolveBaseRef returns null when nothing in the chain exists', async () => {
+    // A repo with no branch named what we ask for, no `main`/`master` other
+    // than the default we already committed on. Use a fresh empty repo so we
+    // don't accidentally hit one of the standard fallbacks.
+    const empty = mkdtempSync(path.join(os.tmpdir(), 'autopod-fw-empty-'));
+    try {
+      execSync('git init -q -b nonstandard', { cwd: empty });
+      execSync('git config user.email t@e.x', { cwd: empty });
+      execSync('git config user.name test', { cwd: empty });
+      execSync('git config commit.gpgsign false', { cwd: empty });
+      writeFileSync(path.join(empty, 'f.txt'), 'x');
+      execSync('git add -A', { cwd: empty });
+      execSync('git commit -q -m init', { cwd: empty });
+      const ref = await resolveBaseRef(empty, 'origin/feature/does-not-exist');
+      expect(ref).toBeNull();
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 });

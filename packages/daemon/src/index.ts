@@ -106,6 +106,17 @@ const logger = IS_DEV
   ? pino(PINO_BASE_OPTIONS, buildPrettyStream({ colorize: true }))
   : pino(PINO_BASE_OPTIONS);
 
+// Node's `fetch` (undici) calls `performance.mark()` per request for the
+// Resource Timing API. Over a long-running daemon (PR polling, issue watcher,
+// MCP proxy, action HTTP handlers) the global mark buffer fills up and Node
+// emits MaxPerformanceEntryBufferExceededWarning. We don't read these entries,
+// so it's safe to clear them periodically.
+const perfClearTimer = setInterval(() => {
+  performance.clearMarks();
+  performance.clearMeasures();
+}, 60_000);
+perfClearTimer.unref();
+
 // Database
 const db = createDatabase(DB_PATH, logger);
 
@@ -688,6 +699,9 @@ async function shutdown(signal: string) {
 
   // Stop scheduled job scheduler
   scheduledJobScheduler.stop();
+
+  // Stop perf-mark cleaner
+  clearInterval(perfClearTimer);
 
   // Drain pod queue
   await podQueue.drain();

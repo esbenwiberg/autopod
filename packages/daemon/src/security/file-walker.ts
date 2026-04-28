@@ -63,6 +63,41 @@ export async function listDiffFiles(workdir: string, baseRef: string): Promise<s
 }
 
 /**
+ * Probe a candidate base ref against the local repo. Returns the first ref
+ * that resolves to a commit, or null if none do.
+ *
+ * Tried in order: the candidate as-given, the same name with/without an
+ * `origin/` prefix, then `origin/main`, `main`, `origin/master`, `master`.
+ *
+ * Used at the push checkpoint where `origin/<feature-branch>` may not yet
+ * exist locally (e.g. a fix-pod whose parent branch hasn't been pushed).
+ */
+export async function resolveBaseRef(workdir: string, candidate: string): Promise<string | null> {
+  const stripped = candidate.replace(/^origin\//, '');
+  const tries = [
+    candidate,
+    stripped,
+    `origin/${stripped}`,
+    'origin/main',
+    'main',
+    'origin/master',
+    'master',
+  ];
+  const seen = new Set<string>();
+  for (const ref of tries) {
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    try {
+      await runGit(workdir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+      return ref;
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve a glob list (default DEFAULT_ALWAYS_SCAN_PATHS) against the repo.
  * Returns repo-relative paths that exist and pass the skip filter.
  *

@@ -13,6 +13,7 @@ import {
   listDiffFiles,
   listTrackedFiles,
   loadScanFiles,
+  resolveBaseRef,
 } from './file-walker.js';
 import { decide } from './scan-policy.js';
 import { buildWarningSection } from './warning-section.js';
@@ -108,7 +109,7 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
       }
 
       // Resolve the file set for this checkpoint.
-      const { fileSet, errors } = await resolveFileSet(input);
+      const { fileSet, errors, scopeDegraded } = await resolveFileSet(input);
       for (const err of errors) {
         deps.logger.warn({ err, podId: input.podId }, 'Scan file resolution warning');
       }
@@ -132,7 +133,11 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
       // Run detectors over each file, respecting the wall-clock budget.
       const findings: ScanFinding[] = [];
       let scanned = 0;
-      let scanIncomplete = false;
+      // scopeDegraded means the requested diff couldn't be resolved against
+      // any usable base ref — we scanned the alwaysScanPaths fallback only.
+      // Surface that to callers via scanIncomplete so a scope-degraded scan
+      // doesn't read as a clean full-coverage pass.
+      let scanIncomplete = scopeDegraded;
       for (const file of scanFiles) {
         if (Date.now() > deadline) {
           scanIncomplete = true;
@@ -223,6 +228,10 @@ function passesThreshold(finding: ScanFinding, policy: SecurityScanPolicy): bool
 interface ResolvedFileSet {
   fileSet: Set<string>;
   errors: unknown[];
+  /** True when a `diff`-scoped scan couldn't resolve a usable base ref and
+   *  silently degraded to alwaysScanPaths only. Callers should surface this
+   *  via `scanIncomplete` so the scan isn't read as full-coverage. */
+  scopeDegraded: boolean;
 }
 
 async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
@@ -230,6 +239,7 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
     input.checkpoint === 'provisioning' ? input.policy.provisioning : input.policy.push;
   const errors: unknown[] = [];
   const set = new Set<string>();
+  let scopeDegraded = false;
 
   const alwaysScanPaths =
     input.alwaysScanPaths ?? input.policy.alwaysScanPaths ?? DEFAULT_ALWAYS_SCAN_PATHS;
@@ -251,23 +261,42 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
   }
 
   if (wantsDiff && input.baseRef) {
-    try {
-      const diff = await listDiffFiles(input.workdir, input.baseRef);
-      for (const p of diff) set.add(p);
-    } catch (err) {
-      errors.push(err);
-      // Diff failed — fall back to listing tracked files so we still produce something useful.
+    // Probe what's actually present locally — at the push checkpoint
+    // `origin/<feature-branch>` may not exist yet (e.g. a fix-pod whose
+    // parent branch hasn't been pushed). We fall back through a small
+    // chain of candidates rather than silently widening to a full-tree
+    // scan — that's how a "diff" scope used to scan ~all tracked files.
+    const resolved = await resolveBaseRef(input.workdir, input.baseRef);
+    if (resolved) {
       try {
-        const tracked = await listTrackedFiles(input.workdir);
-        for (const p of tracked) set.add(p);
-      } catch (err2) {
-        errors.push(err2);
+        const diff = await listDiffFiles(input.workdir, resolved);
+        for (const p of diff) set.add(p);
+        if (resolved !== input.baseRef) {
+          errors.push(
+            new Error(
+              `Base ref '${input.baseRef}' missing locally; scanned diff vs '${resolved}' instead`,
+            ),
+          );
+        }
+      } catch (err) {
+        // git diff against a verified ref still failed — degrade safely.
+        errors.push(err);
+        scopeDegraded = true;
       }
+    } else {
+      errors.push(
+        new Error(
+          `No usable base ref for diff scan (tried '${input.baseRef}' and standard fallbacks); scanning alwaysScanPaths only`,
+        ),
+      );
+      scopeDegraded = true;
     }
   }
 
-  // Always-scan list runs at provisioning regardless of scope.
-  if (input.checkpoint === 'provisioning') {
+  // Always-scan list runs at provisioning regardless of scope, AND as the
+  // scope-degraded fallback at any checkpoint so we still surface secrets
+  // in well-known config locations.
+  if (input.checkpoint === 'provisioning' || scopeDegraded) {
     try {
       const always = await listAlwaysScan(input.workdir, alwaysScanPaths);
       for (const p of always) set.add(p);
@@ -276,7 +305,7 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
     }
   }
 
-  return { fileSet: set, errors };
+  return { fileSet: set, errors, scopeDegraded };
 }
 
 export type { ScanFile };

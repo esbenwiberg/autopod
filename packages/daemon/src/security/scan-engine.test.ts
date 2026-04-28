@@ -174,4 +174,67 @@ describe('scan-engine', () => {
     expect(result.findings).toHaveLength(0);
     expect(result.decision).toBe('pass');
   });
+
+  it('push diff scan with missing origin/<branch> falls back to local branch and warns', async () => {
+    // Create a feature branch with one extra file, then ask the scanner to
+    // diff against `origin/feature` — which doesn't exist locally. The
+    // resolver should drop the prefix, find the local `feature` branch, and
+    // produce a real diff (NOT a full-tree scan).
+    const head = execSync('git symbolic-ref --short HEAD', { cwd: workdir }).toString().trim();
+    execSync('git checkout -q -b feature', { cwd: workdir });
+    writeFileSync(path.join(workdir, 'changed.ts'), 'export const z = 3;');
+    execSync('git add -A', { cwd: workdir });
+    execSync('git commit -q -m feature', { cwd: workdir });
+
+    const seen: string[] = [];
+    const detector = fakeDetector('secrets', (file) => {
+      seen.push(file);
+      return [];
+    });
+    const engine = createScanEngine({ detectors: [detector], logger });
+    const policy = getPreset('default');
+    policy.push.scope = 'diff';
+    const result = await engine.run({
+      podId: 'p7',
+      workdir,
+      policy,
+      checkpoint: 'push',
+      // The base branch the pod thinks it has: an `origin/<head>` that was
+      // never fetched — because origin doesn't exist for this test repo.
+      baseRef: `origin/${head}`,
+    });
+    // The diff vs the local fallback ref contains only `changed.ts`. If the
+    // old behaviour leaked, we'd see CLAUDE.md and src.ts too.
+    expect(seen).toEqual(['changed.ts']);
+    expect(result.filesScanned).toBe(1);
+    expect(result.scanIncomplete).toBe(false);
+  });
+
+  it('push diff scan with NO usable base ref scans alwaysScanPaths only and flags scanIncomplete', async () => {
+    // Workdir already has CLAUDE.md (default alwaysScanPaths matches that).
+    // We point baseRef at something that has no fallback: rename branches so
+    // even `main`/`master` are absent.
+    execSync('git branch -m nonstandard', { cwd: workdir });
+
+    const seen: string[] = [];
+    const detector = fakeDetector('secrets', (file) => {
+      seen.push(file);
+      return [];
+    });
+    const engine = createScanEngine({ detectors: [detector], logger });
+    const policy = getPreset('default');
+    policy.push.scope = 'diff';
+    const result = await engine.run({
+      podId: 'p8',
+      workdir,
+      policy,
+      checkpoint: 'push',
+      baseRef: 'origin/feature/relative-crocodile',
+    });
+    // Should have scanned only the always-scan list (CLAUDE.md), NOT every
+    // tracked file. src.ts must NOT be in `seen`.
+    expect(seen).toContain('CLAUDE.md');
+    expect(seen).not.toContain('src.ts');
+    expect(result.scanIncomplete).toBe(true);
+  });
 });
