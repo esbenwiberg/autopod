@@ -33,7 +33,10 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
   program
     .command('workspace <profile> [description]')
     .description('Create a workspace pod — an interactive container with no agent')
-    .option('-b, --branch <name>', 'Explicit branch name (for handoff to worker)')
+    .option(
+      '-b, --branch <name>',
+      'Name for the new working branch (defaults to autopod/<id>). Pass --base-branch on "ap run" for the handoff, not here.',
+    )
     .option(
       '--pim-group <spec>',
       'PIM group to activate: <groupId> or <groupId:displayName> (repeatable)',
