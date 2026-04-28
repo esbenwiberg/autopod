@@ -1861,6 +1861,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
           branch = `${prefix}${id}`;
         }
+        // Workspace pods must not land on the default branch — `ap complete` would push
+        // directly to origin/main. Auto-generate a safe branch unless this pod was spawned
+        // by fixManually() (linkedPodId set), which intentionally inherits the worker's branch.
+        if (resolvedPod.agentMode === 'interactive' && !request.linkedPodId) {
+          const effectiveBaseBranch = request.baseBranch ?? profile.defaultBranch ?? 'main';
+          if (branch === effectiveBaseBranch) {
+            const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
+            branch = `${prefix}${id}`;
+          }
+        }
         try {
           podRepo.insert({
             id,
@@ -2037,6 +2047,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       try {
+        // For handoff pods the interactive container is still running — sync the
+        // human's work back to the host worktree and stop the container here so
+        // the promote HTTP endpoint can return immediately without timing out.
+        if (pod.status === 'handoff' && pod.containerId && pod.worktreePath) {
+          const cm = containerManagerFactory.get(pod.executionTarget);
+          try {
+            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to sync workspace back during handoff — agent may miss in-flight changes');
+          }
+          try {
+            await cm.stop(pod.containerId);
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to stop interactive container during handoff');
+          }
+          podRepo.update(podId, { containerId: null });
+          pod = podRepo.getOrThrow(podId);
+        }
+
         // Detect recovery mode before any provisioning work
         const isRecovery = !!pod.recoveryWorktreePath;
         const isRework = isRecovery && !!pod.reworkReason;
@@ -4230,28 +4259,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      // Sync the human's work back to the host worktree so the agent picks
-      // up where they left off.
-      if (pod.containerId && pod.worktreePath) {
-        try {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to sync workspace back during promotion');
-        }
-      }
-
-      // Tear down the interactive container — processPod will spawn a
-      // fresh one for the agent phase.
-      if (pod.containerId) {
-        try {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          await cm.stop(pod.containerId);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to stop interactive container during promotion');
-        }
-      }
-
       // Swap to the worker profile if one is configured — this lets the
       // interactive profile keep a minimal setup and delegate the heavy
       // agent config (model, validation, PR provider) to a sibling profile.
@@ -4268,10 +4275,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       transition(pod, 'handoff', {
         options: newPod,
-        containerId: null,
         // Reuse the existing worktree in recovery mode so the agent resumes
         // on the human's in-flight work.
         recoveryWorktreePath: pod.worktreePath,
+        // containerId is intentionally kept — processPod reads it to sync the
+        // workspace and stop the container before spawning the agent container.
       });
 
       // If we're switching profiles for the worker phase, snapshot the new
@@ -4377,6 +4385,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // which happens for non-workspace pods (handled at validating entry).
             const pushScanProfile = profileStore.get(pod.profileName);
             await runPushCheckpointScan(pod, pushScanProfile);
+            // Refuse to push a workspace pod directly to the default branch — this almost
+            // always means the user passed `--branch main` by mistake. fixManually() pods
+            // have linkedPodId set and are explicitly exempt.
+            const completionBaseBranch =
+              pod.baseBranch ?? pushScanProfile?.defaultBranch ?? 'main';
+            if (!pod.linkedPodId && pod.branch === completionBaseBranch) {
+              throw new AutopodError(
+                `Refusing to push workspace pod directly to default branch '${pod.branch}'. Use ap complete <id> --pr or check out a feature branch first.`,
+                'INVALID_STATE',
+                409,
+              );
+            }
             // mergeBranch auto-commits any remaining uncommitted changes before pushing.
             // If sync-back failed, the host worktree may be missing files the index still
             // references — tighten the deletion guard so a ghost mass-delete cannot ship.
