@@ -189,6 +189,30 @@ describe('EventRepository', () => {
       expect(events[0]?.id).toBeLessThan(events[1]?.id);
       expect(events[1]?.id).toBeLessThan(events[2]?.id);
     });
+
+    it('should respect the limit parameter and allow paged reads', () => {
+      const event: SystemEvent = {
+        type: 'pod.status_changed',
+        timestamp: new Date().toISOString(),
+        podId: 'sess-001',
+        previousStatus: 'queued',
+        newStatus: 'running',
+      };
+      const ids: number[] = [];
+      for (let i = 0; i < 1200; i++) ids.push(repo.insert(event));
+
+      const firstPage = repo.getSince(0, 500);
+      expect(firstPage).toHaveLength(500);
+      expect(firstPage[0]?.id).toBe(ids[0]);
+      expect(firstPage[499]?.id).toBe(ids[499]);
+
+      const secondPage = repo.getSince(firstPage[499]?.id ?? 0, 500);
+      expect(secondPage).toHaveLength(500);
+      expect(secondPage[0]?.id).toBe(ids[500]);
+
+      const thirdPage = repo.getSince(secondPage[499]?.id ?? 0, 500);
+      expect(thirdPage).toHaveLength(200);
+    });
   });
 
   describe('getForSession', () => {

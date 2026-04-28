@@ -4,6 +4,69 @@ import type { WebSocket } from 'ws';
 import type { AuthModule } from '../interfaces/index.js';
 import type { EventBus, EventRepository } from '../pods/index.js';
 
+// Replay is paged so a long-disconnected client can't block the daemon's event
+// loop. Each page yields back to the loop via setImmediate; the hard cap stops
+// runaway replays from clients that are days behind — they refetch via REST.
+const REPLAY_PAGE_SIZE = 500;
+const REPLAY_MAX_EVENTS = 10_000;
+
+/** Minimal socket surface needed by the replay path — keeps the helper testable. */
+export interface ReplaySocket {
+  readyState: number;
+  OPEN: number;
+  send(data: string): void;
+}
+
+export interface ReplayOptions {
+  pageSize?: number;
+  maxEvents?: number;
+}
+
+export async function replayEvents(
+  socket: ReplaySocket,
+  eventRepo: EventRepository,
+  lastEventId: number,
+  options: ReplayOptions = {},
+): Promise<void> {
+  const pageSize = options.pageSize ?? REPLAY_PAGE_SIZE;
+  const maxEvents = options.maxEvents ?? REPLAY_MAX_EVENTS;
+  let cursor = lastEventId;
+  let totalSent = 0;
+
+  while (totalSent < maxEvents) {
+    if (socket.readyState !== socket.OPEN) return;
+    const remaining = maxEvents - totalSent;
+    const page = eventRepo.getSince(cursor, Math.min(pageSize, remaining));
+    if (page.length === 0) break;
+    for (const stored of page) {
+      if (socket.readyState !== socket.OPEN) return;
+      socket.send(JSON.stringify({ ...stored.payload, _eventId: stored.id }));
+    }
+    const last = page[page.length - 1];
+    if (!last) break;
+    cursor = last.id;
+    totalSent += page.length;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  if (socket.readyState !== socket.OPEN) return;
+
+  // If we hit the cap and there may be more on disk, signal the client to
+  // resync via REST instead of incremental replay.
+  const moreAvailable = totalSent >= maxEvents && eventRepo.getSince(cursor, 1).length > 0;
+  if (moreAvailable) {
+    socket.send(
+      JSON.stringify({
+        type: 'replay_truncated',
+        resumeFromEventId: cursor,
+        reason: 'too_many_events',
+      }),
+    );
+  } else {
+    socket.send(JSON.stringify({ type: 'replay_complete', lastEventId: cursor }));
+  }
+}
+
 interface WsClient {
   ws: WebSocket;
   userId: string;
@@ -85,10 +148,9 @@ export function websocketHandler(
           client.unsubscribers.set('*', unsub);
           socket.send(JSON.stringify({ type: 'subscribed_all' }));
         } else if (msg.type === 'replay' && typeof msg.lastEventId === 'number') {
-          const events = eventRepo.getSince(msg.lastEventId);
-          for (const stored of events) {
-            socket.send(JSON.stringify({ ...stored.payload, _eventId: stored.id }));
-          }
+          replayEvents(socket, eventRepo, msg.lastEventId).catch((err) => {
+            request.log.warn({ err }, 'Replay failed');
+          });
         } else if (!['subscribe', 'unsubscribe', 'subscribe_all', 'replay'].includes(msg.type)) {
           request.log.warn({ msgType: msg.type }, 'Unknown WS message type');
           socket.send(

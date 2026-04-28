@@ -11,7 +11,7 @@ export interface StoredEvent {
 
 export interface EventRepository {
   insert(event: SystemEvent): number; // returns auto-increment id
-  getSince(lastId: number): StoredEvent[];
+  getSince(lastId: number, limit?: number): StoredEvent[];
   getForSession(podId: string): StoredEvent[];
 }
 
@@ -50,10 +50,16 @@ export function createEventRepository(db: Database.Database): EventRepository {
       return Number(result.lastInsertRowid);
     },
 
-    getSince(lastId: number): StoredEvent[] {
-      const rows = db
-        .prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC')
-        .all(lastId) as Record<string, unknown>[];
+    getSince(lastId: number, limit?: number): StoredEvent[] {
+      const rows =
+        limit === undefined
+          ? (db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC').all(lastId) as Record<
+              string,
+              unknown
+            >[])
+          : (db
+              .prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT ?')
+              .all(lastId, limit) as Record<string, unknown>[]);
       return rows.map(rowToStoredEvent);
     },
 
