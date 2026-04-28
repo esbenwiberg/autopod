@@ -68,7 +68,20 @@ public final class PodStore {
     error = nil
     do {
       let responses = try await api.listPods()
-      pods = PodMapper.map(responses)
+      let fresh = PodMapper.map(responses)
+      // Preserve in-memory WebSocket state that REST doesn't carry (validationProgress is
+      // transient — set by phase events, never serialised to the database).
+      let savedProgress = Dictionary(
+        uniqueKeysWithValues: pods.compactMap { p in
+          p.validationProgress.map { (p.id, $0) }
+        }
+      )
+      pods = fresh.map { pod in
+        guard let progress = savedProgress[pod.id] else { return pod }
+        var updated = pod
+        updated.validationProgress = progress
+        return updated
+      }
     } catch {
       print("[PodStore] Failed to load pods: \(error)")
       self.error = error.localizedDescription

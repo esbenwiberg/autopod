@@ -92,6 +92,13 @@ struct AutopodXcodeApp: App {
     stream.connect(baseURL: conn.url, token: connToken)
     eventStream = stream
 
+    // Reload historical events for the currently selected pod — the EventStream was just
+    // replaced, so its sessionEvents buffer is empty and the .task(id: selectedSessionId)
+    // in AppRootView won't re-fire (selectedSessionId didn't change).
+    if let selectedId = podStore.selectedSessionId {
+      stream.loadHistoricalEvents(podId: selectedId, api: api)
+    }
+
     // Wire notification service for catchup actions
     NotificationService.shared.scheduledJobStore = scheduledJobStore
 
