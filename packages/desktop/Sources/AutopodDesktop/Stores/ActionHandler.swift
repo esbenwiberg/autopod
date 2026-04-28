@@ -417,6 +417,7 @@ public final class ActionHandler {
   public func setSkipValidation(_ podId: String, skip: Bool) async {
     do {
       try await api.setSkipValidation(podId, skip: skip)
+      await podStore.refreshSession(podId)
     } catch {
       lastError = error.localizedDescription
     }

@@ -157,6 +157,7 @@ public struct DetailPanelView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { selectedTab = Self.defaultTab(for: pod) }
         .onChange(of: pod.id) { _, _ in selectedTab = Self.defaultTab(for: pod) }
