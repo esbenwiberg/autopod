@@ -24,7 +24,6 @@ import type {
   PodStatus,
   PrivateRegistry,
   Profile,
-  ReferenceRepo,
   RequestCredentialPayload,
   SastResult,
   StdioInjectedMcpServer,
@@ -87,6 +86,7 @@ import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
+import { deriveReferenceRepos } from './reference-repos.js';
 import {
   CREDENTIAL_GUARD_HOOK,
   buildNuGetCredentialEnv,
@@ -1838,15 +1838,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
-      // Derive referenceRepos with mountPath from URL last segment
-      const derivedReferenceRepos: ReferenceRepo[] = (request.referenceRepos ?? []).map((r) => ({
-        url: r.url,
-        mountPath:
-          r.url
-            .replace(/\.git$/, '')
-            .split('/')
-            .pop() ?? r.url,
-      }));
+      const derivedReferenceRepos = deriveReferenceRepos(request.referenceRepos);
 
       let id: string;
       for (let attempt = 0; attempt < 10; attempt++) {

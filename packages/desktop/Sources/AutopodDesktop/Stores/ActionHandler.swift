@@ -37,12 +37,14 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createPod: { [weak self] profile, task, model, pod, ac, base, acFrom, pimGroups, sidecars in
+      createPod: { [weak self] profile, task, model, pod, ac, base, acFrom, pimGroups, sidecars, refRepos, refRepoPat in
         await self?.createPod(
           profileName: profile, task: task, model: model,
           pod: pod, acceptanceCriteria: ac,
           baseBranch: base, acFrom: acFrom, pimGroups: pimGroups,
-          requireSidecars: sidecars
+          requireSidecars: sidecars,
+          referenceRepos: refRepos,
+          referenceRepoPat: refRepoPat
         )
       },
       promote: { [weak self] id, target in await self?.promoteSession(id, targetOutput: target) },
@@ -259,7 +261,9 @@ public final class ActionHandler {
     profileName: String, task: String, model: String?,
     pod: PodConfigRequest?, acceptanceCriteria: [AcDefinition]?,
     baseBranch: String?, acFrom: String?, pimGroups: [PimGroupRequest]? = nil,
-    requireSidecars: [String]? = nil
+    requireSidecars: [String]? = nil,
+    referenceRepos: [ReferenceRepoRequest]? = nil,
+    referenceRepoPat: String? = nil
   ) async -> String? {
     pendingAction = "create"
     let req = CreateSessionRequest(
@@ -271,7 +275,9 @@ public final class ActionHandler {
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       acFrom: acFrom?.isEmpty == true ? nil : acFrom,
       pimGroups: pimGroups?.filter { !$0.groupId.isEmpty },
-      requireSidecars: (requireSidecars?.isEmpty ?? true) ? nil : requireSidecars
+      requireSidecars: (requireSidecars?.isEmpty ?? true) ? nil : requireSidecars,
+      referenceRepos: (referenceRepos?.isEmpty ?? true) ? nil : referenceRepos,
+      referenceRepoPat: referenceRepoPat?.isEmpty == true ? nil : referenceRepoPat
     )
     do {
       let response = try await api.createPod(req)

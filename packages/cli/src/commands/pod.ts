@@ -113,6 +113,16 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       collectRepeatable,
       [] as string[],
     )
+    .option(
+      '--ref-repo <url>',
+      'Read-only reference repo cloned at /repos/<name>/. Repeatable. PAT (if any) must cover all listed repos.',
+      collectRepeatable,
+      [] as string[],
+    )
+    .option(
+      '--ref-repo-pat <token>',
+      'Single PAT used to clone every --ref-repo. SAML/SSO orgs require an SSO-authorized PAT.',
+    )
     .action(
       async (
         profile: string,
@@ -128,6 +138,8 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           baseBranch?: string;
           acFrom?: string;
           sidecar: string[];
+          refRepo: string[];
+          refRepoPat?: string;
         },
       ) => {
         const client = getClient();
@@ -158,6 +170,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           process.exit(1);
         }
 
+        const referenceRepos = opts.refRepo.length
+          ? opts.refRepo.map((url) => ({ url }))
+          : undefined;
+
         const pod = await withSpinner('Starting pod…', () =>
           client.createSession({
             profileName: profile,
@@ -170,6 +186,8 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             acFrom: opts.acFrom,
             options: podOptions,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
+            referenceRepos,
+            referenceRepoPat: opts.refRepoPat,
           }),
         );
 
@@ -180,6 +198,11 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(
           `${chalk.bold('Pod:')}      ${pod.options?.agentMode ?? 'auto'} → ${pod.options?.output ?? 'pr'}`,
         );
+        if (pod.referenceRepos?.length) {
+          console.log(
+            `${chalk.bold('Refs:')}     ${pod.referenceRepos.map((r) => `/repos/${r.mountPath}`).join(', ')}`,
+          );
+        }
         if (pod.options?.agentMode === 'interactive') {
           console.log(chalk.dim(`Attach: ap attach ${pod.id.slice(0, 8)}`));
         } else {

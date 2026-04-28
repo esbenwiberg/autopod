@@ -147,6 +147,8 @@ public struct SessionCardFinal: View {
                         pod.branch,
                         pod.acFrom,
                         nil,
+                        nil,
+                        nil,
                         nil
                     )
                 }

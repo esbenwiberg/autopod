@@ -140,6 +140,39 @@ describe('pod commands', () => {
     expect(call.requireSidecars).toBeUndefined();
   });
 
+  it('passes --ref-repo flags as referenceRepos on start', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'start',
+      'test-profile',
+      'audit',
+      '--ref-repo',
+      'https://github.com/org/docs-gen',
+      '--ref-repo',
+      'https://github.com/org/pipelines.git',
+      '--ref-repo-pat',
+      'ghp_secret',
+    ]);
+    expect(mockClient.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceRepos: [
+          { url: 'https://github.com/org/docs-gen' },
+          { url: 'https://github.com/org/pipelines.git' },
+        ],
+        referenceRepoPat: 'ghp_secret',
+      }),
+    );
+  });
+
+  it('omits referenceRepos when no --ref-repo flags are passed', async () => {
+    await program.parseAsync(['node', 'ap', 'start', 'test-profile', 'do it']);
+    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(call.referenceRepos).toBeUndefined();
+    expect(call.referenceRepoPat).toBeUndefined();
+  });
+
   it('registers ls command that calls listSessions', async () => {
     await program.parseAsync(['node', 'ap', 'ls']);
     expect(mockClient.listSessions).toHaveBeenCalled();

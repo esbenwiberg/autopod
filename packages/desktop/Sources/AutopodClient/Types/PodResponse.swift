@@ -125,6 +125,9 @@ public struct SessionResponse: Codable, Sendable {
   /// Human-readable title from the brief's YAML frontmatter `title` field.
   /// Nil for standalone pods or briefs without an explicit title.
   public let briefTitle: String?
+  /// Reference repos cloned read-only into the container at /repos/<mountPath>/.
+  /// Optional for back-compat with daemons that don't surface this field.
+  public let referenceRepos: [ReferenceRepoSummary]?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
@@ -146,6 +149,7 @@ public struct SessionResponse: Codable, Sendable {
     case worktreeCompromised
     case validationOverrides
     case briefTitle
+    case referenceRepos
   }
 }
 
@@ -219,6 +223,22 @@ public struct SessionSummaryResponse: Codable, Sendable {
   public let createdAt: String
 }
 
+// MARK: - Reference repos
+
+public struct ReferenceRepoRequest: Codable, Sendable, Hashable {
+  public let url: String
+  public init(url: String) { self.url = url }
+}
+
+public struct ReferenceRepoSummary: Codable, Sendable, Hashable {
+  public let url: String
+  public let mountPath: String
+  public init(url: String, mountPath: String) {
+    self.url = url
+    self.mountPath = mountPath
+  }
+}
+
 // MARK: - Create pod request
 
 public struct CreateSessionRequest: Codable, Sendable {
@@ -244,6 +264,8 @@ public struct CreateSessionRequest: Codable, Sendable {
   // entry must correspond to an enabled entry in `profile.sidecars`;
   // privileged sidecars additionally require `profile.trustedSource: true`.
   public var requireSidecars: [String]?
+  public var referenceRepos: [ReferenceRepoRequest]?
+  public var referenceRepoPat: String?
 
   public init(
     profileName: String,
@@ -263,7 +285,9 @@ public struct CreateSessionRequest: Codable, Sendable {
     dependsOnPodIds: [String]? = nil,
     seriesId: String? = nil,
     seriesName: String? = nil,
-    requireSidecars: [String]? = nil
+    requireSidecars: [String]? = nil,
+    referenceRepos: [ReferenceRepoRequest]? = nil,
+    referenceRepoPat: String? = nil
   ) {
     self.profileName = profileName
     self.task = task
@@ -283,6 +307,8 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.seriesId = seriesId
     self.seriesName = seriesName
     self.requireSidecars = requireSidecars
+    self.referenceRepos = referenceRepos
+    self.referenceRepoPat = referenceRepoPat
   }
 
   // Backend zod schema names the pod-config field `options`; the Swift
@@ -293,6 +319,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     case pod = "options"
     case baseBranch, acFrom, linkedSessionId, pimGroups
     case dependsOnPodIds, seriesId, seriesName, requireSidecars
+    case referenceRepos, referenceRepoPat
   }
 }
 

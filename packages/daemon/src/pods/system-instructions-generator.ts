@@ -248,7 +248,6 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
-  // Reference repos (artifact mode only)
   if (pod.referenceRepos?.length) {
     lines.push('## Reference Repositories');
     lines.push('The following repos are cloned read-only at:');

@@ -37,6 +37,9 @@ public struct CreateSessionSheet: View {
     @State private var pimGroups: [PimGroupRequest] = []
     @State private var showAdvanced = false
     @State private var enableDaggerSidecar = false
+    @State private var refProfileNames: Set<String> = []
+    @State private var adHocRefUrls: [String] = []
+    @State private var refRepoPat: String = ""
 
     private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
 
@@ -65,6 +68,32 @@ public struct CreateSessionSheet: View {
     private var isInteractive: Bool { agentMode == "interactive" }
     private var canCreate: Bool {
         isInteractive || !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Profiles eligible to be picked as reference repos: any profile other
+    /// than the primary, that has a non-empty repoUrl.
+    private var refRepoCandidates: [Profile] {
+        profileDetails.filter { $0.name != selectedProfile && !$0.repoUrl.isEmpty }
+    }
+
+    /// Resolve the final `[ReferenceRepoRequest]` list from the two UI sources,
+    /// deduping by URL while preserving order (profile chips first, then ad-hoc).
+    private func resolvedReferenceRepos() -> [ReferenceRepoRequest] {
+        var seen: Set<String> = []
+        var out: [ReferenceRepoRequest] = []
+        for p in refRepoCandidates where refProfileNames.contains(p.name) {
+            if seen.insert(p.repoUrl).inserted {
+                out.append(ReferenceRepoRequest(url: p.repoUrl))
+            }
+        }
+        for raw in adHocRefUrls {
+            let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !url.isEmpty else { continue }
+            if seen.insert(url).inserted {
+                out.append(ReferenceRepoRequest(url: url))
+            }
+        }
+        return out
     }
 
     public var body: some View {
@@ -407,6 +436,100 @@ public struct CreateSessionSheet: View {
                                         }
                                     }
                                 }
+
+                                Divider()
+
+                                // Reference repos — read-only mounts at /repos/<name>/.
+                                HStack {
+                                    Text("Reference Repos")
+                                        .font(.system(.caption).weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    HelpBadge(text: "Read-only repos cloned into /repos/<name>/ alongside the primary worktree. Use for cross-repo audits, comparing implementations, or letting the agent reference docs/pipeline definitions while it works.")
+                                    Spacer()
+                                }
+
+                                if refRepoCandidates.isEmpty && adHocRefUrls.isEmpty {
+                                    Text("No other profiles available — add a URL below to attach an ad-hoc reference repo.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+
+                                if !refRepoCandidates.isEmpty {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("From profiles")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                        ForEach(refRepoCandidates, id: \.name) { p in
+                                            Toggle(isOn: Binding(
+                                                get: { refProfileNames.contains(p.name) },
+                                                set: { isOn in
+                                                    if isOn { refProfileNames.insert(p.name) }
+                                                    else { refProfileNames.remove(p.name) }
+                                                }
+                                            )) {
+                                                HStack(spacing: 6) {
+                                                    Text(p.name).font(.callout)
+                                                    Text(p.repoUrl)
+                                                        .font(.system(.caption, design: .monospaced))
+                                                        .foregroundStyle(.tertiary)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.middle)
+                                                }
+                                            }
+                                            .toggleStyle(.checkbox)
+                                            .controlSize(.small)
+                                        }
+                                    }
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text("Ad-hoc URLs")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                        Spacer()
+                                        Button {
+                                            adHocRefUrls.append("")
+                                        } label: {
+                                            Label("Add URL", systemImage: "plus")
+                                                .font(.caption)
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .foregroundStyle(.blue)
+                                    }
+                                    ForEach(Array(adHocRefUrls.enumerated()), id: \.offset) { idx, _ in
+                                        HStack(spacing: 6) {
+                                            TextField("https://github.com/org/repo", text: Binding(
+                                                get: { idx < adHocRefUrls.count ? adHocRefUrls[idx] : "" },
+                                                set: { newValue in
+                                                    if idx < adHocRefUrls.count {
+                                                        adHocRefUrls[idx] = newValue
+                                                    }
+                                                }
+                                            ))
+                                            .textFieldStyle(.roundedBorder)
+                                            .font(.system(.caption, design: .monospaced))
+                                            Button {
+                                                if idx < adHocRefUrls.count {
+                                                    adHocRefUrls.remove(at: idx)
+                                                }
+                                            } label: {
+                                                Image(systemName: "minus.circle")
+                                                    .foregroundStyle(.red.opacity(0.6))
+                                            }
+                                            .buttonStyle(.borderless)
+                                        }
+                                    }
+                                }
+
+                                if !refProfileNames.isEmpty || adHocRefUrls.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+                                    SecureField("Shared PAT (optional — must cover all listed repos)", text: $refRepoPat)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.system(.caption, design: .monospaced))
+                                    Text("One PAT for every reference repo above. Cross-org refs require a PAT with access to all of them; SSO orgs require an SSO-authorized PAT.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
                             }
                             .padding(.top, 8)
                         } label: {
@@ -438,13 +561,17 @@ public struct CreateSessionSheet: View {
                             promotable: isInteractive
                         )
                         let sidecars: [String]? = (canRequestDaggerSidecar && enableDaggerSidecar) ? ["dagger"] : nil
+                        let refs = resolvedReferenceRepos()
+                        let trimmedPat = refRepoPat.trimmingCharacters(in: .whitespacesAndNewlines)
                         _ = await actions.createPod(
                             selectedProfile, task, model.isEmpty ? nil : model,
                             pod, ac.isEmpty ? nil : ac,
                             baseBranch.isEmpty ? nil : baseBranch,
                             acFromPath.isEmpty ? nil : acFromPath,
                             pim.isEmpty ? nil : pim,
-                            sidecars
+                            sidecars,
+                            refs.isEmpty ? nil : refs,
+                            trimmedPat.isEmpty ? nil : trimmedPat
                         )
                         isPresented = false
                     }
