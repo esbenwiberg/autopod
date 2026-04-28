@@ -740,7 +740,9 @@ function generateOperatingEnvironment(
   const profileOutputTarget = profile.pod?.output ?? profile.outputMode;
   if (!profile.repoUrl || profileOutputTarget === 'none') {
     lines.push('- There is no remote repository for this session.');
-    lines.push('- You CAN use git locally for version tracking if useful (commits stay in container).');
+    lines.push(
+      '- You CAN use git locally for version tracking if useful (commits stay in container).',
+    );
     lines.push('- Do NOT attempt to `git push` or create PRs — there is no remote.');
   } else if (profileOutputTarget === 'artifact') {
     lines.push('- You CAN use git within your worktree for version tracking.');

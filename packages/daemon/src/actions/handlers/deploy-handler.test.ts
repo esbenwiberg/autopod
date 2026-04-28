@@ -6,16 +6,18 @@ function sha256(content: string) {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
-const mockProfile = (deployConfig: unknown) => ({
-  name: 'test-profile',
-  deployment: deployConfig,
-  actionPolicy: null,
-} as any);
+const mockProfile = (deployConfig: unknown) =>
+  ({
+    name: 'test-profile',
+    deployment: deployConfig,
+    actionPolicy: null,
+  }) as any;
 
-const mockPod = (containerId = 'container-123') => ({
-  containerId,
-  profileName: 'test-profile',
-} as any);
+const mockPod = (containerId = 'container-123') =>
+  ({
+    containerId,
+    profileName: 'test-profile',
+  }) as any;
 
 function makeHandler(overrides: Partial<Parameters<typeof createDeployHandler>[0]> = {}) {
   const podRepo = { getSession: vi.fn().mockReturnValue(mockPod()) };
@@ -24,9 +26,11 @@ function makeHandler(overrides: Partial<Parameters<typeof createDeployHandler>[0
     execInContainer: vi.fn().mockResolvedValue({ stdout: 'done', stderr: '', exitCode: 0 }),
   };
   const profileStore = {
-    get: vi.fn().mockReturnValue(
-      mockProfile({ enabled: true, env: { MY_VAR: 'my-value' }, allowedScripts: undefined }),
-    ),
+    get: vi
+      .fn()
+      .mockReturnValue(
+        mockProfile({ enabled: true, env: { MY_VAR: 'my-value' }, allowedScripts: undefined }),
+      ),
   };
 
   const handler = createDeployHandler({
@@ -148,10 +152,14 @@ describe('deploy handler — execute', () => {
     containerManager.readFile.mockResolvedValue(tamperedContent);
 
     await expect(
-      handler.execute({} as any, { script_path: 'deploy.sh' }, {
-        podId: 'pod-1',
-        approvalContext: { scriptHash: approvedHash },
-      }),
+      handler.execute(
+        {} as any,
+        { script_path: 'deploy.sh' },
+        {
+          podId: 'pod-1',
+          approvalContext: { scriptHash: approvedHash },
+        },
+      ),
     ).rejects.toThrow('changed after approval');
   });
 
@@ -188,9 +196,7 @@ describe('deploy handler — execute', () => {
 
   it('never includes env var values in the returned response', async () => {
     const { handler, profileStore } = makeHandler();
-    profileStore.get.mockReturnValue(
-      mockProfile({ enabled: true, env: { SECRET: 'topsecret' } }),
-    );
+    profileStore.get.mockReturnValue(mockProfile({ enabled: true, env: { SECRET: 'topsecret' } }));
 
     const result = await handler.execute(
       {} as any,

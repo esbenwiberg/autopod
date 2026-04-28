@@ -78,7 +78,12 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   const startCommand = input.startCommand;
   if (hasRepoUrl && (typeof startCommand !== 'string' || startCommand.length === 0)) {
     errors.push('startCommand is required when repoUrl is set');
-  } else if (hasRepoUrl && typeof startCommand === 'string' && startCommand.length > 0 && !startCommand.includes('$PORT')) {
+  } else if (
+    hasRepoUrl &&
+    typeof startCommand === 'string' &&
+    startCommand.length > 0 &&
+    !startCommand.includes('$PORT')
+  ) {
     errors.push('startCommand must contain $PORT placeholder');
   }
 
