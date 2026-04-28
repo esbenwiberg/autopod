@@ -236,157 +236,162 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     });
 
   // ap status
+  async function statusAction(id: string, opts: { json?: boolean }): Promise<void> {
+    const client = getClient();
+    const resolvedId = await resolvePodId(client, id);
+    const pod = await client.getSession(resolvedId);
+
+    withJsonOutput(opts, pod, (s) => {
+      console.log(chalk.bold.cyan(`Pod ${s.id}`));
+      console.log(chalk.dim('─'.repeat(50)));
+      console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
+      console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
+      console.log(`${chalk.bold('Task:')}         ${s.task}`);
+      console.log(`${chalk.bold('Model:')}        ${s.model}`);
+      console.log(`${chalk.bold('Runtime:')}      ${s.runtime}`);
+      console.log(`${chalk.bold('Branch:')}       ${s.branch}`);
+      console.log(
+        `${chalk.bold('Duration:')}     ${formatDurationFromDates(s.startedAt, s.completedAt)}`,
+      );
+      console.log(
+        `${chalk.bold('Validations:')}  ${s.validationAttempts}/${s.maxValidationAttempts}`,
+      );
+      console.log(`${chalk.bold('Escalations:')}  ${s.escalationCount}`);
+      console.log(
+        `${chalk.bold('Changes:')}      ${s.filesChanged} files (+${s.linesAdded} -${s.linesRemoved})`,
+      );
+      if (s.mergeBlockReason) {
+        console.log(`${chalk.bold('Merge:')}        ${chalk.yellow(`⏳ ${s.mergeBlockReason}`)}`);
+      }
+      if (s.previewUrl) {
+        console.log(`${chalk.bold('Preview:')}      ${s.previewUrl}`);
+      }
+      if (s.plan) {
+        console.log(chalk.bold('\nPlan:'));
+        console.log(`  ${s.plan.summary}`);
+        s.plan.steps.forEach((step, i) => {
+          const isCurrent = s.progress && i + 1 === s.progress.currentPhase;
+          const prefix = isCurrent ? chalk.cyan('→') : chalk.dim('·');
+          console.log(`  ${prefix} ${i + 1}. ${step}`);
+        });
+      }
+      if (s.progress) {
+        console.log(
+          `${chalk.bold('Progress:')}     ${s.progress.currentPhase}/${s.progress.totalPhases} — ${s.progress.phase}`,
+        );
+        console.log(`${chalk.bold('Phase:')}        ${chalk.dim(s.progress.description)}`);
+      }
+      if (s.pendingEscalation) {
+        if (s.pendingEscalation.type === 'validation_override') {
+          const p = s.pendingEscalation.payload as {
+            findings: Array<{
+              id: string;
+              source: string;
+              description: string;
+              reasoning?: string;
+            }>;
+            attempt: number;
+            maxAttempts: number;
+          };
+          console.log(
+            chalk.yellow.bold(
+              `\nRecurring validation findings need review (attempt ${p.attempt}/${p.maxAttempts}):`,
+            ),
+          );
+          console.log(chalk.dim('  (Auto-hoisted to deeper review tier — still flagged)\n'));
+          for (const [i, f] of p.findings.entries()) {
+            const sourceLabel =
+              f.source === 'ac_validation' ? 'AC' : f.source === 'task_review' ? 'Review' : 'Req';
+            console.log(`  ${chalk.bold(`[${i + 1}]`)} ${sourceLabel}: "${f.description}"`);
+            if (f.reasoning) {
+              console.log(`      ${chalk.dim(`→ ${f.reasoning}`)}`);
+            }
+          }
+          console.log('');
+          console.log(chalk.dim(`  ap tell ${s.id} dismiss       — dismiss all`));
+          console.log(chalk.dim(`  ap tell ${s.id} dismiss 1     — dismiss finding #1`));
+          console.log(chalk.dim(`  ap tell ${s.id} "fix: ..."    — provide guidance`));
+        } else {
+          console.log(chalk.yellow.bold('\nPending escalation:'));
+          console.log(`  Type: ${s.pendingEscalation.type}`);
+          const p = s.pendingEscalation.payload;
+          console.log(
+            `  Message: ${'question' in p ? p.question : 'description' in p ? p.description : ''}`,
+          );
+        }
+      }
+      if (s.lastValidationResult) {
+        const vr = s.lastValidationResult;
+        const color = vr.overall === 'pass' ? chalk.green : chalk.red;
+        console.log(
+          `\n${chalk.bold('Last validation:')} ${color(vr.overall.toUpperCase())} (attempt ${vr.attempt})`,
+        );
+      }
+    });
+  }
   program
     .command('status <id>')
     .description('Show detailed pod status')
     .option('--json', 'Output as JSON')
-    .action(async (id: string, opts: { json?: boolean }) => {
-      const client = getClient();
-      const resolvedId = await resolvePodId(client, id);
-      const pod = await client.getSession(resolvedId);
-
-      withJsonOutput(opts, pod, (s) => {
-        console.log(chalk.bold.cyan(`Pod ${s.id}`));
-        console.log(chalk.dim('─'.repeat(50)));
-        console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
-        console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
-        console.log(`${chalk.bold('Task:')}         ${s.task}`);
-        console.log(`${chalk.bold('Model:')}        ${s.model}`);
-        console.log(`${chalk.bold('Runtime:')}      ${s.runtime}`);
-        console.log(`${chalk.bold('Branch:')}       ${s.branch}`);
-        console.log(
-          `${chalk.bold('Duration:')}     ${formatDurationFromDates(s.startedAt, s.completedAt)}`,
-        );
-        console.log(
-          `${chalk.bold('Validations:')}  ${s.validationAttempts}/${s.maxValidationAttempts}`,
-        );
-        console.log(`${chalk.bold('Escalations:')}  ${s.escalationCount}`);
-        console.log(
-          `${chalk.bold('Changes:')}      ${s.filesChanged} files (+${s.linesAdded} -${s.linesRemoved})`,
-        );
-        if (s.mergeBlockReason) {
-          console.log(`${chalk.bold('Merge:')}        ${chalk.yellow(`⏳ ${s.mergeBlockReason}`)}`);
-        }
-        if (s.previewUrl) {
-          console.log(`${chalk.bold('Preview:')}      ${s.previewUrl}`);
-        }
-        if (s.plan) {
-          console.log(chalk.bold('\nPlan:'));
-          console.log(`  ${s.plan.summary}`);
-          s.plan.steps.forEach((step, i) => {
-            const isCurrent = s.progress && i + 1 === s.progress.currentPhase;
-            const prefix = isCurrent ? chalk.cyan('→') : chalk.dim('·');
-            console.log(`  ${prefix} ${i + 1}. ${step}`);
-          });
-        }
-        if (s.progress) {
-          console.log(
-            `${chalk.bold('Progress:')}     ${s.progress.currentPhase}/${s.progress.totalPhases} — ${s.progress.phase}`,
-          );
-          console.log(`${chalk.bold('Phase:')}        ${chalk.dim(s.progress.description)}`);
-        }
-        if (s.pendingEscalation) {
-          if (s.pendingEscalation.type === 'validation_override') {
-            const p = s.pendingEscalation.payload as {
-              findings: Array<{
-                id: string;
-                source: string;
-                description: string;
-                reasoning?: string;
-              }>;
-              attempt: number;
-              maxAttempts: number;
-            };
-            console.log(
-              chalk.yellow.bold(
-                `\nRecurring validation findings need review (attempt ${p.attempt}/${p.maxAttempts}):`,
-              ),
-            );
-            console.log(chalk.dim('  (Auto-hoisted to deeper review tier — still flagged)\n'));
-            for (const [i, f] of p.findings.entries()) {
-              const sourceLabel =
-                f.source === 'ac_validation' ? 'AC' : f.source === 'task_review' ? 'Review' : 'Req';
-              console.log(`  ${chalk.bold(`[${i + 1}]`)} ${sourceLabel}: "${f.description}"`);
-              if (f.reasoning) {
-                console.log(`      ${chalk.dim(`→ ${f.reasoning}`)}`);
-              }
-            }
-            console.log('');
-            console.log(chalk.dim(`  ap tell ${s.id} dismiss       — dismiss all`));
-            console.log(chalk.dim(`  ap tell ${s.id} dismiss 1     — dismiss finding #1`));
-            console.log(chalk.dim(`  ap tell ${s.id} "fix: ..."    — provide guidance`));
-          } else {
-            console.log(chalk.yellow.bold('\nPending escalation:'));
-            console.log(`  Type: ${s.pendingEscalation.type}`);
-            const p = s.pendingEscalation.payload;
-            console.log(
-              `  Message: ${'question' in p ? p.question : 'description' in p ? p.description : ''}`,
-            );
-          }
-        }
-        if (s.lastValidationResult) {
-          const vr = s.lastValidationResult;
-          const color = vr.overall === 'pass' ? chalk.green : chalk.red;
-          console.log(
-            `\n${chalk.bold('Last validation:')} ${color(vr.overall.toUpperCase())} (attempt ${vr.attempt})`,
-          );
-        }
-      });
-    });
+    .action(statusAction);
 
   // ap logs
+  async function logsAction(
+    id: string,
+    opts: { build?: boolean; follow?: boolean },
+  ): Promise<void> {
+    const client = getClient();
+    const resolvedId = await resolvePodId(client, id);
+
+    if (opts.follow) {
+      const WebSocket = (await import('ws')).default;
+      const token = await client.fetchToken();
+      const wsUrl = client.getWebSocketUrl(`/events?token=${encodeURIComponent(token)}`);
+      const ws = new WebSocket(wsUrl);
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify({ type: 'subscribe', podId: resolvedId }));
+        console.log(chalk.dim(`Following pod ${resolvedId.slice(0, 8)}… (Ctrl+C to stop)\n`));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const event = JSON.parse(data.toString()) as { type: string };
+          // Skip subscribe/unsubscribe confirmations
+          if (['subscribed', 'unsubscribed', 'subscribed_all', 'error'].includes(event.type))
+            return;
+          formatLogEvent(event as SystemEvent);
+        } catch {
+          // Ignore malformed messages
+        }
+      });
+
+      ws.on('close', () => process.exit(0));
+      ws.on('error', (err: Error) => {
+        console.error(chalk.red(`WebSocket error: ${err.message}`));
+        process.exit(1);
+      });
+
+      process.on('SIGINT', () => {
+        ws.close();
+        process.exit(0);
+      });
+
+      // Keep the process alive — the event loop stays open via the WebSocket
+      return;
+    }
+
+    const logs = await withSpinner('Fetching logs...', () =>
+      client.getSessionLogs(resolvedId, opts.build),
+    );
+    process.stdout.write(logs);
+  }
   program
     .command('logs <id>')
     .description('Show pod logs')
     .option('--build', 'Show build logs instead of agent logs')
     .option('-f, --follow', 'Follow log output in real-time via WebSocket')
-    .action(async (id: string, opts: { build?: boolean; follow?: boolean }) => {
-      const client = getClient();
-      const resolvedId = await resolvePodId(client, id);
-
-      if (opts.follow) {
-        const WebSocket = (await import('ws')).default;
-        const token = await client.fetchToken();
-        const wsUrl = client.getWebSocketUrl(`/events?token=${encodeURIComponent(token)}`);
-        const ws = new WebSocket(wsUrl);
-
-        ws.on('open', () => {
-          ws.send(JSON.stringify({ type: 'subscribe', podId: resolvedId }));
-          console.log(chalk.dim(`Following pod ${resolvedId.slice(0, 8)}… (Ctrl+C to stop)\n`));
-        });
-
-        ws.on('message', (data: Buffer) => {
-          try {
-            const event = JSON.parse(data.toString()) as { type: string };
-            // Skip subscribe/unsubscribe confirmations
-            if (['subscribed', 'unsubscribed', 'subscribed_all', 'error'].includes(event.type))
-              return;
-            formatLogEvent(event as SystemEvent);
-          } catch {
-            // Ignore malformed messages
-          }
-        });
-
-        ws.on('close', () => process.exit(0));
-        ws.on('error', (err: Error) => {
-          console.error(chalk.red(`WebSocket error: ${err.message}`));
-          process.exit(1);
-        });
-
-        process.on('SIGINT', () => {
-          ws.close();
-          process.exit(0);
-        });
-
-        // Keep the process alive — the event loop stays open via the WebSocket
-        return;
-      }
-
-      const logs = await withSpinner('Fetching logs...', () =>
-        client.getSessionLogs(resolvedId, opts.build),
-      );
-      process.stdout.write(logs);
-    });
+    .action(logsAction);
 
   // ap pause
   program
@@ -469,6 +474,12 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     });
 
   // ap kill
+  async function killAction(id: string): Promise<void> {
+    const client = getClient();
+    const resolvedId = await resolvePodId(client, id);
+    await withSpinner('Killing pod...', () => client.killSession(resolvedId));
+    console.log(chalk.red(`Pod ${resolvedId} killed.`));
+  }
   program
     .command('kill [id]')
     .description('Kill a running pod')
@@ -493,10 +504,23 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         process.exit(1);
       }
 
-      const resolvedId = await resolvePodId(client, id);
-      await withSpinner('Killing pod...', () => client.killSession(resolvedId));
-      console.log(chalk.red(`Pod ${resolvedId} killed.`));
+      await killAction(id);
     });
+
+  // ap pod <sub> — aliases for ap logs / status / kill
+  const podGroup = program.command('pod').description('Pod management shortcuts');
+  podGroup
+    .command('logs <id>')
+    .description('Show pod logs')
+    .option('--build', 'Show build logs instead of agent logs')
+    .option('-f, --follow', 'Follow log output in real-time via WebSocket')
+    .action(logsAction);
+  podGroup
+    .command('show <id>')
+    .description('Show detailed pod status')
+    .option('--json', 'Output as JSON')
+    .action(statusAction);
+  podGroup.command('kill <id>').description('Kill a running pod').action(killAction);
 }
 
 function formatTimestamp(ts: string): string {
