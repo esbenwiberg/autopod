@@ -250,6 +250,50 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
         ),
       );
     });
+
+  // ap install <id> gh|az
+  program
+    .command('install <id> <tool>')
+    .description('Install gh or az CLI into a running container (no credentials)')
+    .action(async (id: string, tool: string) => {
+      if (tool !== 'gh' && tool !== 'az') {
+        console.error(chalk.red('tool must be "gh" or "az"'));
+        process.exit(1);
+      }
+
+      const client = getClient();
+      const resolvedId = await resolvePodId(client, id);
+
+      const WAIT_TIMEOUT_MS = 60_000;
+      const POLL_INTERVAL_MS = 1_500;
+      const deadline = Date.now() + WAIT_TIMEOUT_MS;
+
+      await withSpinner(`Installing ${tool} CLI into pod ${resolvedId.slice(0, 8)}…`, async () => {
+        while (true) {
+          const pod = await client.getSession(resolvedId);
+          if (pod.status === 'running') break;
+
+          const terminalStates = ['complete', 'killed', 'failed'];
+          if (terminalStates.includes(pod.status)) {
+            throw new Error(
+              `Pod ${resolvedId.slice(0, 8)} is ${pod.status} — cannot install tools.`,
+            );
+          }
+
+          if (Date.now() >= deadline) {
+            throw new Error(
+              `Pod ${resolvedId.slice(0, 8)} is still ${pod.status} after ${WAIT_TIMEOUT_MS / 1000}s — container may have failed to start.`,
+            );
+          }
+
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        }
+
+        await client.installCliTool(resolvedId, tool as 'gh' | 'az');
+      });
+
+      console.log(chalk.green(`Done. ${tool} CLI installed in pod ${resolvedId.slice(0, 8)}.`));
+    });
 }
 
 async function ensureSpawnHelperExecutable(): Promise<void> {

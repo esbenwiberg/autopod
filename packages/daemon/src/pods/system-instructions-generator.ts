@@ -460,8 +460,16 @@ export function generateSystemInstructions(
 
   lines.push('## Workflow Requirements');
   lines.push('');
+  const activeCodeIntelNames = new Set((options?.injectedMcpServers ?? []).map((s) => s.name));
+  const activeCodeIntelTools = CODE_INTEL_TOOL_ROWS.filter((r) => activeCodeIntelNames.has(r.server)).map((r) => r.tool);
+  const hasCodeIntel = activeCodeIntelTools.length > 0;
+  const codeIntelExamples = activeCodeIntelTools.slice(0, 2).map((t) => `\`${t}\``).join(', ');
   lines.push(
-    '1. **Plan first**: Before writing any code, call `report_plan` with your approach and numbered steps.',
+    '1. **Plan first**: Before writing any code, explore the codebase to understand the relevant symbols, call sites, and patterns. ' +
+      (hasCodeIntel
+        ? `**Code-intel MCPs are active — use ${codeIntelExamples}, etc. for ALL symbol discovery. Do NOT use grep, find, or file reads to locate symbols.** `
+        : '') +
+      'Then call `report_plan` with your approach and numbered steps.',
   );
   lines.push(
     '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',
@@ -770,7 +778,7 @@ function generateCodeNavigationRules(lines: string[], injectedMcpServers: Inject
     lines.push(`| ${row.task} | \`${row.tool}\` |`);
   }
   lines.push('');
-  lines.push('Only fall back to grep/find if a code-intel tool returns empty results or explicitly errors.');
+  lines.push('**Never substitute grep/find/cat for a code-intel lookup.** Only fall back if a tool explicitly returns empty results or errors.');
   lines.push('');
 }
 

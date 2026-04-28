@@ -366,6 +366,26 @@ export function podRoutes(
     }
   });
 
+  // POST /pods/:podId/install-cli — install gh or az CLI into the container (no credentials)
+  app.post('/pods/:podId/install-cli', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const { tool } = request.body as { tool: 'gh' | 'az' };
+    if (tool !== 'gh' && tool !== 'az') {
+      reply.status(400);
+      return { error: 'tool must be "gh" or "az"' };
+    }
+    try {
+      await podManager.installCliTool(podId, tool);
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { message: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
   // POST /pods/:podId/recover-worktree — attempt to recover a worktree-compromised pod
   // by pulling files from its still-running container and retrying the auto-commit.
   app.post('/pods/:podId/recover-worktree', async (request, reply) => {

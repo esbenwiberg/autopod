@@ -169,6 +169,10 @@ export class AutopodClient {
     await this.request<void>('POST', `/pods/${id}/inject-credential`, { service });
   }
 
+  async installCliTool(id: string, tool: 'gh' | 'az'): Promise<void> {
+    await this.request<void>('POST', `/pods/${id}/install-cli`, { tool });
+  }
+
   async deleteSession(id: string): Promise<void> {
     await this.request<void>('DELETE', `/pods/${id}`);
   }

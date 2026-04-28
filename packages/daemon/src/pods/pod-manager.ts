@@ -513,6 +513,8 @@ export interface PodManager {
    * the temp credential file. Safe to call from user-initiated flows (workspace pods, CLI).
    */
   injectCredential(podId: string, service: 'github' | 'ado'): Promise<void>;
+  /** Install gh or az CLI into a running pod container without touching credentials. */
+  installCliTool(podId: string, tool: 'gh' | 'az'): Promise<void>;
   /**
    * Manually spawn a fix pod for a merge_pending or complete pod, bypassing the
    * automatic detection guards. Clears any stale fixPodId first so the fix
@@ -5965,6 +5967,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
       await performCredentialInjection(podId, service);
       emitActivityStatus(podId, `${service} credentials injected.`);
+    },
+
+    async installCliTool(podId: string, tool: 'gh' | 'az'): Promise<void> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.status !== 'running') {
+        throw new AutopodError(
+          `Pod ${podId} is ${pod.status} — can only install tools into running pods.`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!pod.containerId) {
+        throw new AutopodError(`Pod ${podId} has no running container`, 'INVALID_STATE', 409);
+      }
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      const containerId = pod.containerId;
+
+      const check = await cm.execInContainer(containerId, ['sh', '-c', `command -v ${tool}`]);
+      if (check.exitCode === 0) {
+        emitActivityStatus(podId, `${tool} is already installed.`);
+        return;
+      }
+
+      emitActivityStatus(podId, `Installing ${tool} CLI…`);
+      if (tool === 'gh') {
+        await installGhBinary(cm, containerId, podId);
+      } else {
+        await installAzViaPip(cm, containerId, podId);
+      }
+      emitActivityStatus(podId, `${tool} CLI installed.`);
     },
 
     async spawnFixSession(podId: string, userMessage?: string): Promise<void> {
