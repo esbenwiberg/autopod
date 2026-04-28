@@ -103,7 +103,11 @@ public final class PodStore {
       var updated = PodMapper.map(response)
       if let index = pods.firstIndex(where: { $0.id == id }) {
         // Preserve live WebSocket state that REST doesn't carry
-        updated.validationProgress = pods[index].validationProgress
+        if updated.status == .validating && pods[index].validationProgress == nil {
+          updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
+        } else {
+          updated.validationProgress = pods[index].validationProgress
+        }
         pods[index] = updated
       } else {
         pods.append(updated)
@@ -224,6 +228,10 @@ public final class PodStore {
 
   public func markValidationPhaseStarted(_ podId: String, phase: ValidationPhase) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
+    if pods[index].validationProgress == nil {
+      let attempt = pods[index].attempts?.current ?? 1
+      pods[index].validationProgress = ValidationProgress.initial(attempt: attempt)
+    }
     pods[index].validationProgress?.markStarted(phase)
   }
 

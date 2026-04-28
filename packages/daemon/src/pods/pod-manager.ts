@@ -4586,9 +4586,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (force) {
           const cm = containerManagerFactory.get(pod.executionTarget);
           await cm.start(pod.containerId);
+        } else {
+          // Guard: if the container exited before we got here (e.g. agent gave up after a
+          // push rejection), fail fast with a human-readable message instead of getting a
+          // cryptic Docker 409 "container stopped/paused" error from the exec call below.
+          const cm = containerManagerFactory.get(pod.executionTarget);
+          const containerStatus = await cm.getStatus(pod.containerId);
+          if (containerStatus !== 'running') {
+            throw new Error(
+              `Container exited before validation could run — check agent logs for errors (container status: ${containerStatus})`,
+            );
+          }
         }
 
         // Sync workspace back before reading diff/commit log from host worktree
+        emitActivityStatus(podId, 'Syncing workspace…');
         let validationSyncOk = true;
         if (pod.containerId && pod.worktreePath) {
           try {
@@ -4605,6 +4617,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // should only evaluate what this agent changed — pre-existing code on a
         // parent branch is not the agent's responsibility. Stats/file counts still
         // use the full branch diff (computed earlier) for accurate PR sizing.
+        emitActivityStatus(podId, 'Computing diff…');
         const diffSinceCommit = pod.startCommitSha ?? undefined;
         const validationDefaultBranch = profile.defaultBranch ?? 'main';
         const [diff, commitLog] = pod.worktreePath
@@ -4737,6 +4750,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             { err: validateErr, podId, attempt },
             'Validation engine threw unexpectedly',
           );
+          const isContainerStopped =
+            validateErr instanceof Error &&
+            (validateErr.message.includes('container stopped/paused') ||
+              (validateErr as NodeJS.ErrnoException & { statusCode?: number }).statusCode === 409);
+          const buildOutput = isContainerStopped
+            ? `Container exited before validation could run — check agent logs for errors`
+            : String(validateErr);
           result = {
             podId,
             attempt,
@@ -4744,7 +4764,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             overall: 'fail',
             smoke: {
               status: 'fail',
-              build: { status: 'fail', output: String(validateErr), duration: 0 },
+              build: { status: 'fail', output: buildOutput, duration: 0 },
               health: { status: 'fail', url: '', responseCode: null, duration: 0 },
               pages: [],
             },
@@ -4968,6 +4988,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Rethrow on non-guard errors: a swallowed push lets the carry-forward
             // path approve & merge a PR whose tip never advanced (real bug from
             // misrouted fix pods writing to the wrong branch).
+            emitActivityStatus(podId, 'Branch validated — pushing…');
             try {
               await worktreeManager.mergeBranch({
                 worktreePath: s2.worktreePath,
@@ -5291,6 +5312,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         } catch (validateErr) {
           logger.error({ err: validateErr, podId }, 'Revalidation engine threw unexpectedly');
+          const isContainerStopped =
+            validateErr instanceof Error &&
+            (validateErr.message.includes('container stopped/paused') ||
+              (validateErr as NodeJS.ErrnoException & { statusCode?: number }).statusCode === 409);
+          const buildOutput = isContainerStopped
+            ? `Container exited before validation could run — check agent logs for errors`
+            : String(validateErr);
           result = {
             podId,
             attempt,
@@ -5298,7 +5326,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             overall: 'fail',
             smoke: {
               status: 'fail',
-              build: { status: 'fail', output: String(validateErr), duration: 0 },
+              build: { status: 'fail', output: buildOutput, duration: 0 },
               health: { status: 'fail', url: '', responseCode: null, duration: 0 },
               pages: [],
             },

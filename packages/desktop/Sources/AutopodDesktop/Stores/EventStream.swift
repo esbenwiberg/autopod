@@ -138,6 +138,11 @@ public final class EventStream {
     case .statusChanged(let podId, _, let newStatus):
       if let status = PodStatus(rawValue: newStatus) {
         podStore.updateStatus(podId, to: status)
+        if status == .validating,
+           let pod = podStore.pods.first(where: { $0.id == podId }),
+           pod.validationProgress == nil {
+          podStore.initValidationProgress(podId, attempt: pod.attempts?.current ?? 1)
+        }
       }
       // Full refresh to pick up any other changed fields
       Task { await podStore.refreshSession(podId) }
