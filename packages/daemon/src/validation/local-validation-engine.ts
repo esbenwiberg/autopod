@@ -536,10 +536,27 @@ async function runBuild(
   }
 
   const duration = Date.now() - buildStart;
-  const output = `${result.stdout}\n${result.stderr}`.trim();
+  const rawOutput = `${result.stdout}\n${result.stderr}`.trim();
   const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
 
-  if (status === 'fail') {
+  // Exit 137 from an in-container exec is overwhelmingly the kernel OOM killer
+  // (SIGKILL). Combined with a bare trailing "Killed" line and no Node stack
+  // trace, it's a near-certain memory exhaustion. Surface this clearly so the
+  // failure points at memory headroom instead of looking like a generic build
+  // bug. Common cause on Docker Desktop: the Linux VM's memory ceiling is
+  // smaller than the container's requested limit, so the per-container cgroup
+  // limit is fake headroom.
+  const looksOomKilled = result.exitCode === 137 || /(^|\n)Killed\s*$/.test(rawOutput.slice(-200));
+  let output = rawOutput;
+  if (status === 'fail' && looksOomKilled) {
+    const hint =
+      'Build appears to have been OOM-killed (exit 137 / "Killed"). Raise the Docker Desktop VM memory (Settings → Resources), reduce concurrent pods, or increase profile.containerMemoryGb.';
+    output = `${hint}\n\n--- build output ---\n${rawOutput}`;
+    log?.warn(
+      { exitCode: result.exitCode, duration },
+      'build failed — OOM-killed (exit 137 / Killed)',
+    );
+  } else if (status === 'fail') {
     log?.warn({ exitCode: result.exitCode, duration }, 'build failed');
   } else {
     log?.info({ duration }, 'build passed');

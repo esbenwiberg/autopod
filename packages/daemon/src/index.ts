@@ -274,6 +274,43 @@ if (MOCK_DOCKER) {
     );
     process.exit(1);
   }
+  // Warn if the Docker engine's memory ceiling can't back the worst-case
+  // concurrent pod load. Per-container memory limits set by autopod are fake
+  // headroom if the VM doesn't actually have that much RAM — the kernel OOM
+  // killer fires first (most visible on Docker Desktop's small Linux VM).
+  try {
+    const info = await d.info();
+    const memTotalBytes =
+      typeof (info as { MemTotal?: unknown }).MemTotal === 'number'
+        ? ((info as { MemTotal: number }).MemTotal as number)
+        : undefined;
+    if (memTotalBytes && memTotalBytes > 0) {
+      const { DEFAULT_CONTAINER_MEMORY_GB } = await import('@autopod/shared');
+      const worstCaseBytes = DEFAULT_CONTAINER_MEMORY_GB * MAX_CONCURRENCY * 1024 ** 3;
+      const memTotalGb = (memTotalBytes / 1024 ** 3).toFixed(2);
+      if (memTotalBytes < worstCaseBytes) {
+        logger.warn(
+          {
+            dockerMemTotalGb: Number(memTotalGb),
+            defaultContainerMemoryGb: DEFAULT_CONTAINER_MEMORY_GB,
+            maxConcurrency: MAX_CONCURRENCY,
+            worstCaseGb: DEFAULT_CONTAINER_MEMORY_GB * MAX_CONCURRENCY,
+          },
+          'Docker engine memory is undersized for configured concurrency — heavy builds may be OOM-killed. Raise Docker Desktop Settings → Resources → Memory, lower MAX_CONCURRENCY, or set profile.containerMemoryGb on memory-light profiles.',
+        );
+      } else {
+        logger.info(
+          {
+            dockerMemTotalGb: Number(memTotalGb),
+            worstCaseGb: DEFAULT_CONTAINER_MEMORY_GB * MAX_CONCURRENCY,
+          },
+          'Docker engine memory budget OK',
+        );
+      }
+    }
+  } catch (err) {
+    logger.debug({ err }, 'docker.info() failed — skipping memory headroom check');
+  }
   docker = d;
   containerManager = new DockerContainerManager({ docker: d, logger });
   networkManager = new DockerNetworkManager({ docker: d, logger });

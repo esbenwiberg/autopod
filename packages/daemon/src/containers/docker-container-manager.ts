@@ -104,12 +104,21 @@ export class DockerContainerManager implements ContainerManager {
       securityOpt.push(`seccomp=${SECCOMP_JSON}`);
     }
 
+    const alignedMemory = config.memoryBytes
+      ? alignMemoryToPageSize(config.memoryBytes)
+      : undefined;
     const hostConfig: Record<string, unknown> = {
       Binds: binds.length > 0 ? binds : undefined,
       PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
       AutoRemove: false,
       // Hard memory cap — prevents OOM kills from taking down the whole Docker VM.
-      Memory: config.memoryBytes ? alignMemoryToPageSize(config.memoryBytes) : undefined,
+      Memory: alignedMemory,
+      // MemorySwap == Memory means the container's swap budget equals its RAM
+      // budget (i.e. no extra swap is allocated). Without this cap, Docker
+      // defaults to MemorySwap = 2 × Memory and a single heavy build can drain
+      // the host's shared swap pool, OOM-killing siblings on tightly-allocated
+      // hosts (notably Docker Desktop's small Linux VM).
+      MemorySwap: alignedMemory,
       // Drop ALL capabilities — re-add only what is needed per use-case.
       CapDrop: ['ALL'],
       SecurityOpt: securityOpt,
