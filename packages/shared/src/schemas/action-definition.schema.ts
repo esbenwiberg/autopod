@@ -49,6 +49,7 @@ export const actionGroupSchema = z.enum([
   'ado-test-pipeline',
   'azure-logs',
   'azure-pim',
+  'deploy',
   'custom',
 ]);
 
@@ -59,6 +60,7 @@ export const actionHandlerSchema = z.enum([
   'azure-pim',
   'http',
   'test-pipeline',
+  'deploy',
 ]);
 
 // ─── Endpoint (HTTP handler) ────────────────────────────────────

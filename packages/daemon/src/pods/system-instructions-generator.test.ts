@@ -169,9 +169,7 @@ describe('generateSystemInstructions', () => {
 
     expect(md).toContain('### serena');
     // Consolidated first-turn block appears before the per-server section
-    expect(md).toContain(
-      '**On your first turn, load all tool schemas before starting work:**',
-    );
+    expect(md).toContain('**On your first turn, load all tool schemas before starting work:**');
     // Both the consolidated block and the per-server reminder reference the tool names
     expect(md).toContain(
       'ToolSearch select:mcp__serena__find_symbol,mcp__serena__find_referencing_symbols',
@@ -274,7 +272,11 @@ describe('generateSystemInstructions', () => {
   });
 
   it('omits Code Navigation Rules when no servers are injected', () => {
-    const md = generateSystemInstructions(makeProfile(), makeSession(), 'http://localhost:8080/mcp/x');
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
     expect(md).not.toContain('## Code Navigation Rules');
   });
 

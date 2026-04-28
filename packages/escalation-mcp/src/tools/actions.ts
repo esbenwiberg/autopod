@@ -24,12 +24,22 @@ export async function executeAction(
 ): Promise<string> {
   // Check if this action requires human approval before execution
   if (bridge.actionRequiresApproval(podId, actionName)) {
+    // Gather handler-specific approval context (e.g. deploy script content + hash)
+    // BEFORE creating the escalation so the human reviewer sees it.
+    let approvalContext: Record<string, unknown> | undefined;
+    try {
+      approvalContext = await bridge.getActionApprovalContext?.(podId, actionName, params);
+    } catch (err) {
+      return `Cannot prepare approval context: ${err instanceof Error ? err.message : String(err)}`;
+    }
+
     const approvalResult = await requestApproval(
       podId,
       actionName,
       params,
       bridge,
       pendingRequests,
+      approvalContext,
     );
     if (!approvalResult.approved) {
       return approvalResult.message;
@@ -38,6 +48,7 @@ export async function executeAction(
     // Approved — execute with skipApprovalCheck to bypass engine's defense-in-depth guard
     const response = await bridge.executeAction(podId, actionName, params, {
       skipApprovalCheck: true,
+      approvalContext,
     });
     return formatResponse(response);
   }
@@ -53,6 +64,7 @@ async function requestApproval(
   params: Record<string, unknown>,
   bridge: PodBridge,
   pendingRequests: PendingRequests,
+  approvalContext?: Record<string, unknown>,
 ): Promise<{ approved: boolean; message: string }> {
   const escalationId = generateId();
   const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
@@ -60,6 +72,12 @@ async function requestApproval(
   const paramSummary = Object.entries(params)
     .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)
     .join('\n');
+
+  // For deploy actions, include the script content so the reviewer knows what they're approving
+  let contextSection = '';
+  if (approvalContext?.scriptContent) {
+    contextSection = `\n\nScript content to be executed:\n\`\`\`\n${approvalContext.scriptContent}\n\`\`\``;
+  }
 
   const escalation: EscalationRequest = {
     id: escalationId,
@@ -69,7 +87,8 @@ async function requestApproval(
     payload: {
       actionName,
       params,
-      description: `Execute action '${actionName}' with parameters:\n${paramSummary}`,
+      approvalContext,
+      description: `Execute action '${actionName}' with parameters:\n${paramSummary}${contextSection}`,
     },
     response: null,
   };

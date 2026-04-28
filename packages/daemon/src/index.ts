@@ -447,6 +447,7 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
     logger,
     podRepo,
     profileStore,
+    containerManager,
     getSecret: (ref: string) => {
       const envVal = process.env[ref];
       if (envVal) return envVal;

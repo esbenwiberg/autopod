@@ -362,9 +362,39 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           actionName,
           params: resolvedParams,
           skipApprovalCheck: options?.skipApprovalCheck,
+          approvalContext: options?.approvalContext,
         },
         profile.actionPolicy,
       );
+    },
+
+    async getActionApprovalContext(
+      podId: string,
+      actionName: string,
+      params: Record<string, unknown>,
+    ): Promise<Record<string, unknown> | undefined> {
+      if (actionName !== 'run_deploy_script') return undefined;
+
+      const pod = podManager.getSession(podId);
+      const profile = profileStore.get(pod.profileName);
+      if (!profile.deployment?.enabled) return undefined;
+      if (!pod.containerId) return undefined;
+
+      const scriptPath = params.script_path;
+      if (
+        typeof scriptPath !== 'string' ||
+        scriptPath.length === 0 ||
+        scriptPath.startsWith('/') ||
+        scriptPath.includes('..')
+      ) {
+        return undefined; // invalid path — let the handler emit the proper error
+      }
+
+      const { createHash } = await import('node:crypto');
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      const scriptContent = await cm.readFile(pod.containerId, `/workspace/${scriptPath}`);
+      const scriptHash = createHash('sha256').update(scriptContent, 'utf8').digest('hex');
+      return { scriptContent, scriptHash };
     },
 
     getAvailableActions(podId: string): ActionDefinition[] {

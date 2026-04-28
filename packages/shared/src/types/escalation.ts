@@ -43,6 +43,8 @@ export interface ActionApprovalPayload {
   actionName: string;
   params: Record<string, unknown>;
   description: string;
+  /** Handler-specific context captured before the approval was requested (e.g. deploy script hash). */
+  approvalContext?: Record<string, unknown>;
 }
 
 export interface ValidationOverridePayload {

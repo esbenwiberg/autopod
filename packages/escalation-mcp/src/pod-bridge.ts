@@ -34,12 +34,26 @@ export interface PodBridge {
   consumeMessages(podId: string): { hasMessage: boolean; message?: string };
   /** Check if an action requires human approval before execution */
   actionRequiresApproval(podId: string, actionName: string): boolean;
+  /**
+   * Optionally called before creating a human-approval escalation.
+   * Handlers that need to show additional context to the reviewer (e.g. deploy
+   * script content) implement this. The returned object is:
+   *  - Included in the escalation payload so the human sees it before approving
+   *  - Forwarded to the action handler after approval as `request.approvalContext`
+   *    so it can perform post-approval verification (e.g. hash check).
+   * Returns undefined when the action has no special approval context.
+   */
+  getActionApprovalContext?(
+    podId: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | undefined>;
   /** Execute an action via the action control plane */
   executeAction(
     podId: string,
     actionName: string,
     params: Record<string, unknown>,
-    options?: { skipApprovalCheck?: boolean },
+    options?: { skipApprovalCheck?: boolean; approvalContext?: Record<string, unknown> },
   ): Promise<ActionResponse>;
   /** Get all action definitions available for a pod's profile */
   getAvailableActions(podId: string): ActionDefinition[];

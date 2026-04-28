@@ -18,6 +18,12 @@ export interface ActionHandler {
  *  it simply ignore the argument. */
 export interface ActionHandlerContext {
   podId: string;
+  /**
+   * Handler-specific data captured at approval time (populated by the MCP layer
+   * after a human approves the action). Used by the deploy handler to verify
+   * the script hash has not changed since the reviewer approved it.
+   */
+  approvalContext?: Record<string, unknown>;
 }
 
 export interface HandlerConfig {

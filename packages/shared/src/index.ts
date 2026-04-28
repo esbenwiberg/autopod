@@ -31,6 +31,7 @@ export type {
   MergeStrategy,
   TestPipelineConfig,
   CodeIntelligenceConfig,
+  DeploymentConfig,
 } from './types/profile.js';
 
 export type {

@@ -1,0 +1,23 @@
+[
+  {
+    "name": "run_deploy_script",
+    "group": "deploy",
+    "handler": "deploy",
+    "description": "Execute a deployment script in the workspace with environment variables injected server-side from the profile. Credentials and secrets are resolved by the daemon and are never visible to the agent. Requires deployment to be enabled on the profile. When human approval is configured, the reviewer sees the full script content before approving.",
+    "params": {
+      "script_path": {
+        "type": "string",
+        "required": true,
+        "description": "Path to the script relative to the workspace root (e.g. 'deploy.sh', 'scripts/deploy-prod.sh'). Must not start with / or contain .."
+      },
+      "args": {
+        "type": "string",
+        "required": false,
+        "description": "Optional space-separated arguments to pass to the script (e.g. '--env prod --dry-run')"
+      }
+    },
+    "response": {
+      "fields": ["exit_code", "stdout", "stderr"]
+    }
+  }
+]

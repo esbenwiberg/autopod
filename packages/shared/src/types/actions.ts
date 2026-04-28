@@ -9,6 +9,7 @@ export type ActionGroup =
   | 'ado-test-pipeline'
   | 'azure-logs'
   | 'azure-pim'
+  | 'deploy'
   | 'custom';
 
 export type ActionHandler =
@@ -17,7 +18,8 @@ export type ActionHandler =
   | 'azure-logs'
   | 'azure-pim'
   | 'http'
-  | 'test-pipeline';
+  | 'test-pipeline'
+  | 'deploy';
 
 // ─── Auth Config ────────────────────────────────────────────────
 export type AuthConfig =
@@ -110,6 +112,13 @@ export interface ActionRequest {
   params: Record<string, unknown>;
   /** Set by MCP layer after human approval — bypasses requiresApproval check in engine */
   skipApprovalCheck?: boolean;
+  /**
+   * Handler-specific context captured at approval time (e.g. script hash for deploy actions).
+   * The MCP layer populates this via `PodBridge.getActionApprovalContext` before creating the
+   * escalation, then forwards it here after the human approves. Handlers use it for
+   * post-approval verification (e.g. confirming the deploy script was not swapped after approval).
+   */
+  approvalContext?: Record<string, unknown>;
 }
 
 export interface ActionResponse {

@@ -6,6 +6,7 @@ import type {
 } from '@autopod/shared';
 import { processContentDeep } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ActionRegistry } from './action-registry.js';
@@ -14,6 +15,7 @@ import { createGenericHttpHandler } from './generic-http-handler.js';
 import { createAdoHandler } from './handlers/ado-handler.js';
 import { createAzureLogsHandler } from './handlers/azure-logs-handler.js';
 import { createAzurePimHandler } from './handlers/azure-pim-handler.js';
+import { createDeployHandler } from './handlers/deploy-handler.js';
 import { createGitHubHandler } from './handlers/github-handler.js';
 import type { ActionHandler, HandlerConfig } from './handlers/handler.js';
 import { createTestPipelineHandler } from './handlers/test-pipeline-handler.js';
@@ -40,10 +42,21 @@ export interface ActionEngineDependencies {
   podRepo?: PodRepository;
   /** Optional — required only when the `test-pipeline` handler is used. */
   profileStore?: ProfileStore;
+  /** Optional — required only when the `deploy` handler is used. */
+  containerManager?: ContainerManager;
 }
 
 export function createActionEngine(deps: ActionEngineDependencies): ActionEngine {
-  const { registry, auditRepo, logger, getSecret, ssrfGuard, podRepo, profileStore } = deps;
+  const {
+    registry,
+    auditRepo,
+    logger,
+    getSecret,
+    ssrfGuard,
+    podRepo,
+    profileStore,
+    containerManager,
+  } = deps;
   const log = logger.child({ component: 'action-engine' });
 
   // Create handler instances
@@ -60,6 +73,14 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       logger: log,
       podRepo,
       profileStore,
+    });
+  }
+  if (podRepo && profileStore && containerManager) {
+    handlers.deploy = createDeployHandler({
+      podRepo,
+      containerManager,
+      profileStore,
+      daemonEnv: process.env,
     });
   }
 
@@ -152,7 +173,10 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
 
       let rawData: unknown;
       try {
-        rawData = await handler.execute(action, resolvedParams, { podId });
+        rawData = await handler.execute(action, resolvedParams, {
+          podId,
+          approvalContext: request.approvalContext,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error({ err, podId, actionName }, 'Action handler failed');

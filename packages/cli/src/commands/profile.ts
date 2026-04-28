@@ -123,11 +123,14 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       const client = getClient();
       const template = {
         name: 'my-project',
-        repoUrl: 'https://github.com/org/repo',
+        // repoUrl: optional. Set to a github.com or dev.azure.com URL for repo-backed pods.
+        // Leave null for ephemeral/red-team profiles or base profiles shared across repos.
+        // buildCommand and startCommand are also optional when repoUrl is null.
+        repoUrl: null,
         defaultBranch: 'main',
         template: 'node22',
-        buildCommand: 'npm run build',
-        startCommand: 'npm start',
+        buildCommand: null,
+        startCommand: null,
         healthPath: '/',
         healthTimeout: 120,
         smokePages: [{ path: '/' }],

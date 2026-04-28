@@ -370,9 +370,7 @@ describe('DockerNetworkManager', () => {
       it('resolves daemon gateway in dnsmasq-only mode', async () => {
         const script = await manager.generateFirewallScript(['example.com']);
         // gateway resolution appears in both dnsmasq branches
-        const gatewayCount = (
-          script.match(/getent ahostsv4 host\.docker\.internal/g) || []
-        ).length;
+        const gatewayCount = (script.match(/getent ahostsv4 host\.docker\.internal/g) || []).length;
         expect(gatewayCount).toBe(2);
       });
 
@@ -384,7 +382,10 @@ describe('DockerNetworkManager', () => {
       });
 
       it('prints correct echo for dnsmasq-only mode', async () => {
-        const script = await manager.generateFirewallScript(['example.com', '*.blob.core.windows.net']);
+        const script = await manager.generateFirewallScript([
+          'example.com',
+          '*.blob.core.windows.net',
+        ]);
         expect(script).toContain('restricted mode (dnsmasq DNS-only)');
         expect(script).toContain('port 443/80 open');
       });

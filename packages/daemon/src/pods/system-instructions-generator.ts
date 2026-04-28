@@ -182,9 +182,7 @@ export function generateSystemInstructions(
   // the agent loads all deferred schemas in a single pass before starting work.
   // Only rendered when injected servers have toolNames to load.
   const injectedMcpServers = options?.injectedMcpServers ?? [];
-  const serversWithTools = injectedMcpServers.filter(
-    (s) => s.toolNames && s.toolNames.length > 0,
-  );
+  const serversWithTools = injectedMcpServers.filter((s) => s.toolNames && s.toolNames.length > 0);
   if (serversWithTools.length > 0) {
     lines.push('**On your first turn, load all tool schemas before starting work:**');
     for (const server of serversWithTools) {
@@ -461,9 +459,14 @@ export function generateSystemInstructions(
   lines.push('## Workflow Requirements');
   lines.push('');
   const activeCodeIntelNames = new Set((options?.injectedMcpServers ?? []).map((s) => s.name));
-  const activeCodeIntelTools = CODE_INTEL_TOOL_ROWS.filter((r) => activeCodeIntelNames.has(r.server)).map((r) => r.tool);
+  const activeCodeIntelTools = CODE_INTEL_TOOL_ROWS.filter((r) =>
+    activeCodeIntelNames.has(r.server),
+  ).map((r) => r.tool);
   const hasCodeIntel = activeCodeIntelTools.length > 0;
-  const codeIntelExamples = activeCodeIntelTools.slice(0, 2).map((t) => `\`${t}\``).join(', ');
+  const codeIntelExamples = activeCodeIntelTools
+    .slice(0, 2)
+    .map((t) => `\`${t}\``)
+    .join(', ');
   lines.push(
     '1. **Plan first**: Before writing any code, explore the codebase to understand the relevant symbols, call sites, and patterns. ' +
       (hasCodeIntel
@@ -721,7 +724,9 @@ function generateOperatingEnvironment(
   // What You Cannot Do
   lines.push('### What You Cannot Do');
   lines.push('- Access external APIs directly (use the action tools on the Escalation MCP server)');
-  lines.push('- Read files from repos other than your worktree (use read_file action instead)');
+  if (profile.repoUrl) {
+    lines.push('- Read files from repos other than your worktree (use read_file action instead)');
+  }
   lines.push('- See real email addresses or usernames (they are masked for privacy)');
   lines.push(
     '- Extract, copy, or embed credentials from environment variables into any file. ' +
@@ -732,7 +737,12 @@ function generateOperatingEnvironment(
 
   // Git Operations
   lines.push('### Git Operations');
-  if (profile.outputMode === 'artifact') {
+  const profileOutputTarget = profile.pod?.output ?? profile.outputMode;
+  if (!profile.repoUrl || profileOutputTarget === 'none') {
+    lines.push('- There is no remote repository for this session.');
+    lines.push('- You CAN use git locally for version tracking if useful (commits stay in container).');
+    lines.push('- Do NOT attempt to `git push` or create PRs — there is no remote.');
+  } else if (profileOutputTarget === 'artifact') {
     lines.push('- You CAN use git within your worktree for version tracking.');
     lines.push('- Your primary output is the artifact file, not a PR.');
   } else {
@@ -748,18 +758,53 @@ function generateOperatingEnvironment(
 }
 
 const CODE_INTEL_TOOL_ROWS: Array<{ task: string; tool: string; server: string }> = [
-  { task: 'Find a class / method / symbol by name', tool: 'mcp__serena__find_symbol', server: 'serena' },
-  { task: 'Find all callers of a method', tool: 'mcp__serena__find_referencing_symbols', server: 'serena' },
-  { task: 'Find implementations of a symbol', tool: 'mcp__serena__find_implementations', server: 'serena' },
+  {
+    task: 'Find a class / method / symbol by name',
+    tool: 'mcp__serena__find_symbol',
+    server: 'serena',
+  },
+  {
+    task: 'Find all callers of a method',
+    tool: 'mcp__serena__find_referencing_symbols',
+    server: 'serena',
+  },
+  {
+    task: 'Find implementations of a symbol',
+    tool: 'mcp__serena__find_implementations',
+    server: 'serena',
+  },
   { task: 'Search for a code pattern', tool: 'mcp__serena__search_for_pattern', server: 'serena' },
-  { task: 'List implementations of an interface', tool: 'mcp__roslyn-codelens__find_implementations', server: 'roslyn-codelens' },
-  { task: 'Trace DI container registrations', tool: 'mcp__roslyn-codelens__get_di_registrations', server: 'roslyn-codelens' },
-  { task: 'Find all references to a symbol', tool: 'mcp__roslyn-codelens__find_references', server: 'roslyn-codelens' },
-  { task: 'Find all callers of a method (C#)', tool: 'mcp__roslyn-codelens__find_callers', server: 'roslyn-codelens' },
-  { task: 'Navigate to a definition', tool: 'mcp__roslyn-codelens__go_to_definition', server: 'roslyn-codelens' },
+  {
+    task: 'List implementations of an interface',
+    tool: 'mcp__roslyn-codelens__find_implementations',
+    server: 'roslyn-codelens',
+  },
+  {
+    task: 'Trace DI container registrations',
+    tool: 'mcp__roslyn-codelens__get_di_registrations',
+    server: 'roslyn-codelens',
+  },
+  {
+    task: 'Find all references to a symbol',
+    tool: 'mcp__roslyn-codelens__find_references',
+    server: 'roslyn-codelens',
+  },
+  {
+    task: 'Find all callers of a method (C#)',
+    tool: 'mcp__roslyn-codelens__find_callers',
+    server: 'roslyn-codelens',
+  },
+  {
+    task: 'Navigate to a definition',
+    tool: 'mcp__roslyn-codelens__go_to_definition',
+    server: 'roslyn-codelens',
+  },
 ];
 
-function generateCodeNavigationRules(lines: string[], injectedMcpServers: InjectedMcpServer[]): void {
+function generateCodeNavigationRules(
+  lines: string[],
+  injectedMcpServers: InjectedMcpServer[],
+): void {
   const activeServerNames = new Set(injectedMcpServers.map((s) => s.name));
   const rows = CODE_INTEL_TOOL_ROWS.filter((r) => activeServerNames.has(r.server));
   if (rows.length === 0) return;
@@ -778,7 +823,9 @@ function generateCodeNavigationRules(lines: string[], injectedMcpServers: Inject
     lines.push(`| ${row.task} | \`${row.tool}\` |`);
   }
   lines.push('');
-  lines.push('**Never substitute grep/find/cat for a code-intel lookup.** Only fall back if a tool explicitly returns empty results or errors.');
+  lines.push(
+    '**Never substitute grep/find/cat for a code-intel lookup.** Only fall back if a tool explicitly returns empty results or errors.',
+  );
   lines.push('');
 }
 

@@ -186,6 +186,8 @@ export interface Profile {
    * inherit from parent or fall back to the bundled `default` preset.
    */
   securityScan: SecurityScanPolicy | null;
+  /** Deployment configuration — enables agents to trigger deploy scripts with server-injected credentials */
+  deployment: DeploymentConfig | null;
   /**
    * Code intelligence tools to inject into agent containers as stdio MCP servers.
    * Null = feature disabled (default). Tools are installed in the container image
@@ -278,6 +280,27 @@ export type PimActivationConfig =
       duration?: string;
       justification?: string;
     };
+
+export interface DeploymentConfig {
+  enabled: boolean;
+  /**
+   * Env vars injected into deploy script executions via `docker exec --env`.
+   * Never placed in the container's persistent environment, so agents cannot
+   * observe them passively via `printenv` or `/proc/self/environ`.
+   *
+   * Prefix a value with `$DAEMON:<VAR>` to resolve it from the daemon's
+   * `process.env` at execution time (e.g. for secrets on the daemon host).
+   * Plain string values are stored as-is — use for non-secret targeting config
+   * like resource group names, locations, etc.
+   */
+  env: Record<string, string>;
+  /**
+   * Optional glob allowlist. When set, only script paths matching one of these
+   * patterns can be executed. Relative to `/workspace` inside the container.
+   * Supports `*` wildcards within path segments (e.g. `scripts/deploy-*.sh`).
+   */
+  allowedScripts?: string[];
+}
 
 export interface CodeIntelligenceConfig {
   /**

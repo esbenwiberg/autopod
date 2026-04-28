@@ -210,6 +210,46 @@ describe('ProfileValidator', () => {
     });
   });
 
+  describe('repo-less profiles (ephemeral / base anchor)', () => {
+    it('accepts a profile with no repoUrl', () => {
+      const result = validateProfile({ name: 'red-team', repoUrl: null });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts a profile with no repoUrl and no buildCommand or startCommand', () => {
+      const result = validateProfile({ name: 'red-team', repoUrl: null, buildCommand: null, startCommand: null });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts a profile with no repoUrl but with a buildCommand', () => {
+      const result = validateProfile({ name: 'tooling', repoUrl: null, buildCommand: 'pip install -r requirements.txt' });
+      expect(result.valid).toBe(true);
+    });
+
+    it('still rejects dangerous buildCommand even without a repoUrl', () => {
+      const result = validateProfile({ name: 'tooling', repoUrl: null, buildCommand: 'sudo pip install' });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('dangerous');
+    });
+
+    it('still requires buildCommand when repoUrl is set', () => {
+      const result = validateProfile({ name: 'my-app', repoUrl: 'https://github.com/org/repo', buildCommand: '' });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('buildCommand'))).toBe(true);
+    });
+
+    it('still requires $PORT in startCommand when repoUrl is set', () => {
+      const result = validateProfile({ ...validInput, startCommand: 'node server.js' });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('$PORT');
+    });
+
+    it('does not require $PORT in startCommand when repoUrl is null', () => {
+      const result = validateProfile({ name: 'tooling', repoUrl: null, startCommand: 'node worker.js' });
+      expect(result.valid).toBe(true);
+    });
+  });
+
   describe('private registry SSRF guard', () => {
     it('rejects a registry URL pointing at the AWS/GCP/Azure metadata endpoint', () => {
       const result = validateProfile({

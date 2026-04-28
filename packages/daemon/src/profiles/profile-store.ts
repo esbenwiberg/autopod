@@ -2,6 +2,7 @@ import type {
   ActionPolicy,
   AgentMode,
   CodeIntelligenceConfig,
+  DeploymentConfig,
   EscalationConfig,
   InjectedClaudeMdSection,
   InjectedMcpServer,
@@ -181,6 +182,7 @@ export function rowToProfile(
     codeIntelligence: row.code_intelligence
       ? (JSON.parse(row.code_intelligence as string) as CodeIntelligenceConfig)
       : null,
+    deployment: row.deployment ? (JSON.parse(row.deployment as string) as DeploymentConfig) : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -302,6 +304,7 @@ export function createProfileStore(
           pim_activations,
           merge_strategy,
           sidecars, trusted_source, test_pipeline, security_scan, code_intelligence,
+          deployment,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand, @buildWorkDir,
@@ -319,6 +322,7 @@ export function createProfileStore(
           @pimActivations,
           @mergeStrategy,
           @sidecars, @trustedSource, @testPipeline, @securityScan, @codeIntelligence,
+          @deployment,
           @createdAt, @updatedAt
         )
       `).run({
@@ -388,6 +392,7 @@ export function createProfileStore(
         testPipeline: parsed.testPipeline ? JSON.stringify(parsed.testPipeline) : null,
         securityScan: parsed.securityScan ? JSON.stringify(parsed.securityScan) : null,
         codeIntelligence: parsed.codeIntelligence ? JSON.stringify(parsed.codeIntelligence) : null,
+        deployment: parsed.deployment ? JSON.stringify(parsed.deployment) : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -435,21 +440,22 @@ export function createProfileStore(
         if (!parentExists) throw new ProfileNotFoundError(parsed.extends);
       }
 
-      // Enforce: base profiles (extends == null after this update) must have
-      // non-null buildCommand and startCommand. Null is only meaningful on
-      // derived profiles as "inherit from parent".
+      // Base profiles with a repo must have buildCommand and startCommand.
+      // Repo-less profiles (ephemeral / inheritance anchors) are exempt — nothing to build or start.
+      // Derived profiles always treat null as "inherit from parent".
       const resultExtends = parsed.extends === undefined ? existing.extends : parsed.extends;
-      if (resultExtends === null) {
+      const resultRepoUrl = parsed.repoUrl !== undefined ? parsed.repoUrl : existing.repoUrl;
+      if (resultExtends === null && resultRepoUrl !== null) {
         if (parsed.buildCommand === null) {
           throw new AutopodError(
-            'buildCommand cannot be null on a base profile (extends is null)',
+            'buildCommand cannot be null on a base profile with a repoUrl',
             'INVALID_BASE_PROFILE',
             400,
           );
         }
         if (parsed.startCommand === null) {
           throw new AutopodError(
-            'startCommand cannot be null on a base profile (extends is null)',
+            'startCommand cannot be null on a base profile with a repoUrl',
             'INVALID_BASE_PROFILE',
             400,
           );
@@ -713,6 +719,10 @@ export function createProfileStore(
         fieldMap.codeIntelligence = parsed.codeIntelligence
           ? JSON.stringify(parsed.codeIntelligence)
           : null;
+      }
+      if (parsed.deployment !== undefined) {
+        setClauses.push('deployment = @deployment');
+        fieldMap.deployment = parsed.deployment ? JSON.stringify(parsed.deployment) : null;
       }
 
       if (setClauses.length === 0) {

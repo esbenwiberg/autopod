@@ -37,20 +37,14 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     );
   }
 
-  // Repo URL
+  // Repo URL — optional; repo-less profiles are valid for ephemeral/red-team use or as
+  // inheritance anchors where derived profiles supply the repoUrl. Runtime enforcement
+  // (e.g. "you need a repo to create PRs") lives in pod-manager.
   const repoUrl = input.repoUrl;
-  // The pod axes determine whether a repoUrl is needed:
-  //  - output='artifact' | 'none' → ephemeral, no push target required
-  //  - output='pr' | 'branch'     → must have somewhere to push
-  // Legacy outputMode='artifact' is still honored as a fallback.
-  const pod = (input.pod ?? null) as { output?: string } | null;
-  const outputTarget = pod?.output ?? (input.outputMode as string | undefined);
-  const repoUrlRequired = outputTarget !== 'artifact' && outputTarget !== 'none';
-  if (repoUrlRequired && (typeof repoUrl !== 'string' || repoUrl.length === 0)) {
-    errors.push('repoUrl is required');
-  } else if (typeof repoUrl === 'string' && repoUrl.length > 0) {
+  const hasRepoUrl = typeof repoUrl === 'string' && repoUrl.length > 0;
+  if (hasRepoUrl) {
     try {
-      const url = new URL(repoUrl);
+      const url = new URL(repoUrl as string);
       if (url.protocol !== 'https:') {
         errors.push('repoUrl must use https://');
       } else if (!url.hostname.includes('github.com') && !url.hostname.includes('dev.azure.com')) {
@@ -67,11 +61,11 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     errors.push(`template must be one of: ${VALID_TEMPLATES.join(', ')}`);
   }
 
-  // Build command
+  // Build command — required only when repoUrl is set; repo-less profiles have nothing to build
   const buildCommand = input.buildCommand;
-  if (typeof buildCommand !== 'string' || buildCommand.length === 0) {
-    errors.push('buildCommand is required');
-  } else {
+  if (hasRepoUrl && (typeof buildCommand !== 'string' || buildCommand.length === 0)) {
+    errors.push('buildCommand is required when repoUrl is set');
+  } else if (typeof buildCommand === 'string' && buildCommand.length > 0) {
     for (const pattern of DANGEROUS_PATTERNS) {
       if (pattern.test(buildCommand)) {
         errors.push(`buildCommand contains dangerous pattern: ${pattern.source}`);
@@ -80,11 +74,11 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
-  // Start command
+  // Start command — required only when repoUrl is set
   const startCommand = input.startCommand;
-  if (typeof startCommand !== 'string' || startCommand.length === 0) {
-    errors.push('startCommand is required');
-  } else if (!startCommand.includes('$PORT')) {
+  if (hasRepoUrl && (typeof startCommand !== 'string' || startCommand.length === 0)) {
+    errors.push('startCommand is required when repoUrl is set');
+  } else if (hasRepoUrl && typeof startCommand === 'string' && startCommand.length > 0 && !startCommand.includes('$PORT')) {
     errors.push('startCommand must contain $PORT placeholder');
   }
 
@@ -280,6 +274,52 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
           errors.push(
             `privateRegistries[].url '${regUrl}' resolves to a private/loopback/metadata address — SSRF not allowed`,
           );
+        }
+      }
+    }
+  }
+
+  // Deployment config
+  const deployment = input.deployment;
+  if (deployment !== null && deployment !== undefined) {
+    if (typeof deployment !== 'object' || Array.isArray(deployment)) {
+      errors.push('deployment must be an object or null');
+    } else {
+      const d = deployment as Record<string, unknown>;
+      if (typeof d.enabled !== 'boolean') {
+        errors.push('deployment.enabled must be a boolean');
+      }
+      if (d.env !== null && d.env !== undefined) {
+        if (typeof d.env !== 'object' || Array.isArray(d.env)) {
+          errors.push('deployment.env must be a string record');
+        } else {
+          for (const [k, v] of Object.entries(d.env as Record<string, unknown>)) {
+            if (typeof v !== 'string') {
+              errors.push(`deployment.env["${k}"] must be a string`);
+            }
+          }
+        }
+      }
+      if (d.allowedScripts !== undefined) {
+        if (!Array.isArray(d.allowedScripts)) {
+          errors.push('deployment.allowedScripts must be an array');
+        } else {
+          for (const s of d.allowedScripts as unknown[]) {
+            if (typeof s !== 'string' || s.length === 0) {
+              errors.push('deployment.allowedScripts entries must be non-empty strings');
+              break;
+            }
+            if ((s as string).startsWith('/')) {
+              errors.push(`deployment.allowedScripts entry "${s}" must be relative (no leading /)`);
+              break;
+            }
+            if ((s as string).includes('..')) {
+              errors.push(
+                `deployment.allowedScripts entry "${s}" must not contain path traversal (..)`,
+              );
+              break;
+            }
+          }
         }
       }
     }

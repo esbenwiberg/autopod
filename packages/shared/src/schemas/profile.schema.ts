@@ -319,6 +319,14 @@ const createProfileBaseSchema = z.object({
   testPipeline: testPipelineConfigSchema.nullable().default(null),
   securityScan: securityScanPolicySchema.nullable().default(null),
   codeIntelligence: codeIntelligenceConfigSchema.nullable().default(null),
+  deployment: z
+    .object({
+      enabled: z.boolean(),
+      env: z.record(z.string()),
+      allowedScripts: z.array(z.string().min(1)).optional(),
+    })
+    .nullable()
+    .default(null),
 });
 
 // Every nullable field on the base schema except identity/metadata. On a
@@ -350,25 +358,21 @@ export const createProfileSchema = z
   }, createProfileBaseSchema)
   .superRefine((data, ctx) => {
     if (data.extends !== null) return;
-    if (data.repoUrl === null) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['repoUrl'],
-        message: 'repoUrl is required on base profiles (extends is null)',
-      });
-    }
+    // Repo-less profiles (ephemeral / inheritance anchors) don't need build or start commands.
+    // Enforcement of "you need a repo to create PRs" happens at pod-creation time in pod-manager.
+    if (data.repoUrl === null) return;
     if (data.buildCommand === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['buildCommand'],
-        message: 'buildCommand is required on base profiles (extends is null)',
+        message: 'buildCommand is required when repoUrl is set',
       });
     }
     if (data.startCommand === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['startCommand'],
-        message: 'startCommand is required on base profiles (extends is null)',
+        message: 'startCommand is required when repoUrl is set',
       });
     }
   });

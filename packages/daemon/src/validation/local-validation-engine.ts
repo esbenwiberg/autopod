@@ -469,7 +469,11 @@ async function runBuild(
   const stubCheck = await containerManager
     .execInContainer(
       config.containerId,
-      ['sh', '-c', `find ${buildCwd} -path "*/node_modules/.bin/*" -empty -print 2>/dev/null | head -1`],
+      [
+        'sh',
+        '-c',
+        `find ${buildCwd} -path "*/node_modules/.bin/*" -empty -print 2>/dev/null | head -1`,
+      ],
       { timeout: 5_000 },
     )
     .catch(() => null);
@@ -486,7 +490,10 @@ async function runBuild(
         { timeout: 120_000, ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}) },
       )
       .catch((err: unknown) =>
-        log?.warn({ err }, 'pre-build npm rebuild failed — build may still encounter Permission denied errors'),
+        log?.warn(
+          { err },
+          'pre-build npm rebuild failed — build may still encounter Permission denied errors',
+        ),
       );
   }
 

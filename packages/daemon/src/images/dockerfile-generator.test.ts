@@ -698,7 +698,7 @@ describe('generateDockerfile', () => {
         gitCredentials: 'none',
       });
       // base64 decode approach: no single/double quote nesting issues
-      expect(df).toContain("| base64 -d > /tmp/serena-warmup.py");
+      expect(df).toContain('| base64 -d > /tmp/serena-warmup.py');
     });
   });
 });
