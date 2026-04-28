@@ -535,6 +535,12 @@ export interface PodManager {
    * or due to a missing `maybeTriggerDependents` call.
    */
   rehydrateDependentSessions(): void;
+  /**
+   * Attempt to recover a pod whose worktree was marked compromised by the deletion guard.
+   * Pulls files from the container (which must still be running), repopulates the worktree,
+   * and retries the auto-commit. Clears `worktreeCompromised` on success.
+   */
+  recoverWorktree(podId: string): Promise<{ recovered: boolean; message: string }>;
 }
 
 export function createPodManager(deps: PodManagerDependencies): PodManager {
@@ -1320,48 +1326,105 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         { timeout: 120_000 },
       );
     } catch (err) {
-      // Container may have already exited before we could exec into it.
-      // Docker returns 409 for exec on a stopped container. In that case, fall back to
-      // extracting /workspace directly from the container's filesystem via the archive API,
-      // which works on stopped (but not yet removed) containers.
-      const isContainerNotRunning =
-        (err &&
-          typeof err === 'object' &&
-          'statusCode' in err &&
-          (err as { statusCode: number }).statusCode === 409) ||
-        (err instanceof Error && err.message.includes('is not running'));
-      if (isContainerNotRunning) {
-        // Extract workspace files excluding .git so the host gitlink is preserved.
-        await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath, ['.git']);
+      // Fall back to the Docker archive API on any exec failure — getArchive() works on both
+      // running and stopped (but not yet removed) containers. Previously only 409
+      // (stopped-container) errors triggered this path; timeouts from VirtioFS stalls on
+      // Docker Desktop for Mac or large workspace copies silently re-threw, which left the
+      // host worktree partially populated and caused the deletion guard to fire.
+      logger.warn(
+        { err, worktreePath },
+        'In-container sync command failed — falling back to archive API extraction',
+      );
 
-        // Try to recover commits: extract the container's .git to a temp dir and push to bare.
-        let bareRepoPath: string | null = null;
+      // Extract workspace files excluding .git so the host gitlink is preserved.
+      await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath, ['.git']);
+
+      // Try to recover commits: extract the container's .git to a temp dir and push to bare.
+      let bareRepoPath: string | null = null;
+      try {
+        // Host worktree gitlink is intact (we excluded .git above), so we can derive the path.
+        bareRepoPath = await deriveBareRepoPath(worktreePath);
+      } catch {
+        // Best-effort — if we can't get the bare path, commit recovery is skipped.
+      }
+      if (bareRepoPath) {
+        const tmpGitDir = path.join(os.tmpdir(), `autopod-git-${Date.now()}`);
         try {
-          // Host worktree gitlink is intact (we excluded .git above), so we can derive the path.
-          bareRepoPath = await deriveBareRepoPath(worktreePath);
-        } catch {
-          // Best-effort — if we can't get the bare path, commit recovery is skipped.
+          await mkdir(tmpGitDir, { recursive: true });
+          // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
+          // so git can resolve baseline objects and push only the new ones.
+          await cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir);
+          await execFileAsync('git', ['--git-dir', tmpGitDir, 'push', bareRepoPath, 'HEAD']);
+        } catch (gitRecoveryErr) {
+          logger.warn(
+            { err: gitRecoveryErr, worktreePath },
+            'Could not push commits from container during sync fallback — new commits may be lost',
+          );
+        } finally {
+          await rm(tmpGitDir, { recursive: true, force: true }).catch(() => {});
         }
-        if (bareRepoPath) {
-          const tmpGitDir = path.join(os.tmpdir(), `autopod-git-${Date.now()}`);
-          try {
-            await mkdir(tmpGitDir, { recursive: true });
-            // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
-            // so git can resolve baseline objects and push only the new ones.
-            await cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir);
-            await execFileAsync('git', ['--git-dir', tmpGitDir, 'push', bareRepoPath, 'HEAD']);
-          } catch (gitRecoveryErr) {
+      }
+    }
+  }
+
+  /**
+   * Attempt to recover a partially-synced host worktree by pulling files directly from a
+   * still-running container. Returns true on success, false if the container is gone or the
+   * extraction fails (caller should fall through to the compromised path).
+   */
+  async function recoverWorktreeFromContainer(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+  ): Promise<boolean> {
+    try {
+      const status = await cm.getStatus(containerId);
+      if (status !== 'running') {
+        logger.warn({ containerId, worktreePath }, 'Cannot recover worktree — container not running');
+        return false;
+      }
+
+      // Push any commits the agent made inside the container to the bare repo first.
+      const alternatesResult = await cm.execInContainer(
+        containerId,
+        [
+          'sh',
+          '-c',
+          "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
+        ],
+        { timeout: 5_000 },
+      );
+      const containerBareRepoPath =
+        alternatesResult.exitCode === 0 && alternatesResult.stdout.trim()
+          ? alternatesResult.stdout.trim()
+          : null;
+
+      if (containerBareRepoPath) {
+        let expectedBareRepoPath: string | null = null;
+        try {
+          expectedBareRepoPath = await deriveBareRepoPath(worktreePath);
+        } catch {}
+        if (expectedBareRepoPath && containerBareRepoPath === expectedBareRepoPath) {
+          const push = await cm.execInContainer(
+            containerId,
+            ['git', '-C', '/workspace', 'push', containerBareRepoPath, 'HEAD'],
+            { timeout: 30_000 },
+          );
+          if (push.exitCode !== 0) {
             logger.warn(
-              { err: gitRecoveryErr, worktreePath },
-              'Could not push commits from stopped container — new commits may be lost',
+              { worktreePath, stderr: push.stderr },
+              'Git push during worktree recovery failed — commits may not be fully visible on host',
             );
-          } finally {
-            await rm(tmpGitDir, { recursive: true, force: true }).catch(() => {});
           }
         }
-      } else {
-        throw err;
       }
+
+      await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath, ['.git']);
+      logger.info({ containerId, worktreePath }, 'Worktree repopulated from live container');
+      return true;
+    } catch (err) {
+      logger.warn({ err, containerId, worktreePath }, 'Live container worktree recovery failed');
+      return false;
     }
   }
 
@@ -3427,8 +3490,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             logger.info({ podId }, 'Auto-committed uncommitted agent changes');
           }
         } catch (err) {
-          logger.error({ err, podId }, 'Auto-commit blocked by deletion safety guard');
-          handleDeletionGuardError(podId, err);
+          if (err instanceof DeletionGuardError && pod.containerId && pod.worktreePath) {
+            logger.warn({ podId }, 'Deletion guard fired — attempting live container recovery');
+            const cm = containerManagerFactory.get(pod.executionTarget);
+            const recovered = await recoverWorktreeFromContainer(
+              pod.containerId,
+              pod.worktreePath,
+              cm,
+            );
+            if (recovered) {
+              try {
+                await worktreeManager.commitPendingChangesWithGeneratedMessage(
+                  pod.worktreePath,
+                  pod.task,
+                  { maxDeletions: 100 },
+                );
+                logger.info({ podId }, 'Auto-committed after live container recovery');
+              } catch (retryErr) {
+                logger.error({ err: retryErr, podId }, 'Commit after worktree recovery also failed');
+                handleDeletionGuardError(podId, retryErr);
+              }
+            } else {
+              logger.error({ err, podId }, 'Auto-commit blocked by deletion safety guard');
+              handleDeletionGuardError(podId, err);
+            }
+          } else {
+            logger.error({ err, podId }, 'Auto-commit blocked by deletion safety guard');
+            handleDeletionGuardError(podId, err);
+          }
         }
 
         try {
@@ -6045,6 +6134,44 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.update(podId, { prUrl: newPrUrl });
       emitActivityStatus(podId, `PR created: ${newPrUrl}`);
       logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
+    },
+
+    async recoverWorktree(podId: string): Promise<{ recovered: boolean; message: string }> {
+      const pod = podRepo.getOrThrow(podId);
+      if (!pod.worktreeCompromised) {
+        throw new AutopodError(
+          `Pod ${podId} worktree is not compromised — nothing to recover`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!pod.containerId || !pod.worktreePath) {
+        return {
+          recovered: false,
+          message: 'Pod has no container or worktree — manual extraction needed',
+        };
+      }
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      const recovered = await recoverWorktreeFromContainer(pod.containerId, pod.worktreePath, cm);
+      if (!recovered) {
+        return {
+          recovered: false,
+          message: 'Container not reachable — manual extraction needed',
+        };
+      }
+      try {
+        await worktreeManager.commitPendingChangesWithGeneratedMessage(pod.worktreePath, pod.task, {
+          maxDeletions: 100,
+        });
+        podRepo.update(podId, { worktreeCompromised: false });
+        emitActivityStatus(podId, 'Worktree recovered from container and committed successfully');
+        return { recovered: true, message: 'Worktree recovered and committed' };
+      } catch (err) {
+        return {
+          recovered: false,
+          message: `Recovery failed at commit stage: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
     },
   };
 }

@@ -366,6 +366,23 @@ export function podRoutes(
     }
   });
 
+  // POST /pods/:podId/recover-worktree — attempt to recover a worktree-compromised pod
+  // by pulling files from its still-running container and retrying the auto-commit.
+  app.post('/pods/:podId/recover-worktree', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    try {
+      const result = await podManager.recoverWorktree(podId);
+      reply.status(result.recovered ? 200 : 409);
+      return result;
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
   // POST /pods/:podId/complete — complete an interactive pod.
   // Without a body this pushes the branch and transitions to `complete`.
   // With `promoteTo` set to 'pr' | 'artifact' | 'none', the pod is
