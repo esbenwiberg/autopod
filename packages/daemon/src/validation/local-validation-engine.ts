@@ -497,6 +497,21 @@ async function runBuild(
       );
   }
 
+  // Fix non-executable binaries (distinct from 0-byte stubs — files that exist but lack +x).
+  // The agent may have installed packages during its run; npm doesn't always set execute bits
+  // on native platform binaries (e.g. @esbuild/linux-arm64/bin/esbuild) on Docker Desktop for Mac.
+  await containerManager
+    .execInContainer(
+      config.containerId,
+      [
+        'sh',
+        '-c',
+        `find ${buildCwd} \\( -path "*/node_modules/.bin/*" -o -path "*/node_modules/*/bin/*" \\) -type f -not -empty -not -perm /111 -exec chmod +x {} + 2>/dev/null || true`,
+      ],
+      { timeout: 10_000 },
+    )
+    .catch(() => null);
+
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
     result = await containerManager.execInContainer(

@@ -2420,6 +2420,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             ['cp', '-a', '/mnt/worktree/.', '/workspace/'],
             { timeout: 120_000 },
           );
+          // Restore execute bit on node_modules binaries — VirtioFS bind mounts on Docker Desktop
+          // for Mac can strip +x from native platform binaries (e.g. @esbuild/linux-arm64/bin/esbuild).
+          await containerManager
+            .execInContainer(
+              containerId,
+              [
+                'sh',
+                '-c',
+                'find /workspace \\( -path "*/node_modules/.bin/*" -o -path "*/node_modules/*/bin/*" \\) -type f -not -empty -exec chmod +x {} + 2>/dev/null || true',
+              ],
+              { timeout: 15_000 },
+            )
+            .catch(() => null);
           // Convert /workspace/.git from a gitlink file into a self-contained real .git
           // directory. The gitlink references a Mac host path that sub-processes
           // (e.g. Dagger CLI, go-git) can't follow when they don't inherit autopod's
