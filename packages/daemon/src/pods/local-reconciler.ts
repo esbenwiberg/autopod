@@ -69,7 +69,30 @@ async function reconcileSession(
   deps: LocalReconcilerDependencies,
   result: ReconcileResult,
 ): Promise<void> {
-  const { podRepo, eventBus, enqueueSession, logger } = deps;
+  const { podRepo, eventBus, containerManager, enqueueSession, logger } = deps;
+
+  // 0. Workspace pods whose container is still alive — restore running status in-place.
+  //    Docker containers are independent processes and survive daemon restarts, so there
+  //    is no reason to kill and re-provision them. Preserves user state (e.g. Claude auth
+  //    from /login) across daemon restarts without touching the container at all.
+  if (pod.outputMode === 'workspace' && pod.containerId) {
+    try {
+      const containerStatus = await containerManager.getStatus(pod.containerId);
+      if (containerStatus === 'running') {
+        const previousStatus = pod.status;
+        podRepo.update(pod.id, { status: 'running' });
+        emitStatusChanged(pod.id, previousStatus, 'running', eventBus);
+        result.recovered.push(pod.id);
+        logger.info(
+          { podId: pod.id, containerId: pod.containerId },
+          'Workspace pod container still running — restored without re-provisioning',
+        );
+        return;
+      }
+    } catch {
+      // getStatus threw — container is gone; fall through to normal reconciliation
+    }
+  }
 
   // 1. Sessions already in `killing` → finish the kill
   if (pod.status === 'killing') {
@@ -174,6 +197,7 @@ async function recoverSession(
     status: 'queued',
     containerId: null,
     recoveryWorktreePath: pod.worktreePath,
+    validationAttempts: 0,
   });
 
   emitStatusChanged(pod.id, previousStatus, 'queued', eventBus);

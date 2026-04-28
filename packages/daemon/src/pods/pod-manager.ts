@@ -48,6 +48,7 @@ import {
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
+import { isExpectedDockerError } from '../containers/docker-helpers.js';
 import { networkNameForPod } from '../containers/docker-network-manager.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import { resolveSidecarSpec, sidecarPodEnv } from '../containers/sidecar-resolver.js';
@@ -507,6 +508,8 @@ export interface PodManager {
   refreshNetworkPolicy(profileName: string): Promise<void>;
   /** Abort a currently running validation for the given pod. No-op if not validating. */
   interruptValidation(podId: string): void;
+  /** Toggle skip-validation at runtime. When true, the next validation result is bypassed → validated. */
+  setSkipValidation(podId: string, skip: boolean): void;
   /**
    * Inject provider credentials directly into a running container without exposing the token.
    * Reads the PAT from the profile, runs the auth command inside the container, and deletes
@@ -1382,7 +1385,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     try {
       const status = await cm.getStatus(containerId);
       if (status !== 'running') {
-        logger.warn({ containerId, worktreePath }, 'Cannot recover worktree — container not running');
+        logger.warn(
+          { containerId, worktreePath },
+          'Cannot recover worktree — container not running',
+        );
         return false;
       }
 
@@ -2806,17 +2812,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             });
 
             if (mcpProbe.exitCode === 0) {
-              logger.info({ podId, server: server.name }, `Code-intel MCP "${server.name}" probe OK`);
+              logger.info(
+                { podId, server: server.name },
+                `Code-intel MCP "${server.name}" probe OK`,
+              );
               emitStatus(`✅ Code-intel MCP "${server.name}" initialized and ready`);
             } else {
               const stderr = (mcpProbe.stderr || '').trim();
               const isTimeout = stderr.startsWith('timeout:');
               if (isTimeout) {
-                logger.info({ podId, server: server.name }, `Code-intel MCP "${server.name}" slow to start — will initialize inside container`);
-                emitStatus(`🔄 Code-intel MCP "${server.name}" is starting (language server initializing in background)`);
+                logger.info(
+                  { podId, server: server.name },
+                  `Code-intel MCP "${server.name}" slow to start — will initialize inside container`,
+                );
+                emitStatus(
+                  `🔄 Code-intel MCP "${server.name}" is starting (language server initializing in background)`,
+                );
               } else {
                 const detail = (mcpProbe.stdout || stderr || 'no output').slice(0, 200);
-                logger.warn({ podId, server: server.name, detail }, `Code-intel MCP "${server.name}" probe failed`);
+                logger.warn(
+                  { podId, server: server.name, detail },
+                  `Code-intel MCP "${server.name}" probe failed`,
+                );
                 emitStatus(
                   `⚠️ Code-intel MCP "${server.name}" binary found but failed to respond (${detail}). If this persists, rebuild: \`ap profile warm ${profile.name} --rebuild\``,
                 );
@@ -2868,7 +2885,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitStatus('✅ npm rebuild completed — bin stubs restored');
           } else {
             logger.warn({ podId }, `npm rebuild failed: ${rebuildResult.stdout?.slice(0, 300)}`);
-            emitStatus(`⚠️ npm rebuild failed. Agent may encounter "Permission denied" errors for node_modules/.bin tools.`);
+            emitStatus(
+              `⚠️ npm rebuild failed. Agent may encounter "Permission denied" errors for node_modules/.bin tools.`,
+            );
           }
         }
 
@@ -3509,7 +3528,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 );
                 logger.info({ podId }, 'Auto-committed after live container recovery');
               } catch (retryErr) {
-                logger.error({ err: retryErr, podId }, 'Commit after worktree recovery also failed');
+                logger.error(
+                  { err: retryErr, podId },
+                  'Commit after worktree recovery also failed',
+                );
                 handleDeletionGuardError(podId, retryErr);
               }
             } else {
@@ -4912,6 +4934,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
+        // Skip-validation may have been toggled while this run was in flight — bypass result.
+        if (s2.skipValidation) {
+          emitActivityStatus(podId, 'Validation skipped by human toggle — marking as validated');
+          logger.info({ podId, attempt }, 'skip_validation set mid-run — bypassing result');
+          const validatedPod = transition(s2, 'validated');
+          maybeTriggerDependents(validatedPod);
+          return;
+        }
+
         if (effectiveResult.overall === 'pass') {
           emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
           const passDefaultBranch = profile.defaultBranch ?? 'main';
@@ -5183,7 +5214,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Restart the container with updated worktree
         const cm = containerManagerFactory.get(pod.executionTarget);
-        await cm.start(pod.containerId);
+        try {
+          await cm.start(pod.containerId);
+        } catch (err) {
+          if (isExpectedDockerError(err, [404])) {
+            podRepo.update(podId, { containerId: null });
+            throw new AutopodError(
+              `Container for pod ${podId} no longer exists — use "Retry" to re-provision with a fresh agent run`,
+              'CONTAINER_NOT_FOUND',
+              409,
+            );
+          }
+          throw err;
+        }
 
         const revalDefaultBranch = profile.defaultBranch ?? 'main';
         const [diff, commitLog] = pod.worktreePath
@@ -5766,16 +5809,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Extended validation attempts',
       );
       emitActivityStatus(podId, `Validation attempts extended to ${newMax} — resuming validation`);
-      // Container was stopped when pod transitioned to review_required — restart it
-      if (pod.containerId) {
-        const cm = containerManagerFactory.get(pod.executionTarget);
-        try {
-          await cm.start(pod.containerId);
-        } catch {
-          // Container may already be running or removed — let triggerValidation handle it
-        }
-      }
-      await this.triggerValidation(podId);
+      // Use force=true so triggerValidation re-provisions the container. The pod is in
+      // review_required (terminal), so force+fromTerminal triggers a clean re-provision:
+      // old container killed, worktree preserved, agent re-run with the "exhausted attempts"
+      // rework prompt. This is safer than manually calling cm.start() and silently swallowing
+      // errors — if the container was removed rather than stopped, exec calls would 404.
+      await this.triggerValidation(podId, { force: true });
     },
 
     async applyOverridesInstant(podId: string): Promise<{ advanced: boolean }> {
@@ -5884,6 +5923,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     interruptValidation(podId: string): void {
       validationAbortControllers.get(podId)?.abort();
+    },
+
+    setSkipValidation(podId: string, skip: boolean): void {
+      podRepo.getOrThrow(podId);
+      podRepo.update(podId, { skipValidation: skip });
+      const msg = skip
+        ? 'Skip-validation toggled on — next validation result will be bypassed'
+        : 'Skip-validation toggled off — validation will run normally';
+      emitActivityStatus(podId, msg);
+      logger.info({ podId, skip }, 'skip_validation updated by user');
     },
 
     async refreshNetworkPolicy(profileName: string): Promise<void> {

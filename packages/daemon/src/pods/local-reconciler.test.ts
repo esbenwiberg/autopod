@@ -165,17 +165,54 @@ describe('reconcileLocalSessions', () => {
     expect(result.recovered).toContain('ses-1');
     expect(result.killed).not.toContain('ses-1');
 
-    // Pod should be re-queued
+    // Pod should be re-queued with counter reset
     const pod = podRepo.getOrThrow('ses-1');
     expect(pod.status).toBe('queued');
     expect(pod.recoveryWorktreePath).toBe('/tmp/worktree/ses-1');
     expect(pod.containerId).toBeNull();
+    expect(pod.validationAttempts).toBe(0);
 
     // Old container should have been killed (best-effort)
     expect(containerManager.kill).toHaveBeenCalledWith('ctr-old');
 
     // Pod should have been enqueued
     expect(enqueuedSessions).toContain('ses-1');
+  });
+
+  it('resets validationAttempts to 0 when recovering a pod that had exhausted its attempts', async () => {
+    const { deps, podRepo } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'ses-exhausted',
+      profileName: 'test-profile',
+      task: 'Add feature',
+      status: 'validating',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ses-exhausted',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('ses-exhausted', {
+      containerId: 'ctr-exhausted',
+      worktreePath: '/tmp/worktree/ses-exhausted',
+      validationAttempts: 3,
+    });
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    await reconcileLocalSessions(deps);
+
+    const pod = podRepo.getOrThrow('ses-exhausted');
+    // Without the fix, validationAttempts stays 3, next run computes attempt=4 → "4 of 3"
+    expect(pod.validationAttempts).toBe(0);
+    expect(pod.status).toBe('queued');
   });
 
   it('kills pod with missing worktree', async () => {
@@ -217,7 +254,11 @@ describe('reconcileLocalSessions', () => {
   });
 
   it('re-queues interactive pod with no worktree for fresh re-provision', async () => {
-    const { deps, podRepo, enqueuedSessions } = createReconcilerDeps();
+    const stoppedContainerManager = createMockContainerManager();
+    vi.mocked(stoppedContainerManager.getStatus).mockResolvedValue('stopped');
+    const { deps, podRepo, enqueuedSessions } = createReconcilerDeps({
+      containerManager: stoppedContainerManager,
+    });
 
     podRepo.insert({
       id: 'int-1',
@@ -253,6 +294,46 @@ describe('reconcileLocalSessions', () => {
     expect(pod.status).toBe('queued');
     expect(enqueuedSessions).toContain('int-1');
     expect(pod.recoveryWorktreePath).toBeNull();
+  });
+
+  it('restores workspace pod in-place when its container is still running after daemon restart', async () => {
+    // Default mock returns 'running' for getStatus — simulates container surviving daemon restart
+    const { deps, podRepo, containerManager, enqueuedSessions } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'ws-alive',
+      profileName: 'test-profile',
+      task: 'Workspace task',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ws-alive',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'workspace',
+      options: { agentMode: 'interactive', output: 'branch', validate: false, promotable: true },
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('ws-alive', {
+      containerId: 'ctr-alive',
+      worktreePath: '/tmp/worktree/ws-alive',
+    });
+
+    const result = await reconcileLocalSessions(deps);
+
+    // Container still alive — should be restored, never re-queued or killed
+    expect(result.recovered).toContain('ws-alive');
+    expect(result.killed).not.toContain('ws-alive');
+    expect(enqueuedSessions).not.toContain('ws-alive');
+    expect(vi.mocked(containerManager.kill)).not.toHaveBeenCalledWith('ctr-alive');
+
+    const pod = podRepo.getOrThrow('ws-alive');
+    expect(pod.status).toBe('running');
+    expect(pod.containerId).toBe('ctr-alive');
   });
 
   it('finishes pod stuck in killing state', async () => {
