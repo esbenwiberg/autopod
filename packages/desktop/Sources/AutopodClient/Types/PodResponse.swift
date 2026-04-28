@@ -369,6 +369,11 @@ public struct ParsedBriefResponse: Codable, Sendable {
 public struct SeriesPreviewResponse: Codable, Sendable {
   public let seriesName: String
   public let briefs: [ParsedBriefResponse]
+  /// Series purpose (from `purpose.md`). Rendered in the Series tab and used
+  /// as the PR "Why" section when the series merges as a single PR.
+  public let seriesDescription: String?
+  /// Series design (from `design.md`). Rendered in the Series tab.
+  public let seriesDesign: String?
 }
 
 public struct CreateSeriesRequest: Codable, Sendable {
@@ -379,6 +384,8 @@ public struct CreateSeriesRequest: Codable, Sendable {
   public var prMode: String?   // "single" | "stacked" | "none"
   public var autoApprove: Bool?
   public var disableAskHuman: Bool?
+  public var seriesDescription: String?
+  public var seriesDesign: String?
 
   public init(
     seriesName: String,
@@ -387,7 +394,9 @@ public struct CreateSeriesRequest: Codable, Sendable {
     baseBranch: String? = nil,
     prMode: String? = nil,
     autoApprove: Bool? = nil,
-    disableAskHuman: Bool? = nil
+    disableAskHuman: Bool? = nil,
+    seriesDescription: String? = nil,
+    seriesDesign: String? = nil
   ) {
     self.seriesName = seriesName
     self.briefs = briefs
@@ -396,6 +405,8 @@ public struct CreateSeriesRequest: Codable, Sendable {
     self.prMode = prMode
     self.autoApprove = autoApprove
     self.disableAskHuman = disableAskHuman
+    self.seriesDescription = seriesDescription
+    self.seriesDesign = seriesDesign
   }
 }
 

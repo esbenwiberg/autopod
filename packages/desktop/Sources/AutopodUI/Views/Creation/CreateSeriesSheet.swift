@@ -450,7 +450,9 @@ public struct CreateSeriesSheet: View {
             baseBranch: baseBranch.isEmpty ? nil : baseBranch,
             prMode: prMode,
             autoApprove: autoApprove ? true : nil,
-            disableAskHuman: disableAskHuman ? true : nil
+            disableAskHuman: disableAskHuman ? true : nil,
+            seriesDescription: preview.seriesDescription,
+            seriesDesign: preview.seriesDesign
         )
         if let id = await actions.createSeries(request) {
             onSeriesCreated?(id)

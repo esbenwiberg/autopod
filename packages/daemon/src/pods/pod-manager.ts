@@ -371,6 +371,27 @@ function parseValidationOverrideResponse(
   }));
 }
 
+/**
+ * Warn when a single-PR series pod is about to create a PR without the
+ * series-level metadata it needs. With either `seriesName` or
+ * `seriesDescription` missing, `buildPrTitle` falls back to using the brief's
+ * task as the title and "Why" body — usually a sign that the client (CLI or
+ * desktop) didn't forward `purpose.md` from the spec folder.
+ */
+function warnIfSinglePrSeriesMissingSeriesMeta(pod: Pod, logger: Logger): void {
+  if (pod.prMode !== 'single' || !pod.seriesId) return;
+  if (pod.seriesDescription && pod.seriesName) return;
+  logger.warn(
+    {
+      podId: pod.id,
+      seriesId: pod.seriesId,
+      hasSeriesDescription: Boolean(pod.seriesDescription),
+      hasSeriesName: Boolean(pod.seriesName),
+    },
+    'Single-PR series pod is missing seriesName or seriesDescription — PR title and "Why" will fall back to the brief task. Verify the client forwarded purpose.md when creating the series.',
+  );
+}
+
 /** Merge new overrides into existing ones, deduplicating by findingId (latest wins). */
 function mergeOverrides(
   existing: ValidationOverride[],
@@ -5066,6 +5087,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               try {
                 emitActivityStatus(podId, 'Creating PR…');
                 const s3 = podRepo.getOrThrow(podId);
+                warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
                 prUrl = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
                   worktreePath: s2.worktreePath!,
@@ -5435,6 +5457,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               try {
                 emitActivityStatus(podId, 'Creating PR…');
                 const s3 = podRepo.getOrThrow(podId);
+                warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
                 prUrl = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
                   worktreePath: s2.worktreePath!,
@@ -5451,6 +5474,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   previewUrl: s2.previewUrl,
                   screenshots: [],
                   taskSummary: s3.taskSummary ?? undefined,
+                  seriesDescription: s2.seriesDescription ?? undefined,
+                  seriesName: s2.seriesName ?? undefined,
                   securityFindings: getLatestPushFindings(podId),
                 });
                 if (prUrl) emitActivityStatus(podId, `PR created: ${prUrl}`);
