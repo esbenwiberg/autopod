@@ -268,6 +268,7 @@ public enum PodMapper {
       testRunBranches: response.testRunBranches ?? []
     )
     result.worktreeCompromised = response.worktreeCompromised ?? false
+    result.skipValidation = response.skipValidation
     return result
   }
 

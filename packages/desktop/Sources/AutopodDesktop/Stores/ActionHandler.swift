@@ -64,6 +64,7 @@ public final class ActionHandler {
         self?.profileStore.profiles.first(where: { $0.name == name })?.workerProfile
       },
       interruptValidation: { [weak self] id in await self?.interruptValidation(id) },
+      setSkipValidation: { [weak self] id, skip in await self?.setSkipValidation(id, skip: skip) },
       addValidationOverride: { [weak self] id, fid, desc, action, reason, guidance in
         await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
       },
@@ -408,6 +409,14 @@ public final class ActionHandler {
   public func interruptValidation(_ podId: String) async {
     do {
       try await api.interruptValidation(podId: podId)
+    } catch {
+      lastError = error.localizedDescription
+    }
+  }
+
+  public func setSkipValidation(_ podId: String, skip: Bool) async {
+    do {
+      try await api.setSkipValidation(podId, skip: skip)
     } catch {
       lastError = error.localizedDescription
     }

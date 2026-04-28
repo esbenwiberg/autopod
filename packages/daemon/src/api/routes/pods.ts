@@ -481,6 +481,14 @@ export function podRoutes(
     reply.status(204);
   });
 
+  // POST /pods/:podId/skip-validation — toggle skip-validation flag at runtime
+  app.post('/pods/:podId/skip-validation', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const body = request.body as { skip: boolean };
+    podManager.setSkipValidation(podId, Boolean(body.skip));
+    reply.status(204);
+  });
+
   // POST /pods/:podId/force-approve — bypass validation and transition pod to validated
   app.post('/pods/:podId/force-approve', async (request, reply) => {
     const { podId } = request.params as { podId: string };

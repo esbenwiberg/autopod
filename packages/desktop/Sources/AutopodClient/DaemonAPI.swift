@@ -413,6 +413,13 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("POST", "/pods/\(podId)/interrupt-validation")
   }
 
+  public func setSkipValidation(_ id: String, skip: Bool) async throws {
+    let _: EmptyResponse = try await request(
+      "POST", "/pods/\(id)/skip-validation",
+      body: try encode(["skip": skip])
+    )
+  }
+
   public func addValidationOverride(
     podId: String,
     findingId: String,

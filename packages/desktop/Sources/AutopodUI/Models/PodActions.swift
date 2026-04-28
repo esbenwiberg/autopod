@@ -35,6 +35,8 @@ public struct PodActions: Sendable {
   public var workerProfileForProfile: @MainActor @Sendable (String) -> String?
   /// Abort the currently running validation for the pod (no-op if not validating)
   public var interruptValidation: @MainActor @Sendable (String) async -> Void
+  /// Toggle skip-validation at runtime. True = bypass next result; false = run normally.
+  public var setSkipValidation: @MainActor @Sendable (String, Bool) async -> Void
   /// Enqueue a finding override — params: podId, findingId, description, action, reason?, guidance?
   public var addValidationOverride: @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void
   /// Bypass validation and push the pod to validated — params: podId, reason?
@@ -94,6 +96,7 @@ public struct PodActions: Sendable {
     openLiveApp: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     workerProfileForProfile: @escaping @MainActor @Sendable (String) -> String? = { _ in nil },
     interruptValidation: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    setSkipValidation: @escaping @MainActor @Sendable (String, Bool) async -> Void = { _, _ in },
     addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
     forceApprove: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
@@ -129,6 +132,7 @@ public struct PodActions: Sendable {
     self.openLiveApp = openLiveApp
     self.workerProfileForProfile = workerProfileForProfile
     self.interruptValidation = interruptValidation
+    self.setSkipValidation = setSkipValidation
     self.addValidationOverride = addValidationOverride
     self.forceApprove = forceApprove
     self.spawnFix = spawnFix

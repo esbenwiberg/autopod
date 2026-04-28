@@ -145,6 +145,7 @@ export interface PodUpdates {
   sidecarContainerIds?: Record<string, string> | null;
   testRunBranches?: string[] | null;
   worktreeCompromised?: boolean;
+  skipValidation?: boolean;
 }
 
 export interface PodStats {
@@ -644,6 +645,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.worktreeCompromised !== undefined) {
         setClauses.push('worktree_compromised = @worktreeCompromised');
         params.worktreeCompromised = changes.worktreeCompromised ? 1 : 0;
+      }
+      if (changes.skipValidation !== undefined) {
+        setClauses.push('skip_validation = @skipValidation');
+        params.skipValidation = changes.skipValidation ? 1 : 0;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so

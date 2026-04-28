@@ -19,6 +19,7 @@ public struct ValidationTab: View {
   @State private var expandedSastOutput = false
   @State private var isOpeningApp = false
   @State private var isInterrupting = false
+  @State private var isSkippingValidation = false
   @State private var isForceApproving = false
   @State private var showForceApprovePopover = false
   @State private var forceApproveReason: String = ""
@@ -196,6 +197,28 @@ public struct ValidationTab: View {
         .buttonStyle(.bordered)
         .controlSize(.small)
         .disabled(isOpeningApp)
+      }
+      if pod.status == .validating || pod.status == .running {
+        Button {
+          isSkippingValidation = true
+          let newSkip = !pod.skipValidation
+          Task {
+            await actions.setSkipValidation(pod.id, newSkip)
+            isSkippingValidation = false
+          }
+        } label: {
+          if isSkippingValidation {
+            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Updating…") }
+          } else if pod.skipValidation {
+            Label("Skipping", systemImage: "forward.fill")
+          } else {
+            Label("Skip Validation", systemImage: "forward")
+          }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(pod.skipValidation ? .orange : nil)
+        .disabled(isSkippingValidation)
       }
       if pod.status == .validating {
         Button {

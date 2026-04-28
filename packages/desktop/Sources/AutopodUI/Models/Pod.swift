@@ -534,6 +534,9 @@ public struct Pod: Identifiable, Sendable {
     /// real work may still live in the container.
     public var worktreeCompromised: Bool
 
+    /// Whether validation is toggled off at runtime — the next validation result will be bypassed.
+    public var skipValidation: Bool
+
     /// Human-readable title from the brief's YAML frontmatter. Nil for standalone pods.
     public var briefTitle: String?
 
@@ -628,7 +631,8 @@ public struct Pod: Identifiable, Sendable {
         requireSidecars: [String] = [],
         sidecarContainerIds: [String: String] = [:],
         testRunBranches: [String] = [],
-        worktreeCompromised: Bool = false
+        worktreeCompromised: Bool = false,
+        skipValidation: Bool = false
     ) {
         self.id = id; self.status = status; self.pod = pod
         self.hasWorktree = hasWorktree
@@ -656,6 +660,7 @@ public struct Pod: Identifiable, Sendable {
         self.sidecarContainerIds = sidecarContainerIds
         self.testRunBranches = testRunBranches
         self.worktreeCompromised = worktreeCompromised
+        self.skipValidation = skipValidation
     }
 
     /// Back-compat init that takes a legacy `OutputMode` and derives a `PodConfig`.
