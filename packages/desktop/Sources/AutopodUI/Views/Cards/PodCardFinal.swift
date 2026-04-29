@@ -500,33 +500,6 @@ public struct SessionCardFinal: View {
                     .help("Pull latest and re-run validation on the linked worker pod")
                 }
             }
-        case .complete:
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Branch pushed — ready for worker", systemImage: "checkmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button {
-                    showLaunchWorker = true
-                } label: {
-                    Label("Launch Worker", systemImage: "arrow.right.circle.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.blue)
-
-                if let onLaunchSeriesFromPod {
-                    Button {
-                        onLaunchSeriesFromPod(pod)
-                    } label: {
-                        Label("Launch Series", systemImage: "rectangle.3.group.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Launch a pod series stacked on this branch")
-                }
-            }
         default:
             EmptyView()
         }
