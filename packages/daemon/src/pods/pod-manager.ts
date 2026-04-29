@@ -111,6 +111,11 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
+import {
+  buildBashrcHintBlock,
+  buildWorkspaceToolsDoc,
+  mergeBashrcHint,
+} from './workspace-tools-doc.js';
 
 /** Inject a PAT into an https URL: https://host/... → https://x-access-token:PAT@host/...
  * Strips any existing userinfo first to avoid double-injection. */
@@ -2906,6 +2911,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             logger.warn(
               { err, podId },
               'Failed to inject MCP servers into workspace .mcp.json — MCP tools unavailable',
+            );
+          }
+
+          // Surface the injected MCP tools to the human user. Without a doc and
+          // a shell hint, validate_in_browser and friends are invisible — workspace
+          // pods deliberately don't write a CLAUDE.md to /workspace/ to avoid
+          // clobbering the repo, so we drop docs under the user's home instead.
+          try {
+            const httpServerNames = ['escalation', ...wsProxiedServers.map((s) => s.name)];
+            const stdioServerNames = wsStdioServers.map((s) => s.name);
+            const toolsDocPath = `${CONTAINER_HOME_DIR}/.config/autopod/tools.md`;
+            const bashrcPath = `${CONTAINER_HOME_DIR}/.bashrc`;
+
+            const toolsDoc = buildWorkspaceToolsDoc({ httpServerNames, stdioServerNames });
+            await containerManager.writeFile(containerId, toolsDocPath, toolsDoc);
+
+            let existingBashrc = '';
+            try {
+              existingBashrc = await containerManager.readFile(containerId, bashrcPath);
+            } catch {
+              // No .bashrc yet — that's fine, we'll create one.
+            }
+            const merged = mergeBashrcHint(existingBashrc, buildBashrcHintBlock(toolsDocPath));
+            await containerManager.writeFile(containerId, bashrcPath, merged);
+
+            logger.info({ podId, toolsDocPath }, 'Workspace tools doc + bashrc hint written');
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to write workspace tools doc — MCP tools still work, just no discovery hint',
             );
           }
 
