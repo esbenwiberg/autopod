@@ -441,8 +441,9 @@ public struct PhaseProgress: Sendable {
 public struct AttemptInfo: Sendable {
     public let current: Int
     public let max: Int
-    public init(current: Int, max: Int) {
-        self.current = current; self.max = max
+    public let reworkCount: Int
+    public init(current: Int, max: Int, reworkCount: Int = 0) {
+        self.current = current; self.max = max; self.reworkCount = reworkCount
     }
 }
 

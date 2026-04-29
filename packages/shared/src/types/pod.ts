@@ -10,6 +10,13 @@ import type { ValidationFinding, ValidationOverride, ValidationResult } from './
 export interface ReferenceRepo {
   url: string;
   mountPath: string; // derived from last URL segment at pod creation time
+  /**
+   * Name of the profile that contributed this URL, when the user picked it
+   * from the profile list. Lets the daemon resolve auth (githubPat / adoPat)
+   * from the source profile at clone time. Absent for ad-hoc URLs, which
+   * clone unauthenticated.
+   */
+  sourceProfile?: string;
 }
 
 export type PodStatus =
@@ -83,6 +90,7 @@ export interface Pod {
   acFrom: string | null;
   recoveryWorktreePath: string | null;
   reworkReason: string | null;
+  reworkCount: number;
   lastHeartbeatAt: string | null;
   inputTokens: number;
   outputTokens: number;
@@ -107,8 +115,6 @@ export interface Pod {
   pauseReason: 'budget' | 'manual' | null;
   /** Reference repos cloned read-only into the container for research pods. */
   referenceRepos: ReferenceRepo[] | null;
-  /** Shared PAT for authenticating against all reference repos (plaintext). */
-  referenceRepoPat: string | null;
   /** Host path where /workspace was extracted on pod completion (artifact mode). */
   artifactsPath: string | null;
   /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
@@ -238,10 +244,13 @@ export interface CreatePodRequest {
   prUrl?: string | null;
   /** Override the profile's token budget for this pod. null = inherit from profile. */
   tokenBudget?: number | null;
-  /** Reference repos to clone read-only into the container. Mount paths are derived automatically. */
-  referenceRepos?: { url: string }[];
-  /** Shared PAT for authenticating against all reference repos (optional). */
-  referenceRepoPat?: string;
+  /**
+   * Reference repos to clone read-only into the container. Mount paths are
+   * derived automatically. When `sourceProfile` is set, the daemon resolves
+   * auth from that profile's `githubPat` / `adoPat` at clone time. Ad-hoc
+   * URLs (no `sourceProfile`) clone unauthenticated — must be public/SSH.
+   */
+  referenceRepos?: { url: string; sourceProfile?: string }[];
   /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
   scheduledJobId?: string | null;
   /**

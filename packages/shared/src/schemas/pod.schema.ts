@@ -77,6 +77,19 @@ export const createPodRequestSchema = z
       )
       .max(8)
       .optional(),
+    // Read-only repos to mount at /repos/<name>/. Profile-picked entries
+    // carry `sourceProfile` so the daemon can resolve auth from that profile;
+    // ad-hoc entries omit it and clone unauthenticated. Zod strips unknown
+    // fields, so omitting this entry would silently drop ref-repo posts.
+    referenceRepos: z
+      .array(
+        z.object({
+          url: z.string().url().max(500),
+          sourceProfile: z.string().min(1).max(64).optional(),
+        }),
+      )
+      .max(20)
+      .optional(),
   })
   .refine(
     (data) => {

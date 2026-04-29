@@ -201,12 +201,19 @@ export function generateDockerfile(options: DockerfileOptions): string {
     );
   }
 
-  // Clean up git credentials
-  if (options.gitCredentials === 'pat') {
+  // Strip the baked-in `.git` directory from the image. The earlier `git clone --depth 1`
+  // is only needed so the install/build pre-warm has package manifests + lockfiles to chew
+  // on — once pre-warm is done, the `.git` directory is dead weight that pins the image to
+  // a stale main ref. Worse: at pod start, the host worktree's `.git` is a *gitlink file*,
+  // and `cp -a /mnt/worktree/. /workspace/` cannot overwrite a directory with a non-directory
+  // (GNU cp errors on that single entry, copies the rest, exits non-zero). Removing the dir
+  // here means the cp at pod start has no collision and the agent works against the host
+  // worktree's actual base ref. Also strips embedded git credentials in the same shot.
+  if (profile.repoUrl) {
     lines.push(
       '',
-      '# Remove git credentials from image',
-      'RUN git remote set-url origin https://github.com/placeholder/repo.git',
+      '# Strip baked-in .git so pod-start cp has no collision',
+      'RUN rm -rf /workspace/.git',
     );
   }
 

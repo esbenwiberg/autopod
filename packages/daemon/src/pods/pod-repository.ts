@@ -50,8 +50,6 @@ export interface NewPod {
   tokenBudget?: number | null;
   /** Reference repos to clone read-only into the container. */
   referenceRepos?: ReferenceRepo[] | null;
-  /** Shared PAT for authenticating against all reference repos (plaintext — no encryption at repo layer). */
-  referenceRepoPat?: string | null;
   /** ID of the scheduled job that spawned this pod. */
   scheduledJobId?: string | null;
   /** IDs of the pods this pod depends on (fan-in supported). */
@@ -119,6 +117,7 @@ export interface PodUpdates {
   acceptanceCriteria?: AcDefinition[] | null;
   recoveryWorktreePath?: string | null;
   reworkReason?: string | null;
+  reworkCount?: number;
   lastHeartbeatAt?: string | null;
   inputTokens?: number;
   outputTokens?: number;
@@ -282,6 +281,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     acFrom: (row.ac_from as string) ?? null,
     recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
     reworkReason: (row.rework_reason as string) ?? null,
+    reworkCount: (row.rework_count as number) ?? 0,
     lastHeartbeatAt: (row.last_heartbeat_at as string) ?? null,
     inputTokens: (row.input_tokens as number) ?? 0,
     outputTokens: (row.output_tokens as number) ?? 0,
@@ -308,7 +308,6 @@ function rowToSession(row: Record<string, unknown>): Pod {
     referenceRepos: row.reference_repos
       ? (JSON.parse(row.reference_repos as string) as ReferenceRepo[])
       : null,
-    referenceRepoPat: (row.reference_repo_pat as string) ?? null,
     artifactsPath: (row.artifacts_path as string) ?? null,
     scheduledJobId: (row.scheduled_job_id as string) ?? null,
     dependsOnPodIds: parseDependsOnPodIds(row.depends_on_pod_ids, row.depends_on_pod_id),
@@ -362,7 +361,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           user_id, max_validation_attempts, skip_validation, acceptance_criteria,
           output_mode, agent_mode, output_target, validate, promotable,
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
-          token_budget, reference_repos, reference_repo_pat, scheduled_job_id,
+          token_budget, reference_repos, scheduled_job_id,
           depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description,
           series_design, brief_title, touches, does_not_touch, pr_mode, wait_for_merge,
           require_sidecars, auto_approve, disable_ask_human
@@ -371,7 +370,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
-          @tokenBudget, @referenceRepos, @referenceRepoPat, @scheduledJobId,
+          @tokenBudget, @referenceRepos, @scheduledJobId,
           @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription,
           @seriesDesign, @briefTitle, @touches, @doesNotTouch, @prMode, @waitForMerge,
           @requireSidecars, @autoApprove, @disableAskHuman
@@ -401,7 +400,6 @@ export function createPodRepository(db: Database.Database): PodRepository {
         prUrl: pod.prUrl ?? null,
         tokenBudget: pod.tokenBudget ?? null,
         referenceRepos: pod.referenceRepos ? JSON.stringify(pod.referenceRepos) : null,
-        referenceRepoPat: pod.referenceRepoPat ?? null,
         scheduledJobId: pod.scheduledJobId ?? null,
         dependsOnPodId: depIds[0] ?? null,
         dependsOnPodIds: depIds.length > 0 ? JSON.stringify(depIds) : null,
@@ -536,6 +534,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.reworkReason !== undefined) {
         setClauses.push('rework_reason = @reworkReason');
         params.reworkReason = changes.reworkReason;
+      }
+      if (changes.reworkCount !== undefined) {
+        setClauses.push('rework_count = @reworkCount');
+        params.reworkCount = changes.reworkCount;
       }
       if (changes.inputTokens !== undefined) {
         setClauses.push('input_tokens = @inputTokens');

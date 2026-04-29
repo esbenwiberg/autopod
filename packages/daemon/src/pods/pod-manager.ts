@@ -86,7 +86,7 @@ import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
-import { deriveReferenceRepos } from './reference-repos.js';
+import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
 import {
   CREDENTIAL_GUARD_HOOK,
   buildNuGetCredentialEnv,
@@ -1292,7 +1292,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     containerId: string,
     worktreePath: string,
     cm: ContainerManager,
-  ): Promise<void> {
+  ): Promise<{ pushed: boolean }> {
+    let pushed = false;
     try {
       // Read the bare repo path from the alternates file written during gitlink conversion.
       // Alternates contains "<bareRepoPath>/objects" — strip the trailing "/objects".
@@ -1332,10 +1333,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             ['git', '-C', '/workspace', 'push', bareRepoPath, 'HEAD'],
             { timeout: 30_000 },
           );
-          if (push.exitCode !== 0) {
+          if (push.exitCode === 0) {
+            pushed = true;
+          } else {
+            // Surface as pushed=false rather than throwing. A non-fast-forward rejection
+            // (e.g. from a stale /workspace/.git seam) won't be helped by the archive-API
+            // fallback below — it'd push the same git history. The caller uses pushed=false
+            // to clamp auto-commit's deletion guard so a partially-synced worktree can't
+            // get swept into a single bogus chore commit via `git add -A`.
             logger.warn(
-              { worktreePath, stderr: push.stderr },
-              'Git push to bare during sync-back failed — new commits may not be visible on host',
+              { worktreePath, stderr: push.stderr.trim() },
+              'Git push to bare during sync-back failed — agent commits not on host branch',
             );
           }
         }
@@ -1381,6 +1389,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // so git can resolve baseline objects and push only the new ones.
           await cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir);
           await execFileAsync('git', ['--git-dir', tmpGitDir, 'push', bareRepoPath, 'HEAD']);
+          pushed = true;
         } catch (gitRecoveryErr) {
           logger.warn(
             { err: gitRecoveryErr, worktreePath },
@@ -1391,6 +1400,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
     }
+    return { pushed };
   }
 
   /**
@@ -1922,7 +1932,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 ? request.tokenBudget
                 : (profile.tokenBudget ?? null),
             referenceRepos: derivedReferenceRepos.length > 0 ? derivedReferenceRepos : null,
-            referenceRepoPat: request.referenceRepoPat ?? null,
             scheduledJobId: request.scheduledJobId ?? null,
             dependsOnPodIds:
               request.dependsOnPodIds && request.dependsOnPodIds.length > 0
@@ -2068,7 +2077,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           try {
             await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
           } catch (err) {
-            logger.warn({ err, podId }, 'Failed to sync workspace back during handoff — agent may miss in-flight changes');
+            logger.warn(
+              { err, podId },
+              'Failed to sync workspace back during handoff — agent may miss in-flight changes',
+            );
           }
           try {
             await cm.stop(pod.containerId);
@@ -2428,11 +2440,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Skipped for artifact pods with no worktree.
         if (worktreePath) {
           emitStatus('Populating workspace…');
-          await containerManager.execInContainer(
+          // Strip the image's baked-in `/workspace/.git` first. The warm image is built
+          // with `RUN git clone --depth 1` (dockerfile-generator.ts), which leaves a real
+          // `.git` directory pinned to whatever main was at image-build time. The host
+          // worktree carries a `.git` *gitlink file*, and `cp -a` cannot overwrite a
+          // directory with a non-directory — it errors on that single entry, copies
+          // everything else, and exits non-zero. If we don't pre-clear, the seam leaks
+          // image-era HEAD into /workspace/.git/HEAD and the agent works against a stale
+          // base. Pre-clearing makes cp's job collision-free.
+          const preclear = await containerManager.execInContainer(
+            containerId,
+            ['rm', '-rf', '/workspace/.git'],
+            { timeout: 30_000 },
+          );
+          if (preclear.exitCode !== 0) {
+            throw new Error(
+              `Workspace pre-clear failed (exit ${preclear.exitCode}): ${preclear.stderr}`,
+            );
+          }
+          const populate = await containerManager.execInContainer(
             containerId,
             ['cp', '-a', '/mnt/worktree/.', '/workspace/'],
             { timeout: 120_000 },
           );
+          if (populate.exitCode !== 0) {
+            throw new Error(
+              `Workspace populate failed (exit ${populate.exitCode}): ${populate.stderr}`,
+            );
+          }
           // Restore execute bit on node_modules binaries — VirtioFS bind mounts on Docker Desktop
           // for Mac can strip +x from native platform binaries (e.g. @esbuild/linux-arm64/bin/esbuild).
           await containerManager
@@ -2518,7 +2553,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
           for (const repo of referenceRepos) {
             const destPath = `/repos/${repo.mountPath}`;
-            const refPat = pod.referenceRepoPat ?? undefined;
+            const refPat = resolveRefRepoPat(repo, profileStore, logger);
             try {
               if (refPat) {
                 // Use a git credential helper script to avoid embedding the PAT in the
@@ -3542,25 +3577,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       // Sync workspace back to host worktree before any host-side git reads
       let syncSucceeded = true;
+      let agentCommitsPushed = true;
       if (pod.containerId && pod.worktreePath) {
         try {
           const cm = containerManagerFactory.get(pod.executionTarget);
-          await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+          const result = await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+          agentCommitsPushed = result.pushed;
+          if (!agentCommitsPushed) {
+            logger.warn(
+              { podId },
+              'Sync-back completed but push to bare did not — auto-commit will run with strict deletion guard',
+            );
+          }
         } catch (err) {
           syncSucceeded = false;
+          agentCommitsPushed = false;
           logger.warn({ err, podId }, 'Failed to sync workspace back to host');
         }
       }
 
       // Auto-commit any uncommitted changes the agent left behind, then get diff stats.
-      // When sync failed, block all deletions (threshold=0) to prevent committing a
-      // partially-synced worktree that looks like mass file deletions.
+      // When sync failed OR the in-container push didn't land on the bare, clamp deletions
+      // to 0 so a `git add -A` over a partially-synced or stale-base worktree can't masquerade
+      // as agent work. Push failure here is the canary for /workspace/.git diverging from
+      // the host bare's branch tip — see syncWorkspaceBack for context.
+      const safeAutoCommit = syncSucceeded && agentCommitsPushed;
       if (pod.worktreePath) {
         try {
           const committed = await worktreeManager.commitPendingChangesWithGeneratedMessage(
             pod.worktreePath,
             pod.task,
-            { maxDeletions: syncSucceeded ? 100 : 0 },
+            { maxDeletions: safeAutoCommit ? 100 : 0 },
           );
           if (committed) {
             logger.info({ podId }, 'Auto-committed uncommitted agent changes');
@@ -3968,6 +4015,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             worktreePath: pod.worktreePath,
             // Push the feature branch up so the PR can be opened against retryDefaultBranch.
             targetBranch: pod.branch,
+            // Pass the PAT explicitly — approval retry runs post-container, so the
+            // in-memory PAT cache may be cold after a daemon restart.
+            pat: selectGitPat(retryProfile),
             // Post-container retry: sync-back already happened (or failed silently) upstream;
             // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
             maxDeletions: 0,
@@ -4029,6 +4079,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // last step. Pushing onto profile.defaultBranch would force-push the feature work
             // straight onto main, which is never what we want.
             targetBranch: pod.branch,
+            // Pass the PAT explicitly — fallback push runs post-container, so the
+            // in-memory PAT cache may be cold after a daemon restart.
+            pat: selectGitPat(profile),
             // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
             maxDeletions: 0,
           });
@@ -4414,8 +4467,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Refuse to push a workspace pod directly to the default branch — this almost
             // always means the user passed `--branch main` by mistake. fixManually() pods
             // have linkedPodId set and are explicitly exempt.
-            const completionBaseBranch =
-              pod.baseBranch ?? pushScanProfile?.defaultBranch ?? 'main';
+            const completionBaseBranch = pod.baseBranch ?? pushScanProfile?.defaultBranch ?? 'main';
             if (!pod.linkedPodId && pod.branch === completionBaseBranch) {
               throw new AutopodError(
                 `Refusing to push workspace pod directly to default branch '${pod.branch}'. Use ap complete <id> --pr or check out a feature branch first.`,
@@ -4436,6 +4488,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             await worktreeManager.mergeBranch({
               worktreePath: pod.worktreePath,
               targetBranch: pod.branch ?? 'HEAD',
+              // Pass the PAT explicitly — workspace pods auto-push on container exit,
+              // possibly hours/days after the worktree was created. The in-memory PAT
+              // cache may be cold after a daemon restart in between.
+              pat: selectGitPat(pushScanProfile),
               maxDeletions: workspaceSyncOk ? 100 : 0,
               commitMessage,
             });
@@ -4586,6 +4642,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           claudeSessionId: null,
           recoveryWorktreePath: pod.worktreePath ?? null,
           reworkReason,
+          reworkCount: (pod.reworkCount ?? 0) + 1,
         });
         transition(pod, 'queued');
         enqueueSession(podId);
@@ -4621,7 +4678,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         attempt,
       });
 
-      emitActivityStatus(podId, `Starting validation (attempt ${attempt})…`);
+      const reworkLabel = s1.reworkCount > 0 ? `rework ${s1.reworkCount}, ` : '';
+      emitActivityStatus(
+        podId,
+        `Starting validation (${reworkLabel}attempt ${attempt}/${s1.maxValidationAttempts})…`,
+      );
 
       try {
         if (!pod.containerId) {
@@ -5041,6 +5102,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 // Push the feature branch up so `gh pr create --head <branch>` can reference it.
                 // The PR is opened against passDefaultBranch separately by prManager.createPr.
                 targetBranch: s2.branch,
+                // Pass the PAT explicitly — the in-memory cache may be cold after a daemon
+                // restart or for recovery pods that mount an existing worktree without
+                // re-warming via create(). Without this, ADO URLs of the form
+                // https://<org>@dev.azure.com/... cause git to prompt for a password.
+                pat: selectGitPat(profile),
                 maxDeletions: validationSyncOk ? 100 : 0,
               });
             } catch (err) {
@@ -5427,6 +5493,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 // Push the feature branch up — the PR is opened against revalDefaultBranch
                 // separately by the PR manager.
                 targetBranch: s2.branch,
+                // Pass the PAT explicitly — revalidation often runs after a daemon restart,
+                // when the in-memory PAT cache for this bare repo is cold.
+                pat: selectGitPat(profile),
                 maxDeletions: 0,
               });
             } catch (err) {

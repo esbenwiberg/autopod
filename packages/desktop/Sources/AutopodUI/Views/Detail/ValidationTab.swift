@@ -167,7 +167,7 @@ public struct ValidationTab: View {
   private var headerView: some View {
     HStack(spacing: 12) {
       if let attempts = pod.attempts {
-        Text("Attempt \(attempts.current) of \(attempts.max)")
+        Text(attempts.reworkCount > 0 ? "Rework \(attempts.reworkCount) — Attempt \(attempts.current) of \(attempts.max)" : "Attempt \(attempts.current) of \(attempts.max)")
           .font(.caption)
           .foregroundStyle(.secondary)
       } else if let p = progress {

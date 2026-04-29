@@ -37,14 +37,13 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createPod: { [weak self] profile, task, model, pod, ac, base, acFrom, pimGroups, sidecars, refRepos, refRepoPat in
+      createPod: { [weak self] profile, task, model, pod, ac, base, acFrom, pimGroups, sidecars, refRepos in
         await self?.createPod(
           profileName: profile, task: task, model: model,
           pod: pod, acceptanceCriteria: ac,
           baseBranch: base, acFrom: acFrom, pimGroups: pimGroups,
           requireSidecars: sidecars,
-          referenceRepos: refRepos,
-          referenceRepoPat: refRepoPat
+          referenceRepos: refRepos
         )
       },
       promote: { [weak self] id, target in await self?.promoteSession(id, targetOutput: target) },
@@ -262,8 +261,7 @@ public final class ActionHandler {
     pod: PodConfigRequest?, acceptanceCriteria: [AcDefinition]?,
     baseBranch: String?, acFrom: String?, pimGroups: [PimGroupRequest]? = nil,
     requireSidecars: [String]? = nil,
-    referenceRepos: [ReferenceRepoRequest]? = nil,
-    referenceRepoPat: String? = nil
+    referenceRepos: [ReferenceRepoRequest]? = nil
   ) async -> String? {
     pendingAction = "create"
     let req = CreateSessionRequest(
@@ -276,8 +274,7 @@ public final class ActionHandler {
       acFrom: acFrom?.isEmpty == true ? nil : acFrom,
       pimGroups: pimGroups?.filter { !$0.groupId.isEmpty },
       requireSidecars: (requireSidecars?.isEmpty ?? true) ? nil : requireSidecars,
-      referenceRepos: (referenceRepos?.isEmpty ?? true) ? nil : referenceRepos,
-      referenceRepoPat: referenceRepoPat?.isEmpty == true ? nil : referenceRepoPat
+      referenceRepos: (referenceRepos?.isEmpty ?? true) ? nil : referenceRepos
     )
     do {
       let response = try await api.createPod(req)

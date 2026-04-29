@@ -434,18 +434,24 @@ export class DockerNetworkManager {
     for (const ip of extraAllowedIps) {
       cidrs.add(ip);
     }
+    // host.docker.internal is injected into the container's /etc/hosts by Docker Desktop
+    // and is not resolvable from the macOS host — the startup shell script handles it via
+    // getent at container runtime, so skip it here to avoid a spurious WARN.
+    const CONTAINER_RUNTIME_HOSTS = new Set(['host.docker.internal']);
     await Promise.all(
-      exactHosts.map(async (host) => {
-        try {
-          const { resolve4 } = await import('node:dns/promises');
-          const ips = await resolve4(host);
-          for (const ip of ips) {
-            cidrs.add(`${ip}/32`);
+      exactHosts
+        .filter((h) => !CONTAINER_RUNTIME_HOSTS.has(h))
+        .map(async (host) => {
+          try {
+            const { resolve4 } = await import('node:dns/promises');
+            const ips = await resolve4(host);
+            for (const ip of ips) {
+              cidrs.add(`${ip}/32`);
+            }
+          } catch {
+            this.logger.warn({ host }, 'Failed to resolve host for firewall allowlist');
           }
-        } catch {
-          this.logger.warn({ host }, 'Failed to resolve host for firewall allowlist');
-        }
-      }),
+        }),
     );
 
     // Build dnsmasq domain entries: for each domain, generate server= and ipset= lines.

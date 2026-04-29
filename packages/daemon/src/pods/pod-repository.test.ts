@@ -238,6 +238,13 @@ describe('PodRepository', () => {
       repo.update('sess-001', { previewUrl: 'http://localhost:3000' });
       expect(repo.getOrThrow('sess-001').previewUrl).toBe('http://localhost:3000');
     });
+
+    it('round-trips reworkCount through update and getOrThrow', () => {
+      repo.insert(validSession);
+      expect(repo.getOrThrow('sess-001').reworkCount).toBe(0);
+      repo.update('sess-001', { reworkCount: 3 });
+      expect(repo.getOrThrow('sess-001').reworkCount).toBe(3);
+    });
   });
 
   describe('list', () => {

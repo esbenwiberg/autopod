@@ -115,13 +115,15 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     )
     .option(
       '--ref-repo <url>',
-      'Read-only reference repo cloned at /repos/<name>/. Repeatable. PAT (if any) must cover all listed repos.',
+      'Read-only reference repo cloned at /repos/<name>/. Repeatable. Cloned unauthenticated — use --ref-from-profile for private repos.',
       collectRepeatable,
       [] as string[],
     )
     .option(
-      '--ref-repo-pat <token>',
-      'Single PAT used to clone every --ref-repo. SAML/SSO orgs require an SSO-authorized PAT.',
+      '--ref-from-profile <name>',
+      "Reference repo from a profile (uses that profile's PAT). Repeatable.",
+      collectRepeatable,
+      [] as string[],
     )
     .action(
       async (
@@ -139,7 +141,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           acFrom?: string;
           sidecar: string[];
           refRepo: string[];
-          refRepoPat?: string;
+          refFromProfile: string[];
         },
       ) => {
         const client = getClient();
@@ -170,9 +172,20 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           process.exit(1);
         }
 
-        const referenceRepos = opts.refRepo.length
-          ? opts.refRepo.map((url) => ({ url }))
-          : undefined;
+        const refRepoEntries: { url: string; sourceProfile?: string }[] = opts.refRepo.map(
+          (url) => ({ url }),
+        );
+        for (const profileName of opts.refFromProfile) {
+          const refProfile = await client.getProfile(profileName).catch(() => null);
+          if (!refProfile?.repoUrl) {
+            console.error(
+              chalk.red(`--ref-from-profile ${profileName}: profile not found or has no repoUrl`),
+            );
+            process.exit(1);
+          }
+          refRepoEntries.push({ url: refProfile.repoUrl, sourceProfile: profileName });
+        }
+        const referenceRepos = refRepoEntries.length ? refRepoEntries : undefined;
 
         const pod = await withSpinner('Starting pod…', () =>
           client.createSession({
@@ -187,7 +200,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             options: podOptions,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
             referenceRepos,
-            referenceRepoPat: opts.refRepoPat,
           }),
         );
 

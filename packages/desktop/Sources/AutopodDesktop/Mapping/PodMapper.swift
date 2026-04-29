@@ -178,10 +178,12 @@ public enum PodMapper {
 
     // Map attempt info
     let attempts: AttemptInfo? = {
-      guard response.validationAttempts > 0 else { return nil }
+      let rework = response.reworkCount ?? 0
+      guard response.validationAttempts > 0 || rework > 0 else { return nil }
       return AttemptInfo(
         current: response.validationAttempts,
-        max: response.maxValidationAttempts
+        max: response.maxValidationAttempts,
+        reworkCount: rework
       )
     }()
 

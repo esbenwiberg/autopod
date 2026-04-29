@@ -45,6 +45,7 @@ describe('state-machine', () => {
       expect(() => validateTransition('s1', 'review_required', 'running')).not.toThrow();
       expect(() => validateTransition('s1', 'review_required', 'validating')).not.toThrow();
       expect(() => validateTransition('s1', 'review_required', 'killing')).not.toThrow();
+      expect(() => validateTransition('s1', 'review_required', 'queued')).not.toThrow();
     });
 
     it('allows validating to review_required', () => {
@@ -52,9 +53,6 @@ describe('state-machine', () => {
     });
 
     it('rejects invalid transitions from review_required', () => {
-      expect(() => validateTransition('s1', 'review_required', 'queued')).toThrow(
-        InvalidStateTransitionError,
-      );
       expect(() => validateTransition('s1', 'review_required', 'complete')).toThrow(
         InvalidStateTransitionError,
       );

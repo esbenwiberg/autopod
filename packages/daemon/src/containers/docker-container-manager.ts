@@ -219,8 +219,8 @@ export class DockerContainerManager implements ContainerManager {
       await container.stop({ t: 10 });
       this.logger.info({ containerId }, 'Docker container stopped');
     } catch (err: unknown) {
-      if (isExpectedDockerError(err, [304])) {
-        this.logger.debug({ containerId }, 'Container already stopped');
+      if (isExpectedDockerError(err, [304, 404])) {
+        this.logger.debug({ containerId }, 'Container already stopped or removed');
         return;
       }
       this.logger.error({ containerId, err }, 'Failed to stop Docker container');

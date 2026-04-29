@@ -39,7 +39,6 @@ public struct CreateSessionSheet: View {
     @State private var enableDaggerSidecar = false
     @State private var refProfileNames: Set<String> = []
     @State private var adHocRefUrls: [String] = []
-    @State private var refRepoPat: String = ""
 
     private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
 
@@ -78,12 +77,14 @@ public struct CreateSessionSheet: View {
 
     /// Resolve the final `[ReferenceRepoRequest]` list from the two UI sources,
     /// deduping by URL while preserving order (profile chips first, then ad-hoc).
+    /// Profile-picked entries carry `sourceProfile` so the daemon authenticates
+    /// the clone with that profile's PAT; ad-hoc URLs clone unauthenticated.
     private func resolvedReferenceRepos() -> [ReferenceRepoRequest] {
         var seen: Set<String> = []
         var out: [ReferenceRepoRequest] = []
         for p in refRepoCandidates where refProfileNames.contains(p.name) {
             if seen.insert(p.repoUrl).inserted {
-                out.append(ReferenceRepoRequest(url: p.repoUrl))
+                out.append(ReferenceRepoRequest(url: p.repoUrl, sourceProfile: p.name))
             }
         }
         for raw in adHocRefUrls {
@@ -344,10 +345,11 @@ public struct CreateSessionSheet: View {
                         .foregroundStyle(.tertiary)
                     } // end if !isInteractive
 
-                    // Advanced options (PIM groups, sidecars)
-                    if !isInteractive {
-                        DisclosureGroup(isExpanded: $showAdvanced) {
-                            VStack(alignment: .leading, spacing: 10) {
+                    // Advanced options. Reference Repos applies to all pods;
+                    // Sidecars and PIM Groups are agent-only.
+                    DisclosureGroup(isExpanded: $showAdvanced) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if !isInteractive {
                                 // Dagger sidecar — only offered when the profile
                                 // has trustedSource + sidecars.dagger.enabled.
                                 if canRequestDaggerSidecar {
@@ -438,6 +440,7 @@ public struct CreateSessionSheet: View {
                                 }
 
                                 Divider()
+                            } // end agent-only Advanced sub-sections
 
                                 // Reference repos — read-only mounts at /repos/<name>/.
                                 HStack {
@@ -522,21 +525,15 @@ public struct CreateSessionSheet: View {
                                     }
                                 }
 
-                                if !refProfileNames.isEmpty || adHocRefUrls.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
-                                    SecureField("Shared PAT (optional — must cover all listed repos)", text: $refRepoPat)
-                                        .textFieldStyle(.roundedBorder)
-                                        .font(.system(.caption, design: .monospaced))
-                                    Text("One PAT for every reference repo above. Cross-org refs require a PAT with access to all of them; SSO orgs require an SSO-authorized PAT.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                            .padding(.top, 8)
-                        } label: {
-                            Text("Advanced")
-                                .font(.system(.caption).weight(.semibold))
-                                .foregroundStyle(.secondary)
+                                Text("Profile-backed refs authenticate with that profile's PAT. Ad-hoc URLs clone unauthenticated — for private repos, add a profile and pick it above.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
                         }
+                        .padding(.top, 8)
+                    } label: {
+                        Text("Advanced")
+                            .font(.system(.caption).weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .padding(20)
@@ -562,7 +559,6 @@ public struct CreateSessionSheet: View {
                         )
                         let sidecars: [String]? = (canRequestDaggerSidecar && enableDaggerSidecar) ? ["dagger"] : nil
                         let refs = resolvedReferenceRepos()
-                        let trimmedPat = refRepoPat.trimmingCharacters(in: .whitespacesAndNewlines)
                         _ = await actions.createPod(
                             selectedProfile, task, model.isEmpty ? nil : model,
                             pod, ac.isEmpty ? nil : ac,
@@ -570,8 +566,7 @@ public struct CreateSessionSheet: View {
                             acFromPath.isEmpty ? nil : acFromPath,
                             pim.isEmpty ? nil : pim,
                             sidecars,
-                            refs.isEmpty ? nil : refs,
-                            trimmedPat.isEmpty ? nil : trimmedPat
+                            refs.isEmpty ? nil : refs
                         )
                         isPresented = false
                     }

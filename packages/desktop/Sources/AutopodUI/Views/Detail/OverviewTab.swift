@@ -766,7 +766,7 @@ struct OverviewTab: View {
                     .foregroundStyle(accentColor)
             }
             if let a = pod.attempts {
-                Text("Attempt \(a.current) of \(a.max)")
+                Text(a.reworkCount > 0 ? "Rework \(a.reworkCount) — Attempt \(a.current) of \(a.max)" : "Attempt \(a.current) of \(a.max)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -308,7 +308,9 @@ describe('generateDockerfile', () => {
     });
     expect(df).toContain('ARG GIT_PAT');
     expect(df).toContain('x-access-token:${GIT_PAT}@');
-    expect(df).toContain('git remote set-url origin');
+    // Image strips the baked-in .git after pre-warm so a PAT-bearing remote can't survive
+    // and so pod-start cp has no .git/file vs .git/dir collision.
+    expect(df).toContain('rm -rf /workspace/.git');
   });
 
   it('does not include PAT args for public repos', () => {
@@ -584,8 +586,8 @@ describe('generateDockerfile', () => {
     expect(df).toContain('rm -f /workspace/.npmrc /workspace/NuGet.config');
     // NuGet credential provider env cleared
     expect(df).toContain('ENV VSS_NUGET_EXTERNAL_FEED_ENDPOINTS=');
-    // Git credentials are also cleaned up
-    expect(df).toContain('git remote set-url origin');
+    // Baked-in .git stripped — also scrubs any embedded credentials in the remote URL
+    expect(df).toContain('rm -rf /workspace/.git');
   });
 
   describe('codeIntelligence install steps', () => {

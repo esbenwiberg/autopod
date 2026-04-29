@@ -510,6 +510,31 @@ describe('Integration', () => {
       expect(res.json().status).toBe('queued');
     });
 
+    it('POST /pods preserves referenceRepos with sourceProfile (regression: schema must not strip)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          profileName: 'test-app',
+          task: 'use the lib',
+          referenceRepos: [
+            { url: 'https://github.com/org/lib', sourceProfile: 'test-app' },
+            { url: 'https://github.com/org/other' },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.referenceRepos).toHaveLength(2);
+      expect(body.referenceRepos[0]).toMatchObject({
+        url: 'https://github.com/org/lib',
+        mountPath: 'lib',
+        sourceProfile: 'test-app',
+      });
+      expect(body.referenceRepos[1].sourceProfile).toBeUndefined();
+    });
+
     it('GET /pods lists pods', async () => {
       await app.inject({
         method: 'POST',

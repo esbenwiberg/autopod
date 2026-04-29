@@ -76,6 +76,12 @@ function createMockClient() {
     getSessionLogs: vi.fn().mockResolvedValue('some log output'),
     approveAllValidated: vi.fn().mockResolvedValue({ approved: ['a', 'b'] }),
     killAllFailed: vi.fn().mockResolvedValue({ killed: ['c'] }),
+    getProfile: vi.fn().mockImplementation((name: string) =>
+      Promise.resolve({
+        name,
+        repoUrl: `https://github.com/org/${name}`,
+      }),
+    ),
   } as unknown as AutopodClient;
 }
 
@@ -140,7 +146,7 @@ describe('pod commands', () => {
     expect(call.requireSidecars).toBeUndefined();
   });
 
-  it('passes --ref-repo flags as referenceRepos on start', async () => {
+  it('passes --ref-repo and --ref-from-profile flags as referenceRepos on start', async () => {
     await program.parseAsync([
       'node',
       'ap',
@@ -151,26 +157,29 @@ describe('pod commands', () => {
       'https://github.com/org/docs-gen',
       '--ref-repo',
       'https://github.com/org/pipelines.git',
-      '--ref-repo-pat',
-      'ghp_secret',
+      '--ref-from-profile',
+      'duck',
     ]);
     expect(mockClient.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         referenceRepos: [
           { url: 'https://github.com/org/docs-gen' },
           { url: 'https://github.com/org/pipelines.git' },
+          { url: 'https://github.com/org/duck', sourceProfile: 'duck' },
         ],
-        referenceRepoPat: 'ghp_secret',
       }),
     );
+    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(call).not.toHaveProperty('referenceRepoPat');
   });
 
-  it('omits referenceRepos when no --ref-repo flags are passed', async () => {
+  it('omits referenceRepos when no ref flags are passed', async () => {
     await program.parseAsync(['node', 'ap', 'start', 'test-profile', 'do it']);
     const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
     expect(call.referenceRepos).toBeUndefined();
-    expect(call.referenceRepoPat).toBeUndefined();
+    expect(call).not.toHaveProperty('referenceRepoPat');
   });
 
   it('registers ls command that calls listSessions', async () => {

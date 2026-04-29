@@ -73,6 +73,9 @@ interface TestProfileOverrides {
   privateRegistries?: string;
   registryPat?: string;
   branchPrefix?: string;
+  githubPat?: string;
+  adoPat?: string;
+  prProvider?: 'github' | 'ado';
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -85,12 +88,14 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       name, repo_url, default_branch, template, build_command, start_command,
       health_path, health_timeout, validation_pages, max_validation_attempts,
       default_model, default_runtime, escalation_config,
-      private_registries, registry_pat, branch_prefix
+      private_registries, registry_pat, branch_prefix,
+      pr_provider, github_pat, ado_pat
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
       @defaultModel, @defaultRuntime, @escalationConfig,
-      @privateRegistries, @registryPat, @branchPrefix
+      @privateRegistries, @registryPat, @branchPrefix,
+      @prProvider, @githubPat, @adoPat
     )
   `).run({
     name,
@@ -115,6 +120,9 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     privateRegistries: opts.privateRegistries ?? '[]',
     registryPat: opts.registryPat ?? null,
     branchPrefix: opts.branchPrefix ?? 'autopod/',
+    prProvider: opts.prProvider ?? 'github',
+    githubPat: opts.githubPat ?? null,
+    adoPat: opts.adoPat ?? null,
   });
 }
 
@@ -728,6 +736,80 @@ describe('PodManager', () => {
         }),
       );
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+    });
+
+    // Regression: approval-time mergeBranch sites used to omit the PAT, so a daemon
+    // restart between worktree create and approval (or a recovery pod that mounts an
+    // existing worktree) left the in-memory PAT cache cold. ADO clone URLs of the
+    // form https://<org>@dev.azure.com/... then prompted for a password, and with
+    // GIT_TERMINAL_PROMPT=0 the push died with "could not read Password".
+    it('forwards profile PAT into mergeBranch on approval-time PR creation retry', async () => {
+      const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_12345' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        filesChanged: 1,
+      });
+
+      await manager.approveSession(pod.id);
+
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({ pat: 'ghp_test_pat_12345' }),
+      );
+    });
+
+    it('forwards profile PAT into mergeBranch on approval-time fallback push (no prManager)', async () => {
+      const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_67890' });
+      ctx.deps.prManagerFactory = undefined;
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        filesChanged: 1,
+      });
+
+      await manager.approveSession(pod.id);
+
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({ pat: 'ghp_test_pat_67890' }),
+      );
+    });
+
+    it('forwards profile.adoPat for ADO profiles (prProvider=ado) on approval push', async () => {
+      const ctx = createTestContext(undefined, {
+        prProvider: 'ado',
+        adoPat: 'ado_test_pat_xyz',
+        githubPat: 'should_not_be_used',
+      });
+      ctx.deps.prManagerFactory = undefined;
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        filesChanged: 1,
+      });
+
+      await manager.approveSession(pod.id);
+
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({ pat: 'ado_test_pat_xyz' }),
+      );
     });
 
     it('enqueues dependent series pod after manual approval', async () => {
