@@ -121,6 +121,33 @@ export interface Profile {
   sastCommand?: string | null;
   /** SAST phase timeout in seconds. Default 300 (5 min). */
   sastTimeout?: number | null;
+  /**
+   * How often the merge poller checks the PR for CI / review state changes,
+   * in seconds. Defaults to 60. Lower values (e.g. 20) make fix pods spawn
+   * faster on actively-watched profiles; the trade-off is more GitHub /
+   * Azure DevOps API calls.
+   */
+  mergePollIntervalSec?: number | null;
+  /**
+   * Minimum interval between PR-fix-pod spawns on the same parent pod, in
+   * seconds. Defaults to 600 (10 min). Prevents a fast-failing CI from
+   * burning all `maxPrFixAttempts` in a single burst. Lower this for trusted
+   * profiles where each fix attempt is safe to run as soon as the previous
+   * cycle finished.
+   */
+  fixPodCooldownSec?: number | null;
+  /**
+   * When true, the daemon reuses a single fix pod entity per parent PR
+   * across all rounds of CI / review feedback instead of spawning a new
+   * child pod per round. The pod's prior container is torn down and a fresh
+   * one provisioned for each iteration, but the pod identity is preserved
+   * so the UI shows a single "fix pod, iteration N of M" instead of N
+   * separate fix pods cluttering the list.
+   *
+   * Defaults to false to preserve existing behavior on profiles that
+   * haven't opted in.
+   */
+  reuseFixPod?: boolean | null;
   /** PR provider — determines which service creates/merges pull requests */
   prProvider: 'github' | 'ado' | null;
   /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */

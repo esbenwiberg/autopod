@@ -46,7 +46,12 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   approved: ['merging'],
   merging: ['complete', 'merge_pending'],
   merge_pending: ['complete', 'failed', 'killing'],
-  complete: [],
+  // `complete → queued` is reachable only via the long-lived fix-pod path
+  // (`profile.reuseFixPod = true`): when a parent PR receives new CI / review
+  // feedback after the fix pod already completed, the daemon re-enqueues the
+  // same pod entity with a fresh task and container instead of spawning a
+  // new child pod.
+  complete: ['queued'],
   // handoff re-enters orchestration: interactive pod has been stopped and
   // is being provisioned again with a new pod options (agentMode: 'auto').
   handoff: ['provisioning', 'killing'],

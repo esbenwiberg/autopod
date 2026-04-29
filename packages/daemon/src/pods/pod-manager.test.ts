@@ -293,6 +293,7 @@ function createTestContext(
         tokenBudgetPolicy: (row.token_budget_policy as 'soft' | 'hard' | null) ?? 'soft',
         maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
         workerProfile: (row.worker_profile as string) ?? null,
+        reuseFixPod: ((row.reuse_fix_pod as number) ?? 0) === 1,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -2436,6 +2437,151 @@ describe('PodManager', () => {
           baseBranch: 'main',
         }),
       );
+    });
+  });
+
+  describe('spawnFixSession — long-lived fix pod (reuseFixPod=true)', () => {
+    it('re-enqueues the same fix pod entity instead of spawning a new child', async () => {
+      const ctx = createTestContext();
+      // Enable the long-lived fix-pod path on this profile.
+      ctx.db.prepare(`UPDATE profiles SET reuse_fix_pod = 1 WHERE name = 'test-profile'`).run();
+
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        merged: false,
+        open: true,
+        blockReason: 'CHANGES_REQUESTED',
+        ciFailures: [],
+        reviewComments: [{ body: 'Please rename foo to bar.', path: null }],
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Original work' },
+        'user-1',
+      );
+
+      // Drive parent into complete + merge_pending-with-PR.
+      ctx.podRepo.update(parent.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-xyz',
+        startedAt: new Date().toISOString(),
+      });
+      for (const status of [
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(parent.id, { status });
+      }
+      ctx.podRepo.update(parent.id, {
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
+
+      // First spawn — creates a fix pod the normal way.
+      await manager.spawnFixSession(parent.id, 'first round of feedback');
+      const podsAfterFirst = ctx.podRepo.list({});
+      const firstFix = podsAfterFirst.find((p) => p.linkedPodId === parent.id);
+      expect(firstFix, 'first spawn should create a fix pod').toBeDefined();
+      const firstFixId = firstFix?.id;
+
+      // Drive that fix pod through to `complete` (it pushed and finished).
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(firstFix?.id ?? '', { status });
+      }
+
+      // Second spawn — same parent gets a new round of feedback. With
+      // reuseFixPod=true, the daemon should re-enqueue the same fix pod
+      // entity, NOT create a new child.
+      await manager.spawnFixSession(parent.id, 'second round of feedback');
+
+      const podsAfterSecond = ctx.podRepo.list({});
+      const fixPodsForParent = podsAfterSecond.filter((p) => p.linkedPodId === parent.id);
+      expect(fixPodsForParent).toHaveLength(1);
+      expect(fixPodsForParent[0]?.id).toBe(firstFixId);
+
+      const reusedFix = ctx.podRepo.getOrThrow(firstFixId ?? '');
+      expect(reusedFix.status).toBe('queued');
+      expect(reusedFix.task).toContain('second round of feedback');
+      expect(reusedFix.containerId).toBeNull();
+      expect(reusedFix.fixIteration).toBe(1);
+      expect(ctx.enqueuedSessions).toContain(firstFixId);
+
+      // Parent's prFixAttempts incremented.
+      const refreshedParent = ctx.podRepo.getOrThrow(parent.id);
+      expect(refreshedParent.prFixAttempts).toBe(2);
+      expect(refreshedParent.fixPodId).toBe(firstFixId);
+    });
+
+    it('falls back to spawning a new fix pod when reuseFixPod is false (default)', async () => {
+      const ctx = createTestContext();
+      // reuse_fix_pod is 0 by default — explicit for clarity.
+      ctx.db.prepare(`UPDATE profiles SET reuse_fix_pod = 0 WHERE name = 'test-profile'`).run();
+
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        merged: false,
+        open: true,
+        blockReason: 'CHANGES_REQUESTED',
+        ciFailures: [],
+        reviewComments: [{ body: 'fix this', path: null }],
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Original work' },
+        'user-1',
+      );
+
+      ctx.podRepo.update(parent.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/wt',
+        containerId: 'c',
+        startedAt: new Date().toISOString(),
+      });
+      for (const status of [
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(parent.id, { status });
+      }
+      ctx.podRepo.update(parent.id, { prUrl: 'https://github.com/org/repo/pull/42' });
+
+      await manager.spawnFixSession(parent.id, 'round 1');
+      const firstFix = ctx.podRepo.list({}).find((p) => p.linkedPodId === parent.id);
+      expect(firstFix).toBeDefined();
+
+      // Drive the first fix pod to complete.
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(firstFix?.id ?? '', { status });
+      }
+
+      // Second spawn — should create ANOTHER child pod (today's behavior).
+      await manager.spawnFixSession(parent.id, 'round 2');
+      const fixPodsForParent = ctx.podRepo.list({}).filter((p) => p.linkedPodId === parent.id);
+      expect(fixPodsForParent.length).toBeGreaterThanOrEqual(2);
     });
   });
 

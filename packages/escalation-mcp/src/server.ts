@@ -11,12 +11,14 @@ import { memoryList } from './tools/memory-list.js';
 import { memoryRead } from './tools/memory-read.js';
 import { memorySearch } from './tools/memory-search.js';
 import { memorySuggest } from './tools/memory-suggest.js';
+import { preSubmitReview } from './tools/pre-submit-review.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
 import { reportTaskSummary } from './tools/report-task-summary.js';
 import { requestCredential } from './tools/request-credential.js';
 import { validateInBrowser } from './tools/validate-in-browser.js';
+import { validateLocally } from './tools/validate-locally.js';
 
 export interface EscalationMcpDeps {
   podId: string;
@@ -170,6 +172,51 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     {},
     async () => {
       const response = await checkMessages(podId, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'pre_submit_review',
+    "Run a fast critic pass on your current diff using the profile reviewer model. Call this AFTER `validate_locally` succeeds and BEFORE `report_task_summary` — it catches logic/security/scope issues the lint/build/test pipeline cannot. Returns structured findings; if `status` is `fail`, address the issues and call again. Significantly cheaper than discovering the same problems after the daemon's full validation cycle (~5–30 minutes).",
+    {
+      plannedSummary: z
+        .string()
+        .optional()
+        .describe(
+          'Preview of the `actualSummary` you intend to pass to `report_task_summary`. Helps the reviewer assess whether the diff matches the claimed scope.',
+        ),
+      plannedDeviations: z
+        .array(
+          z.object({
+            step: z.string(),
+            planned: z.string(),
+            actual: z.string(),
+            reason: z.string(),
+          }),
+        )
+        .optional()
+        .describe('Preview of the `deviations` array you intend to disclose. Optional.'),
+    },
+    async (input) => {
+      const response = await preSubmitReview(podId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'validate_locally',
+    'Run the profile-configured lint, build, and tests inside your container — the same commands the daemon will re-run after you finish. Call before `report_task_summary` to catch failures while you still have full context. Returns structured results per phase. With no `phases` argument, runs lint → build → tests in order; tests are skipped automatically if build fails. Output is truncated to keep your context manageable.',
+    {
+      phases: z
+        .array(z.enum(['lint', 'build', 'tests']))
+        .optional()
+        .describe(
+          'Subset of phases to run. Omit to run all configured phases (recommended for the final pre-completion check). Useful for re-running just `tests` or just `lint` after a targeted fix.',
+        ),
+    },
+    async (input) => {
+      const response = await validateLocally(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );

@@ -148,6 +148,9 @@ export function rowToProfile(
     lintTimeout: nullableNum(row.lint_timeout),
     sastCommand: nullableStr(row.sast_command),
     sastTimeout: nullableNum(row.sast_timeout),
+    mergePollIntervalSec: nullableNum(row.merge_poll_interval_sec),
+    fixPodCooldownSec: nullableNum(row.fix_pod_cooldown_sec),
+    reuseFixPod: ((row.reuse_fix_pod as number) ?? 0) === 1,
     prProvider: nullableStr(row.pr_provider) as Profile['prProvider'],
     adoPat: decryptPat(row.ado_pat),
     githubPat: decryptPat(row.github_pat),
@@ -298,6 +301,7 @@ export function createProfileStore(
           private_registries, registry_pat, branch_prefix, container_memory_gb,
           build_timeout, test_timeout, build_env,
           lint_command, lint_timeout, sast_command, sast_timeout,
+          merge_poll_interval_sec, fix_pod_cooldown_sec, reuse_fix_pod,
           token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
           has_web_ui,
           issue_watcher_enabled, issue_watcher_label_prefix,
@@ -316,6 +320,7 @@ export function createProfileStore(
           @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout, @buildEnv,
           @lintCommand, @lintTimeout, @sastCommand, @sastTimeout,
+          @mergePollIntervalSec, @fixPodCooldownSec, @reuseFixPod,
           @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
           @hasWebUi,
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
@@ -362,6 +367,9 @@ export function createProfileStore(
         lintTimeout: parsed.lintTimeout ?? null,
         sastCommand: parsed.sastCommand ?? null,
         sastTimeout: parsed.sastTimeout ?? null,
+        mergePollIntervalSec: parsed.mergePollIntervalSec ?? null,
+        fixPodCooldownSec: parsed.fixPodCooldownSec ?? null,
+        reuseFixPod: parsed.reuseFixPod ? 1 : 0,
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
         githubPat: encryptPat(parsed.githubPat),
@@ -657,6 +665,18 @@ export function createProfileStore(
       if (parsed.sastTimeout !== undefined) {
         setClauses.push('sast_timeout = @sastTimeout');
         fieldMap.sastTimeout = parsed.sastTimeout ?? null;
+      }
+      if (parsed.mergePollIntervalSec !== undefined) {
+        setClauses.push('merge_poll_interval_sec = @mergePollIntervalSec');
+        fieldMap.mergePollIntervalSec = parsed.mergePollIntervalSec ?? null;
+      }
+      if (parsed.fixPodCooldownSec !== undefined) {
+        setClauses.push('fix_pod_cooldown_sec = @fixPodCooldownSec');
+        fieldMap.fixPodCooldownSec = parsed.fixPodCooldownSec ?? null;
+      }
+      if (parsed.reuseFixPod !== undefined) {
+        setClauses.push('reuse_fix_pod = @reuseFixPod');
+        fieldMap.reuseFixPod = parsed.reuseFixPod ? 1 : 0;
       }
       if (parsed.tokenBudget !== undefined) {
         setClauses.push('token_budget = @tokenBudget');
