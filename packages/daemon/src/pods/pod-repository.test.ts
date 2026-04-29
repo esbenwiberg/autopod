@@ -245,6 +245,21 @@ describe('PodRepository', () => {
       repo.update('sess-001', { reworkCount: 3 });
       expect(repo.getOrThrow('sess-001').reworkCount).toBe(3);
     });
+
+    it('round-trips handoffInstructions and handoffContext', () => {
+      repo.insert(validSession);
+      expect(repo.getOrThrow('sess-001').handoffInstructions).toBe(null);
+      expect(repo.getOrThrow('sess-001').handoffContext).toBe(null);
+      repo.update('sess-001', {
+        handoffInstructions: 'finish wiring tab Y',
+        handoffContext: '## Handoff\n3 commits, 12 files',
+      });
+      expect(repo.getOrThrow('sess-001').handoffInstructions).toBe('finish wiring tab Y');
+      expect(repo.getOrThrow('sess-001').handoffContext).toBe('## Handoff\n3 commits, 12 files');
+      repo.update('sess-001', { handoffInstructions: null, handoffContext: null });
+      expect(repo.getOrThrow('sess-001').handoffInstructions).toBe(null);
+      expect(repo.getOrThrow('sess-001').handoffContext).toBe(null);
+    });
   });
 
   describe('list', () => {

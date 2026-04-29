@@ -143,7 +143,10 @@ export class AutopodClient {
 
   async completeSession(
     id: string,
-    options?: { promoteTo?: 'pr' | 'branch' | 'artifact' | 'none' },
+    options?: {
+      promoteTo?: 'pr' | 'branch' | 'artifact' | 'none';
+      instructions?: string;
+    },
   ): Promise<{
     ok: boolean;
     pushError?: string;
@@ -159,9 +162,11 @@ export class AutopodClient {
   async promoteSession(
     id: string,
     targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
+    options?: { instructions?: string },
   ): Promise<{ ok: boolean; promotedTo: string }> {
     return this.request<{ ok: boolean; promotedTo: string }>('POST', `/pods/${id}/promote`, {
       targetOutput,
+      ...(options?.instructions ? { instructions: options.instructions } : {}),
     });
   }
 

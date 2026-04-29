@@ -84,15 +84,35 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/kill")
   }
 
-  public func completeSession(_ id: String, promoteTo: String? = nil) async throws {
-    let body = try promoteTo.map { try encode(CompleteBody(promoteTo: $0)) }
+  public func completeSession(
+    _ id: String,
+    promoteTo: String? = nil,
+    instructions: String? = nil
+  ) async throws {
+    let body: Data?
+    if promoteTo != nil || instructions != nil {
+      body = try encode(CompleteBody(promoteTo: promoteTo, instructions: instructions))
+    } else {
+      body = nil
+    }
     let _: OkResponse = try await request("POST", "/pods/\(id)/complete", body: body)
   }
 
   /// Promote an interactive pod to agent-driven (in-place, same pod ID).
   /// `targetOutput` must be one of `pr`, `branch`, `artifact`, `none`. Defaults to `pr` daemon-side.
-  public func promoteSession(_ id: String, targetOutput: String? = nil) async throws {
-    let body = try targetOutput.map { try encode(PromoteBody(targetOutput: $0)) }
+  /// `instructions` is the human's typed handoff text from the desktop sheet (or CLI flag);
+  /// it is composed into a `## Handoff` section in the agent's CLAUDE.md.
+  public func promoteSession(
+    _ id: String,
+    targetOutput: String? = nil,
+    instructions: String? = nil
+  ) async throws {
+    let body: Data?
+    if targetOutput != nil || instructions != nil {
+      body = try encode(PromoteBody(targetOutput: targetOutput, instructions: instructions))
+    } else {
+      body = nil
+    }
     let _: OkResponse = try await request("POST", "/pods/\(id)/promote", body: body)
   }
 
@@ -577,11 +597,13 @@ struct ForceApproveBody: Codable {
 }
 
 struct CompleteBody: Codable {
-  let promoteTo: String
+  let promoteTo: String?
+  let instructions: String?
 }
 
 struct PromoteBody: Codable {
-  let targetOutput: String
+  let targetOutput: String?
+  let instructions: String?
 }
 
 struct WarmBody: Codable {

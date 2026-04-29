@@ -491,10 +491,20 @@ export interface PodManager {
   killSession(podId: string): Promise<void>;
   completeSession(
     podId: string,
-    options?: { promoteTo?: 'pr' | 'branch' | 'artifact' | 'none' },
+    options?: {
+      promoteTo?: 'pr' | 'branch' | 'artifact' | 'none';
+      instructions?: string;
+    },
   ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }>;
-  /** Promote an interactive pod to auto on the same pod ID. */
-  promoteToAuto(podId: string, targetOutput: 'pr' | 'branch' | 'artifact' | 'none'): Promise<void>;
+  /** Promote an interactive pod to auto on the same pod ID.
+   *  `options.instructions` is the raw human-typed handoff text from the desktop sheet
+   *  (or `--instructions` on the CLI); persisted as `handoffInstructions` and consumed
+   *  by the recovery restart to compose the agent-facing `## Handoff` section. */
+  promoteToAuto(
+    podId: string,
+    targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
+    options?: { instructions?: string },
+  ): Promise<void>;
   triggerValidation(podId: string, options?: { force?: boolean }): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
    *  Used after human fixes via a linked workspace pod. */
@@ -2089,6 +2099,73 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           podRepo.update(podId, { containerId: null });
           pod = podRepo.getOrThrow(podId);
+
+          // Compose the agent-facing handoff context now that the worktree
+          // reflects the human's in-flight work. Reads the human's typed
+          // instructions (captured by promoteToAuto) plus the live commit log
+          // and diff stats; the system-instructions-generator renders this as
+          // the `## Handoff` section in the agent's CLAUDE.md.
+          try {
+            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+            const [stats, commitLog] = await Promise.all([
+              worktreeManager.getDiffStats(
+                pod.worktreePath,
+                baseBranch,
+                pod.startCommitSha ?? undefined,
+              ),
+              worktreeManager.getCommitLog(
+                pod.worktreePath,
+                baseBranch,
+                30,
+                pod.startCommitSha ?? undefined,
+              ),
+            ]);
+
+            const hasInstructions =
+              !!pod.handoffInstructions && pod.handoffInstructions.trim().length > 0;
+            const hasWork =
+              stats.filesChanged > 0 || stats.linesAdded > 0 || stats.linesRemoved > 0;
+
+            if (hasInstructions || hasWork) {
+              const sections: string[] = [
+                "You're picking up after a human-driven interactive session on this branch. " +
+                  'Treat the human as a collaborator, not noise — their commits encode intent, ' +
+                  'and their instructions (if any) take precedence over inferences from the diff alone.',
+                '',
+                '### Human instructions',
+                hasInstructions
+                  ? (pod.handoffInstructions as string)
+                  : '(none provided — infer the remaining work from the session summary and original brief)',
+                '',
+                '### Session summary',
+                hasWork
+                  ? `${stats.filesChanged} file(s) changed, +${stats.linesAdded}/-${stats.linesRemoved} lines.`
+                  : 'No diff against base — the human may have explored without committing changes yet.',
+              ];
+
+              if (commitLog && commitLog.length > 0) {
+                sections.push('', '### Commit log', '```', commitLog, '```');
+              }
+
+              const handoffContext = sections.join('\n');
+              podRepo.update(podId, { handoffContext });
+              pod = podRepo.getOrThrow(podId);
+              logger.info(
+                {
+                  podId,
+                  hasInstructions,
+                  filesChanged: stats.filesChanged,
+                  contextLength: handoffContext.length,
+                },
+                'Composed handoff context for promoted pod',
+              );
+            }
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to compose handoff context — agent will run without it',
+            );
+          }
         }
 
         // Detect recovery mode before any provisioning work
@@ -4318,6 +4395,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     async promoteToAuto(
       podId: string,
       targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
+      options?: { instructions?: string },
     ): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
 
@@ -4336,6 +4414,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           'INVALID_CONFIGURATION',
           400,
         );
+      }
+
+      // Capture the human's handoff instructions BEFORE the transition so they
+      // survive the recovery restart. The recovery path inside processPod reads
+      // them after `syncWorkspaceBack()` completes and composes `handoffContext`.
+      const trimmedInstructions = options?.instructions?.trim();
+      if (trimmedInstructions && trimmedInstructions.length > 0) {
+        podRepo.update(podId, { handoffInstructions: trimmedInstructions });
       }
 
       // Swap to the worker profile if one is configured — this lets the
@@ -4386,7 +4472,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async completeSession(
       podId: string,
-      options?: { promoteTo?: 'pr' | 'branch' | 'artifact' | 'none' },
+      options?: {
+        promoteTo?: 'pr' | 'branch' | 'artifact' | 'none';
+        instructions?: string;
+      },
     ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }> {
       const pod = podRepo.getOrThrow(podId);
 
@@ -4409,7 +4498,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // If caller asked us to promote (e.g. `ap complete <id> --pr`), hand off
       // into the agent-driven flow instead of just pushing + completing.
       if (options?.promoteTo && options.promoteTo !== 'branch') {
-        await this.promoteToAuto(podId, options.promoteTo);
+        await this.promoteToAuto(podId, options.promoteTo, {
+          instructions: options.instructions,
+        });
         return { promotedTo: options.promoteTo };
       }
 

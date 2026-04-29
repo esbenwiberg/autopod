@@ -76,6 +76,19 @@ export function generateSystemInstructions(
   lines.push('<!-- END USER TASK -->');
   lines.push('');
 
+  // Handoff context is set when a workspace pod was promoted to auto. It carries
+  // the human's typed instructions plus a session summary (commit log, diff stat)
+  // captured at the moment of handoff. Boundary-marked for the same reason as the
+  // brief above — the inner content is human-authored, not system-trusted.
+  if (pod.handoffContext) {
+    lines.push('## Handoff');
+    lines.push('');
+    lines.push('<!-- BEGIN HANDOFF CONTEXT -->');
+    lines.push(pod.handoffContext);
+    lines.push('<!-- END HANDOFF CONTEXT -->');
+    lines.push('');
+  }
+
   // Advisory scope hints from the brief frontmatter. The reviewer sees the
   // same lists and treats deviations as discussion items, not failures —
   // explicit here so the agent knows what it was authorized for and where

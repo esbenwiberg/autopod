@@ -149,57 +149,86 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
     .option('--pr', 'Hand off to the agent and open a PR when it finishes')
     .option('--artifact', 'Hand off to the agent in artifact mode (no PR)')
     .option('--none', 'Hand off to the agent ephemerally (no push)')
-    .action(async (id: string, opts: { pr?: boolean; artifact?: boolean; none?: boolean }) => {
-      const client = getClient();
-      const resolvedId = await resolvePodId(client, id);
-      const pod = await client.getSession(resolvedId);
+    .option(
+      '-i, --instructions <text>',
+      'Handoff instructions for the agent (only used with --pr/--artifact/--none)',
+    )
+    .action(
+      async (
+        id: string,
+        opts: { pr?: boolean; artifact?: boolean; none?: boolean; instructions?: string },
+      ) => {
+        const client = getClient();
+        const resolvedId = await resolvePodId(client, id);
+        const pod = await client.getSession(resolvedId);
 
-      if (pod.options?.agentMode !== 'interactive' && pod.outputMode !== 'workspace') {
-        console.error(chalk.red(`Pod ${resolvedId} is not an interactive pod.`));
-        process.exit(1);
-      }
+        if (pod.options?.agentMode !== 'interactive' && pod.outputMode !== 'workspace') {
+          console.error(chalk.red(`Pod ${resolvedId} is not an interactive pod.`));
+          process.exit(1);
+        }
 
-      if (pod.status !== 'running') {
-        console.error(
-          chalk.red(`Pod ${resolvedId} is ${pod.status} — can only complete running pods.`),
+        if (pod.status !== 'running') {
+          console.error(
+            chalk.red(`Pod ${resolvedId} is ${pod.status} — can only complete running pods.`),
+          );
+          process.exit(1);
+        }
+
+        const promoteFlags = [opts.pr, opts.artifact, opts.none].filter(Boolean).length;
+        if (promoteFlags > 1) {
+          console.error(chalk.red('Choose at most one of --pr, --artifact, --none'));
+          process.exit(1);
+        }
+        const promoteTo = opts.pr
+          ? ('pr' as const)
+          : opts.artifact
+            ? ('artifact' as const)
+            : opts.none
+              ? ('none' as const)
+              : undefined;
+
+        const trimmedInstructions = opts.instructions?.trim();
+        if (trimmedInstructions && !promoteTo) {
+          console.log(
+            chalk.yellow(
+              'Note: --instructions is only used when handing off (--pr / --artifact / --none); ignored for plain branch push.',
+            ),
+          );
+        }
+
+        console.log();
+        const completion = await withSpinner(
+          promoteTo ? `Promoting pod to ${promoteTo}…` : 'Completing pod…',
+          () =>
+            client.completeSession(
+              resolvedId,
+              promoteTo
+                ? {
+                    promoteTo,
+                    ...(trimmedInstructions ? { instructions: trimmedInstructions } : {}),
+                  }
+                : undefined,
+            ),
         );
-        process.exit(1);
-      }
 
-      const promoteFlags = [opts.pr, opts.artifact, opts.none].filter(Boolean).length;
-      if (promoteFlags > 1) {
-        console.error(chalk.red('Choose at most one of --pr, --artifact, --none'));
-        process.exit(1);
-      }
-      const promoteTo = opts.pr
-        ? ('pr' as const)
-        : opts.artifact
-          ? ('artifact' as const)
-          : opts.none
-            ? ('none' as const)
-            : undefined;
+        if (completion.promotedTo) {
+          console.log(
+            chalk.green(`Pod handed off. Agent will take over in ${completion.promotedTo} mode.`),
+          );
+          console.log(chalk.dim(`Track progress: ap status ${resolvedId.slice(0, 8)}`));
+          return;
+        }
 
-      console.log();
-      const completion = await withSpinner(
-        promoteTo ? `Promoting pod to ${promoteTo}…` : 'Completing pod…',
-        () => client.completeSession(resolvedId, promoteTo ? { promoteTo } : undefined),
-      );
-
-      if (completion.promotedTo) {
-        console.log(
-          chalk.green(`Pod handed off. Agent will take over in ${completion.promotedTo} mode.`),
-        );
-        console.log(chalk.dim(`Track progress: ap status ${resolvedId.slice(0, 8)}`));
-        return;
-      }
-
-      if (completion.pushError) {
-        console.log(chalk.yellow(`Pod complete, but branch push failed: ${completion.pushError}`));
-        console.log(chalk.dim('You can push manually from the worktree.'));
-      } else {
-        console.log(chalk.green('Pod complete. Branch pushed to origin.'));
-      }
-    });
+        if (completion.pushError) {
+          console.log(
+            chalk.yellow(`Pod complete, but branch push failed: ${completion.pushError}`),
+          );
+          console.log(chalk.dim('You can push manually from the worktree.'));
+        } else {
+          console.log(chalk.green('Pod complete. Branch pushed to origin.'));
+        }
+      },
+    );
 
   // ap inject <id> github|ado
   program

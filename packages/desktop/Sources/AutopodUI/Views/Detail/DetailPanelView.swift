@@ -169,6 +169,7 @@ public struct DetailPanelView: View {
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
+        .sheet(isPresented: $showHandoffSheet) { handoffSheet }
         .alert("Resume pod", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
             Button("Resume") {
@@ -283,13 +284,16 @@ public struct DetailPanelView: View {
                         if pod.isPromotable {
                             Divider()
                             Button("Hand off → Open PR") {
-                                Task { await actions.promote(pod.id, "pr") }
+                                handoffTarget = "pr"
+                                showHandoffSheet = true
                             }
                             Button("Hand off → Branch only") {
-                                Task { await actions.promote(pod.id, "branch") }
+                                handoffTarget = "branch"
+                                showHandoffSheet = true
                             }
                             Button("Hand off → Artifact") {
-                                Task { await actions.promote(pod.id, "artifact") }
+                                handoffTarget = "artifact"
+                                showHandoffSheet = true
                             }
                         }
                     } label: {
@@ -563,6 +567,9 @@ public struct DetailPanelView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSpawnFixSheet = false
     @State private var spawnFixMessage = ""
+    @State private var showHandoffSheet = false
+    @State private var handoffTarget: String? = nil
+    @State private var handoffInstructionsText = ""
 
     private func copyPodName() {
         NSPasteboard.general.clearContents()
@@ -610,6 +617,74 @@ public struct DetailPanelView: View {
         }
         .padding(20)
         .frame(minWidth: 380)
+    }
+
+    private var handoffTargetLabel: String {
+        switch handoffTarget {
+        case "pr": return "Open PR"
+        case "branch": return "Branch only"
+        case "artifact": return "Artifact"
+        default: return "agent"
+        }
+    }
+
+    private var handoffSummaryText: String {
+        let commits = pod.commitCount
+        let files = pod.diffStats?.files ?? 0
+        let added = pod.diffStats?.added ?? 0
+        let removed = pod.diffStats?.removed ?? 0
+        if commits == 0 && files == 0 {
+            return "No commits or diff yet — only your typed instructions will be included."
+        }
+        return "\(commits) commit\(commits == 1 ? "" : "s"), \(files) file\(files == 1 ? "" : "s") changed (+\(added)/-\(removed)) will be included as session summary."
+    }
+
+    private var handoffSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Hand off → \(handoffTargetLabel)")
+                .font(.headline)
+            Text("Tell the agent what to finish and anything tricky about your in-flight changes. Your commits and a diff summary are forwarded automatically — leave blank if there's nothing to add.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(.secondary)
+                Text(handoffSummaryText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            TextEditor(text: $handoffInstructionsText)
+                .font(.body)
+                .frame(minHeight: 120)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                )
+            HStack {
+                Button("Cancel") {
+                    handoffInstructionsText = ""
+                    handoffTarget = nil
+                    showHandoffSheet = false
+                }
+                Spacer()
+                Button("Hand off") {
+                    let trimmed = handoffInstructionsText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let target = handoffTarget
+                    handoffInstructionsText = ""
+                    handoffTarget = nil
+                    showHandoffSheet = false
+                    Task {
+                        await actions.promote(pod.id, target, trimmed.isEmpty ? nil : trimmed)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(handoffTarget == nil)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 480)
     }
 
     private var rejectFeedbackSheet: some View {

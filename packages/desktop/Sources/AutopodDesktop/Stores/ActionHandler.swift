@@ -46,7 +46,9 @@ public final class ActionHandler {
           referenceRepos: refRepos
         )
       },
-      promote: { [weak self] id, target in await self?.promoteSession(id, targetOutput: target) },
+      promote: { [weak self] id, target, instructions in
+        await self?.promoteSession(id, targetOutput: target, instructions: instructions)
+      },
       approveAll: { [weak self] in await self?.approveAllValidated() },
       killAllFailed: { [weak self] in await self?.killAllFailed() },
       extendAttempts: { [weak self] id, count in await self?.extendAttempts(id, additionalAttempts: count) },
@@ -289,10 +291,14 @@ public final class ActionHandler {
     }
   }
 
-  public func promoteSession(_ podId: String, targetOutput: String?) async {
+  public func promoteSession(
+    _ podId: String,
+    targetOutput: String?,
+    instructions: String? = nil
+  ) async {
     pendingAction = "promote-\(podId)"
     do {
-      try await api.promoteSession(podId, targetOutput: targetOutput)
+      try await api.promoteSession(podId, targetOutput: targetOutput, instructions: instructions)
       // Status will be updated via WebSocket event (running → handoff → provisioning → ...)
     } catch {
       lastError = error.localizedDescription

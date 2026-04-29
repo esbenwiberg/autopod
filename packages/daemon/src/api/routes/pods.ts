@@ -411,10 +411,12 @@ export function podRoutes(
     const { podId } = request.params as { podId: string };
     const body = (request.body ?? {}) as {
       promoteTo?: 'pr' | 'branch' | 'artifact' | 'none';
+      instructions?: string;
     };
     try {
       const result = await podManager.completeSession(podId, {
         promoteTo: body.promoteTo,
+        instructions: body.instructions,
       });
       return { ok: true, ...result };
     } catch (err) {
@@ -432,10 +434,11 @@ export function podRoutes(
     const { podId } = request.params as { podId: string };
     const body = (request.body ?? {}) as {
       targetOutput?: 'pr' | 'branch' | 'artifact' | 'none';
+      instructions?: string;
     };
     const target = body.targetOutput ?? 'pr';
     try {
-      await podManager.promoteToAuto(podId, target);
+      await podManager.promoteToAuto(podId, target, { instructions: body.instructions });
       reply.status(202);
       return { ok: true, promotedTo: target };
     } catch (err) {

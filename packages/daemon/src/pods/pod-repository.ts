@@ -138,6 +138,8 @@ export interface PodUpdates {
   pauseReason?: 'budget' | 'manual' | null;
   referenceRepos?: ReferenceRepo[] | null;
   artifactsPath?: string | null;
+  handoffInstructions?: string | null;
+  handoffContext?: string | null;
   options?: PodOptions;
   dependencyStartedAt?: string | null;
   baseBranch?: string | null;
@@ -309,6 +311,8 @@ function rowToSession(row: Record<string, unknown>): Pod {
       ? (JSON.parse(row.reference_repos as string) as ReferenceRepo[])
       : null,
     artifactsPath: (row.artifacts_path as string) ?? null,
+    handoffInstructions: (row.handoff_instructions as string) ?? null,
+    handoffContext: (row.handoff_context as string) ?? null,
     scheduledJobId: (row.scheduled_job_id as string) ?? null,
     dependsOnPodIds: parseDependsOnPodIds(row.depends_on_pod_ids, row.depends_on_pod_id),
     dependsOnPodId: (row.depends_on_pod_id as string) ?? null,
@@ -618,6 +622,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.artifactsPath !== undefined) {
         setClauses.push('artifacts_path = @artifactsPath');
         params.artifactsPath = changes.artifactsPath ?? null;
+      }
+      if (changes.handoffInstructions !== undefined) {
+        setClauses.push('handoff_instructions = @handoffInstructions');
+        params.handoffInstructions = changes.handoffInstructions ?? null;
+      }
+      if (changes.handoffContext !== undefined) {
+        setClauses.push('handoff_context = @handoffContext');
+        params.handoffContext = changes.handoffContext ?? null;
       }
       if (changes.dependencyStartedAt !== undefined) {
         setClauses.push('dependency_started_at = @dependencyStartedAt');

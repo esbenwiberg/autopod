@@ -309,6 +309,37 @@ describe('generateSystemInstructions', () => {
     expect(md).not.toContain('## Custom Instructions');
   });
 
+  it('renders ## Handoff section between brief and the rest when handoffContext is set', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        handoffContext:
+          "You're picking up after a human-driven session.\n\n### Human instructions\nfinish wiring tab Y",
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('## Handoff');
+    expect(md).toContain('<!-- BEGIN HANDOFF CONTEXT -->');
+    expect(md).toContain('<!-- END HANDOFF CONTEXT -->');
+    expect(md).toContain('finish wiring tab Y');
+
+    const briefIdx = md.indexOf('## Brief');
+    const handoffIdx = md.indexOf('## Handoff');
+    expect(briefIdx).toBeGreaterThan(-1);
+    expect(handoffIdx).toBeGreaterThan(briefIdx);
+  });
+
+  it('omits ## Handoff section when handoffContext is null', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## Handoff');
+    expect(md).not.toContain('<!-- BEGIN HANDOFF CONTEXT -->');
+  });
+
   it('includes acceptance criteria when pod has ACs', () => {
     const md = generateSystemInstructions(
       makeProfile(),

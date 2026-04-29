@@ -117,6 +117,21 @@ export interface Pod {
   referenceRepos: ReferenceRepo[] | null;
   /** Host path where /workspace was extracted on pod completion (artifact mode). */
   artifactsPath: string | null;
+  /**
+   * Raw human-typed instructions captured when a workspace pod was promoted
+   * (interactive → auto). Persisted at promote time and read once when the
+   * recovery restart composes `handoffContext`. Null for pods that were
+   * never promoted, or promoted without instructions.
+   */
+  handoffInstructions: string | null;
+  /**
+   * Composed handoff blob (instructions + commit log + diff stat) written
+   * after `syncWorkspaceBack()` runs on the recovery restart. Rendered as
+   * the `## Handoff` section in the agent's CLAUDE.md so the spawned agent
+   * picks up after the human's interactive session with full context.
+   * Null when the pod was never promoted.
+   */
+  handoffContext: string | null;
   /** ID of the scheduled job that spawned this pod (null for on-demand pods). */
   scheduledJobId: string | null;
   /**
