@@ -16,7 +16,7 @@ import type {
   PimActivationConfig,
   Profile,
 } from '@autopod/shared';
-import { generateId } from '@autopod/shared';
+import { MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
@@ -592,7 +592,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           diff = await worktreeManager.getDiff(
             pod.worktreePath,
             profile.defaultBranch ?? 'main',
-            undefined,
+            MAX_DIFF_LENGTH,
             pod.startCommitSha ?? undefined,
           );
         } catch (err) {

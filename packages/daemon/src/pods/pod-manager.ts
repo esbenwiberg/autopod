@@ -854,6 +854,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return;
     }
 
+    const profile = profileStore.get(parent.profileName);
+
     // Guard: a fix pod is already alive
     let reuseFixPodCandidate: Pod | null = null;
     if (parent.fixPodId) {
@@ -872,8 +874,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } catch {
         // Fix pod not found — treat as terminal, fall through
       }
-      const reuseEnabled = profileStore.get(parent.profileName).reuseFixPod === true;
-      if (!reuseEnabled) {
+      if (profile.reuseFixPod !== true) {
         // Clear stale fixPodId and return — let the *next* poll cycle decide whether
         // to spawn. This gives CI time to restart and re-run on the fix's new commits
         // before we evaluate failures again (e.g. SonarCloud takes a full rebuild).
@@ -900,9 +901,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
       return;
     }
-
-    // Build fix task and create child pod directly using closure deps
-    const profile = profileStore.get(parent.profileName);
 
     // Guard: per-parent cooldown between fix-pod spawns. Defaults to 10 minutes
     // to prevent a fast-failing CI from burning all fix attempts in a single

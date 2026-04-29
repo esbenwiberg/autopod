@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
 import type { Logger } from 'pino';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { parseReviewJson } from './local-validation-engine.js';
+
+export type PreSubmitSkipReason = 'no-diff' | 'no-task' | 'parse-failure' | 'cli-error';
 
 export interface PreSubmitReviewOpts {
   task: string;
@@ -18,8 +21,8 @@ export interface PreSubmitReviewResult {
   status: 'pass' | 'fail' | 'uncertain' | 'skipped';
   reasoning: string;
   issues: string[];
-  /** True when we couldn't run the critic (no diff, no model, parse failure, timeout). */
-  skipReason?: string;
+  /** Set when status is 'skipped'. */
+  skipReason?: PreSubmitSkipReason;
   model: string;
   /** Hash of the diff this verdict applies to — useful for caching. */
   diffHash: string;
@@ -56,28 +59,22 @@ export async function runPreSubmitReview(
   const diffHash = hashDiff(opts.diff);
   const startedAt = Date.now();
 
-  if (!opts.diff?.trim()) {
-    return {
-      status: 'skipped',
-      reasoning: 'No diff to review.',
-      issues: [],
-      skipReason: 'no-diff',
-      model: opts.reviewerModel,
-      diffHash,
-      durationMs: 0,
-    };
-  }
+  const skipped = (
+    reason: PreSubmitSkipReason,
+    explanation: string,
+  ): PreSubmitReviewResult => ({
+    status: 'skipped',
+    reasoning: explanation,
+    issues: [],
+    skipReason: reason,
+    model: opts.reviewerModel,
+    diffHash,
+    durationMs: Date.now() - startedAt,
+  });
 
+  if (!opts.diff?.trim()) return skipped('no-diff', 'No diff to review.');
   if (!opts.task?.trim()) {
-    return {
-      status: 'skipped',
-      reasoning: 'No task description available for context.',
-      issues: [],
-      skipReason: 'no-task',
-      model: opts.reviewerModel,
-      diffHash,
-      durationMs: 0,
-    };
+    return skipped('no-task', 'No task description available for context.');
   }
 
   const prompt = buildPrompt(opts);
@@ -92,15 +89,7 @@ export async function runPreSubmitReview(
     const parsed = parseReviewJson(stdout.trim());
     if (!parsed) {
       log?.warn({ rawOutput: stdout.slice(0, 500) }, 'pre-submit review: failed to parse response');
-      return {
-        status: 'skipped',
-        reasoning: 'Pre-submit reviewer returned an unparseable response.',
-        issues: [],
-        skipReason: 'parse-failure',
-        model: opts.reviewerModel,
-        diffHash,
-        durationMs: Date.now() - startedAt,
-      };
+      return skipped('parse-failure', 'Pre-submit reviewer returned an unparseable response.');
     }
     return {
       status: parsed.status,
@@ -113,15 +102,7 @@ export async function runPreSubmitReview(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log?.warn({ err: message }, 'pre-submit review: claude CLI failed');
-    return {
-      status: 'skipped',
-      reasoning: `Pre-submit reviewer failed to run: ${message}`,
-      issues: [],
-      skipReason: 'cli-error',
-      model: opts.reviewerModel,
-      diffHash,
-      durationMs: Date.now() - startedAt,
-    };
+    return skipped('cli-error', `Pre-submit reviewer failed to run: ${message}`);
   }
 }
 
@@ -153,22 +134,7 @@ function buildPrompt(opts: PreSubmitReviewOpts): string {
   return sections.join('\n');
 }
 
-/**
- * Stable, fast hash of a diff string. Used as a cache key so the daemon's
- * full reviewer can short-circuit Tier 1 when an agent already received a
- * passing verdict on the *same* diff bytes pre-submit.
- *
- * Not cryptographic — only collision-resistant enough for this purpose.
- */
+/** Cache key for pre-submit verdicts; collision resistance is the only requirement. */
 export function hashDiff(diff: string): string {
-  let h1 = 0xdeadbeef ^ diff.length;
-  let h2 = 0x41c6ce57 ^ diff.length;
-  for (let i = 0; i < diff.length; i++) {
-    const ch = diff.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return ((h2 >>> 0).toString(16) + (h1 >>> 0).toString(16)).padStart(16, '0');
+  return createHash('sha256').update(diff, 'utf8').digest('hex').slice(0, 16);
 }
