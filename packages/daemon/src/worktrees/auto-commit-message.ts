@@ -9,8 +9,19 @@ const execFileAsync = promisify(execFile);
 const FALLBACK_MESSAGE = 'chore: auto-commit uncommitted agent changes';
 const MODEL_ID = 'claude-haiku-4-5-20251001';
 const MAX_DIFF_BYTES = 8 * 1024;
-const API_TIMEOUT_MS = 5_000;
+const API_TIMEOUT_MS = 10_000;
 const MAX_MESSAGE_LENGTH = 100;
+
+let warnedMissingApiKey = false;
+function warnMissingApiKeyOnce(logger: Logger): void {
+  if (warnedMissingApiKey) return;
+  warnedMissingApiKey = true;
+  logger.warn(
+    'auto-commit message: ANTHROPIC_API_KEY not set — falling back to heuristic ' +
+      'commit messages (`chore: auto-commit updates to ...`). Set ANTHROPIC_API_KEY ' +
+      'on the daemon to get conventional-commit subjects.',
+  );
+}
 
 const SYSTEM_PROMPT =
   'Generate a single conventional-commit subject line summarizing the staged diff. ' +
@@ -47,6 +58,7 @@ export async function generateAutoCommitMessage(
   const heuristic = buildHeuristicMessage(stat);
 
   if (!process.env.ANTHROPIC_API_KEY) {
+    warnMissingApiKeyOnce(logger);
     return heuristic;
   }
 

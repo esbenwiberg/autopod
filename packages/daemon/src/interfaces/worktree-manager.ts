@@ -19,8 +19,16 @@ export interface MergeBranchConfig {
    * failed or wasn't attempted) so a ghost mass-deletion does not get committed over real work.
    */
   maxDeletions?: number;
-  /** Override the default auto-commit message. Defaults to a generic chore message. */
+  /**
+   * Override the default auto-commit message. When omitted, the message is
+   * generated from the staged diff (Claude Haiku, with a heuristic fallback).
+   */
   commitMessage?: string;
+  /**
+   * Pod task description, used as extra context when auto-generating the
+   * commit message. Ignored when `commitMessage` is provided.
+   */
+  podTask?: string;
 }
 
 export interface DiffStats {

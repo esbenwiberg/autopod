@@ -489,9 +489,25 @@ export function generateSystemInstructions(
   lines.push(
     '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',
   );
+  lines.push('3. **Commit your work — properly**:');
   lines.push(
-    '3. **Commit regularly**: After each phase (or sooner for significant changes), run ' +
-      '`git add -A && git commit -m "..."`. Do not save all commits for the end.',
+    '   - After each phase (or sooner for significant changes), run ' +
+      '`git add -A && git commit -m "<conventional-commit subject>"`. ' +
+      'Do not save all commits for the end.',
+  );
+  lines.push(
+    '   - Use conventional-commit format: `type(scope): subject`. ' +
+      'Types: feat, fix, refactor, chore, test, docs, style, perf. ' +
+      'Subject in imperative mood, ≤72 chars, no trailing period. ' +
+      'Examples: `feat(auth): add MSAL token refresh`, ' +
+      '`refactor(graph): consolidate request adapters into single facade`, ' +
+      '`fix(profiles): handle missing defaultBranch gracefully`.',
+  );
+  lines.push(
+    '   - **Before calling `report_task_summary`, commit any remaining changes.** ' +
+      'If you leave uncommitted work behind, the daemon will auto-commit it with ' +
+      'a generic `chore: auto-commit ...` message that pollutes the PR history. ' +
+      'Owning your commits is part of the task.',
   );
   lines.push(
     '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
@@ -570,7 +586,11 @@ export function generateSystemInstructions(
     lines.push('- Use ask_human when uncertain about scope or direction');
     lines.push('- Cite sources where applicable');
   } else {
-    lines.push('- Commit after every meaningful unit of work — do not batch everything at the end');
+    lines.push(
+      '- Commit after every meaningful unit of work — do not batch everything at the end. ' +
+        'Use conventional-commit subjects (e.g. `feat(scope): ...`, `fix(scope): ...`); ' +
+        'leftover uncommitted changes get an ugly `chore: auto-commit ...` fallback.',
+    );
     lines.push('- Ensure the build passes before completing');
     lines.push('- Use ask_human when uncertain rather than guessing');
     lines.push('- Do NOT modify configuration files unless required by the task');

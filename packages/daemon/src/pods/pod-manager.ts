@@ -4098,6 +4098,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Post-container retry: sync-back already happened (or failed silently) upstream;
             // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
             maxDeletions: 0,
+            // Provide pod task as context for any auto-generated commit message.
+            podTask: pod.task,
           });
           const newPrUrl = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
@@ -4161,6 +4163,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             pat: selectGitPat(profile),
             // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
             maxDeletions: 0,
+            podTask: pod.task,
           });
           emitActivityStatus(podId, 'Branch pushed successfully');
         } catch (err) {
@@ -5200,6 +5203,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 // https://<org>@dev.azure.com/... cause git to prompt for a password.
                 pat: selectGitPat(profile),
                 maxDeletions: validationSyncOk ? 100 : 0,
+                podTask: pod.task,
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
@@ -5589,6 +5593,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 // when the in-memory PAT cache for this bare repo is cold.
                 pat: selectGitPat(profile),
                 maxDeletions: 0,
+                podTask: pod.task,
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
@@ -6410,6 +6415,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Block auto-commit deletions entirely — the user wants to ship what's already
           // on the branch, not commit a catastrophic delete on top of it.
           maxDeletions: 0,
+          // Provide pod task as context for any auto-generated commit message.
+          podTask: pod.task,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

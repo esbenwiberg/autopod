@@ -481,11 +481,15 @@ export class LocalWorktreeManager implements WorktreeManager {
     // Commit any uncommitted work (with deletion guard). Callers that know the worktree may be
     // out of sync with the container should pass `maxDeletions: 0` so a ghost mass-deletion
     // cannot be committed over the agent's real work.
-    await this.commitPendingChanges(
-      worktreePath,
-      config.commitMessage ?? 'chore: auto-commit uncommitted changes before merge',
-      { maxDeletions: config.maxDeletions ?? 100 },
-    );
+    if (config.commitMessage) {
+      await this.commitPendingChanges(worktreePath, config.commitMessage, {
+        maxDeletions: config.maxDeletions ?? 100,
+      });
+    } else {
+      await this.commitPendingChangesWithGeneratedMessage(worktreePath, config.podTask, {
+        maxDeletions: config.maxDeletions ?? 100,
+      });
+    }
 
     // Push using auth URL so the PAT is never stored in git config.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
