@@ -713,6 +713,9 @@ function generateOperatingEnvironment(
     if (groups.has('azure-pim')) {
       coveredDomains.push('Azure PIM');
     }
+    if (groups.has('deploy')) {
+      coveredDomains.push('Deployment scripts');
+    }
 
     if (coveredDomains.length > 0) {
       lines.push(
@@ -725,6 +728,33 @@ function generateOperatingEnvironment(
           'actions handle authentication, PII redaction, and audit logging automatically.',
       );
     }
+    // Deployment details — surface the env vars and script allowlist so the agent
+    // doesn't try to read secrets from the container or guess at script paths.
+    const deployment = profile.deployment;
+    if (groups.has('deploy') && deployment?.enabled) {
+      lines.push('');
+      lines.push('### Deployment — Pre-configured');
+      lines.push(
+        'Use `run_deploy_script` to deploy. The daemon injects credentials at exec time — do NOT try to read them from the container env, and do NOT bake secrets into the script. Each invocation requires human approval; the reviewer sees the exact script content.',
+      );
+      const envKeys = Object.keys(deployment.env ?? {});
+      if (envKeys.length > 0) {
+        lines.push('');
+        lines.push(
+          `Env vars available to the script (values resolved server-side, never visible to you): ${envKeys.map((k) => `\`${k}\``).join(', ')}.`,
+        );
+      }
+      const allowedScripts = deployment.allowedScripts ?? [];
+      if (allowedScripts.length > 0) {
+        lines.push('');
+        lines.push('Only these script paths are runnable (relative to the workspace root):');
+        for (const pattern of allowedScripts) {
+          lines.push(`- \`${pattern}\``);
+        }
+      }
+      lines.push('');
+    }
+
     // PIM activation details — give the agent the exact values so it doesn't guess
     const pimActivations = profile.pimActivations ?? [];
     if (groups.has('azure-pim') && pimActivations.length > 0) {

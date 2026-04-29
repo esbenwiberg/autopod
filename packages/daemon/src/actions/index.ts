@@ -4,6 +4,7 @@ export {
   type ActionEngineDependencies,
 } from './action-engine.js';
 export { createActionRegistry, type ActionRegistry } from './action-registry.js';
+export { resolveEffectiveActionPolicy } from './policy-resolver.js';
 export { createActionAuditRepository, type ActionAuditRepository } from './audit-repository.js';
 export { createGitHubHandler } from './handlers/github-handler.js';
 export { createAdoHandler } from './handlers/ado-handler.js';

@@ -47,6 +47,7 @@ import {
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
+import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isExpectedDockerError } from '../containers/docker-helpers.js';
 import { networkNameForPod } from '../containers/docker-network-manager.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
@@ -3070,9 +3071,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           headers: undefined,
         }));
 
-        // Resolve available actions from profile's action policy
-        const availableActions = profile.actionPolicy
-          ? (deps.actionEngine?.getAvailableActions(profile.actionPolicy) ?? [])
+        // Resolve available actions from profile's action policy.
+        // resolveEffectiveActionPolicy auto-injects the 'deploy' group when
+        // profile.deployment.enabled is true so users only have to flip one switch.
+        const effectivePolicy = resolveEffectiveActionPolicy(profile);
+        const availableActions = effectivePolicy
+          ? (deps.actionEngine?.getAvailableActions(effectivePolicy) ?? [])
           : [];
 
         // Resolve dynamic sections (fetches URLs, respects token budgets)

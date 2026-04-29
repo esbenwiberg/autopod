@@ -13,6 +13,7 @@ import type {
 import { generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
+import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
@@ -277,7 +278,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         };
       }
 
-      if (!profile.actionPolicy) {
+      const effectivePolicy = resolveEffectiveActionPolicy(profile);
+      if (!effectivePolicy) {
         return {
           success: false,
           error: 'No action policy configured for this profile',
@@ -364,7 +366,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           skipApprovalCheck: options?.skipApprovalCheck,
           approvalContext: options?.approvalContext,
         },
-        profile.actionPolicy,
+        effectivePolicy,
       );
     },
 
@@ -403,8 +405,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
 
-      if (!profile.actionPolicy) return [];
-      return makeActionEngine(profile).getAvailableActions(profile.actionPolicy);
+      const effectivePolicy = resolveEffectiveActionPolicy(profile);
+      if (!effectivePolicy) return [];
+      return makeActionEngine(profile).getAvailableActions(effectivePolicy);
     },
 
     async writeFileInContainer(podId: string, path: string, content: string): Promise<void> {

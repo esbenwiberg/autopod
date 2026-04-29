@@ -658,6 +658,60 @@ describe('generateSystemInstructions', () => {
       expect(md).toContain('dev.azure.com');
     });
 
+    it('describes deploy coverage and surfaces env vars + allowedScripts when deploy group is enabled', () => {
+      const md = generateSystemInstructions(
+        makeProfile({
+          deployment: {
+            enabled: true,
+            env: { ACR_NAME: 'myregistry', AZURE_RG: '$DAEMON:RG_NAME' },
+            allowedScripts: ['infra/azure/acr-deploy.sh'],
+          },
+        }),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          availableActions: [
+            {
+              name: 'run_deploy_script',
+              description: 'Run a deploy script',
+              group: 'deploy',
+              params: {
+                script_path: { type: 'string', required: true, description: 'Path' },
+              },
+            },
+          ],
+        },
+      );
+      expect(md).toContain('Deployment scripts');
+      expect(md).toContain('### Deployment — Pre-configured');
+      expect(md).toContain('`ACR_NAME`');
+      expect(md).toContain('`AZURE_RG`');
+      expect(md).toContain('`infra/azure/acr-deploy.sh`');
+      expect(md).toContain('do NOT try to read them from the container env');
+    });
+
+    it('omits deploy details section when deploy group is enabled but profile.deployment is not', () => {
+      const md = generateSystemInstructions(
+        makeProfile({ deployment: null }),
+        makeSession(),
+        'http://localhost:8080/mcp/x',
+        {
+          availableActions: [
+            {
+              name: 'run_deploy_script',
+              description: 'Run a deploy script',
+              group: 'deploy',
+              params: {
+                script_path: { type: 'string', required: true, description: 'Path' },
+              },
+            },
+          ],
+        },
+      );
+      expect(md).toContain('Deployment scripts');
+      expect(md).not.toContain('### Deployment — Pre-configured');
+    });
+
     it('uses generic phrasing for custom action groups', () => {
       const md = generateSystemInstructions(
         makeProfile(),
