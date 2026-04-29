@@ -284,9 +284,9 @@ export type PimActivationConfig =
 export interface DeploymentConfig {
   enabled: boolean;
   /**
-   * Env vars injected into deploy script executions via `docker exec --env`.
-   * Never placed in the container's persistent environment, so agents cannot
-   * observe them passively via `printenv` or `/proc/self/environ`.
+   * Env vars injected into deploy script executions on the daemon host.
+   * Deploy scripts run in the daemon's process space (not inside the agent
+   * container), so the agent never observes these values.
    *
    * Prefix a value with `$DAEMON:<VAR>` to resolve it from the daemon's
    * `process.env` at execution time (e.g. for secrets on the daemon host).

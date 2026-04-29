@@ -6,7 +6,6 @@ import type {
 } from '@autopod/shared';
 import { processContentDeep } from '@autopod/shared';
 import type { Logger } from 'pino';
-import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ActionRegistry } from './action-registry.js';
@@ -38,25 +37,14 @@ export interface ActionEngineDependencies {
    * that hit a localhost mock server may pass a permissive override.
    */
   ssrfGuard?: (url: string) => Promise<{ ok: boolean; reason?: string }>;
-  /** Optional — required only when the `test-pipeline` handler is used. */
+  /** Optional — required only when the `test-pipeline` or `deploy` handler is used. */
   podRepo?: PodRepository;
-  /** Optional — required only when the `test-pipeline` handler is used. */
+  /** Optional — required only when the `test-pipeline` or `deploy` handler is used. */
   profileStore?: ProfileStore;
-  /** Optional — required only when the `deploy` handler is used. */
-  containerManager?: ContainerManager;
 }
 
 export function createActionEngine(deps: ActionEngineDependencies): ActionEngine {
-  const {
-    registry,
-    auditRepo,
-    logger,
-    getSecret,
-    ssrfGuard,
-    podRepo,
-    profileStore,
-    containerManager,
-  } = deps;
+  const { registry, auditRepo, logger, getSecret, ssrfGuard, podRepo, profileStore } = deps;
   const log = logger.child({ component: 'action-engine' });
 
   // Create handler instances
@@ -75,10 +63,9 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
       profileStore,
     });
   }
-  if (podRepo && profileStore && containerManager) {
+  if (podRepo && profileStore) {
     handlers.deploy = createDeployHandler({
       podRepo,
-      containerManager,
       profileStore,
       daemonEnv: process.env,
     });
