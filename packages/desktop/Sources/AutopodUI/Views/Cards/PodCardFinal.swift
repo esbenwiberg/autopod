@@ -115,9 +115,29 @@ public struct SessionCardFinal: View {
                     Label("Launch series from here", systemImage: "rectangle.3.group.fill")
                 }
             }
+            Divider()
+            if pod.status != .killed && pod.status != .killing {
+                Button(role: .destructive) {
+                    Task { await actions.kill(pod.id) }
+                } label: {
+                    Label("Kill", systemImage: "xmark.circle")
+                }
+            }
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
+        .confirmationDialog("Delete pod \(pod.id)?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                Task { await actions.delete(pod.id) }
+            }
+        } message: {
+            Text("This will permanently remove the pod record.")
+        }
         .alert("Resume pod", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
             Button("Resume") {
@@ -1000,13 +1020,6 @@ public struct SessionCardFinal: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .confirmationDialog("Delete pod \(pod.id)?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                Task { await actions.delete(pod.id) }
-            }
-        } message: {
-            Text("This will permanently remove the pod record.")
-        }
     }
 
     private func checkItem(_ label: String, status: Bool?) -> some View {
