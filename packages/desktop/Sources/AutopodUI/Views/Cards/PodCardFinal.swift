@@ -131,12 +131,24 @@ public struct SessionCardFinal: View {
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
-        .confirmationDialog("Delete pod \(pod.id)?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                Task { await actions.delete(pod.id) }
+        .confirmationDialog(
+            isDeletableNow ? "Delete pod \(pod.id)?" : "Kill and delete pod \(pod.id)?",
+            isPresented: $showDeleteConfirmation
+        ) {
+            Button(isDeletableNow ? "Delete" : "Kill and delete", role: .destructive) {
+                Task {
+                    if !isDeletableNow {
+                        await actions.kill(pod.id)
+                    }
+                    await actions.delete(pod.id)
+                }
             }
         } message: {
-            Text("This will permanently remove the pod record.")
+            Text(
+                isDeletableNow
+                ? "This will permanently remove the pod record."
+                : "The pod is still active. It will be killed and then permanently removed."
+            )
         }
         .alert("Resume pod", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
@@ -849,6 +861,13 @@ public struct SessionCardFinal: View {
     @State private var showDeleteConfirmation = false
     @State private var showLaunchWorker = false
     @State private var launchWorkerTask = ""
+
+    private var isDeletableNow: Bool {
+        switch pod.status {
+        case .complete, .killed, .failed, .reviewRequired, .killing: true
+        default: false
+        }
+    }
 
     private var replySheet: some View {
         VStack(alignment: .leading, spacing: 0) {
