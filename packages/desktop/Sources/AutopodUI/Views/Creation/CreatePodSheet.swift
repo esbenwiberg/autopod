@@ -209,6 +209,13 @@ public struct CreateSessionSheet: View {
                         .padding(10)
                         .background(.teal.opacity(0.06))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                        // Reference Repos is the primary configuration for interactive
+                        // pods (no Task / AC / sidecars / PIM apply), so surface it as a
+                        // top-level section instead of burying it in Advanced.
+                        VStack(alignment: .leading, spacing: 10) {
+                            referenceReposSection()
+                        }
                     }
 
                     // Task (not for interactive)
@@ -345,8 +352,10 @@ public struct CreateSessionSheet: View {
                         .foregroundStyle(.tertiary)
                     } // end if !isInteractive
 
-                    // Advanced options. Reference Repos applies to all pods;
-                    // Sidecars and PIM Groups are agent-only.
+                    // Advanced options — agent-mode only. Reference Repos lives top-level
+                    // for interactive pods; Sidecars + PIM are agent-only and would leave
+                    // an empty disclosure in interactive mode.
+                    if !isInteractive {
                     DisclosureGroup(isExpanded: $showAdvanced) {
                         VStack(alignment: .leading, spacing: 10) {
                             if !isInteractive {
@@ -442,92 +451,12 @@ public struct CreateSessionSheet: View {
                                 Divider()
                             } // end agent-only Advanced sub-sections
 
-                                // Reference repos — read-only mounts at /repos/<name>/.
-                                HStack {
-                                    Text("Reference Repos")
-                                        .font(.system(.caption).weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    HelpBadge(text: "Read-only repos cloned into /repos/<name>/ alongside the primary worktree. Use for cross-repo audits, comparing implementations, or letting the agent reference docs/pipeline definitions while it works.")
-                                    Spacer()
-                                }
-
-                                if refRepoCandidates.isEmpty && adHocRefUrls.isEmpty {
-                                    Text("No other profiles available — add a URL below to attach an ad-hoc reference repo.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-
-                                if !refRepoCandidates.isEmpty {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("From profiles")
-                                            .font(.caption2)
-                                            .foregroundStyle(.tertiary)
-                                        ForEach(refRepoCandidates, id: \.name) { p in
-                                            Toggle(isOn: Binding(
-                                                get: { refProfileNames.contains(p.name) },
-                                                set: { isOn in
-                                                    if isOn { refProfileNames.insert(p.name) }
-                                                    else { refProfileNames.remove(p.name) }
-                                                }
-                                            )) {
-                                                HStack(spacing: 6) {
-                                                    Text(p.name).font(.callout)
-                                                    Text(p.repoUrl)
-                                                        .font(.system(.caption, design: .monospaced))
-                                                        .foregroundStyle(.tertiary)
-                                                        .lineLimit(1)
-                                                        .truncationMode(.middle)
-                                                }
-                                            }
-                                            .toggleStyle(.checkbox)
-                                            .controlSize(.small)
-                                        }
-                                    }
-                                }
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text("Ad-hoc URLs")
-                                            .font(.caption2)
-                                            .foregroundStyle(.tertiary)
-                                        Spacer()
-                                        Button {
-                                            adHocRefUrls.append("")
-                                        } label: {
-                                            Label("Add URL", systemImage: "plus")
-                                                .font(.caption)
-                                        }
-                                        .buttonStyle(.borderless)
-                                        .foregroundStyle(.blue)
-                                    }
-                                    ForEach(Array(adHocRefUrls.enumerated()), id: \.offset) { idx, _ in
-                                        HStack(spacing: 6) {
-                                            TextField("https://github.com/org/repo", text: Binding(
-                                                get: { idx < adHocRefUrls.count ? adHocRefUrls[idx] : "" },
-                                                set: { newValue in
-                                                    if idx < adHocRefUrls.count {
-                                                        adHocRefUrls[idx] = newValue
-                                                    }
-                                                }
-                                            ))
-                                            .textFieldStyle(.roundedBorder)
-                                            .font(.system(.caption, design: .monospaced))
-                                            Button {
-                                                if idx < adHocRefUrls.count {
-                                                    adHocRefUrls.remove(at: idx)
-                                                }
-                                            } label: {
-                                                Image(systemName: "minus.circle")
-                                                    .foregroundStyle(.red.opacity(0.6))
-                                            }
-                                            .buttonStyle(.borderless)
-                                        }
-                                    }
-                                }
-
-                                Text("Profile-backed refs authenticate with that profile's PAT. Ad-hoc URLs clone unauthenticated — for private repos, add a profile and pick it above.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
+                            // Agent-mode: Reference Repos lives inside Advanced.
+                            // Interactive-mode: rendered top-level above the Advanced
+                            // disclosure, so it doesn't double-render here.
+                            if !isInteractive {
+                                referenceReposSection()
+                            }
                         }
                         .padding(.top, 8)
                     } label: {
@@ -535,6 +464,7 @@ public struct CreateSessionSheet: View {
                             .font(.system(.caption).weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
+                    } // end if !isInteractive — Advanced is agent-mode only
                 }
                 .padding(20)
             }
@@ -642,6 +572,100 @@ public struct CreateSessionSheet: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .map { $0.replacing(prefix, with: "") }
             .filter { !$0.isEmpty }
+    }
+
+    /// Reference Repos picker — same UI used for both interactive (top-level)
+    /// and agent-mode (inside Advanced) call sites. Renders its own caption-
+    /// weight title with HelpBadge, so callers don't need to wrap it in a
+    /// `formSection` (doing so would duplicate the title).
+    @ViewBuilder
+    private func referenceReposSection() -> some View {
+        // Reference repos — read-only mounts at /repos/<name>/.
+        HStack {
+            Text("Reference Repos")
+                .font(.system(.caption).weight(.semibold))
+                .foregroundStyle(.secondary)
+            HelpBadge(text: "Read-only repos cloned into /repos/<name>/ alongside the primary worktree. Use for cross-repo audits, comparing implementations, or letting the agent reference docs/pipeline definitions while it works.")
+            Spacer()
+        }
+
+        if refRepoCandidates.isEmpty && adHocRefUrls.isEmpty {
+            Text("No other profiles available — add a URL below to attach an ad-hoc reference repo.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+
+        if !refRepoCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("From profiles")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                ForEach(refRepoCandidates, id: \.name) { p in
+                    Toggle(isOn: Binding(
+                        get: { refProfileNames.contains(p.name) },
+                        set: { isOn in
+                            if isOn { refProfileNames.insert(p.name) }
+                            else { refProfileNames.remove(p.name) }
+                        }
+                    )) {
+                        HStack(spacing: 6) {
+                            Text(p.name).font(.callout)
+                            Text(p.repoUrl)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                }
+            }
+        }
+
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Ad-hoc URLs")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button {
+                    adHocRefUrls.append("")
+                } label: {
+                    Label("Add URL", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.blue)
+            }
+            ForEach(Array(adHocRefUrls.enumerated()), id: \.offset) { idx, _ in
+                HStack(spacing: 6) {
+                    TextField("https://github.com/org/repo", text: Binding(
+                        get: { idx < adHocRefUrls.count ? adHocRefUrls[idx] : "" },
+                        set: { newValue in
+                            if idx < adHocRefUrls.count {
+                                adHocRefUrls[idx] = newValue
+                            }
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    Button {
+                        if idx < adHocRefUrls.count {
+                            adHocRefUrls.remove(at: idx)
+                        }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .foregroundStyle(.red.opacity(0.6))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        }
+
+        Text("Profile-backed refs authenticate with that profile's PAT. Ad-hoc URLs clone unauthenticated — for private repos, add a profile and pick it above.")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
     }
 
     private func formSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
