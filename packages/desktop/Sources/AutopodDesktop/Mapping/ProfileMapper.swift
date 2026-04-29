@@ -146,6 +146,9 @@ public enum ProfileMapper {
       securityScan: response.securityScan.map(mapSecurityScan),
       codeIntelligenceSerena: response.codeIntelligence?.serena ?? false,
       codeIntelligenceRoslynCodeLens: response.codeIntelligence?.roslynCodeLens ?? false,
+      deploymentEnabled: response.deployment?.enabled ?? false,
+      deploymentEnv: response.deployment?.env ?? [:],
+      deploymentAllowedScripts: response.deployment?.allowedScripts ?? [],
       providerCredentialsType: response.providerCredentials?.provider,
       version: response.version,
       createdAt: PodMapper.parseDate(response.createdAt),
@@ -395,6 +398,24 @@ public enum ProfileMapper {
       d["codeIntelligence"] = ci
     } else {
       d["codeIntelligence"] = NSNull()
+    }
+
+    // Deployment — preserve `$DAEMON:` value prefixes verbatim. Treat the
+    // (disabled, no env, no scripts) tuple as "clear" so derived profiles
+    // can reset back to inheriting from the parent.
+    if profile.deploymentEnabled
+      || !profile.deploymentEnv.isEmpty
+      || !profile.deploymentAllowedScripts.isEmpty {
+      var dep: [String: Any] = [
+        "enabled": profile.deploymentEnabled,
+        "env": profile.deploymentEnv,
+      ]
+      if !profile.deploymentAllowedScripts.isEmpty {
+        dep["allowedScripts"] = profile.deploymentAllowedScripts
+      }
+      d["deployment"] = dep
+    } else {
+      d["deployment"] = NSNull()
     }
 
     // Action policy

@@ -18,6 +18,7 @@ public enum ProfileOverrideFieldSection: String, CaseIterable, Sendable {
     case sandbox     = "Sandbox & Test Pipeline"
     case credentials = "Credentials"
     case injections  = "Injections"
+    case deployment  = "Deployment"
 }
 
 /// A single overridable property. `key` must match the Profile JSON field
@@ -373,6 +374,14 @@ public enum ProfileOverrideCatalog {
             label: "Code Intelligence",
             section: .injections,
             help: "LSP-backed code navigation tools (Serena, roslyn-codelens-mcp) injected as stdio MCP servers."
+        ),
+
+        // MARK: Deployment
+        .init(
+            key: "deployment",
+            label: "Deployment",
+            section: .deployment,
+            help: "Configures the run_deploy_script action: env vars injected into deploy execs (use $DAEMON:VAR to pull secrets from the daemon at exec time, never stored in the container env), plus an optional script-path glob allowlist. Scripts are hashed at human-approval time and re-verified at exec, so an agent can't swap the script after sign-off."
         ),
     ]
 

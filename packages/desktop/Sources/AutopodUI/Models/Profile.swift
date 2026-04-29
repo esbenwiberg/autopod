@@ -125,6 +125,15 @@ public struct Profile: Identifiable, Sendable {
     public var codeIntelligenceSerena: Bool
     public var codeIntelligenceRoslynCodeLens: Bool
 
+    // Deployment (env-var injection + script allowlist for run_deploy_script)
+    public var deploymentEnabled: Bool
+    /// Values prefixed `$DAEMON:<VAR>` are resolved from the daemon's process.env
+    /// at execution time and never written into the container's persistent env.
+    /// Plain string values are stored as-is — use for non-secret targeting config.
+    public var deploymentEnv: [String: String]
+    /// Optional glob allowlist (relative to /workspace). Empty = any script.
+    public var deploymentAllowedScripts: [String]
+
     // Provider credentials (read-only indicator)
     public var providerCredentialsType: String?
 
@@ -197,6 +206,9 @@ public struct Profile: Identifiable, Sendable {
         securityScan: SecurityScanPolicy? = nil,
         codeIntelligenceSerena: Bool = false,
         codeIntelligenceRoslynCodeLens: Bool = false,
+        deploymentEnabled: Bool = false,
+        deploymentEnv: [String: String] = [:],
+        deploymentAllowedScripts: [String] = [],
         providerCredentialsType: String? = nil,
         version: Int = 1,
         createdAt: Date = Date(), updatedAt: Date = Date()
@@ -258,6 +270,9 @@ public struct Profile: Identifiable, Sendable {
         self.securityScan = securityScan
         self.codeIntelligenceSerena = codeIntelligenceSerena
         self.codeIntelligenceRoslynCodeLens = codeIntelligenceRoslynCodeLens
+        self.deploymentEnabled = deploymentEnabled
+        self.deploymentEnv = deploymentEnv
+        self.deploymentAllowedScripts = deploymentAllowedScripts
         self.providerCredentialsType = providerCredentialsType
         self.version = version
         self.createdAt = createdAt; self.updatedAt = updatedAt

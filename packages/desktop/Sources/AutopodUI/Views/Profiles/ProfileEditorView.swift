@@ -18,6 +18,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
     case credentials
     case injections
     case memory
+    case deployment
 
     var id: String { rawValue }
 
@@ -37,6 +38,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .credentials: "Credentials"
         case .injections: "Injections"
         case .memory:     "Memory"
+        case .deployment: "Deployment"
         }
     }
 
@@ -56,6 +58,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .credentials: "key"
         case .injections: "syringe"
         case .memory:     "brain"
+        case .deployment: "paperplane.fill"
         }
     }
 
@@ -89,6 +92,8 @@ enum ProfileSection: String, CaseIterable, Identifiable {
             "Additional tools, documentation, and commands injected into agent containers."
         case .memory:
             "Persistent memory entries injected into agent pods for this profile. Agents can suggest new memories via memory_suggest."
+        case .deployment:
+            "Configures the run_deploy_script action: env vars (with $DAEMON: refs resolved at exec time, never written into the container's env), an enable gate, and an optional script-path glob allowlist. Scripts are hashed at human approval and re-verified at execution to prevent post-approval swaps."
         }
     }
 
@@ -122,6 +127,8 @@ enum ProfileSection: String, CaseIterable, Identifiable {
             ["mcp", "mcp servers", "claude.md", "sections", "skills", "slash commands", "injection", "tools"]
         case .memory:
             ["memory", "persistent", "memory_suggest", "memory entries"]
+        case .deployment:
+            ["deploy", "deployment", "deploy script", "run_deploy_script", "env vars", "secrets", "$DAEMON", "allowed scripts", "hash pin"]
         }
     }
 }
@@ -577,6 +584,7 @@ public struct ProfileEditorView: View {
                 case .credentials:  credentialFields
                 case .injections:   injectionFields
                 case .memory:       memorySection
+                case .deployment:   deploymentFields
                 }
             }
             .padding(24)
@@ -1873,6 +1881,31 @@ public struct ProfileEditorView: View {
         )
     }
 
+    // MARK: - Deployment
+
+    @ViewBuilder
+    private var deploymentFields: some View {
+        fieldRow("Enabled", help: "Allow agents to invoke `run_deploy_script` for this profile. Off by default — turn on after you've reviewed the env-var values and (optionally) the script allowlist.") {
+            Toggle(isOn: $profile.deploymentEnabled) {
+                Text(profile.deploymentEnabled ? "Deployment enabled" : "Deployment disabled")
+                    .font(.callout)
+            }
+            .toggleStyle(.switch)
+        }
+
+        Divider().padding(.vertical, 4)
+
+        fieldRow("Environment Variables", help: "Injected into deploy script execs via `docker exec --env`. Never written into the container's persistent env, so agents can't read them passively. Prefix a value with `$DAEMON:VAR_NAME` to resolve it from the daemon's process environment at execution time — use this for secrets. Plaintext values are stored as-is — use this for non-sensitive targeting config like resource group names or regions.") {
+            DeploymentEnvEditor(env: $profile.deploymentEnv)
+        }
+
+        Divider().padding(.vertical, 4)
+
+        fieldRow("Allowed Scripts", help: "Optional glob allowlist relative to `/workspace`. When non-empty, only script paths matching one of these globs may be executed. Supports `*` wildcards (e.g. `scripts/deploy-*.sh`). Leave empty to allow any script the agent invokes (the human approval gate still applies).") {
+            DeploymentAllowedScriptsEditor(scripts: $profile.deploymentAllowedScripts)
+        }
+    }
+
     // MARK: - Injections
 
     @ViewBuilder
@@ -2694,6 +2727,10 @@ public struct ProfileEditorView: View {
             privateRegistriesOverrideCard(field: field)
         case "codeIntelligence":
             codeIntelligenceOverrideCard(field: field)
+
+        // MARK: Deployment
+        case "deployment":
+            deploymentOverrideCard(field: field)
 
         default:
             // Placeholder for unmapped keys — shouldn't fire with a full catalog.
@@ -3532,6 +3569,55 @@ public struct ProfileEditorView: View {
         }
     }
 
+    private func deploymentOverrideCard(field: ProfileOverrideField) -> some View {
+        let parentDeployment = editorPayload?.parent?.deployment
+        let parentEnabled = parentDeployment?.enabled ?? false
+        let parentEnv = parentDeployment?.env ?? [:]
+        let parentScripts = parentDeployment?.allowedScripts ?? []
+        return overrideCardShell(field: field) {
+            if parentEnabled || !parentEnv.isEmpty || !parentScripts.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("From \(parentDisplayName ?? "parent")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text(parentEnabled ? "enabled" : "disabled")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    ForEach(parentEnv.sorted(by: { $0.key < $1.key }), id: \.key) { entry in
+                        Text("\(entry.key)=\(entry.value)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(parentScripts, id: \.self) { glob in
+                        Text("allow: \(glob)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 2)
+                Divider().padding(.vertical, 2)
+                Text("Your overrides (replaces parent deployment block entirely)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Toggle(isOn: $profile.deploymentEnabled) {
+                Text(profile.deploymentEnabled ? "Deployment enabled" : "Deployment disabled")
+                    .font(.callout)
+            }
+            .toggleStyle(.switch)
+            Text("Environment Variables")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 4)
+            DeploymentEnvEditor(env: $profile.deploymentEnv)
+            Text("Allowed Scripts")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 4)
+            DeploymentAllowedScriptsEditor(scripts: $profile.deploymentAllowedScripts)
+        }
+    }
+
     private func smokePagesOverrideCard(field: ProfileOverrideField) -> some View {
         let mode = mergeStrategyDraft["smokePages"] ?? .merge
         let parentPages = editorPayload?.parent?.smokePages ?? []
@@ -4249,6 +4335,136 @@ private struct BuildEnvEditor: View {
             d[r.key] = r.value
         }
         if d != env { env = d }
+    }
+}
+
+private struct DeploymentEnvEditor: View {
+    @Binding var env: [String: String]
+    @State private var rows: [Row] = []
+
+    private struct Row: Identifiable {
+        let id: UUID = UUID()
+        var key: String
+        var value: String
+    }
+
+    private static let daemonPrefix = "$DAEMON:"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach($rows) { $row in
+                HStack(spacing: 6) {
+                    TextField("KEY", text: $row.key)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .onChange(of: row.key) { _, _ in sync() }
+                    Text("=").foregroundStyle(.secondary)
+                    TextField("value or $DAEMON:VAR", text: $row.value)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .onChange(of: row.value) { _, _ in sync() }
+                    if row.value.hasPrefix(Self.daemonPrefix) {
+                        Image(systemName: "key.fill")
+                            .foregroundStyle(.purple.opacity(0.8))
+                            .help("Resolved from the daemon's environment at execution time. The container never sees this value in its persistent env.")
+                    }
+                    Button {
+                        rows.removeAll { $0.id == row.id }
+                        sync()
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.red.opacity(0.6))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            HStack(spacing: 8) {
+                Button {
+                    rows.append(Row(key: "", value: ""))
+                } label: {
+                    Label("Add variable", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                Button {
+                    rows.append(Row(key: "", value: Self.daemonPrefix))
+                } label: {
+                    Label("Add daemon-resolved secret", systemImage: "key.fill")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .onAppear { populate() }
+    }
+
+    private func populate() {
+        rows = env.sorted(by: { $0.key < $1.key })
+            .map { Row(key: $0.key, value: $0.value) }
+    }
+
+    private func sync() {
+        var d: [String: String] = [:]
+        for r in rows where !r.key.isEmpty {
+            d[r.key] = r.value
+        }
+        if d != env { env = d }
+    }
+}
+
+private struct DeploymentAllowedScriptsEditor: View {
+    @Binding var scripts: [String]
+    @State private var rows: [Row] = []
+
+    private struct Row: Identifiable {
+        let id: UUID = UUID()
+        var glob: String
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if rows.isEmpty {
+                Text("No allowlist — any script the agent invokes will be permitted (still gated by human approval).")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            ForEach($rows) { $row in
+                HStack(spacing: 6) {
+                    TextField("scripts/deploy-*.sh", text: $row.glob)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .onChange(of: row.glob) { _, _ in sync() }
+                    Button {
+                        rows.removeAll { $0.id == row.id }
+                        sync()
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.red.opacity(0.6))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            Button {
+                rows.append(Row(glob: ""))
+            } label: {
+                Label("Add glob", systemImage: "plus")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+        }
+        .onAppear { populate() }
+    }
+
+    private func populate() {
+        rows = scripts.map { Row(glob: $0) }
+    }
+
+    private func sync() {
+        let next = rows.map(\.glob).filter { !$0.isEmpty }
+        if next != scripts { scripts = next }
     }
 }
 

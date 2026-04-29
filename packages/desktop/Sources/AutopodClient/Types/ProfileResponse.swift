@@ -75,6 +75,10 @@ public struct ProfileResponse: Codable, Sendable {
   public var testPipeline: TestPipelineResponse?
   /// Repo content scan policy. Null = inherit from parent / fall back to bundled `default`.
   public var securityScan: SecurityScanPolicyResponse?
+  /// Deploy script invocation config — env-var injection (with `$DAEMON:VAR` refs
+  /// resolved at exec time), allowed-script glob list, and an `enabled` gate.
+  /// Null = inherit.
+  public var deployment: DeploymentConfigResponse?
   public var version: Int
   public var createdAt: String
   public var updatedAt: String
@@ -143,6 +147,7 @@ public struct ProfileResponse: Codable, Sendable {
     testPipeline = try c.decodeIfPresent(TestPipelineResponse.self, forKey: .testPipeline)
     securityScan = try c.decodeIfPresent(SecurityScanPolicyResponse.self, forKey: .securityScan)
     codeIntelligence = try c.decodeIfPresent(CodeIntelligenceResponse.self, forKey: .codeIntelligence)
+    deployment = try c.decodeIfPresent(DeploymentConfigResponse.self, forKey: .deployment)
     version = try c.decode(Int.self, forKey: .version)
     createdAt = try c.decode(String.self, forKey: .createdAt)
     updatedAt = try c.decode(String.self, forKey: .updatedAt)
@@ -498,6 +503,31 @@ public struct CheckpointPolicyResponse: Codable, Sendable {
     onSecret = try c.decode(String.self, forKey: .onSecret)
     onPii = try c.decode(String.self, forKey: .onPii)
     onInjection = try c.decode(String.self, forKey: .onInjection)
+  }
+}
+
+// MARK: - Deployment
+
+public struct DeploymentConfigResponse: Codable, Sendable {
+  public var enabled: Bool
+  /// Env vars injected into deploy script execs. Values prefixed `$DAEMON:<VAR>`
+  /// are resolved from the daemon's process.env at execution time and never
+  /// stored in the container's persistent env.
+  public var env: [String: String]
+  /// Optional glob allowlist for executable script paths. Relative to `/workspace`.
+  public var allowedScripts: [String]?
+
+  public init(enabled: Bool, env: [String: String], allowedScripts: [String]? = nil) {
+    self.enabled = enabled
+    self.env = env
+    self.allowedScripts = allowedScripts
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try decodeBoolOrInt(c, key: .enabled)
+    env = (try c.decodeIfPresent([String: String].self, forKey: .env)) ?? [:]
+    allowedScripts = try c.decodeIfPresent([String].self, forKey: .allowedScripts)
   }
 }
 
