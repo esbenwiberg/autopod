@@ -177,6 +177,42 @@ async function recoverSession(
     }
   }
 
+  // Cap how many times we'll re-queue a pod across daemon restarts. Without this,
+  // a pod whose validation reliably hangs or crashes the daemon can be re-spawned
+  // forever — burning cycles on every dev-mode reload. After the cap, transition
+  // to `failed` so the human can decide what to do (Rework / Fix Manually / Delete).
+  // A user-driven force-rework resets this counter (see pod-manager.triggerValidation).
+  const MAX_RECOVERIES = 3;
+  const nextRecoveryCount = (pod.recoveryCount ?? 0) + 1;
+  if (nextRecoveryCount > MAX_RECOVERIES) {
+    logger.warn(
+      {
+        podId: pod.id,
+        recoveryCount: pod.recoveryCount,
+        maxRecoveries: MAX_RECOVERIES,
+        previousStatus: pod.status,
+      },
+      'Pod exceeded recovery cap — marking failed instead of re-queueing',
+    );
+    if (pod.containerId) {
+      try {
+        await containerManager.kill(pod.containerId);
+      } catch {
+        // Container already gone — expected after a crash/restart
+      }
+    }
+    const previousStatus = pod.status;
+    podRepo.update(pod.id, {
+      status: 'failed',
+      containerId: null,
+      completedAt: new Date().toISOString(),
+    });
+    emitStatusChanged(pod.id, previousStatus, 'failed', eventBus);
+    result.killed.push(pod.id);
+    return;
+  }
+  podRepo.update(pod.id, { recoveryCount: nextRecoveryCount });
+
   // Kill the old container (best-effort — it may already be gone after daemon restart)
   if (pod.containerId) {
     try {

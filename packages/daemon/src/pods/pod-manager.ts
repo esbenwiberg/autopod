@@ -4734,6 +4734,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           recoveryWorktreePath: pod.worktreePath ?? null,
           reworkReason,
           reworkCount: (pod.reworkCount ?? 0) + 1,
+          recoveryCount: 0,
         });
         transition(pod, 'queued');
         enqueueSession(podId);

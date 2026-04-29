@@ -91,6 +91,7 @@ export interface Pod {
   recoveryWorktreePath: string | null;
   reworkReason: string | null;
   reworkCount: number;
+  recoveryCount: number;
   lastHeartbeatAt: string | null;
   inputTokens: number;
   outputTokens: number;

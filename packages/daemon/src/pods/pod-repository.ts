@@ -118,6 +118,7 @@ export interface PodUpdates {
   recoveryWorktreePath?: string | null;
   reworkReason?: string | null;
   reworkCount?: number;
+  recoveryCount?: number;
   lastHeartbeatAt?: string | null;
   inputTokens?: number;
   outputTokens?: number;
@@ -284,6 +285,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
     reworkReason: (row.rework_reason as string) ?? null,
     reworkCount: (row.rework_count as number) ?? 0,
+    recoveryCount: (row.recovery_count as number) ?? 0,
     lastHeartbeatAt: (row.last_heartbeat_at as string) ?? null,
     inputTokens: (row.input_tokens as number) ?? 0,
     outputTokens: (row.output_tokens as number) ?? 0,
@@ -542,6 +544,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.reworkCount !== undefined) {
         setClauses.push('rework_count = @reworkCount');
         params.reworkCount = changes.reworkCount;
+      }
+      if (changes.recoveryCount !== undefined) {
+        setClauses.push('recovery_count = @recoveryCount');
+        params.recoveryCount = changes.recoveryCount;
       }
       if (changes.inputTokens !== undefined) {
         setClauses.push('input_tokens = @inputTokens');

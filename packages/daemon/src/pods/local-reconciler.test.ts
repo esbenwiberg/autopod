@@ -215,6 +215,81 @@ describe('reconcileLocalSessions', () => {
     expect(pod.status).toBe('queued');
   });
 
+  it('marks pod failed once recovery cap is exceeded', async () => {
+    const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'ses-loopy',
+      profileName: 'test-profile',
+      task: 'Stuck task',
+      status: 'validating',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ses-loopy',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('ses-loopy', {
+      containerId: 'ctr-loopy',
+      worktreePath: '/tmp/worktree/ses-loopy',
+      recoveryCount: 3,
+    });
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    const result = await reconcileLocalSessions(deps);
+
+    const pod = podRepo.getOrThrow('ses-loopy');
+    expect(pod.status).toBe('failed');
+    expect(pod.containerId).toBeNull();
+    expect(pod.completedAt).not.toBeNull();
+    expect(enqueuedSessions).not.toContain('ses-loopy');
+    expect(result.killed).toContain('ses-loopy');
+    expect(result.recovered).not.toContain('ses-loopy');
+    expect(containerManager.kill).toHaveBeenCalledWith('ctr-loopy');
+  });
+
+  it('increments recoveryCount on successful recovery', async () => {
+    const { deps, podRepo } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'ses-counted',
+      profileName: 'test-profile',
+      task: 'Counted task',
+      status: 'validating',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ses-counted',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('ses-counted', {
+      containerId: 'ctr-counted',
+      worktreePath: '/tmp/worktree/ses-counted',
+      recoveryCount: 1,
+    });
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    await reconcileLocalSessions(deps);
+
+    const pod = podRepo.getOrThrow('ses-counted');
+    expect(pod.status).toBe('queued');
+    expect(pod.recoveryCount).toBe(2);
+  });
+
   it('kills pod with missing worktree', async () => {
     const { deps, podRepo } = createReconcilerDeps();
 
