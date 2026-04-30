@@ -8,7 +8,8 @@ import type {
   PrMergeStatus,
   ReviewCommentDetail,
 } from '../interfaces/pr-manager.js';
-import { buildPrBody, buildPrTitle } from './pr-body-builder.js';
+import { buildPrBody } from './pr-body-builder.js';
+import { generatePrNarrative, generatePrTitle } from './pr-description-generator.js';
 
 export interface AdoPrManagerConfig {
   /** e.g. https://dev.azure.com/myorg */
@@ -144,7 +145,21 @@ export class AdoPrManager implements PrManager {
   }
 
   async createPr(config: CreatePrConfig): Promise<string> {
-    const title = buildPrTitle(config.task, config.seriesName, config.seriesDescription);
+    const descInput = {
+      task: config.task,
+      worktreePath: config.worktreePath,
+      baseBranch: config.baseBranch,
+      taskSummary: config.taskSummary,
+      seriesName: config.seriesName,
+      seriesDescription: config.seriesDescription,
+      filesChanged: config.filesChanged,
+      linesAdded: config.linesAdded,
+      linesRemoved: config.linesRemoved,
+    };
+    const [title, narrative] = await Promise.all([
+      generatePrTitle(descInput, this.logger),
+      generatePrNarrative(descInput, this.logger, true),
+    ]);
     const description = buildPrBody({
       task: config.task,
       podId: config.podId,
@@ -160,6 +175,8 @@ export class AdoPrManager implements PrManager {
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
       securityFindings: config.securityFindings,
+      narrative,
+      budgetChars: 4000,
     });
 
     this.logger.info(
@@ -167,13 +184,9 @@ export class AdoPrManager implements PrManager {
       'Creating ADO pull request',
     );
 
-    const ADO_DESCRIPTION_LIMIT = 4000;
     const body = {
       title,
-      description:
-        description.length > ADO_DESCRIPTION_LIMIT
-          ? `${description.slice(0, ADO_DESCRIPTION_LIMIT - 3)}...`
-          : description,
+      description,
       sourceRefName: `refs/heads/${config.branch}`,
       targetRefName: `refs/heads/${config.baseBranch}`,
     };

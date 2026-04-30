@@ -560,11 +560,19 @@ export function generateSystemInstructions(
   lines.push(
     '6. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
   );
-  lines.push('   - `actualSummary`: a concise description of what was actually accomplished');
+  lines.push(
+    '   - `actualSummary`: 2–4 sentences describing what the user gains — focus on outcomes and ' +
+      'behaviour changes, not just which files were edited.',
+  );
+  lines.push(
+    '   - `how`: (optional) key technical decisions — libraries chosen, patterns applied, tradeoffs ' +
+      'made. Skip if the implementation is straightforward.',
+  );
   lines.push(
     '   - `deviations`: an array of any steps where you deviated from your original plan. ' +
       'For each deviation include the step name, what was planned, what you did instead, and why. ' +
-      'Use an empty array if you followed the plan exactly.',
+      'Use an empty array if you followed the plan exactly. ' +
+      'Only include meaningful plan deviations — not minor style choices or trivial reorderings.',
   );
   lines.push(
     '   Transparency is rewarded — the independent reviewer will see your deviations and assess ' +

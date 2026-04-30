@@ -522,3 +522,121 @@ describe('escapeMd', () => {
     expect(body).toContain('&lt;injected&gt;');
   });
 });
+
+describe('buildPrBody — narrative param', () => {
+  const baseConfig: PrBodyConfig = {
+    task: 'Add dark mode',
+    podId: 'abc12345',
+    profileName: 'my-app',
+    validationResult: null,
+    filesChanged: 2,
+    linesAdded: 40,
+    linesRemoved: 5,
+    previewUrl: null,
+  };
+
+  it('uses narrative.why instead of task in Why section', () => {
+    const body = buildPrBody({
+      ...baseConfig,
+      narrative: { why: 'LLM-generated why.', what: 'LLM what.', how: 'LLM how.' },
+    });
+    expect(body).toContain('LLM-generated why.');
+    expect(body).not.toContain('Add dark mode\n');
+  });
+
+  it('uses narrative.what and narrative.how', () => {
+    const body = buildPrBody({
+      ...baseConfig,
+      narrative: { why: 'Why.', what: 'Specific what.', how: 'Specific how.' },
+    });
+    expect(body).toContain('Specific what.');
+    expect(body).toContain('Specific how.');
+  });
+
+  it('shows Review Focus section when narrative.reviewFocus is provided', () => {
+    const body = buildPrBody({
+      ...baseConfig,
+      narrative: {
+        why: 'Why.',
+        what: 'What.',
+        reviewFocus: ['packages/cli/src/auth/token-manager.ts', 'packages/daemon/src/api/plugins/auth.ts'],
+      },
+    });
+    expect(body).toContain('## Review Focus');
+    expect(body).toContain('packages/cli/src/auth/token-manager.ts');
+    expect(body).toContain('packages/daemon/src/api/plugins/auth.ts');
+    // Review Focus appears after How (narrative) and before Concerns
+    expect(body.indexOf('## Review Focus')).toBeGreaterThan(body.indexOf('## What'));
+  });
+
+  it('omits Review Focus when reviewFocus is empty', () => {
+    const body = buildPrBody({
+      ...baseConfig,
+      narrative: { why: 'Why.', what: 'What.', reviewFocus: [] },
+    });
+    expect(body).not.toContain('## Review Focus');
+  });
+
+  it('narrative overrides taskSummary for What/How', () => {
+    const body = buildPrBody({
+      ...baseConfig,
+      taskSummary: { actualSummary: 'Agent summary.', how: 'Agent how.', deviations: [] },
+      narrative: { why: 'LLM why.', what: 'LLM what.', how: 'LLM how.' },
+    });
+    expect(body).toContain('LLM what.');
+    expect(body).not.toContain('Agent summary.');
+  });
+});
+
+describe('buildPrBody — budgetChars', () => {
+  const baseConfig: PrBodyConfig = {
+    task: 'Add feature',
+    podId: 'abc12345',
+    profileName: 'my-app',
+    validationResult: null,
+    filesChanged: 10,
+    linesAdded: 500,
+    linesRemoved: 100,
+    previewUrl: 'https://preview.example.com',
+    screenshots: [{ pagePath: '/', imageUrl: 'https://raw.github.com/screenshot.png' }],
+    taskSummary: {
+      actualSummary: 'Did the work.',
+      deviations: [{ step: 'Step 1', planned: 'A', actual: 'B', reason: 'Better' }],
+    },
+  };
+
+  it('returns the full body when under budget', () => {
+    const full = buildPrBody(baseConfig);
+    const budgeted = buildPrBody({ ...baseConfig, budgetChars: full.length + 100 });
+    expect(budgeted).toBe(full);
+  });
+
+  it('drops Screenshots when budget is just below full length', () => {
+    const full = buildPrBody(baseConfig);
+    const withoutScreenshots = buildPrBody({ ...baseConfig, screenshots: undefined });
+    // Budget between the two sizes forces screenshots to be dropped
+    const budget = withoutScreenshots.length + 10;
+    const budgeted = buildPrBody({ ...baseConfig, budgetChars: budget });
+    expect(budgeted).not.toContain('## Screenshots');
+    expect(budgeted).toContain('## Why');
+    expect(budgeted).toContain('## Stats');
+  });
+
+  it('drops Preview after Screenshots when still over budget', () => {
+    const withoutBoth = buildPrBody({ ...baseConfig, screenshots: undefined, previewUrl: null });
+    // Budget between "without-screenshots" and "without-both" forces both to be dropped
+    const budget = withoutBoth.length + 10;
+    const budgeted = buildPrBody({ ...baseConfig, budgetChars: budget });
+    expect(budgeted).not.toContain('## Screenshots');
+    expect(budgeted).not.toContain('## Preview');
+  });
+
+  it('never mid-sentence-truncates sections — every kept section is complete', () => {
+    const full = buildPrBody(baseConfig);
+    // Use a budget just below full so at least Screenshots is dropped
+    const budgeted = buildPrBody({ ...baseConfig, budgetChars: full.length - 10 });
+    // The footer must be present and intact
+    expect(budgeted).toContain('autopod');
+    expect(budgeted).toContain('abc12345');
+  });
+});
