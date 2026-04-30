@@ -90,8 +90,8 @@ export async function createProfileAnthropicClient(
       return null;
     }
     if ((creds.apiSurface ?? 'anthropic') !== 'anthropic') {
-      logger.debug(
-        { profile: profile.name },
+      logger.warn(
+        { profile: profile.name, provider, reason: 'foundry_openai_surface' },
         'Profile uses foundry openai surface — daemon-side LLM helpers fall back to templates',
       );
       return null;
@@ -104,8 +104,8 @@ export async function createProfileAnthropicClient(
   }
 
   // copilot — no daemon-callable Anthropic-compatible API
-  logger.debug(
-    { profile: profile.name, provider },
+  logger.warn(
+    { profile: profile.name, provider, reason: 'provider_not_callable' },
     'Profile provider is not daemon-callable — LLM helpers fall back to templates',
   );
   return null;

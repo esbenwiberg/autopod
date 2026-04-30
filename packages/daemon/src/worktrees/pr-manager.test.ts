@@ -1,6 +1,6 @@
 import type { Profile } from '@autopod/shared';
 import pino from 'pino';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GhPrManager } from './pr-manager.js';
 
 // Track call count so we can return different responses for sequential calls
@@ -34,11 +34,11 @@ describe('GhPrManager', () => {
     expect(manager).toBeDefined();
   });
 
-  it('createPr returns trimmed PR URL', async () => {
+  it('createPr returns trimmed PR URL with fallback metadata', async () => {
     execResponses.push({ stdout: 'https://github.com/org/repo/pull/42\n', stderr: '' });
     const manager = new GhPrManager({ logger });
 
-    const prUrl = await manager.createPr({
+    const result = await manager.createPr({
       worktreePath: '/tmp/worktree',
       branch: 'autopod/abc123',
       baseBranch: 'main',
@@ -54,7 +54,10 @@ describe('GhPrManager', () => {
       previewUrl: null,
     });
 
-    expect(prUrl).toBe('https://github.com/org/repo/pull/42');
+    expect(result.url).toBe('https://github.com/org/repo/pull/42');
+    // Profile has no modelProvider here, which falls through to env-var anthropic;
+    // since ANTHROPIC_API_KEY is not set in tests, the LLM client returns null.
+    expect(result.usedFallback).toBe(true);
   });
 
   it('mergePr returns merged:true when PR merges immediately', async () => {

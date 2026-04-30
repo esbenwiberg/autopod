@@ -4,6 +4,7 @@ import type { Logger } from 'pino';
 import type {
   CiFailureDetail,
   CreatePrConfig,
+  CreatePrResult,
   MergePrConfig,
   MergePrResult,
   PrManager,
@@ -11,9 +12,38 @@ import type {
   ReviewCommentDetail,
 } from '../interfaces/pr-manager.js';
 import { buildPrBody } from './pr-body-builder.js';
-import { generatePrNarrative, generatePrTitle } from './pr-description-generator.js';
+import {
+  generatePrNarrative,
+  generatePrTitle,
+  type PrNarrativeResult,
+  type PrTitleResult,
+} from './pr-description-generator.js';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Compose the `CreatePrResult` from generator outcomes. Narrative fallback
+ * wins precedence over title fallback for the top-level `fallbackReason`
+ * because the narrative drives the visible PR body — that's what reviewers
+ * actually read and what the user complained about.
+ */
+function buildCreatePrResult(
+  url: string,
+  title: PrTitleResult,
+  narrative: PrNarrativeResult,
+): CreatePrResult {
+  const usedFallback = title.usedFallback || narrative.usedFallback;
+  if (!usedFallback) return { url, usedFallback: false };
+  const primary = narrative.usedFallback ? narrative : title;
+  return {
+    url,
+    usedFallback: true,
+    fallbackReason: primary.fallbackReason,
+    fallbackDetail: primary.fallbackDetail,
+    titleUsedFallback: title.usedFallback,
+    narrativeUsedFallback: narrative.usedFallback,
+  };
+}
 
 export interface GhPrManagerConfig {
   logger: Logger;
@@ -33,7 +63,7 @@ export class GhPrManager implements PrManager {
     this.logger = config.logger;
   }
 
-  async createPr(config: CreatePrConfig): Promise<string> {
+  async createPr(config: CreatePrConfig): Promise<CreatePrResult> {
     const descInput = {
       task: config.task,
       worktreePath: config.worktreePath,
@@ -48,7 +78,7 @@ export class GhPrManager implements PrManager {
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
     };
-    const [title, narrative] = await Promise.all([
+    const [titleResult, narrativeResult] = await Promise.all([
       generatePrTitle(descInput, this.logger),
       generatePrNarrative(descInput, this.logger),
     ]);
@@ -66,7 +96,10 @@ export class GhPrManager implements PrManager {
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
       securityFindings: config.securityFindings,
-      narrative,
+      narrative: narrativeResult.narrative,
+      narrativeFallback: narrativeResult.usedFallback
+        ? { reason: narrativeResult.fallbackReason ?? 'unknown', detail: narrativeResult.fallbackDetail }
+        : undefined,
     });
 
     this.logger.info(
@@ -82,7 +115,7 @@ export class GhPrManager implements PrManager {
       '--base',
       config.baseBranch,
       '--title',
-      title,
+      titleResult.title,
       '--body',
       body,
     ];
@@ -95,7 +128,7 @@ export class GhPrManager implements PrManager {
 
       const prUrl = stdout.trim();
       this.logger.info({ podId: config.podId, prUrl }, 'Pull request created');
-      return prUrl;
+      return buildCreatePrResult(prUrl, titleResult, narrativeResult);
     } catch (err) {
       this.logger.error({ err, podId: config.podId }, 'Failed to create pull request');
       throw err;
@@ -288,7 +321,7 @@ export class GitHubApiPrManager implements PrManager {
     };
   }
 
-  async createPr(config: CreatePrConfig): Promise<string> {
+  async createPr(config: CreatePrConfig): Promise<CreatePrResult> {
     if (!config.repoUrl) throw new Error('repoUrl is required for GitHubApiPrManager');
     const { owner, repo } = parseGitHubRepoUrl(config.repoUrl);
     const descInput = {
@@ -305,7 +338,7 @@ export class GitHubApiPrManager implements PrManager {
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
     };
-    const [title, narrative] = await Promise.all([
+    const [titleResult, narrativeResult] = await Promise.all([
       generatePrTitle(descInput, this.logger),
       generatePrNarrative(descInput, this.logger),
     ]);
@@ -323,7 +356,10 @@ export class GitHubApiPrManager implements PrManager {
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
       securityFindings: config.securityFindings,
-      narrative,
+      narrative: narrativeResult.narrative,
+      narrativeFallback: narrativeResult.usedFallback
+        ? { reason: narrativeResult.fallbackReason ?? 'unknown', detail: narrativeResult.fallbackDetail }
+        : undefined,
     });
 
     this.logger.info(
@@ -334,7 +370,12 @@ export class GitHubApiPrManager implements PrManager {
     const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
       method: 'POST',
       headers: this.headers,
-      body: JSON.stringify({ title, body, head: config.branch, base: config.baseBranch }),
+      body: JSON.stringify({
+        title: titleResult.title,
+        body,
+        head: config.branch,
+        base: config.baseBranch,
+      }),
     });
 
     if (!response.ok) {
@@ -344,7 +385,7 @@ export class GitHubApiPrManager implements PrManager {
 
     const data = (await response.json()) as { html_url: string };
     this.logger.info({ podId: config.podId, prUrl: data.html_url }, 'Pull request created');
-    return data.html_url;
+    return buildCreatePrResult(data.html_url, titleResult, narrativeResult);
   }
 
   async mergePr(config: MergePrConfig): Promise<MergePrResult> {

@@ -6,10 +6,10 @@ import { buildHeuristicMessage, generateAutoCommitMessage } from './auto-commit-
 
 const logger = pino({ level: 'silent' });
 
-const { execFileMock, anthropicCreateMock, createClientMock } = vi.hoisted(() => ({
+const { execFileMock, anthropicCreateMock, anthropicCtorMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
   anthropicCreateMock: vi.fn(),
-  createClientMock: vi.fn(),
+  anthropicCtorMock: vi.fn(),
 }));
 
 vi.mock('node:child_process', async () => {
@@ -17,9 +17,13 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile: execFileMock };
 });
 
-vi.mock('../providers/llm-client.js', () => ({
-  createProfileAnthropicClient: createClientMock,
-}));
+vi.mock('@anthropic-ai/sdk', () => {
+  const Anthropic = vi.fn().mockImplementation((opts: unknown) => {
+    anthropicCtorMock(opts);
+    return { messages: { create: anthropicCreateMock } };
+  });
+  return { default: Anthropic };
+});
 
 type ExecCallback = (error: Error | null, result: unknown, stderr?: string) => void;
 
@@ -67,21 +71,12 @@ function setupExec(opts: { stat?: string; diff?: string; statError?: Error; diff
   );
 }
 
-function setupClientAvailable() {
-  createClientMock.mockResolvedValue({
-    client: { messages: { create: anthropicCreateMock } },
-    model: 'claude-haiku-4-5',
-  });
-}
-
-function setupClientUnavailable() {
-  createClientMock.mockResolvedValue(null);
-}
-
 const SAMPLE_PROFILE = {
   name: 'test-profile',
   modelProvider: 'max',
   providerCredentials: { provider: 'max' },
+  reviewerModel: null,
+  defaultModel: null,
 } as unknown as Profile;
 
 const baseInput = {
@@ -95,84 +90,104 @@ describe('generateAutoCommitMessage', () => {
   beforeEach(() => {
     execFileMock.mockReset();
     anthropicCreateMock.mockReset();
-    createClientMock.mockReset();
+    anthropicCtorMock.mockReset();
+    process.env.ANTHROPIC_API_KEY = 'test-key';
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    delete process.env.ANTHROPIC_API_KEY;
   });
 
   it('returns the model output verbatim on a successful call', async () => {
-    setupClientAvailable();
     setupExec({});
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: add foo helper' }],
     });
 
-    const msg = await generateAutoCommitMessage(
+    const result = await generateAutoCommitMessage(
       { ...baseInput, podTask: 'add foo helper' },
       logger,
     );
-    expect(msg).toBe('feat: add foo helper');
+    expect(result.message).toBe('feat: add foo helper');
+    expect(result.usedFallback).toBe(false);
+    expect(result.fallbackReason).toBeUndefined();
     expect(anthropicCreateMock).toHaveBeenCalledOnce();
   });
 
-  it('falls back to heuristic when the API call throws', async () => {
-    setupClientAvailable();
+  it('falls back to heuristic when the API call throws (api_call_failed)', async () => {
     setupExec({});
     anthropicCreateMock.mockRejectedValueOnce(new Error('429 rate limited'));
 
-    const msg = await generateAutoCommitMessage(baseInput, logger);
-    expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    const result = await generateAutoCommitMessage(baseInput, logger);
+    expect(result.message).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('api_call_failed');
+    expect(result.fallbackDetail).toContain('429');
   });
 
-  it('skips the API call entirely when the profile is not daemon-callable', async () => {
-    setupClientUnavailable();
+  it('skips the API call entirely when ANTHROPIC_API_KEY is unset (no_anthropic_api_key)', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
     setupExec({});
 
-    const msg = await generateAutoCommitMessage(baseInput, logger);
-    expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    const result = await generateAutoCommitMessage(baseInput, logger);
+    expect(result.message).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('no_anthropic_api_key');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
   });
 
-  it('rejects model output that contains newlines and falls back to heuristic', async () => {
-    setupClientAvailable();
+  it('rejects model output that contains newlines and falls back (output_invalid)', async () => {
     setupExec({});
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: add foo helper\n\nThis is a body' }],
     });
 
-    const msg = await generateAutoCommitMessage(baseInput, logger);
-    expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    const result = await generateAutoCommitMessage(baseInput, logger);
+    expect(result.message).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('output_invalid');
   });
 
-  it('rejects model output longer than 100 chars and falls back to heuristic', async () => {
-    setupClientAvailable();
+  it('rejects model output longer than 100 chars and falls back (output_invalid)', async () => {
     setupExec({});
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: '.padEnd(120, 'x') }],
     });
 
-    const msg = await generateAutoCommitMessage(baseInput, logger);
-    expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    const result = await generateAutoCommitMessage(baseInput, logger);
+    expect(result.message).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('output_invalid');
   });
 
-  it('returns the original hardcoded message when git stat itself fails', async () => {
-    setupClientAvailable();
+  it('returns the hardcoded message when git stat itself fails (git_stat_failed)', async () => {
     setupExec({ statError: new Error('not a git repo') });
 
-    const msg = await generateAutoCommitMessage(baseInput, logger);
-    expect(msg).toBe('chore: auto-commit uncommitted agent changes');
+    const result = await generateAutoCommitMessage(baseInput, logger);
+    expect(result.message).toBe('chore: auto-commit uncommitted agent changes');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('git_stat_failed');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to heuristic when reading the full diff fails', async () => {
-    setupClientAvailable();
+  it('falls back to heuristic when reading the full diff fails (git_diff_failed)', async () => {
     setupExec({ diffError: new Error('diff broke') });
 
-    const msg = await generateAutoCommitMessage(baseInput, logger);
-    expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    const result = await generateAutoCommitMessage(baseInput, logger);
+    expect(result.message).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('git_diff_failed');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('instantiates the Anthropic SDK with the host env var', async () => {
+    setupExec({});
+    anthropicCreateMock.mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'feat: ok' }],
+    });
+
+    await generateAutoCommitMessage(baseInput, logger);
+    expect(anthropicCtorMock).toHaveBeenCalledWith({ apiKey: 'test-key' });
   });
 });
 

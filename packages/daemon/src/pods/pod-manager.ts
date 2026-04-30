@@ -2008,7 +2008,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     try {
-      return await prManager.createPr({
+      const result = await prManager.createPr({
         worktreePath: pod.worktreePath,
         repoUrl: profile.repoUrl ?? undefined,
         branch: pod.branch,
@@ -2030,6 +2030,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         seriesName: pod.seriesName ?? undefined,
         securityFindings: getLatestPushFindings(podId),
       });
+      if (result.usedFallback) {
+        const which = result.narrativeUsedFallback
+          ? result.titleUsedFallback
+            ? 'title + body'
+            : 'body'
+          : 'title';
+        const reason = result.fallbackReason ?? 'unknown';
+        logger.error(
+          {
+            podId,
+            callerLabel,
+            profile: profile.name,
+            modelProvider: profile.modelProvider,
+            fallbackReason: reason,
+            fallbackDetail: result.fallbackDetail,
+            titleUsedFallback: result.titleUsedFallback,
+            narrativeUsedFallback: result.narrativeUsedFallback,
+          },
+          'PR description used template fallback — daemon-side LLM helper failed',
+        );
+        emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
+      }
+      return result.url;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: PR creation failed');
@@ -4544,7 +4567,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             profile: retryProfile,
             podModel: pod.model,
           });
-          const newPrUrl = await prManager.createPr({
+          const createResult = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
             worktreePath: pod.worktreePath!,
             repoUrl: retryProfile.repoUrl ?? undefined,
@@ -4567,6 +4590,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             seriesName: pod.seriesName ?? undefined,
             securityFindings: getLatestPushFindings(podId),
           });
+          const newPrUrl = createResult.url;
+          if (createResult.usedFallback) {
+            const which = createResult.narrativeUsedFallback
+              ? createResult.titleUsedFallback
+                ? 'title + body'
+                : 'body'
+              : 'title';
+            const reason = createResult.fallbackReason ?? 'unknown';
+            logger.error(
+              {
+                podId,
+                profile: retryProfile.name,
+                modelProvider: retryProfile.modelProvider,
+                fallbackReason: reason,
+                fallbackDetail: createResult.fallbackDetail,
+              },
+              'PR description used template fallback during approval retry',
+            );
+            emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
+          }
           podRepo.update(podId, { prUrl: newPrUrl });
           emitActivityStatus(podId, `PR created: ${newPrUrl}`);
           const retryMergeResult = await prManager.mergePr({
@@ -5678,7 +5721,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Creating PR…');
                 const s3 = podRepo.getOrThrow(podId);
                 warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
-                prUrl = await prManager.createPr({
+                const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
@@ -5701,6 +5744,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   seriesName: s2.seriesName ?? undefined,
                   securityFindings: getLatestPushFindings(podId),
                 });
+                prUrl = createResult.url;
+                if (createResult.usedFallback) {
+                  const which = createResult.narrativeUsedFallback
+                    ? createResult.titleUsedFallback
+                      ? 'title + body'
+                      : 'body'
+                    : 'title';
+                  const reason = createResult.fallbackReason ?? 'unknown';
+                  logger.error(
+                    {
+                      podId,
+                      profile: profile.name,
+                      modelProvider: profile.modelProvider,
+                      fallbackReason: reason,
+                      fallbackDetail: createResult.fallbackDetail,
+                    },
+                    'PR description used template fallback during validation',
+                  );
+                  emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
+                }
                 if (prUrl) {
                   emitActivityStatus(podId, `PR created: ${prUrl}`);
                 }
@@ -6088,7 +6151,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Creating PR…');
                 const s3 = podRepo.getOrThrow(podId);
                 warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
-                prUrl = await prManager.createPr({
+                const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
@@ -6111,6 +6174,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   seriesName: s2.seriesName ?? undefined,
                   securityFindings: getLatestPushFindings(podId),
                 });
+                prUrl = createResult.url;
+                if (createResult.usedFallback) {
+                  const which = createResult.narrativeUsedFallback
+                    ? createResult.titleUsedFallback
+                      ? 'title + body'
+                      : 'body'
+                    : 'title';
+                  const reason = createResult.fallbackReason ?? 'unknown';
+                  logger.error(
+                    {
+                      podId,
+                      profile: profile.name,
+                      modelProvider: profile.modelProvider,
+                      fallbackReason: reason,
+                      fallbackDetail: createResult.fallbackDetail,
+                    },
+                    'PR description used template fallback during revalidation',
+                  );
+                  emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
+                }
                 if (prUrl) emitActivityStatus(podId, `PR created: ${prUrl}`);
               } catch (err) {
                 logger.warn({ err, podId }, 'Failed to create PR — pod still validated');

@@ -100,8 +100,24 @@ export interface PrMergeStatus {
   reviewComments: ReviewCommentDetail[];
 }
 
+/**
+ * Outcome of `createPr`. Surfaces fallback-reason metadata so callers can
+ * emit pod activity events / log entries when daemon-side LLM helpers fell
+ * back to template content for the PR title or body.
+ */
+export interface CreatePrResult {
+  url: string;
+  /** True when EITHER the title or the narrative used template fallback. */
+  usedFallback: boolean;
+  /** Stable reason code for whichever generator fell back (narrative wins if both did). */
+  fallbackReason?: string;
+  fallbackDetail?: string;
+  titleUsedFallback?: boolean;
+  narrativeUsedFallback?: boolean;
+}
+
 export interface PrManager {
-  createPr(config: CreatePrConfig): Promise<string>; // returns PR URL
+  createPr(config: CreatePrConfig): Promise<CreatePrResult>;
   mergePr(config: MergePrConfig): Promise<MergePrResult>;
   getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus>;
 }

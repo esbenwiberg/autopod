@@ -6,10 +6,10 @@ import { generatePrNarrative, generatePrTitle } from './pr-description-generator
 
 const logger = pino({ level: 'silent' });
 
-const { execFileMock, anthropicCreateMock, createClientMock } = vi.hoisted(() => ({
+const { execFileMock, anthropicCreateMock, anthropicCtorMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
   anthropicCreateMock: vi.fn(),
-  createClientMock: vi.fn(),
+  anthropicCtorMock: vi.fn(),
 }));
 
 vi.mock('node:child_process', async () => {
@@ -17,9 +17,15 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile: execFileMock };
 });
 
-vi.mock('../providers/llm-client.js', () => ({
-  createProfileAnthropicClient: createClientMock,
-}));
+vi.mock('@anthropic-ai/sdk', () => {
+  // Minimal Anthropic SDK shape: default-exported class with .messages.create().
+  // The constructor records its args so tests can assert apiKey wiring if needed.
+  const Anthropic = vi.fn().mockImplementation((opts: unknown) => {
+    anthropicCtorMock(opts);
+    return { messages: { create: anthropicCreateMock } };
+  });
+  return { default: Anthropic };
+});
 
 type ExecCallback = (error: Error | null, result: unknown) => void;
 
@@ -37,19 +43,6 @@ function setupDiffExec(diff: string, error?: Error) {
   );
 }
 
-/** Wire createProfileAnthropicClient to return a stub client wrapping anthropicCreateMock. */
-function setupClientAvailable() {
-  createClientMock.mockResolvedValue({
-    client: { messages: { create: anthropicCreateMock } },
-    model: 'claude-haiku-4-5',
-  });
-}
-
-/** Wire createProfileAnthropicClient to return null (provider not daemon-callable). */
-function setupClientUnavailable() {
-  createClientMock.mockResolvedValue(null);
-}
-
 const SAMPLE_DIFF = `diff --git a/src/auth/token-manager.ts b/src/auth/token-manager.ts
 +  async refreshToken() { ... }
 -  async getToken() { ... }
@@ -59,6 +52,8 @@ const SAMPLE_PROFILE = {
   name: 'test-profile',
   modelProvider: 'max',
   providerCredentials: { provider: 'max' },
+  reviewerModel: null,
+  defaultModel: null,
 } as unknown as Profile;
 
 const baseInput = {
@@ -76,71 +71,78 @@ describe('generatePrTitle', () => {
   beforeEach(() => {
     execFileMock.mockReset();
     anthropicCreateMock.mockReset();
-    createClientMock.mockReset();
+    anthropicCtorMock.mockReset();
+    process.env.ANTHROPIC_API_KEY = 'test-key';
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    delete process.env.ANTHROPIC_API_KEY;
   });
 
   it('returns LLM title on a successful call', async () => {
-    setupClientAvailable();
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat(auth): add MSAL proactive token refresh' }],
     });
 
-    const title = await generatePrTitle(baseInput, logger);
-    expect(title).toBe('feat(auth): add MSAL proactive token refresh');
+    const result = await generatePrTitle(baseInput, logger);
+    expect(result.title).toBe('feat(auth): add MSAL proactive token refresh');
+    expect(result.usedFallback).toBe(false);
+    expect(result.fallbackReason).toBeUndefined();
     expect(anthropicCreateMock).toHaveBeenCalledOnce();
   });
 
-  it('falls back to buildPrTitle when client is unavailable', async () => {
-    setupClientUnavailable();
+  it('falls back when ANTHROPIC_API_KEY is unset (no_anthropic_api_key)', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
     setupDiffExec(SAMPLE_DIFF);
 
-    const title = await generatePrTitle(baseInput, logger);
-    expect(title).toContain('feat:');
+    const result = await generatePrTitle(baseInput, logger);
+    expect(result.title).toContain('feat:');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('no_anthropic_api_key');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
   });
 
-  it('falls back when LLM returns a title over 72 chars', async () => {
-    setupClientAvailable();
+  it('falls back when LLM returns a title over 72 chars (output_invalid)', async () => {
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat(auth): '.padEnd(80, 'x') }],
     });
 
-    const title = await generatePrTitle(baseInput, logger);
-    // Falls back to buildPrTitle which truncates to ≤70 chars
-    expect(title.length).toBeLessThanOrEqual(70);
+    const result = await generatePrTitle(baseInput, logger);
+    expect(result.title.length).toBeLessThanOrEqual(70);
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('output_invalid');
   });
 
   it('falls back when LLM title contains newlines', async () => {
-    setupClientAvailable();
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: add token refresh\n\nextra body' }],
     });
 
-    const title = await generatePrTitle(baseInput, logger);
-    expect(title).not.toContain('\n');
+    const result = await generatePrTitle(baseInput, logger);
+    expect(result.title).not.toContain('\n');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('output_invalid');
   });
 
-  it('falls back on API error', async () => {
-    setupClientAvailable();
+  it('falls back on API error (api_call_failed)', async () => {
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockRejectedValueOnce(new Error('503 service unavailable'));
 
-    const title = await generatePrTitle(baseInput, logger);
-    expect(title).toContain('feat:');
+    const result = await generatePrTitle(baseInput, logger);
+    expect(result.title).toContain('feat:');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('api_call_failed');
+    expect(result.fallbackDetail).toContain('503');
   });
 
   it('uses handoffInstructions over task in fallback for promoted pods', async () => {
-    setupClientUnavailable();
+    delete process.env.ANTHROPIC_API_KEY;
     setupDiffExec(SAMPLE_DIFF);
 
-    const title = await generatePrTitle(
+    const result = await generatePrTitle(
       {
         ...baseInput,
         task: '#4',
@@ -148,11 +150,11 @@ describe('generatePrTitle', () => {
       },
       logger,
     );
-    expect(title).toContain('login redirect');
+    expect(result.title).toContain('login redirect');
+    expect(result.usedFallback).toBe(true);
   });
 
   it('passes handoffInstructions to the LLM message body', async () => {
-    setupClientAvailable();
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: route ?next= through redirect' }],
@@ -168,6 +170,16 @@ describe('generatePrTitle', () => {
     };
     expect(callArgs.messages[0]?.content).toContain('fix login redirect');
   });
+
+  it('instantiates the Anthropic SDK with the host env var', async () => {
+    setupDiffExec(SAMPLE_DIFF);
+    anthropicCreateMock.mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'feat: ok' }],
+    });
+
+    await generatePrTitle(baseInput, logger);
+    expect(anthropicCtorMock).toHaveBeenCalledWith({ apiKey: 'test-key' });
+  });
 });
 
 describe('generatePrNarrative', () => {
@@ -181,74 +193,80 @@ describe('generatePrNarrative', () => {
   beforeEach(() => {
     execFileMock.mockReset();
     anthropicCreateMock.mockReset();
-    createClientMock.mockReset();
+    anthropicCtorMock.mockReset();
+    process.env.ANTHROPIC_API_KEY = 'test-key';
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    delete process.env.ANTHROPIC_API_KEY;
   });
 
   it('returns parsed narrative on a successful LLM call', async () => {
-    setupClientAvailable();
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: validNarrativeJson }],
     });
 
     const result = await generatePrNarrative(baseInput, logger);
-    expect(result.why).toBe('Sessions were silently expiring after 30 minutes.');
-    expect(result.what).toContain('proactive token refresh');
-    expect(result.how).toContain('acquireTokenSilent');
-    expect(result.reviewFocus).toEqual(['packages/cli/src/auth/token-manager.ts']);
+    expect(result.usedFallback).toBe(false);
+    expect(result.fallbackReason).toBeUndefined();
+    expect(result.narrative.why).toBe('Sessions were silently expiring after 30 minutes.');
+    expect(result.narrative.what).toContain('proactive token refresh');
+    expect(result.narrative.how).toContain('acquireTokenSilent');
+    expect(result.narrative.reviewFocus).toEqual(['packages/cli/src/auth/token-manager.ts']);
   });
 
-  it('falls back to plain taskSummary when client is unavailable', async () => {
-    setupClientUnavailable();
+  it('falls back to plain taskSummary when ANTHROPIC_API_KEY is unset (no_anthropic_api_key)', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
     setupDiffExec(SAMPLE_DIFF);
 
     const result = await generatePrNarrative(
       { ...baseInput, taskSummary: { actualSummary: 'Did the thing.', deviations: [] } },
       logger,
     );
-    expect(result.why).toBe(baseInput.task);
-    expect(result.what).toBe('Did the thing.');
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('no_anthropic_api_key');
+    expect(result.narrative.why).toBe(baseInput.task);
+    expect(result.narrative.what).toBe('Did the thing.');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
   });
 
-  it('falls back on invalid JSON response', async () => {
-    setupClientAvailable();
+  it('falls back on invalid JSON response (json_parse_failed)', async () => {
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'Here is your narrative: sorry not json' }],
     });
 
     const result = await generatePrNarrative(baseInput, logger);
-    expect(result.why).toBe(baseInput.task);
-    expect(result.reviewFocus).toBeUndefined();
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('json_parse_failed');
+    expect(result.narrative.why).toBe(baseInput.task);
+    expect(result.narrative.reviewFocus).toBeUndefined();
   });
 
   it('strips markdown code fences from LLM output before parsing', async () => {
-    setupClientAvailable();
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: `\`\`\`json\n${validNarrativeJson}\n\`\`\`` }],
     });
 
     const result = await generatePrNarrative(baseInput, logger);
-    expect(result.why).toBe('Sessions were silently expiring after 30 minutes.');
+    expect(result.usedFallback).toBe(false);
+    expect(result.narrative.why).toBe('Sessions were silently expiring after 30 minutes.');
   });
 
-  it('falls back on API error', async () => {
-    setupClientAvailable();
+  it('falls back on API error (api_call_failed)', async () => {
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockRejectedValueOnce(new Error('timeout'));
 
     const result = await generatePrNarrative(baseInput, logger);
-    expect(result.why).toBe(baseInput.task);
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('api_call_failed');
+    expect(result.fallbackDetail).toContain('timeout');
+    expect(result.narrative.why).toBe(baseInput.task);
   });
 
   it('handles reviewFocus being absent or empty array', async () => {
-    setupClientAvailable();
     setupDiffExec(SAMPLE_DIFF);
     anthropicCreateMock.mockResolvedValueOnce({
       content: [
@@ -260,11 +278,12 @@ describe('generatePrNarrative', () => {
     });
 
     const result = await generatePrNarrative(baseInput, logger);
-    expect(result.reviewFocus).toBeUndefined();
+    expect(result.usedFallback).toBe(false);
+    expect(result.narrative.reviewFocus).toBeUndefined();
   });
 
-  it('uses handoffInstructions in fallback when client unavailable and no taskSummary', async () => {
-    setupClientUnavailable();
+  it('uses handoffInstructions in fallback when env var unset and no taskSummary', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
     setupDiffExec(SAMPLE_DIFF);
 
     const result = await generatePrNarrative(
@@ -275,7 +294,8 @@ describe('generatePrNarrative', () => {
       },
       logger,
     );
-    expect(result.why).toContain('redirect param');
-    expect(result.what).toContain('redirect param');
+    expect(result.usedFallback).toBe(true);
+    expect(result.narrative.why).toContain('redirect param');
+    expect(result.narrative.what).toContain('redirect param');
   });
 });

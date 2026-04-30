@@ -573,11 +573,23 @@ export class LocalWorktreeManager implements WorktreeManager {
   ): Promise<boolean> {
     const hasStaged = await this.stageAllChanges(worktreePath);
     if (!hasStaged) return false;
-    const message = await generateAutoCommitMessage(
+    const result = await generateAutoCommitMessage(
       { worktreePath, podTask, profile, podModel },
       this.logger,
     );
-    return this.commitStagedChanges(worktreePath, message, options?.maxDeletions ?? 100);
+    if (result.usedFallback) {
+      this.logger.warn(
+        {
+          worktreePath,
+          profile: profile.name,
+          modelProvider: profile.modelProvider,
+          fallbackReason: result.fallbackReason,
+          fallbackDetail: result.fallbackDetail,
+        },
+        'auto-commit message used heuristic/template fallback — daemon-side LLM helper failed',
+      );
+    }
+    return this.commitStagedChanges(worktreePath, result.message, options?.maxDeletions ?? 100);
   }
 
   private async stageAllChanges(worktreePath: string): Promise<boolean> {

@@ -2,6 +2,7 @@ import type { Logger } from 'pino';
 import type {
   CiFailureDetail,
   CreatePrConfig,
+  CreatePrResult,
   MergePrConfig,
   MergePrResult,
   PrManager,
@@ -9,7 +10,35 @@ import type {
   ReviewCommentDetail,
 } from '../interfaces/pr-manager.js';
 import { buildPrBody } from './pr-body-builder.js';
-import { generatePrNarrative, generatePrTitle } from './pr-description-generator.js';
+import {
+  generatePrNarrative,
+  generatePrTitle,
+  type PrNarrativeResult,
+  type PrTitleResult,
+} from './pr-description-generator.js';
+
+/**
+ * Compose the `CreatePrResult` from generator outcomes. Mirrors the helper
+ * in pr-manager.ts — narrative fallback wins over title fallback for the
+ * top-level reason.
+ */
+function buildCreatePrResult(
+  url: string,
+  title: PrTitleResult,
+  narrative: PrNarrativeResult,
+): CreatePrResult {
+  const usedFallback = title.usedFallback || narrative.usedFallback;
+  if (!usedFallback) return { url, usedFallback: false };
+  const primary = narrative.usedFallback ? narrative : title;
+  return {
+    url,
+    usedFallback: true,
+    fallbackReason: primary.fallbackReason,
+    fallbackDetail: primary.fallbackDetail,
+    titleUsedFallback: title.usedFallback,
+    narrativeUsedFallback: narrative.usedFallback,
+  };
+}
 
 export interface AdoPrManagerConfig {
   /** e.g. https://dev.azure.com/myorg */
@@ -144,7 +173,7 @@ export class AdoPrManager implements PrManager {
     );
   }
 
-  async createPr(config: CreatePrConfig): Promise<string> {
+  async createPr(config: CreatePrConfig): Promise<CreatePrResult> {
     const descInput = {
       task: config.task,
       worktreePath: config.worktreePath,
@@ -159,7 +188,7 @@ export class AdoPrManager implements PrManager {
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
     };
-    const [title, narrative] = await Promise.all([
+    const [titleResult, narrativeResult] = await Promise.all([
       generatePrTitle(descInput, this.logger),
       generatePrNarrative(descInput, this.logger, true),
     ]);
@@ -178,7 +207,10 @@ export class AdoPrManager implements PrManager {
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
       securityFindings: config.securityFindings,
-      narrative,
+      narrative: narrativeResult.narrative,
+      narrativeFallback: narrativeResult.usedFallback
+        ? { reason: narrativeResult.fallbackReason ?? 'unknown', detail: narrativeResult.fallbackDetail }
+        : undefined,
       budgetChars: 4000,
     });
 
@@ -188,7 +220,7 @@ export class AdoPrManager implements PrManager {
     );
 
     const body = {
-      title,
+      title: titleResult.title,
       description,
       sourceRefName: `refs/heads/${config.branch}`,
       targetRefName: `refs/heads/${config.baseBranch}`,
@@ -208,7 +240,7 @@ export class AdoPrManager implements PrManager {
       { podId: config.podId, prUrl, prId: pr.pullRequestId },
       'ADO pull request created',
     );
-    return prUrl;
+    return buildCreatePrResult(prUrl, titleResult, narrativeResult);
   }
 
   private extractPrId(prUrl: string): string {

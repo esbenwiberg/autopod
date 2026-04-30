@@ -42,7 +42,10 @@ import { type PodManager, createPodManager } from './pod-manager.js';
 
 function createMockPrManager(): PrManager {
   return {
-    createPr: vi.fn(async () => 'https://github.com/org/repo/pull/42'),
+    createPr: vi.fn(async () => ({
+      url: 'https://github.com/org/repo/pull/42',
+      usedFallback: false,
+    })),
     mergePr: vi.fn(async () => ({ merged: true, autoMergeScheduled: false })),
     getPrStatus: vi.fn(async () => ({ merged: true, open: false, blockReason: null })),
   };

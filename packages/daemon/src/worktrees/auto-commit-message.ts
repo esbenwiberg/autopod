@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import Anthropic from '@anthropic-ai/sdk';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { createProfileAnthropicClient } from '../providers/llm-client.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -11,6 +11,18 @@ const FALLBACK_MESSAGE = 'chore: auto-commit uncommitted agent changes';
 const MAX_DIFF_BYTES = 8 * 1024;
 const API_TIMEOUT_MS = 10_000;
 const MAX_MESSAGE_LENGTH = 100;
+const DEFAULT_MODEL = 'claude-haiku-4-5';
+
+const MODEL_ALIASES: Record<string, string> = {
+  opus: 'claude-opus-4-6',
+  sonnet: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5',
+};
+
+function pickModel(profile: Profile, podModel: string): string {
+  const raw = profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_MODEL;
+  return MODEL_ALIASES[raw] ?? raw;
+}
 
 const SYSTEM_PROMPT =
   'Generate a single conventional-commit subject line summarizing the staged diff. ' +
@@ -28,19 +40,35 @@ export interface AutoCommitMessageInput {
   podModel: string;
 }
 
+export type AutoCommitFallbackReason =
+  | 'git_stat_failed'
+  | 'git_diff_failed'
+  | 'no_anthropic_api_key'
+  | 'api_call_failed'
+  | 'output_invalid';
+
+export interface AutoCommitMessageResult {
+  message: string;
+  usedFallback: boolean;
+  fallbackReason?: AutoCommitFallbackReason;
+  fallbackDetail?: string;
+}
+
 /**
  * Generate a commit message for staged changes in `worktreePath`.
  *
- * Tries the profile's provider+model first; on any failure falls back to a
- * deterministic `git diff --cached --stat`-based message. As a last resort
- * returns a generic chore message so the caller can always commit.
+ * Uses the daemon host's `ANTHROPIC_API_KEY` (mirrors AI review's auth path).
+ * On any failure falls back to a deterministic `git diff --cached --stat`-based
+ * message. As a last resort returns a generic chore message so the caller can
+ * always commit.
  *
- * Never throws.
+ * Never throws. The returned `usedFallback` flag tells callers whether the
+ * LLM path succeeded or template was used (and why).
  */
 export async function generateAutoCommitMessage(
   input: AutoCommitMessageInput,
   logger: Logger,
-): Promise<string> {
+): Promise<AutoCommitMessageResult> {
   const { worktreePath, podTask } = input;
   let stat = '';
   try {
@@ -49,14 +77,26 @@ export async function generateAutoCommitMessage(
     });
     stat = result.stdout;
   } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
     logger.warn({ err, worktreePath }, 'auto-commit message: failed to read git stat');
-    return FALLBACK_MESSAGE;
+    return {
+      message: FALLBACK_MESSAGE,
+      usedFallback: true,
+      fallbackReason: 'git_stat_failed',
+      fallbackDetail: detail,
+    };
   }
 
   const heuristic = buildHeuristicMessage(stat);
 
-  const llm = await createProfileAnthropicClient(input.profile, input.podModel, logger);
-  if (!llm) return heuristic;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    logger.warn(
+      { worktreePath, profile: input.profile.name, reason: 'no_anthropic_api_key' },
+      'auto-commit message: ANTHROPIC_API_KEY not set on daemon host, using heuristic',
+    );
+    return { message: heuristic, usedFallback: true, fallbackReason: 'no_anthropic_api_key' };
+  }
 
   let diff = '';
   try {
@@ -66,14 +106,23 @@ export async function generateAutoCommitMessage(
     });
     diff = result.stdout.slice(0, MAX_DIFF_BYTES);
   } catch (err) {
-    logger.debug({ err, worktreePath }, 'auto-commit message: failed to read git diff');
-    return heuristic;
+    const detail = err instanceof Error ? err.message : String(err);
+    logger.warn({ err, worktreePath }, 'auto-commit message: failed to read git diff');
+    return {
+      message: heuristic,
+      usedFallback: true,
+      fallbackReason: 'git_diff_failed',
+      fallbackDetail: detail,
+    };
   }
+
+  const client = new Anthropic({ apiKey });
+  const model = pickModel(input.profile, input.podModel);
 
   try {
     const taskLine = podTask ? `Pod task: ${podTask}\n\n` : '';
-    const response = await llm.client.messages.create({
-      model: llm.model,
+    const response = await client.messages.create({
+      model,
       max_tokens: 100,
       system: SYSTEM_PROMPT,
       messages: [
@@ -92,17 +141,31 @@ export async function generateAutoCommitMessage(
       .trim();
 
     if (!text || text.length > MAX_MESSAGE_LENGTH || text.includes('\n')) {
-      logger.debug(
-        { worktreePath, length: text.length },
+      logger.error(
+        { worktreePath, length: text.length, raw: text.slice(0, 200), reason: 'output_invalid' },
         'auto-commit message: model output rejected, using heuristic',
       );
-      return heuristic;
+      return {
+        message: heuristic,
+        usedFallback: true,
+        fallbackReason: 'output_invalid',
+        fallbackDetail: `length=${text.length}`,
+      };
     }
 
-    return text;
+    return { message: text, usedFallback: false };
   } catch (err) {
-    logger.warn({ err, worktreePath }, 'auto-commit message: model call failed, using heuristic');
-    return heuristic;
+    const detail = err instanceof Error ? err.message : String(err);
+    logger.error(
+      { err, worktreePath, reason: 'api_call_failed' },
+      'auto-commit message: model API call failed, using heuristic',
+    );
+    return {
+      message: heuristic,
+      usedFallback: true,
+      fallbackReason: 'api_call_failed',
+      fallbackDetail: detail,
+    };
   }
 }
 

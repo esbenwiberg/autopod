@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import Anthropic from '@anthropic-ai/sdk';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Profile, TaskSummary } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { createProfileAnthropicClient } from '../providers/llm-client.js';
 import { buildPrTitle } from './pr-body-builder.js';
 
 const execFileAsync = promisify(execFile);
@@ -11,6 +11,21 @@ const execFileAsync = promisify(execFile);
 const MAX_DIFF_BYTES = 20 * 1024;
 const API_TIMEOUT_MS = 15_000;
 const MAX_TITLE_LENGTH = 72;
+const DEFAULT_DESCRIPTION_MODEL = 'claude-haiku-4-5';
+
+const MODEL_ALIASES: Record<string, string> = {
+  opus: 'claude-opus-4-6',
+  sonnet: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5',
+};
+
+function resolveModelId(model: string): string {
+  return MODEL_ALIASES[model] ?? model;
+}
+
+function pickDescriptionModel(profile: Profile, podModel: string): string {
+  return resolveModelId(profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_DESCRIPTION_MODEL);
+}
 
 const TITLE_SYSTEM_PROMPT =
   'Generate a single-line GitHub PR title in conventional-commit format. ' +
@@ -41,6 +56,32 @@ export interface PrNarrative {
   what: string;
   how?: string;
   reviewFocus?: string[];
+}
+
+/**
+ * Stable reason codes for daemon-side LLM fallback paths. Greppable in logs and
+ * serializable into pod activity events / PR body footers so the user can see
+ * exactly why a template fallback was used instead of an LLM-generated body.
+ */
+export type LlmFallbackReason =
+  | 'no_anthropic_api_key'
+  | 'api_call_failed'
+  | 'output_invalid'
+  | 'json_parse_failed';
+
+export interface PrTitleResult {
+  title: string;
+  usedFallback: boolean;
+  fallbackReason?: LlmFallbackReason;
+  /** Underlying error message when relevant (api_call_failed). */
+  fallbackDetail?: string;
+}
+
+export interface PrNarrativeResult {
+  narrative: PrNarrative;
+  usedFallback: boolean;
+  fallbackReason?: LlmFallbackReason;
+  fallbackDetail?: string;
 }
 
 export interface PrDescriptionInput {
@@ -104,28 +145,42 @@ function buildUserMessage(input: PrDescriptionInput, diff: string): string {
 }
 
 /**
- * Generate an LLM PR title in conventional-commit format using the profile's
- * provider+model. Falls back to `buildPrTitle()` on any error or when the
- * profile's provider is not daemon-callable (copilot, foundry openai surface).
+ * Generate an LLM PR title in conventional-commit format using the daemon
+ * host's `ANTHROPIC_API_KEY`. Mirrors how AI review authenticates: profile
+ * credentials are intentionally NOT used — MAX OAuth, copilot, and
+ * foundry-openai are not daemon-callable, so unifying on the host key keeps a
+ * single working path.
+ *
+ * Falls back to `buildPrTitle()` on any error or when the env var is unset.
+ * Always returns a usable title — the `usedFallback` flag tells callers
+ * whether the LLM path succeeded or template was used (and why).
  */
 export async function generatePrTitle(
   input: PrDescriptionInput,
   logger: Logger,
-): Promise<string> {
-  const fallback = buildPrTitle(
+): Promise<PrTitleResult> {
+  const fallbackTitle = buildPrTitle(
     input.handoffInstructions || input.task,
     input.seriesName,
     input.seriesDescription,
   );
 
-  const llm = await createProfileAnthropicClient(input.profile, input.podModel, logger);
-  if (!llm) return fallback;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    logger.error(
+      { profile: input.profile.name, reason: 'no_anthropic_api_key' },
+      'pr-description-generator: ANTHROPIC_API_KEY not set on daemon host, using fallback title',
+    );
+    return { title: fallbackTitle, usedFallback: true, fallbackReason: 'no_anthropic_api_key' };
+  }
 
+  const client = new Anthropic({ apiKey });
+  const model = pickDescriptionModel(input.profile, input.podModel);
   const diff = await readBranchDiff(input.worktreePath, input.baseBranch, logger);
 
   try {
-    const response = await llm.client.messages.create({
-      model: llm.model,
+    const response = await client.messages.create({
+      model,
       max_tokens: 100,
       system: TITLE_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
@@ -139,47 +194,77 @@ export async function generatePrTitle(
       .trim();
 
     if (!text || text.length > MAX_TITLE_LENGTH || text.includes('\n')) {
-      logger.debug(
-        { length: text.length },
+      logger.error(
+        { length: text.length, raw: text.slice(0, 200), reason: 'output_invalid' },
         'pr-description-generator: title rejected by validation, using fallback',
       );
-      return fallback;
+      return {
+        title: fallbackTitle,
+        usedFallback: true,
+        fallbackReason: 'output_invalid',
+        fallbackDetail: `length=${text.length}`,
+      };
     }
 
-    return text;
+    return { title: text, usedFallback: false };
   } catch (err) {
-    logger.warn({ err }, 'pr-description-generator: title generation failed, using fallback');
-    return fallback;
+    const detail = err instanceof Error ? err.message : String(err);
+    logger.error(
+      { err, reason: 'api_call_failed' },
+      'pr-description-generator: title generation API call failed, using fallback',
+    );
+    return {
+      title: fallbackTitle,
+      usedFallback: true,
+      fallbackReason: 'api_call_failed',
+      fallbackDetail: detail,
+    };
   }
 }
 
 /**
  * Generate LLM narrative sections (Why / What / How / Review Focus) for a PR
- * body using the profile's provider+model. Falls back to plain task /
- * taskSummary text on any error.
+ * body using the daemon host's `ANTHROPIC_API_KEY`. Mirrors AI review's auth
+ * path; profile credentials are intentionally NOT used.
+ *
+ * Falls back to plain task / taskSummary text on any error.
+ * Always returns a usable narrative — the `usedFallback` flag tells callers
+ * whether the LLM path succeeded or template was used (and why).
  */
 export async function generatePrNarrative(
   input: PrDescriptionInput,
   logger: Logger,
   compact = false,
-): Promise<PrNarrative> {
-  const fallback: PrNarrative = {
+): Promise<PrNarrativeResult> {
+  const fallbackNarrative: PrNarrative = {
     why: input.seriesDescription ?? input.handoffInstructions ?? input.task,
     what: input.taskSummary?.actualSummary ?? input.handoffInstructions ?? input.task,
     how: input.taskSummary?.how,
   };
 
-  const llm = await createProfileAnthropicClient(input.profile, input.podModel, logger);
-  if (!llm) return fallback;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    logger.error(
+      { profile: input.profile.name, reason: 'no_anthropic_api_key' },
+      'pr-description-generator: ANTHROPIC_API_KEY not set on daemon host, using fallback narrative',
+    );
+    return {
+      narrative: fallbackNarrative,
+      usedFallback: true,
+      fallbackReason: 'no_anthropic_api_key',
+    };
+  }
 
+  const client = new Anthropic({ apiKey });
+  const model = pickDescriptionModel(input.profile, input.podModel);
   const diff = await readBranchDiff(input.worktreePath, input.baseBranch, logger);
   const systemPrompt = compact
     ? NARRATIVE_SYSTEM_PROMPT + NARRATIVE_COMPACT_SUFFIX
     : NARRATIVE_SYSTEM_PROMPT;
 
   try {
-    const response = await llm.client.messages.create({
-      model: llm.model,
+    const response = await client.messages.create({
+      model,
       max_tokens: compact ? 400 : 800,
       system: systemPrompt,
       messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
@@ -194,17 +279,31 @@ export async function generatePrNarrative(
 
     const parsed = parseNarrativeJson(raw);
     if (!parsed) {
-      logger.debug(
-        { raw: raw.slice(0, 200) },
+      logger.error(
+        { raw: raw.slice(0, 200), reason: 'json_parse_failed' },
         'pr-description-generator: narrative JSON invalid, using fallback',
       );
-      return fallback;
+      return {
+        narrative: fallbackNarrative,
+        usedFallback: true,
+        fallbackReason: 'json_parse_failed',
+        fallbackDetail: raw.slice(0, 200),
+      };
     }
 
-    return parsed;
+    return { narrative: parsed, usedFallback: false };
   } catch (err) {
-    logger.warn({ err }, 'pr-description-generator: narrative generation failed, using fallback');
-    return fallback;
+    const detail = err instanceof Error ? err.message : String(err);
+    logger.error(
+      { err, reason: 'api_call_failed' },
+      'pr-description-generator: narrative generation API call failed, using fallback',
+    );
+    return {
+      narrative: fallbackNarrative,
+      usedFallback: true,
+      fallbackReason: 'api_call_failed',
+      fallbackDetail: detail,
+    };
   }
 }
 

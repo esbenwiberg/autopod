@@ -39,6 +39,12 @@ export interface PrBodyConfig {
    */
   narrative?: PrNarrative;
   /**
+   * When set, the narrative was actually a template fallback (the daemon-side LLM call
+   * failed). Surface that as a footer note so reviewers know the body wasn't AI-generated
+   * and the user has a bisect aid for the fallback reason.
+   */
+  narrativeFallback?: { reason: string; detail?: string };
+  /**
    * Maximum character budget for the rendered body. When set, lower-priority sections are
    * dropped (rather than truncated mid-sentence) until the body fits within the budget.
    * Drop order: screenshots → previewUrl → deviations table → AI review details block.
@@ -279,6 +285,15 @@ export function buildPrBody(config: PrBodyConfig): string {
 
   if (previewUrl) {
     sections.push(`## Preview\n\n[Open preview](${previewUrl})`);
+  }
+
+  if (config.narrativeFallback) {
+    const detail = config.narrativeFallback.detail
+      ? ` (${escapeMd(config.narrativeFallback.detail.slice(0, 200))})`
+      : '';
+    sections.push(
+      `_Note: PR description generated from template — daemon-side LLM call fell back: \`${escapeMd(config.narrativeFallback.reason)}\`${detail}._`,
+    );
   }
 
   sections.push(
