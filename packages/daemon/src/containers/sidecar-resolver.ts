@@ -25,6 +25,38 @@ export function resolveSidecarSpec(profile: Profile, name: string): SidecarSpec 
 }
 
 /**
+ * Sidecar names that are auto-attached to every pod on the profile when their
+ * config is enabled. Adding a name here means "if the profile turns this on,
+ * every pod gets it" — the per-pod `requireSidecars` flag becomes additive
+ * instead of mandatory. Privileged auto-attach still respects `trustedSource`,
+ * so untrusted profiles silently skip even with `enabled: true`.
+ */
+const AUTO_ATTACH_SIDECAR_NAMES: readonly string[] = ['dagger'];
+
+/**
+ * Names of sidecars the daemon will spawn automatically for any pod created
+ * against this profile, given the profile's current config + trust gate.
+ *
+ * Returned names are guaranteed to resolve to a non-null `SidecarSpec` and
+ * pass the privileged-trust check, so feeding them straight back into the
+ * pod's `requireSidecars` array won't trip the validation in `createSession`.
+ *
+ * Sub-profiles can opt out by setting `sidecars.dagger.enabled: false` (simple
+ * inheritance override) or `trustedSource: false` (kills privileged
+ * auto-attach for the whole profile).
+ */
+export function getAutoAttachedSidecars(profile: Profile): string[] {
+  const names: string[] = [];
+  for (const name of AUTO_ATTACH_SIDECAR_NAMES) {
+    const spec = resolveSidecarSpec(profile, name);
+    if (!spec) continue;
+    if (spec.privileged === true && profile.trustedSource !== true) continue;
+    names.push(name);
+  }
+  return names;
+}
+
+/**
  * Environment variables the POD container needs so its tools can reach the
  * sidecar. E.g. the Dagger CLI reads `_EXPERIMENTAL_DAGGER_RUNNER_HOST` to
  * find a remote engine.

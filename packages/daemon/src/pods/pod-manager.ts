@@ -51,7 +51,11 @@ import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isExpectedDockerError } from '../containers/docker-helpers.js';
 import { networkNameForPod } from '../containers/docker-network-manager.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
-import { resolveSidecarSpec, sidecarPodEnv } from '../containers/sidecar-resolver.js';
+import {
+  getAutoAttachedSidecars,
+  resolveSidecarSpec,
+  sidecarPodEnv,
+} from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import { createHistoryExporter } from '../history/history-exporter.js';
 import { generateHistoryInstructions } from '../history/instructions-generator.js';
@@ -1933,7 +1937,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Validate requireSidecars against the pod's profile at create time so
       // typos and missing configs fail fast instead of silently no-oping at
       // spawn. Privileged sidecars additionally require `trustedSource:true`.
-      const requireSidecars = request.requireSidecars ?? [];
+      //
+      // Auto-attach sidecars that the profile has enabled + trusted (currently
+      // just Dagger). Profiles can opt out per child via inheritance — sub-
+      // profiles set `sidecars.dagger.enabled:false` or `trustedSource:false`.
+      // Auto-attach is unioned with the explicit request so CLI/brief-level
+      // opt-in still works for sidecars not auto-attached.
+      const autoAttached = getAutoAttachedSidecars(profile);
+      const requestedSidecars = request.requireSidecars ?? [];
+      const requireSidecars = Array.from(new Set([...autoAttached, ...requestedSidecars]));
       for (const name of requireSidecars) {
         const spec = resolveSidecarSpec(profile, name);
         if (!spec) {

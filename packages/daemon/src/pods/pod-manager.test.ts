@@ -494,6 +494,85 @@ describe('PodManager', () => {
       expect(pods).toHaveLength(1);
       expect(pods[0]?.userId).toBe('user-1');
     });
+
+    it('auto-attaches profile-enabled trusted sidecars without explicit request', () => {
+      const ctx = createTestContext();
+      // Override profile to enable Dagger + trustedSource. Auto-attach should
+      // fold 'dagger' into pod.requireSidecars even though the request omits it.
+      const baseGet = ctx.profileStore.get;
+      ctx.profileStore.get = vi.fn((name: string) => ({
+        ...baseGet(name),
+        trustedSource: true,
+        sidecars: {
+          dagger: {
+            enabled: true,
+            engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+            engineVersion: 'v0.18.6',
+          },
+        },
+      }));
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'build a Dagger module' },
+        'user-1',
+      );
+
+      expect(pod.requireSidecars).toEqual(['dagger']);
+    });
+
+    it('does not auto-attach Dagger when the profile is not trustedSource', () => {
+      const ctx = createTestContext();
+      const baseGet = ctx.profileStore.get;
+      ctx.profileStore.get = vi.fn((name: string) => ({
+        ...baseGet(name),
+        trustedSource: false,
+        sidecars: {
+          dagger: {
+            enabled: true,
+            engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+            engineVersion: 'v0.18.6',
+          },
+        },
+      }));
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'untrusted profile' },
+        'user-1',
+      );
+
+      // requireSidecars defaults to [] in the Pod type
+      expect(pod.requireSidecars).toEqual([]);
+    });
+
+    it('dedupes when caller explicitly requests an already auto-attached sidecar', () => {
+      const ctx = createTestContext();
+      const baseGet = ctx.profileStore.get;
+      ctx.profileStore.get = vi.fn((name: string) => ({
+        ...baseGet(name),
+        trustedSource: true,
+        sidecars: {
+          dagger: {
+            enabled: true,
+            engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+            engineVersion: 'v0.18.6',
+          },
+        },
+      }));
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'redundant explicit request',
+          requireSidecars: ['dagger'],
+        },
+        'user-1',
+      );
+
+      expect(pod.requireSidecars).toEqual(['dagger']);
+    });
   });
 
   describe('killSession', () => {

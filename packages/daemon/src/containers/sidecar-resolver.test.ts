@@ -1,6 +1,6 @@
 import type { Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { resolveSidecarSpec, sidecarPodEnv } from './sidecar-resolver.js';
+import { getAutoAttachedSidecars, resolveSidecarSpec, sidecarPodEnv } from './sidecar-resolver.js';
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
   // Minimal Profile — only fields accessed by the resolver matter.
@@ -81,6 +81,54 @@ describe('resolveSidecarSpec', () => {
     expect(spec?.resources.memoryMb).toBe(4096);
     expect(spec?.resources.cpus).toBe(2);
     expect(spec?.resources.storageMb).toBe(20_480);
+  });
+});
+
+describe('getAutoAttachedSidecars', () => {
+  it('returns empty when the profile has no sidecar config', () => {
+    expect(getAutoAttachedSidecars(makeProfile())).toEqual([]);
+  });
+
+  it('returns empty when Dagger is configured but disabled', () => {
+    const profile = makeProfile({
+      trustedSource: true,
+      sidecars: {
+        dagger: {
+          enabled: false,
+          engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+          engineVersion: 'v0.12.0',
+        },
+      },
+    });
+    expect(getAutoAttachedSidecars(profile)).toEqual([]);
+  });
+
+  it('returns empty when Dagger is enabled but the profile is untrusted', () => {
+    const profile = makeProfile({
+      trustedSource: false,
+      sidecars: {
+        dagger: {
+          enabled: true,
+          engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+          engineVersion: 'v0.12.0',
+        },
+      },
+    });
+    expect(getAutoAttachedSidecars(profile)).toEqual([]);
+  });
+
+  it('auto-attaches Dagger when enabled on a trusted profile', () => {
+    const profile = makeProfile({
+      trustedSource: true,
+      sidecars: {
+        dagger: {
+          enabled: true,
+          engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+          engineVersion: 'v0.12.0',
+        },
+      },
+    });
+    expect(getAutoAttachedSidecars(profile)).toEqual(['dagger']);
   });
 });
 

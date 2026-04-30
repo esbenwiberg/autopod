@@ -8,8 +8,9 @@ public struct CreateSessionSheet: View {
     public var profileNames: [String]
     /// Full profile objects for the selection list. Optional — when provided,
     /// the sheet uses these to drive per-profile UI (e.g. surfacing the Dagger
-    /// sidecar toggle only for trusted profiles with Dagger enabled). When
-    /// empty, only `profileNames` is used and profile-gated controls stay hidden.
+    /// sidecar auto-attach badge for trusted profiles with Dagger enabled).
+    /// When empty, only `profileNames` is used and profile-gated controls
+    /// stay hidden.
     public var profileDetails: [Profile]
     public init(
         isPresented: Binding<Bool>,
@@ -36,7 +37,6 @@ public struct CreateSessionSheet: View {
     @State private var bulkText = ""
     @State private var pimGroups: [PimGroupRequest] = []
     @State private var showAdvanced = false
-    @State private var enableDaggerSidecar = false
     @State private var refProfileNames: Set<String> = []
     @State private var adHocRefUrls: [String] = []
 
@@ -48,11 +48,14 @@ public struct CreateSessionSheet: View {
         profileDetails.first { $0.name == selectedProfile }
     }
 
-    /// The Dagger sidecar toggle is gated on two profile flags:
+    /// True when the selected profile auto-attaches a Dagger engine sidecar
+    /// to every pod. Mirrors the daemon's `getAutoAttachedSidecars` rule:
     ///  - `trustedSource` — the privileged-sidecar trust gate
     ///  - `sidecars.dagger.enabled` — the engine image/version is configured
-    /// Without both, spawning would fail server-side anyway.
-    private var canRequestDaggerSidecar: Bool {
+    /// When true, the sheet shows a read-only badge so the user knows their
+    /// pod will boot with a Dagger engine attached. Sub-profiles disable it
+    /// by overriding either flag.
+    private var profileAutoAttachesDagger: Bool {
         guard let p = selectedProfileDetail else { return false }
         return p.trustedSource && (p.sidecars?.dagger?.enabled ?? false)
     }
@@ -130,12 +133,26 @@ public struct CreateSessionSheet: View {
                             }
                         }
                         .labelsHidden()
-                        .onChange(of: selectedProfile) { _, _ in
-                            // Reset the Dagger toggle if the new profile can't
-                            // spawn one — avoids sending a request the daemon
-                            // would reject with UNTRUSTED_PROFILE.
-                            if !canRequestDaggerSidecar { enableDaggerSidecar = false }
+                    }
+
+                    // Auto-attach badge — surfaces silently-spawned sidecars
+                    // (currently just Dagger) so the user isn't surprised when
+                    // pod startup spends ~10–30s pulling/booting the engine.
+                    // Visible for both interactive and agent pods.
+                    if profileAutoAttachesDagger {
+                        HStack(spacing: 6) {
+                            Image(systemName: "shippingbox.fill")
+                                .foregroundStyle(.secondary)
+                            Text("Dagger engine: auto-attached from profile")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HelpBadge(text: "This profile has trustedSource and sidecars.dagger.enabled, so every pod on it gets a privileged Dagger engine container. To opt out, use a sub-profile that sets sidecars.dagger.enabled:false or trustedSource:false.")
+                            Spacer()
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
 
                     // Agent + Output
@@ -353,38 +370,14 @@ public struct CreateSessionSheet: View {
                     } // end if !isInteractive
 
                     // Advanced options — agent-mode only. Reference Repos lives top-level
-                    // for interactive pods; Sidecars + PIM are agent-only and would leave
-                    // an empty disclosure in interactive mode.
+                    // for interactive pods; PIM is agent-only and would leave an empty
+                    // disclosure in interactive mode. Dagger sidecar attachment is
+                    // surfaced as a top-level badge above (auto-attached from profile),
+                    // so it doesn't need a slot here anymore.
                     if !isInteractive {
                     DisclosureGroup(isExpanded: $showAdvanced) {
                         VStack(alignment: .leading, spacing: 10) {
                             if !isInteractive {
-                                // Dagger sidecar — only offered when the profile
-                                // has trustedSource + sidecars.dagger.enabled.
-                                if canRequestDaggerSidecar {
-                                    HStack {
-                                        Text("Sidecars")
-                                            .font(.system(.caption).weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                        HelpBadge(text: "Spawns a privileged Dagger engine container alongside the pod so the agent's `dagger` CLI can run pipelines. Rarely needed — enable only when developing/editing .dagger modules.")
-                                        Spacer()
-                                    }
-                                    Toggle(isOn: $enableDaggerSidecar) {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("Enable Dagger engine")
-                                                .font(.callout)
-                                            Text(enableDaggerSidecar
-                                                ? "Spawns a privileged sidecar; adds ~10–30s to pod startup."
-                                                : "Agent's `dagger develop` / `dagger call` will fail without this.")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-                                    Divider()
-                                }
-
                                 HStack {
                                     Text("Azure PIM Groups")
                                         .font(.system(.caption).weight(.semibold))
@@ -487,7 +480,10 @@ public struct CreateSessionSheet: View {
                             validate: validate,
                             promotable: isInteractive
                         )
-                        let sidecars: [String]? = (canRequestDaggerSidecar && enableDaggerSidecar) ? ["dagger"] : nil
+                        // Sidecars are auto-attached server-side based on profile
+                        // config; no need to set them per-pod from this sheet.
+                        // Briefs and CLI can still pass requireSidecars for
+                        // additive opt-in to non-auto-attached sidecars.
                         let refs = resolvedReferenceRepos()
                         _ = await actions.createPod(
                             selectedProfile, task, model.isEmpty ? nil : model,
@@ -495,7 +491,7 @@ public struct CreateSessionSheet: View {
                             baseBranch.isEmpty ? nil : baseBranch,
                             acFromPath.isEmpty ? nil : acFromPath,
                             pim.isEmpty ? nil : pim,
-                            sidecars,
+                            nil,
                             refs.isEmpty ? nil : refs
                         )
                         isPresented = false
