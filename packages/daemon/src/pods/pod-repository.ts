@@ -158,6 +158,8 @@ export interface PodUpdates {
   testRunBranches?: string[] | null;
   worktreeCompromised?: boolean;
   skipValidation?: boolean;
+  forceCompletedAt?: string | null;
+  forceCompletedReason?: string | null;
 }
 
 export interface PodStats {
@@ -356,6 +358,8 @@ function rowToSession(row: Record<string, unknown>): Pod {
       ? (JSON.parse(row.test_run_branches as string) as string[])
       : null,
     worktreeCompromised: Boolean(row.worktree_compromised),
+    forceCompletedAt: (row.force_completed_at as string) ?? null,
+    forceCompletedReason: (row.force_completed_reason as string) ?? null,
   };
 }
 
@@ -696,6 +700,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.skipValidation !== undefined) {
         setClauses.push('skip_validation = @skipValidation');
         params.skipValidation = changes.skipValidation ? 1 : 0;
+      }
+      if (changes.forceCompletedAt !== undefined) {
+        setClauses.push('force_completed_at = @forceCompletedAt');
+        params.forceCompletedAt = changes.forceCompletedAt;
+      }
+      if (changes.forceCompletedReason !== undefined) {
+        setClauses.push('force_completed_reason = @forceCompletedReason');
+        params.forceCompletedReason = changes.forceCompletedReason;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so

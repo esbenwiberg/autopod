@@ -252,6 +252,14 @@ export interface Pod {
   autoApprove: boolean;
   /** When true, agent `ask_human` calls are rerouted to the reviewer AI model instead of blocking. */
   disableAskHuman: boolean;
+  /**
+   * ISO timestamp when an operator force-completed this pod (admin escape hatch
+   * that skips remaining push / PR / merge steps). Null when the pod completed
+   * normally.
+   */
+  forceCompletedAt: string | null;
+  /** Operator-supplied reason for the force-complete. Null when not force-completed. */
+  forceCompletedReason: string | null;
 }
 
 export interface CreatePodRequest {

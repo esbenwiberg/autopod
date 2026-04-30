@@ -3034,4 +3034,316 @@ describe('PodManager', () => {
       expect(result.status).toBe('validated');
     });
   });
+
+  describe('resumePod — token-free escape hatch for failed pods', () => {
+    function setupFailedPod(
+      ctx: TestContext,
+      overrides: {
+        validationOverall?: 'pass' | 'fail';
+        prUrl?: string | null;
+        worktreePath?: string | null;
+        worktreeCompromised?: boolean;
+        containerId?: string | null;
+      } = {},
+    ) {
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do a thing' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath:
+          overrides.worktreePath === undefined ? '/tmp/worktree/abc' : overrides.worktreePath,
+        containerId: overrides.containerId === undefined ? 'container-xyz' : overrides.containerId,
+        startedAt: new Date().toISOString(),
+      });
+      // Move into a state we can transition to `failed` from.
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      // Stash a validation result if requested. lastValidationResult is `unknown` so
+      // we shape it to match what pod-manager checks: `lastValidationResult.overall`.
+      if (overrides.validationOverall !== undefined) {
+        ctx.podRepo.update(pod.id, {
+          lastValidationResult: {
+            podId: pod.id,
+            attempt: 1,
+            timestamp: new Date().toISOString(),
+            smoke: null,
+            taskReview: null,
+            overall: overrides.validationOverall,
+            duration: 1000,
+          },
+        });
+      }
+      if (overrides.prUrl !== undefined) {
+        ctx.podRepo.update(pod.id, { prUrl: overrides.prUrl });
+      }
+      if (overrides.worktreeCompromised) {
+        ctx.podRepo.update(pod.id, { worktreeCompromised: true });
+      }
+      ctx.podRepo.update(pod.id, { status: 'failed' });
+      return { manager, pod };
+    }
+
+    it('Path 1: passed validation + no PR → pushes branch, opens PR, returns to validated', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'pass',
+        prUrl: null,
+      });
+
+      const result = await manager.resumePod(pod.id);
+
+      expect(result).toEqual({ action: 'retry-pr' });
+      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreePath: '/tmp/worktree/abc',
+          targetBranch: pod.branch,
+          maxDeletions: 0,
+        }),
+      );
+      expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('validated');
+      expect(refreshed.prUrl).toBe('https://github.com/org/repo/pull/42');
+    });
+
+    it('Path 1: surfaces push failures as BRANCH_PUSH_FAILED without flipping the pod', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'pass',
+        prUrl: null,
+      });
+      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('ssh: connection refused'),
+      );
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'BRANCH_PUSH_FAILED',
+        statusCode: 502,
+      });
+
+      const refreshed = manager.getSession(pod.id);
+      // Still failed — the pod didn't move forward because push failed.
+      expect(refreshed.status).toBe('failed');
+      expect(refreshed.prUrl).toBeNull();
+    });
+
+    it('Path 2: failed validation → routes to revalidate (force=true) without spawning agent', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        prUrl: null,
+      });
+
+      // Spy on revalidateSession so we can assert the routing decision without
+      // needing to walk through the full revalidation pipeline.
+      const revalidateSpy = vi
+        .spyOn(manager, 'revalidateSession')
+        .mockResolvedValue({ newCommits: false, result: 'pass' });
+
+      const result = await manager.resumePod(pod.id);
+
+      expect(result).toEqual({ action: 'revalidate' });
+      expect(revalidateSpy).toHaveBeenCalledWith(pod.id, { force: true });
+      // Cheapest possible recovery — never spawn the agent runtime again.
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it('Path 2: existing PR + failed validation → revalidates (no second PR)', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        prUrl: 'https://github.com/org/repo/pull/7',
+      });
+
+      const revalidateSpy = vi
+        .spyOn(manager, 'revalidateSession')
+        .mockResolvedValue({ newCommits: false, result: 'pass' });
+
+      const result = await manager.resumePod(pod.id);
+
+      expect(result).toEqual({ action: 'revalidate' });
+      expect(revalidateSpy).toHaveBeenCalledWith(pod.id, { force: true });
+      // PR already exists — do not try to push a second one.
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it('rejects when pod is not in failed status', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do a thing' },
+        'user-1',
+      );
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+        statusCode: 409,
+      });
+    });
+
+    it('rejects when pod has no worktree (nothing to push or revalidate)', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'pass',
+        worktreePath: null,
+      });
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+        statusCode: 409,
+      });
+    });
+
+    it('rejects when worktree is compromised — operator must recover first', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'pass',
+        worktreeCompromised: true,
+      });
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'WORKTREE_COMPROMISED',
+        statusCode: 409,
+      });
+      // Refused before any push attempt.
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('forceComplete — admin override for stuck failed pods', () => {
+    function setupFailedPod(ctx: TestContext, opts: { containerId?: string | null } = {}) {
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do a thing' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: opts.containerId === undefined ? 'container-xyz' : opts.containerId,
+        startedAt: new Date().toISOString(),
+      });
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      ctx.podRepo.update(pod.id, { status: 'failed' });
+      return { manager, pod };
+    }
+
+    it('transitions failed → complete and persists the operator reason', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx);
+
+      await manager.forceComplete(pod.id, 'subscription got nuked, work is fine');
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('complete');
+      expect(refreshed.forceCompletedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(refreshed.forceCompletedReason).toBe('subscription got nuked, work is fine');
+    });
+
+    it('persists null when no reason is provided (or only whitespace)', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx);
+
+      await manager.forceComplete(pod.id, '   ');
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('complete');
+      expect(refreshed.forceCompletedReason).toBeNull();
+    });
+
+    it('stops the underlying container as part of the override', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { containerId: 'container-stuck' });
+
+      await manager.forceComplete(pod.id);
+
+      expect(ctx.containerManager.stop).toHaveBeenCalledWith('container-stuck');
+    });
+
+    it('still completes when the container stop fails (best-effort cleanup)', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx);
+      (ctx.containerManager.stop as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('container already gone'),
+      );
+
+      await manager.forceComplete(pod.id, 'cleanup');
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('complete');
+      expect(refreshed.forceCompletedReason).toBe('cleanup');
+    });
+
+    it('does not call container.stop when the pod has no containerId', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { containerId: null });
+
+      await manager.forceComplete(pod.id);
+
+      expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('complete');
+    });
+
+    it('rejects when pod is already complete (no double-override)', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do a thing' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-xyz',
+        startedAt: new Date().toISOString(),
+      });
+      for (const status of [
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(pod.id, { status });
+      }
+
+      await expect(manager.forceComplete(pod.id, 'reason')).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+        statusCode: 409,
+      });
+    });
+
+    it('rejects when pod is in any non-failed status', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do a thing' },
+        'user-1',
+      );
+      // queued → not failed.
+      await expect(manager.forceComplete(pod.id)).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+        statusCode: 409,
+      });
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('queued');
+      expect(refreshed.forceCompletedAt).toBeNull();
+    });
+
+    it('throws PodNotFoundError for unknown pod IDs', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      await expect(manager.forceComplete('does-not-exist', 'whatever')).rejects.toBeInstanceOf(
+        PodNotFoundError,
+      );
+    });
+  });
 });

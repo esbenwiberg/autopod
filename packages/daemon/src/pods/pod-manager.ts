@@ -517,8 +517,14 @@ export interface PodManager {
   ): Promise<void>;
   triggerValidation(podId: string, options?: { force?: boolean }): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
-   *  Used after human fixes via a linked workspace pod. */
-  revalidateSession(podId: string): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
+   *  Used after human fixes via a linked workspace pod.
+   *  Pass `{ force: true }` to skip the no-new-commits early-exit — used by Resume
+   *  when the operator suspects validation crashed on infra rather than on real
+   *  findings. */
+  revalidateSession(
+    podId: string,
+    options?: { force?: boolean },
+  ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
   /** Create a linked workspace pod on the same branch as a failed worker pod for human fixes. */
   fixManually(podId: string, userId: string): Pod;
   createHistoryWorkspace(profileName: string, userId: string, historyQuery: HistoryQuery): Pod;
@@ -572,6 +578,19 @@ export interface PodManager {
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
    */
   retryCreatePr(podId: string): Promise<void>;
+  /**
+   * Operator escape hatch for `failed` pods: advance the pod from where it died
+   * without re-running the agent. Picks the cheapest action that fits the pod's
+   * state — push + open PR if validation passed, re-validate if validation
+   * failed on infra. Throws when the pod isn't in a recoverable state.
+   */
+  resumePod(podId: string): Promise<{ action: 'retry-pr' | 'revalidate' }>;
+  /**
+   * Operator admin override: force-transition a `failed` pod to `complete`,
+   * skipping push, PR creation, and validation. Persists `forceCompletedAt`
+   * + reason on the pod row for audit.
+   */
+  forceComplete(podId: string, reason?: string): Promise<void>;
   /** Return all pods belonging to a series, ordered by creation time. */
   getSeriesPods(seriesId: string): Pod[];
   /**
@@ -1776,6 +1795,89 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       `Worktree out of sync with container — ${err.deletionCount} phantom deletions blocked. Do not retry PR; work may still live in the container.`,
     );
     return true;
+  }
+
+  /**
+   * Shared push-then-open-PR flow used by both `retryCreatePr` (post-complete) and
+   * `resumePod` (post-failure). Caller is responsible for the status preconditions
+   * and any post-success state transition; this helper only does the side effects
+   * + returns the new PR URL on success.
+   */
+  async function pushAndCreatePr(pod: Pod, callerLabel: string): Promise<string> {
+    const podId = pod.id;
+    if (!pod.worktreePath) {
+      throw new AutopodError(
+        `Pod ${podId} has no worktree — cannot push branch`,
+        'INVALID_STATE',
+        409,
+      );
+    }
+    const profile = profileStore.get(pod.profileName);
+    const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+    if (!prManager) {
+      throw new AutopodError(
+        `No PR manager configured for profile ${pod.profileName}`,
+        'INVALID_STATE',
+        409,
+      );
+    }
+
+    const baseBranch = profile.defaultBranch ?? 'main';
+    const pat = selectGitPat(profile);
+    try {
+      await worktreeManager.mergeBranch({
+        worktreePath: pod.worktreePath,
+        // Push the feature branch up so PR creation can reference it. Using the
+        // feature branch (not baseBranch) avoids force-pushing the work onto main.
+        targetBranch: pod.branch,
+        pat,
+        // Block auto-commit deletions: this helper runs post-container with no
+        // fresh sync-back, so any "missing files" almost certainly means a sync
+        // ghost rather than the operator wanting to ship a mass-delete.
+        maxDeletions: 0,
+        podTask: pod.task,
+        profile,
+        podModel: pod.model,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: branch push failed');
+      if (handleDeletionGuardError(podId, err)) {
+        throw new AutopodError(message, 'WORKTREE_COMPROMISED', 409);
+      }
+      emitActivityStatus(podId, `Branch push failed: ${message}`);
+      throw new AutopodError(message, 'BRANCH_PUSH_FAILED', 502);
+    }
+
+    try {
+      return await prManager.createPr({
+        worktreePath: pod.worktreePath,
+        repoUrl: profile.repoUrl ?? undefined,
+        branch: pod.branch,
+        baseBranch,
+        podId,
+        task: pod.task,
+        profileName: pod.profileName,
+        profile,
+        podModel: pod.model,
+        handoffInstructions: pod.handoffInstructions ?? undefined,
+        validationResult: pod.lastValidationResult ?? null,
+        filesChanged: pod.filesChanged,
+        linesAdded: pod.linesAdded,
+        linesRemoved: pod.linesRemoved,
+        previewUrl: pod.previewUrl,
+        screenshots: [],
+        taskSummary: pod.taskSummary ?? undefined,
+        seriesDescription: pod.seriesDescription ?? undefined,
+        seriesName: pod.seriesName ?? undefined,
+        securityFindings: getLatestPushFindings(podId),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: PR creation failed');
+      emitActivityStatus(podId, `PR creation failed: ${message}`);
+      throw new AutopodError(message, 'PR_CREATION_FAILED', 502);
+    }
   }
 
   function transition(pod: Pod, to: PodStatus, extraUpdates?: Partial<PodUpdates>): Pod {
@@ -5527,8 +5629,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async revalidateSession(
       podId: string,
+      options?: { force?: boolean },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       const pod = podRepo.getOrThrow(podId);
+      const force = options?.force ?? false;
       if (pod.status !== 'failed' && pod.status !== 'review_required') {
         throw new AutopodError(
           `Cannot revalidate pod ${podId} in status ${pod.status} — only failed or review_required pods can be revalidated`,
@@ -5544,14 +5648,32 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      // Pull latest from remote branch (human may have pushed fixes)
+      // Pull latest from remote branch (human may have pushed fixes). Failures are
+      // tolerated when force=true so a resume with no remote access (e.g. revoked
+      // PAT) still reaches the validation engine on the existing worktree.
       emitActivityStatus(podId, 'Pulling latest changes from remote branch…');
-      const { newCommits } = await worktreeManager.pullBranch(pod.worktreePath);
+      let newCommits = false;
+      try {
+        const pullResult = await worktreeManager.pullBranch(pod.worktreePath);
+        newCommits = pullResult.newCommits;
+      } catch (err) {
+        if (!force) throw err;
+        logger.warn({ err, podId }, 'pullBranch failed — proceeding (force=true)');
+        emitActivityStatus(podId, 'Could not pull from remote — revalidating local worktree');
+      }
 
-      if (!newCommits) {
+      // Without `force`, no-new-commits is a fast-fail: the only legitimate caller is
+      // a human-fix workspace flow, where the human just pushed. With `force` (Resume),
+      // the operator is asserting that the prior failure was infra/transient and wants
+      // a fresh validation run against the same code.
+      if (!newCommits && !force) {
         logger.info({ podId }, 'No new commits on branch — skipping revalidation');
         emitActivityStatus(podId, 'No new commits found — nothing to revalidate');
         return { newCommits: false, result: 'fail' };
+      }
+      if (!newCommits && force) {
+        logger.info({ podId }, 'Resume: revalidating without new commits (force=true)');
+        emitActivityStatus(podId, 'Resuming — revalidating with existing worktree');
       }
 
       logger.info({ podId }, 'New commits found — running revalidation');
@@ -5696,7 +5818,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const s2 = podRepo.getOrThrow(podId);
 
         if (isTerminalState(s2.status) || s2.status === 'killing') {
-          return { newCommits: true, result: 'fail' };
+          return { newCommits, result: 'fail' };
         }
 
         if (result.overall === 'pass') {
@@ -5818,7 +5940,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             });
           }
 
-          return { newCommits: true, result: 'pass' };
+          return { newCommits, result: 'pass' };
         }
 
         // Validation failed — stay in failed state, no agent rework
@@ -5850,12 +5972,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        return { newCommits: true, result: 'fail' };
+        return { newCommits, result: 'fail' };
       } catch (err) {
         logger.error({ err, podId }, 'Revalidation error');
         const s2 = podRepo.getOrThrow(podId);
         transition(s2, 'failed');
-        return { newCommits: true, result: 'fail' };
+        return { newCommits, result: 'fail' };
       }
     },
 
@@ -6532,88 +6654,112 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           409,
         );
       }
+      emitActivityStatus(podId, 'Retrying PR creation…');
+      const newPrUrl = await pushAndCreatePr(pod, 'retryCreatePr');
+      podRepo.update(podId, { prUrl: newPrUrl });
+      emitActivityStatus(podId, `PR created: ${newPrUrl}`);
+      logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
+    },
 
-      const profile = profileStore.get(pod.profileName);
-      const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-      if (!prManager) {
+    async resumePod(podId: string): Promise<{ action: 'retry-pr' | 'revalidate' }> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.status !== 'failed') {
         throw new AutopodError(
-          `No PR manager configured for profile ${pod.profileName}`,
+          `Cannot resume pod ${podId} in status ${pod.status} — only failed pods can be resumed`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!pod.worktreePath) {
+        throw new AutopodError(
+          `Pod ${podId} has no worktree — cannot resume`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (pod.worktreeCompromised) {
+        throw new AutopodError(
+          `Pod ${podId} worktree is marked compromised — recover the worktree before resuming`,
+          'WORKTREE_COMPROMISED',
+          409,
+        );
+      }
+
+      // Path 1: validation already passed, downstream step (push / PR) blew up.
+      // Push + open PR, no agent rework, no validation rerun. Cheapest possible recovery.
+      if (pod.lastValidationResult?.overall === 'pass' && !pod.prUrl) {
+        emitActivityStatus(podId, 'Resume: pushing branch + opening PR…');
+        const newPrUrl = await pushAndCreatePr(pod, 'resume');
+        // Transition the pod from `failed → validated` so it rejoins the normal
+        // approval flow. The validation result on the pod is already the passing
+        // one captured pre-push; no need to overwrite it.
+        const refreshed = podRepo.getOrThrow(podId);
+        const validated = transition(refreshed, 'validated', { prUrl: newPrUrl });
+        emitActivityStatus(podId, `Resume succeeded — PR ready: ${newPrUrl}`);
+        logger.info({ podId, prUrl: newPrUrl }, 'Pod resumed via push + PR');
+        if (validated.autoApprove) {
+          setImmediate(() => {
+            this.approveSession(podId).catch((err) =>
+              logger.warn({ err, podId }, 'Auto-approve failed after resume'),
+            );
+          });
+        }
+        return { action: 'retry-pr' };
+      }
+
+      // Path 2: validation didn't pass (or never ran). Re-run validation only —
+      // no agent rework. force=true skips the no-new-commits gate so a Resume
+      // works even when the worktree wasn't touched between attempts.
+      if (pod.prUrl) {
+        emitActivityStatus(podId, 'Resume: PR already exists — re-running validation only');
+      } else {
+        emitActivityStatus(podId, 'Resume: re-running validation (no agent rework)');
+      }
+      await this.revalidateSession(podId, { force: true });
+      return { action: 'revalidate' };
+    },
+
+    async forceComplete(podId: string, reason?: string): Promise<void> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.status === 'complete') {
+        throw new AutopodError(`Pod ${podId} is already complete`, 'INVALID_STATE', 409);
+      }
+      if (pod.status !== 'failed') {
+        throw new AutopodError(
+          `Cannot force-complete pod ${podId} in status ${pod.status} — only failed pods are eligible`,
           'INVALID_STATE',
           409,
         );
       }
 
-      emitActivityStatus(podId, 'Retrying PR creation…');
-      const baseBranch = profile.defaultBranch ?? 'main';
-
-      // Push the branch to the remote — intermediate series pods (output='branch') skip this
-      // during normal completion, so the branch may only exist locally. Pass the PAT explicitly
-      // because the in-memory cache may be cold after a daemon restart.
-      const retryPat = selectGitPat(profile);
-      try {
-        await worktreeManager.mergeBranch({
-          worktreePath: pod.worktreePath,
-          // Push the feature branch up to origin so the PR can be opened against baseBranch.
-          // mergeBranch verifies HEAD is on targetBranch and pushes to refs/heads/<targetBranch>;
-          // passing baseBranch here would force-push the feature work onto main.
-          targetBranch: pod.branch,
-          pat: retryPat,
-          // retryCreatePr runs post-container with no fresh sync-back: if the worktree is
-          // missing files, it's almost certainly a ghost from an earlier sync failure.
-          // Block auto-commit deletions entirely — the user wants to ship what's already
-          // on the branch, not commit a catastrophic delete on top of it.
-          maxDeletions: 0,
-          // Provide pod task as context for any auto-generated commit message.
-          podTask: pod.task,
-          profile,
-          podModel: pod.model,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.warn({ podId, err }, 'retryCreatePr: branch push failed');
-        if (handleDeletionGuardError(podId, err)) {
-          // The guard already surfaced a specific activity-status message + event.
-          // Use a distinct error code so the desktop can render a recovery banner
-          // instead of a generic failure toast.
-          throw new AutopodError(message, 'WORKTREE_COMPROMISED', 409);
+      // Stop any container that's still around so we don't leak runtime resources.
+      // Best-effort: a stopped/missing container shouldn't block the override.
+      if (pod.containerId) {
+        try {
+          const cm = containerManagerFactory.get(pod.executionTarget);
+          await cm.stop(pod.containerId);
+        } catch (err) {
+          logger.warn({ err, podId }, 'force-complete: failed to stop container');
         }
-        emitActivityStatus(podId, `Branch push failed: ${message}`);
-        throw new AutopodError(message, 'BRANCH_PUSH_FAILED', 502);
       }
 
-      let newPrUrl: string;
-      try {
-        newPrUrl = await prManager.createPr({
-          worktreePath: pod.worktreePath,
-          repoUrl: profile.repoUrl ?? undefined,
-          branch: pod.branch,
-          baseBranch,
-          podId,
-          task: pod.task,
-          profileName: pod.profileName,
-          profile,
-          podModel: pod.model,
-          handoffInstructions: pod.handoffInstructions ?? undefined,
-          validationResult: null,
-          filesChanged: pod.filesChanged,
-          linesAdded: pod.linesAdded,
-          linesRemoved: pod.linesRemoved,
-          previewUrl: pod.previewUrl,
-          screenshots: [],
-          taskSummary: pod.taskSummary ?? undefined,
-          seriesDescription: pod.seriesDescription ?? undefined,
-          seriesName: pod.seriesName ?? undefined,
-          securityFindings: getLatestPushFindings(podId),
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.warn({ podId, err }, 'retryCreatePr: PR creation failed');
-        emitActivityStatus(podId, `PR creation failed: ${message}`);
-        throw new AutopodError(message, 'PR_CREATION_FAILED', 502);
-      }
-      podRepo.update(podId, { prUrl: newPrUrl });
-      emitActivityStatus(podId, `PR created: ${newPrUrl}`);
-      logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
+      const trimmedReason = reason?.trim() || null;
+      const now = new Date().toISOString();
+      podRepo.update(podId, {
+        forceCompletedAt: now,
+        forceCompletedReason: trimmedReason,
+      });
+      transition(pod, 'complete');
+      emitActivityStatus(
+        podId,
+        trimmedReason
+          ? `Force-completed by operator: ${trimmedReason}`
+          : 'Force-completed by operator',
+      );
+      logger.warn(
+        { podId, reason: trimmedReason },
+        'Pod force-completed by operator (admin override — push/PR/merge skipped)',
+      );
     },
 
     async recoverWorktree(podId: string): Promise<{ recovered: boolean; message: string }> {

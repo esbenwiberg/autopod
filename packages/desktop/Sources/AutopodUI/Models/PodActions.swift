@@ -47,6 +47,13 @@ public struct PodActions: Sendable {
   public var spawnFix: @MainActor @Sendable (String, String?) async -> Void
   /// Retry PR creation for a complete pod whose PR was never successfully created
   public var retryCreatePr: @MainActor @Sendable (String) async -> Void
+  /// Token-free recovery for a `failed` pod — pushes + opens PR if validation already passed,
+  /// otherwise re-runs validation only (no agent rework). Cheapest possible path forward.
+  public var resume: @MainActor @Sendable (String) async -> Void
+  /// Admin override: transition `failed` → `complete`, skipping push/PR/merge.
+  /// Use when the agent's work is fine but a downstream step is stuck and re-running
+  /// would just burn tokens. Reason is optional, persisted for audit.
+  public var forceComplete: @MainActor @Sendable (String, String?) async -> Void
   /// Ask the daemon to parse a local brief folder and return the DAG preview.
   public var previewSeriesFolder: @MainActor @Sendable (String) async -> SeriesPreviewResponse?
   /// Ask the daemon to parse a brief folder on a git branch.
@@ -102,6 +109,8 @@ public struct PodActions: Sendable {
     forceApprove: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    forceComplete: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
     previewSeriesOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> SeriesPreviewResponse? = { _, _, _ in nil },
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
@@ -138,6 +147,8 @@ public struct PodActions: Sendable {
     self.forceApprove = forceApprove
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
+    self.resume = resume
+    self.forceComplete = forceComplete
     self.previewSeriesFolder = previewSeriesFolder
     self.previewSeriesOnBranch = previewSeriesOnBranch
     self.lastPreviewError = lastPreviewError

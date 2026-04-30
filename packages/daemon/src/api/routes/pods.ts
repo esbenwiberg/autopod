@@ -276,6 +276,42 @@ export function podRoutes(
     }
   });
 
+  // POST /pods/:podId/resume — operator escape hatch for `failed` pods.
+  // Picks the cheapest recovery path that fits the pod's state — push + open PR
+  // if validation already passed, re-run validation otherwise. No agent rework.
+  app.post('/pods/:podId/resume', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    try {
+      const result = await podManager.resumePod(podId);
+      return { ok: true, action: result.action };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
+  // POST /pods/:podId/force-complete — admin override: transition `failed → complete`,
+  // skipping push, PR creation, and merge. Operator accepts the worktree as-is.
+  app.post('/pods/:podId/force-complete', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason =
+      typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : undefined;
+    try {
+      await podManager.forceComplete(podId, reason);
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
   // POST /pods/:podId/spawn-fix — manually force-spawn a fix pod for merge_pending or complete
   app.post('/pods/:podId/spawn-fix', async (request, reply) => {
     const { podId } = request.params as { podId: string };

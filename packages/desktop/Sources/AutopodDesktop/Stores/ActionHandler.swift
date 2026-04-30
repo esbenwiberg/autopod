@@ -74,6 +74,8 @@ public final class ActionHandler {
       forceApprove: { [weak self] id, reason in await self?.forceApprove(id, reason: reason) },
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
+      resume: { [weak self] id in await self?.resume(id) },
+      forceComplete: { [weak self] id, reason in await self?.forceComplete(id, reason: reason) },
       previewSeriesFolder: { [weak self] path in
         await self?.previewSeriesFolder(path: path) ?? nil
       },
@@ -251,6 +253,32 @@ public final class ActionHandler {
     pendingAction = "retry-pr-\(podId)"
     do {
       try await api.retryCreatePr(podId)
+      await podStore.refreshSession(podId)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func resume(_ podId: String) async {
+    pendingAction = "resume-\(podId)"
+    do {
+      _ = try await api.resumePod(podId)
+      // Resume can flip the pod back to validated (Path 1) or kick off a fresh
+      // validation (Path 2). Either way the WebSocket will stream the eventual
+      // status — but pull a fresh snapshot now so the UI doesn't sit on `failed`.
+      await podStore.refreshSession(podId)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func forceComplete(_ podId: String, reason: String?) async {
+    pendingAction = "force-complete-\(podId)"
+    do {
+      let trimmed = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+      try await api.forceComplete(podId, reason: (trimmed?.isEmpty ?? true) ? nil : trimmed)
       await podStore.refreshSession(podId)
     } catch {
       lastError = error.localizedDescription

@@ -167,6 +167,20 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/retry-pr")
   }
 
+  /// Operator escape hatch for `failed` pods — picks the cheapest recovery path
+  /// (push + open PR if validation already passed, otherwise re-run validation).
+  /// Returns the action the daemon took, so the UI can confirm what happened.
+  public func resumePod(_ id: String) async throws -> ResumeResponse {
+    try await request("POST", "/pods/\(id)/resume")
+  }
+
+  /// Admin override: transition a `failed` pod to `complete`, skipping push/PR/merge.
+  /// Reason is optional and persisted as audit metadata on the pod row.
+  public func forceComplete(_ id: String, reason: String?) async throws {
+    let body = try reason.map { try encode(ForceCompleteBody(reason: $0)) }
+    let _: OkResponse = try await request("POST", "/pods/\(id)/force-complete", body: body)
+  }
+
   public func deletePod(_ id: String) async throws {
     let _: EmptyResponse = try await request("DELETE", "/pods/\(id)")
   }
@@ -617,6 +631,16 @@ struct ExtendAttemptsBody: Codable {
 
 struct SpawnFixBody: Codable {
   let userMessage: String
+}
+
+struct ForceCompleteBody: Codable {
+  let reason: String
+}
+
+public struct ResumeResponse: Codable, Sendable {
+  public let ok: Bool?
+  /// Either "retry-pr" (Path 1: push + open PR) or "revalidate" (Path 2: re-run validation only).
+  public let action: String?
 }
 
 struct PreviewResponse: Codable {

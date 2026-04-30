@@ -440,14 +440,32 @@ public struct DetailPanelView: View {
                 .tint(.red)
 
             case .failed:
+                // Resume — token-free recovery. Promoted to primary because it's the
+                // cheapest path: pushes/opens the PR if validation passed, otherwise
+                // re-runs validation only. Disabled when the worktree is unrecoverable.
+                Button {
+                    Task { await actions.resume(pod.id) }
+                } label: {
+                    Label("Resume", systemImage: "arrow.uturn.forward")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.blue)
+                .disabled(pod.worktreeCompromised || !pod.hasWorktree)
+                .help(pod.worktreeCompromised
+                    ? "Worktree is compromised — recover it before resuming."
+                    : !pod.hasWorktree
+                    ? "Pod has no worktree to resume from."
+                    : "Retry the cheapest recovery path — push + open PR if validation passed, otherwise re-run validation. No agent rework, no token spend.")
                 Button {
                     Task { await actions.rework(pod.id) }
                 } label: {
                     Label("Rework", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
-                .tint(.red)
+                .tint(.orange)
+                .help("Re-run the agent from scratch with feedback. Spends tokens.")
                 Button {
                     Task { await actions.fixManually(pod.id) }
                 } label: {
@@ -466,6 +484,18 @@ public struct DetailPanelView: View {
                     .controlSize(.small)
                     .tint(.orange)
                 }
+                // Force Complete — admin override. Skips push/PR/merge entirely.
+                // Last-resort escape when downstream is broken and re-running burns tokens.
+                Button {
+                    forceCompleteReasonText = ""
+                    showForceCompleteSheet = true
+                } label: {
+                    Label("Force Complete", systemImage: "checkmark.shield")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                .help("Admin override — mark this pod complete without pushing/PR/merge. Reason persisted for audit.")
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
                 } label: {
@@ -556,6 +586,9 @@ public struct DetailPanelView: View {
                 }
             )
         }
+        .sheet(isPresented: $showForceCompleteSheet) {
+            forceCompleteSheet
+        }
     }
 
     @State private var showNudgeInput = false
@@ -570,6 +603,8 @@ public struct DetailPanelView: View {
     @State private var showHandoffSheet = false
     @State private var handoffTarget: String? = nil
     @State private var handoffInstructionsText = ""
+    @State private var showForceCompleteSheet = false
+    @State private var forceCompleteReasonText = ""
 
     private func copyPodName() {
         NSPasteboard.general.clearContents()
@@ -617,6 +652,46 @@ public struct DetailPanelView: View {
         }
         .padding(20)
         .frame(minWidth: 380)
+    }
+
+    private var forceCompleteSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Force complete pod", systemImage: "checkmark.shield")
+                .font(.headline)
+            Text("Mark **\(pod.id)** as complete without pushing, opening a PR, or merging. The agent's work stays in the worktree as-is. Use this when the work is fine but a downstream step is stuck and re-running would burn tokens.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Reason (optional, persisted for audit)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $forceCompleteReasonText)
+                .font(.body)
+                .frame(minHeight: 80)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                )
+            HStack {
+                Button("Cancel") {
+                    forceCompleteReasonText = ""
+                    showForceCompleteSheet = false
+                }
+                .keyboardShortcut(.escape)
+                Spacer()
+                Button("Force Complete") {
+                    let reason = forceCompleteReasonText
+                    forceCompleteReasonText = ""
+                    showForceCompleteSheet = false
+                    Task { await actions.forceComplete(pod.id, reason) }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 420, idealWidth: 480)
     }
 
     private var handoffTargetLabel: String {

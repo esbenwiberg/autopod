@@ -41,7 +41,18 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   paused: ['running', 'killing', 'failed'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
   validated: ['approved', 'running', 'validating', 'killing', 'queued'],
-  failed: ['running', 'validating', 'validated', 'killing', 'queued', 'merge_pending'],
+  failed: [
+    'running',
+    'validating',
+    'validated',
+    'killing',
+    'queued',
+    'merge_pending',
+    // Operator force-complete: escape hatch for failed pods where the agent's
+    // work is fine but a downstream step (push/PR/merge) failed and re-running
+    // the agent would burn tokens. Only set via `forceComplete()` in PodManager.
+    'complete',
+  ],
   review_required: ['running', 'validating', 'validated', 'killing', 'queued'],
   approved: ['merging'],
   merging: ['complete', 'merge_pending'],
