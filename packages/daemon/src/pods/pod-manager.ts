@@ -773,7 +773,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   /** Active merge polling intervals, keyed by podId. */
   const mergePollers = new Map<string, ReturnType<typeof setInterval>>();
 
-  const MERGE_POLL_INTERVAL_MS = 60_000;
+  const DEFAULT_MERGE_POLL_INTERVAL_MS = 60_000;
+  const DEFAULT_FIX_POD_COOLDOWN_MS = 10 * 60 * 1_000;
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const validationAbortControllers = new Map<string, AbortController>();
@@ -858,7 +859,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return;
     }
 
+    const profile = profileStore.get(parent.profileName);
+
     // Guard: a fix pod is already alive
+    let reuseFixPodCandidate: Pod | null = null;
     if (parent.fixPodId) {
       try {
         const fix = podRepo.getOrThrow(parent.fixPodId);
@@ -871,14 +875,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
           return;
         }
+        reuseFixPodCandidate = fix;
       } catch {
         // Fix pod not found — treat as terminal, fall through
       }
-      // Clear stale fixPodId and return — let the *next* poll cycle decide whether
-      // to spawn. This gives CI time to restart and re-run on the fix's new commits
-      // before we evaluate failures again (e.g. SonarCloud takes a full rebuild).
-      podRepo.update(parentSessionId, { fixPodId: null });
-      return;
+      if (profile.reuseFixPod !== true) {
+        // Clear stale fixPodId and return — let the *next* poll cycle decide whether
+        // to spawn. This gives CI time to restart and re-run on the fix's new commits
+        // before we evaluate failures again (e.g. SonarCloud takes a full rebuild).
+        podRepo.update(parentSessionId, { fixPodId: null });
+        return;
+      }
+      // reuse path: keep fixPodId so we re-enqueue the same pod below.
     }
 
     // Guard: max retries exhausted
@@ -899,15 +907,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return;
     }
 
-    // Guard: per-parent cooldown (10 minutes between fix-pod spawns)
-    // Prevents a fast-failing CI from burning all fix attempts in a single burst.
-    // Manual user-triggered spawns bypass — the user is the explicit override,
-    // and skipping silently here would also drop their userMessage on the floor.
-    const FIX_POD_COOLDOWN_MS = 10 * 60 * 1_000;
-    if (!bypassCooldown && parent.lastFixPodSpawnedAt) {
+    // Guard: per-parent cooldown between fix-pod spawns. Defaults to 10 minutes
+    // to prevent a fast-failing CI from burning all fix attempts in a single
+    // burst; profiles can override (incl. 0 to disable). Manual user-triggered
+    // spawns bypass — the user is the explicit override, and skipping silently
+    // here would also drop their userMessage on the floor.
+    const cooldownMs =
+      profile.fixPodCooldownSec !== undefined && profile.fixPodCooldownSec !== null
+        ? profile.fixPodCooldownSec * 1_000
+        : DEFAULT_FIX_POD_COOLDOWN_MS;
+    if (!bypassCooldown && cooldownMs > 0 && parent.lastFixPodSpawnedAt) {
       const elapsed = Date.now() - new Date(parent.lastFixPodSpawnedAt).getTime();
-      if (elapsed < FIX_POD_COOLDOWN_MS) {
-        const remainingSec = Math.ceil((FIX_POD_COOLDOWN_MS - elapsed) / 1_000);
+      if (elapsed < cooldownMs) {
+        const remainingSec = Math.ceil((cooldownMs - elapsed) / 1_000);
         logger.debug(
           { podId: parentSessionId, remainingSec },
           'Merge polling: fix-pod cooldown active — skipping spawn',
@@ -916,9 +928,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     }
 
-    // Build fix task and create child pod directly using closure deps
     const newAttempt = (parent.prFixAttempts ?? 0) + 1;
-    const profile = profileStore.get(parent.profileName);
     const fixTask = buildPrFixTask(parent, status, podRepo, profile, userMessage);
 
     // In a single-PR series, all pods share the root's branch but only the
@@ -928,6 +938,50 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     // and take branch/baseBranch/prUrl from it. Other prModes own their own
     // PR per pod, so the parent's fields are correct.
     const branchSource = resolveBranchSource(parent);
+
+    // Long-lived fix pod path: when `profile.reuseFixPod` is true and we
+    // have a terminal-state fix pod from a previous round, re-enqueue THAT
+    // pod with the new task instead of creating a new child. This keeps the
+    // "one fix pod per PR" invariant the user sees in the UI.
+    if (reuseFixPodCandidate && profile.reuseFixPod === true) {
+      const fixPodId = reuseFixPodCandidate.id;
+      const newIteration = (reuseFixPodCandidate.fixIteration ?? 0) + 1;
+
+      // Reset operational state so processPod re-provisions cleanly.
+      // status complete → queued is allowed by the state machine specifically
+      // for this path (see VALID_STATUS_TRANSITIONS in shared/constants.ts).
+      transition(reuseFixPodCandidate, 'queued', {
+        task: fixTask,
+        containerId: null,
+        worktreePath: null,
+        validationAttempts: 0,
+        lastValidationResult: null,
+        lastCorrectionMessage: null,
+        pendingEscalation: null,
+        escalationCount: 0,
+        startedAt: null,
+        completedAt: null,
+        claudeSessionId: null,
+        preSubmitReview: null,
+        fixIteration: newIteration,
+      });
+
+      podRepo.update(parentSessionId, {
+        prFixAttempts: newAttempt,
+        lastFixPodSpawnedAt: new Date().toISOString(),
+      });
+
+      enqueueSession(fixPodId);
+      emitActivityStatus(
+        parentSessionId,
+        `Re-enqueued fix pod ${fixPodId} (iteration ${newIteration}, attempt ${newAttempt}/${maxAttempts})`,
+      );
+      logger.info(
+        { podId: parentSessionId, fixPodId, iteration: newIteration, attempt: newAttempt },
+        'Merge polling: re-enqueued long-lived fix pod for new failures',
+      );
+      return;
+    }
 
     let fixId = '';
     for (let attempt = 0; attempt < 10; attempt++) {
@@ -1091,9 +1145,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     };
 
+    // Resolve per-profile poll interval once. Falls back to the default when
+    // unset; clamped at 5s by the validator so this is safe to use directly.
+    let pollIntervalMs = DEFAULT_MERGE_POLL_INTERVAL_MS;
+    try {
+      const pod = podRepo.getOrThrow(podId);
+      const profile = profileStore.get(pod.profileName);
+      if (profile.mergePollIntervalSec) {
+        pollIntervalMs = profile.mergePollIntervalSec * 1_000;
+      }
+    } catch {
+      // Pod or profile gone — let poll() decide what to do on its first tick.
+    }
+
     // Run first poll immediately
     poll();
-    const interval = setInterval(poll, MERGE_POLL_INTERVAL_MS);
+    const interval = setInterval(poll, pollIntervalMs);
     interval.unref();
     mergePollers.set(podId, interval);
   }
@@ -4930,6 +4997,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             profile.registryPat ?? profile.adoPat ?? null,
             profile.buildEnv,
           ),
+          preSubmitReview: pod.preSubmitReview ?? undefined,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
@@ -5554,6 +5622,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               worktreePath: pod.worktreePath ?? undefined,
               startCommitSha: pod.startCommitSha ?? undefined,
               hasWebUi: profile.hasWebUi ?? true,
+              preSubmitReview: pod.preSubmitReview ?? undefined,
             },
             (phase) => emitActivityStatus(podId, phase),
             revalidateController.signal,
@@ -6367,13 +6436,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      // Clear any stale fixPodId so maybeSpawnFixSession won't wait a cycle
-      podRepo.update(podId, { fixPodId: null });
+      const profile = profileStore.get(pod.profileName);
+
+      // Clear any stale fixPodId so maybeSpawnFixSession won't wait a cycle.
+      // Skip the clear when `reuseFixPod` is enabled — that path INTENTIONALLY
+      // wants to find the previous fix pod (in a terminal state) and re-enqueue
+      // it instead of spawning a new child.
+      if (profile.reuseFixPod !== true) {
+        podRepo.update(podId, { fixPodId: null });
+      }
 
       // Fetch current PR status to build a meaningful fix task. For single-mode
       // siblings the PR lives on a different pod — resolve it so we fetch the
       // real PR's status instead of skipping.
-      const profile = profileStore.get(pod.profileName);
       const prManager = prManagerFactory ? prManagerFactory(profile) : null;
       const prUrlForStatus = pod.prUrl ?? resolveBranchSource(pod).prUrl ?? null;
       let status: PrMergeStatus = {

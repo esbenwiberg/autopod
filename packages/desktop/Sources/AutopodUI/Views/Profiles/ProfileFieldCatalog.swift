@@ -303,6 +303,24 @@ public enum ProfileOverrideCatalog {
             section: .validation,
             help: "Pages loaded after start to verify the app renders."
         ),
+        .init(
+            key: "mergePollIntervalSec",
+            label: "Merge Poll Interval (sec)",
+            section: .validation,
+            help: "How often the daemon checks the PR for CI / review state changes. Default 60s. Lower values catch failures faster on actively-watched profiles at the cost of more API calls."
+        ),
+        .init(
+            key: "fixPodCooldownSec",
+            label: "Fix-Pod Cooldown (sec)",
+            section: .validation,
+            help: "Minimum delay between PR-fix-pod spawns on the same pod. Default 600 (10 min); 0 disables the cooldown so iterations can run back-to-back."
+        ),
+        .init(
+            key: "reuseFixPod",
+            label: "Reuse Fix Pod",
+            section: .validation,
+            help: "When on, the daemon recycles a single fix pod entity per parent PR across all rounds of CI / review feedback instead of spawning a new child pod each round. Shows up as one pod with an iteration counter rather than a chain."
+        ),
 
         // MARK: Sandbox & Test Pipeline
         .init(

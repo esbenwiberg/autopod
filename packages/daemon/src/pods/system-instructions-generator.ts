@@ -591,7 +591,47 @@ export function generateSystemInstructions(
         'Use conventional-commit subjects (e.g. `feat(scope): ...`, `fix(scope): ...`); ' +
         'leftover uncommitted changes get an ugly `chore: auto-commit ...` fallback.',
     );
-    lines.push('- Ensure the build passes before completing');
+
+    const preflightCommands: Array<{ label: string; command: string }> = [];
+    if (profile.lintCommand) {
+      preflightCommands.push({ label: 'lint', command: profile.lintCommand });
+    }
+    if (profile.buildCommand) {
+      preflightCommands.push({ label: 'build', command: profile.buildCommand });
+    }
+    if (profile.testCommand) {
+      preflightCommands.push({ label: 'tests', command: profile.testCommand });
+    }
+
+    if (preflightCommands.length > 0) {
+      const cwdHint = profile.buildWorkDir
+        ? ` (run from \`/workspace/${profile.buildWorkDir}\`)`
+        : '';
+      lines.push(
+        `- **Run pre-completion checks before \`report_task_summary\`**${cwdHint} — these are the same commands the system will re-run independently after you finish. Catching failures here keeps you in your current context; failures caught after will loop you back through validation, costing several minutes per round:`,
+      );
+      for (const { label, command } of preflightCommands) {
+        lines.push(`   - ${label}: \`${command}\``);
+      }
+      lines.push(
+        '   If a check fails, fix the underlying issue and re-run. If it looks like infrastructure (native module errors that persist after one retry, registry auth, etc.) call `report_blocker` rather than fighting it.',
+      );
+    } else {
+      lines.push('- Ensure the build passes before completing');
+    }
+
+    lines.push(
+      '- **Self-review your diff before `report_task_summary`** — run `git diff` against the base branch and check for: ' +
+        '(a) changes outside the task scope, ' +
+        '(b) edge cases or error paths you did not cover, ' +
+        '(c) anything you were unsure about. ' +
+        'Address what you can; surface the rest in the `deviations` field of `report_task_summary` so the reviewer sees them up front.',
+    );
+
+    lines.push(
+      '- **Run `pre_submit_review` before `report_task_summary`** — once your pre-completion checks pass and your self-review is clean, call this tool for a fast critic pass on your diff. It uses the same reviewer model the daemon will use after you finish, so a clean verdict here means the daemon can skip its Tier 1 review entirely. If `status` comes back `fail`, address the issues and call again.',
+    );
+
     lines.push('- Use ask_human when uncertain rather than guessing');
     lines.push('- Do NOT modify configuration files unless required by the task');
   }
@@ -611,9 +651,11 @@ export function generateSystemInstructions(
       'Report persistent failures via `report_blocker`.',
   );
   lines.push(
-    '- **Validation is automatic**: After you commit and finish, the system independently runs ' +
-      'build, tests, health checks, smoke tests, and AC validation. ' +
-      'You do not need to replicate this pipeline. Use `validate_in_browser` for quick self-checks only.',
+    '- **Validation also runs after you finish**: the system independently re-runs build, tests, ' +
+      'health checks, smoke tests, and AC validation as a safety net. ' +
+      'Always run the pre-completion checks listed in Guidelines first — failures caught there are ' +
+      'cheap; failures caught after will loop you back with correction feedback. ' +
+      '`validate_in_browser` remains available for browser-based self-checks.',
   );
   lines.push(
     '- **Do not retry identical failing commands more than twice.** ' +

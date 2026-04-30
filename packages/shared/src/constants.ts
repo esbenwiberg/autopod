@@ -46,7 +46,10 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   approved: ['merging'],
   merging: ['complete', 'merge_pending'],
   merge_pending: ['complete', 'failed', 'killing'],
-  complete: [],
+  // Re-enqueueing a completed pod resets its container and task and runs it
+  // again — used when the same pod entity needs to handle a follow-up round
+  // of work without losing its identity in the UI.
+  complete: ['queued'],
   // handoff re-enters orchestration: interactive pod has been stopped and
   // is being provisioned again with a new pod options (agentMode: 'auto').
   handoff: ['provisioning', 'killing'],

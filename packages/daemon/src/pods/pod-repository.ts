@@ -8,6 +8,7 @@ import type {
   Pod,
   PodOptions,
   PodStatus,
+  PreSubmitReviewSnapshot,
   Profile,
   ReferenceRepo,
   TaskSummary,
@@ -90,6 +91,13 @@ export interface PodFilters {
 
 export interface PodUpdates {
   status?: PodStatus;
+  /**
+   * Update the pod's task description. Only used by the long-lived fix-pod
+   * path (`profile.reuseFixPod = true`) — when the same fix pod is re-enqueued
+   * for a new round of CI / review feedback, its task is replaced with a
+   * fresh fix prompt covering the new failures.
+   */
+  task?: string;
   containerId?: string | null;
   worktreePath?: string | null;
   validationAttempts?: number;
@@ -128,9 +136,11 @@ export interface PodUpdates {
   startCommitSha?: string | null;
   linkedPodId?: string | null;
   taskSummary?: TaskSummary | null;
+  preSubmitReview?: PreSubmitReviewSnapshot | null;
   validationOverrides?: ValidationOverride[] | null;
   profileSnapshot?: Profile | null;
   prFixAttempts?: number;
+  fixIteration?: number;
   maxPrFixAttempts?: number;
   fixPodId?: string | null;
   lastFixPodSpawnedAt?: string | null;
@@ -295,6 +305,9 @@ function rowToSession(row: Record<string, unknown>): Pod {
     startCommitSha: (row.start_commit_sha as string) ?? null,
     linkedPodId: (row.linked_pod_id as string) ?? null,
     taskSummary: row.task_summary ? JSON.parse(row.task_summary as string) : null,
+    preSubmitReview: row.pre_submit_review
+      ? (JSON.parse(row.pre_submit_review as string) as PreSubmitReviewSnapshot)
+      : null,
     validationOverrides: row.validation_overrides
       ? JSON.parse(row.validation_overrides as string)
       : null,
@@ -304,6 +317,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
       : null,
     prFixAttempts: (row.pr_fix_attempts as number) ?? 0,
     maxPrFixAttempts: (row.max_pr_fix_attempts as number) ?? DEFAULT_MAX_PR_FIX_ATTEMPTS,
+    fixIteration: (row.fix_iteration as number) ?? 0,
     fixPodId: (row.fix_pod_id as string) ?? null,
     lastFixPodSpawnedAt: (row.last_fix_pod_spawned_at as string) ?? null,
     tokenBudget: (row.token_budget as number | null) ?? null,
@@ -444,6 +458,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('status = @status');
         params.status = changes.status;
       }
+      if (changes.task !== undefined) {
+        setClauses.push('task = @task');
+        params.task = changes.task;
+      }
       if (changes.containerId !== undefined) {
         setClauses.push('container_id = @containerId');
         params.containerId = changes.containerId;
@@ -582,6 +600,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
         params.taskSummary =
           changes.taskSummary !== null ? JSON.stringify(changes.taskSummary) : null;
       }
+      if (changes.preSubmitReview !== undefined) {
+        setClauses.push('pre_submit_review = @preSubmitReview');
+        params.preSubmitReview =
+          changes.preSubmitReview !== null ? JSON.stringify(changes.preSubmitReview) : null;
+      }
       if (changes.validationOverrides !== undefined) {
         setClauses.push('validation_overrides = @validationOverrides');
         params.validationOverrides =
@@ -595,6 +618,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.prFixAttempts !== undefined) {
         setClauses.push('pr_fix_attempts = @prFixAttempts');
         params.prFixAttempts = changes.prFixAttempts;
+      }
+      if (changes.fixIteration !== undefined) {
+        setClauses.push('fix_iteration = @fixIteration');
+        params.fixIteration = changes.fixIteration;
       }
       if (changes.maxPrFixAttempts !== undefined) {
         setClauses.push('max_pr_fix_attempts = @maxPrFixAttempts');

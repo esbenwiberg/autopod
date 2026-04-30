@@ -130,6 +130,14 @@ public struct SessionResponse: Codable, Sendable {
   public let referenceRepos: [ReferenceRepoSummary]?
   /// Number of times this pod has been reworked (never resets). Zero for the original run.
   public let reworkCount: Int?
+  /// Cached verdict from the agent's `pre_submit_review` MCP tool call.
+  /// Surfaced in the pod detail view so reviewers can see what the critic
+  /// flagged before the daemon's full validation runs.
+  public let preSubmitReview: PreSubmitReviewSnapshotResponse?
+  /// Iteration counter for fix pods running under `profile.reuseFixPod = true`.
+  /// 0 for non-fix pods or the first round; increments each time the same fix
+  /// pod entity is re-enqueued for a new round of CI / review feedback.
+  public let fixIteration: Int?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
@@ -152,7 +160,21 @@ public struct SessionResponse: Codable, Sendable {
     case validationOverrides
     case briefTitle
     case referenceRepos
+    case preSubmitReview
+    case fixIteration
   }
+}
+
+public struct PreSubmitReviewSnapshotResponse: Codable, Sendable {
+  /// "pass" | "fail" | "uncertain" | "skipped"
+  public let status: String
+  /// Hash of the diff this verdict applies to. Used by the daemon to skip
+  /// Tier 1 of its full reviewer when nothing has changed since this pass.
+  public let diffHash: String
+  public let reasoning: String
+  public let issues: [String]
+  public let model: String
+  public let checkedAt: String
 }
 
 public struct DeviationResponse: Codable, Sendable {

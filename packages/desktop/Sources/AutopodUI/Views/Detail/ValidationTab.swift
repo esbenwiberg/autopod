@@ -175,6 +175,14 @@ public struct ValidationTab: View {
           .font(.caption)
           .foregroundStyle(.secondary)
       }
+      if pod.fixIteration > 0 {
+        Text("Fix iteration \(pod.fixIteration)")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.indigo)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .background(.indigo.opacity(0.12), in: Capsule())
+      }
       Spacer()
       if pod.containerUrl != nil,
          pod.status == .validated || pod.status == .validating {

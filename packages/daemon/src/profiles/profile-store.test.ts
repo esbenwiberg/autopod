@@ -322,6 +322,35 @@ describe('ProfileStore', () => {
     });
   });
 
+  describe('loop tunables', () => {
+    it('round-trips mergePollIntervalSec and fixPodCooldownSec', () => {
+      store.create({ ...validInput, mergePollIntervalSec: 20, fixPodCooldownSec: 120 });
+      const profile = store.get('my-app');
+      expect(profile.mergePollIntervalSec).toBe(20);
+      expect(profile.fixPodCooldownSec).toBe(120);
+    });
+
+    it('defaults to null when unset', () => {
+      store.create(validInput);
+      const profile = store.get('my-app');
+      expect(profile.mergePollIntervalSec).toBeNull();
+      expect(profile.fixPodCooldownSec).toBeNull();
+    });
+
+    it('accepts fixPodCooldownSec=0 (no cooldown)', () => {
+      store.create({ ...validInput, fixPodCooldownSec: 0 });
+      expect(store.get('my-app').fixPodCooldownSec).toBe(0);
+    });
+
+    it('updates loop tunables via update()', () => {
+      store.create(validInput);
+      store.update('my-app', { mergePollIntervalSec: 30, fixPodCooldownSec: 60 });
+      const profile = store.get('my-app');
+      expect(profile.mergePollIntervalSec).toBe(30);
+      expect(profile.fixPodCooldownSec).toBe(60);
+    });
+  });
+
   describe('setWarmImage', () => {
     it('persists warmImageTag and warmImageBuiltAt', () => {
       store.create(validInput);

@@ -27,6 +27,11 @@ struct SummaryTab: View {
                     planCard(plan)
                 }
 
+                // Pre-submit reviewer verdict (set when the agent called pre_submit_review)
+                if let verdict = pod.preSubmitReview {
+                    preSubmitReviewCard(verdict)
+                }
+
                 // Task summary (persistent once reported)
                 if let summary = pod.taskSummary {
                     taskSummaryCard(summary)
@@ -146,6 +151,81 @@ struct SummaryTab: View {
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Pre-submit reviewer verdict
+
+    private func preSubmitReviewCard(_ verdict: PreSubmitReviewSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: preSubmitIcon(for: verdict.status))
+                    .foregroundStyle(preSubmitTint(for: verdict.status))
+                Text("Pre-submit Review")
+                    .font(.system(.subheadline).weight(.semibold))
+                Spacer()
+                Text(verdict.status.rawValue.uppercased())
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(preSubmitTint(for: verdict.status).opacity(0.15), in: Capsule())
+                    .foregroundStyle(preSubmitTint(for: verdict.status))
+                Text(verdict.model)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            if !verdict.reasoning.isEmpty {
+                Text(verdict.reasoning)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+
+            if !verdict.issues.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Issues")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .tracking(0.3)
+                    ForEach(Array(verdict.issues.enumerated()), id: \.offset) { _, issue in
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 4))
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 6)
+                            Text(issue)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func preSubmitIcon(for status: PreSubmitReviewSnapshot.Status) -> String {
+        switch status {
+        case .pass: "checkmark.seal.fill"
+        case .fail: "xmark.seal.fill"
+        case .uncertain: "questionmark.circle.fill"
+        case .skipped: "minus.circle"
+        }
+    }
+
+    private func preSubmitTint(for status: PreSubmitReviewSnapshot.Status) -> Color {
+        switch status {
+        case .pass: .green
+        case .fail: .red
+        case .uncertain: .orange
+        case .skipped: .secondary
+        }
     }
 
     // MARK: - Task summary

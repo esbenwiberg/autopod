@@ -1,4 +1,10 @@
-import type { PodBridge } from '@autopod/escalation-mcp';
+import type {
+  PodBridge,
+  PreSubmitReviewInput,
+  PreSubmitReviewToolResult,
+  ValidationPhaseName,
+  ValidationPhaseResult,
+} from '@autopod/escalation-mcp';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   ActionDefinition,
@@ -10,13 +16,15 @@ import type {
   PimActivationConfig,
   Profile,
 } from '@autopod/shared';
-import { generateId } from '@autopod/shared';
+import { MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
+import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
+import { runPreSubmitReview } from '../validation/pre-submit-review.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
@@ -24,6 +32,7 @@ import type { NudgeRepository } from './nudge-repository.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import { buildValidationExecEnv } from './registry-injector.js';
 
 export interface SessionBridgeDependencies {
   podManager: PodManager;
@@ -39,6 +48,7 @@ export interface SessionBridgeDependencies {
   pendingRequestsByPod: Map<string, PendingRequests>;
   logger: Logger;
   hostBrowserRunner?: HostBrowserRunner;
+  worktreeManager?: WorktreeManager;
 }
 
 export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge {
@@ -56,6 +66,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     pendingRequestsByPod: _pendingRequestsBySession,
     logger,
     hostBrowserRunner,
+    worktreeManager,
   } = deps;
 
   return {
@@ -566,6 +577,139 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       return entry.id;
     },
 
+    async runPreSubmitReview(
+      podId: string,
+      input: PreSubmitReviewInput,
+    ): Promise<PreSubmitReviewToolResult> {
+      podManager.touchHeartbeat(podId);
+      const pod = podManager.getSession(podId);
+      const profile = profileStore.get(pod.profileName);
+      const reviewerModel = profile.reviewerModel || profile.defaultModel || 'sonnet';
+
+      let diff = '';
+      if (worktreeManager && pod.worktreePath) {
+        try {
+          diff = await worktreeManager.getDiff(
+            pod.worktreePath,
+            profile.defaultBranch ?? 'main',
+            MAX_DIFF_LENGTH,
+            pod.startCommitSha ?? undefined,
+          );
+        } catch (err) {
+          logger.warn({ err, podId }, 'pre-submit review: failed to fetch diff');
+        }
+      }
+
+      const result = await runPreSubmitReview(
+        {
+          task: pod.task ?? '',
+          diff,
+          reviewerModel,
+          plannedSummary: input.plannedSummary,
+          plannedDeviations: input.plannedDeviations,
+        },
+        logger,
+      );
+
+      // Cache the verdict on the pod so the daemon's full reviewer can skip
+      // Tier 1 when the diff hasn't changed since this pre-submit pass.
+      try {
+        podRepo.update(podId, {
+          preSubmitReview: {
+            status: result.status,
+            diffHash: result.diffHash,
+            issues: result.issues,
+            reasoning: result.reasoning,
+            model: result.model,
+            checkedAt: new Date().toISOString(),
+          },
+        });
+      } catch (err) {
+        logger.warn({ err, podId }, 'pre-submit review: failed to cache verdict');
+      }
+
+      return {
+        status: result.status,
+        reasoning: result.reasoning,
+        issues: result.issues,
+        ...(result.skipReason ? { skipReason: result.skipReason } : {}),
+        model: result.model,
+        durationMs: result.durationMs,
+      };
+    },
+
+    async runValidationPhase(
+      podId: string,
+      phase: ValidationPhaseName,
+    ): Promise<ValidationPhaseResult> {
+      podManager.touchHeartbeat(podId);
+      const pod = podManager.getSession(podId);
+      if (!pod.containerId) {
+        throw new Error(`Pod ${podId} has no container`);
+      }
+      const profile = profileStore.get(pod.profileName);
+
+      const phaseConfig = resolveValidationPhase(phase, profile);
+      if (!phaseConfig.command) {
+        return {
+          phase,
+          configured: false,
+          passed: false,
+          exitCode: null,
+          command: null,
+          durationMs: 0,
+          output: '',
+        };
+      }
+
+      const cwd = profile.buildWorkDir ? `/workspace/${profile.buildWorkDir}` : '/workspace';
+      const env = buildValidationExecEnv(
+        profile.privateRegistries,
+        profile.registryPat ?? profile.adoPat ?? null,
+        profile.buildEnv,
+      );
+      const cm = containerManagerFactory.get(pod.executionTarget);
+
+      const startedAt = Date.now();
+      try {
+        const result = await cm.execInContainer(
+          pod.containerId,
+          ['sh', '-c', phaseConfig.command],
+          {
+            cwd,
+            timeout: phaseConfig.timeoutMs,
+            ...(env ? { env } : {}),
+          },
+        );
+        const durationMs = Date.now() - startedAt;
+        const combined = `${result.stdout}\n${result.stderr}`.trim();
+        return {
+          phase,
+          configured: true,
+          passed: result.exitCode === 0,
+          exitCode: result.exitCode,
+          command: phaseConfig.command,
+          durationMs,
+          output: truncateOutput(combined),
+        };
+      } catch (err) {
+        const durationMs = Date.now() - startedAt;
+        const message = err instanceof Error ? err.message : String(err);
+        const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
+        return {
+          phase,
+          configured: true,
+          passed: false,
+          exitCode: null,
+          command: phaseConfig.command,
+          durationMs,
+          output: truncateOutput(
+            partial ? `${message}\n\n--- partial output ---\n${partial}` : message,
+          ),
+        };
+      }
+    },
+
     validateBrowserUrl(_podId: string, url: string): void {
       let parsed: URL;
       try {
@@ -626,4 +770,49 @@ function consumeSuggestBudget(podId: string): {
 /** Test-only: reset the per-pod suggestion rate-limit window. */
 export function __resetSuggestBudgetForTests(): void {
   suggestBudget.clear();
+}
+
+const VALIDATE_LOCALLY_OUTPUT_BUDGET = 6_000;
+
+/**
+ * Truncate combined stdout+stderr to fit the agent's context.
+ *
+ * Failures usually surface near the end of build/test output, so we keep the
+ * tail and drop the middle when the output is large. The head is retained too
+ * because some failures (Biome rule errors, lint errors with file paths) are
+ * easier to grok with a bit of preamble showing the command's shape.
+ */
+function truncateOutput(text: string): string {
+  if (text.length <= VALIDATE_LOCALLY_OUTPUT_BUDGET) return text;
+  const headLen = 1_000;
+  const tailLen = VALIDATE_LOCALLY_OUTPUT_BUDGET - headLen - 80;
+  const omitted = text.length - headLen - tailLen;
+  const head = text.slice(0, headLen);
+  const tail = text.slice(text.length - tailLen);
+  return `${head}\n\n... [truncated ${omitted} chars in the middle] ...\n\n${tail}`;
+}
+
+interface ResolvedPhase {
+  command: string | null;
+  timeoutMs: number;
+}
+
+function resolveValidationPhase(phase: ValidationPhaseName, profile: Profile): ResolvedPhase {
+  switch (phase) {
+    case 'lint':
+      return {
+        command: profile.lintCommand ?? null,
+        timeoutMs: (profile.lintTimeout ?? 120) * 1_000,
+      };
+    case 'build':
+      return {
+        command: profile.buildCommand ?? null,
+        timeoutMs: (profile.buildTimeout ?? 300) * 1_000,
+      };
+    case 'tests':
+      return {
+        command: profile.testCommand ?? null,
+        timeoutMs: (profile.testTimeout ?? 600) * 1_000,
+      };
+  }
 }

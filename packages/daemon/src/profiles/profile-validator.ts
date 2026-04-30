@@ -226,6 +226,30 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
+  // Merge poll interval — 5s lower bound to avoid hammering GitHub/ADO; 1h upper.
+  const mergePollIntervalSec = input.mergePollIntervalSec;
+  if (mergePollIntervalSec !== undefined && mergePollIntervalSec !== null) {
+    if (
+      typeof mergePollIntervalSec !== 'number' ||
+      mergePollIntervalSec < 5 ||
+      mergePollIntervalSec > 3600
+    ) {
+      errors.push('mergePollIntervalSec must be between 5 and 3600');
+    }
+  }
+
+  // Fix-pod cooldown — 0 means "no cooldown"; cap at 1h to keep it sensible.
+  const fixPodCooldownSec = input.fixPodCooldownSec;
+  if (fixPodCooldownSec !== undefined && fixPodCooldownSec !== null) {
+    if (
+      typeof fixPodCooldownSec !== 'number' ||
+      fixPodCooldownSec < 0 ||
+      fixPodCooldownSec > 3600
+    ) {
+      errors.push('fixPodCooldownSec must be between 0 and 3600');
+    }
+  }
+
   // ACI backend does not support iptables-based network isolation.
   // Reject restricted/deny-all network policies for ACI profiles at write time
   // so operators get a clear error instead of a silently open container.

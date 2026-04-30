@@ -530,6 +530,7 @@ const podBridge = createSessionBridge({
   pendingRequestsByPod,
   logger,
   hostBrowserRunner,
+  worktreeManager,
 });
 
 // Notifications (opt-in via TEAMS_WEBHOOK_URL)

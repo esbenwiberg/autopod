@@ -20,6 +20,15 @@ public struct Profile: Identifiable, Sendable {
     public var lintTimeout: Int?
     public var sastCommand: String?
     public var sastTimeout: Int?
+    /// Override for the merge poller's interval, in seconds. Nil = daemon default (60s).
+    public var mergePollIntervalSec: Int?
+    /// Override for the PR-fix-pod cooldown, in seconds. Nil = daemon default (600s).
+    /// 0 disables the cooldown so iterations can happen back-to-back.
+    public var fixPodCooldownSec: Int?
+    /// When true, the daemon recycles a single fix pod entity per parent PR
+    /// across all rounds of CI / review feedback instead of spawning a new
+    /// child each round.
+    public var reuseFixPod: Bool
     public var healthPath: String
     public var healthTimeout: Int
     public var buildTimeout: Int
@@ -161,6 +170,9 @@ public struct Profile: Identifiable, Sendable {
         buildEnv: [String: String] = [:],
         lintCommand: String? = nil, lintTimeout: Int? = nil,
         sastCommand: String? = nil, sastTimeout: Int? = nil,
+        mergePollIntervalSec: Int? = nil,
+        fixPodCooldownSec: Int? = nil,
+        reuseFixPod: Bool = false,
         healthPath: String = "/", healthTimeout: Int = 120,
         buildTimeout: Int = 300, testTimeout: Int = 600,
         maxValidationAttempts: Int = 3,
@@ -220,6 +232,9 @@ public struct Profile: Identifiable, Sendable {
         self.buildEnv = buildEnv
         self.lintCommand = lintCommand; self.lintTimeout = lintTimeout
         self.sastCommand = sastCommand; self.sastTimeout = sastTimeout
+        self.mergePollIntervalSec = mergePollIntervalSec
+        self.fixPodCooldownSec = fixPodCooldownSec
+        self.reuseFixPod = reuseFixPod
         self.healthPath = healthPath; self.healthTimeout = healthTimeout
         self.buildTimeout = buildTimeout; self.testTimeout = testTimeout
         self.maxValidationAttempts = maxValidationAttempts

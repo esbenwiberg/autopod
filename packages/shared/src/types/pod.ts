@@ -7,6 +7,18 @@ import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
 import type { ValidationFinding, ValidationOverride, ValidationResult } from './validation.js';
 
+export interface PreSubmitReviewSnapshot {
+  status: 'pass' | 'fail' | 'uncertain' | 'skipped';
+  /** Hash of the diff this verdict applies to. Cache keyed by this. */
+  diffHash: string;
+  reasoning: string;
+  issues: string[];
+  /** The reviewer model used (e.g. 'sonnet'). */
+  model: string;
+  /** ISO timestamp of when the pre-submit pass ran. */
+  checkedAt: string;
+}
+
 export interface ReferenceRepo {
   url: string;
   mountPath: string; // derived from last URL segment at pod creation time
@@ -101,6 +113,13 @@ export interface Pod {
   startCommitSha: string | null;
   linkedPodId: string | null;
   taskSummary: TaskSummary | null;
+  /**
+   * Cached verdict from the agent's `pre_submit_review` tool call. The daemon's
+   * full reviewer skips its Tier 1 single-shot pass when this verdict is `pass`
+   * AND `diffHash` matches the diff at validation time — i.e. the agent
+   * hasn't changed code since the pre-submit pass.
+   */
+  preSubmitReview: PreSubmitReviewSnapshot | null;
   validationOverrides: ValidationOverride[] | null;
   pimGroups: PimGroupConfig[] | null;
   /** Snapshot of the resolved profile config at pod creation time (after inheritance). */
@@ -108,6 +127,12 @@ export interface Pod {
   prFixAttempts: number;
   maxPrFixAttempts: number;
   fixPodId: string | null;
+  /**
+   * Iteration counter for fix pods running under `profile.reuseFixPod = true`.
+   * 0 for non-fix pods or the first iteration; increments each time the same
+   * fix pod is re-enqueued for a new round of CI / review feedback.
+   */
+  fixIteration: number;
   /** Token budget for this pod (input + output). null = no budget. Inherited from profile at creation. */
   tokenBudget: number | null;
   /** Number of times the user has approved a budget extension for this pod. */

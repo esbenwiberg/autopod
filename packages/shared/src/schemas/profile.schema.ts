@@ -284,6 +284,23 @@ const createProfileBaseSchema = z.object({
   /** Optional SAST command run after lint. */
   sastCommand: z.string().nullable().optional().default(null),
   sastTimeout: z.number().int().min(10).max(1800).nullable().optional().default(300),
+  /**
+   * How often the merge poller checks the PR for CI / review state changes,
+   * in seconds. Null = use the daemon default (60s). Profiles where each fix
+   * cycle is fast and trusted can lower this for snappier turnarounds.
+   */
+  mergePollIntervalSec: z.number().int().min(5).max(3600).nullable().optional().default(null),
+  /**
+   * Minimum interval between PR-fix-pod spawns on the same parent pod, in
+   * seconds. Null = use the daemon default (600s). 0 disables the cooldown.
+   */
+  fixPodCooldownSec: z.number().int().min(0).max(3600).nullable().optional().default(null),
+  /**
+   * Reuse a single fix pod across all rounds of CI / review feedback for the
+   * same parent PR. Defaults to false (today's behavior: one fresh fix pod
+   * per round).
+   */
+  reuseFixPod: z.boolean().nullable().optional().default(false),
   prProvider: z.enum(['github', 'ado']).nullable().default('github'),
   adoPat: z.string().min(1).nullable().default(null),
   githubPat: z.string().min(1).nullable().default(null),

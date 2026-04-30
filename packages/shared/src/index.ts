@@ -7,6 +7,7 @@ export type {
   CreatePodRequest,
   PodSummary,
   ReferenceRepo,
+  PreSubmitReviewSnapshot,
   QualityGrade,
   QualitySignals,
   PodQualityScore,

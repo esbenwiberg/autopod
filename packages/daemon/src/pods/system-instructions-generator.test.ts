@@ -429,6 +429,66 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('## Guidelines');
     expect(md).toContain('Commit after every meaningful unit of work');
     expect(md).toContain('Do NOT modify configuration files');
+    expect(md).toContain('Self-review your diff');
+  });
+
+  it('lists configured pre-completion commands in guidelines', () => {
+    const md = generateSystemInstructions(
+      makeProfile({
+        buildCommand: 'npm run build',
+        testCommand: 'npm test',
+        lintCommand: 'biome check .',
+      }),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('Run pre-completion checks before `report_task_summary`');
+    expect(md).toContain('lint: `biome check .`');
+    expect(md).toContain('build: `npm run build`');
+    expect(md).toContain('tests: `npm test`');
+  });
+
+  it('mentions buildWorkDir when set so the agent runs commands in the right place', () => {
+    const md = generateSystemInstructions(
+      makeProfile({ buildCommand: 'npm run build', buildWorkDir: 'apps/web' }),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('run from `/workspace/apps/web`');
+  });
+
+  it('falls back to a generic build-passes hint when no commands are configured', () => {
+    const md = generateSystemInstructions(
+      makeProfile({ buildCommand: null, testCommand: null, lintCommand: null }),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('Ensure the build passes before completing');
+    expect(md).not.toContain('Run pre-completion checks');
+  });
+
+  it('still tells the agent that validation also runs after finishing', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('Validation also runs after you finish');
+    expect(md).not.toContain('Validation is automatic');
+  });
+
+  it('mentions pre_submit_review in guidelines', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('pre_submit_review');
   });
 
   it('includes advisor section when advisor is enabled', () => {

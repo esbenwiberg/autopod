@@ -1,5 +1,3 @@
-import { spawn } from 'node:child_process';
-
 import type {
   AcCheckResult,
   AcDefinition,
@@ -23,82 +21,8 @@ import { runAgenticReview } from './review-agentic-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
-/**
- * Runs the Claude CLI in print mode, piping `input` via stdin.
- *
- * Uses `spawn` instead of `execFile` so that stdin data is written immediately
- * after the process is created. This avoids the Claude CLI's 3-second stdin
- * timeout that `execFile` can miss when its internal setup delays the write.
- */
-function runClaudeCli(opts: {
-  model: string;
-  input: string;
-  timeout: number;
-  maxBuffer?: number;
-}): Promise<{ stdout: string }> {
-  const maxBuf = opts.maxBuffer ?? 2 * 1024 * 1024;
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const settle = (fn: () => void) => {
-      if (!settled) {
-        settled = true;
-        fn();
-      }
-    };
-
-    const child = spawn('claude', ['-p', '--model', opts.model, '--output-format', 'text']);
-
-    // Write stdin immediately so data is queued before the CLI's 3 s timeout.
-    child.stdin.write(opts.input);
-    child.stdin.end();
-    // Suppress EPIPE if the process exits before stdin is fully flushed.
-    child.stdin.on('error', () => {});
-
-    let stdout = '';
-    let stderr = '';
-    let stdoutLen = 0;
-
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      settle(() => reject(new Error(`Command timed out after ${opts.timeout}ms`)));
-    }, opts.timeout);
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdoutLen += chunk.length;
-      if (stdoutLen > maxBuf) {
-        child.kill('SIGTERM');
-        settle(() => reject(new Error(`stdout exceeded maxBuffer (${maxBuf} bytes)`)));
-        return;
-      }
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        settle(() =>
-          reject(
-            new Error(
-              `Command failed: claude -p --model ${opts.model} --output-format text\n${stderr}`,
-            ),
-          ),
-        );
-      } else {
-        settle(() => resolve({ stdout }));
-      }
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      settle(() => reject(err));
-    });
-  });
-}
+import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { hashDiff } from './pre-submit-review.js';
 
 /**
  * Local validation engine with build, health check, and AI task review.
@@ -2420,17 +2344,29 @@ async function runTaskReview(
     let tier1Parsed: ReturnType<typeof parseReviewJson> = null;
 
     if (!diffIsTruncated) {
-      // ── Tier 1: Single-shot review with enriched context ──────────────
-      const { stdout } = await runClaudeCli({
-        model: config.reviewerModel,
-        input: prompt,
-        timeout: reviewTimeout,
-      });
+      // Reuse the agent's pre-submit verdict when it applies to the same diff
+      // bytes and was a clean pass. Saves ~30s–5min of Tier 1 work on diffs
+      // the reviewer model already opined on.
+      const cached = pickCachedPreSubmit(config);
+      if (cached) {
+        tier1Parsed = cached;
+        log?.info(
+          { issueCount: cached.issues.length },
+          'Tier 1 task review: reusing cached pre-submit verdict (diff unchanged)',
+        );
+      } else {
+        // ── Tier 1: Single-shot review with enriched context ──────────────
+        const { stdout } = await runClaudeCli({
+          model: config.reviewerModel,
+          input: prompt,
+          timeout: reviewTimeout,
+        });
 
-      tier1Parsed = enforceRequirementsStatus(parseReviewJson(stdout.trim()));
-      if (!tier1Parsed) {
-        log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
-        return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
+        tier1Parsed = enforceRequirementsStatus(parseReviewJson(stdout.trim()));
+        if (!tier1Parsed) {
+          log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
+          return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
+        }
       }
     } else {
       log?.info(
@@ -2640,6 +2576,25 @@ export function normalizeReviewIssue(raw: unknown): string | null {
  * Attempts to parse the reviewer's JSON response, tolerating markdown fences
  * and other common LLM output quirks.
  */
+/**
+ * Returns the cached pre-submit verdict in Tier-1 shape when it can be reused.
+ * Only `status: 'pass'` cache entries are reused — fail/uncertain/skipped get
+ * a fresh Tier 1 pass to avoid stale negatives.
+ */
+export function pickCachedPreSubmit(
+  config: ValidationEngineConfig,
+): { status: 'pass'; reasoning: string; issues: string[] } | null {
+  const cache = config.preSubmitReview;
+  if (!cache) return null;
+  if (cache.status !== 'pass') return null;
+  if (cache.diffHash !== hashDiff(config.diff)) return null;
+  return {
+    status: 'pass',
+    reasoning: cache.reasoning,
+    issues: cache.issues,
+  };
+}
+
 export function parseReviewJson(raw: string): {
   status: 'pass' | 'fail' | 'uncertain';
   reasoning: string;

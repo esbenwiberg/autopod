@@ -1,6 +1,7 @@
 import type {
   AcCheckResult,
   AcDefinition,
+  PreSubmitReviewSnapshot,
   TaskSummary,
   ValidationOverride,
   ValidationPhase,
@@ -85,6 +86,13 @@ export interface ValidationEngineConfig {
    * execInContainer and would otherwise see no creds — causing NU1301 on cold caches.
    */
   extraExecEnv?: Record<string, string>;
+  /**
+   * Cached verdict from the agent's `pre_submit_review` tool call. When the
+   * cached `diffHash` matches the current diff's hash AND the cached status
+   * is `pass`, the Tier 1 single-shot reviewer pass is skipped — we already
+   * spent the tokens on this exact diff during the agent's pre-submit pass.
+   */
+  preSubmitReview?: PreSubmitReviewSnapshot | null;
 }
 
 export interface ValidationPhaseCallbacks {

@@ -135,4 +135,72 @@ export interface PodBridge {
    *    services — are blocked to prevent SSRF via URL rewriting.
    */
   validateBrowserUrl(podId: string, url: string): void;
+
+  /**
+   * Run one of the profile's configured validation commands (lint, build, or
+   * tests) inside the pod's container, using the same cwd / env / timeout the
+   * daemon's post-completion validation pipeline uses. Used by the
+   * `validate_locally` tool so agents can catch failures pre-completion in
+   * their own context, instead of being looped back through the full
+   * validation cycle.
+   *
+   * Returns structured results regardless of pass/fail. `configured: false`
+   * when the profile has no command for that phase. `output` is truncated by
+   * the daemon to keep the agent's context manageable.
+   */
+  runValidationPhase(podId: string, phase: ValidationPhaseName): Promise<ValidationPhaseResult>;
+
+  /**
+   * Run a fast critic pass on the pod's current diff using the profile's
+   * reviewer model. Used by the `pre_submit_review` tool so agents get a
+   * sanity-check before calling `report_task_summary`.
+   *
+   * The verdict is also recorded on the pod so the daemon's full reviewer can
+   * skip Tier 1 when the diff hasn't changed since this pre-submit pass.
+   */
+  runPreSubmitReview(
+    podId: string,
+    input: PreSubmitReviewInput,
+  ): Promise<PreSubmitReviewToolResult>;
+}
+
+export type ValidationPhaseName = 'lint' | 'build' | 'tests';
+
+export interface PreSubmitReviewInput {
+  /** Optional preview of the agent's planned task summary. */
+  plannedSummary?: string;
+  /** Optional preview of deviations the agent intends to disclose. */
+  plannedDeviations?: Array<{
+    step: string;
+    planned: string;
+    actual: string;
+    reason: string;
+  }>;
+}
+
+export interface PreSubmitReviewToolResult {
+  /** 'pass'/'fail'/'uncertain' from the model; 'skipped' when the critic couldn't run. */
+  status: 'pass' | 'fail' | 'uncertain' | 'skipped';
+  reasoning: string;
+  /** List of issues to address before declaring done; empty on a clean pass. */
+  issues: string[];
+  /** Reason the critic was skipped (no diff, no model, parse failure, timeout). */
+  skipReason?: string;
+  model: string;
+  durationMs: number;
+}
+
+export interface ValidationPhaseResult {
+  phase: ValidationPhaseName;
+  /** False when the profile has no command for this phase. */
+  configured: boolean;
+  /** True if the phase ran and exited 0. False if it failed or was skipped. */
+  passed: boolean;
+  /** Exit code; null when the phase wasn't configured or timed out before exiting. */
+  exitCode: number | null;
+  /** The exact command line that was run (or null when not configured). */
+  command: string | null;
+  durationMs: number;
+  /** Combined stdout+stderr, head+tail truncated to fit the agent's context. */
+  output: string;
 }
