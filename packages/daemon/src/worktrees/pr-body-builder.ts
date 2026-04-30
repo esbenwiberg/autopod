@@ -1,4 +1,5 @@
 import type { ScanFinding, TaskSummary, ValidationResult } from '@autopod/shared';
+import type { PrNarrative } from './pr-description-generator.js';
 
 export interface ScreenshotRef {
   /** Page path (e.g. '/', '/about') */
@@ -32,6 +33,17 @@ export interface PrBodyConfig {
   seriesName?: string;
   /** Security scan findings to render as a Security Notice section. */
   securityFindings?: ScanFinding[];
+  /**
+   * LLM-generated narrative sections. When provided, overrides the template-based Why/What/How
+   * derived from task and taskSummary. reviewFocus adds a "Review Focus" section.
+   */
+  narrative?: PrNarrative;
+  /**
+   * Maximum character budget for the rendered body. When set, lower-priority sections are
+   * dropped (rather than truncated mid-sentence) until the body fits within the budget.
+   * Drop order: screenshots → previewUrl → deviations table → AI review details block.
+   */
+  budgetChars?: number;
 }
 
 /**
@@ -96,20 +108,33 @@ export function buildPrBody(config: PrBodyConfig): string {
     taskSummary,
     inlineImages = true,
     seriesDescription,
+    narrative,
+    budgetChars,
   } = config;
+
+  // Resolve narrative sources — LLM-generated narrative wins over template fallbacks
+  const whyText = narrative ? narrative.why : (seriesDescription ?? task);
+  const whatText = narrative ? narrative.what : taskSummary?.actualSummary;
+  const howText = narrative ? narrative.how : taskSummary?.how;
+  const reviewFocus = narrative?.reviewFocus;
 
   const sections: string[] = [];
 
-  // ── Narrative: Why / What / How ──────────────────────────────────────────
+  // ── Narrative: Why / What / How / Review Focus ────────────────────────────
 
-  sections.push(`## Why\n\n${escapeMd(seriesDescription ?? task)}`);
+  sections.push(`## Why\n\n${escapeMd(whyText)}`);
 
-  if (taskSummary) {
-    sections.push(`## What\n\n${escapeMd(taskSummary.actualSummary)}`);
+  if (whatText) {
+    sections.push(`## What\n\n${escapeMd(whatText)}`);
+  }
 
-    if (taskSummary.how) {
-      sections.push(`## How\n\n${escapeMd(taskSummary.how)}`);
-    }
+  if (howText) {
+    sections.push(`## How\n\n${escapeMd(howText)}`);
+  }
+
+  if (reviewFocus && reviewFocus.length > 0) {
+    const items = reviewFocus.map((f) => `- ${escapeMd(f)}`).join('\n');
+    sections.push(`## Review Focus\n\n${items}`);
   }
 
   // ── Reviewer sections ─────────────────────────────────────────────────────
@@ -260,7 +285,46 @@ export function buildPrBody(config: PrBodyConfig): string {
     `---\n🤖 Created by [autopod](https://github.com/esbenwiberg/autopod) · pod \`${podId}\` · profile \`${profileName}\``,
   );
 
+  if (budgetChars) {
+    return applyBudget(sections, budgetChars);
+  }
   return sections.join('\n\n');
+}
+
+/**
+ * Drop lower-priority sections (screenshots → preview → deviations → AI review details)
+ * until the joined body fits within budgetChars. Sections are dropped whole — no mid-sentence cuts.
+ */
+function applyBudget(sections: string[], budgetChars: number): string {
+  const join = (s: string[]) => s.join('\n\n');
+
+  if (join(sections).length <= budgetChars) return join(sections);
+
+  // Drop order: least informative for a reviewer first
+  const dropPrefixes = [
+    '## Screenshots',
+    '## Preview',
+    '## Deviations from Plan',
+  ];
+
+  for (const prefix of dropPrefixes) {
+    const filtered = sections.filter((s) => !s.startsWith(prefix));
+    if (filtered.length !== sections.length) {
+      sections = filtered;
+      if (join(sections).length <= budgetChars) return join(sections);
+    }
+  }
+
+  // Strip the <details> block from the Validation section
+  sections = sections.map((s) =>
+    s.startsWith('## Validation')
+      ? s.replace(/\n\n<details>[\s\S]*?<\/details>/g, '')
+      : s,
+  );
+  if (join(sections).length <= budgetChars) return join(sections);
+
+  // Last resort: hard-truncate the body (shouldn't be needed after the drops above)
+  return join(sections).slice(0, budgetChars);
 }
 
 function formatDuration(ms: number): string {

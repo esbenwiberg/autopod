@@ -10,7 +10,8 @@ import type {
   PrMergeStatus,
   ReviewCommentDetail,
 } from '../interfaces/pr-manager.js';
-import { buildPrBody, buildPrTitle } from './pr-body-builder.js';
+import { buildPrBody } from './pr-body-builder.js';
+import { generatePrNarrative, generatePrTitle } from './pr-description-generator.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +34,21 @@ export class GhPrManager implements PrManager {
   }
 
   async createPr(config: CreatePrConfig): Promise<string> {
-    const title = buildPrTitle(config.task, config.seriesName, config.seriesDescription);
+    const descInput = {
+      task: config.task,
+      worktreePath: config.worktreePath,
+      baseBranch: config.baseBranch,
+      taskSummary: config.taskSummary,
+      seriesName: config.seriesName,
+      seriesDescription: config.seriesDescription,
+      filesChanged: config.filesChanged,
+      linesAdded: config.linesAdded,
+      linesRemoved: config.linesRemoved,
+    };
+    const [title, narrative] = await Promise.all([
+      generatePrTitle(descInput, this.logger),
+      generatePrNarrative(descInput, this.logger),
+    ]);
     const body = buildPrBody({
       task: config.task,
       podId: config.podId,
@@ -48,6 +63,7 @@ export class GhPrManager implements PrManager {
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
       securityFindings: config.securityFindings,
+      narrative,
     });
 
     this.logger.info(
@@ -272,7 +288,21 @@ export class GitHubApiPrManager implements PrManager {
   async createPr(config: CreatePrConfig): Promise<string> {
     if (!config.repoUrl) throw new Error('repoUrl is required for GitHubApiPrManager');
     const { owner, repo } = parseGitHubRepoUrl(config.repoUrl);
-    const title = buildPrTitle(config.task, config.seriesName, config.seriesDescription);
+    const descInput = {
+      task: config.task,
+      worktreePath: config.worktreePath,
+      baseBranch: config.baseBranch,
+      taskSummary: config.taskSummary,
+      seriesName: config.seriesName,
+      seriesDescription: config.seriesDescription,
+      filesChanged: config.filesChanged,
+      linesAdded: config.linesAdded,
+      linesRemoved: config.linesRemoved,
+    };
+    const [title, narrative] = await Promise.all([
+      generatePrTitle(descInput, this.logger),
+      generatePrNarrative(descInput, this.logger),
+    ]);
     const body = buildPrBody({
       task: config.task,
       podId: config.podId,
@@ -287,6 +317,7 @@ export class GitHubApiPrManager implements PrManager {
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
       securityFindings: config.securityFindings,
+      narrative,
     });
 
     this.logger.info(
