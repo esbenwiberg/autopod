@@ -568,7 +568,7 @@ struct OverviewTab: View {
                     metricRow(icon: "checkmark.seal",
                               value: scoreDisplay,
                               label: "Score",
-                              color: qualityColor(signals.grade))
+                              color: signals.score == nil ? .secondary : qualityColor(signals.grade))
 
                     let readEditDisplay = signals.editCount == 0
                         ? "—"
