@@ -271,7 +271,26 @@ public enum PodMapper {
     )
     result.worktreeCompromised = response.worktreeCompromised ?? false
     result.skipValidation = response.skipValidation
+    result.preSubmitReview = mapPreSubmitReview(response.preSubmitReview)
+    result.fixIteration = response.fixIteration ?? 0
     return result
+  }
+
+  static func mapPreSubmitReview(_ snapshot: PreSubmitReviewSnapshotResponse?)
+    -> PreSubmitReviewSnapshot?
+  {
+    guard let snapshot else { return nil }
+    let status =
+      PreSubmitReviewSnapshot.Status(rawValue: snapshot.status) ?? .skipped
+    let checkedAt = isoFormatter.date(from: snapshot.checkedAt) ?? Date()
+    return PreSubmitReviewSnapshot(
+      status: status,
+      diffHash: snapshot.diffHash,
+      reasoning: snapshot.reasoning,
+      issues: snapshot.issues,
+      model: snapshot.model,
+      checkedAt: checkedAt
+    )
   }
 
   // MARK: - Batch mapping

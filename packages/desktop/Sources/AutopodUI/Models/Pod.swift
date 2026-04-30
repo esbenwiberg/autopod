@@ -541,6 +541,16 @@ public struct Pod: Identifiable, Sendable {
     /// Human-readable title from the brief's YAML frontmatter. Nil for standalone pods.
     public var briefTitle: String?
 
+    /// Cached verdict from the agent's `pre_submit_review` MCP tool call.
+    /// Surfaced in the pod detail view so reviewers see what the critic flagged
+    /// before the daemon's full validation runs.
+    public var preSubmitReview: PreSubmitReviewSnapshot?
+
+    /// Iteration counter for fix pods running under `profile.reuseFixPod = true`.
+    /// 0 for non-fix pods or the first round; increments each time the same fix
+    /// pod entity is re-enqueued for a new round of CI / review feedback.
+    public var fixIteration: Int
+
     // MARK: - Series (pod dependency DAG)
 
     /// Series this pod belongs to, or nil for standalone pods.
@@ -633,7 +643,9 @@ public struct Pod: Identifiable, Sendable {
         sidecarContainerIds: [String: String] = [:],
         testRunBranches: [String] = [],
         worktreeCompromised: Bool = false,
-        skipValidation: Bool = false
+        skipValidation: Bool = false,
+        preSubmitReview: PreSubmitReviewSnapshot? = nil,
+        fixIteration: Int = 0
     ) {
         self.id = id; self.status = status; self.pod = pod
         self.hasWorktree = hasWorktree
@@ -662,6 +674,8 @@ public struct Pod: Identifiable, Sendable {
         self.testRunBranches = testRunBranches
         self.worktreeCompromised = worktreeCompromised
         self.skipValidation = skipValidation
+        self.preSubmitReview = preSubmitReview
+        self.fixIteration = fixIteration
     }
 
     /// Back-compat init that takes a legacy `OutputMode` and derives a `PodConfig`.
@@ -727,5 +741,37 @@ public struct Pod: Identifiable, Sendable {
             dependsOnPodIds: dependsOnPodIds,
             dependencyStartedAt: dependencyStartedAt
         )
+    }
+}
+
+/// Cached verdict from the agent's `pre_submit_review` MCP tool call. The
+/// daemon stores this snapshot on the pod so its full reviewer can skip
+/// Tier 1 when the diff hasn't changed since the agent's pre-submit pass.
+public struct PreSubmitReviewSnapshot: Sendable, Equatable {
+    public enum Status: String, Sendable {
+        case pass, fail, uncertain, skipped
+    }
+    public var status: Status
+    /// Hash of the diff this verdict applies to.
+    public var diffHash: String
+    public var reasoning: String
+    public var issues: [String]
+    public var model: String
+    public var checkedAt: Date
+
+    public init(
+        status: Status,
+        diffHash: String,
+        reasoning: String,
+        issues: [String],
+        model: String,
+        checkedAt: Date
+    ) {
+        self.status = status
+        self.diffHash = diffHash
+        self.reasoning = reasoning
+        self.issues = issues
+        self.model = model
+        self.checkedAt = checkedAt
     }
 }

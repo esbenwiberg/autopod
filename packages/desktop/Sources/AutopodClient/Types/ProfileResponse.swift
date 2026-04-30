@@ -46,6 +46,15 @@ public struct ProfileResponse: Codable, Sendable {
   public var lintTimeout: Int?
   public var sastCommand: String?
   public var sastTimeout: Int?
+  /// Override for the merge poller's interval, in seconds. Null = daemon default (60s).
+  public var mergePollIntervalSec: Int?
+  /// Override for the PR-fix-pod cooldown, in seconds. Null = daemon default (600s).
+  /// 0 disables the cooldown entirely.
+  public var fixPodCooldownSec: Int?
+  /// When true, the daemon recycles a single fix pod entity per parent PR
+  /// across all rounds of CI / review feedback instead of spawning a new
+  /// child pod each round.
+  public var reuseFixPod: Bool?
   public var prProvider: String?
   public var adoPat: String?
   public var githubPat: String?
@@ -126,6 +135,9 @@ public struct ProfileResponse: Codable, Sendable {
     lintTimeout = try c.decodeIfPresent(Int.self, forKey: .lintTimeout)
     sastCommand = try c.decodeIfPresent(String.self, forKey: .sastCommand)
     sastTimeout = try c.decodeIfPresent(Int.self, forKey: .sastTimeout)
+    mergePollIntervalSec = try c.decodeIfPresent(Int.self, forKey: .mergePollIntervalSec)
+    fixPodCooldownSec = try c.decodeIfPresent(Int.self, forKey: .fixPodCooldownSec)
+    reuseFixPod = try decodeBoolOrIntIfPresent(c, key: .reuseFixPod)
     prProvider = try c.decodeIfPresent(String.self, forKey: .prProvider)
     adoPat = try c.decodeIfPresent(String.self, forKey: .adoPat)
     githubPat = try c.decodeIfPresent(String.self, forKey: .githubPat)
