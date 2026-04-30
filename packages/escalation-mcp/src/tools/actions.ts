@@ -76,7 +76,15 @@ async function requestApproval(
   // For deploy actions, include the script content so the reviewer knows what they're approving
   let contextSection = '';
   if (approvalContext?.scriptContent) {
-    contextSection = `\n\nScript content to be executed:\n\`\`\`\n${approvalContext.scriptContent}\n\`\`\``;
+    let baselineNote = '';
+    if (approvalContext.matchesBaseline === false) {
+      baselineNote =
+        '\n\n⚠️ This script differs from the trusted baseline captured at pod provision. ' +
+        'The deploy handler will refuse to execute it — approving here cannot bypass that check.';
+    } else if (approvalContext.matchesBaseline === true) {
+      baselineNote = '\n\n✓ Matches the trusted baseline from the base branch.';
+    }
+    contextSection = `\n\nScript content to be executed:\n\`\`\`\n${approvalContext.scriptContent}\n\`\`\`${baselineNote}`;
   }
 
   const escalation: EscalationRequest = {

@@ -260,6 +260,35 @@ export interface Pod {
   forceCompletedAt: string | null;
   /** Operator-supplied reason for the force-complete. Null when not force-completed. */
   forceCompletedReason: string | null;
+  /**
+   * ISO timestamp of the most recent AgentEvent consumed for this pod. The stuck-pod
+   * watchdog reads this to detect `running` pods whose agent stream has gone silent
+   * (container hang, network blip) and auto-fails them so the concurrency slot frees up.
+   * Null until the first event arrives.
+   */
+  lastAgentEventAt: string | null;
+  /**
+   * ISO timestamp when an operator kicked this pod (manual unstick: re-enqueues a
+   * stuck queued pod, or kills + fails a stuck running/provisioning pod).
+   */
+  kickedAt: string | null;
+  /** Operator-supplied reason for the kick. */
+  kickedReason: string | null;
+  /**
+   * One-shot flag set by `promoteToAuto` when the operator promoted an
+   * interactive pod with `--skip-agent`. `processPod` clears it before
+   * handing off to `handleCompletion`, so the agent is skipped exactly once.
+   */
+  skipAgent: boolean;
+  /**
+   * SHA-256 hex digests of every script in `profile.deployment.allowedScripts`
+   * captured from the bare repo at the base ref when the pod was provisioned.
+   * Keyed by repo-relative script path. The deploy handler refuses to execute
+   * a script whose current container content does not match its baseline,
+   * blocking the agent from editing-then-invoking. `null` for pods without
+   * deployment enabled (or pods predating migration 079).
+   */
+  deployBaselineHashes: Record<string, string> | null;
 }
 
 export interface CreatePodRequest {

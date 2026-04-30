@@ -407,7 +407,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const cm = containerManagerFactory.get(pod.executionTarget);
       const scriptContent = await cm.readFile(pod.containerId, `/workspace/${scriptPath}`);
       const scriptHash = createHash('sha256').update(scriptContent, 'utf8').digest('hex');
-      return { scriptContent, scriptHash };
+      // Surface the baseline status so the human approval UI can flag scripts
+      // that were modified during the pod session. The deploy handler enforces
+      // the baseline check independently via `pod.deployBaselineHashes` — this
+      // is purely informational for the reviewer.
+      const baselineHash = pod.deployBaselineHashes?.[scriptPath] ?? null;
+      const matchesBaseline = baselineHash !== null ? scriptHash === baselineHash : null;
+      return { scriptContent, scriptHash, baselineHash, matchesBaseline };
     },
 
     getAvailableActions(podId: string): ActionDefinition[] {

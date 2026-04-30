@@ -1,0 +1,11 @@
+-- Snapshot of trusted baseline hashes for deploy scripts, captured at pod
+-- provision time by reading each entry of profile.deployment.allowedScripts
+-- from the base ref of the bare repo. The deploy handler refuses to execute
+-- a script whose current container content does not hash to the baseline,
+-- preventing the agent from editing a deploy script and then invoking it.
+--
+-- Stored as a JSON object mapping `scriptPath` (relative to repo root) to
+-- the SHA-256 hex digest of the file content at the base ref. Pods that
+-- predate this column (or profiles without deployment.allowedScripts) are
+-- treated as having no baseline — see deploy-handler for the deny policy.
+ALTER TABLE pods ADD COLUMN deploy_baseline_hashes TEXT;

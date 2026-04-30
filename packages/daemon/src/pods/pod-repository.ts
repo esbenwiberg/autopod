@@ -160,6 +160,11 @@ export interface PodUpdates {
   skipValidation?: boolean;
   forceCompletedAt?: string | null;
   forceCompletedReason?: string | null;
+  lastAgentEventAt?: string | null;
+  kickedAt?: string | null;
+  kickedReason?: string | null;
+  skipAgent?: boolean;
+  deployBaselineHashes?: Record<string, string> | null;
 }
 
 export interface PodStats {
@@ -360,6 +365,13 @@ function rowToSession(row: Record<string, unknown>): Pod {
     worktreeCompromised: Boolean(row.worktree_compromised),
     forceCompletedAt: (row.force_completed_at as string) ?? null,
     forceCompletedReason: (row.force_completed_reason as string) ?? null,
+    lastAgentEventAt: (row.last_agent_event_at as string) ?? null,
+    kickedAt: (row.kicked_at as string) ?? null,
+    kickedReason: (row.kicked_reason as string) ?? null,
+    skipAgent: Boolean(row.skip_agent),
+    deployBaselineHashes: row.deploy_baseline_hashes
+      ? (JSON.parse(row.deploy_baseline_hashes as string) as Record<string, string>)
+      : null,
   };
 }
 
@@ -708,6 +720,29 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.forceCompletedReason !== undefined) {
         setClauses.push('force_completed_reason = @forceCompletedReason');
         params.forceCompletedReason = changes.forceCompletedReason;
+      }
+      if (changes.lastAgentEventAt !== undefined) {
+        setClauses.push('last_agent_event_at = @lastAgentEventAt');
+        params.lastAgentEventAt = changes.lastAgentEventAt;
+      }
+      if (changes.kickedAt !== undefined) {
+        setClauses.push('kicked_at = @kickedAt');
+        params.kickedAt = changes.kickedAt;
+      }
+      if (changes.kickedReason !== undefined) {
+        setClauses.push('kicked_reason = @kickedReason');
+        params.kickedReason = changes.kickedReason;
+      }
+      if (changes.skipAgent !== undefined) {
+        setClauses.push('skip_agent = @skipAgent');
+        params.skipAgent = changes.skipAgent ? 1 : 0;
+      }
+      if (changes.deployBaselineHashes !== undefined) {
+        setClauses.push('deploy_baseline_hashes = @deployBaselineHashes');
+        params.deployBaselineHashes =
+          changes.deployBaselineHashes !== null
+            ? JSON.stringify(changes.deployBaselineHashes)
+            : null;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so

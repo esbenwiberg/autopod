@@ -205,14 +205,38 @@ export function createDeployHandler(deps: DeployHandlerDeps) {
 
       const absolutePath = resolveHostScriptPath(pod.worktreePath, scriptPath);
 
-      // Hash verification — prevent timing attack where agent swaps script after approval
-      if (approvalContext?.scriptHash) {
+      // Baseline integrity check — refuse to execute when the script's content
+      // differs from the SHA-256 captured at pod provision time from the base
+      // branch (see captureDeployBaselineHashes in pod-manager). This blocks
+      // the original gap: an agent editing a deploy script and then invoking
+      // it. Only fires for profiles that declare an allowedScripts list (the
+      // intended security posture); profiles without one get the legacy
+      // unrestricted behaviour.
+      if (deployConfig.allowedScripts?.length) {
+        const baselines = pod.deployBaselineHashes;
+        if (!baselines) {
+          throw new Error(
+            `Deploy script "${scriptPath}" cannot run: no trusted baseline was ` +
+              'captured for this pod. The pod likely predates baseline tracking — ' +
+              'kill and recreate it, or land deploy script changes on the base branch.',
+          );
+        }
+        const baseline = baselines[scriptPath];
+        if (!baseline) {
+          throw new Error(
+            `Deploy script "${scriptPath}" has no trusted baseline at the base ref. ` +
+              'Add a matching pattern to profile.deployment.allowedScripts and ensure ' +
+              'the script is committed to the base branch before re-running.',
+          );
+        }
         const currentContent = await runner.readScript(absolutePath);
         const currentHash = sha256hex(currentContent);
-        if (currentHash !== approvalContext.scriptHash) {
+        if (currentHash !== baseline) {
           throw new Error(
-            'Deploy script content changed after approval. Execution aborted for security. ' +
-              'Submit a new deploy request if you need to use the updated script.',
+            `Deploy script "${scriptPath}" does not match its trusted baseline ` +
+              '(captured at pod provision from the base branch). The script was ' +
+              'modified during the pod session — execution aborted for security. ' +
+              'Land legitimate changes on the base branch and rerun the pod.',
           );
         }
       }

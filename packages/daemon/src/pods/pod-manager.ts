@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -323,6 +324,76 @@ async function deriveBareRepoPath(worktreePath: string): Promise<string> {
     cwd: worktreePath,
   });
   return path.resolve(worktreePath, stdout.trim());
+}
+
+/**
+ * Snapshot SHA-256 hashes of every script in `profile.deployment.allowedScripts`
+ * read from the bare repo at the base ref. The deploy handler refuses to run a
+ * script whose live container content does not hash to its baseline — without
+ * this capture the agent could edit a deploy script and immediately invoke it.
+ *
+ * Glob patterns in `allowedScripts` (single-segment `*`) are expanded against
+ * the file list at the base ref. Returns `null` when no patterns are
+ * configured — caller treats that as "no baseline enforcement".
+ */
+async function captureDeployBaselineHashes(
+  bareRepoPath: string,
+  baseRef: string,
+  allowedScripts: string[] | undefined,
+  log: Logger,
+): Promise<Record<string, string> | null> {
+  if (!allowedScripts || allowedScripts.length === 0) return null;
+
+  let files: string[];
+  try {
+    const { stdout } = await execFileAsync('git', [
+      '--git-dir',
+      bareRepoPath,
+      'ls-tree',
+      '-r',
+      '--name-only',
+      baseRef,
+    ]);
+    files = stdout.split('\n').filter((l) => l.length > 0);
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err), bareRepoPath, baseRef },
+      'deploy baseline: could not list files at base ref',
+    );
+    return {};
+  }
+
+  const matches = new Set<string>();
+  for (const pattern of allowedScripts) {
+    if (!pattern.includes('*')) {
+      if (files.includes(pattern)) matches.add(pattern);
+      continue;
+    }
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`^${escaped.replace(/\*/g, '[^/]*')}$`);
+    for (const f of files) {
+      if (re.test(f)) matches.add(f);
+    }
+  }
+
+  const hashes: Record<string, string> = {};
+  for (const scriptPath of matches) {
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['--git-dir', bareRepoPath, 'show', `${baseRef}:${scriptPath}`],
+        { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
+      );
+      hashes[scriptPath] = createHash('sha256').update(stdout, 'utf8').digest('hex');
+    } catch (err) {
+      log.warn(
+        { err: err instanceof Error ? err.message : String(err), scriptPath, baseRef },
+        'deploy baseline: could not read script at base ref',
+      );
+    }
+  }
+
+  return hashes;
 }
 
 /**
@@ -2432,6 +2503,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (!pod.startCommitSha && result.startCommitSha) {
               podRepo.update(podId, { startCommitSha: result.startCommitSha });
               pod = podRepo.getOrThrow(podId);
+            }
+
+            if (profile.deployment?.enabled && bareRepoPath) {
+              const baseRef = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+              const baselineHashes = await captureDeployBaselineHashes(
+                bareRepoPath,
+                baseRef,
+                profile.deployment.allowedScripts,
+                logger,
+              );
+              if (baselineHashes !== null) {
+                podRepo.update(podId, { deployBaselineHashes: baselineHashes });
+                pod = podRepo.getOrThrow(podId);
+                logger.info(
+                  { podId, count: Object.keys(baselineHashes).length, baseRef },
+                  'deploy baseline hashes captured',
+                );
+              }
             }
           }
         }
