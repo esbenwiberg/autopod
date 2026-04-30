@@ -21,7 +21,8 @@ export interface MergeBranchConfig {
   maxDeletions?: number;
   /**
    * Override the default auto-commit message. When omitted, the message is
-   * generated from the staged diff (Claude Haiku, with a heuristic fallback).
+   * generated from the staged diff using the profile's provider+model (with a
+   * heuristic fallback when the provider can't be called from the daemon).
    */
   commitMessage?: string;
   /**
@@ -29,6 +30,10 @@ export interface MergeBranchConfig {
    * commit message. Ignored when `commitMessage` is provided.
    */
   podTask?: string;
+  /** Pod's profile — drives daemon-side LLM auth for the auto-commit message. */
+  profile?: import('@autopod/shared').Profile;
+  /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus'). */
+  podModel?: string;
 }
 
 export interface DiffStats {
@@ -71,14 +76,17 @@ export interface WorktreeManager {
     options?: { maxDeletions?: number },
   ): Promise<boolean>;
   /**
-   * Stage all changes and commit using a message generated from the staged diff
-   * (Claude Haiku, with a heuristic fallback). Returns true if a commit was
+   * Stage all changes and commit using a message generated from the staged
+   * diff via the profile's provider+model (with a heuristic fallback when the
+   * provider can't be called from the daemon). Returns true if a commit was
    * created, false if the working tree was clean. The `podTask` is used as
    * extra context when generating the message.
    */
   commitPendingChangesWithGeneratedMessage(
     worktreePath: string,
     podTask: string | undefined,
+    profile: import('@autopod/shared').Profile,
+    podModel: string,
     options?: { maxDeletions?: number },
   ): Promise<boolean>;
   /** Push the current branch to origin. Verifies HEAD is on `expectedBranch` before pushing. */

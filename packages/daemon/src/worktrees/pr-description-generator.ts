@@ -1,27 +1,16 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import Anthropic from '@anthropic-ai/sdk';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
+import type { Profile, TaskSummary } from '@autopod/shared';
 import type { Logger } from 'pino';
-import type { TaskSummary } from '@autopod/shared';
+import { createProfileAnthropicClient } from '../providers/llm-client.js';
 import { buildPrTitle } from './pr-body-builder.js';
 
 const execFileAsync = promisify(execFile);
 
-const MODEL_ID = 'claude-haiku-4-5-20251001';
 const MAX_DIFF_BYTES = 20 * 1024;
 const API_TIMEOUT_MS = 15_000;
 const MAX_TITLE_LENGTH = 72;
-
-let warnedMissingApiKey = false;
-function warnMissingApiKeyOnce(logger: Logger): void {
-  if (warnedMissingApiKey) return;
-  warnedMissingApiKey = true;
-  logger.warn(
-    'pr-description-generator: ANTHROPIC_API_KEY not set — falling back to template-based ' +
-      'PR title and narrative. Set ANTHROPIC_API_KEY on the daemon for LLM-generated descriptions.',
-  );
-}
 
 const TITLE_SYSTEM_PROMPT =
   'Generate a single-line GitHub PR title in conventional-commit format. ' +
@@ -64,15 +53,31 @@ export interface PrDescriptionInput {
   filesChanged: number;
   linesAdded: number;
   linesRemoved: number;
+  /**
+   * Profile that owns this pod. Drives daemon-side LLM auth via the same
+   * provider/credentials the agent uses.
+   */
+  profile: Profile;
+  /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus', or full id). */
+  podModel: string;
+  /**
+   * Human-supplied instructions captured at workspace→agent promotion. For
+   * promoted pods these are usually a far better signal than `task`, which is
+   * often a placeholder ("#4") on the original interactive pod.
+   */
+  handoffInstructions?: string;
 }
 
-async function readBranchDiff(worktreePath: string, baseBranch: string, logger: Logger): Promise<string> {
+async function readBranchDiff(
+  worktreePath: string,
+  baseBranch: string,
+  logger: Logger,
+): Promise<string> {
   try {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['diff', `origin/${baseBranch}...HEAD`],
-      { cwd: worktreePath, maxBuffer: 30 * 1024 * 1024 },
-    );
+    const { stdout } = await execFileAsync('git', ['diff', `origin/${baseBranch}...HEAD`], {
+      cwd: worktreePath,
+      maxBuffer: 30 * 1024 * 1024,
+    });
     return stdout.slice(0, MAX_DIFF_BYTES);
   } catch (err) {
     logger.debug({ err, worktreePath }, 'pr-description-generator: failed to read branch diff');
@@ -83,32 +88,44 @@ async function readBranchDiff(worktreePath: string, baseBranch: string, logger: 
 function buildUserMessage(input: PrDescriptionInput, diff: string): string {
   const lines: string[] = [];
   lines.push(`Task: ${input.task}`);
+  if (input.handoffInstructions) {
+    lines.push(`Human handoff instructions: ${input.handoffInstructions}`);
+  }
   if (input.seriesDescription) lines.push(`Series description: ${input.seriesDescription}`);
-  if (input.taskSummary?.actualSummary) lines.push(`Agent summary: ${input.taskSummary.actualSummary}`);
+  if (input.taskSummary?.actualSummary) {
+    lines.push(`Agent summary: ${input.taskSummary.actualSummary}`);
+  }
   if (input.taskSummary?.how) lines.push(`Agent technical notes: ${input.taskSummary.how}`);
-  lines.push(`Stats: ${input.filesChanged} files changed, +${input.linesAdded} -${input.linesRemoved}`);
+  lines.push(
+    `Stats: ${input.filesChanged} files changed, +${input.linesAdded} -${input.linesRemoved}`,
+  );
   if (diff) lines.push(`\nDiff (truncated to ${MAX_DIFF_BYTES / 1024}KB):\n${diff}`);
   return lines.join('\n');
 }
 
 /**
- * Generate an LLM PR title in conventional-commit format.
- * Falls back to buildPrTitle() on any error or missing API key.
+ * Generate an LLM PR title in conventional-commit format using the profile's
+ * provider+model. Falls back to `buildPrTitle()` on any error or when the
+ * profile's provider is not daemon-callable (copilot, foundry openai surface).
  */
-export async function generatePrTitle(input: PrDescriptionInput, logger: Logger): Promise<string> {
-  const fallback = buildPrTitle(input.task, input.seriesName, input.seriesDescription);
+export async function generatePrTitle(
+  input: PrDescriptionInput,
+  logger: Logger,
+): Promise<string> {
+  const fallback = buildPrTitle(
+    input.handoffInstructions || input.task,
+    input.seriesName,
+    input.seriesDescription,
+  );
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    warnMissingApiKeyOnce(logger);
-    return fallback;
-  }
+  const llm = await createProfileAnthropicClient(input.profile, input.podModel, logger);
+  if (!llm) return fallback;
 
   const diff = await readBranchDiff(input.worktreePath, input.baseBranch, logger);
 
   try {
-    const client = new Anthropic();
-    const response = await client.messages.create({
-      model: MODEL_ID,
+    const response = await llm.client.messages.create({
+      model: llm.model,
       max_tokens: 100,
       system: TITLE_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
@@ -137,8 +154,9 @@ export async function generatePrTitle(input: PrDescriptionInput, logger: Logger)
 }
 
 /**
- * Generate LLM narrative sections (Why / What / How / Review Focus) for a PR body.
- * Falls back to plain task/taskSummary text on any error or missing API key.
+ * Generate LLM narrative sections (Why / What / How / Review Focus) for a PR
+ * body using the profile's provider+model. Falls back to plain task /
+ * taskSummary text on any error.
  */
 export async function generatePrNarrative(
   input: PrDescriptionInput,
@@ -146,15 +164,13 @@ export async function generatePrNarrative(
   compact = false,
 ): Promise<PrNarrative> {
   const fallback: PrNarrative = {
-    why: input.seriesDescription ?? input.task,
-    what: input.taskSummary?.actualSummary ?? input.task,
+    why: input.seriesDescription ?? input.handoffInstructions ?? input.task,
+    what: input.taskSummary?.actualSummary ?? input.handoffInstructions ?? input.task,
     how: input.taskSummary?.how,
   };
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    warnMissingApiKeyOnce(logger);
-    return fallback;
-  }
+  const llm = await createProfileAnthropicClient(input.profile, input.podModel, logger);
+  if (!llm) return fallback;
 
   const diff = await readBranchDiff(input.worktreePath, input.baseBranch, logger);
   const systemPrompt = compact
@@ -162,9 +178,8 @@ export async function generatePrNarrative(
     : NARRATIVE_SYSTEM_PROMPT;
 
   try {
-    const client = new Anthropic();
-    const response = await client.messages.create({
-      model: MODEL_ID,
+    const response = await llm.client.messages.create({
+      model: llm.model,
       max_tokens: compact ? 400 : 800,
       system: systemPrompt,
       messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
@@ -179,7 +194,10 @@ export async function generatePrNarrative(
 
     const parsed = parseNarrativeJson(raw);
     if (!parsed) {
-      logger.debug({ raw: raw.slice(0, 200) }, 'pr-description-generator: narrative JSON invalid, using fallback');
+      logger.debug(
+        { raw: raw.slice(0, 200) },
+        'pr-description-generator: narrative JSON invalid, using fallback',
+      );
       return fallback;
     }
 
@@ -193,7 +211,10 @@ export async function generatePrNarrative(
 function parseNarrativeJson(raw: string): PrNarrative | null {
   try {
     // Strip markdown code fences if the model wraps output despite instructions
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim();
     const obj = JSON.parse(cleaned) as Record<string, unknown>;
 
     const why = typeof obj['why'] === 'string' ? obj['why'].trim() : null;
@@ -204,7 +225,9 @@ function parseNarrativeJson(raw: string): PrNarrative | null {
 
     let reviewFocus: string[] | undefined;
     if (Array.isArray(obj['reviewFocus'])) {
-      const items = obj['reviewFocus'].filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+      const items = obj['reviewFocus'].filter(
+        (x): x is string => typeof x === 'string' && x.trim().length > 0,
+      );
       if (items.length > 0) reviewFocus = items.slice(0, 3);
     }
 

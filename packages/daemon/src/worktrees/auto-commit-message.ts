@@ -1,27 +1,16 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import Anthropic from '@anthropic-ai/sdk';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
+import type { Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { createProfileAnthropicClient } from '../providers/llm-client.js';
 
 const execFileAsync = promisify(execFile);
 
 const FALLBACK_MESSAGE = 'chore: auto-commit uncommitted agent changes';
-const MODEL_ID = 'claude-haiku-4-5-20251001';
 const MAX_DIFF_BYTES = 8 * 1024;
 const API_TIMEOUT_MS = 10_000;
 const MAX_MESSAGE_LENGTH = 100;
-
-let warnedMissingApiKey = false;
-function warnMissingApiKeyOnce(logger: Logger): void {
-  if (warnedMissingApiKey) return;
-  warnedMissingApiKey = true;
-  logger.warn(
-    'auto-commit message: ANTHROPIC_API_KEY not set — falling back to heuristic ' +
-      'commit messages (`chore: auto-commit updates to ...`). Set ANTHROPIC_API_KEY ' +
-      'on the daemon to get conventional-commit subjects.',
-  );
-}
 
 const SYSTEM_PROMPT =
   'Generate a single conventional-commit subject line summarizing the staged diff. ' +
@@ -30,20 +19,29 @@ const SYSTEM_PROMPT =
   'Return ONLY the subject line — no body, no quotes, no backticks, no markdown, no trailing period. ' +
   'Maximum 72 characters total.';
 
+export interface AutoCommitMessageInput {
+  worktreePath: string;
+  podTask?: string;
+  /** Profile that owns the pod — drives daemon-side LLM auth. */
+  profile: Profile;
+  /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus', or full id). */
+  podModel: string;
+}
+
 /**
  * Generate a commit message for staged changes in `worktreePath`.
  *
- * Tries Claude Haiku first; on any failure falls back to a deterministic
- * `git diff --cached --stat`-based message. As a last resort returns a
- * generic chore message so the caller can always commit.
+ * Tries the profile's provider+model first; on any failure falls back to a
+ * deterministic `git diff --cached --stat`-based message. As a last resort
+ * returns a generic chore message so the caller can always commit.
  *
  * Never throws.
  */
 export async function generateAutoCommitMessage(
-  worktreePath: string,
-  podTask: string | undefined,
+  input: AutoCommitMessageInput,
   logger: Logger,
 ): Promise<string> {
+  const { worktreePath, podTask } = input;
   let stat = '';
   try {
     const result = await execFileAsync('git', ['diff', '--cached', '--stat'], {
@@ -57,10 +55,8 @@ export async function generateAutoCommitMessage(
 
   const heuristic = buildHeuristicMessage(stat);
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    warnMissingApiKeyOnce(logger);
-    return heuristic;
-  }
+  const llm = await createProfileAnthropicClient(input.profile, input.podModel, logger);
+  if (!llm) return heuristic;
 
   let diff = '';
   try {
@@ -75,10 +71,9 @@ export async function generateAutoCommitMessage(
   }
 
   try {
-    const client = new Anthropic();
     const taskLine = podTask ? `Pod task: ${podTask}\n\n` : '';
-    const response = await client.messages.create({
-      model: MODEL_ID,
+    const response = await llm.client.messages.create({
+      model: llm.model,
       max_tokens: 100,
       system: SYSTEM_PROMPT,
       messages: [
@@ -106,10 +101,7 @@ export async function generateAutoCommitMessage(
 
     return text;
   } catch (err) {
-    logger.warn(
-      { err, worktreePath },
-      'auto-commit message: Anthropic call failed, using heuristic',
-    );
+    logger.warn({ err, worktreePath }, 'auto-commit message: model call failed, using heuristic');
     return heuristic;
   }
 }

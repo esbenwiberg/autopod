@@ -1,3 +1,4 @@
+import type { Profile } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import { GhPrManager } from './pr-manager.js';
@@ -44,6 +45,8 @@ describe('GhPrManager', () => {
       podId: 'abc123',
       task: 'Add dark mode',
       profileName: 'my-app',
+      profile: { name: 'my-app' } as unknown as Profile,
+      podModel: 'haiku',
       validationResult: null,
       filesChanged: 3,
       linesAdded: 50,

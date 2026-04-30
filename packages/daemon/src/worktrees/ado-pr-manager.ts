@@ -155,6 +155,9 @@ export class AdoPrManager implements PrManager {
       filesChanged: config.filesChanged,
       linesAdded: config.linesAdded,
       linesRemoved: config.linesRemoved,
+      profile: config.profile,
+      podModel: config.podModel,
+      handoffInstructions: config.handoffInstructions,
     };
     const [title, narrative] = await Promise.all([
       generatePrTitle(descInput, this.logger),

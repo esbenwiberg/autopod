@@ -1,4 +1,4 @@
-import type { ScanFinding, TaskSummary, ValidationResult } from '@autopod/shared';
+import type { Profile, ScanFinding, TaskSummary, ValidationResult } from '@autopod/shared';
 
 export interface CreatePrConfig {
   /** Worktree path to run `gh` from (inherits git remote context) */
@@ -15,6 +15,10 @@ export interface CreatePrConfig {
   task: string;
   /** Profile name */
   profileName: string;
+  /** Resolved profile — drives daemon-side LLM auth for title/narrative generation. */
+  profile: Profile;
+  /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus'). */
+  podModel: string;
   /** Validation result to include in PR body */
   validationResult: ValidationResult | null;
   /** Diff stats */
@@ -33,6 +37,12 @@ export interface CreatePrConfig {
   seriesName?: string;
   /** Security scan findings to surface in the PR body. */
   securityFindings?: ScanFinding[];
+  /**
+   * Human-supplied instructions captured at workspace→agent promotion. Far
+   * better signal than `task` for promoted pods (where `task` is often a
+   * placeholder like "#4").
+   */
+  handoffInstructions?: string;
 }
 
 export interface MergePrConfig {

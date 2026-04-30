@@ -1,13 +1,15 @@
 import type { ChildProcess } from 'node:child_process';
+import type { Profile } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildHeuristicMessage, generateAutoCommitMessage } from './auto-commit-message.js';
 
 const logger = pino({ level: 'silent' });
 
-const { execFileMock, anthropicCreateMock } = vi.hoisted(() => ({
+const { execFileMock, anthropicCreateMock, createClientMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
   anthropicCreateMock: vi.fn(),
+  createClientMock: vi.fn(),
 }));
 
 vi.mock('node:child_process', async () => {
@@ -15,13 +17,9 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile: execFileMock };
 });
 
-vi.mock('@anthropic-ai/sdk', () => {
-  return {
-    default: vi.fn().mockImplementation(() => ({
-      messages: { create: anthropicCreateMock },
-    })),
-  };
-});
+vi.mock('../providers/llm-client.js', () => ({
+  createProfileAnthropicClient: createClientMock,
+}));
 
 type ExecCallback = (error: Error | null, result: unknown, stderr?: string) => void;
 
@@ -69,90 +67,110 @@ function setupExec(opts: { stat?: string; diff?: string; statError?: Error; diff
   );
 }
 
-describe('generateAutoCommitMessage', () => {
-  const originalKey = process.env.ANTHROPIC_API_KEY;
+function setupClientAvailable() {
+  createClientMock.mockResolvedValue({
+    client: { messages: { create: anthropicCreateMock } },
+    model: 'claude-haiku-4-5',
+  });
+}
 
+function setupClientUnavailable() {
+  createClientMock.mockResolvedValue(null);
+}
+
+const SAMPLE_PROFILE = {
+  name: 'test-profile',
+  modelProvider: 'max',
+  providerCredentials: { provider: 'max' },
+} as unknown as Profile;
+
+const baseInput = {
+  worktreePath: '/tmp/wt',
+  podTask: 'task',
+  profile: SAMPLE_PROFILE,
+  podModel: 'haiku',
+};
+
+describe('generateAutoCommitMessage', () => {
   beforeEach(() => {
     execFileMock.mockReset();
     anthropicCreateMock.mockReset();
+    createClientMock.mockReset();
   });
 
   afterEach(() => {
-    if (originalKey === undefined) {
-      // biome-ignore lint/performance/noDelete: assigning undefined to process.env coerces to the string "undefined"
-      delete process.env.ANTHROPIC_API_KEY;
-    } else {
-      process.env.ANTHROPIC_API_KEY = originalKey;
-    }
+    vi.restoreAllMocks();
   });
 
-  it('returns the model output verbatim on a successful Haiku call', async () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-test';
+  it('returns the model output verbatim on a successful call', async () => {
+    setupClientAvailable();
     setupExec({});
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: add foo helper' }],
     });
 
-    const msg = await generateAutoCommitMessage('/tmp/wt', 'add foo helper', logger);
+    const msg = await generateAutoCommitMessage(
+      { ...baseInput, podTask: 'add foo helper' },
+      logger,
+    );
     expect(msg).toBe('feat: add foo helper');
     expect(anthropicCreateMock).toHaveBeenCalledOnce();
   });
 
   it('falls back to heuristic when the API call throws', async () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-test';
+    setupClientAvailable();
     setupExec({});
     anthropicCreateMock.mockRejectedValueOnce(new Error('429 rate limited'));
 
-    const msg = await generateAutoCommitMessage('/tmp/wt', 'task', logger);
+    const msg = await generateAutoCommitMessage(baseInput, logger);
     expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
   });
 
-  it('skips the API call entirely when ANTHROPIC_API_KEY is unset', async () => {
-    // biome-ignore lint/performance/noDelete: assigning undefined to process.env coerces to the string "undefined"
-    delete process.env.ANTHROPIC_API_KEY;
+  it('skips the API call entirely when the profile is not daemon-callable', async () => {
+    setupClientUnavailable();
     setupExec({});
 
-    const msg = await generateAutoCommitMessage('/tmp/wt', 'task', logger);
+    const msg = await generateAutoCommitMessage(baseInput, logger);
     expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
   });
 
   it('rejects model output that contains newlines and falls back to heuristic', async () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-test';
+    setupClientAvailable();
     setupExec({});
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: add foo helper\n\nThis is a body' }],
     });
 
-    const msg = await generateAutoCommitMessage('/tmp/wt', 'task', logger);
+    const msg = await generateAutoCommitMessage(baseInput, logger);
     expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
   });
 
   it('rejects model output longer than 100 chars and falls back to heuristic', async () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-test';
+    setupClientAvailable();
     setupExec({});
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: '.padEnd(120, 'x') }],
     });
 
-    const msg = await generateAutoCommitMessage('/tmp/wt', 'task', logger);
+    const msg = await generateAutoCommitMessage(baseInput, logger);
     expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
   });
 
   it('returns the original hardcoded message when git stat itself fails', async () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-test';
+    setupClientAvailable();
     setupExec({ statError: new Error('not a git repo') });
 
-    const msg = await generateAutoCommitMessage('/tmp/wt', 'task', logger);
+    const msg = await generateAutoCommitMessage(baseInput, logger);
     expect(msg).toBe('chore: auto-commit uncommitted agent changes');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
   });
 
   it('falls back to heuristic when reading the full diff fails', async () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-test';
+    setupClientAvailable();
     setupExec({ diffError: new Error('diff broke') });
 
-    const msg = await generateAutoCommitMessage('/tmp/wt', 'task', logger);
+    const msg = await generateAutoCommitMessage(baseInput, logger);
     expect(msg).toBe('chore: auto-commit updates to foo.ts, bar.ts, baz.ts (+14 -2)');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
   });

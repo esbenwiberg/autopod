@@ -485,10 +485,27 @@ export class LocalWorktreeManager implements WorktreeManager {
       await this.commitPendingChanges(worktreePath, config.commitMessage, {
         maxDeletions: config.maxDeletions ?? 100,
       });
+    } else if (config.profile && config.podModel) {
+      await this.commitPendingChangesWithGeneratedMessage(
+        worktreePath,
+        config.podTask,
+        config.profile,
+        config.podModel,
+        { maxDeletions: config.maxDeletions ?? 100 },
+      );
     } else {
-      await this.commitPendingChangesWithGeneratedMessage(worktreePath, config.podTask, {
-        maxDeletions: config.maxDeletions ?? 100,
-      });
+      // No profile context (rare — only happens for callers that haven't been
+      // updated). Fall back to the heuristic path inside generateAutoCommitMessage
+      // by passing a synthetic profile with a null provider.
+      this.logger.warn(
+        { worktreePath },
+        'mergeBranch called without profile/podModel — auto-commit message will be heuristic-only',
+      );
+      await this.commitPendingChanges(
+        worktreePath,
+        'chore: auto-commit uncommitted agent changes',
+        { maxDeletions: config.maxDeletions ?? 100 },
+      );
     }
 
     // Push using auth URL so the PAT is never stored in git config.
@@ -550,11 +567,16 @@ export class LocalWorktreeManager implements WorktreeManager {
   async commitPendingChangesWithGeneratedMessage(
     worktreePath: string,
     podTask: string | undefined,
+    profile: import('@autopod/shared').Profile,
+    podModel: string,
     options?: { maxDeletions?: number },
   ): Promise<boolean> {
     const hasStaged = await this.stageAllChanges(worktreePath);
     if (!hasStaged) return false;
-    const message = await generateAutoCommitMessage(worktreePath, podTask, this.logger);
+    const message = await generateAutoCommitMessage(
+      { worktreePath, podTask, profile, podModel },
+      this.logger,
+    );
     return this.commitStagedChanges(worktreePath, message, options?.maxDeletions ?? 100);
   }
 

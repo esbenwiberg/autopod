@@ -3798,10 +3798,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // the host bare's branch tip — see syncWorkspaceBack for context.
       const safeAutoCommit = syncSucceeded && agentCommitsPushed;
       if (pod.worktreePath) {
+        const profileForCommit = profileStore.get(pod.profileName);
         try {
           const committed = await worktreeManager.commitPendingChangesWithGeneratedMessage(
             pod.worktreePath,
             pod.task,
+            profileForCommit,
+            pod.model,
             { maxDeletions: safeAutoCommit ? 100 : 0 },
           );
           if (committed) {
@@ -3821,6 +3824,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 await worktreeManager.commitPendingChangesWithGeneratedMessage(
                   pod.worktreePath,
                   pod.task,
+                  profileForCommit,
+                  pod.model,
                   { maxDeletions: 100 },
                 );
                 logger.info({ podId }, 'Auto-committed after live container recovery');
@@ -4218,6 +4223,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             maxDeletions: 0,
             // Provide pod task as context for any auto-generated commit message.
             podTask: pod.task,
+            profile: retryProfile,
+            podModel: pod.model,
           });
           const newPrUrl = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
@@ -4228,6 +4235,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             task: pod.task,
             profileName: pod.profileName,
+            profile: retryProfile,
+            podModel: pod.model,
+            handoffInstructions: pod.handoffInstructions ?? undefined,
             validationResult: null,
             filesChanged: pod.filesChanged,
             linesAdded: pod.linesAdded,
@@ -4282,6 +4292,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
             maxDeletions: 0,
             podTask: pod.task,
+            profile,
+            podModel: pod.model,
           });
           emitActivityStatus(podId, 'Branch pushed successfully');
         } catch (err) {
@@ -5323,6 +5335,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 pat: selectGitPat(profile),
                 maxDeletions: validationSyncOk ? 100 : 0,
                 podTask: pod.task,
+                profile,
+                podModel: pod.model,
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
@@ -5378,6 +5392,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
+                  profile,
+                  podModel: s2.model,
+                  handoffInstructions: s2.handoffInstructions ?? undefined,
                   validationResult: result,
                   filesChanged: s3.filesChanged,
                   linesAdded: s3.linesAdded,
@@ -5714,6 +5731,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 pat: selectGitPat(profile),
                 maxDeletions: 0,
                 podTask: pod.task,
+                profile,
+                podModel: pod.model,
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
@@ -5753,6 +5772,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
+                  profile,
+                  podModel: s2.model,
+                  handoffInstructions: s2.handoffInstructions ?? undefined,
                   validationResult: result,
                   filesChanged: s3.filesChanged,
                   linesAdded: s3.linesAdded,
@@ -6543,6 +6565,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           maxDeletions: 0,
           // Provide pod task as context for any auto-generated commit message.
           podTask: pod.task,
+          profile,
+          podModel: pod.model,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -6567,6 +6591,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           podId,
           task: pod.task,
           profileName: pod.profileName,
+          profile,
+          podModel: pod.model,
+          handoffInstructions: pod.handoffInstructions ?? undefined,
           validationResult: null,
           filesChanged: pod.filesChanged,
           linesAdded: pod.linesAdded,
@@ -6613,9 +6640,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         };
       }
       try {
-        await worktreeManager.commitPendingChangesWithGeneratedMessage(pod.worktreePath, pod.task, {
-          maxDeletions: 100,
-        });
+        const profileForRecovery = profileStore.get(pod.profileName);
+        await worktreeManager.commitPendingChangesWithGeneratedMessage(
+          pod.worktreePath,
+          pod.task,
+          profileForRecovery,
+          pod.model,
+          { maxDeletions: 100 },
+        );
         podRepo.update(podId, { worktreeCompromised: false });
         emitActivityStatus(podId, 'Worktree recovered from container and committed successfully');
         return { recovered: true, message: 'Worktree recovered and committed' };
