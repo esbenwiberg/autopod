@@ -451,6 +451,27 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       console.log(chalk.green('Nudge queued. Agent will see it on next check_messages call.'));
     });
 
+  // ap kick
+  program
+    .command('kick <id>')
+    .description(
+      'Unstick a pod: re-enqueues a stuck queued pod, or kills+fails a stuck running/provisioning pod',
+    )
+    .option('-r, --reason <reason>', 'Reason for the kick (audit trail)')
+    .action(async (id: string, opts: { reason?: string }) => {
+      const client = getClient();
+      const resolvedId = await resolvePodId(client, id);
+      const result = await withSpinner('Kicking pod...', () =>
+        client.kickPod(resolvedId, opts.reason),
+      );
+      if (result.action === 'requeued') {
+        console.log(chalk.green(`Pod ${resolvedId} re-enqueued.`));
+      } else {
+        console.log(chalk.yellow(`Pod ${resolvedId} force-failed — slot freed.`));
+        console.log(chalk.dim('Recover with: ap resume <id> or ap force-complete <id>'));
+      }
+    });
+
   // ap tell
   program
     .command('tell <id> <message>')

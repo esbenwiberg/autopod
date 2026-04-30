@@ -722,6 +722,10 @@ if (aciContainerManager) {
 // a daemon restart or after the approveSession bug that omitted this call).
 podManager.rehydrateDependentSessions();
 
+// Watchdog: auto-fail running pods whose agent stream went silent so the
+// concurrency slot frees up. Threshold via AUTOPOD_STUCK_RUNNING_THRESHOLD_MS.
+podManager.startStuckPodWatchdog();
+
 // Graceful shutdown
 async function shutdown(signal: string) {
   logger.info({ signal }, 'Shutting down...');
@@ -739,6 +743,9 @@ async function shutdown(signal: string) {
 
   // Stop perf-mark cleaner
   clearInterval(perfClearTimer);
+
+  // Stop the stuck-pod watchdog
+  podManager.stopStuckPodWatchdog();
 
   // Drain pod queue
   await podQueue.drain();

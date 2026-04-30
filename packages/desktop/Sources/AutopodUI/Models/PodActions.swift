@@ -54,6 +54,11 @@ public struct PodActions: Sendable {
   /// Use when the agent's work is fine but a downstream step is stuck and re-running
   /// would just burn tokens. Reason is optional, persisted for audit.
   public var forceComplete: @MainActor @Sendable (String, String?) async -> Void
+  /// Unstick a pod: re-enqueues a stuck `queued` pod, or kills+fails a stuck
+  /// `running`/`provisioning` pod so its concurrency slot frees up. Reason is
+  /// optional, persisted for audit. After a force-fail the pod is recoverable
+  /// via `resume` / `forceComplete`.
+  public var kick: @MainActor @Sendable (String, String?) async -> Void
   /// Ask the daemon to parse a local brief folder and return the DAG preview.
   public var previewSeriesFolder: @MainActor @Sendable (String) async -> SeriesPreviewResponse?
   /// Ask the daemon to parse a brief folder on a git branch.
@@ -111,6 +116,7 @@ public struct PodActions: Sendable {
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     forceComplete: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
+    kick: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
     previewSeriesOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> SeriesPreviewResponse? = { _, _, _ in nil },
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
@@ -149,6 +155,7 @@ public struct PodActions: Sendable {
     self.retryCreatePr = retryCreatePr
     self.resume = resume
     self.forceComplete = forceComplete
+    self.kick = kick
     self.previewSeriesFolder = previewSeriesFolder
     self.previewSeriesOnBranch = previewSeriesOnBranch
     self.lastPreviewError = lastPreviewError

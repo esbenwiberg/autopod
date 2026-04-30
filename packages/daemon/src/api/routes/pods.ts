@@ -293,6 +293,25 @@ export function podRoutes(
     }
   });
 
+  // POST /pods/:podId/kick — operator unstick: re-enqueue a stuck queued pod, or
+  // kill+fail a stuck running/provisioning pod so its concurrency slot frees up.
+  app.post('/pods/:podId/kick', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason =
+      typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : undefined;
+    try {
+      const result = await podManager.kickPod(podId, reason);
+      return { ok: true, action: result.action };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
   // POST /pods/:podId/force-complete — admin override: transition `failed → complete`,
   // skipping push, PR creation, and merge. Operator accepts the worktree as-is.
   app.post('/pods/:podId/force-complete', async (request, reply) => {

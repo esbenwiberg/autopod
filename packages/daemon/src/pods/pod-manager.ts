@@ -32,6 +32,7 @@ import type {
   ValidationFinding,
   ValidationOverride,
   ValidationOverridePayload,
+  ValidationPhase,
 } from '@autopod/shared';
 import {
   AUTOPOD_INSTRUCTIONS_PATH,
@@ -666,6 +667,22 @@ export interface PodManager {
    * + reason on the pod row for audit.
    */
   forceComplete(podId: string, reason?: string): Promise<void>;
+  /**
+   * Operator escape hatch to unstick a pod. On `queued` pods (e.g. if the queue
+   * silently lost track), re-enqueues without state change. On `running` /
+   * `provisioning` pods, kills the container best-effort and transitions to
+   * `failed` so the slot frees up — the pod is then recoverable via
+   * `resume` / `force-complete`. Persists `kickedAt` + reason for audit.
+   */
+  kickPod(podId: string, reason?: string): Promise<{ action: 'requeued' | 'failed' }>;
+  /**
+   * Start the global watchdog that detects `running` pods whose agent stream has
+   * gone silent for longer than the configured threshold and transitions them to
+   * `failed`. Called once from the daemon entrypoint. Idempotent.
+   */
+  startStuckPodWatchdog(options?: { intervalMs?: number; thresholdMs?: number }): void;
+  /** Stop the stuck-pod watchdog (used in tests / shutdown). */
+  stopStuckPodWatchdog(): void;
   /** Return all pods belonging to a series, ordered by creation time. */
   getSeriesPods(seriesId: string): Pod[];
   /**
@@ -876,6 +893,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const validationAbortControllers = new Map<string, AbortController>();
+
+  /**
+   * Per-pod throttle for `last_agent_event_at` DB writes. Bumped every agent event
+   * but persisted at most once per `EVENT_TIMESTAMP_WRITE_THROTTLE_MS` to avoid
+   * hammering SQLite during chatty streams. The watchdog threshold is in the
+   * tens of minutes so 10 s granularity is fine.
+   */
+  const lastEventWriteAt = new Map<string, number>();
+  const EVENT_TIMESTAMP_WRITE_THROTTLE_MS = 10_000;
+
+  /** Stuck-running watchdog interval handle (single global timer). */
+  let stuckPodWatchdog: ReturnType<typeof setInterval> | null = null;
 
   /**
    * Returns the pod whose branch/baseBranch/prUrl a fix pod should inherit.
@@ -1845,6 +1874,60 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
   }
 
+  /** Per-phase WebSocket events that drive the desktop Validation tab chips.
+   *  Pass to every `validationEngine.validate()` call — the engine no-ops on
+   *  missing callbacks, which silently freezes the UI. */
+  function buildPhaseEventCallbacks(podId: string) {
+    return {
+      onPhaseStarted: (phase: ValidationPhase) => {
+        eventBus.emit({
+          type: 'pod.validation_phase_started',
+          timestamp: new Date().toISOString(),
+          podId,
+          phase,
+        });
+      },
+      onPhaseCompleted: (
+        phase: ValidationPhase,
+        status: 'pass' | 'fail' | 'skip',
+        phaseResult: unknown,
+      ) => {
+        const base = {
+          type: 'pod.validation_phase_completed' as const,
+          timestamp: new Date().toISOString(),
+          podId,
+          phase,
+          phaseStatus: status,
+        };
+        if (phase === 'build') {
+          eventBus.emit({ ...base, buildResult: phaseResult as BuildResult });
+        } else if (phase === 'test') {
+          eventBus.emit({
+            ...base,
+            testResult: phaseResult as {
+              status: 'pass' | 'fail' | 'skip';
+              duration: number;
+              stdout?: string;
+              stderr?: string;
+            },
+          });
+        } else if (phase === 'lint') {
+          eventBus.emit({ ...base, lintResult: phaseResult as LintResult });
+        } else if (phase === 'sast') {
+          eventBus.emit({ ...base, sastResult: phaseResult as SastResult });
+        } else if (phase === 'health') {
+          eventBus.emit({ ...base, healthResult: phaseResult as HealthResult });
+        } else if (phase === 'pages') {
+          eventBus.emit({ ...base, pageResults: phaseResult as PageResult[] });
+        } else if (phase === 'ac') {
+          eventBus.emit({ ...base, acResult: phaseResult as AcValidationResult | null });
+        } else if (phase === 'review') {
+          eventBus.emit({ ...base, reviewResult: phaseResult as TaskReviewResult | null });
+        }
+      },
+    };
+  }
+
   /**
    * If `err` is a DeletionGuardError, mark the pod as worktree-compromised so the desktop
    * disables Create PR / merge actions until a human reconciles the state. Emits an event
@@ -2334,13 +2417,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
-      const profile = profileStore.get(pod.profileName);
-
       function emitStatus(message: string): void {
         emitActivityStatus(podId, message);
       }
 
       try {
+        // Fetched inside the try so a missing profile (or broken extends chain) is caught
+        // and transitions the pod to 'failed' instead of orphaning it as 'queued' forever —
+        // the queue's finally block frees activeIds, and without a status update nothing
+        // ever re-enqueues the pod.
+        const profile = profileStore.get(pod.profileName);
+
         // For handoff pods the interactive container is still running — sync the
         // human's work back to the host worktree and stop the container here so
         // the promote HTTP endpoint can return immediately without timing out.
@@ -3754,6 +3841,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             event,
           });
 
+          // Throttled bump for the stuck-running watchdog. Accepts up to
+          // EVENT_TIMESTAMP_WRITE_THROTTLE_MS staleness — fine because the
+          // watchdog threshold dwarfs the throttle window.
+          const eventNow = Date.now();
+          const lastWrite = lastEventWriteAt.get(podId) ?? 0;
+          if (eventNow - lastWrite >= EVENT_TIMESTAMP_WRITE_THROTTLE_MS) {
+            lastEventWriteAt.set(podId, eventNow);
+            try {
+              podRepo.update(podId, { lastAgentEventAt: new Date(eventNow).toISOString() });
+            } catch (err) {
+              logger.warn({ err, podId }, 'Failed to bump lastAgentEventAt');
+            }
+          }
+
           if (event.type === 'escalation') {
             const pod = podRepo.getOrThrow(podId);
             if (pod.status === 'running') {
@@ -3903,6 +4004,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       } finally {
         stopCommitPolling(podId);
+        lastEventWriteAt.delete(podId);
       }
     },
 
@@ -5267,50 +5369,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             validationConfig,
             (phase) => emitActivityStatus(podId, phase),
             validationController.signal,
-            {
-              onPhaseStarted: (phase) => {
-                eventBus.emit({
-                  type: 'pod.validation_phase_started',
-                  timestamp: new Date().toISOString(),
-                  podId,
-                  phase,
-                });
-              },
-              onPhaseCompleted: (phase, status, phaseResult) => {
-                const base = {
-                  type: 'pod.validation_phase_completed' as const,
-                  timestamp: new Date().toISOString(),
-                  podId,
-                  phase,
-                  phaseStatus: status,
-                };
-                if (phase === 'build') {
-                  eventBus.emit({ ...base, buildResult: phaseResult as BuildResult });
-                } else if (phase === 'test') {
-                  eventBus.emit({
-                    ...base,
-                    testResult: phaseResult as {
-                      status: 'pass' | 'fail' | 'skip';
-                      duration: number;
-                      stdout?: string;
-                      stderr?: string;
-                    },
-                  });
-                } else if (phase === 'lint') {
-                  eventBus.emit({ ...base, lintResult: phaseResult as LintResult });
-                } else if (phase === 'sast') {
-                  eventBus.emit({ ...base, sastResult: phaseResult as SastResult });
-                } else if (phase === 'health') {
-                  eventBus.emit({ ...base, healthResult: phaseResult as HealthResult });
-                } else if (phase === 'pages') {
-                  eventBus.emit({ ...base, pageResults: phaseResult as PageResult[] });
-                } else if (phase === 'ac') {
-                  eventBus.emit({ ...base, acResult: phaseResult as AcValidationResult | null });
-                } else if (phase === 'review') {
-                  eventBus.emit({ ...base, reviewResult: phaseResult as TaskReviewResult | null });
-                }
-              },
-            },
+            buildPhaseEventCallbacks(podId),
           );
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies
@@ -5461,6 +5520,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   { ...validationConfig, reviewDepth: 'deep' },
                   (phase) => emitActivityStatus(podId, phase),
                   validationController.signal,
+                  buildPhaseEventCallbacks(podId),
                 );
                 if (s2.validationOverrides && s2.validationOverrides.length > 0) {
                   hoistedResult = applyOverrides(hoistedResult, s2.validationOverrides);
@@ -5826,6 +5886,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const attempt = 1;
       podRepo.update(podId, { validationAttempts: attempt });
 
+      // Reset the desktop Validation tab chips for this fresh attempt — without this,
+      // the UI keeps the previous run's stale ValidationProgress.
+      eventBus.emit({
+        type: 'pod.validation_started',
+        timestamp: new Date().toISOString(),
+        podId,
+        attempt,
+      });
+
       emitActivityStatus(podId, 'Starting revalidation (human fix)…');
 
       try {
@@ -5910,6 +5979,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             },
             (phase) => emitActivityStatus(podId, phase),
             revalidateController.signal,
+            buildPhaseEventCallbacks(podId),
           );
         } catch (validateErr) {
           logger.error({ err: validateErr, podId }, 'Revalidation engine threw unexpectedly');
@@ -6893,6 +6963,120 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         { podId, reason: trimmedReason },
         'Pod force-completed by operator (admin override — push/PR/merge skipped)',
       );
+    },
+
+    async kickPod(podId: string, reason?: string): Promise<{ action: 'requeued' | 'failed' }> {
+      const pod = podRepo.getOrThrow(podId);
+      const trimmedReason = reason?.trim() || null;
+      const nowIso = new Date().toISOString();
+
+      if (pod.status === 'queued') {
+        // The queue's dedup is `!queue.includes && !activeIds.has`. A pod stuck in
+        // 'queued' has been removed from both, so a fresh enqueue will accept it.
+        podRepo.update(podId, { kickedAt: nowIso, kickedReason: trimmedReason });
+        enqueueSession(podId);
+        emitActivityStatus(
+          podId,
+          trimmedReason ? `Re-enqueued by operator: ${trimmedReason}` : 'Re-enqueued by operator',
+        );
+        logger.warn(
+          { podId, reason: trimmedReason },
+          'Pod kicked by operator — re-enqueued from queued',
+        );
+        return { action: 'requeued' };
+      }
+
+      if (pod.status === 'running' || pod.status === 'provisioning') {
+        if (pod.containerId) {
+          try {
+            const cm = containerManagerFactory.get(pod.executionTarget);
+            await cm.stop(pod.containerId);
+          } catch (err) {
+            logger.warn({ err, podId }, 'kick: failed to stop container');
+          }
+        }
+        podRepo.update(podId, { kickedAt: nowIso, kickedReason: trimmedReason });
+        transition(pod, 'failed', { completedAt: nowIso });
+        emitActivityStatus(
+          podId,
+          trimmedReason
+            ? `Kicked by operator (force-failed): ${trimmedReason}`
+            : 'Kicked by operator (force-failed)',
+        );
+        logger.warn(
+          { podId, previousStatus: pod.status, reason: trimmedReason },
+          'Pod kicked by operator — transitioned to failed',
+        );
+        return { action: 'failed' };
+      }
+
+      throw new AutopodError(
+        `Cannot kick pod ${podId} in status ${pod.status} — only queued/running/provisioning are eligible`,
+        'INVALID_STATE',
+        409,
+      );
+    },
+
+    startStuckPodWatchdog(options?: { intervalMs?: number; thresholdMs?: number }): void {
+      if (stuckPodWatchdog) return; // idempotent
+      const intervalMs = options?.intervalMs ?? 60_000;
+      const thresholdMs =
+        options?.thresholdMs ??
+        (process.env.AUTOPOD_STUCK_RUNNING_THRESHOLD_MS
+          ? Number(process.env.AUTOPOD_STUCK_RUNNING_THRESHOLD_MS)
+          : 30 * 60 * 1_000);
+
+      const tick = async (): Promise<void> => {
+        try {
+          const running = podRepo.list({ status: 'running' as PodStatus });
+          const now = Date.now();
+          for (const pod of running) {
+            // Use lastAgentEventAt when present; fall back to startedAt/updatedAt
+            // for pods created before the migration or that never emitted an event.
+            const reference =
+              pod.lastAgentEventAt ?? pod.startedAt ?? pod.updatedAt ?? pod.createdAt;
+            const refMs = new Date(reference).getTime();
+            if (Number.isNaN(refMs)) continue;
+            const ageMs = now - refMs;
+            if (ageMs < thresholdMs) continue;
+
+            logger.warn(
+              { podId: pod.id, ageMs, thresholdMs },
+              'Watchdog: running pod has gone silent — transitioning to failed',
+            );
+            if (pod.containerId) {
+              try {
+                const cm = containerManagerFactory.get(pod.executionTarget);
+                await cm.stop(pod.containerId);
+              } catch (err) {
+                logger.warn({ err, podId: pod.id }, 'Watchdog: failed to stop container');
+              }
+            }
+            try {
+              const fresh = podRepo.getOrThrow(pod.id);
+              if (fresh.status !== 'running') continue; // raced with another transition
+              transition(fresh, 'failed', { completedAt: new Date(now).toISOString() });
+              emitActivityStatus(pod.id, 'Watchdog: no agent activity — pod auto-failed');
+            } catch (err) {
+              logger.warn({ err, podId: pod.id }, 'Watchdog: transition to failed failed');
+            }
+          }
+        } catch (err) {
+          logger.warn({ err }, 'Stuck-pod watchdog tick failed');
+        }
+      };
+
+      stuckPodWatchdog = setInterval(() => {
+        void tick();
+      }, intervalMs);
+      logger.info({ intervalMs, thresholdMs }, 'Stuck-pod watchdog started');
+    },
+
+    stopStuckPodWatchdog(): void {
+      if (stuckPodWatchdog) {
+        clearInterval(stuckPodWatchdog);
+        stuckPodWatchdog = null;
+      }
     },
 
     async recoverWorktree(podId: string): Promise<{ recovered: boolean; message: string }> {

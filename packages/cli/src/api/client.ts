@@ -141,11 +141,23 @@ export class AutopodClient {
     await this.request<void>('POST', `/pods/${id}/kill`);
   }
 
+  async kickPod(
+    id: string,
+    reason?: string,
+  ): Promise<{ ok: boolean; action: 'requeued' | 'failed' }> {
+    return this.request<{ ok: boolean; action: 'requeued' | 'failed' }>(
+      'POST',
+      `/pods/${id}/kick`,
+      reason ? { reason } : undefined,
+    );
+  }
+
   async completeSession(
     id: string,
     options?: {
       promoteTo?: 'pr' | 'branch' | 'artifact' | 'none';
       instructions?: string;
+      skipAgent?: boolean;
     },
   ): Promise<{
     ok: boolean;

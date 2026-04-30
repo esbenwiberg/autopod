@@ -275,6 +275,48 @@ public struct DetailPanelView: View {
     private var headerActions: some View {
         HStack(spacing: 6) {
             switch pod.status {
+            case .queued:
+                // Kick — re-enqueues a stuck queued pod (e.g. orphaned by a missing
+                // profile or a transient queue hiccup). Safe, no state change.
+                Button {
+                    Task { await actions.kick(pod.id, nil) }
+                } label: {
+                    Label("Kick", systemImage: "bolt")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.blue)
+                .help("Re-enqueue this pod. Use if it's stuck queued while slots are free.")
+                Button {
+                    Task { await actions.kill(pod.id) }
+                } label: {
+                    Label("Kill", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+
+            case .provisioning:
+                // Kick — kills container and force-fails. Use when provisioning is hung.
+                Button {
+                    kickReasonText = ""
+                    showKickSheet = true
+                } label: {
+                    Label("Kick", systemImage: "bolt")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.orange)
+                .help("Kill the container and mark this pod failed so the slot frees up.")
+                Button {
+                    Task { await actions.kill(pod.id) }
+                } label: {
+                    Label("Kill", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+
             case .running:
                 if pod.pod.agentMode == .interactive {
                     Menu {
@@ -327,6 +369,16 @@ public struct DetailPanelView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
+                Button {
+                    kickReasonText = ""
+                    showKickSheet = true
+                } label: {
+                    Label("Kick", systemImage: "bolt")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.orange)
+                .help("Force-fail this pod (kills the container) so its slot frees up. Reach for this when the pod looks hung.")
 
             case .paused:
                 Button {
@@ -589,6 +641,9 @@ public struct DetailPanelView: View {
         .sheet(isPresented: $showForceCompleteSheet) {
             forceCompleteSheet
         }
+        .sheet(isPresented: $showKickSheet) {
+            kickSheet
+        }
     }
 
     @State private var showNudgeInput = false
@@ -605,6 +660,8 @@ public struct DetailPanelView: View {
     @State private var handoffInstructionsText = ""
     @State private var showForceCompleteSheet = false
     @State private var forceCompleteReasonText = ""
+    @State private var showKickSheet = false
+    @State private var kickReasonText = ""
 
     private func copyPodName() {
         NSPasteboard.general.clearContents()
@@ -687,6 +744,46 @@ public struct DetailPanelView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 420, idealWidth: 480)
+    }
+
+    private var kickSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Kick pod", systemImage: "bolt.horizontal")
+                .font(.headline)
+            Text("Force **\(pod.id)** to fail and free its concurrency slot. The container is killed; you can `Resume` or `Force Complete` afterward.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Reason (optional, persisted for audit)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $kickReasonText)
+                .font(.body)
+                .frame(minHeight: 80)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                )
+            HStack {
+                Button("Cancel") {
+                    kickReasonText = ""
+                    showKickSheet = false
+                }
+                .keyboardShortcut(.escape)
+                Spacer()
+                Button("Kick") {
+                    let reason = kickReasonText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    kickReasonText = ""
+                    showKickSheet = false
+                    Task { await actions.kick(pod.id, reason.isEmpty ? nil : reason) }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
                 .keyboardShortcut(.defaultAction)
             }
         }

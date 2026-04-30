@@ -3346,4 +3346,218 @@ describe('PodManager', () => {
       );
     });
   });
+
+  describe('processPod — missing profile is caught (no orphaned queued pods)', () => {
+    it('transitions pod out of queued when profileStore.get throws after creation', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature', skipValidation: true },
+        'user-1',
+      );
+
+      // Simulate the profile being deleted (or its extends chain breaking) AFTER
+      // the pod was queued — processPod's outer try/catch must catch this and
+      // transition the pod into a terminal state (killed, since queued→failed
+      // is not directly valid; the catch falls back to killing→killed).
+      // The point of the bug fix is that the pod must NOT sit as 'queued' forever.
+      vi.mocked(ctx.profileStore.get).mockImplementation((name: string) => {
+        throw new Error(`Profile "${name}" not found`);
+      });
+
+      await manager.processPod(pod.id);
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).not.toBe('queued');
+      expect(['failed', 'killed']).toContain(refreshed.status);
+    });
+  });
+
+  describe('kickPod — manual escape hatch', () => {
+    it('re-enqueues a stuck queued pod and persists the reason', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'do thing' },
+        'user-1',
+      );
+      // Pod is created in 'queued' state.
+      ctx.enqueuedSessions.length = 0;
+
+      const result = await manager.kickPod(pod.id, 'queue stalled');
+
+      expect(result).toEqual({ action: 'requeued' });
+      expect(ctx.enqueuedSessions).toEqual([pod.id]);
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('queued');
+      expect(refreshed.kickedReason).toBe('queue stalled');
+      expect(refreshed.kickedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it('kills container and transitions running pod to failed', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'do thing' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-stuck',
+        startedAt: new Date().toISOString(),
+      });
+      ctx.podRepo.update(pod.id, { status: 'running' });
+
+      const result = await manager.kickPod(pod.id, 'agent wedged');
+
+      expect(result).toEqual({ action: 'failed' });
+      expect(ctx.containerManager.stop).toHaveBeenCalledWith('container-stuck');
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('failed');
+      expect(refreshed.kickedReason).toBe('agent wedged');
+    });
+
+    it('still transitions to failed if container.stop throws (best-effort cleanup)', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'do thing' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-stuck',
+        startedAt: new Date().toISOString(),
+      });
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      (ctx.containerManager.stop as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('container already gone'),
+      );
+
+      await manager.kickPod(pod.id);
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('failed');
+    });
+
+    it('rejects with INVALID_STATE for non-kickable statuses', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'do thing' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'c1',
+        startedAt: new Date().toISOString(),
+      });
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      ctx.podRepo.update(pod.id, { status: 'failed' });
+
+      await expect(manager.kickPod(pod.id, 'whatever')).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+        statusCode: 409,
+      });
+    });
+
+    it('throws PodNotFoundError for unknown pod IDs', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      await expect(manager.kickPod('nope', 'reason')).rejects.toBeInstanceOf(PodNotFoundError);
+    });
+  });
+
+  describe('startStuckPodWatchdog — auto-fail running pods that have gone silent', () => {
+    it('transitions a stale running pod to failed and stops the container', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'do thing' },
+          'user-1',
+        );
+        // Wedge the pod into running with a stale lastAgentEventAt (35 min old).
+        const stale = new Date(Date.now() - 35 * 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/worktree/abc',
+          containerId: 'container-hung',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
+
+        // Tight thresholds + interval so a single tick fires.
+        manager.startStuckPodWatchdog({ intervalMs: 50, thresholdMs: 30 * 60 * 1000 });
+        // Fire one tick. The tick is async but its first microtask runs
+        // synchronously after advanceTimersByTimeAsync resolves; advancing
+        // a hair more lets any awaited container.stop / transition settle.
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(ctx.containerManager.stop).toHaveBeenCalledWith('container-hung');
+        const refreshed = manager.getSession(pod.id);
+        expect(refreshed.status).toBe('failed');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('leaves a fresh running pod alone', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'do thing' },
+          'user-1',
+        );
+        const fresh = new Date().toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/worktree/abc',
+          containerId: 'container-active',
+          startedAt: fresh,
+        });
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: fresh });
+
+        manager.startStuckPodWatchdog({ intervalMs: 50, thresholdMs: 30 * 60 * 1000 });
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        const refreshed = manager.getSession(pod.id);
+        expect(refreshed.status).toBe('running');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('is idempotent — calling start twice does not stack timers', () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        manager.startStuckPodWatchdog({ intervalMs: 1000, thresholdMs: 60_000 });
+        manager.startStuckPodWatchdog({ intervalMs: 1000, thresholdMs: 60_000 });
+        // Two starts → still only one interval; stop() must clear cleanly.
+        manager.stopStuckPodWatchdog();
+        manager.stopStuckPodWatchdog(); // should not throw
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

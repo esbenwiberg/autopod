@@ -181,6 +181,14 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/force-complete", body: body)
   }
 
+  /// Operator unstick: re-enqueues a stuck queued pod, or kills+fails a stuck
+  /// running/provisioning pod so its concurrency slot frees up. Action in the
+  /// response says which path the daemon took ("requeued" or "failed").
+  public func kickPod(_ id: String, reason: String?) async throws -> KickResponse {
+    let body = try reason.map { try encode(KickBody(reason: $0)) }
+    return try await request("POST", "/pods/\(id)/kick", body: body)
+  }
+
   public func deletePod(_ id: String) async throws {
     let _: EmptyResponse = try await request("DELETE", "/pods/\(id)")
   }
@@ -640,6 +648,16 @@ struct ForceCompleteBody: Codable {
 public struct ResumeResponse: Codable, Sendable {
   public let ok: Bool?
   /// Either "retry-pr" (Path 1: push + open PR) or "revalidate" (Path 2: re-run validation only).
+  public let action: String?
+}
+
+struct KickBody: Codable {
+  let reason: String
+}
+
+public struct KickResponse: Codable, Sendable {
+  public let ok: Bool?
+  /// Either "requeued" (queued pod re-enqueued) or "failed" (running/provisioning pod was killed and force-failed).
   public let action: String?
 }
 

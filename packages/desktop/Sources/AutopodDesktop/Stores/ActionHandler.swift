@@ -76,6 +76,7 @@ public final class ActionHandler {
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       resume: { [weak self] id in await self?.resume(id) },
       forceComplete: { [weak self] id, reason in await self?.forceComplete(id, reason: reason) },
+      kick: { [weak self] id, reason in await self?.kick(id, reason: reason) },
       previewSeriesFolder: { [weak self] path in
         await self?.previewSeriesFolder(path: path) ?? nil
       },
@@ -279,6 +280,21 @@ public final class ActionHandler {
     do {
       let trimmed = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
       try await api.forceComplete(podId, reason: (trimmed?.isEmpty ?? true) ? nil : trimmed)
+      await podStore.refreshSession(podId)
+    } catch {
+      lastError = error.localizedDescription
+    }
+    pendingAction = nil
+  }
+
+  public func kick(_ podId: String, reason: String?) async {
+    pendingAction = "kick-\(podId)"
+    do {
+      let trimmed = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+      _ = try await api.kickPod(podId, reason: (trimmed?.isEmpty ?? true) ? nil : trimmed)
+      // Kick may flip a queued pod back into the active queue (status unchanged)
+      // or transition a running pod to failed. Either way refresh now so the
+      // UI doesn't sit on the old state until the next WebSocket tick.
       await podStore.refreshSession(podId)
     } catch {
       lastError = error.localizedDescription
