@@ -153,10 +153,20 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       '-i, --instructions <text>',
       'Handoff instructions for the agent (only used with --pr/--artifact/--none)',
     )
+    .option(
+      '--skip-agent',
+      'Promote without spawning the agent — go straight to validation/PR with the human work as-is. Requires --pr or --artifact.',
+    )
     .action(
       async (
         id: string,
-        opts: { pr?: boolean; artifact?: boolean; none?: boolean; instructions?: string },
+        opts: {
+          pr?: boolean;
+          artifact?: boolean;
+          none?: boolean;
+          instructions?: string;
+          skipAgent?: boolean;
+        },
       ) => {
         const client = getClient();
         const resolvedId = await resolvePodId(client, id);
@@ -187,6 +197,19 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
               ? ('none' as const)
               : undefined;
 
+        if (opts.skipAgent && !promoteTo) {
+          console.error(
+            chalk.red('--skip-agent requires a promotion target (--pr or --artifact).'),
+          );
+          process.exit(1);
+        }
+        if (opts.skipAgent && opts.none) {
+          console.error(
+            chalk.red('--skip-agent has no effect with --none (no PR, no push, no artifact).'),
+          );
+          process.exit(1);
+        }
+
         const trimmedInstructions = opts.instructions?.trim();
         if (trimmedInstructions && !promoteTo) {
           console.log(
@@ -195,10 +218,21 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
             ),
           );
         }
+        if (trimmedInstructions && opts.skipAgent) {
+          console.log(
+            chalk.yellow(
+              'Note: --instructions is recorded for audit but the agent is skipped — instructions will not drive any work.',
+            ),
+          );
+        }
 
         console.log();
         const completion = await withSpinner(
-          promoteTo ? `Promoting pod to ${promoteTo}…` : 'Completing pod…',
+          promoteTo
+            ? opts.skipAgent
+              ? `Promoting pod to ${promoteTo} (no agent)…`
+              : `Promoting pod to ${promoteTo}…`
+            : 'Completing pod…',
           () =>
             client.completeSession(
               resolvedId,
@@ -206,6 +240,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
                 ? {
                     promoteTo,
                     ...(trimmedInstructions ? { instructions: trimmedInstructions } : {}),
+                    ...(opts.skipAgent ? { skipAgent: true } : {}),
                   }
                 : undefined,
             ),

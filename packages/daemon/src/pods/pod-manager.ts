@@ -575,16 +575,20 @@ export interface PodManager {
     options?: {
       promoteTo?: 'pr' | 'branch' | 'artifact' | 'none';
       instructions?: string;
+      /** When true, promote without spawning the agent — go straight to validation/PR
+       *  with the human's work as-is. Requires a promotion target (pr/artifact). */
+      skipAgent?: boolean;
     },
   ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }>;
   /** Promote an interactive pod to auto on the same pod ID.
    *  `options.instructions` is the raw human-typed handoff text from the desktop sheet
    *  (or `--instructions` on the CLI); persisted as `handoffInstructions` and consumed
-   *  by the recovery restart to compose the agent-facing `## Handoff` section. */
+   *  by the recovery restart to compose the agent-facing `## Handoff` section.
+   *  `options.skipAgent` skips agent spawn entirely — pod goes straight to validation. */
   promoteToAuto(
     podId: string,
     targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
-    options?: { instructions?: string },
+    options?: { instructions?: string; skipAgent?: boolean },
   ): Promise<void>;
   triggerValidation(podId: string, options?: { force?: boolean }): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
@@ -2363,66 +2367,70 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // instructions (captured by promoteToAuto) plus the live commit log
           // and diff stats; the system-instructions-generator renders this as
           // the `## Handoff` section in the agent's CLAUDE.md.
-          try {
-            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-            const [stats, commitLog] = await Promise.all([
-              worktreeManager.getDiffStats(
-                pod.worktreePath,
-                baseBranch,
-                pod.startCommitSha ?? undefined,
-              ),
-              worktreeManager.getCommitLog(
-                pod.worktreePath,
-                baseBranch,
-                30,
-                pod.startCommitSha ?? undefined,
-              ),
-            ]);
+          //
+          // Skip when `skipAgent` is set — the agent will never read this.
+          if (!pod.skipAgent) {
+            try {
+              const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+              const [stats, commitLog] = await Promise.all([
+                worktreeManager.getDiffStats(
+                  pod.worktreePath,
+                  baseBranch,
+                  pod.startCommitSha ?? undefined,
+                ),
+                worktreeManager.getCommitLog(
+                  pod.worktreePath,
+                  baseBranch,
+                  30,
+                  pod.startCommitSha ?? undefined,
+                ),
+              ]);
 
-            const hasInstructions =
-              !!pod.handoffInstructions && pod.handoffInstructions.trim().length > 0;
-            const hasWork =
-              stats.filesChanged > 0 || stats.linesAdded > 0 || stats.linesRemoved > 0;
+              const hasInstructions =
+                !!pod.handoffInstructions && pod.handoffInstructions.trim().length > 0;
+              const hasWork =
+                stats.filesChanged > 0 || stats.linesAdded > 0 || stats.linesRemoved > 0;
 
-            if (hasInstructions || hasWork) {
-              const sections: string[] = [
-                "You're picking up after a human-driven interactive session on this branch. " +
-                  'Treat the human as a collaborator, not noise — their commits encode intent, ' +
-                  'and their instructions (if any) take precedence over inferences from the diff alone.',
-                '',
-                '### Human instructions',
-                hasInstructions
-                  ? (pod.handoffInstructions as string)
-                  : '(none provided — infer the remaining work from the session summary and original brief)',
-                '',
-                '### Session summary',
-                hasWork
-                  ? `${stats.filesChanged} file(s) changed, +${stats.linesAdded}/-${stats.linesRemoved} lines.`
-                  : 'No diff against base — the human may have explored without committing changes yet.',
-              ];
+              if (hasInstructions || hasWork) {
+                const sections: string[] = [
+                  "You're picking up after a human-driven interactive session on this branch. " +
+                    'Treat the human as a collaborator, not noise — their commits encode intent, ' +
+                    'and their instructions (if any) take precedence over inferences from the diff alone.',
+                  '',
+                  '### Human instructions',
+                  hasInstructions
+                    ? (pod.handoffInstructions as string)
+                    : '(none provided — infer the remaining work from the session summary and original brief)',
+                  '',
+                  '### Session summary',
+                  hasWork
+                    ? `${stats.filesChanged} file(s) changed, +${stats.linesAdded}/-${stats.linesRemoved} lines.`
+                    : 'No diff against base — the human may have explored without committing changes yet.',
+                ];
 
-              if (commitLog && commitLog.length > 0) {
-                sections.push('', '### Commit log', '```', commitLog, '```');
+                if (commitLog && commitLog.length > 0) {
+                  sections.push('', '### Commit log', '```', commitLog, '```');
+                }
+
+                const handoffContext = sections.join('\n');
+                podRepo.update(podId, { handoffContext });
+                pod = podRepo.getOrThrow(podId);
+                logger.info(
+                  {
+                    podId,
+                    hasInstructions,
+                    filesChanged: stats.filesChanged,
+                    contextLength: handoffContext.length,
+                  },
+                  'Composed handoff context for promoted pod',
+                );
               }
-
-              const handoffContext = sections.join('\n');
-              podRepo.update(podId, { handoffContext });
-              pod = podRepo.getOrThrow(podId);
-              logger.info(
-                {
-                  podId,
-                  hasInstructions,
-                  filesChanged: stats.filesChanged,
-                  contextLength: handoffContext.length,
-                },
-                'Composed handoff context for promoted pod',
+            } catch (err) {
+              logger.warn(
+                { err, podId },
+                'Failed to compose handoff context — agent will run without it',
               );
             }
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to compose handoff context — agent will run without it',
-            );
           }
         }
 
@@ -3568,6 +3576,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               `⚠ Registry config check failed: ${(regErr as Error).message}`,
             );
           }
+        }
+
+        // skipAgent escape hatch: operator promoted an interactive pod with
+        // `--skip-agent` — the human's work is final. Container is up so
+        // validation/artifact extraction inside `handleCompletion` can run;
+        // we just bypass the runtime spawn entirely.
+        // Clear the one-shot flag *before* handing off so a future failed →
+        // resume cycle re-runs the agent normally.
+        if (pod.skipAgent) {
+          podRepo.update(podId, { skipAgent: false });
+          emitStatus('Skipping agent — going straight to completion…');
+          logger.info(
+            { podId, output: pod.options.output },
+            'skipAgent: bypassing runtime spawn, proceeding to handleCompletion',
+          );
+          await this.handleCompletion(podId);
+          return;
         }
 
         // Start the agent — recovery mode uses resume for Claude, fresh spawn for others
@@ -4719,7 +4744,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     async promoteToAuto(
       podId: string,
       targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
-      options?: { instructions?: string },
+      options?: { instructions?: string; skipAgent?: boolean },
     ): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
 
@@ -4740,12 +4765,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
+      const skipAgent = !!options?.skipAgent;
+      if (skipAgent && targetOutput === 'none') {
+        // No PR, no push, no artifact, no agent — pod would just die. Refuse
+        // explicitly so the caller picks a real promotion target.
+        throw new AutopodError(
+          "--skip-agent requires a promotion target ('--pr' or '--artifact')",
+          'INVALID_OUTPUT_MODE',
+          400,
+        );
+      }
+
       // Capture the human's handoff instructions BEFORE the transition so they
       // survive the recovery restart. The recovery path inside processPod reads
       // them after `syncWorkspaceBack()` completes and composes `handoffContext`.
+      // (When skipAgent is set the agent never sees these — the field stays on
+      // the pod for audit/UI purposes only.)
       const trimmedInstructions = options?.instructions?.trim();
       if (trimmedInstructions && trimmedInstructions.length > 0) {
         podRepo.update(podId, { handoffInstructions: trimmedInstructions });
+      }
+
+      if (skipAgent) {
+        podRepo.update(podId, { skipAgent: true });
       }
 
       // Swap to the worker profile if one is configured — this lets the
@@ -4799,6 +4841,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       options?: {
         promoteTo?: 'pr' | 'branch' | 'artifact' | 'none';
         instructions?: string;
+        skipAgent?: boolean;
       },
     ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }> {
       const pod = podRepo.getOrThrow(podId);
@@ -4824,6 +4867,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (options?.promoteTo && options.promoteTo !== 'branch') {
         await this.promoteToAuto(podId, options.promoteTo, {
           instructions: options.instructions,
+          skipAgent: options.skipAgent,
         });
         return { promotedTo: options.promoteTo };
       }

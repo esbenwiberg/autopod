@@ -162,11 +162,12 @@ export class AutopodClient {
   async promoteSession(
     id: string,
     targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
-    options?: { instructions?: string },
+    options?: { instructions?: string; skipAgent?: boolean },
   ): Promise<{ ok: boolean; promotedTo: string }> {
     return this.request<{ ok: boolean; promotedTo: string }>('POST', `/pods/${id}/promote`, {
       targetOutput,
       ...(options?.instructions ? { instructions: options.instructions } : {}),
+      ...(options?.skipAgent ? { skipAgent: true } : {}),
     });
   }
 
