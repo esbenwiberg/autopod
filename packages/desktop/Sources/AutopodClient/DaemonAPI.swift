@@ -102,14 +102,22 @@ public actor DaemonAPI {
   /// `targetOutput` must be one of `pr`, `branch`, `artifact`, `none`. Defaults to `pr` daemon-side.
   /// `instructions` is the human's typed handoff text from the desktop sheet (or CLI flag);
   /// it is composed into a `## Handoff` section in the agent's CLAUDE.md.
+  /// `skipAgent` bypasses the runtime spawn entirely — the pod goes straight to
+  /// validation/PR with the human's commits as-is. Daemon refuses the combo with
+  /// `targetOutput == "none"`.
   public func promoteSession(
     _ id: String,
     targetOutput: String? = nil,
-    instructions: String? = nil
+    instructions: String? = nil,
+    skipAgent: Bool = false
   ) async throws {
     let body: Data?
-    if targetOutput != nil || instructions != nil {
-      body = try encode(PromoteBody(targetOutput: targetOutput, instructions: instructions))
+    if targetOutput != nil || instructions != nil || skipAgent {
+      body = try encode(PromoteBody(
+        targetOutput: targetOutput,
+        instructions: instructions,
+        skipAgent: skipAgent ? true : nil
+      ))
     } else {
       body = nil
     }
@@ -626,6 +634,7 @@ struct CompleteBody: Codable {
 struct PromoteBody: Codable {
   let targetOutput: String?
   let instructions: String?
+  let skipAgent: Bool?
 }
 
 struct WarmBody: Codable {

@@ -19,7 +19,8 @@ public struct PodActions: Sendable {
   // createPod params: profileName, task, model, pod, acceptanceCriteria, baseBranch, acFrom, pimGroups, requireSidecars, referenceRepos → returns pod ID or nil
   /// Promote an interactive pod to agent-driven in place. `targetOutput` ∈ {pr, branch, artifact, none}.
   /// `instructions` is the human's typed handoff text from the sheet — composed into the agent's CLAUDE.md.
-  public var promote: @MainActor @Sendable (String, String?, String?) async -> Void
+  /// `skipAgent` bypasses the runtime spawn entirely (only valid with pr/artifact targets).
+  public var promote: @MainActor @Sendable (String, String?, String?, Bool) async -> Void
   public var attachTerminal: @MainActor @Sendable (String) -> Void
   public var approveAll: @MainActor @Sendable () async -> Void
   public var killAllFailed: @MainActor @Sendable () async -> Void
@@ -95,7 +96,7 @@ public struct PodActions: Sendable {
     fixManually: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     revalidate: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?) async -> String? = { _, _, _, _, _, _, _, _, _, _ in nil },
-    promote: @escaping @MainActor @Sendable (String, String?, String?) async -> Void = { _, _, _ in },
+    promote: @escaping @MainActor @Sendable (String, String?, String?, Bool) async -> Void = { _, _, _, _ in },
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
     killAllFailed: @escaping @MainActor @Sendable () async -> Void = {},

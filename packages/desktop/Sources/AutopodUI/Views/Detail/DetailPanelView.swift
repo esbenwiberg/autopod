@@ -658,6 +658,7 @@ public struct DetailPanelView: View {
     @State private var showHandoffSheet = false
     @State private var handoffTarget: String? = nil
     @State private var handoffInstructionsText = ""
+    @State private var handoffSkipAgent = false
     @State private var showForceCompleteSheet = false
     @State private var forceCompleteReasonText = ""
     @State private var showKickSheet = false
@@ -812,7 +813,11 @@ public struct DetailPanelView: View {
     }
 
     private var handoffSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        // Skip-agent only makes sense when there's a downstream output to validate
+        // and ship: pr/artifact. With "branch only" the plain Complete button
+        // already covers "just push the commits", so we hide the toggle there.
+        let skipAgentEligible = handoffTarget == "pr" || handoffTarget == "artifact"
+        return VStack(alignment: .leading, spacing: 16) {
             Text("Hand off → \(handoffTargetLabel)")
                 .font(.headline)
             Text("Tell the agent what to finish and anything tricky about your in-flight changes. Your commits and a diff summary are forwarded automatically — leave blank if there's nothing to add.")
@@ -826,6 +831,14 @@ public struct DetailPanelView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if skipAgentEligible {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Skip agent — submit human work as-is", isOn: $handoffSkipAgent)
+                    Text("Pod goes straight to validation/PR with your commits — no agent run.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             TextEditor(text: $handoffInstructionsText)
                 .font(.body)
                 .frame(minHeight: 120)
@@ -837,17 +850,20 @@ public struct DetailPanelView: View {
                 Button("Cancel") {
                     handoffInstructionsText = ""
                     handoffTarget = nil
+                    handoffSkipAgent = false
                     showHandoffSheet = false
                 }
                 Spacer()
                 Button("Hand off") {
                     let trimmed = handoffInstructionsText.trimmingCharacters(in: .whitespacesAndNewlines)
                     let target = handoffTarget
+                    let skipAgent = skipAgentEligible && handoffSkipAgent
                     handoffInstructionsText = ""
                     handoffTarget = nil
+                    handoffSkipAgent = false
                     showHandoffSheet = false
                     Task {
-                        await actions.promote(pod.id, target, trimmed.isEmpty ? nil : trimmed)
+                        await actions.promote(pod.id, target, trimmed.isEmpty ? nil : trimmed, skipAgent)
                     }
                 }
                 .buttonStyle(.borderedProminent)
