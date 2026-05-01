@@ -29,6 +29,7 @@ export function historyRoutes(app: FastifyInstance, podManager: PodManager): voi
         body.profileName,
         request.user.oid,
         historyQuery,
+        { email: request.user.preferred_username, name: request.user.name },
       );
       reply.status(201);
       return pod;

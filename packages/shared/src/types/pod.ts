@@ -73,6 +73,19 @@ export interface Pod {
   completedAt: string | null;
   updatedAt: string;
   userId: string;
+  /**
+   * Email of the human who created this pod (from the JWT `preferred_username`
+   * claim). Used to pre-fill `git config --global user.email` inside the
+   * container so interactive commits don't fail with "Author identity unknown".
+   * Null for legacy pods predating this field.
+   */
+  creatorEmail: string | null;
+  /**
+   * Display name of the human who created this pod (from the JWT `name`
+   * claim). Used to pre-fill `git config --global user.name` inside the
+   * container. Null for legacy pods predating this field.
+   */
+  creatorName: string | null;
   filesChanged: number;
   linesAdded: number;
   linesRemoved: number;

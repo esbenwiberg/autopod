@@ -138,6 +138,25 @@ describe('PodRepository', () => {
       const pod = repo.getOrThrow('sess-001');
       expect(pod.pimGroups).toBeNull();
     });
+
+    it('should round-trip creator email and name', () => {
+      repo.insert({
+        ...validSession,
+        id: 'sess-creator',
+        creatorEmail: 'alice@example.com',
+        creatorName: "O'Brien, Alice",
+      });
+      const pod = repo.getOrThrow('sess-creator');
+      expect(pod.creatorEmail).toBe('alice@example.com');
+      expect(pod.creatorName).toBe("O'Brien, Alice");
+    });
+
+    it('should default creator email and name to null when not provided', () => {
+      repo.insert(validSession);
+      const pod = repo.getOrThrow('sess-001');
+      expect(pod.creatorEmail).toBeNull();
+      expect(pod.creatorName).toBeNull();
+    });
   });
 
   describe('getOrThrow', () => {

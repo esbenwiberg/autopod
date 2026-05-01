@@ -701,4 +701,99 @@ describe('Pod Lifecycle E2E', () => {
       expect(transitions[1]).toEqual({ from: 'provisioning', to: 'running' });
     });
   });
+
+  describe('Container bootstrap', () => {
+    it('pre-fills git author identity inside the container from the pod creator', async () => {
+      const ctx = createTestContext();
+      const prManager = createMockPrManager();
+      ctx.deps.prManagerFactory = () => prManager;
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Anything', skipValidation: true },
+        'user-1',
+        { email: 'alice@example.com', name: "O'Brien, Alice" },
+      );
+      await manager.processPod(pod.id);
+
+      const calls = (
+        ctx.containerManager.execInContainer as unknown as { mock: { calls: unknown[][] } }
+      ).mock.calls;
+      const gitConfigCall = calls.find((args) => {
+        const argv = args[1] as string[] | undefined;
+        return (
+          Array.isArray(argv) &&
+          argv[0] === 'sh' &&
+          typeof argv[2] === 'string' &&
+          argv[2].includes('git config --global user.email')
+        );
+      });
+      expect(gitConfigCall).toBeDefined();
+      const command = (gitConfigCall as unknown[])[1] as string[];
+      expect(command[2]).toContain("'alice@example.com'");
+      // single-quote escaping for apostrophe: O'Brien → 'O'\''Brien, Alice'
+      expect(command[2]).toContain("'O'\\''Brien, Alice'");
+    });
+
+    it('falls back to a generic identity when creator info is missing', async () => {
+      const ctx = createTestContext();
+      const prManager = createMockPrManager();
+      ctx.deps.prManagerFactory = () => prManager;
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Anything', skipValidation: true },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+
+      const calls = (
+        ctx.containerManager.execInContainer as unknown as { mock: { calls: unknown[][] } }
+      ).mock.calls;
+      const gitConfigCall = calls.find((args) => {
+        const argv = args[1] as string[] | undefined;
+        return (
+          Array.isArray(argv) &&
+          argv[0] === 'sh' &&
+          typeof argv[2] === 'string' &&
+          argv[2].includes('git config --global user.email')
+        );
+      });
+      expect(gitConfigCall).toBeDefined();
+      const command = (gitConfigCall as unknown[])[1] as string[];
+      expect(command[2]).toContain("'autopod@autopod.local'");
+      expect(command[2]).toContain("'Autopod User'");
+    });
+
+    it('appends @autopod.local when JWT preferred_username is not an email (dev mode)', async () => {
+      const ctx = createTestContext();
+      const prManager = createMockPrManager();
+      ctx.deps.prManagerFactory = () => prManager;
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Anything', skipValidation: true },
+        'user-1',
+        { email: 'developer', name: 'Developer' },
+      );
+      await manager.processPod(pod.id);
+
+      const calls = (
+        ctx.containerManager.execInContainer as unknown as { mock: { calls: unknown[][] } }
+      ).mock.calls;
+      const gitConfigCall = calls.find((args) => {
+        const argv = args[1] as string[] | undefined;
+        return (
+          Array.isArray(argv) &&
+          argv[0] === 'sh' &&
+          typeof argv[2] === 'string' &&
+          argv[2].includes('git config --global user.email')
+        );
+      });
+      expect(gitConfigCall).toBeDefined();
+      const command = (gitConfigCall as unknown[])[1] as string[];
+      expect(command[2]).toContain("'developer@autopod.local'");
+      expect(command[2]).toContain("'Developer'");
+    });
+  });
 });

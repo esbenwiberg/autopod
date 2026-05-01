@@ -129,6 +129,22 @@ function injectPatIntoUrl(url: string, pat: string): string {
   return url.replace(/^https:\/\/([^@]*@)?/, `https://x-access-token:${pat}@`);
 }
 
+/** Single-quote shell escaping. Names can contain spaces and apostrophes (e.g. `O'Brien`),
+ * so we wrap in single quotes and escape any embedded single quotes the standard way. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/** Normalize a JWT preferred_username into something that looks like an email.
+ * Dev mode emits `developer` (no `@`); git accepts it but commits look weird.
+ * Real Entra tokens already carry a UPN-shaped email here. */
+function normalizeCommitEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  const trimmed = email.trim();
+  if (!trimmed) return null;
+  return trimmed.includes('@') ? trimmed : `${trimmed}@autopod.local`;
+}
+
 /** Allocate a random host port in range 10000–48999 for container port mapping.
  * Capped at 48999 to avoid the Windows/Hyper-V dynamic port reservation range (49152+). */
 function allocateHostPort(): number {
@@ -548,8 +564,14 @@ export interface PodManagerDependencies {
   logger: Logger;
 }
 
+/** Identity of the human who created a pod, used to pre-fill git config inside the container. */
+export interface PodCreator {
+  email?: string | null;
+  name?: string | null;
+}
+
 export interface PodManager {
-  createSession(request: CreatePodRequest, userId: string): Pod;
+  createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod;
   processPod(podId: string): Promise<void>;
   consumeAgentEvents(podId: string, events: AsyncIterable<AgentEvent>): Promise<void>;
   handleCompletion(podId: string): Promise<void>;
@@ -602,9 +624,14 @@ export interface PodManager {
     options?: { force?: boolean },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
   /** Create a linked workspace pod on the same branch as a failed worker pod for human fixes. */
-  fixManually(podId: string, userId: string): Pod;
-  createHistoryWorkspace(profileName: string, userId: string, historyQuery: HistoryQuery): Pod;
-  createMemoryWorkspace(profileName: string, userId: string): Pod;
+  fixManually(podId: string, userId: string, creator?: PodCreator): Pod;
+  createHistoryWorkspace(
+    profileName: string,
+    userId: string,
+    historyQuery: HistoryQuery,
+    creator?: PodCreator,
+  ): Pod;
+  createMemoryWorkspace(profileName: string, userId: string, creator?: PodCreator): Pod;
   deleteSession(podId: string): Promise<void>;
   startPreview(podId: string): Promise<{ previewUrl: string }>;
   stopPreview(podId: string): Promise<void>;
@@ -2188,7 +2215,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   return {
-    createSession(request: CreatePodRequest, userId: string): Pod {
+    createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod {
       const profile = profileStore.get(request.profileName);
       const model = request.model ?? profile.defaultModel ?? 'opus';
       const runtime = request.runtime ?? profile.defaultRuntime ?? 'claude';
@@ -2283,6 +2310,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             executionTarget,
             branch,
             userId,
+            creatorEmail: creator?.email ?? null,
+            creatorName: creator?.name ?? null,
             maxValidationAttempts: profile.maxValidationAttempts ?? 3,
             skipValidation,
             acceptanceCriteria: request.acceptanceCriteria ?? null,
@@ -2377,7 +2406,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return pod;
     },
 
-    createHistoryWorkspace(profileName: string, userId: string, historyQuery: HistoryQuery): Pod {
+    createHistoryWorkspace(
+      profileName: string,
+      userId: string,
+      historyQuery: HistoryQuery,
+      creator?: PodCreator,
+    ): Pod {
       // Encode query params into the task field with a [history] prefix
       const queryJson = JSON.stringify(historyQuery);
       const task = `[history] History analysis workspace | ${queryJson}`;
@@ -2389,10 +2423,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           skipValidation: true,
         },
         userId,
+        creator,
       );
     },
 
-    createMemoryWorkspace(profileName: string, userId: string): Pod {
+    createMemoryWorkspace(profileName: string, userId: string, creator?: PodCreator): Pod {
       const globalMems = deps.memoryRepo?.listByScope('global', true) ?? [];
       const profileMems = deps.memoryRepo?.list('profile', profileName, true) ?? [];
       const all = [...globalMems, ...profileMems];
@@ -2423,6 +2458,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           skipValidation: true,
         },
         userId,
+        creator,
       );
     },
 
@@ -3012,6 +3048,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 `Git workspace restore failed (exit ${restore.exitCode}): ${restore.stderr}`,
               );
             }
+          }
+        }
+
+        // Pre-fill global git author identity so the user (or agent) doesn't hit
+        // "Author identity unknown" the first time they `git commit`. Sourced
+        // from the JWT claims captured at pod creation; falls back to a generic
+        // identity for legacy pods or pre-auth code paths so commits never fail.
+        {
+          const email = normalizeCommitEmail(pod.creatorEmail) ?? 'autopod@autopod.local';
+          const name = pod.creatorName?.trim() || 'Autopod User';
+          const gitIdentity = await containerManager.execInContainer(
+            containerId,
+            [
+              'sh',
+              '-c',
+              `git config --global user.email ${shellQuote(email)} && git config --global user.name ${shellQuote(name)}`,
+            ],
+            { timeout: 5_000 },
+          );
+          if (gitIdentity.exitCode !== 0) {
+            // Non-fatal: the worst case is the user re-runs the two commands manually.
+            logger.warn(
+              { podId, exitCode: gitIdentity.exitCode, stderr: gitIdentity.stderr.slice(0, 200) },
+              'Failed to set global git author identity in container',
+            );
           }
         }
 
@@ -6321,7 +6382,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
-    fixManually(podId: string, userId: string): Pod {
+    fixManually(podId: string, userId: string, creator?: PodCreator): Pod {
       const worker = podRepo.getOrThrow(podId);
       if (
         worker.status !== 'failed' &&
@@ -6346,6 +6407,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           linkedPodId: worker.id,
         },
         userId,
+        creator,
       );
 
       logger.info(

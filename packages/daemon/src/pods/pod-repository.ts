@@ -34,6 +34,10 @@ export interface NewPod {
   executionTarget: ExecutionTarget;
   branch: string;
   userId: string;
+  /** Email of the human creator (JWT preferred_username). Used for git config inside the container. */
+  creatorEmail?: string | null;
+  /** Display name of the human creator (JWT name). Used for git config inside the container. */
+  creatorName?: string | null;
   maxValidationAttempts: number;
   skipValidation: boolean;
   acceptanceCriteria?: AcDefinition[] | null;
@@ -285,6 +289,8 @@ function rowToSession(row: Record<string, unknown>): Pod {
     completedAt: (row.completed_at as string) ?? null,
     updatedAt: row.updated_at as string,
     userId: row.user_id as string,
+    creatorEmail: (row.creator_email as string) ?? null,
+    creatorName: (row.creator_name as string) ?? null,
     filesChanged: row.files_changed as number,
     linesAdded: row.lines_added as number,
     linesRemoved: row.lines_removed as number,
@@ -394,7 +400,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       db.prepare(`
         INSERT INTO pods (
           id, profile_name, task, status, model, runtime, execution_target, branch,
-          user_id, max_validation_attempts, skip_validation, acceptance_criteria,
+          user_id, creator_email, creator_name, max_validation_attempts, skip_validation, acceptance_criteria,
           output_mode, agent_mode, output_target, validate, promotable,
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, scheduled_job_id,
@@ -403,7 +409,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           require_sidecars, auto_approve, disable_ask_human
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
-          @userId, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
+          @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @scheduledJobId,
@@ -421,6 +427,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
         executionTarget: pod.executionTarget,
         branch: pod.branch,
         userId: pod.userId,
+        creatorEmail: pod.creatorEmail ?? null,
+        creatorName: pod.creatorName ?? null,
         maxValidationAttempts: pod.maxValidationAttempts,
         skipValidation: pod.skipValidation ? 1 : 0,
         acceptanceCriteria: pod.acceptanceCriteria ? JSON.stringify(pod.acceptanceCriteria) : null,

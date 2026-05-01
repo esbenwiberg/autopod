@@ -13,7 +13,10 @@ export function memoryWorkspaceRoutes(app: FastifyInstance, podManager: PodManag
     }
 
     try {
-      const pod = podManager.createMemoryWorkspace(body.profileName, request.user.oid);
+      const pod = podManager.createMemoryWorkspace(body.profileName, request.user.oid, {
+        email: request.user.preferred_username,
+        name: request.user.name,
+      });
       reply.status(201);
       return pod;
     } catch (err) {

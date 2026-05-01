@@ -57,7 +57,10 @@ export function podRoutes(
       sanitized.seriesDescription = processContent(body.seriesDescription, sanitizeOpts).text;
 
     try {
-      const pod = podManager.createSession(sanitized, request.user.oid);
+      const pod = podManager.createSession(sanitized, request.user.oid, {
+        email: request.user.preferred_username,
+        name: request.user.name,
+      });
       reply.status(201);
       return pod;
     } catch (err) {
@@ -355,7 +358,10 @@ export function podRoutes(
   // POST /pods/:podId/fix-manually — create linked workspace for human fixes
   app.post('/pods/:podId/fix-manually', async (request, reply) => {
     const { podId } = request.params as { podId: string };
-    const workspace = podManager.fixManually(podId, request.user.oid);
+    const workspace = podManager.fixManually(podId, request.user.oid, {
+      email: request.user.preferred_username,
+      name: request.user.name,
+    });
     reply.status(201);
     return workspace;
   });
