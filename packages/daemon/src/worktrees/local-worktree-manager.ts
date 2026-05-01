@@ -35,12 +35,23 @@ export class DeletionGuardError extends Error {
   }
 }
 
+// macOS apps launched via GUI or launchd get a stripped PATH that omits /usr/local/bin,
+// /opt/homebrew/bin, and even /usr/bin on some setups — causing `spawn git ENOENT`.
+// Prepend the canonical git locations so the binary is found regardless of how the daemon started.
+const GIT_PATH_PREPEND = ['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin'].join(':');
+
 /** Env vars applied to every git subprocess to prevent interactive prompts from hanging the daemon. */
 const GIT_ENV: Record<string, string> = {
   ...process.env,
+  PATH: `${GIT_PATH_PREPEND}:${process.env['PATH'] ?? ''}`,
   GIT_TERMINAL_PROMPT: '0',
   GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
 } as Record<string, string>;
+
+/** Wrapper so every git call in this file gets GIT_ENV — no env-less calls allowed. */
+function git(args: string[], options: { cwd?: string; timeout?: number; maxBuffer?: number } = {}) {
+  return execFileAsync('git', args, { ...options, env: GIT_ENV });
+}
 
 /**
  * Remove diff sections that only change file mode (chmod) with no content hunks.
@@ -155,13 +166,11 @@ export class LocalWorktreeManager implements WorktreeManager {
         // reset origin to the clean URL — containers mount the bare repo and must
         // not be able to read the PAT from git config.
         try {
-          await execFileAsync('git', ['clone', '--bare', authUrl, bareRepoPath], {
-            env: GIT_ENV,
-          });
+          await git(['clone', '--bare', authUrl, bareRepoPath]);
         } catch (err) {
           throw sanitizeGitError(err);
         }
-        await execFileAsync('git', ['remote', 'set-url', 'origin', repoUrl], {
+        await git(['remote', 'set-url', 'origin', repoUrl], {
           cwd: bareRepoPath,
         });
       }
@@ -175,15 +184,14 @@ export class LocalWorktreeManager implements WorktreeManager {
       // a pod that failed before pushing), fall back to the local ref in the bare repo.
       let baseBranchRef = `refs/remotes/origin/${baseBranch}`;
       try {
-        await execFileAsync(
-          'git',
+        await git(
           [
             'fetch',
             authUrl,
             `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
             `+refs/heads/${baseBranch}:refs/heads/${baseBranch}`,
           ],
-          { cwd: bareRepoPath, env: GIT_ENV },
+          { cwd: bareRepoPath },
         );
       } catch (fetchErr) {
         const sanitized = sanitizeGitError(fetchErr);
@@ -191,7 +199,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         // Remote fetch failed — check if the branch exists locally (created by a prior
         // pod's `git worktree add -B` and still in the bare repo after cleanup).
         try {
-          await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${baseBranch}`], {
+          await git(['rev-parse', '--verify', `refs/heads/${baseBranch}`], {
             cwd: bareRepoPath,
           });
           baseBranchRef = `refs/heads/${baseBranch}`;
@@ -211,10 +219,9 @@ export class LocalWorktreeManager implements WorktreeManager {
       let startPoint = baseBranchRef;
       if (branch !== baseBranch) {
         try {
-          await execFileAsync(
-            'git',
+          await git(
             ['fetch', authUrl, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-            { cwd: bareRepoPath, env: GIT_ENV },
+            { cwd: bareRepoPath },
           );
           // Fetch succeeded — branch exists on remote, use it as start point
           startPoint = `refs/remotes/origin/${branch}`;
@@ -228,16 +235,16 @@ export class LocalWorktreeManager implements WorktreeManager {
       // Clean up stale worktree registration if a previous pod left one behind
       // (e.g. killed pod whose cleanup didn't fully complete).
       // Always try both git worktree remove AND fs.rm — either alone can leave remnants.
-      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
+      await git(['worktree', 'remove', '--force', worktreePath], {
         cwd: bareRepoPath,
       }).catch(() => {});
       await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-      await execFileAsync('git', ['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+      await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
 
       // -B force-creates branch to handle retry scenarios
       this.logger.info({ worktreePath, branch, startPoint }, 'Creating worktree');
       try {
-        await execFileAsync('git', ['worktree', 'add', '-B', branch, worktreePath, startPoint], {
+        await git(['worktree', 'add', '-B', branch, worktreePath, startPoint], {
           cwd: bareRepoPath,
         });
       } catch (addErr: unknown) {
@@ -251,12 +258,12 @@ export class LocalWorktreeManager implements WorktreeManager {
             { conflictPath, branch },
             'Branch locked by orphaned worktree — removing and retrying',
           );
-          await execFileAsync('git', ['worktree', 'remove', '--force', conflictPath], {
+          await git(['worktree', 'remove', '--force', conflictPath], {
             cwd: bareRepoPath,
           }).catch(() => {});
           await fs.rm(conflictPath, { recursive: true, force: true }).catch(() => {});
-          await execFileAsync('git', ['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
-          await execFileAsync('git', ['worktree', 'add', '-B', branch, worktreePath, startPoint], {
+          await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+          await git(['worktree', 'add', '-B', branch, worktreePath, startPoint], {
             cwd: bareRepoPath,
           });
         } else {
@@ -285,7 +292,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     // will retry and persist later.
     let startCommitSha = '';
     try {
-      const result = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+      const result = await git(['rev-parse', 'HEAD'], { cwd: worktreePath });
       startCommitSha = result.stdout?.trim() ?? '';
     } catch (err) {
       this.logger.warn(
@@ -304,7 +311,7 @@ export class LocalWorktreeManager implements WorktreeManager {
    */
   private async appendWorktreeExcludes(worktreePath: string, entries: string[]): Promise<void> {
     if (entries.length === 0) return;
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', 'info/exclude'], {
+    const { stdout } = await git(['rev-parse', '--git-path', 'info/exclude'], {
       cwd: worktreePath,
     });
     const excludePath = path.resolve(worktreePath, stdout.trim());
@@ -330,13 +337,13 @@ export class LocalWorktreeManager implements WorktreeManager {
   async cleanup(worktreePath: string): Promise<void> {
     // Find the bare repo that owns this worktree
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+      const { stdout } = await git(['rev-parse', '--git-common-dir'], {
         cwd: worktreePath,
       });
       const bareRepoPath = path.resolve(worktreePath, stdout.trim());
       this.patCache.delete(bareRepoPath);
 
-      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
+      await git(['worktree', 'remove', '--force', worktreePath], {
         cwd: bareRepoPath,
       }).catch(async () => {
         // Fallback: rm -rf if git worktree remove fails
@@ -345,7 +352,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       });
 
       // Prune stale worktree refs
-      await execFileAsync('git', ['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {
+      await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {
         // Non-fatal
       });
     } catch {
@@ -374,15 +381,13 @@ export class LocalWorktreeManager implements WorktreeManager {
         }
 
         // Committed changes: base..HEAD
-        const { stdout: committedStat } = await execFileAsync(
-          'git',
-          ['diff', '--stat', base, 'HEAD'],
-          { cwd: worktreePath },
-        );
+        const { stdout: committedStat } = await git(['diff', '--stat', base, 'HEAD'], {
+          cwd: worktreePath,
+        });
         const committed = this.parseDiffStats(committedStat);
 
         // Uncommitted changes: working tree vs HEAD (staged + unstaged)
-        const { stdout: uncommittedStat } = await execFileAsync('git', ['diff', '--stat', 'HEAD'], {
+        const { stdout: uncommittedStat } = await git(['diff', '--stat', 'HEAD'], {
           cwd: worktreePath,
         });
         const uncommitted = this.parseDiffStats(uncommittedStat);
@@ -395,7 +400,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       }
 
       // Fallback: uncommitted changes only (legacy behaviour)
-      const { stdout } = await execFileAsync('git', ['diff', '--stat', 'HEAD'], {
+      const { stdout } = await git(['diff', '--stat', 'HEAD'], {
         cwd: worktreePath,
       });
 
@@ -426,15 +431,13 @@ export class LocalWorktreeManager implements WorktreeManager {
       const bufOpts = { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 };
 
       // Committed changes: base..HEAD
-      const { stdout: committedDiff } = await execFileAsync(
-        'git',
+      const { stdout: committedDiff } = await git(
         ['diff', base, 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
         bufOpts,
       );
 
       // Uncommitted changes: working tree vs HEAD (staged + unstaged)
-      const { stdout: uncommittedDiff } = await execFileAsync(
-        'git',
+      const { stdout: uncommittedDiff } = await git(
         ['diff', 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
         bufOpts,
       );
@@ -448,8 +451,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       if (!combined.trim() && sinceCommit) {
         const mergeBase = await this.resolveMergeBase(worktreePath, baseBranch);
         if (mergeBase && mergeBase !== sinceCommit) {
-          const { stdout: mbCommitted } = await execFileAsync(
-            'git',
+          const { stdout: mbCommitted } = await git(
             ['diff', mergeBase, 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
             bufOpts,
           );
@@ -471,7 +473,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     // If a PAT is explicitly provided, warm the cache so getAuthUrl picks it up.
     if (pat) {
-      const { stdout: commonDir } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+      const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
         cwd: worktreePath,
       });
       const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
@@ -511,20 +513,17 @@ export class LocalWorktreeManager implements WorktreeManager {
     // Push using auth URL so the PAT is never stored in git config.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
     const authUrl = await this.getAuthUrl(worktreePath);
-    const { stdout: actualBranch } = await execFileAsync(
-      'git',
-      ['rev-parse', '--abbrev-ref', 'HEAD'],
-      { cwd: worktreePath },
-    );
+    const { stdout: actualBranch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: worktreePath,
+    });
     if (actualBranch.trim() !== targetBranch) {
       throw new Error(
         `Expected HEAD to be on branch '${targetBranch}' but it is on '${actualBranch.trim()}'`,
       );
     }
     try {
-      await execFileAsync('git', ['push', authUrl, `HEAD:refs/heads/${targetBranch}`], {
+      await git(['push', authUrl, `HEAD:refs/heads/${targetBranch}`], {
         cwd: worktreePath,
-        env: GIT_ENV,
       });
     } catch (err) {
       throw sanitizeGitError(err);
@@ -536,18 +535,18 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     try {
       // Stage the specific paths
-      await execFileAsync('git', ['add', ...paths], { cwd: worktreePath });
+      await git(['add', ...paths], { cwd: worktreePath });
 
       // Check if there's anything staged
       try {
-        await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: worktreePath });
+        await git(['diff', '--cached', '--quiet'], { cwd: worktreePath });
         // Exit 0 means nothing staged — skip commit
         return;
       } catch {
         // Exit non-zero means there ARE staged changes — commit them
       }
 
-      await execFileAsync('git', ['commit', '-m', message], { cwd: worktreePath });
+      await git(['commit', '-m', message], { cwd: worktreePath });
       this.logger.info({ worktreePath, fileCount: paths.length }, 'Committed files');
     } catch (err) {
       this.logger.warn({ err, worktreePath }, 'Failed to commit files');
@@ -593,9 +592,9 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   private async stageAllChanges(worktreePath: string): Promise<boolean> {
-    await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
+    await git(['add', '-A'], { cwd: worktreePath });
     try {
-      await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: worktreePath });
+      await git(['diff', '--cached', '--quiet'], { cwd: worktreePath });
       // Exit 0 → nothing staged
       return false;
     } catch {
@@ -610,34 +609,30 @@ export class LocalWorktreeManager implements WorktreeManager {
   ): Promise<boolean> {
     const deletionCount = await this.getStagedDeletionCount(worktreePath);
     if (deletionCount > maxDeletions) {
-      await execFileAsync('git', ['reset', 'HEAD'], { cwd: worktreePath });
+      await git(['reset', 'HEAD'], { cwd: worktreePath });
       this.logger.error(
         { worktreePath, deletionCount, maxDeletions },
         'Auto-commit aborted: staged deletions exceed safety threshold',
       );
       throw new DeletionGuardError(deletionCount, maxDeletions);
     }
-    await execFileAsync('git', ['commit', '-m', message], { cwd: worktreePath });
+    await git(['commit', '-m', message], { cwd: worktreePath });
     this.logger.info({ worktreePath, deletionCount }, 'Auto-committed pending changes');
     return true;
   }
 
   private async getStagedDeletionCount(worktreePath: string): Promise<number> {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['diff', '--cached', '--diff-filter=D', '--name-only'],
-      { cwd: worktreePath },
-    );
+    const { stdout } = await git(['diff', '--cached', '--diff-filter=D', '--name-only'], {
+      cwd: worktreePath,
+    });
     return stdout.trim().split('\n').filter(Boolean).length;
   }
 
   async pushBranch(worktreePath: string, expectedBranch: string): Promise<void> {
     this.logger.info({ worktreePath, expectedBranch }, 'Pushing branch to origin');
-    const { stdout: actualBranch } = await execFileAsync(
-      'git',
-      ['rev-parse', '--abbrev-ref', 'HEAD'],
-      { cwd: worktreePath },
-    );
+    const { stdout: actualBranch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: worktreePath,
+    });
     if (actualBranch.trim() !== expectedBranch) {
       throw new Error(
         `Expected HEAD to be on branch '${expectedBranch}' but it is on '${actualBranch.trim()}'`,
@@ -645,9 +640,8 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
     const authUrl = await this.getAuthUrl(worktreePath);
     try {
-      await execFileAsync('git', ['push', authUrl, `HEAD:refs/heads/${expectedBranch}`], {
+      await git(['push', authUrl, `HEAD:refs/heads/${expectedBranch}`], {
         cwd: worktreePath,
-        env: GIT_ENV,
       });
     } catch (err) {
       throw sanitizeGitError(err);
@@ -656,23 +650,22 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   async pullBranch(worktreePath: string): Promise<{ newCommits: boolean }> {
     this.logger.info({ worktreePath }, 'Pulling latest from origin');
-    const { stdout: headBefore } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+    const { stdout: headBefore } = await git(['rev-parse', 'HEAD'], {
       cwd: worktreePath,
     });
     const authUrl = await this.getAuthUrl(worktreePath);
-    const { stdout: branch } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    const { stdout: branch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
     });
     try {
-      await execFileAsync('git', ['fetch', authUrl, branch.trim()], {
+      await git(['fetch', authUrl, branch.trim()], {
         cwd: worktreePath,
-        env: GIT_ENV,
       });
     } catch (err) {
       throw sanitizeGitError(err);
     }
-    await execFileAsync('git', ['merge', 'FETCH_HEAD', '--ff-only'], { cwd: worktreePath });
-    const { stdout: headAfter } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+    await git(['merge', 'FETCH_HEAD', '--ff-only'], { cwd: worktreePath });
+    const { stdout: headAfter } = await git(['rev-parse', 'HEAD'], {
       cwd: worktreePath,
     });
     const newCommits = headBefore.trim() !== headAfter.trim();
@@ -693,8 +686,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     for (const rangeRef of rangeRefs) {
       try {
-        const { stdout } = await execFileAsync(
-          'git',
+        const { stdout } = await git(
           ['log', rangeRef, `--max-count=${maxCommits}`, '--format=%h %s%n%b'],
           { cwd: worktreePath },
         );
@@ -744,13 +736,11 @@ export class LocalWorktreeManager implements WorktreeManager {
         await fs.rm(bareRepoPath, { recursive: true, force: true });
         this.logger.info({ repoUrl, bareRepoPath }, 'readBranchFolder: cloning bare repo');
         try {
-          await execFileAsync('git', ['clone', '--bare', authUrl, bareRepoPath], {
-            env: GIT_ENV,
-          });
+          await git(['clone', '--bare', authUrl, bareRepoPath]);
         } catch (err) {
           throw sanitizeGitError(err);
         }
-        await execFileAsync('git', ['remote', 'set-url', 'origin', repoUrl], {
+        await git(['remote', 'set-url', 'origin', repoUrl], {
           cwd: bareRepoPath,
         });
       }
@@ -759,15 +749,14 @@ export class LocalWorktreeManager implements WorktreeManager {
       // local ref (mirrors the `create()` behaviour for pushed-only branches).
       let treeRef = `refs/remotes/origin/${branch}`;
       try {
-        await execFileAsync(
-          'git',
+        await git(
           [
             'fetch',
             authUrl,
             `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
             `+refs/heads/${branch}:refs/heads/${branch}`,
           ],
-          { cwd: bareRepoPath, env: GIT_ENV },
+          { cwd: bareRepoPath },
         );
       } catch (fetchErr) {
         this.logger.debug(
@@ -775,7 +764,7 @@ export class LocalWorktreeManager implements WorktreeManager {
           'readBranchFolder: remote fetch failed',
         );
         try {
-          await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branch}`], {
+          await git(['rev-parse', '--verify', `refs/heads/${branch}`], {
             cwd: bareRepoPath,
           });
           treeRef = `refs/heads/${branch}`;
@@ -790,11 +779,9 @@ export class LocalWorktreeManager implements WorktreeManager {
       // entry.
       const lsTreeAt = async (refPath: string): Promise<string> => {
         try {
-          const { stdout } = await execFileAsync(
-            'git',
-            ['ls-tree', '--name-only', treeRef, `${refPath}/`],
-            { cwd: bareRepoPath },
-          );
+          const { stdout } = await git(['ls-tree', '--name-only', treeRef, `${refPath}/`], {
+            cwd: bareRepoPath,
+          });
           return stdout;
         } catch (err) {
           throw sanitizeGitError(err);
@@ -823,11 +810,9 @@ export class LocalWorktreeManager implements WorktreeManager {
       // List brief files under briefsPath.
       let rawNames: string;
       try {
-        const { stdout } = await execFileAsync(
-          'git',
-          ['ls-tree', '--name-only', treeRef, `${briefsPath}/`],
-          { cwd: bareRepoPath },
-        );
+        const { stdout } = await git(['ls-tree', '--name-only', treeRef, `${briefsPath}/`], {
+          cwd: bareRepoPath,
+        });
         rawNames = stdout;
       } catch (err) {
         throw sanitizeGitError(err);
@@ -849,7 +834,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       const files: Array<{ filename: string; content: string }> = [];
       for (const entry of mdEntries) {
         try {
-          const { stdout } = await execFileAsync('git', ['show', `${treeRef}:${entry.full}`], {
+          const { stdout } = await git(['show', `${treeRef}:${entry.full}`], {
             cwd: bareRepoPath,
             maxBuffer: 2 * 1024 * 1024,
           });
@@ -864,7 +849,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
       const readDoc = async (docPath: string): Promise<string> => {
         try {
-          const { stdout } = await execFileAsync('git', ['show', `${treeRef}:${docPath}`], {
+          const { stdout } = await git(['show', `${treeRef}:${docPath}`], {
             cwd: bareRepoPath,
             maxBuffer: 2 * 1024 * 1024,
           });
@@ -899,7 +884,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   ): Promise<string | undefined> {
     for (const ref of [baseBranch, `origin/${baseBranch}`]) {
       try {
-        const { stdout } = await execFileAsync('git', ['merge-base', 'HEAD', ref], {
+        const { stdout } = await git(['merge-base', 'HEAD', ref], {
           cwd: worktreePath,
         });
         if (stdout.trim()) {
@@ -913,11 +898,11 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   private async getAuthUrl(worktreePath: string): Promise<string> {
-    const { stdout: commonDir } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+    const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
       cwd: worktreePath,
     });
     const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
-    const { stdout: remoteUrl } = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
+    const { stdout: remoteUrl } = await git(['remote', 'get-url', 'origin'], {
       cwd: bareRepoPath,
     });
     const cleanUrl = remoteUrl.trim();
@@ -943,7 +928,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   /** A bare repo is valid if it has been cloned (packed-refs or non-empty refs/). */
   private async isBareRepoValid(bareRepoPath: string): Promise<boolean> {
     try {
-      await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: bareRepoPath });
+      await git(['rev-parse', '--git-dir'], { cwd: bareRepoPath });
       return true;
     } catch {
       return false;
