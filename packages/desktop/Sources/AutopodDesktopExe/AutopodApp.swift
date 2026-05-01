@@ -103,7 +103,13 @@ struct AutopodApp: App {
     NotificationService.shared.scheduledJobStore = scheduledJobStore
 
     Task {
-      await podStore.loadSessions()
+      // Retry up to 3× — daemon may still be initialising when wireUpConnection fires
+      // during a concurrent app+daemon restart, causing a silent empty-pods state.
+      for attempt in 1...3 {
+        await podStore.loadSessions()
+        if !podStore.pods.isEmpty { break }
+        if attempt < 3 { try? await Task.sleep(for: .seconds(1)) }
+      }
       await profileStore.loadProfiles()
       await scheduledJobStore.load()
       await memoryStore.loadMemories()

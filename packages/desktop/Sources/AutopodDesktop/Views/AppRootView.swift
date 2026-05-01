@@ -94,6 +94,7 @@ public struct AppRootView: View {
       onTerminalResize: { cols, rows in terminalManager?.resize(cols: cols, rows: rows) },
       onTerminalConnect: { podId in terminalManager?.connect(podId: podId) },
       onTerminalDisconnect: { terminalManager?.disconnect() },
+      loadError: podStore.error,
       onRefresh: {
         await podStore.loadSessions()
         await profileStore.loadProfiles()

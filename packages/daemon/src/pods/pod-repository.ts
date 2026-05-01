@@ -257,7 +257,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
   return {
     id: row.id as string,
     profileName: row.profile_name as string,
-    task: row.task as string,
+    task: Buffer.isBuffer(row.task) ? (row.task as Buffer).toString('utf8') : (row.task as string),
     status: row.status as PodStatus,
     model: row.model as string,
     runtime: row.runtime as Pod['runtime'],

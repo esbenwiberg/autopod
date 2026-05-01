@@ -63,7 +63,10 @@ public final class PodStore {
   // MARK: - Load
 
   public func loadSessions() async {
-    guard let api else { return }
+    guard let api else {
+      error = "API client not configured — try disconnecting and reconnecting"
+      return
+    }
     isLoading = true
     error = nil
     do {

@@ -32,6 +32,7 @@ public struct MainView: View {
     public var onTerminalResize: ((Int, Int) -> Void)?
     public var onTerminalConnect: ((String) -> Void)?
     public var onTerminalDisconnect: (() -> Void)?
+    public var loadError: String?
     public var onRefresh: (() async -> Void)?
     public var onSelectSession: ((String?) -> Void)?
     public var onRefreshDiff: ((String) -> Void)?
@@ -88,6 +89,7 @@ public struct MainView: View {
         onTerminalResize: ((Int, Int) -> Void)? = nil,
         onTerminalConnect: ((String) -> Void)? = nil,
         onTerminalDisconnect: (() -> Void)? = nil,
+        loadError: String? = nil,
         onRefresh: (() async -> Void)? = nil,
         onSelectSession: ((String?) -> Void)? = nil,
         onRefreshDiff: ((String) -> Void)? = nil,
@@ -135,6 +137,7 @@ public struct MainView: View {
         self.onTerminalResize = onTerminalResize
         self.onTerminalConnect = onTerminalConnect
         self.onTerminalDisconnect = onTerminalDisconnect
+        self.loadError = loadError
         self.onRefresh = onRefresh
         self.onSelectSession = onSelectSession
         self.onRefreshDiff = onRefreshDiff
@@ -475,6 +478,10 @@ public struct MainView: View {
             Button("") { showCommandPalette.toggle() }
                 .keyboardShortcut("k", modifiers: .command)
                 .hidden()
+            // Hidden button to catch Cmd+R (refresh pods)
+            Button("") { Task { await onRefresh?() } }
+                .keyboardShortcut("r", modifiers: .command)
+                .hidden()
         }
     }
 
@@ -513,6 +520,16 @@ public struct MainView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 80)
+            Button {
+                Task { await onRefresh?() }
+            } label: {
+                Image(systemName: isLoading ? "arrow.clockwise" : "arrow.clockwise")
+                    .rotationEffect(isLoading ? .degrees(360) : .zero)
+                    .animation(isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isLoading)
+            }
+            .buttonStyle(.borderless)
+            .help("Refresh pods (⌘R)")
+            .disabled(isLoading)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -590,15 +607,34 @@ public struct MainView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if pods.isEmpty {
             VStack(spacing: 10) {
-                Image(systemName: "tray")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.tertiary)
-                Text("No pods")
+                if loadError != nil {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 32))
+                        .foregroundStyle(Color.orange)
+                } else {
+                    Image(systemName: "tray")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.tertiary)
+                }
+                Text(loadError != nil ? "Failed to load pods" : "No pods")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text("Create a pod to get started")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                if let err = loadError {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    Button("Retry") {
+                        Task { await onRefresh?() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                } else {
+                    Text("Create a pod to get started")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
