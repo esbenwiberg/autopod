@@ -18,6 +18,7 @@ import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { DockerSidecarManager } from './containers/sidecar-manager.js';
 import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createPodTokenIssuer } from './crypto/pod-tokens.js';
+import { createDbBackupManager } from './db/backup.js';
 import { createDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrate.js';
 import type { AuthModule } from './interfaces/index.js';
@@ -128,6 +129,16 @@ const migrationsDir =
   ].find((dir) => fs.existsSync(dir)) ?? path.join(__dirname, '..', 'src', 'db', 'migrations');
 
 runMigrations(db, migrationsDir, logger);
+
+const backupManager = createDbBackupManager(db, DB_PATH, logger, {
+  intervalMs: process.env.AUTOPOD_BACKUP_INTERVAL_MS
+    ? Number.parseInt(process.env.AUTOPOD_BACKUP_INTERVAL_MS, 10)
+    : undefined,
+  retain: process.env.AUTOPOD_BACKUP_RETAIN
+    ? Number.parseInt(process.env.AUTOPOD_BACKUP_RETAIN, 10)
+    : undefined,
+});
+backupManager.start();
 
 const actionAuditRepo = createActionAuditRepository(db);
 const actionRegistry = createActionRegistry(logger);
@@ -749,6 +760,9 @@ async function shutdown(signal: string) {
 
   // Drain pod queue
   await podQueue.drain();
+
+  // Stop backup manager (must precede db.close)
+  backupManager.stop();
 
   // Close database
   db.close();
