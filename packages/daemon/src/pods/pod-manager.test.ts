@@ -953,6 +953,189 @@ describe('PodManager', () => {
       manager.rehydrateDependentSessions();
       expect(ctx.enqueuedSessions).toContain(child.id);
     });
+
+    // Regression: the no-changes fast-path used to trust the cached pod.filesChanged
+    // (which goes stale after force-approve / human-fix) and skip both the branch
+    // push and container→host sync-back. Three pods (fast-crocodile, envious-platypus,
+    // yelling-skink) leaked work this way before we re-checked the worktree and
+    // pushed the branch even on the fast-path.
+    describe('no-changes fast-path', () => {
+      it('refreshes filesChanged from worktree and takes fast-path when actual diff is zero', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Do stuff' },
+          'user-1',
+        );
+        // Stale cache says 5 files changed, but the worktree actually has zero.
+        ctx.podRepo.update(pod.id, {
+          status: 'validated',
+          worktreePath: '/tmp/wt',
+          filesChanged: 5,
+          linesAdded: 100,
+          linesRemoved: 50,
+        });
+
+        (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+
+        await manager.approveSession(pod.id);
+
+        const completed = manager.getSession(pod.id);
+        expect(completed.status).toBe('complete');
+        // Stale cache must be corrected on disk.
+        expect(completed.filesChanged).toBe(0);
+        expect(completed.linesAdded).toBe(0);
+        expect(completed.linesRemoved).toBe(0);
+        // Fast-path push runs against the feature branch.
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith('/tmp/wt', pod.branch);
+        // No PR creation, no merge — fast-path completes directly.
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      });
+
+      it('skips fast-path when worktree has real changes despite cached filesChanged=0', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Do stuff' },
+          'user-1',
+        );
+        // Cached zero — old bug would have taken the fast-path and dropped the branch.
+        ctx.podRepo.update(pod.id, {
+          status: 'validated',
+          worktreePath: '/tmp/wt',
+          filesChanged: 0,
+        });
+
+        (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+          filesChanged: 3,
+          linesAdded: 50,
+          linesRemoved: 10,
+        });
+
+        await manager.approveSession(pod.id);
+
+        // Fresh diff stats must be persisted on disk.
+        expect(manager.getSession(pod.id).filesChanged).toBe(3);
+        // Normal merge path runs — mergeBranch + createPr + mergePr.
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            worktreePath: '/tmp/wt',
+            targetBranch: pod.branch,
+          }),
+        );
+        expect(ctx.prManager.createPr).toHaveBeenCalled();
+        expect(ctx.prManager.mergePr).toHaveBeenCalled();
+      });
+
+      it('forces workspace pods through normal path even when worktree has zero changes', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        // Workspace pods edit files inside the container; sync-back must run via mergeBranch.
+        // Bypassing the fast-path is the whole point of the !isWorkspacePod guard.
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace stuff',
+            options: { agentMode: 'interactive', output: 'branch' },
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'validated',
+          worktreePath: '/tmp/wt',
+          filesChanged: 0,
+        });
+
+        (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+
+        await manager.approveSession(pod.id);
+
+        // Fast-path block is gated by !isWorkspacePod, so getDiffStats must not run inside approveSession.
+        expect(ctx.worktreeManager.getDiffStats).not.toHaveBeenCalled();
+        // Fallback push branch (output==='branch' skips PR retry) runs sync-back via mergeBranch.
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+          expect.objectContaining({ targetBranch: pod.branch }),
+        );
+      });
+
+      it('falls back to normal merge path when getDiffStats throws', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Do stuff' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'validated',
+          worktreePath: '/tmp/wt',
+          filesChanged: 0,
+        });
+
+        (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockRejectedValue(
+          new Error('git error'),
+        );
+
+        await manager.approveSession(pod.id);
+
+        // Fail-safe: when we can't determine diff, treat as "may have changes" and merge.
+        // Better to push an empty branch than to silently drop user work.
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('complete');
+      });
+
+      it('pushes branch on truly-no-changes fast-path before emitting pod.completed', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Do stuff' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'validated',
+          worktreePath: '/tmp/wt',
+          filesChanged: 0,
+        });
+
+        (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+
+        // Track call ordering: pushBranch must run before pod.completed event fires
+        // so the branch is durably on origin if the daemon dies between push and emit.
+        const order: string[] = [];
+        (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockImplementation(
+          async () => {
+            order.push('push');
+          },
+        );
+        ctx.eventBus.subscribe((e) => {
+          // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union
+          if ((e as any).type === 'pod.completed') order.push('completed');
+        });
+
+        await manager.approveSession(pod.id);
+
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith('/tmp/wt', pod.branch);
+        expect(order).toEqual(['push', 'completed']);
+      });
+    });
   });
 
   describe('rejectSession', () => {

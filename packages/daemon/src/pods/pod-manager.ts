@@ -4411,33 +4411,87 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async approveSession(podId: string, options?: { squash?: boolean }): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
+      const isWorkspacePod = pod.options?.agentMode === 'interactive';
 
-      // No-change pod: skip PR creation and branch push, complete directly.
-      if (pod.filesChanged === 0 && pod.worktreePath && !pod.prUrl) {
-        emitActivityStatus(podId, 'No changes to merge — completing pod');
-        const s1 = transition(pod, 'approved');
-        const s2 = transition(s1, 'merging');
-        const noChangePod = transition(s2, 'complete', { completedAt: new Date().toISOString() });
-        eventBus.emit({
-          type: 'pod.completed',
-          timestamp: new Date().toISOString(),
-          podId,
-          finalStatus: 'complete',
-          summary: {
-            id: podId,
-            profileName: pod.profileName,
-            task: pod.task,
-            status: 'complete',
-            model: pod.model,
-            runtime: pod.runtime,
-            duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
-            filesChanged: pod.filesChanged,
-            createdAt: pod.createdAt,
-          },
-        });
-        logger.info({ podId }, 'Pod approved with no changes — completed without PR');
-        maybeTriggerDependents(noChangePod);
-        return;
+      // No-change fast-path: skip PR creation and complete directly.
+      // Workspace pods are excluded — their human edits live in the container until
+      // mergeBranch() runs container→host sync-back, so they MUST take the normal
+      // merge path. Re-check stats from the worktree (cached pod.filesChanged is
+      // stale after force-approve / human-fix) and still push the branch so the
+      // user has a recoverable handle on origin if the "no changes" call is wrong.
+      if (!isWorkspacePod && pod.worktreePath && !pod.prUrl) {
+        let trulyNoChanges = false;
+        try {
+          const profile = profileStore.get(pod.profileName);
+          const defaultBranch = profile.defaultBranch ?? 'main';
+          const sinceCommit = pod.startCommitSha ?? undefined;
+          const baseBranchForStats = pod.baseBranch ?? defaultBranch;
+          const stats = await worktreeManager.getDiffStats(
+            pod.worktreePath,
+            baseBranchForStats,
+            sinceCommit,
+          );
+          if (
+            stats.filesChanged !== pod.filesChanged ||
+            stats.linesAdded !== pod.linesAdded ||
+            stats.linesRemoved !== pod.linesRemoved
+          ) {
+            podRepo.update(podId, {
+              filesChanged: stats.filesChanged,
+              linesAdded: stats.linesAdded,
+              linesRemoved: stats.linesRemoved,
+            });
+          }
+          trulyNoChanges = stats.filesChanged === 0;
+        } catch (err) {
+          logger.warn(
+            { err, podId },
+            'getDiffStats failed in approveSession; falling back to normal merge path',
+          );
+          trulyNoChanges = false;
+        }
+
+        if (trulyNoChanges) {
+          emitActivityStatus(podId, 'No changes to merge — pushing branch and completing pod');
+          if (pod.branch) {
+            try {
+              await worktreeManager.pushBranch(pod.worktreePath, pod.branch);
+            } catch (err) {
+              logger.warn(
+                { err, podId },
+                'Branch push failed in no-changes fast-path; continuing to complete',
+              );
+            }
+          }
+          const s1 = transition(pod, 'approved');
+          const s2 = transition(s1, 'merging');
+          const noChangePod = transition(s2, 'complete', {
+            completedAt: new Date().toISOString(),
+          });
+          eventBus.emit({
+            type: 'pod.completed',
+            timestamp: new Date().toISOString(),
+            podId,
+            finalStatus: 'complete',
+            summary: {
+              id: podId,
+              profileName: pod.profileName,
+              task: pod.task,
+              status: 'complete',
+              model: pod.model,
+              runtime: pod.runtime,
+              duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
+              filesChanged: 0,
+              createdAt: pod.createdAt,
+            },
+          });
+          logger.info(
+            { podId },
+            'Pod approved with no changes — branch pushed, completed without PR',
+          );
+          maybeTriggerDependents(noChangePod);
+          return;
+        }
       }
 
       emitActivityStatus(podId, 'Approved — merging changes…');
