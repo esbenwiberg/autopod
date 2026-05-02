@@ -44,7 +44,8 @@ export type SystemEvent =
   | IssueWatcherPickedUpEvent
   | IssueWatcherCompletedEvent
   | IssueWatcherErrorEvent
-  | PodWorktreeCompromisedEvent;
+  | PodWorktreeCompromisedEvent
+  | PodPreflightOverlapEvent;
 
 export interface PodCreatedEvent {
   type: 'pod.created';
@@ -220,4 +221,27 @@ export interface PodWorktreeCompromisedEvent {
   podId: string;
   deletionCount: number;
   threshold: number;
+}
+
+/**
+ * Emitted at pod-create time when the new pod's `touches` scope overlaps the
+ * scope of one or more in-flight pods on the same repo + base branch. This is
+ * a *warning*, not a block — the pod still proceeds. Surfaced so desktop/CLI
+ * can show "this pod overlaps with pod X" so the operator can decide whether
+ * to kill one, reorder, or accept the parallel work.
+ *
+ * Overlap is computed via directory-prefix glob comparison (see
+ * `packages/daemon/src/pods/glob-overlap.ts`) — conservative on purpose: a
+ * false positive is noise, a missed conflict is a merge conflict an hour later.
+ */
+export interface PodPreflightOverlapEvent {
+  type: 'pod.preflight_overlap';
+  timestamp: string;
+  podId: string;
+  conflicts: Array<{
+    conflictingPodId: string;
+    conflictingPodTask: string;
+    conflictingPodStatus: string;
+    overlappingGlobs: Array<{ ours: string; theirs: string }>;
+  }>;
 }

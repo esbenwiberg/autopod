@@ -92,6 +92,7 @@ import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
+import { findPreflightConflicts } from './preflight.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
@@ -2408,6 +2409,75 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           createdAt: pod.createdAt,
         },
       });
+
+      // Preflight overlap check — emit a warning event if this pod's `touches`
+      // scope overlaps an in-flight pod on the same repo + base. Warn-only:
+      // the pod still proceeds. Best-effort — if the check itself throws we
+      // log and move on; never let preflight block pod creation.
+      const candidateTouches = request.touches ?? [];
+      if (candidateTouches.length > 0) {
+        try {
+          const candidateBase = request.baseBranch ?? profile.defaultBranch ?? 'main';
+          const candidateRepoUrl = profile.repoUrl ?? null;
+
+          // Pods don't carry repoUrl directly — it's on the profile. Cache the
+          // lookup so we make at most one profileStore.get() per profile name
+          // even when there are many in-flight pods sharing a profile.
+          const profileRepoUrls = new Map<string, string | null>();
+          const resolveRepoUrl = (profileName: string): string | null => {
+            const cached = profileRepoUrls.get(profileName);
+            if (cached !== undefined) return cached;
+            try {
+              const url = profileStore.get(profileName).repoUrl ?? null;
+              profileRepoUrls.set(profileName, url);
+              return url;
+            } catch {
+              profileRepoUrls.set(profileName, null);
+              return null;
+            }
+          };
+
+          const candidates = podRepo
+            .list()
+            .filter((p) => p.id !== id)
+            .map((p) => ({ pod: p, repoUrl: resolveRepoUrl(p.profileName) }));
+
+          const conflicts = findPreflightConflicts(
+            {
+              touches: candidateTouches,
+              repoUrl: candidateRepoUrl,
+              baseBranch: candidateBase,
+            },
+            candidates,
+          );
+
+          if (conflicts.length > 0) {
+            eventBus.emit({
+              type: 'pod.preflight_overlap',
+              timestamp: new Date().toISOString(),
+              podId: id,
+              conflicts: conflicts.map((c) => ({
+                conflictingPodId: c.conflictingPodId,
+                conflictingPodTask: c.conflictingPodTask,
+                conflictingPodStatus: c.conflictingPodStatus,
+                overlappingGlobs: c.overlappingGlobs,
+              })),
+            });
+            logger.warn(
+              {
+                podId: id,
+                conflictingPodIds: conflicts.map((c) => c.conflictingPodId),
+              },
+              'Pod created with preflight overlap on in-flight pods — possible merge conflict',
+            );
+          }
+        } catch (err) {
+          logger.debug(
+            { err, podId: id },
+            'Preflight overlap check failed — proceeding without warning',
+          );
+        }
+      }
 
       // Dependent pods must not start until their predecessors reach `validated`;
       // maybeTriggerDependents() will enqueue them at that point. A pod counts
