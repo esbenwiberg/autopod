@@ -484,7 +484,10 @@ export function generateSystemInstructions(
       (hasCodeIntel
         ? `**Code-intel MCPs are active — use ${codeIntelExamples}, etc. for ALL symbol discovery. Do NOT use grep, find, or file reads to locate symbols.** `
         : '') +
-      'Then call `report_plan` with your approach and numbered steps.',
+      'Then call `report_plan` with your approach and numbered steps.' +
+      (profile.evaluatePlan
+        ? ' After calling `report_plan`, immediately call `check_messages` — the harness may have queued feedback on your plan against the acceptance criteria.'
+        : ''),
   );
   lines.push(
     '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',
@@ -574,6 +577,15 @@ export function generateSystemInstructions(
       'Use an empty array if you followed the plan exactly. ' +
       'Only include meaningful plan deviations — not minor style choices or trivial reorderings.',
   );
+  if (pod.acceptanceCriteria?.length) {
+    lines.push(
+      '   - `acChecklist`: include one entry per acceptance criterion from this pod. ' +
+        'Set `verified: true` only if you actually tested or observed the criterion passing ' +
+        '(via `validate_in_browser`, `validate_locally`, or direct manual inspection). ' +
+        'Set `verified: false` if you could not check it. Honest reporting matters — ' +
+        'discrepancies with the automated validator are surfaced to the reviewer.',
+    );
+  }
   lines.push(
     '   Transparency is rewarded — the independent reviewer will see your deviations and assess ' +
       'whether they were justified. A well-reasoned deviation is better than silently skipping a step.',
@@ -869,6 +881,19 @@ function generateOperatingEnvironment(
     lines.push('- Do NOT run `git push` — the system pushes and creates PRs on your behalf');
   }
   lines.push('');
+
+  // Skipped validation phases note — tell the agent which controls are disabled
+  // so it doesn't waste cycles self-validating controls that don't apply.
+  if (profile.skipValidationPhases?.length) {
+    lines.push('### Validation Phase Overrides');
+    lines.push(
+      `Note: the following validation phases are disabled for this profile: ${profile.skipValidationPhases.join(', ')}.`,
+    );
+    lines.push(
+      'Do not rely on them catching issues — self-validate manually for any concerns they would normally cover.',
+    );
+    lines.push('');
+  }
 }
 
 const CODE_INTEL_TOOL_ROWS: Array<{ task: string; tool: string; server: string }> = [

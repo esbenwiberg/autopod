@@ -336,6 +336,11 @@ const createProfileBaseSchema = z.object({
   testPipeline: testPipelineConfigSchema.nullable().default(null),
   securityScan: securityScanPolicySchema.nullable().default(null),
   codeIntelligence: codeIntelligenceConfigSchema.nullable().default(null),
+  skipValidationPhases: z
+    .array(z.enum(['lint', 'sast', 'build', 'test', 'health', 'pages', 'ac', 'review']))
+    .nullable()
+    .default(null),
+  evaluatePlan: z.boolean().nullable().default(null),
   deployment: z
     .object({
       enabled: z.boolean(),

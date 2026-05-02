@@ -19,6 +19,7 @@ import type {
   SidecarsConfig,
   SmokePage,
   TestPipelineConfig,
+  ValidationPhase,
 } from '@autopod/shared';
 import {
   AutopodError,
@@ -187,6 +188,10 @@ export function rowToProfile(
       ? (JSON.parse(row.code_intelligence as string) as CodeIntelligenceConfig)
       : null,
     deployment: row.deployment ? (JSON.parse(row.deployment as string) as DeploymentConfig) : null,
+    skipValidationPhases: row.skip_validation_phases
+      ? (JSON.parse(row.skip_validation_phases as string) as ValidationPhase[])
+      : null,
+    evaluatePlan: row.evaluate_plan != null ? Boolean(row.evaluate_plan) : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -311,6 +316,7 @@ export function createProfileStore(
           merge_strategy,
           sidecars, trusted_source, test_pipeline, security_scan, code_intelligence,
           deployment,
+          skip_validation_phases, evaluate_plan,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand, @buildWorkDir,
@@ -331,6 +337,7 @@ export function createProfileStore(
           @mergeStrategy,
           @sidecars, @trustedSource, @testPipeline, @securityScan, @codeIntelligence,
           @deployment,
+          @skipValidationPhases, @evaluatePlan,
           @createdAt, @updatedAt
         )
       `).run({
@@ -405,6 +412,10 @@ export function createProfileStore(
         securityScan: parsed.securityScan ? JSON.stringify(parsed.securityScan) : null,
         codeIntelligence: parsed.codeIntelligence ? JSON.stringify(parsed.codeIntelligence) : null,
         deployment: parsed.deployment ? JSON.stringify(parsed.deployment) : null,
+        skipValidationPhases: parsed.skipValidationPhases
+          ? JSON.stringify(parsed.skipValidationPhases)
+          : null,
+        evaluatePlan: parsed.evaluatePlan === null ? null : parsed.evaluatePlan ? 1 : 0,
         createdAt: now,
         updatedAt: now,
       });
@@ -751,6 +762,16 @@ export function createProfileStore(
       if (parsed.deployment !== undefined) {
         setClauses.push('deployment = @deployment');
         fieldMap.deployment = parsed.deployment ? JSON.stringify(parsed.deployment) : null;
+      }
+      if (parsed.skipValidationPhases !== undefined) {
+        setClauses.push('skip_validation_phases = @skipValidationPhases');
+        fieldMap.skipValidationPhases = parsed.skipValidationPhases
+          ? JSON.stringify(parsed.skipValidationPhases)
+          : null;
+      }
+      if (parsed.evaluatePlan !== undefined) {
+        setClauses.push('evaluate_plan = @evaluatePlan');
+        fieldMap.evaluatePlan = parsed.evaluatePlan === null ? null : parsed.evaluatePlan ? 1 : 0;
       }
 
       if (setClauses.length === 0) {

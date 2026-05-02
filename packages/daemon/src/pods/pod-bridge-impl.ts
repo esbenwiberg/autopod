@@ -29,6 +29,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import { evaluatePlanAgainstAc } from './plan-evaluator.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
@@ -194,6 +195,19 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         podId,
         event: { type: 'plan', summary, steps, timestamp: new Date().toISOString() },
       });
+
+      // Fire-and-forget plan evaluation against AC when the profile opts in.
+      const pod = podManager.getSession(podId);
+      const profile = profileStore.get(pod.profileName);
+      if (profile.evaluatePlan && pod.acceptanceCriteria?.length) {
+        evaluatePlanAgainstAc(summary, steps, pod.acceptanceCriteria, profile, logger)
+          .then((feedback) => {
+            if (feedback) {
+              nudgeRepo.queue(podId, `**Plan review:** ${feedback}`);
+            }
+          })
+          .catch((err) => logger.warn({ err, podId }, 'Plan evaluation failed'));
+      }
     },
 
     reportProgress(
@@ -229,18 +243,21 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       actualSummary: string,
       deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
       how?: string,
+      acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>,
     ): void {
       podManager.touchHeartbeat(podId);
       logger.info(
         {
           podId,
           deviationCount: deviations.length,
+          acChecklistCount: acChecklist?.length ?? 0,
           actualSummary: actualSummary.slice(0, 100),
         },
         'Agent reported task summary',
       );
       podRepo.update(podId, {
         taskSummary: { actualSummary, how, deviations },
+        ...(acChecklist != null ? { acSelfReport: acChecklist } : {}),
       });
       eventBus.emit({
         type: 'pod.agent_activity',
@@ -251,6 +268,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           actualSummary,
           how,
           deviations,
+          acChecklist,
           timestamp: new Date().toISOString(),
         },
       });

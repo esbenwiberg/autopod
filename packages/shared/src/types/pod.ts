@@ -302,6 +302,20 @@ export interface Pod {
    * deployment enabled (or pods predating migration 079).
    */
   deployBaselineHashes: Record<string, string> | null;
+  /**
+   * Agent's self-reported verification status for each acceptance criterion,
+   * submitted alongside `report_task_summary`. Null until the agent submits it.
+   * Discrepancies with automated findings are surfaced in correction messages.
+   */
+  acSelfReport: Array<{ criterion: string; verified: boolean; notes?: string }> | null;
+  /**
+   * Token counts consumed by harness-side AI calls (e.g. AI review, plan evaluation).
+   * Keyed by phase name. Populated as each phase completes; null until any harness
+   * AI call runs.
+   */
+  phaseTokenUsage: Partial<
+    Record<'review' | 'plan_eval', { inputTokens: number; outputTokens: number }>
+  > | null;
 }
 
 export interface CreatePodRequest {

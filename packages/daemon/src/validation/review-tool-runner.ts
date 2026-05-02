@@ -55,7 +55,9 @@ export interface ToolUseReviewConfig {
  * Runs a review using the Anthropic Messages API with tool use,
  * allowing the reviewer to read files and inspect git state on demand.
  */
-export async function runToolUseReview(config: ToolUseReviewConfig): Promise<{ stdout: string }> {
+export async function runToolUseReview(
+  config: ToolUseReviewConfig,
+): Promise<{ stdout: string; tokenUsage?: { inputTokens: number; outputTokens: number } }> {
   const maxToolCalls = config.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
   const deadline = Date.now() + config.timeout;
 
@@ -67,6 +69,8 @@ export async function runToolUseReview(config: ToolUseReviewConfig): Promise<{ s
   const messages: MessageParam[] = [{ role: 'user', content: config.prompt }];
 
   let toolCallCount = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   // Tool-use loop: keep sending messages until the model returns text-only or we hit limits
   while (true) {
@@ -89,6 +93,9 @@ export async function runToolUseReview(config: ToolUseReviewConfig): Promise<{ s
       timeout: remainingMs,
     });
 
+    totalInputTokens += response.usage.input_tokens;
+    totalOutputTokens += response.usage.output_tokens;
+
     // Check if the model returned any tool-use blocks
     const toolUseBlocks = response.content.filter(
       (block): block is ToolUseBlock => block.type === 'tool_use',
@@ -100,7 +107,10 @@ export async function runToolUseReview(config: ToolUseReviewConfig): Promise<{ s
         (block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text',
       );
       const stdout = textBlocks.map((b) => b.text).join('\n');
-      return { stdout };
+      return {
+        stdout,
+        tokenUsage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+      };
     }
 
     // Execute tool calls

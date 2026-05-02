@@ -132,5 +132,27 @@ export async function buildCorrectionMessage(
     lines.push(context.customInstructions);
   }
 
+  // Surface AC self-verification discrepancies
+  const selfReport = pod.acSelfReport;
+  if (selfReport?.length && validationResult.acValidation?.status === 'fail') {
+    const failingCriteria = validationResult.acValidation.results
+      .filter((r) => r.status === 'fail')
+      .map((r) => r.criterion);
+
+    const falsePositives = selfReport.filter(
+      (r) => r.verified && failingCriteria.some((f) => f === r.criterion),
+    );
+
+    if (falsePositives.length) {
+      lines.push('');
+      lines.push('### Self-Verification Discrepancy');
+      lines.push('You marked these criteria as verified, but the automated validator disagrees:');
+      for (const r of falsePositives) {
+        lines.push(`- ${r.criterion}${r.notes ? ` (your notes: ${r.notes})` : ''}`);
+      }
+      lines.push('Revise your implementation — these are not passing.');
+    }
+  }
+
   return lines.join('\n');
 }

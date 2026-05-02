@@ -362,5 +362,19 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
+  const VALID_PHASES = ['lint', 'sast', 'build', 'test', 'health', 'pages', 'ac', 'review'];
+  const skipValidationPhases = input.skipValidationPhases;
+  if (skipValidationPhases != null) {
+    if (!Array.isArray(skipValidationPhases)) {
+      errors.push('skipValidationPhases must be an array or null');
+    } else {
+      for (const phase of skipValidationPhases as unknown[]) {
+        if (!VALID_PHASES.includes(phase as string)) {
+          errors.push(`skipValidationPhases contains invalid phase: "${String(phase)}"`);
+        }
+      }
+    }
+  }
+
   return { valid: errors.length === 0, errors };
 }

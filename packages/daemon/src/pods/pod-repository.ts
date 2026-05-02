@@ -169,6 +169,10 @@ export interface PodUpdates {
   kickedReason?: string | null;
   skipAgent?: boolean;
   deployBaselineHashes?: Record<string, string> | null;
+  acSelfReport?: Array<{ criterion: string; verified: boolean; notes?: string }> | null;
+  phaseTokenUsage?: Partial<
+    Record<'review' | 'plan_eval', { inputTokens: number; outputTokens: number }>
+  > | null;
 }
 
 export interface PodStats {
@@ -379,6 +383,18 @@ function rowToSession(row: Record<string, unknown>): Pod {
     skipAgent: Boolean(row.skip_agent),
     deployBaselineHashes: row.deploy_baseline_hashes
       ? (JSON.parse(row.deploy_baseline_hashes as string) as Record<string, string>)
+      : null,
+    acSelfReport: row.ac_self_report
+      ? (JSON.parse(row.ac_self_report as string) as Array<{
+          criterion: string;
+          verified: boolean;
+          notes?: string;
+        }>)
+      : null,
+    phaseTokenUsage: row.phase_token_usage
+      ? (JSON.parse(row.phase_token_usage as string) as Partial<
+          Record<'review' | 'plan_eval', { inputTokens: number; outputTokens: number }>
+        >)
       : null,
   };
 }
@@ -753,6 +769,16 @@ export function createPodRepository(db: Database.Database): PodRepository {
           changes.deployBaselineHashes !== null
             ? JSON.stringify(changes.deployBaselineHashes)
             : null;
+      }
+      if (changes.acSelfReport !== undefined) {
+        setClauses.push('ac_self_report = @acSelfReport');
+        params.acSelfReport =
+          changes.acSelfReport !== null ? JSON.stringify(changes.acSelfReport) : null;
+      }
+      if (changes.phaseTokenUsage !== undefined) {
+        setClauses.push('phase_token_usage = @phaseTokenUsage');
+        params.phaseTokenUsage =
+          changes.phaseTokenUsage !== null ? JSON.stringify(changes.phaseTokenUsage) : null;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so

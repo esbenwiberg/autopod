@@ -71,35 +71,61 @@ export function createLocalValidationEngine(
       let stopMonitor: (() => void) | undefined;
 
       try {
+        const skipPhases = config.skipPhases ?? [];
+
         // ── Phase 1: Lint ──────────────────────────────────────────────
         checkAbort();
-        callbacks?.onPhaseStarted?.('lint');
-        if (config.lintCommand) onProgress?.('Running lint…');
-        const lintResult = await runLint(containerManager, config, log);
+        let lintResult: Awaited<ReturnType<typeof runLint>>;
+        if (skipPhases.includes('lint')) {
+          lintResult = { status: 'skip', output: '', duration: 0 };
+        } else {
+          callbacks?.onPhaseStarted?.('lint');
+          if (config.lintCommand) onProgress?.('Running lint…');
+          lintResult = await runLint(containerManager, config, log);
+        }
         callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
 
         // ── Phase 2: SAST ──────────────────────────────────────────────
         checkAbort();
-        callbacks?.onPhaseStarted?.('sast');
-        if (config.sastCommand) onProgress?.('Running SAST…');
-        const sastResult = await runSast(containerManager, config, log);
+        let sastResult: Awaited<ReturnType<typeof runSast>>;
+        if (skipPhases.includes('sast')) {
+          sastResult = { status: 'skip', output: '', duration: 0 };
+        } else {
+          callbacks?.onPhaseStarted?.('sast');
+          if (config.sastCommand) onProgress?.('Running SAST…');
+          sastResult = await runSast(containerManager, config, log);
+        }
         callbacks?.onPhaseCompleted?.('sast', sastResult.status, sastResult);
 
         // ── Phase 3: Build ─────────────────────────────────────────────
         checkAbort();
-        callbacks?.onPhaseStarted?.('build');
-        if (config.buildCommand) onProgress?.('Running build…');
-        const buildResult = await runBuild(containerManager, config, log);
+        let buildResult: Awaited<ReturnType<typeof runBuild>>;
+        if (skipPhases.includes('build')) {
+          buildResult = {
+            status: 'pass',
+            output: 'Build phase skipped by profile configuration',
+            duration: 0,
+          };
+        } else {
+          callbacks?.onPhaseStarted?.('build');
+          if (config.buildCommand) onProgress?.('Running build…');
+          buildResult = await runBuild(containerManager, config, log);
+        }
         callbacks?.onPhaseCompleted?.('build', buildResult.status, buildResult);
 
         // ── Phase 4: Test ──────────────────────────────────────────────
         checkAbort();
-        callbacks?.onPhaseStarted?.('test');
-        if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
-        const testResult =
-          buildResult.status === 'pass'
-            ? await runTests(containerManager, config, log)
-            : { status: 'skip' as const, duration: 0 };
+        let testResult: { status: 'pass' | 'fail' | 'skip'; duration: number };
+        if (skipPhases.includes('test')) {
+          testResult = { status: 'skip', duration: 0 };
+        } else {
+          callbacks?.onPhaseStarted?.('test');
+          if (buildResult.status === 'pass' && config.testCommand) onProgress?.('Running tests…');
+          testResult =
+            buildResult.status === 'pass'
+              ? await runTests(containerManager, config, log)
+              : { status: 'skip' as const, duration: 0 };
+        }
         callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
         // ── Phase 5: Health check ──────────────────────────────────────
@@ -107,25 +133,30 @@ export function createLocalValidationEngine(
         // no endpoint to poll, and downstream Pages/AC web-ui phases are
         // inapplicable too.
         checkAbort();
-        callbacks?.onPhaseStarted?.('health');
         const skipForNoWebUi = config.hasWebUi === false;
-        if (!skipForNoWebUi && buildResult.status === 'pass' && config.startCommand)
-          onProgress?.('Running health check…');
-        const healthResult: HealthResult = skipForNoWebUi
-          ? {
-              status: 'skip',
-              url: '',
-              responseCode: null,
-              duration: 0,
-            }
-          : buildResult.status === 'pass'
-            ? await runHealthCheck(containerManager, config, log)
-            : {
-                status: 'fail',
-                url: config.previewUrl + config.healthPath,
+        let healthResult: HealthResult;
+        if (skipPhases.includes('health')) {
+          healthResult = { status: 'skip', url: '', responseCode: null, duration: 0 };
+        } else {
+          callbacks?.onPhaseStarted?.('health');
+          if (!skipForNoWebUi && buildResult.status === 'pass' && config.startCommand)
+            onProgress?.('Running health check…');
+          healthResult = skipForNoWebUi
+            ? {
+                status: 'skip',
+                url: '',
                 responseCode: null,
                 duration: 0,
-              };
+              }
+            : buildResult.status === 'pass'
+              ? await runHealthCheck(containerManager, config, log)
+              : {
+                  status: 'fail',
+                  url: config.previewUrl + config.healthPath,
+                  responseCode: null,
+                  duration: 0,
+                };
+        }
         callbacks?.onPhaseCompleted?.('health', healthResult.status, healthResult);
 
         // After health passes, watch for post-startup crashes in the background.
@@ -143,19 +174,26 @@ export function createLocalValidationEngine(
 
         // ── Phase 6: Page validation ───────────────────────────────────
         checkAbort();
-        callbacks?.onPhaseStarted?.('pages');
-        if (healthResult.status === 'pass' && config.smokePages.length > 0)
-          onProgress?.('Validating pages…');
-        const pages: PageResult[] =
-          healthResult.status === 'pass' && config.smokePages.length > 0
-            ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
-            : [];
-        const pagesStatus: 'pass' | 'fail' | 'skip' =
-          healthResult.status === 'skip' || config.smokePages.length === 0
-            ? 'skip'
-            : pages.every((p) => p.status === 'pass')
-              ? 'pass'
-              : 'fail';
+        let pages: PageResult[];
+        let pagesStatus: 'pass' | 'fail' | 'skip';
+        if (skipPhases.includes('pages')) {
+          pages = [];
+          pagesStatus = 'skip';
+        } else {
+          callbacks?.onPhaseStarted?.('pages');
+          if (healthResult.status === 'pass' && config.smokePages.length > 0)
+            onProgress?.('Validating pages…');
+          pages =
+            healthResult.status === 'pass' && config.smokePages.length > 0
+              ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
+              : [];
+          pagesStatus =
+            healthResult.status === 'skip' || config.smokePages.length === 0
+              ? 'skip'
+              : pages.every((p) => p.status === 'pass')
+                ? 'pass'
+                : 'fail';
+        }
         callbacks?.onPhaseCompleted?.('pages', pagesStatus, pages);
 
         // ── Phase 7: AC Validation ────────────────────────────────────
@@ -163,20 +201,27 @@ export function createLocalValidationEngine(
         // profile has no web UI — in the latter case web-ui criteria are
         // auto-downgraded to 'none' and routed through the diff reviewer.
         checkAbort();
-        callbacks?.onPhaseStarted?.('ac');
-        const acGateOk = healthResult.status === 'pass' || healthResult.status === 'skip';
-        if (acGateOk && config.acceptanceCriteria?.length)
-          onProgress?.('Checking acceptance criteria…');
-        const acValidation = acGateOk
-          ? await runAcValidation(
-              containerManager,
-              config,
-              log,
-              hostBrowserRunner,
-              acClassificationCache,
-            )
-          : null;
-        const acStatus: 'pass' | 'fail' | 'skip' = acValidation?.status ?? 'skip';
+        let acValidation: Awaited<ReturnType<typeof runAcValidation>> | null;
+        let acStatus: 'pass' | 'fail' | 'skip';
+        if (skipPhases.includes('ac')) {
+          acValidation = null;
+          acStatus = 'skip';
+        } else {
+          callbacks?.onPhaseStarted?.('ac');
+          const acGateOk = healthResult.status === 'pass' || healthResult.status === 'skip';
+          if (acGateOk && config.acceptanceCriteria?.length)
+            onProgress?.('Checking acceptance criteria…');
+          acValidation = acGateOk
+            ? await runAcValidation(
+                containerManager,
+                config,
+                log,
+                hostBrowserRunner,
+                acClassificationCache,
+              )
+            : null;
+          acStatus = acValidation?.status ?? 'skip';
+        }
         callbacks?.onPhaseCompleted?.('ac', acStatus, acValidation);
 
         // Collect "none"-classified ACs so the AI reviewer can own them
@@ -187,29 +232,33 @@ export function createLocalValidationEngine(
 
         // ── Phase 8: AI Task Review ────────────────────────────────────
         checkAbort();
-        callbacks?.onPhaseStarted?.('review');
-        onProgress?.('Running AI task review…');
+        let taskReview: TaskReviewResult | null;
+        let reviewSkipReason: string | undefined;
+        if (skipPhases.includes('review')) {
+          taskReview = null;
+          reviewSkipReason = 'Skipped by profile configuration';
+        } else {
+          callbacks?.onPhaseStarted?.('review');
+          onProgress?.('Running AI task review…');
 
-        // Gather enriched context from the worktree (Tier 0+1)
-        let reviewContext: ReviewContext | undefined;
-        if (config.worktreePath) {
-          try {
-            reviewContext = await gatherReviewContext(
-              config.worktreePath,
-              config.diff,
-              config.startCommitSha,
-            );
-          } catch (err) {
-            log?.warn({ err }, 'Failed to gather review context, proceeding without enrichment');
+          // Gather enriched context from the worktree (Tier 0+1)
+          let reviewContext: ReviewContext | undefined;
+          if (config.worktreePath) {
+            try {
+              reviewContext = await gatherReviewContext(
+                config.worktreePath,
+                config.diff,
+                config.startCommitSha,
+              );
+            } catch (err) {
+              log?.warn({ err }, 'Failed to gather review context, proceeding without enrichment');
+            }
           }
-        }
 
-        const { result: taskReview, skipReason: reviewSkipReason } = await runTaskReview(
-          config,
-          log,
-          reviewContext,
-          noneAcCriteria,
-        );
+          const reviewRun = await runTaskReview(config, log, reviewContext, noneAcCriteria);
+          taskReview = reviewRun.result;
+          reviewSkipReason = reviewRun.skipReason;
+        }
         // Map 'uncertain' to 'pass' for the chip status — the detail view shows the full result.
         const reviewStatus: 'pass' | 'fail' | 'skip' =
           taskReview === null ? 'skip' : taskReview.status === 'fail' ? 'fail' : 'pass';
@@ -2312,7 +2361,11 @@ async function runTaskReview(
   log?: Logger,
   reviewContext?: ReviewContext,
   noneAcCriteria: string[] = [],
-): Promise<{ result: TaskReviewResult | null; skipReason?: string }> {
+): Promise<{
+  result: TaskReviewResult | null;
+  skipReason?: string;
+  tokenUsage?: { inputTokens: number; outputTokens: number };
+}> {
   if (!config.reviewerModel || !config.diff || !config.task) {
     const reason = !config.diff
       ? 'No code changes detected'
@@ -2445,6 +2498,7 @@ async function runTaskReview(
       });
 
       const tier2Parsed = enforceRequirementsStatus(parseReviewJson(tier2Result.stdout.trim()));
+      const tier2TokenUsage = tier2Result.tokenUsage;
       if (tier2Parsed && tier2Parsed.status !== 'uncertain') {
         log?.info({ status: tier2Parsed.status, tier: 2 }, 'Tier 2 tool-use review resolved');
         return {
@@ -2457,7 +2511,9 @@ async function runTaskReview(
             diff: config.diff,
             requirementsCheck: tier2Parsed.requirementsCheck,
             deviationsAssessment: tier2Parsed.deviationsAssessment,
+            tokenUsage: tier2TokenUsage,
           },
+          tokenUsage: tier2TokenUsage,
         };
       }
 
@@ -2509,7 +2565,9 @@ async function runTaskReview(
           diff: config.diff,
           requirementsCheck: bestParsed.requirementsCheck,
           deviationsAssessment: bestParsed.deviationsAssessment,
+          tokenUsage: tier2TokenUsage,
         },
+        tokenUsage: tier2TokenUsage,
       };
     } catch (err) {
       log?.warn({ err }, 'Tier 2 tool-use review failed');

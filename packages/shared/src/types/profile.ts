@@ -1,4 +1,5 @@
 import type { ActionPolicy, OutputMode } from './actions.js';
+import type { ValidationPhase } from './events.js';
 import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from './injection.js';
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
 import type { PodOptions } from './pod-options.js';
@@ -232,6 +233,17 @@ export interface Profile {
    * and configured automatically — no manual MCP server setup required.
    */
   codeIntelligence: CodeIntelligenceConfig | null;
+  /**
+   * Validation phases to skip unconditionally for sessions using this profile.
+   * Use to retire controls that have become dead weight as models improve.
+   */
+  skipValidationPhases: ValidationPhase[] | null;
+  /**
+   * When true, the harness evaluates the agent's reported plan against the
+   * pod's acceptance criteria before implementation begins. Feedback is
+   * delivered as a nudge the agent picks up via check_messages.
+   */
+  evaluatePlan: boolean | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -93,6 +93,8 @@ export interface ValidationEngineConfig {
    * spent the tokens on this exact diff during the agent's pre-submit pass.
    */
   preSubmitReview?: PreSubmitReviewSnapshot | null;
+  /** Validation phases to skip unconditionally (profile-level harness decay control). */
+  skipPhases?: ValidationPhase[];
 }
 
 export interface ValidationPhaseCallbacks {

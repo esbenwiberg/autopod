@@ -109,6 +109,8 @@ export interface TaskReviewResult {
   requirementsCheck?: RequirementsCheckItem[];
   /** Reviewer's assessment of agent-reported and detected deviations */
   deviationsAssessment?: DeviationsAssessment;
+  /** Token counts from the LLM call(s) that produced this result. Absent for Tier-1 CLI reviews. */
+  tokenUsage?: { inputTokens: number; outputTokens: number };
 }
 
 /** A single failed finding extracted from a ValidationResult for recurring-detection. */

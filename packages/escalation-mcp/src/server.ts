@@ -142,6 +142,25 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe(
           'Set true if you called memory_suggest this pod. Set false if you had nothing worth capturing — filler suggestions are actively discouraged.',
         ),
+      acChecklist: z
+        .array(
+          z.object({
+            criterion: z.string().describe('The acceptance criterion text (quote it exactly)'),
+            verified: z
+              .boolean()
+              .describe(
+                'True only if you actually tested or inspected this criterion (via validate_in_browser, validate_locally, or manual inspection). Honest reporting matters — discrepancies with automated validation are surfaced to the reviewer.',
+              ),
+            notes: z
+              .string()
+              .optional()
+              .describe('How you verified it, or why you could not verify it'),
+          }),
+        )
+        .optional()
+        .describe(
+          'Self-verification status for each acceptance criterion. Include one entry per criterion. Use verified: false if you were unable to check it.',
+        ),
     },
     async (input) => {
       const response = await reportTaskSummary(podId, input, bridge);

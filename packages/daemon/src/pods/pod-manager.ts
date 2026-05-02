@@ -2654,6 +2654,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           podRepo.update(podId, { containerId: null });
           pod = podRepo.getOrThrow(podId);
 
+          // Commit any file-level changes the human left in the worktree.
+          // syncWorkspaceBack copies files at the FS level; even when the in-container
+          // git push succeeded (pushed=true), uncommitted edits remain unstaged on the
+          // host. Committing here while the sync is fresh guarantees the branch has at
+          // least one new commit before PR creation, avoiding GitHub 422s.
+          // Human work is unconditionally trusted — no deletion guard needed.
+          if (pod.worktreePath) {
+            try {
+              const committed = await worktreeManager.commitPendingChanges(
+                pod.worktreePath,
+                'chore: sync human session',
+                { maxDeletions: 100 },
+              );
+              if (committed) {
+                logger.info({ podId }, 'Auto-committed human session changes during handoff');
+              }
+            } catch (err) {
+              logger.warn({ err, podId }, 'Failed to auto-commit during handoff — proceeding');
+            }
+          }
+
           // Compose the agent-facing handoff context now that the worktree
           // reflects the human's in-flight work. Reads the human's typed
           // instructions (captured by promoteToAuto) plus the live commit log
@@ -5715,6 +5736,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             profile.buildEnv,
           ),
           preSubmitReview: pod.preSubmitReview ?? undefined,
+          skipPhases: profile.skipValidationPhases ?? undefined,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
@@ -5787,6 +5809,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         podRepo.update(podId, { lastValidationResult: result });
+
+        // Accumulate phase-level token usage for harness cost attribution
+        if (result.taskReview?.tokenUsage) {
+          const currentPod = podRepo.getOrThrow(podId);
+          const existing = currentPod.phaseTokenUsage ?? {};
+          const prev = existing.review ?? { inputTokens: 0, outputTokens: 0 };
+          podRepo.update(podId, {
+            phaseTokenUsage: {
+              ...existing,
+              review: {
+                inputTokens: prev.inputTokens + result.taskReview.tokenUsage.inputTokens,
+                outputTokens: prev.outputTokens + result.taskReview.tokenUsage.outputTokens,
+              },
+            },
+          });
+        }
 
         // Persist every attempt to validation history
         validationRepo?.insert(podId, attempt, result);
@@ -6352,6 +6390,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               startCommitSha: pod.startCommitSha ?? undefined,
               hasWebUi: profile.hasWebUi ?? true,
               preSubmitReview: pod.preSubmitReview ?? undefined,
+              skipPhases: profile.skipValidationPhases ?? undefined,
             },
             (phase) => emitActivityStatus(podId, phase),
             revalidateController.signal,
@@ -6385,6 +6424,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         podRepo.update(podId, { lastValidationResult: result });
+
+        // Accumulate phase-level token usage for harness cost attribution
+        if (result.taskReview?.tokenUsage) {
+          const currentPod = podRepo.getOrThrow(podId);
+          const existingUsage = currentPod.phaseTokenUsage ?? {};
+          const prevReview = existingUsage.review ?? { inputTokens: 0, outputTokens: 0 };
+          podRepo.update(podId, {
+            phaseTokenUsage: {
+              ...existingUsage,
+              review: {
+                inputTokens: prevReview.inputTokens + result.taskReview.tokenUsage.inputTokens,
+                outputTokens: prevReview.outputTokens + result.taskReview.tokenUsage.outputTokens,
+              },
+            },
+          });
+        }
+
         validationRepo?.insert(podId, attempt, result);
 
         eventBus.emit({

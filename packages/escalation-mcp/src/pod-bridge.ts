@@ -30,6 +30,7 @@ export interface PodBridge {
     actualSummary: string,
     deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
     how?: string,
+    acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>,
   ): void;
   consumeMessages(podId: string): { hasMessage: boolean; message?: string };
   /** Check if an action requires human approval before execution */

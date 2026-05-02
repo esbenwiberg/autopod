@@ -124,4 +124,6 @@ export interface AgentTaskSummaryEvent {
     actual: string;
     reason: string;
   }>;
+  /** Agent's self-verification status for each acceptance criterion. */
+  acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>;
 }
