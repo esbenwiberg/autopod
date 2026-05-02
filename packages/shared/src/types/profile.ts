@@ -129,6 +129,17 @@ export interface Profile {
    */
   mergePollIntervalSec?: number | null;
   /**
+   * What to do when a new pod's `touches` scope overlaps an in-flight pod on
+   * the same repo + base branch.
+   *
+   *   - `warn` (default) — emit a `pod.preflight_overlap` event and proceed
+   *   - `block`          — refuse to create the pod (throws CONFLICT)
+   *
+   * Use `block` only when your team's `touches` annotations are reliable —
+   * a missing or wrong annotation will surface as spurious creation failures.
+   */
+  preflightConflictPolicy?: 'warn' | 'block' | null;
+  /**
    * Minimum interval between PR-fix-pod spawns on the same parent pod, in
    * seconds. Defaults to 600 (10 min). Prevents a fast-failing CI from
    * burning all `maxPrFixAttempts` in a single burst. Lower this for trusted

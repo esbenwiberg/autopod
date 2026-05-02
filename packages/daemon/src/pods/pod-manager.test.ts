@@ -298,6 +298,8 @@ function createTestContext(
         maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
         workerProfile: (row.worker_profile as string) ?? null,
         reuseFixPod: ((row.reuse_fix_pod as number) ?? 0) === 1,
+        preflightConflictPolicy:
+          (row.preflight_conflict_policy as 'warn' | 'block' | null | undefined) ?? null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -450,6 +452,96 @@ describe('PodManager', () => {
       // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
       const createdEvent = events.find((e: any) => e.type === 'pod.created');
       expect(createdEvent).toBeDefined();
+    });
+
+    describe('preflight overlap', () => {
+      it('emits pod.preflight_overlap when touches overlap an in-flight pod (default warn)', () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'first',
+            touches: ['packages/daemon/src/pods/**'],
+          },
+          'user-1',
+        );
+
+        const events: unknown[] = [];
+        ctx.eventBus.subscribe((e) => events.push(e));
+
+        const second = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'second',
+            touches: ['packages/daemon/src/pods/pod-manager.ts'],
+          },
+          'user-2',
+        );
+
+        // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
+        const overlap = events.find((e: any) => e.type === 'pod.preflight_overlap');
+        expect(overlap).toBeDefined();
+        // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union
+        expect((overlap as any).podId).toBe(second.id);
+        // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union
+        expect((overlap as any).conflicts).toHaveLength(1);
+      });
+
+      it('blocks pod creation when profile.preflightConflictPolicy is "block"', () => {
+        const ctx = createTestContext();
+        // Set the policy directly on the existing test profile row.
+        ctx.db
+          .prepare("UPDATE profiles SET preflight_conflict_policy = 'block' WHERE name = ?")
+          .run('test-profile');
+        const manager = createPodManager(ctx.deps);
+
+        manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'first',
+            touches: ['packages/daemon/src/pods/**'],
+          },
+          'user-1',
+        );
+
+        expect(() =>
+          manager.createSession(
+            {
+              profileName: 'test-profile',
+              task: 'second',
+              touches: ['packages/daemon/src/pods/pod-manager.ts'],
+            },
+            'user-2',
+          ),
+        ).toThrow(/PREFLIGHT_CONFLICT|blocked by profile/);
+      });
+
+      it('does not block when conflicts exist but pods touch disjoint paths', () => {
+        const ctx = createTestContext();
+        ctx.db
+          .prepare("UPDATE profiles SET preflight_conflict_policy = 'block' WHERE name = ?")
+          .run('test-profile');
+        const manager = createPodManager(ctx.deps);
+
+        manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'first',
+            touches: ['packages/daemon/**'],
+          },
+          'user-1',
+        );
+
+        // Different package — block policy must allow.
+        expect(() =>
+          manager.createSession(
+            { profileName: 'test-profile', task: 'second', touches: ['packages/cli/**'] },
+            'user-2',
+          ),
+        ).not.toThrow();
+      });
     });
   });
 

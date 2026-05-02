@@ -92,7 +92,7 @@ import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
-import { findPreflightConflicts } from './preflight.js';
+import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
@@ -1310,6 +1310,53 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (hasActionableFailures) {
           await maybeSpawnFixSession(podId, status);
         }
+
+        // Self-heal stale branch: if a sibling pod merged while we were waiting
+        // for review/CI, our branch is now behind origin/<base> and the platform
+        // auto-merge will park indefinitely. Rebase + force-push so the existing
+        // auto-merge can pick up the rebased branch on its next attempt.
+        // `rebaseOntoBase` short-circuits to alreadyUpToDate=true when the base
+        // hasn't advanced, so this is a single fetch in the steady state.
+        // Serialized with approveSession via the merge queue so two pods on the
+        // same base never race.
+        if (pod.worktreePath && pod.branch) {
+          try {
+            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+            const queueKey = MergeQueue.keyFor(profile.repoUrl ?? null, baseBranch);
+            const worktreePath = pod.worktreePath;
+            const branch = pod.branch;
+            await mergeQueue.run(queueKey, async () => {
+              const result = await worktreeManager.rebaseOntoBase({
+                worktreePath,
+                baseBranch,
+                pat: selectGitPat(profile),
+              });
+              if (!result.rebased) {
+                const preview = result.conflicts.slice(0, 5).join(', ');
+                const ellipsis = result.conflicts.length > 5 ? '…' : '';
+                const blockReason = `Rebase conflicts on ${baseBranch}: ${preview || '(see logs)'}${ellipsis}`;
+                if (blockReason !== pod.mergeBlockReason) {
+                  podRepo.update(podId, { mergeBlockReason: blockReason });
+                  emitActivityStatus(podId, `Merge pending: ${blockReason}`);
+                  logger.info(
+                    { podId, baseBranch, conflicts: result.conflicts },
+                    'Merge poller: rebase produced conflicts — manual resolution required',
+                  );
+                }
+                return;
+              }
+              if (!result.alreadyUpToDate) {
+                await worktreeManager.pushBranch(worktreePath, branch, { force: true });
+                logger.info(
+                  { podId, baseBranch },
+                  'Merge poller: rebased stale branch and force-pushed onto latest base',
+                );
+              }
+            });
+          } catch (err) {
+            logger.debug({ err, podId }, 'Merge poller self-heal rebase failed');
+          }
+        }
       } catch (err) {
         logger.debug({ err, podId }, 'Merge polling failed, skipping cycle');
       }
@@ -2292,6 +2339,58 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       const derivedReferenceRepos = deriveReferenceRepos(request.referenceRepos);
 
+      // Preflight overlap check: does this pod's `touches` scope overlap with
+      // any in-flight pod on the same repo + base? Computed BEFORE insert so
+      // the `block` policy refuses cleanly without leaving a half-created row.
+      // The `warn` path keeps the result and emits an event after the row
+      // exists (so it carries the new pod's ID).
+      let preflightConflicts: PreflightConflict[] = [];
+      const candidateTouches = request.touches ?? [];
+      if (candidateTouches.length > 0) {
+        try {
+          const candidateBase = request.baseBranch ?? profile.defaultBranch ?? 'main';
+          const candidateRepoUrl = profile.repoUrl ?? null;
+          const profileRepoUrls = new Map<string, string | null>();
+          const resolveRepoUrl = (profileName: string): string | null => {
+            const cached = profileRepoUrls.get(profileName);
+            if (cached !== undefined) return cached;
+            try {
+              const url = profileStore.get(profileName).repoUrl ?? null;
+              profileRepoUrls.set(profileName, url);
+              return url;
+            } catch {
+              profileRepoUrls.set(profileName, null);
+              return null;
+            }
+          };
+          const candidates = podRepo
+            .list()
+            .map((p) => ({ pod: p, repoUrl: resolveRepoUrl(p.profileName) }));
+          preflightConflicts = findPreflightConflicts(
+            {
+              touches: candidateTouches,
+              repoUrl: candidateRepoUrl,
+              baseBranch: candidateBase,
+            },
+            candidates,
+          );
+        } catch (err) {
+          // Best-effort: a failure inside the check itself must not block pod
+          // creation, so swallow and treat as "no conflicts found".
+          logger.debug({ err }, 'Preflight overlap check failed — treating as no conflicts');
+          preflightConflicts = [];
+        }
+
+        if (preflightConflicts.length > 0 && profile.preflightConflictPolicy === 'block') {
+          const ids = preflightConflicts.map((c) => c.conflictingPodId).join(', ');
+          throw new AutopodError(
+            `Pod creation blocked by profile.preflightConflictPolicy='block': touches scope overlaps in-flight pods [${ids}]`,
+            'PREFLIGHT_CONFLICT',
+            409,
+          );
+        }
+      }
+
       let id: string;
       for (let attempt = 0; attempt < 10; attempt++) {
         id = generatePodId();
@@ -2410,73 +2509,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         },
       });
 
-      // Preflight overlap check — emit a warning event if this pod's `touches`
-      // scope overlaps an in-flight pod on the same repo + base. Warn-only:
-      // the pod still proceeds. Best-effort — if the check itself throws we
-      // log and move on; never let preflight block pod creation.
-      const candidateTouches = request.touches ?? [];
-      if (candidateTouches.length > 0) {
-        try {
-          const candidateBase = request.baseBranch ?? profile.defaultBranch ?? 'main';
-          const candidateRepoUrl = profile.repoUrl ?? null;
-
-          // Pods don't carry repoUrl directly — it's on the profile. Cache the
-          // lookup so we make at most one profileStore.get() per profile name
-          // even when there are many in-flight pods sharing a profile.
-          const profileRepoUrls = new Map<string, string | null>();
-          const resolveRepoUrl = (profileName: string): string | null => {
-            const cached = profileRepoUrls.get(profileName);
-            if (cached !== undefined) return cached;
-            try {
-              const url = profileStore.get(profileName).repoUrl ?? null;
-              profileRepoUrls.set(profileName, url);
-              return url;
-            } catch {
-              profileRepoUrls.set(profileName, null);
-              return null;
-            }
-          };
-
-          const candidates = podRepo
-            .list()
-            .filter((p) => p.id !== id)
-            .map((p) => ({ pod: p, repoUrl: resolveRepoUrl(p.profileName) }));
-
-          const conflicts = findPreflightConflicts(
-            {
-              touches: candidateTouches,
-              repoUrl: candidateRepoUrl,
-              baseBranch: candidateBase,
-            },
-            candidates,
-          );
-
-          if (conflicts.length > 0) {
-            eventBus.emit({
-              type: 'pod.preflight_overlap',
-              timestamp: new Date().toISOString(),
-              podId: id,
-              conflicts: conflicts.map((c) => ({
-                conflictingPodId: c.conflictingPodId,
-                conflictingPodTask: c.conflictingPodTask,
-                conflictingPodStatus: c.conflictingPodStatus,
-                overlappingGlobs: c.overlappingGlobs,
-              })),
-            });
-            logger.warn(
-              {
-                podId: id,
-                conflictingPodIds: conflicts.map((c) => c.conflictingPodId),
-              },
-              'Pod created with preflight overlap on in-flight pods — possible merge conflict',
-            );
-          }
-        } catch (err) {
-          logger.debug(
-            { err, podId: id },
-            'Preflight overlap check failed — proceeding without warning',
-          );
-        }
+      // Emit the preflight overlap warning (computed before insert above) now
+      // that the new pod has an ID. The `block` policy already short-circuited
+      // earlier; reaching this point means the policy is `warn` or unset.
+      if (preflightConflicts.length > 0) {
+        eventBus.emit({
+          type: 'pod.preflight_overlap',
+          timestamp: new Date().toISOString(),
+          podId: id,
+          conflicts: preflightConflicts.map((c) => ({
+            conflictingPodId: c.conflictingPodId,
+            conflictingPodTask: c.conflictingPodTask,
+            conflictingPodStatus: c.conflictingPodStatus,
+            overlappingGlobs: c.overlappingGlobs,
+          })),
+        });
+        logger.warn(
+          {
+            podId: id,
+            conflictingPodIds: preflightConflicts.map((c) => c.conflictingPodId),
+          },
+          'Pod created with preflight overlap on in-flight pods — possible merge conflict',
+        );
       }
 
       // Dependent pods must not start until their predecessors reach `validated`;
