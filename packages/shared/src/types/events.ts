@@ -224,6 +224,19 @@ export interface PodWorktreeCompromisedEvent {
 }
 
 /**
+ * One sibling pod whose `touches` scope overlaps the candidate pod's scope.
+ * Carried inside {@link PodPreflightOverlapEvent} and used by the daemon's
+ * preflight check. Defined here in shared so the event payload and the
+ * daemon-internal computation never drift apart.
+ */
+export interface PreflightConflict {
+  conflictingPodId: string;
+  conflictingPodTask: string;
+  conflictingPodStatus: string;
+  overlappingGlobs: Array<{ ours: string; theirs: string }>;
+}
+
+/**
  * Emitted at pod-create time when the new pod's `touches` scope overlaps the
  * scope of one or more in-flight pods on the same repo + base branch. This is
  * a *warning*, not a block — the pod still proceeds. Surfaced so desktop/CLI
@@ -238,10 +251,5 @@ export interface PodPreflightOverlapEvent {
   type: 'pod.preflight_overlap';
   timestamp: string;
   podId: string;
-  conflicts: Array<{
-    conflictingPodId: string;
-    conflictingPodTask: string;
-    conflictingPodStatus: string;
-    overlappingGlobs: Array<{ ours: string; theirs: string }>;
-  }>;
+  conflicts: PreflightConflict[];
 }

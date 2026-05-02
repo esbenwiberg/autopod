@@ -182,6 +182,8 @@ export interface PodRepository {
   update(id: string, changes: PodUpdates): void;
   delete(id: string): void;
   list(filters?: PodFilters): Pod[];
+  /** All pods whose status is not terminal (`complete` / `killed`). */
+  listNonTerminal(): Pod[];
   countByStatusAndProfile(status: PodStatus, profileName: string): number;
   getStats(filters?: { profileName?: string }): PodStats;
   getPodsDependingOn(podId: string): Pod[];
@@ -812,6 +814,15 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .prepare("SELECT id FROM pods WHERE status NOT IN ('complete', 'killed')")
         .all() as { id: string }[];
       return rows.map((r) => r.id);
+    },
+
+    listNonTerminal(): Pod[] {
+      const rows = db
+        .prepare(
+          "SELECT * FROM pods WHERE status NOT IN ('complete', 'killed') ORDER BY created_at DESC",
+        )
+        .all() as Record<string, unknown>[];
+      return rows.map(rowToSession);
     },
 
     delete(id: string): void {

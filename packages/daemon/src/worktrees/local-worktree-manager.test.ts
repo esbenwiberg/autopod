@@ -713,52 +713,8 @@ describe('LocalWorktreeManager', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // withRepoLock (private) — concurrency behaviour
-  // -------------------------------------------------------------------------
-
-  describe('withRepoLock', () => {
-    it('serializes concurrent operations on the same key', async () => {
-      const order: number[] = [];
-
-      const run = (id: number, delay: number) =>
-        (
-          manager as unknown as {
-            withRepoLock: (key: string, fn: () => Promise<void>) => Promise<void>;
-          }
-        ).withRepoLock('same-key', async () => {
-          order.push(id);
-          await new Promise((r) => setTimeout(r, delay));
-          order.push(-id);
-        });
-
-      await Promise.all([run(1, 20), run(2, 5)]);
-
-      expect(order).toEqual([1, -1, 2, -2]);
-    });
-
-    it('runs operations on different keys concurrently', async () => {
-      const started: string[] = [];
-      const finished: string[] = [];
-
-      const run = (key: string, delay: number) =>
-        (
-          manager as unknown as {
-            withRepoLock: (key: string, fn: () => Promise<void>) => Promise<void>;
-          }
-        ).withRepoLock(key, async () => {
-          started.push(key);
-          await new Promise((r) => setTimeout(r, delay));
-          finished.push(key);
-        });
-
-      await Promise.all([run('repo-a', 20), run('repo-b', 5)]);
-
-      expect(started).toContain('repo-a');
-      expect(started).toContain('repo-b');
-      expect(finished[0]).toBe('repo-b');
-    });
-  });
+  // Per-repo serialization is now provided by `KeyedPromiseQueue`; see
+  // `src/util/keyed-promise-queue.test.ts` for the equivalent coverage.
 
   // -------------------------------------------------------------------------
   // cleanup

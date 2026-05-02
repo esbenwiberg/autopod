@@ -1,22 +1,8 @@
-import type { Pod } from '@autopod/shared';
+import type { Pod, PreflightConflict } from '@autopod/shared';
 import { findGlobOverlaps } from './glob-overlap.js';
 import { isTerminalState } from './state-machine.js';
 
-/**
- * One sibling pod that overlaps the new pod's `touches` scope.
- * Surfaced via the `pod.preflight_overlap` event so the operator (or desktop
- * UI) can see that two concurrent pods are about to edit the same files.
- */
-export interface PreflightConflict {
-  /** ID of the in-flight pod whose scope overlaps the new pod's. */
-  conflictingPodId: string;
-  /** Task description of the conflicting pod (for human-friendly display). */
-  conflictingPodTask: string;
-  /** Status of the conflicting pod at the time of the check. */
-  conflictingPodStatus: string;
-  /** Pairwise overlapping globs (caller can show all, or just the first few). */
-  overlappingGlobs: Array<{ ours: string; theirs: string }>;
-}
+export type { PreflightConflict };
 
 export interface PreflightCandidate {
   /** Touches list of the pod being created. Empty/missing → preflight is a no-op. */

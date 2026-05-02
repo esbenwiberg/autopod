@@ -131,6 +131,15 @@ function injectPatIntoUrl(url: string, pat: string): string {
   return url.replace(/^https:\/\/([^@]*@)?/, `https://x-access-token:${pat}@`);
 }
 
+/** Format a `mergeBlockReason` string for a rebase that produced conflicts.
+ * Caps the conflict-file preview at 5 entries (with `…` if truncated) and
+ * falls back to `(see logs)` when the conflict list itself isn't available. */
+function formatRebaseConflictReason(baseBranch: string, conflicts: readonly string[]): string {
+  const preview = conflicts.slice(0, 5).join(', ');
+  const ellipsis = conflicts.length > 5 ? '…' : '';
+  return `Rebase conflicts on ${baseBranch}: ${preview || '(see logs)'}${ellipsis}`;
+}
+
 /** Single-quote shell escaping. Names can contain spaces and apostrophes (e.g. `O'Brien`),
  * so we wrap in single quotes and escape any embedded single quotes the standard way. */
 function shellQuote(s: string): string {
@@ -1332,9 +1341,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 pat: selectGitPat(profile),
               });
               if (!result.rebased) {
-                const preview = result.conflicts.slice(0, 5).join(', ');
-                const ellipsis = result.conflicts.length > 5 ? '…' : '';
-                const blockReason = `Rebase conflicts on ${baseBranch}: ${preview || '(see logs)'}${ellipsis}`;
+                const blockReason = formatRebaseConflictReason(baseBranch, result.conflicts);
                 if (blockReason !== pod.mergeBlockReason) {
                   podRepo.update(podId, { mergeBlockReason: blockReason });
                   emitActivityStatus(podId, `Merge pending: ${blockReason}`);
@@ -2364,7 +2371,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           };
           const candidates = podRepo
-            .list()
+            .listNonTerminal()
             .map((p) => ({ pod: p, repoUrl: resolveRepoUrl(p.profileName) }));
           preflightConflicts = findPreflightConflicts(
             {
@@ -4712,7 +4719,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // the queue so the lock is released as quickly as possible.
         type MergeOutcome =
           | { kind: 'merged' }
-          | { kind: 'merge_pending'; blockReason: string; reason?: string }
+          | { kind: 'merge_pending'; blockReason: string }
           | { kind: 'merge_failed' };
 
         const outcome = await mergeQueue.run<MergeOutcome>(queueKey, async () => {
@@ -4743,9 +4750,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
 
           if (!rebaseResult.rebased) {
-            const preview = rebaseResult.conflicts.slice(0, 5).join(', ');
-            const ellipsis = rebaseResult.conflicts.length > 5 ? '…' : '';
-            const blockReason = `Rebase conflicts on ${mergeBaseBranch}: ${preview || '(see logs)'}${ellipsis}`;
+            const blockReason = formatRebaseConflictReason(mergeBaseBranch, rebaseResult.conflicts);
             logger.info(
               {
                 podId,
@@ -4755,7 +4760,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               },
               'Pre-merge rebase produced conflicts — entering merge_pending for manual resolution',
             );
-            return { kind: 'merge_pending', blockReason, reason: 'rebase_conflicts' };
+            return { kind: 'merge_pending', blockReason };
           }
 
           // Rebase rewrote history → force-push so origin/<branch> matches our
@@ -4786,7 +4791,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 { podId, prUrl, reviewDecision: prStatus.reviewDecision },
                 'Merge deferred — PR requires explicit approval before daemon will merge',
               );
-              return { kind: 'merge_pending', blockReason, reason: 'review_required' };
+              return { kind: 'merge_pending', blockReason };
             }
           } catch (statusErr) {
             // Non-fatal: if we can't determine review status, proceed with the merge attempt
