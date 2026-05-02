@@ -82,6 +82,7 @@ import { detectRecurringFindings, extractFindings } from '../validation/finding-
 import { applyOverrides } from '../validation/override-applicator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
 import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
+import { MergeQueue } from '../worktrees/merge-queue.js';
 import { readAcFile } from './ac-file-parser.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -750,6 +751,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     repoScanner,
     scanRepo,
   } = deps;
+
+  /**
+   * Sequential merge queue keyed by `repo+baseBranch`.
+   *
+   * The "rebase HEAD onto origin/<base> → push → merge" critical section runs
+   * inside this queue so two pods targeting the same base never race: pod B's
+   * rebase always happens against the branch pod A just pushed, eliminating the
+   * "both rebases looked clean, B's became stale before push" failure mode.
+   *
+   * Different repos and different base branches don't conflict, so we key on
+   * both — concurrency stays high in the common case where pods target different
+   * targets.
+   */
+  const mergeQueue = new MergeQueue();
 
   /** Destroy the per-pod Docker bridge. Must be called AFTER the pod + all
    *  sidecars are killed, otherwise Docker refuses with "has active endpoints".
@@ -4563,102 +4578,156 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const approveProfile = profileStore.get(pod.profileName);
       const prManager = prManagerFactory ? prManagerFactory(approveProfile) : null;
       if (pod.prUrl && prManager && pod.worktreePath) {
-        // Fix pods make commits in the container but rely on the agent to push.
-        // Push explicitly here before attempting to complete the PR so any local
-        // commits the agent forgot (or failed) to push are flushed to the remote.
-        try {
-          await worktreeManager.pushBranch(pod.worktreePath, pod.branch ?? '');
-          emitActivityStatus(podId, 'Branch pushed');
-        } catch (pushErr) {
-          logger.warn(
-            { err: pushErr, podId },
-            'Pre-merge push failed — proceeding with merge attempt',
-          );
-        }
+        const mergeBaseBranch = pod.baseBranch ?? approveProfile.defaultBranch ?? 'main';
+        const queueKey = MergeQueue.keyFor(approveProfile.repoUrl, mergeBaseBranch);
+        const worktreePath = pod.worktreePath;
+        const prUrl = pod.prUrl;
+        const branch = pod.branch ?? '';
 
-        // Daemon-side approval gate: check the PR's review decision before attempting
-        // to merge. If the platform reports that a review is still required or changes
-        // were requested, enter merge_pending and let the poller wait for approval.
-        // This ensures the daemon never bypasses required review gates even when
-        // GitHub auto-merge is enabled.
-        try {
-          const prStatus = await prManager.getPrStatus({
-            prUrl: pod.prUrl,
-            worktreePath: pod.worktreePath,
-          });
-          if (prStatus.reviewDecision && prStatus.reviewDecision !== 'APPROVED') {
-            const blockReason = `Waiting for PR review approval (current decision: ${prStatus.reviewDecision})`;
-            emitActivityStatus(podId, `Merge pending: ${blockReason}`);
-            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
-            startMergePolling(podId);
-            logger.info(
-              { podId, prUrl: pod.prUrl, reviewDecision: prStatus.reviewDecision },
-              'Merge deferred — PR requires explicit approval before daemon will merge',
+        // Outcome of the queued critical section. We do state transitions outside
+        // the queue so the lock is released as quickly as possible.
+        type MergeOutcome =
+          | { kind: 'merged' }
+          | { kind: 'merge_pending'; blockReason: string; reason?: string }
+          | { kind: 'merge_failed' };
+
+        const outcome = await mergeQueue.run<MergeOutcome>(queueKey, async () => {
+          // Fix pods make commits in the container but rely on the agent to push.
+          // Push explicitly here before attempting to complete the PR so any local
+          // commits the agent forgot (or failed) to push are flushed to the remote.
+          try {
+            await worktreeManager.pushBranch(worktreePath, branch);
+            emitActivityStatus(podId, 'Branch pushed');
+          } catch (pushErr) {
+            logger.warn(
+              { err: pushErr, podId },
+              'Pre-merge push failed — proceeding with rebase attempt',
             );
-            return;
           }
-        } catch (statusErr) {
-          // Non-fatal: if we can't determine review status, proceed with the merge attempt
-          logger.warn(
-            { err: statusErr, podId, prUrl: pod.prUrl },
-            'Failed to check PR review decision before merge — proceeding anyway',
-          );
-        }
 
-        emitActivityStatus(podId, `Merging PR: ${pod.prUrl}`);
-        try {
-          const mergeResult = await prManager.mergePr({
-            worktreePath: pod.worktreePath,
-            prUrl: pod.prUrl,
-            squash: options?.squash,
+          // Pre-merge rebase onto latest origin/<base>. Catches conflicts
+          // *before* the PR merge attempt so an agent (or fix pod) gets to
+          // resolve them while it still has full task context, instead of
+          // discovering the conflict via GitHub's merge gate after the fact.
+          // Runs inside the merge queue so the rebase always sees the freshly
+          // merged state of any preceding pod on the same base.
+          emitActivityStatus(podId, `Rebasing onto origin/${mergeBaseBranch}…`);
+          const rebaseResult = await worktreeManager.rebaseOntoBase({
+            worktreePath,
+            baseBranch: mergeBaseBranch,
+            pat: selectGitPat(approveProfile),
           });
 
-          if (mergeResult.merged) {
-            emitActivityStatus(podId, 'PR merged successfully');
-          } else {
-            // Merge didn't complete immediately — enter merge_pending state
-            const initialStatus = await prManager.getPrStatus({
-              prUrl: pod.prUrl,
-              worktreePath: pod.worktreePath,
-            });
-            const blockReason = initialStatus.blockReason ?? 'Waiting for merge conditions';
-            emitActivityStatus(podId, `Merge pending: ${blockReason}`);
-            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
-            startMergePolling(podId);
+          if (!rebaseResult.rebased) {
+            const preview = rebaseResult.conflicts.slice(0, 5).join(', ');
+            const ellipsis = rebaseResult.conflicts.length > 5 ? '…' : '';
+            const blockReason = `Rebase conflicts on ${mergeBaseBranch}: ${preview || '(see logs)'}${ellipsis}`;
             logger.info(
               {
                 podId,
-                prUrl: pod.prUrl,
+                prUrl,
+                baseBranch: mergeBaseBranch,
+                conflicts: rebaseResult.conflicts,
+              },
+              'Pre-merge rebase produced conflicts — entering merge_pending for manual resolution',
+            );
+            return { kind: 'merge_pending', blockReason, reason: 'rebase_conflicts' };
+          }
+
+          // Rebase rewrote history → force-push so origin/<branch> matches our
+          // new HEAD. Skip the push when the rebase was a no-op (already up to
+          // date) since we already pushed above.
+          if (!rebaseResult.alreadyUpToDate) {
+            try {
+              await worktreeManager.pushBranch(worktreePath, branch, { force: true });
+              emitActivityStatus(podId, 'Rebased branch pushed');
+            } catch (pushErr) {
+              logger.warn(
+                { err: pushErr, podId },
+                'Force-push after rebase failed — proceeding with merge attempt anyway',
+              );
+            }
+          }
+
+          // Daemon-side approval gate: check the PR's review decision before attempting
+          // to merge. If the platform reports that a review is still required or changes
+          // were requested, enter merge_pending and let the poller wait for approval.
+          // This ensures the daemon never bypasses required review gates even when
+          // GitHub auto-merge is enabled.
+          try {
+            const prStatus = await prManager.getPrStatus({ prUrl, worktreePath });
+            if (prStatus.reviewDecision && prStatus.reviewDecision !== 'APPROVED') {
+              const blockReason = `Waiting for PR review approval (current decision: ${prStatus.reviewDecision})`;
+              logger.info(
+                { podId, prUrl, reviewDecision: prStatus.reviewDecision },
+                'Merge deferred — PR requires explicit approval before daemon will merge',
+              );
+              return { kind: 'merge_pending', blockReason, reason: 'review_required' };
+            }
+          } catch (statusErr) {
+            // Non-fatal: if we can't determine review status, proceed with the merge attempt
+            logger.warn(
+              { err: statusErr, podId, prUrl },
+              'Failed to check PR review decision before merge — proceeding anyway',
+            );
+          }
+
+          emitActivityStatus(podId, `Merging PR: ${prUrl}`);
+          try {
+            const mergeResult = await prManager.mergePr({
+              worktreePath,
+              prUrl,
+              squash: options?.squash,
+            });
+
+            if (mergeResult.merged) {
+              return { kind: 'merged' };
+            }
+            // Merge didn't complete immediately — enter merge_pending state
+            const initialStatus = await prManager.getPrStatus({ prUrl, worktreePath });
+            const blockReason = initialStatus.blockReason ?? 'Waiting for merge conditions';
+            logger.info(
+              {
+                podId,
+                prUrl,
                 blockReason,
                 autoMerge: mergeResult.autoMergeScheduled,
               },
               'Pod approved — merge pending',
             );
-            return;
-          }
-        } catch (err) {
-          logger.error({ err, podId, prUrl: pod.prUrl }, 'Failed to merge PR');
-          // Merge command failed — check if the PR is blocked by checks/reviews
-          try {
-            const fallbackStatus = await prManager.getPrStatus({
-              prUrl: pod.prUrl,
-              worktreePath: pod.worktreePath,
-            });
-            if (fallbackStatus.open && !fallbackStatus.merged) {
-              const blockReason =
-                fallbackStatus.blockReason ?? 'Merge failed — waiting for conditions';
-              emitActivityStatus(podId, `Merge pending: ${blockReason}`);
-              transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
-              startMergePolling(podId);
-              logger.info(
-                { podId, prUrl: pod.prUrl, blockReason },
-                'Merge failed but PR is open — entering merge_pending',
+            return { kind: 'merge_pending', blockReason };
+          } catch (err) {
+            logger.error({ err, podId, prUrl }, 'Failed to merge PR');
+            // Merge command failed — check if the PR is blocked by checks/reviews
+            try {
+              const fallbackStatus = await prManager.getPrStatus({ prUrl, worktreePath });
+              if (fallbackStatus.open && !fallbackStatus.merged) {
+                const blockReason =
+                  fallbackStatus.blockReason ?? 'Merge failed — waiting for conditions';
+                logger.info(
+                  { podId, prUrl, blockReason },
+                  'Merge failed but PR is open — entering merge_pending',
+                );
+                return { kind: 'merge_pending', blockReason };
+              }
+            } catch (statusErr) {
+              logger.warn(
+                { err: statusErr, podId },
+                'Failed to check PR status after merge failure',
               );
-              return;
             }
-          } catch (statusErr) {
-            logger.warn({ err: statusErr, podId }, 'Failed to check PR status after merge failure');
+            return { kind: 'merge_failed' };
           }
+        });
+
+        if (outcome.kind === 'merged') {
+          emitActivityStatus(podId, 'PR merged successfully');
+        } else if (outcome.kind === 'merge_pending') {
+          emitActivityStatus(podId, `Merge pending: ${outcome.blockReason}`);
+          transition(s2, 'merge_pending', { mergeBlockReason: outcome.blockReason });
+          startMergePolling(podId);
+          return;
+        } else {
           emitActivityStatus(podId, 'PR merge failed — pod still completing');
         }
       } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options?.output !== 'branch') {

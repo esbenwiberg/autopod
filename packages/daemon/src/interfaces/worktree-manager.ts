@@ -42,6 +42,22 @@ export interface DiffStats {
   linesRemoved: number;
 }
 
+export interface RebaseOntoBaseConfig {
+  worktreePath: string;
+  baseBranch: string;
+  /** PAT for the fetch — required when the in-memory cache may be cold (post-restart). */
+  pat?: string;
+}
+
+export interface RebaseOntoBaseResult {
+  /** True when origin/<baseBranch> is already an ancestor of HEAD; no rebase performed. */
+  alreadyUpToDate: boolean;
+  /** True when a rebase replayed cleanly (or was unnecessary). False on conflict. */
+  rebased: boolean;
+  /** Files with conflict markers when the rebase aborts. Empty when rebased=true. */
+  conflicts: string[];
+}
+
 export interface WorktreeResult {
   worktreePath: string;
   bareRepoPath: string;
@@ -90,9 +106,25 @@ export interface WorktreeManager {
     options?: { maxDeletions?: number },
   ): Promise<boolean>;
   /** Push the current branch to origin. Verifies HEAD is on `expectedBranch` before pushing. */
-  pushBranch(worktreePath: string, expectedBranch: string): Promise<void>;
+  pushBranch(
+    worktreePath: string,
+    expectedBranch: string,
+    options?: { force?: boolean },
+  ): Promise<void>;
   /** Pull latest changes from origin for the current branch. */
   pullBranch(worktreePath: string): Promise<{ newCommits: boolean }>;
+  /**
+   * Fetch latest origin/<baseBranch> and rebase the current branch onto it.
+   *
+   * Returns:
+   *   - alreadyUpToDate=true → branch already includes origin/baseBranch tip; no-op
+   *   - rebased=true        → rebase replayed cleanly; HEAD now sits on top of latest base
+   *   - conflicts.length>0  → rebase aborted; worktree restored to pre-rebase state
+   *
+   * Never throws on conflicts — always returns a structured result so callers
+   * can route to a fix pod or the merge_pending state without try/catch.
+   */
+  rebaseOntoBase(config: RebaseOntoBaseConfig): Promise<RebaseOntoBaseResult>;
   /** Get commit log between current HEAD and a base branch (or a specific commit). */
   getCommitLog(
     worktreePath: string,

@@ -8,6 +8,8 @@ import type {
   BranchFolderContents,
   DiffStats,
   MergeBranchConfig,
+  RebaseOntoBaseConfig,
+  RebaseOntoBaseResult,
   WorktreeCreateConfig,
   WorktreeManager,
   WorktreeResult,
@@ -219,10 +221,9 @@ export class LocalWorktreeManager implements WorktreeManager {
       let startPoint = baseBranchRef;
       if (branch !== baseBranch) {
         try {
-          await git(
-            ['fetch', authUrl, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-            { cwd: bareRepoPath },
-          );
+          await git(['fetch', authUrl, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
+            cwd: bareRepoPath,
+          });
           // Fetch succeeded — branch exists on remote, use it as start point
           startPoint = `refs/remotes/origin/${branch}`;
           this.logger.info({ branch }, 'Branch exists on remote — resuming from it');
@@ -628,8 +629,13 @@ export class LocalWorktreeManager implements WorktreeManager {
     return stdout.trim().split('\n').filter(Boolean).length;
   }
 
-  async pushBranch(worktreePath: string, expectedBranch: string): Promise<void> {
-    this.logger.info({ worktreePath, expectedBranch }, 'Pushing branch to origin');
+  async pushBranch(
+    worktreePath: string,
+    expectedBranch: string,
+    options?: { force?: boolean },
+  ): Promise<void> {
+    const force = options?.force === true;
+    this.logger.info({ worktreePath, expectedBranch, force }, 'Pushing branch to origin');
     const { stdout: actualBranch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
     });
@@ -639,12 +645,107 @@ export class LocalWorktreeManager implements WorktreeManager {
       );
     }
     const authUrl = await this.getAuthUrl(worktreePath);
+    // --force-with-lease (not --force) — refuses the push if origin/<branch> moved
+    // since our last fetch. Protects against clobbering a teammate's commits when
+    // pushing a rebased branch.
+    const pushArgs = force
+      ? ['push', '--force-with-lease', authUrl, `HEAD:refs/heads/${expectedBranch}`]
+      : ['push', authUrl, `HEAD:refs/heads/${expectedBranch}`];
     try {
-      await git(['push', authUrl, `HEAD:refs/heads/${expectedBranch}`], {
+      await git(pushArgs, { cwd: worktreePath });
+    } catch (err) {
+      throw sanitizeGitError(err);
+    }
+  }
+
+  async rebaseOntoBase(config: RebaseOntoBaseConfig): Promise<RebaseOntoBaseResult> {
+    const { worktreePath, baseBranch, pat } = config;
+
+    // Warm the PAT cache when caller supplies one — mirrors mergeBranch().
+    if (pat) {
+      const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
+        cwd: worktreePath,
+      });
+      const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
+      this.patCache.set(bareRepoPath, pat);
+    }
+
+    const authUrl = await this.getAuthUrl(worktreePath);
+
+    // Fetch the latest base into refs/remotes/origin/<baseBranch>. Explicit refspec
+    // per CLAUDE.md — wildcard fetches fail on Azure File Share.
+    try {
+      await git(['fetch', authUrl, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`], {
         cwd: worktreePath,
       });
     } catch (err) {
       throw sanitizeGitError(err);
+    }
+
+    const baseRef = `refs/remotes/origin/${baseBranch}`;
+
+    // Fast-forward check: if origin/<base> is already an ancestor of HEAD, the
+    // branch is up to date — skip the rebase entirely.
+    try {
+      await git(['merge-base', '--is-ancestor', baseRef, 'HEAD'], { cwd: worktreePath });
+      this.logger.info(
+        { worktreePath, baseBranch },
+        'rebaseOntoBase: branch already includes base tip — no rebase needed',
+      );
+      return { alreadyUpToDate: true, rebased: true, conflicts: [] };
+    } catch {
+      // Non-zero exit means base has commits not in HEAD — proceed with rebase.
+    }
+
+    this.logger.info(
+      { worktreePath, baseBranch, baseRef },
+      'rebaseOntoBase: rebasing branch onto latest base',
+    );
+
+    try {
+      await git(['rebase', baseRef], { cwd: worktreePath });
+      return { alreadyUpToDate: false, rebased: true, conflicts: [] };
+    } catch (rebaseErr) {
+      // Conflict (or other failure). Capture conflicting files, then abort so
+      // the worktree is restored to its pre-rebase state. We never leave a
+      // worktree in a partial rebase — callers either get a clean rebased
+      // branch or the original branch back, never half-applied state.
+      const conflicts = await this.getRebaseConflicts(worktreePath);
+      try {
+        await git(['rebase', '--abort'], { cwd: worktreePath });
+      } catch (abortErr) {
+        this.logger.warn(
+          { err: sanitizeGitError(abortErr), worktreePath },
+          'rebaseOntoBase: rebase --abort failed after a conflict — worktree may be in inconsistent state',
+        );
+      }
+      this.logger.warn(
+        { worktreePath, baseBranch, conflicts },
+        'rebaseOntoBase: rebase aborted due to conflicts',
+      );
+      // Surface the underlying error in debug logs so operators can diagnose
+      // non-conflict failures (e.g. corrupt index) — but don't throw, since
+      // returning a structured result is the contract.
+      this.logger.debug(
+        { err: sanitizeGitError(rebaseErr), worktreePath },
+        'rebaseOntoBase: underlying rebase error',
+      );
+      return { alreadyUpToDate: false, rebased: false, conflicts };
+    }
+  }
+
+  /** Returns the list of files reported by `git diff --name-only --diff-filter=U`. */
+  private async getRebaseConflicts(worktreePath: string): Promise<string[]> {
+    try {
+      const { stdout } = await git(['diff', '--name-only', '--diff-filter=U'], {
+        cwd: worktreePath,
+      });
+      return stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    } catch {
+      return [];
     }
   }
 

@@ -1092,6 +1092,116 @@ describe('LocalWorktreeManager', () => {
   });
 });
 
+describe('LocalWorktreeManager.rebaseOntoBase', () => {
+  let manager: LocalWorktreeManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fsMkdirMock.mockResolvedValue(undefined);
+    fsRmMock.mockResolvedValue(undefined);
+    fsReadFileMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    fsWriteFileMock.mockResolvedValue(undefined);
+    manager = new LocalWorktreeManager({
+      cacheDir: '/tmp/test-cache',
+      worktreeDir: '/tmp/test-worktrees',
+      logger,
+    });
+  });
+
+  /**
+   * Drives the execFile mock with a per-test handler. The handler receives the
+   * git command (joined args) and returns either an exec result, an error, or
+   * undefined to fall back to a default empty stdout response.
+   */
+  function withGitHandler(
+    handler: (cmd: string) => { stdout?: string; stderr?: string; error?: Error } | undefined,
+  ) {
+    execFileMock.mockImplementation(
+      (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+        const cb = resolveCallback(arg3, arg4);
+        const cmd = args.join(' ');
+        const resp = handler(cmd) ?? { stdout: '' };
+        if (resp.error) {
+          cb(resp.error, { stdout: '', stderr: resp.stderr ?? '' });
+        } else {
+          cb(null, { stdout: resp.stdout ?? '', stderr: resp.stderr ?? '' });
+        }
+        return {} as ChildProcess;
+      },
+    );
+  }
+
+  it('returns alreadyUpToDate=true when origin/<base> is an ancestor of HEAD', async () => {
+    withGitHandler((cmd) => {
+      if (cmd.startsWith('rev-parse --git-common-dir')) return { stdout: '/tmp/bare/r.git\n' };
+      if (cmd.startsWith('remote get-url origin'))
+        return { stdout: 'https://github.com/o/r.git\n' };
+      if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd.startsWith('merge-base --is-ancestor')) return { stdout: '' };
+      // Reject anything else so an unexpected git call is loud
+      return { error: new Error(`unexpected git ${cmd}`) };
+    });
+
+    const result = await manager.rebaseOntoBase({
+      worktreePath: '/tmp/wt',
+      baseBranch: 'main',
+    });
+
+    expect(result).toEqual({ alreadyUpToDate: true, rebased: true, conflicts: [] });
+  });
+
+  it('returns rebased=true after a clean rebase', async () => {
+    withGitHandler((cmd) => {
+      if (cmd.startsWith('rev-parse --git-common-dir')) return { stdout: '/tmp/bare/r.git\n' };
+      if (cmd.startsWith('remote get-url origin'))
+        return { stdout: 'https://github.com/o/r.git\n' };
+      if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd.startsWith('merge-base --is-ancestor'))
+        return { error: new Error('not an ancestor') };
+      if (cmd.startsWith('rebase ')) return { stdout: '' };
+      return { error: new Error(`unexpected git ${cmd}`) };
+    });
+
+    const result = await manager.rebaseOntoBase({
+      worktreePath: '/tmp/wt',
+      baseBranch: 'main',
+    });
+
+    expect(result).toEqual({ alreadyUpToDate: false, rebased: true, conflicts: [] });
+  });
+
+  it('aborts and returns conflicts when the rebase fails', async () => {
+    let rebaseAborted = false;
+    withGitHandler((cmd) => {
+      if (cmd.startsWith('rev-parse --git-common-dir')) return { stdout: '/tmp/bare/r.git\n' };
+      if (cmd.startsWith('remote get-url origin'))
+        return { stdout: 'https://github.com/o/r.git\n' };
+      if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd.startsWith('merge-base --is-ancestor'))
+        return { error: new Error('not an ancestor') };
+      if (cmd === 'rebase refs/remotes/origin/main')
+        return { error: new Error('CONFLICT (content): merge conflict in src/foo.ts') };
+      if (cmd.startsWith('diff --name-only --diff-filter=U'))
+        return { stdout: 'src/foo.ts\nsrc/bar.ts\n' };
+      if (cmd.startsWith('rebase --abort')) {
+        rebaseAborted = true;
+        return { stdout: '' };
+      }
+      return { error: new Error(`unexpected git ${cmd}`) };
+    });
+
+    const result = await manager.rebaseOntoBase({
+      worktreePath: '/tmp/wt',
+      baseBranch: 'main',
+    });
+
+    expect(result.rebased).toBe(false);
+    expect(result.alreadyUpToDate).toBe(false);
+    expect(result.conflicts).toEqual(['src/foo.ts', 'src/bar.ts']);
+    expect(rebaseAborted).toBe(true);
+  });
+});
+
 describe('truncateDiffAtFileBoundary', () => {
   const h1 = 'diff --git a/a.ts b/a.ts\n+line\n';
   const h2 = `diff --git a/b.ts b/b.ts\n+${'x'.repeat(200)}\n`;

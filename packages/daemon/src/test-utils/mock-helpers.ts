@@ -160,6 +160,7 @@ export function createMockWorktreeManager(): WorktreeManager {
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
     pushBranch: vi.fn(async () => {}),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
+    rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
     getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
     readBranchFolder: vi.fn(async ({ relPath }) => ({
       relPath,
