@@ -238,6 +238,14 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
+  // Preflight conflict policy — enum check.
+  const preflightConflictPolicy = input.preflightConflictPolicy;
+  if (preflightConflictPolicy !== undefined && preflightConflictPolicy !== null) {
+    if (preflightConflictPolicy !== 'warn' && preflightConflictPolicy !== 'block') {
+      errors.push("preflightConflictPolicy must be 'warn' or 'block'");
+    }
+  }
+
   // Fix-pod cooldown — 0 means "no cooldown"; cap at 1h to keep it sensible.
   const fixPodCooldownSec = input.fixPodCooldownSec;
   if (fixPodCooldownSec !== undefined && fixPodCooldownSec !== null) {

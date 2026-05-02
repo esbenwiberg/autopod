@@ -713,52 +713,8 @@ describe('LocalWorktreeManager', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // withRepoLock (private) — concurrency behaviour
-  // -------------------------------------------------------------------------
-
-  describe('withRepoLock', () => {
-    it('serializes concurrent operations on the same key', async () => {
-      const order: number[] = [];
-
-      const run = (id: number, delay: number) =>
-        (
-          manager as unknown as {
-            withRepoLock: (key: string, fn: () => Promise<void>) => Promise<void>;
-          }
-        ).withRepoLock('same-key', async () => {
-          order.push(id);
-          await new Promise((r) => setTimeout(r, delay));
-          order.push(-id);
-        });
-
-      await Promise.all([run(1, 20), run(2, 5)]);
-
-      expect(order).toEqual([1, -1, 2, -2]);
-    });
-
-    it('runs operations on different keys concurrently', async () => {
-      const started: string[] = [];
-      const finished: string[] = [];
-
-      const run = (key: string, delay: number) =>
-        (
-          manager as unknown as {
-            withRepoLock: (key: string, fn: () => Promise<void>) => Promise<void>;
-          }
-        ).withRepoLock(key, async () => {
-          started.push(key);
-          await new Promise((r) => setTimeout(r, delay));
-          finished.push(key);
-        });
-
-      await Promise.all([run('repo-a', 20), run('repo-b', 5)]);
-
-      expect(started).toContain('repo-a');
-      expect(started).toContain('repo-b');
-      expect(finished[0]).toBe('repo-b');
-    });
-  });
+  // Per-repo serialization is now provided by `KeyedPromiseQueue`; see
+  // `src/util/keyed-promise-queue.test.ts` for the equivalent coverage.
 
   // -------------------------------------------------------------------------
   // cleanup
@@ -1089,6 +1045,116 @@ describe('LocalWorktreeManager', () => {
       expect(result.startCommitSha).toBe('');
       expect(result.worktreePath).toContain('feat_sha-fail');
     });
+  });
+});
+
+describe('LocalWorktreeManager.rebaseOntoBase', () => {
+  let manager: LocalWorktreeManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fsMkdirMock.mockResolvedValue(undefined);
+    fsRmMock.mockResolvedValue(undefined);
+    fsReadFileMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    fsWriteFileMock.mockResolvedValue(undefined);
+    manager = new LocalWorktreeManager({
+      cacheDir: '/tmp/test-cache',
+      worktreeDir: '/tmp/test-worktrees',
+      logger,
+    });
+  });
+
+  /**
+   * Drives the execFile mock with a per-test handler. The handler receives the
+   * git command (joined args) and returns either an exec result, an error, or
+   * undefined to fall back to a default empty stdout response.
+   */
+  function withGitHandler(
+    handler: (cmd: string) => { stdout?: string; stderr?: string; error?: Error } | undefined,
+  ) {
+    execFileMock.mockImplementation(
+      (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+        const cb = resolveCallback(arg3, arg4);
+        const cmd = args.join(' ');
+        const resp = handler(cmd) ?? { stdout: '' };
+        if (resp.error) {
+          cb(resp.error, { stdout: '', stderr: resp.stderr ?? '' });
+        } else {
+          cb(null, { stdout: resp.stdout ?? '', stderr: resp.stderr ?? '' });
+        }
+        return {} as ChildProcess;
+      },
+    );
+  }
+
+  it('returns alreadyUpToDate=true when origin/<base> is an ancestor of HEAD', async () => {
+    withGitHandler((cmd) => {
+      if (cmd.startsWith('rev-parse --git-common-dir')) return { stdout: '/tmp/bare/r.git\n' };
+      if (cmd.startsWith('remote get-url origin'))
+        return { stdout: 'https://github.com/o/r.git\n' };
+      if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd.startsWith('merge-base --is-ancestor')) return { stdout: '' };
+      // Reject anything else so an unexpected git call is loud
+      return { error: new Error(`unexpected git ${cmd}`) };
+    });
+
+    const result = await manager.rebaseOntoBase({
+      worktreePath: '/tmp/wt',
+      baseBranch: 'main',
+    });
+
+    expect(result).toEqual({ alreadyUpToDate: true, rebased: true, conflicts: [] });
+  });
+
+  it('returns rebased=true after a clean rebase', async () => {
+    withGitHandler((cmd) => {
+      if (cmd.startsWith('rev-parse --git-common-dir')) return { stdout: '/tmp/bare/r.git\n' };
+      if (cmd.startsWith('remote get-url origin'))
+        return { stdout: 'https://github.com/o/r.git\n' };
+      if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd.startsWith('merge-base --is-ancestor'))
+        return { error: new Error('not an ancestor') };
+      if (cmd.startsWith('rebase ')) return { stdout: '' };
+      return { error: new Error(`unexpected git ${cmd}`) };
+    });
+
+    const result = await manager.rebaseOntoBase({
+      worktreePath: '/tmp/wt',
+      baseBranch: 'main',
+    });
+
+    expect(result).toEqual({ alreadyUpToDate: false, rebased: true, conflicts: [] });
+  });
+
+  it('aborts and returns conflicts when the rebase fails', async () => {
+    let rebaseAborted = false;
+    withGitHandler((cmd) => {
+      if (cmd.startsWith('rev-parse --git-common-dir')) return { stdout: '/tmp/bare/r.git\n' };
+      if (cmd.startsWith('remote get-url origin'))
+        return { stdout: 'https://github.com/o/r.git\n' };
+      if (cmd.startsWith('fetch ')) return { stdout: '' };
+      if (cmd.startsWith('merge-base --is-ancestor'))
+        return { error: new Error('not an ancestor') };
+      if (cmd === 'rebase refs/remotes/origin/main')
+        return { error: new Error('CONFLICT (content): merge conflict in src/foo.ts') };
+      if (cmd.startsWith('diff --name-only --diff-filter=U'))
+        return { stdout: 'src/foo.ts\nsrc/bar.ts\n' };
+      if (cmd.startsWith('rebase --abort')) {
+        rebaseAborted = true;
+        return { stdout: '' };
+      }
+      return { error: new Error(`unexpected git ${cmd}`) };
+    });
+
+    const result = await manager.rebaseOntoBase({
+      worktreePath: '/tmp/wt',
+      baseBranch: 'main',
+    });
+
+    expect(result.rebased).toBe(false);
+    expect(result.alreadyUpToDate).toBe(false);
+    expect(result.conflicts).toEqual(['src/foo.ts', 'src/bar.ts']);
+    expect(rebaseAborted).toBe(true);
   });
 });
 

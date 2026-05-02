@@ -149,6 +149,7 @@ export function rowToProfile(
     sastCommand: nullableStr(row.sast_command),
     sastTimeout: nullableNum(row.sast_timeout),
     mergePollIntervalSec: nullableNum(row.merge_poll_interval_sec),
+    preflightConflictPolicy: nullableStr(row.preflight_conflict_policy) as 'warn' | 'block' | null,
     fixPodCooldownSec: nullableNum(row.fix_pod_cooldown_sec),
     reuseFixPod: ((row.reuse_fix_pod as number) ?? 0) === 1,
     prProvider: nullableStr(row.pr_provider) as Profile['prProvider'],
@@ -302,6 +303,7 @@ export function createProfileStore(
           build_timeout, test_timeout, build_env,
           lint_command, lint_timeout, sast_command, sast_timeout,
           merge_poll_interval_sec, fix_pod_cooldown_sec, reuse_fix_pod,
+          preflight_conflict_policy,
           token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
           has_web_ui,
           issue_watcher_enabled, issue_watcher_label_prefix,
@@ -321,6 +323,7 @@ export function createProfileStore(
           @buildTimeout, @testTimeout, @buildEnv,
           @lintCommand, @lintTimeout, @sastCommand, @sastTimeout,
           @mergePollIntervalSec, @fixPodCooldownSec, @reuseFixPod,
+          @preflightConflictPolicy,
           @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
           @hasWebUi,
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
@@ -368,6 +371,7 @@ export function createProfileStore(
         sastCommand: parsed.sastCommand ?? null,
         sastTimeout: parsed.sastTimeout ?? null,
         mergePollIntervalSec: parsed.mergePollIntervalSec ?? null,
+        preflightConflictPolicy: parsed.preflightConflictPolicy ?? null,
         fixPodCooldownSec: parsed.fixPodCooldownSec ?? null,
         reuseFixPod: parsed.reuseFixPod ? 1 : 0,
         prProvider: parsed.prProvider,
@@ -669,6 +673,10 @@ export function createProfileStore(
       if (parsed.mergePollIntervalSec !== undefined) {
         setClauses.push('merge_poll_interval_sec = @mergePollIntervalSec');
         fieldMap.mergePollIntervalSec = parsed.mergePollIntervalSec ?? null;
+      }
+      if (parsed.preflightConflictPolicy !== undefined) {
+        setClauses.push('preflight_conflict_policy = @preflightConflictPolicy');
+        fieldMap.preflightConflictPolicy = parsed.preflightConflictPolicy ?? null;
       }
       if (parsed.fixPodCooldownSec !== undefined) {
         setClauses.push('fix_pod_cooldown_sec = @fixPodCooldownSec');
