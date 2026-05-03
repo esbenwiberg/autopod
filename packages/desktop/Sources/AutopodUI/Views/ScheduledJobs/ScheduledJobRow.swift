@@ -135,7 +135,7 @@ extension ScheduledJob {
       enabled: true,
       nextRunAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600)),
       lastRunAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86400)),
-      lastSessionId: nil,
+      lastPodId: nil,
       catchupPending: false,
       createdAt: ISO8601DateFormatter().string(from: Date()),
       updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -152,7 +152,7 @@ extension ScheduledJob {
       enabled: true,
       nextRunAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)),
       lastRunAt: nil,
-      lastSessionId: nil,
+      lastPodId: nil,
       catchupPending: true,
       createdAt: ISO8601DateFormatter().string(from: Date()),
       updatedAt: ISO8601DateFormatter().string(from: Date())
@@ -169,7 +169,7 @@ extension ScheduledJob {
       enabled: false,
       nextRunAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(7200)),
       lastRunAt: nil,
-      lastSessionId: nil,
+      lastPodId: nil,
       catchupPending: false,
       createdAt: ISO8601DateFormatter().string(from: Date()),
       updatedAt: ISO8601DateFormatter().string(from: Date())

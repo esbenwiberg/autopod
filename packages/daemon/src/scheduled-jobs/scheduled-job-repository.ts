@@ -19,7 +19,7 @@ function mapRow(row: Record<string, unknown>): ScheduledJob {
     id: row.id as string,
     name: row.name as string,
     profileName: row.profile_name as string,
-    task: row.task as string,
+    task: Buffer.isBuffer(row.task) ? (row.task as Buffer).toString('utf8') : (row.task as string),
     cronExpression: row.cron_expression as string,
     enabled: Boolean(row.enabled),
     nextRunAt: row.next_run_at as string,

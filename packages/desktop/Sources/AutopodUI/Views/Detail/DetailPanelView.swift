@@ -337,6 +337,10 @@ public struct DetailPanelView: View {
                                 handoffTarget = "artifact"
                                 showHandoffSheet = true
                             }
+                            Divider()
+                            Button("Submit as-is → Open PR") {
+                                Task { await actions.promote(pod.id, "pr", nil, true) }
+                            }
                         }
                     } label: {
                         Label("Complete", systemImage: "checkmark.circle")

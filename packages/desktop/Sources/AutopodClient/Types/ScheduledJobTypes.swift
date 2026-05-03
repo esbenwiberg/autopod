@@ -56,7 +56,7 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
   public let enabled: Bool
   public let nextRunAt: String
   public let lastRunAt: String?
-  public let lastSessionId: String?
+  public let lastPodId: String?
   public let catchupPending: Bool
   public let createdAt: String
   public let updatedAt: String
@@ -70,7 +70,7 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     enabled: Bool,
     nextRunAt: String,
     lastRunAt: String?,
-    lastSessionId: String?,
+    lastPodId: String?,
     catchupPending: Bool,
     createdAt: String,
     updatedAt: String
@@ -83,7 +83,7 @@ public struct ScheduledJob: Codable, Identifiable, Sendable, Hashable {
     self.enabled = enabled
     self.nextRunAt = nextRunAt
     self.lastRunAt = lastRunAt
-    self.lastSessionId = lastSessionId
+    self.lastPodId = lastPodId
     self.catchupPending = catchupPending
     self.createdAt = createdAt
     self.updatedAt = updatedAt
