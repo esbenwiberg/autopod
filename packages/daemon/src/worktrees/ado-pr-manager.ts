@@ -11,10 +11,10 @@ import type {
 } from '../interfaces/pr-manager.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
-  generatePrNarrative,
-  generatePrTitle,
   type PrNarrativeResult,
   type PrTitleResult,
+  generatePrNarrative,
+  generatePrTitle,
 } from './pr-description-generator.js';
 
 /**
@@ -209,7 +209,10 @@ export class AdoPrManager implements PrManager {
       securityFindings: config.securityFindings,
       narrative: narrativeResult.narrative,
       narrativeFallback: narrativeResult.usedFallback
-        ? { reason: narrativeResult.fallbackReason ?? 'unknown', detail: narrativeResult.fallbackDetail }
+        ? {
+            reason: narrativeResult.fallbackReason ?? 'unknown',
+            detail: narrativeResult.fallbackDetail,
+          }
         : undefined,
       budgetChars: 4000,
     });

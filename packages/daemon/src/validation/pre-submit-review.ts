@@ -59,10 +59,7 @@ export async function runPreSubmitReview(
   const diffHash = hashDiff(opts.diff);
   const startedAt = Date.now();
 
-  const skipped = (
-    reason: PreSubmitSkipReason,
-    explanation: string,
-  ): PreSubmitReviewResult => ({
+  const skipped = (reason: PreSubmitSkipReason, explanation: string): PreSubmitReviewResult => ({
     status: 'skipped',
     reasoning: explanation,
     issues: [],

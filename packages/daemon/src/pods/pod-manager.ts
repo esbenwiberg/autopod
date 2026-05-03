@@ -3683,7 +3683,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (brokenStubs) {
           const first5 = brokenStubs.split('\n').slice(0, 5).join(', ');
           logger.warn({ podId }, `0-byte .bin stubs detected before agent start: ${first5}`);
-          emitStatus(`⚠️ 0-byte .bin stubs detected — running npm rebuild to restore them…`);
+          emitStatus('⚠️ 0-byte .bin stubs detected — running npm rebuild to restore them…');
           const rebuildResult = await containerManager
             .execInContainer(
               containerId,
@@ -5760,7 +5760,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             (validateErr.message.includes('container stopped/paused') ||
               (validateErr as NodeJS.ErrnoException & { statusCode?: number }).statusCode === 409);
           const buildOutput = isContainerStopped
-            ? `Container exited before validation could run — check agent logs for errors`
+            ? 'Container exited before validation could run — check agent logs for errors'
             : String(validateErr);
           result = {
             podId,
@@ -6403,7 +6403,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             (validateErr.message.includes('container stopped/paused') ||
               (validateErr as NodeJS.ErrnoException & { statusCode?: number }).statusCode === 409);
           const buildOutput = isContainerStopped
-            ? `Container exited before validation could run — check agent logs for errors`
+            ? 'Container exited before validation could run — check agent logs for errors'
             : String(validateErr);
           result = {
             podId,

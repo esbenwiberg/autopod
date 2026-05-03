@@ -24,7 +24,9 @@ function resolveModelId(model: string): string {
 }
 
 function pickDescriptionModel(profile: Profile, podModel: string): string {
-  return resolveModelId(profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_DESCRIPTION_MODEL);
+  return resolveModelId(
+    profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_DESCRIPTION_MODEL,
+  );
 }
 
 const TITLE_SYSTEM_PROMPT =
@@ -48,8 +50,7 @@ const NARRATIVE_SYSTEM_PROMPT =
   'Each item should name a specific file, module, or concern — not generic advice. ' +
   'Be concise and precise. Write for a developer code reviewer, not a business stakeholder.';
 
-const NARRATIVE_COMPACT_SUFFIX =
-  ' Keep each field under 120 characters. reviewFocus max 2 items.';
+const NARRATIVE_COMPACT_SUFFIX = ' Keep each field under 120 characters. reviewFocus max 2 items.';
 
 export interface PrNarrative {
   why: string;
@@ -316,15 +317,15 @@ function parseNarrativeJson(raw: string): PrNarrative | null {
       .trim();
     const obj = JSON.parse(cleaned) as Record<string, unknown>;
 
-    const why = typeof obj['why'] === 'string' ? obj['why'].trim() : null;
-    const what = typeof obj['what'] === 'string' ? obj['what'].trim() : null;
+    const why = typeof obj.why === 'string' ? obj.why.trim() : null;
+    const what = typeof obj.what === 'string' ? obj.what.trim() : null;
     if (!why || !what) return null;
 
-    const how = typeof obj['how'] === 'string' && obj['how'].trim() ? obj['how'].trim() : undefined;
+    const how = typeof obj.how === 'string' && obj.how.trim() ? obj.how.trim() : undefined;
 
     let reviewFocus: string[] | undefined;
-    if (Array.isArray(obj['reviewFocus'])) {
-      const items = obj['reviewFocus'].filter(
+    if (Array.isArray(obj.reviewFocus)) {
+      const items = obj.reviewFocus.filter(
         (x): x is string => typeof x === 'string' && x.trim().length > 0,
       );
       if (items.length > 0) reviewFocus = items.slice(0, 3);

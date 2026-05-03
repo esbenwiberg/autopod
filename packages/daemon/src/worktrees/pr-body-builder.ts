@@ -316,30 +316,25 @@ function applyBudget(sections: string[], budgetChars: number): string {
   if (join(sections).length <= budgetChars) return join(sections);
 
   // Drop order: least informative for a reviewer first
-  const dropPrefixes = [
-    '## Screenshots',
-    '## Preview',
-    '## Deviations from Plan',
-  ];
+  const dropPrefixes = ['## Screenshots', '## Preview', '## Deviations from Plan'];
 
+  let trimmed = sections;
   for (const prefix of dropPrefixes) {
-    const filtered = sections.filter((s) => !s.startsWith(prefix));
-    if (filtered.length !== sections.length) {
-      sections = filtered;
-      if (join(sections).length <= budgetChars) return join(sections);
+    const filtered = trimmed.filter((s) => !s.startsWith(prefix));
+    if (filtered.length !== trimmed.length) {
+      trimmed = filtered;
+      if (join(trimmed).length <= budgetChars) return join(trimmed);
     }
   }
 
   // Strip the <details> block from the Validation section
-  sections = sections.map((s) =>
-    s.startsWith('## Validation')
-      ? s.replace(/\n\n<details>[\s\S]*?<\/details>/g, '')
-      : s,
+  trimmed = trimmed.map((s) =>
+    s.startsWith('## Validation') ? s.replace(/\n\n<details>[\s\S]*?<\/details>/g, '') : s,
   );
-  if (join(sections).length <= budgetChars) return join(sections);
+  if (join(trimmed).length <= budgetChars) return join(trimmed);
 
   // Last resort: hard-truncate the body (shouldn't be needed after the drops above)
-  return join(sections).slice(0, budgetChars);
+  return join(trimmed).slice(0, budgetChars);
 }
 
 function formatDuration(ms: number): string {

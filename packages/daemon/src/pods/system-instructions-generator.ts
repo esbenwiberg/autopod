@@ -199,7 +199,7 @@ export function generateSystemInstructions(
   if (serversWithTools.length > 0) {
     lines.push('**On your first turn, load all tool schemas before starting work:**');
     for (const server of serversWithTools) {
-      lines.push(`- \`ToolSearch select:${server.toolNames!.join(',')}\``);
+      lines.push(`- \`ToolSearch select:${server.toolNames?.join(',')}\``);
     }
     lines.push('');
   }
@@ -480,14 +480,15 @@ export function generateSystemInstructions(
     .map((t) => `\`${t}\``)
     .join(', ');
   lines.push(
-    '1. **Plan first**: Before writing any code, explore the codebase to understand the relevant symbols, call sites, and patterns. ' +
-      (hasCodeIntel
+    `1. **Plan first**: Before writing any code, explore the codebase to understand the relevant symbols, call sites, and patterns. ${
+      hasCodeIntel
         ? `**Code-intel MCPs are active — use ${codeIntelExamples}, etc. for ALL symbol discovery. Do NOT use grep, find, or file reads to locate symbols.** `
-        : '') +
-      'Then call `report_plan` with your approach and numbered steps.' +
-      (profile.evaluatePlan
+        : ''
+    }Then call \`report_plan\` with your approach and numbered steps.${
+      profile.evaluatePlan
         ? ' After calling `report_plan`, immediately call `check_messages` — the harness may have queued feedback on your plan against the acceptance criteria.'
-        : ''),
+        : ''
+    }`,
   );
   lines.push(
     '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',

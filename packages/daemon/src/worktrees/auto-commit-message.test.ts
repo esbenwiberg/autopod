@@ -95,7 +95,7 @@ describe('generateAutoCommitMessage', () => {
   });
 
   afterEach(() => {
-    delete process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
   });
 
   it('returns the model output verbatim on a successful call', async () => {
@@ -126,7 +126,7 @@ describe('generateAutoCommitMessage', () => {
   });
 
   it('skips the API call entirely when ANTHROPIC_API_KEY is unset (no_anthropic_api_key)', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
     setupExec({});
 
     const result = await generateAutoCommitMessage(baseInput, logger);

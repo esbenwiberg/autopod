@@ -559,7 +559,10 @@ describe('buildPrBody — narrative param', () => {
       narrative: {
         why: 'Why.',
         what: 'What.',
-        reviewFocus: ['packages/cli/src/auth/token-manager.ts', 'packages/daemon/src/api/plugins/auth.ts'],
+        reviewFocus: [
+          'packages/cli/src/auth/token-manager.ts',
+          'packages/daemon/src/api/plugins/auth.ts',
+        ],
       },
     });
     expect(body).toContain('## Review Focus');

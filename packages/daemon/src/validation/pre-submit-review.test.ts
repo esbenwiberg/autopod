@@ -155,7 +155,6 @@ describe('pickCachedPreSubmit (Tier 1 cache hit logic)', () => {
   // validation engine's import graph.
   // biome-ignore lint/suspicious/noExplicitAny: dynamic import avoids hoist
   let pickCachedPreSubmit: any;
-  // biome-ignore lint/suspicious/noExplicitAny: dynamic import avoids hoist
   beforeEach(async () => {
     const mod = await import('./local-validation-engine.js');
     pickCachedPreSubmit = mod.pickCachedPreSubmit;

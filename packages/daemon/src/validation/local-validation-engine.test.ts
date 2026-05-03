@@ -17,6 +17,7 @@ import {
   parseApiCheckSpecs,
   parseClassificationJson,
   parseReviewJson,
+  parseWarningCount,
   stripMarkdownFences,
 } from './local-validation-engine.js';
 
@@ -880,5 +881,139 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.smoke.build.status).toBe('fail');
     expect(result.smoke.health.status).toBe('fail');
     expect(result.smoke.health.url).toBe('http://127.0.0.1:9999/');
+  });
+});
+
+describe('parseWarningCount', () => {
+  it('reads MSBuild trailing summary as the authoritative count', () => {
+    const output = [
+      'Infrastructure net10.0 succeeded with 3 warning(s) (2.4s)',
+      '  /repo/Foo.cs(16,46): warning S1075: Refactor your code',
+      'Build succeeded with 3 warning(s) in 17.8s',
+    ].join('\n');
+    expect(parseWarningCount(output)).toBe(3);
+  });
+
+  it('falls back to summing per-project lines when no trailing summary is present', () => {
+    const output = [
+      'ProjectA net10.0 succeeded with 2 warning(s) (1.0s)',
+      'ProjectB net10.0 succeeded with 5 warning(s) (1.0s)',
+    ].join('\n');
+    expect(parseWarningCount(output)).toBe(7);
+  });
+
+  it('falls back to per-line "warning CODE:" when no summary is present', () => {
+    const output = [
+      '/repo/Foo.cs(16,46): warning S1075: Refactor your code',
+      '/repo/Bar.cs(56,26): warning S2139: Either log this exception',
+      '/repo/Baz.cs(143,26): warning CS1591: Missing XML comment',
+    ].join('\n');
+    expect(parseWarningCount(output)).toBe(3);
+  });
+
+  it('returns 0 for clean output', () => {
+    expect(parseWarningCount('Build succeeded.\n  0 Warning(s)\n  0 Error(s)')).toBe(0);
+    expect(parseWarningCount('')).toBe(0);
+  });
+
+  it('does not match a path that contains the substring "warning"', () => {
+    // The fallback regex is anchored on "path(line,col): warning CODE:" — a path
+    // segment named "warning" without that structure must not be counted.
+    const output = '/repo/warning-test/foo.cs(1,1): error CS001: Something broke';
+    expect(parseWarningCount(output)).toBe(0);
+  });
+
+  it('prefers trailing summary even when per-project lines disagree (truncated output)', () => {
+    // If the per-project lines were truncated mid-build but the trailer made it
+    // through, trust the trailer.
+    const output = 'Build succeeded with 5 warning(s) in 17.8s';
+    expect(parseWarningCount(output)).toBe(5);
+  });
+});
+
+describe('runBuild — exit-0-with-warnings downgrade', () => {
+  function baseConfigForBuild(buildCommand: string): ValidationEngineConfig {
+    return {
+      podId: 'pod-test',
+      containerId: 'container-test',
+      previewUrl: 'http://127.0.0.1:9999',
+      buildCommand,
+      startCommand: 'node server.js',
+      healthPath: '/',
+      healthTimeout: 1,
+      smokePages: [{ path: '/' }],
+      attempt: 1,
+      task: 'test task',
+      diff: '',
+      hasWebUi: false,
+    };
+  }
+
+  function containerManagerWithBuildOutput(stdout: string, exitCode: number): ContainerManager {
+    return {
+      spawn: vi.fn(),
+      kill: vi.fn(),
+      refreshFirewall: vi.fn(),
+      stop: vi.fn(),
+      start: vi.fn(),
+      writeFile: vi.fn(),
+      readFile: vi.fn(),
+      extractDirectoryFromContainer: vi.fn(),
+      getStatus: vi.fn(),
+      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
+        // The pre-build healing exec calls (find for 0-byte stubs, chmod for native bins)
+        // run via `sh -c "find ..."` — return empty stdout so the heal paths are skipped.
+        const joined = cmd.join(' ');
+        if (joined.includes('-empty -print') || joined.includes('chmod +x')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        // The actual buildCommand exec — return our crafted output.
+        return { stdout, stderr: '', exitCode };
+      }),
+      execStreaming: vi.fn(),
+    } as unknown as ContainerManager;
+  }
+
+  it("downgrades build status to 'fail' when exit 0 but warnings present", async () => {
+    const cm = containerManagerWithBuildOutput(
+      'Restore complete (1.0s)\nBuild succeeded with 3 warning(s) in 17.8s',
+      0,
+    );
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfigForBuild('dotnet build'));
+
+    expect(result.smoke.build.status).toBe('fail');
+    expect(result.smoke.build.warningCount).toBe(3);
+    expect(result.smoke.build.output).toContain('Build exited 0 but emitted 3 warning(s)');
+    expect(result.smoke.build.output).toContain('--- build output ---');
+  });
+
+  it("keeps status 'pass' when exit 0 and no warnings", async () => {
+    const cm = containerManagerWithBuildOutput('Build succeeded.\n  0 Warning(s)\n  0 Error(s)', 0);
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfigForBuild('dotnet build'));
+
+    expect(result.smoke.build.status).toBe('pass');
+    expect(result.smoke.build.warningCount).toBe(0);
+    expect(result.smoke.build.output).not.toContain('exited 0 but emitted');
+  });
+
+  it('reports warningCount on a real failure (exit nonzero) without overriding status reasoning', async () => {
+    // A genuine build failure may also emit warnings before erroring out.
+    // The warning count is still informative, but the failure stands on its own.
+    const cm = containerManagerWithBuildOutput(
+      'Foo.cs(10,5): warning S1075: hardcoded URI\nBar.cs(20,5): error CS1002: ;',
+      1,
+    );
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfigForBuild('dotnet build'));
+
+    expect(result.smoke.build.status).toBe('fail');
+    // The output is the raw build output (not the warning-downgrade hint), since
+    // the build legitimately failed via exit code.
+    expect(result.smoke.build.output).not.toContain('Build exited 0 but emitted');
   });
 });

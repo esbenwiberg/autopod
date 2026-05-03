@@ -13,10 +13,10 @@ import type {
 } from '../interfaces/pr-manager.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
-  generatePrNarrative,
-  generatePrTitle,
   type PrNarrativeResult,
   type PrTitleResult,
+  generatePrNarrative,
+  generatePrTitle,
 } from './pr-description-generator.js';
 
 const execFileAsync = promisify(execFile);
@@ -98,7 +98,10 @@ export class GhPrManager implements PrManager {
       securityFindings: config.securityFindings,
       narrative: narrativeResult.narrative,
       narrativeFallback: narrativeResult.usedFallback
-        ? { reason: narrativeResult.fallbackReason ?? 'unknown', detail: narrativeResult.fallbackDetail }
+        ? {
+            reason: narrativeResult.fallbackReason ?? 'unknown',
+            detail: narrativeResult.fallbackDetail,
+          }
         : undefined,
     });
 
@@ -358,7 +361,10 @@ export class GitHubApiPrManager implements PrManager {
       securityFindings: config.securityFindings,
       narrative: narrativeResult.narrative,
       narrativeFallback: narrativeResult.usedFallback
-        ? { reason: narrativeResult.fallbackReason ?? 'unknown', detail: narrativeResult.fallbackDetail }
+        ? {
+            reason: narrativeResult.fallbackReason ?? 'unknown',
+            detail: narrativeResult.fallbackDetail,
+          }
         : undefined,
     });
 

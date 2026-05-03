@@ -46,7 +46,7 @@ const GIT_PATH_PREPEND = ['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin'].joi
 /** Env vars applied to every git subprocess to prevent interactive prompts from hanging the daemon. */
 const GIT_ENV: Record<string, string> = {
   ...process.env,
-  PATH: `${GIT_PATH_PREPEND}:${process.env['PATH'] ?? ''}`,
+  PATH: `${GIT_PATH_PREPEND}:${process.env.PATH ?? ''}`,
   GIT_TERMINAL_PROMPT: '0',
   GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
 } as Record<string, string>;

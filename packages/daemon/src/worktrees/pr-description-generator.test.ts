@@ -76,7 +76,7 @@ describe('generatePrTitle', () => {
   });
 
   afterEach(() => {
-    delete process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
   });
 
   it('returns LLM title on a successful call', async () => {
@@ -93,7 +93,7 @@ describe('generatePrTitle', () => {
   });
 
   it('falls back when ANTHROPIC_API_KEY is unset (no_anthropic_api_key)', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
     setupDiffExec(SAMPLE_DIFF);
 
     const result = await generatePrTitle(baseInput, logger);
@@ -139,7 +139,7 @@ describe('generatePrTitle', () => {
   });
 
   it('uses handoffInstructions over task in fallback for promoted pods', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
     setupDiffExec(SAMPLE_DIFF);
 
     const result = await generatePrTitle(
@@ -198,7 +198,7 @@ describe('generatePrNarrative', () => {
   });
 
   afterEach(() => {
-    delete process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
   });
 
   it('returns parsed narrative on a successful LLM call', async () => {
@@ -217,7 +217,7 @@ describe('generatePrNarrative', () => {
   });
 
   it('falls back to plain taskSummary when ANTHROPIC_API_KEY is unset (no_anthropic_api_key)', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
     setupDiffExec(SAMPLE_DIFF);
 
     const result = await generatePrNarrative(
@@ -283,7 +283,7 @@ describe('generatePrNarrative', () => {
   });
 
   it('uses handoffInstructions in fallback when env var unset and no taskSummary', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
     setupDiffExec(SAMPLE_DIFF);
 
     const result = await generatePrNarrative(

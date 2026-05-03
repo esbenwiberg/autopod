@@ -422,6 +422,38 @@ function startAppStabilityMonitor(url: string, onCrash: () => void): () => void 
 
 // ── Build phase ─────────────────────────────────────────────────────────────
 
+/**
+ * Parse warning count from build output.
+ *
+ * Many toolchains (notably `dotnet build` with Roslyn analyzers) exit 0 even
+ * when they emit warnings. Without parsing them, those warnings sail through
+ * the exit-code-only gate and reach main. This helper recognises common
+ * "succeeded with N warning(s)" summary patterns so the gate can downgrade
+ * an exit-0 build to fail.
+ *
+ * Strategy:
+ *   1. MSBuild's authoritative "Build succeeded with N warning(s)" trailing line
+ *   2. Sum of per-project "succeeded with N warning(s)" lines (when no trailer)
+ *   3. Per-line "path(line,col): warning CODE:" fallback for truncated output
+ *
+ * Returns 0 when nothing matches — the caller treats that as no detectable
+ * warnings (not as confirmation that the build was clean).
+ */
+export function parseWarningCount(output: string): number {
+  const buildSummary = output.match(/Build succeeded with (\d+) warning\(s\)/);
+  if (buildSummary?.[1]) return Number(buildSummary[1]);
+
+  const perProject = [...output.matchAll(/succeeded with (\d+) warning\(s\)/g)];
+  if (perProject.length > 0) {
+    return perProject.reduce((acc, m) => acc + Number(m[1] ?? 0), 0);
+  }
+
+  // Anchored on "path(line,col): warning CODE:" so a path that happens to
+  // contain the substring "warning" doesn't trigger a false positive.
+  const lineRegex = /^\s*\S+\([\d,]+\):\s*warning\s+[A-Z]+\d+:/gm;
+  return (output.match(lineRegex) || []).length;
+}
+
 async function runBuild(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
@@ -511,6 +543,7 @@ async function runBuild(
   const duration = Date.now() - buildStart;
   const rawOutput = `${result.stdout}\n${result.stderr}`.trim();
   const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
+  const warningCount = parseWarningCount(rawOutput);
 
   // Exit 137 from an in-container exec is overwhelmingly the kernel OOM killer
   // (SIGKILL). Combined with a bare trailing "Killed" line and no Node stack
@@ -521,6 +554,7 @@ async function runBuild(
   // limit is fake headroom.
   const looksOomKilled = result.exitCode === 137 || /(^|\n)Killed\s*$/.test(rawOutput.slice(-200));
   let output = rawOutput;
+  let effectiveStatus: 'pass' | 'fail' = status;
   if (status === 'fail' && looksOomKilled) {
     const hint =
       'Build appears to have been OOM-killed (exit 137 / "Killed"). Raise the Docker Desktop VM memory (Settings → Resources), reduce concurrent pods, or increase profile.containerMemoryGb.';
@@ -531,14 +565,24 @@ async function runBuild(
     );
   } else if (status === 'fail') {
     log?.warn({ exitCode: result.exitCode, duration }, 'build failed');
+  } else if (warningCount > 0) {
+    // Build exited 0 but emitted warnings. dotnet/Roslyn (and others) won't
+    // trip the exit-code gate on warnings by default, so without this downgrade
+    // they slip past validation and reach main. Treat warnings as failures and
+    // surface a clear correction prompt to the agent / human reviewer.
+    effectiveStatus = 'fail';
+    const hint = `Build exited 0 but emitted ${warningCount} warning(s). Autopod treats build warnings as failures. Fix the warnings, or — if a specific occurrence is intentional — suppress it at the call site with a justification (e.g. \`#pragma warning disable Sxxxx\` for .NET, or an inline rule disable for the equivalent linter).`;
+    output = `${hint}\n\n--- build output ---\n${rawOutput}`;
+    log?.warn({ warningCount, duration }, 'build downgraded to fail — warnings present');
   } else {
     log?.info({ duration }, 'build passed');
   }
 
   return {
-    status,
+    status: effectiveStatus,
     output: output.slice(0, 50_000), // Cap output size
     duration,
+    warningCount,
   };
 }
 

@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
+import type { ActionDefinition, Pod, Profile } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
+import type { PodRepository } from '../../pods/pod-repository.js';
+import type { ProfileStore } from '../../profiles/index.js';
 import { type DeployScriptRunner, createDeployHandler } from './deploy-handler.js';
 
 function sha256(content: string) {
@@ -13,7 +16,7 @@ const mockProfile = (deployConfig: unknown) =>
     name: 'test-profile',
     deployment: deployConfig,
     actionPolicy: null,
-  }) as any;
+  }) as unknown as Profile;
 
 const mockPod = (
   worktreePath: string | null = WORKTREE,
@@ -23,7 +26,7 @@ const mockPod = (
     worktreePath,
     profileName: 'test-profile',
     deployBaselineHashes,
-  }) as any;
+  }) as unknown as Pod;
 
 function makeRunner(): DeployScriptRunner & {
   readScript: ReturnType<typeof vi.fn>;
@@ -47,8 +50,8 @@ function makeHandler(overrides: Partial<Parameters<typeof createDeployHandler>[0
   const runner = makeRunner();
 
   const handler = createDeployHandler({
-    podRepo: podRepo as any,
-    profileStore: profileStore as any,
+    podRepo: podRepo as unknown as PodRepository,
+    profileStore: profileStore as unknown as ProfileStore,
     daemonEnv: { DAEMON_SECRET: 'supersecret', PATH: '/usr/bin:/bin', HOME: '/home/daemon' },
     runner,
     ...overrides,
@@ -68,7 +71,7 @@ describe('deploy handler — execute', () => {
     );
 
     const result = await handler.execute(
-      {} as any,
+      {} as unknown as ActionDefinition,
       { script_path: 'deploy.sh' },
       { podId: 'pod-1' },
     );
@@ -101,7 +104,11 @@ describe('deploy handler — execute', () => {
     });
     profileStore.get.mockReturnValue(mockProfile({ enabled: true, env: {} }));
 
-    await handler.execute({} as any, { script_path: 'deploy.sh' }, { podId: 'pod-1' });
+    await handler.execute(
+      {} as unknown as ActionDefinition,
+      { script_path: 'deploy.sh' },
+      { podId: 'pod-1' },
+    );
 
     const env = (runner.runScript as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.env as Record<
       string,
@@ -118,7 +125,11 @@ describe('deploy handler — execute', () => {
     );
 
     await expect(
-      handler.execute({} as any, { script_path: 'deploy.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: 'deploy.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('NOT_SET');
   });
 
@@ -127,7 +138,11 @@ describe('deploy handler — execute', () => {
     profileStore.get.mockReturnValue(mockProfile({ enabled: false, env: {} }));
 
     await expect(
-      handler.execute({} as any, { script_path: 'deploy.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: 'deploy.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('not enabled');
   });
 
@@ -136,7 +151,11 @@ describe('deploy handler — execute', () => {
     profileStore.get.mockReturnValue(mockProfile(null));
 
     await expect(
-      handler.execute({} as any, { script_path: 'deploy.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: 'deploy.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('not enabled');
   });
 
@@ -145,7 +164,11 @@ describe('deploy handler — execute', () => {
     podRepo.getOrThrow.mockReturnValue(mockPod(null));
 
     await expect(
-      handler.execute({} as any, { script_path: 'deploy.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: 'deploy.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('no worktree');
   });
 
@@ -153,7 +176,11 @@ describe('deploy handler — execute', () => {
     const { handler } = makeHandler();
 
     await expect(
-      handler.execute({} as any, { script_path: '../evil.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: '../evil.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('..');
   });
 
@@ -161,7 +188,11 @@ describe('deploy handler — execute', () => {
     const { handler } = makeHandler();
 
     await expect(
-      handler.execute({} as any, { script_path: '/etc/passwd' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: '/etc/passwd' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('leading /');
   });
 
@@ -172,7 +203,11 @@ describe('deploy handler — execute', () => {
     );
 
     await expect(
-      handler.execute({} as any, { script_path: 'evil.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: 'evil.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('allowedScripts');
   });
 
@@ -188,7 +223,7 @@ describe('deploy handler — execute', () => {
     runner.readScript.mockResolvedValue(content);
 
     const result = await handler.execute(
-      {} as any,
+      {} as unknown as ActionDefinition,
       { script_path: 'scripts/deploy-prod.sh' },
       { podId: 'pod-1' },
     );
@@ -203,13 +238,15 @@ describe('deploy handler — execute', () => {
     profileStore.get.mockReturnValue(
       mockProfile({ enabled: true, env: {}, allowedScripts: ['deploy.sh'] }),
     );
-    podRepo.getOrThrow.mockReturnValue(
-      mockPod(WORKTREE, { 'deploy.sh': sha256(baselineContent) }),
-    );
+    podRepo.getOrThrow.mockReturnValue(mockPod(WORKTREE, { 'deploy.sh': sha256(baselineContent) }));
     runner.readScript.mockResolvedValue(tamperedContent);
 
     await expect(
-      handler.execute({} as any, { script_path: 'deploy.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: 'deploy.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('does not match its trusted baseline');
   });
 
@@ -223,7 +260,7 @@ describe('deploy handler — execute', () => {
     runner.readScript.mockResolvedValue(content);
 
     const result = await handler.execute(
-      {} as any,
+      {} as unknown as ActionDefinition,
       { script_path: 'deploy.sh' },
       { podId: 'pod-1' },
     );
@@ -240,7 +277,11 @@ describe('deploy handler — execute', () => {
     podRepo.getOrThrow.mockReturnValue(mockPod(WORKTREE, null));
 
     await expect(
-      handler.execute({} as any, { script_path: 'deploy.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: 'deploy.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('no trusted baseline was captured');
   });
 
@@ -253,7 +294,11 @@ describe('deploy handler — execute', () => {
     podRepo.getOrThrow.mockReturnValue(mockPod(WORKTREE, { 'deploy.sh': 'somehash' }));
 
     await expect(
-      handler.execute({} as any, { script_path: 'new.sh' }, { podId: 'pod-1' }),
+      handler.execute(
+        {} as unknown as ActionDefinition,
+        { script_path: 'new.sh' },
+        { podId: 'pod-1' },
+      ),
     ).rejects.toThrow('no trusted baseline at the base ref');
   });
 
@@ -265,7 +310,7 @@ describe('deploy handler — execute', () => {
     runner.readScript.mockResolvedValue('#!/bin/bash\necho legacy');
 
     const result = await handler.execute(
-      {} as any,
+      {} as unknown as ActionDefinition,
       { script_path: 'deploy.sh' },
       { podId: 'pod-1' },
     );
@@ -277,7 +322,7 @@ describe('deploy handler — execute', () => {
     const { handler, runner } = makeHandler();
 
     await handler.execute(
-      {} as any,
+      {} as unknown as ActionDefinition,
       { script_path: 'deploy.sh', args: '--env prod --dry-run' },
       { podId: 'pod-1' },
     );
@@ -295,7 +340,7 @@ describe('deploy handler — execute', () => {
     profileStore.get.mockReturnValue(mockProfile({ enabled: true, env: { SECRET: 'topsecret' } }));
 
     const result = await handler.execute(
-      {} as any,
+      {} as unknown as ActionDefinition,
       { script_path: 'deploy.sh' },
       { podId: 'pod-1' },
     );

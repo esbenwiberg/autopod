@@ -216,27 +216,20 @@ export function createDeployHandler(deps: DeployHandlerDeps) {
         const baselines = pod.deployBaselineHashes;
         if (!baselines) {
           throw new Error(
-            `Deploy script "${scriptPath}" cannot run: no trusted baseline was ` +
-              'captured for this pod. The pod likely predates baseline tracking — ' +
-              'kill and recreate it, or land deploy script changes on the base branch.',
+            `Deploy script "${scriptPath}" cannot run: no trusted baseline was captured for this pod. The pod likely predates baseline tracking — kill and recreate it, or land deploy script changes on the base branch.`,
           );
         }
         const baseline = baselines[scriptPath];
         if (!baseline) {
           throw new Error(
-            `Deploy script "${scriptPath}" has no trusted baseline at the base ref. ` +
-              'Add a matching pattern to profile.deployment.allowedScripts and ensure ' +
-              'the script is committed to the base branch before re-running.',
+            `Deploy script "${scriptPath}" has no trusted baseline at the base ref. Add a matching pattern to profile.deployment.allowedScripts and ensure the script is committed to the base branch before re-running.`,
           );
         }
         const currentContent = await runner.readScript(absolutePath);
         const currentHash = sha256hex(currentContent);
         if (currentHash !== baseline) {
           throw new Error(
-            `Deploy script "${scriptPath}" does not match its trusted baseline ` +
-              '(captured at pod provision from the base branch). The script was ' +
-              'modified during the pod session — execution aborted for security. ' +
-              'Land legitimate changes on the base branch and rerun the pod.',
+            `Deploy script "${scriptPath}" does not match its trusted baseline (captured at pod provision from the base branch). The script was modified during the pod session — execution aborted for security. Land legitimate changes on the base branch and rerun the pod.`,
           );
         }
       }

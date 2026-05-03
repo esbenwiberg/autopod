@@ -28,6 +28,13 @@ export interface BuildResult {
   status: 'pass' | 'fail';
   output: string;
   duration: number;
+  /**
+   * Warnings parsed from build output. Populated when the build emits a
+   * recognizable warning summary (e.g. MSBuild's "succeeded with N warning(s)").
+   * When present and > 0 on an otherwise-passing build, status is downgraded to 'fail' —
+   * autopod treats build warnings as failures so they can't slip past validation.
+   */
+  warningCount?: number;
 }
 
 export interface LintResult {
