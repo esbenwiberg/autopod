@@ -123,18 +123,32 @@ describe('gatherReviewContext', () => {
     expect(violation).toContain('build-output.js');
   });
 
-  it('returns git status summary', async () => {
-    // Create an initial commit so git status works
+  it('classifies untracked files as not-in-PR and tracked changes as in-PR', async () => {
+    // Initial commit so git status works
     await fs.writeFile(path.join(tmpDir, 'README.md'), '# Test');
     await execFileAsync('git', ['add', '.'], { cwd: tmpDir });
     await execFileAsync('git', ['commit', '-m', 'init'], { cwd: tmpDir });
 
-    // Create an uncommitted file
-    await fs.writeFile(path.join(tmpDir, 'uncommitted.ts'), 'export const x = 1;');
+    // Modify a tracked file (M) — counts as in-PR
+    await fs.writeFile(path.join(tmpDir, 'README.md'), '# Test (modified)');
+
+    // Add a brand new untracked file (??) — counts as NOT in PR
+    await fs.writeFile(path.join(tmpDir, 'leftover.ts'), 'export const x = 1;');
 
     const ctx = await gatherReviewContext(tmpDir, '');
 
-    expect(ctx.gitStatusSummary).toContain('uncommitted.ts');
+    expect(ctx.gitStatusSummary.clean).toBe(false);
+    expect(ctx.gitStatusSummary.totalCount).toBe(2);
+
+    // README.md modification lands in inPr
+    expect(ctx.gitStatusSummary.inPr.some((line) => line.includes('README.md'))).toBe(true);
+    expect(ctx.gitStatusSummary.inPr.every((line) => !line.startsWith('??'))).toBe(true);
+
+    // leftover.ts (untracked) lands in untrackedNotInPr
+    expect(ctx.gitStatusSummary.untrackedNotInPr.some((line) => line.includes('leftover.ts'))).toBe(
+      true,
+    );
+    expect(ctx.gitStatusSummary.untrackedNotInPr.every((line) => line.startsWith('??'))).toBe(true);
   });
 
   it('returns clean status for committed repo', async () => {
@@ -144,7 +158,10 @@ describe('gatherReviewContext', () => {
 
     const ctx = await gatherReviewContext(tmpDir, '');
 
-    expect(ctx.gitStatusSummary).toContain('clean');
+    expect(ctx.gitStatusSummary.clean).toBe(true);
+    expect(ctx.gitStatusSummary.inPr).toEqual([]);
+    expect(ctx.gitStatusSummary.untrackedNotInPr).toEqual([]);
+    expect(ctx.gitStatusSummary.totalCount).toBe(0);
   });
 
   it('returns file tree summary', async () => {

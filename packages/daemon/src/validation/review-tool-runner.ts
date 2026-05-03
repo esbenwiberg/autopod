@@ -184,7 +184,7 @@ function getToolDefinitions(): Tool[] {
     {
       name: 'git_status',
       description:
-        'Run git status --porcelain to see uncommitted changes, untracked files, and staging state.',
+        'Run git status --porcelain. Note: untracked files (lines starting with `??`) are NOT part of the PR being reviewed — they are leftover worktree state from build artifacts, tooling, or prior pod runs. Only files appearing in the diff are part of the submission. Do not flag or cite untracked files.',
       input_schema: {
         type: 'object' as const,
         properties: {},

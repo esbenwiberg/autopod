@@ -2214,6 +2214,7 @@ Core principles:
 - When uncertain, skip rather than create noise.
 - Auto-formatter changes (whitespace, punctuation, quote normalization applied by pre-commit hooks like Prettier or ESLint --fix) are expected commit side-effects. Never flag them as scope creep or unrelated changes.
 - Files at paths matching \`specs/*/handovers/*.md\` are required Series Handover Protocol artifacts — agents in a series are explicitly instructed to write them. Their presence in the diff is mandatory and must NOT be flagged as scope violation or undisclosed deviation.
+- Untracked files (\`??\` in git status) are NOT part of this PR. They are leftover worktree state from build artifacts, tooling, or prior pod runs. Evaluate ONLY the changes shown in the DIFF section — do not flag, cite, or read untracked files unless investigating a \`.gitignore\` violation explicitly listed under Warnings.
 - Use the CODEBASE CONTEXT section (if present) to verify claims made in the diff. Auto-detected warnings are high-confidence signals — investigate them seriously.
 ${repoRulesSection}
 ## TASK
@@ -2360,10 +2361,45 @@ function buildContextSection(ctx: ReviewContext): string {
     parts.push('');
   }
 
-  if (ctx.gitStatusSummary) {
+  const status = ctx.gitStatusSummary;
+  if (status.clean) {
     parts.push('### Repository Status\n');
-    parts.push(ctx.gitStatusSummary);
+    parts.push('Working tree clean (all changes committed).');
     parts.push('');
+  } else if (status.inPr.length > 0 || status.untrackedNotInPr.length > 0) {
+    parts.push('### Repository Status\n');
+
+    if (status.inPr.length > 0) {
+      parts.push(`#### Files in this PR (uncommitted, ${status.inPr.length} file(s))\n`);
+      const cappedInPr = status.inPr.slice(0, 50);
+      for (const line of cappedInPr) {
+        parts.push(`  ${line}`);
+      }
+      if (status.inPr.length > 50) {
+        parts.push(`  ... and ${status.inPr.length - 50} more`);
+      }
+      parts.push('');
+    }
+
+    if (status.untrackedNotInPr.length > 0) {
+      parts.push(
+        `#### Files in the worktree that are NOT part of this PR — DO NOT FLAG (${status.untrackedNotInPr.length} file(s))\n`,
+      );
+      parts.push(
+        'These untracked files are leftover worktree state from build artifacts, tooling, or prior pod runs. ' +
+          'They are NOT part of the submission. Do NOT cite them, read them, or flag them as undisclosed scope creep. ' +
+          'The only legitimate reason to investigate one is if it is explicitly listed under Warnings as a `.gitignore` violation.',
+      );
+      parts.push('');
+      const cappedUntracked = status.untrackedNotInPr.slice(0, 20);
+      for (const line of cappedUntracked) {
+        parts.push(`  ${line}`);
+      }
+      if (status.untrackedNotInPr.length > 20) {
+        parts.push(`  ... and ${status.untrackedNotInPr.length - 20} more`);
+      }
+      parts.push('');
+    }
   }
 
   if (ctx.fileTreeSummary) {

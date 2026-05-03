@@ -49,6 +49,10 @@ export async function runAgenticReview(config: AgenticReviewConfig): Promise<{ s
         '--system-prompt',
         'You are an expert code reviewer with full read-only access to the repository. ' +
           'Use the tools to investigate the codebase as needed to verify claims in the diff. ' +
+          'CRITICAL: Untracked files in the worktree (lines starting with `??` in git status) are NOT part of this PR — ' +
+          'they are leftover worktree state from build artifacts, tooling, or prior pod runs. ' +
+          'Evaluate ONLY the changes shown in the DIFF section. Do not flag, cite, or read untracked files ' +
+          "unless investigating a `.gitignore` violation explicitly listed under the prompt's Warnings section. " +
           'When done investigating, output ONLY a JSON object with your review verdict. ' +
           'Do not wrap the JSON in markdown fences. ' +
           'The JSON must have: "status" ("pass"|"fail"|"uncertain"), "reasoning" (string), "issues" (string[]).',

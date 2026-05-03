@@ -31,11 +31,28 @@ const CONFIG_FILE_PATTERNS = [
   '.env.example',
 ];
 
+/**
+ * Structured snapshot of `git status --porcelain` split by what's actually
+ * part of the PR. Untracked entries (`??`) are leftover worktree state from
+ * build steps, tooling, or prior pod runs — they are NOT part of the
+ * submission and the reviewer should not flag them.
+ */
+export interface GitStatusSummary {
+  /** Tracked uncommitted entries (M/A/D/R/C). These ARE in the PR. */
+  inPr: string[];
+  /** Untracked entries (`??`). These are NOT part of the PR. */
+  untrackedNotInPr: string[];
+  /** Total porcelain lines before any capping. */
+  totalCount: number;
+  /** True when working tree is clean (no porcelain output). */
+  clean: boolean;
+}
+
 export interface ReviewContext {
   /** Tier 0: auto-detected warnings (gitignore violations, contradictory ops) */
   annotations: string[];
-  /** Tier 0: git status --porcelain summary */
-  gitStatusSummary: string;
+  /** Tier 0: structured git status --porcelain summary */
+  gitStatusSummary: GitStatusSummary;
   /** Tier 1: directory structure from git ls-files */
   fileTreeSummary: string;
   /** Tier 1: supplementary file contents for reviewer context */
@@ -142,29 +159,52 @@ async function detectGitignoreViolations(
 
 // ── Tier 0: Git status snapshot ───────────────────────────────────────────────
 
-async function getGitStatusSummary(worktreePath: string): Promise<string> {
+/**
+ * Splits `git status --porcelain` into two buckets:
+ * - `inPr`: tracked uncommitted entries (M/A/D/R/C) — these ARE part of the PR.
+ * - `untrackedNotInPr`: `??` entries — leftover worktree state, NOT part of the PR.
+ *
+ * The split exists so the reviewer prompt can render the two with explicit
+ * labels. Otherwise the agentic reviewer reads untracked file paths out of
+ * the status block and starts citing them as if they were submitted code.
+ */
+async function getGitStatusSummary(worktreePath: string): Promise<GitStatusSummary> {
+  const empty: GitStatusSummary = {
+    inPr: [],
+    untrackedNotInPr: [],
+    totalCount: 0,
+    clean: true,
+  };
+
   try {
     const { stdout } = await execFileAsync(
       'git',
       ['status', '--porcelain'],
       EXEC_OPTS(worktreePath),
     );
-    if (!stdout.trim()) return 'Working tree clean (all changes committed).';
+    if (!stdout.trim()) return empty;
 
     const lines = stdout.trim().split('\n');
-    const summary: string[] = [`${lines.length} file(s) with uncommitted changes:`];
+    const inPr: string[] = [];
+    const untrackedNotInPr: string[] = [];
 
-    // Cap at 50 lines to avoid bloating the prompt
-    const capped = lines.slice(0, 50);
-    for (const line of capped) {
-      summary.push(`  ${line}`);
+    for (const line of lines) {
+      // Porcelain v1: columns 0-1 are the status code. `??` marks untracked.
+      if (line.startsWith('??')) {
+        untrackedNotInPr.push(line);
+      } else {
+        inPr.push(line);
+      }
     }
-    if (lines.length > 50) {
-      summary.push(`  ... and ${lines.length - 50} more`);
-    }
-    return summary.join('\n');
+
+    return {
+      inPr,
+      untrackedNotInPr,
+      totalCount: lines.length,
+      clean: false,
+    };
   } catch {
-    return '';
+    return empty;
   }
 }
 
