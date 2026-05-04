@@ -66,6 +66,7 @@ describe('getBaseImage', () => {
     ['go124', 'autopod-go124:latest'],
     ['go124-pw', 'autopod-go124-pw:latest'],
     ['python-node', 'autopod-python-node:latest'],
+    ['python-node-pg', 'autopod-python-node-pg:latest'],
     ['custom', 'autopod-node22:latest'],
   ] as const)('maps %s → %s (no digest)', (template, expected) => {
     expect(getBaseImage(template)).toBe(expected);
@@ -179,6 +180,17 @@ describe('getInstallCommand', () => {
     ).toBe(
       'pip install -r requirements.txt && corepack enable yarn && yarn install --frozen-lockfile',
     );
+  });
+
+  it('python-node-pg: pip + npm ci when build uses npm', () => {
+    expect(
+      getInstallCommand(
+        mockProfile({
+          template: 'python-node-pg',
+          buildCommand: 'pip install -e . && npm run build',
+        }),
+      ),
+    ).toBe('pip install -r requirements.txt && npm ci');
   });
 
   it('uses go mod download for go124', () => {
@@ -299,6 +311,19 @@ describe('generateDockerfile', () => {
     });
     expect(df).toContain('FROM autopod-python-node:latest');
     expect(df).toContain('pip install -r requirements.txt && npm ci');
+  });
+
+  it('generates Dockerfile for python-node-pg project with both installs', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        template: 'python-node-pg',
+        buildCommand: 'pip install -e . && pnpm run build',
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('FROM autopod-python-node-pg:latest');
+    expect(df).toContain('pip install -r requirements.txt');
+    expect(df).toContain('pnpm install --frozen-lockfile');
   });
 
   it('includes PAT-based git clone for private repos', () => {

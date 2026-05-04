@@ -230,6 +230,7 @@ const createProfileBaseSchema = z.object({
       'dotnet10-go',
       'python312',
       'python-node',
+      'python-node-pg',
       'go124',
       'go124-pw',
       'custom',

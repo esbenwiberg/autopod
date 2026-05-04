@@ -7,6 +7,7 @@
   "dotnet10-go": null,
   "python312": null,
   "python-node": null,
+  "python-node-pg": null,
   "go124": null,
   "go124-pw": null,
   "custom": null

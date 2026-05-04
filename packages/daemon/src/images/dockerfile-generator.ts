@@ -23,6 +23,7 @@ const BASE_IMAGE_NAMES: Record<StackTemplate, string> = {
   'dotnet10-go': 'autopod-dotnet10-go',
   python312: 'autopod-python312',
   'python-node': 'autopod-python-node',
+  'python-node-pg': 'autopod-python-node-pg',
   go124: 'autopod-go124',
   'go124-pw': 'autopod-go124-pw',
   custom: 'autopod-node22',
@@ -260,7 +261,7 @@ export function getInstallCommand(profile: Profile): string {
     profile.template === 'dotnet10' ||
     profile.template === 'dotnet10-go';
 
-  const isPythonNode = profile.template === 'python-node';
+  const isPythonNode = profile.template === 'python-node' || profile.template === 'python-node-pg';
   if (isPythonNode) {
     const pip = 'pip install -r requirements.txt';
     if (cmd.includes('pnpm')) {
@@ -392,7 +393,12 @@ function serenaWarmupLanguage(template: StackTemplate | null): 'csharp' | 'types
   if (template === 'dotnet9' || template === 'dotnet10' || template === 'dotnet10-go') {
     return 'csharp';
   }
-  if (template === 'node22' || template === 'node22-pw' || template === 'python-node') {
+  if (
+    template === 'node22' ||
+    template === 'node22-pw' ||
+    template === 'python-node' ||
+    template === 'python-node-pg'
+  ) {
     return 'typescript';
   }
   return null;
