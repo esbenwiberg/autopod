@@ -25,6 +25,7 @@ public struct MarkdownTab: View {
   @State private var isLoadingList = false
   @State private var isLoadingContent = false
   @State private var errorMessage: String?
+  @State private var isExpanded = false
 
   private var filteredFiles: [SessionFileEntry] {
     guard !filter.isEmpty else { return files }
@@ -35,15 +36,28 @@ public struct MarkdownTab: View {
   public var body: some View {
     HSplitView {
       fileList
-        .frame(minWidth: 220, idealWidth: 260, maxWidth: 360)
+        // maxWidth left generous so the user can drag the splitter
+        // wide enough to read long markdown paths without truncation.
+        .frame(minWidth: 220, idealWidth: 280, maxWidth: 600)
 
       renderedPane
+    }
+    .sheet(isPresented: $isExpanded) {
+      expandedSheet
     }
     .task(id: pod.id) {
       await refreshFiles()
     }
     .task(id: "\(pod.id)-\(pod.status.rawValue)") {
-      // Auto-refresh while the agent is active: files appear as the agent writes them,
+      // One-shot refresh on every status change. Workspace pods only sync
+      // /workspace → host worktree at completion, and the daemon's files
+      // endpoint may flip from container-backed (live) to host-backed (post-sync)
+      // when the container exits — refresh both ways so the list catches up.
+      await refreshFiles(silent: true)
+      if let sel = selectedPath {
+        await silentlyReloadSelected(sel)
+      }
+      // Then poll while the agent is active so newly-written files appear
       // and the selected file re-renders without a manual reload.
       guard pod.status == .running else { return }
       while !Task.isCancelled {
@@ -127,8 +141,18 @@ public struct MarkdownTab: View {
 
   // MARK: - Rendered pane
 
-  @ViewBuilder
   private var renderedPane: some View {
+    VStack(spacing: 0) {
+      if let path = selectedPath, errorMessage == nil, !isLoadingContent {
+        renderedHeader(path)
+        Divider()
+      }
+      renderedBody
+    }
+  }
+
+  @ViewBuilder
+  private var renderedBody: some View {
     if let err = errorMessage {
       errorView(err)
     } else if selectedPath == nil {
@@ -146,6 +170,59 @@ public struct MarkdownTab: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
+  }
+
+  private func renderedHeader(_ path: String) -> some View {
+    HStack(spacing: 8) {
+      Text(path)
+        .font(.system(.caption, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.middle)
+      Spacer()
+      Button {
+        isExpanded = true
+      } label: {
+        Image(systemName: "arrow.up.left.and.arrow.down.right")
+          .font(.system(size: 11))
+      }
+      .buttonStyle(.plain)
+      .help("Open in a larger window")
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+  }
+
+  // MARK: - Expanded modal
+
+  private var expandedSheet: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 8) {
+        Image(systemName: "doc.richtext")
+          .foregroundStyle(.blue)
+          .font(.system(size: 12))
+        Text(selectedPath ?? "")
+          .font(.system(.caption, design: .monospaced))
+          .lineLimit(1)
+          .truncationMode(.middle)
+        Spacer()
+        Button("Done") {
+          isExpanded = false
+        }
+        .keyboardShortcut(.cancelAction)
+      }
+      .padding(12)
+      Divider()
+      ScrollView {
+        Markdown(content)
+          .markdownTheme(.autopod)
+          .textSelection(.enabled)
+          .padding(.horizontal, 32)
+          .padding(.vertical, 24)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+    .frame(minWidth: 1200, idealWidth: 1700, minHeight: 800, idealHeight: 1050)
   }
 
   private var placeholder: some View {

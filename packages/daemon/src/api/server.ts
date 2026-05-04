@@ -185,7 +185,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   }
 
   // Files routes — browse/read files from pod worktree (markdown viewer, etc.)
-  filesRoutes(app, deps.podManager);
+  filesRoutes(app, deps.podManager, deps.containerManagerFactory);
 
   // Terminal WebSocket (requires docker instance)
   if (deps.containerManagerFactory && deps.docker) {

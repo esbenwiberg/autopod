@@ -2,8 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { PodManager } from '../../pods/pod-manager.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ContainerManager,
+  ExecOptions,
+  ExecResult,
+} from '../../interfaces/container-manager.js';
+import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 import { filesRoutes } from './files.js';
 
 interface FileEntry {
@@ -12,10 +17,24 @@ interface FileEntry {
   modified: number;
 }
 
-function podManagerWithWorktree(worktreePath: string | null): PodManager {
+interface MockPod {
+  worktreePath: string | null;
+  artifactsPath?: string | null;
+  containerId?: string | null;
+  executionTarget?: string;
+}
+
+function podManager(pod: MockPod): PodManager {
+  const merged = { artifactsPath: null, containerId: null, executionTarget: 'docker', ...pod };
   return {
-    getSession: () => ({ worktreePath, artifactsPath: null }),
+    getSession: () => merged,
   } as unknown as PodManager;
+}
+
+function makeFactory(cm: Partial<ContainerManager>): ContainerManagerFactory {
+  return {
+    get: () => cm as ContainerManager,
+  };
 }
 
 async function buildFixture(root: string): Promise<void> {
@@ -52,7 +71,7 @@ describe('filesRoutes', () => {
     tmp = await mkdtemp(path.join(tmpdir(), 'autopod-files-'));
     await buildFixture(tmp);
     app = Fastify();
-    filesRoutes(app, podManagerWithWorktree(tmp));
+    filesRoutes(app, podManager({ worktreePath: tmp }));
     await app.ready();
   });
 
@@ -100,7 +119,7 @@ describe('filesRoutes', () => {
 
     it('returns 404 when the pod has no worktree or artifacts path', async () => {
       const bare = Fastify();
-      filesRoutes(bare, podManagerWithWorktree(null));
+      filesRoutes(bare, podManager({ worktreePath: null }));
       await bare.ready();
       try {
         const res = await bare.inject({ method: 'GET', url: '/pods/abc/files' });
@@ -150,5 +169,148 @@ describe('filesRoutes', () => {
       });
       expect(res.statusCode).toBe(404);
     });
+  });
+});
+
+describe('filesRoutes — container-first lookup', () => {
+  let tmp: string;
+  let app: ReturnType<typeof Fastify>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let readMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(path.join(tmpdir(), 'autopod-files-'));
+    // Host worktree only has the OLD file. The new file lives only in the container.
+    await writeFile(path.join(tmp, 'OLD.md'), '# old');
+
+    execMock = vi.fn();
+    readMock = vi.fn();
+
+    const cm: Partial<ContainerManager> = {
+      execInContainer: (_id: string, command: string[], _opts?: ExecOptions): Promise<ExecResult> =>
+        execMock(command),
+      readFile: (id: string, p: string): Promise<string> => readMock(id, p),
+    };
+
+    app = Fastify();
+    filesRoutes(
+      app,
+      podManager({ worktreePath: tmp, containerId: 'c1', executionTarget: 'docker' }),
+      makeFactory(cm),
+    );
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('lists files from the container when one is attached, ignoring the stale host worktree', async () => {
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stderr: '',
+      // tab-separated %P\t%s\t%T@\n — single in-container file
+      stdout: 'docs/legacy-plugin-migration/ZERO-DEP-ANALYSIS.md\t1234\t1714831234.5\n',
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/pods/abc/files' });
+    expect(res.statusCode).toBe(200);
+    const files = res.json().files as FileEntry[];
+    const paths = files.map((f) => f.path);
+    expect(paths).toEqual(['docs/legacy-plugin-migration/ZERO-DEP-ANALYSIS.md']);
+    expect(paths).not.toContain('OLD.md'); // host worktree should not be walked
+
+    // Verify the find command shape: starts in /workspace, uses -prune for skip dirs.
+    expect(execMock).toHaveBeenCalledOnce();
+    const cmd = execMock.mock.calls[0][0] as string[];
+    expect(cmd[0]).toBe('find');
+    expect(cmd[1]).toBe('/workspace');
+    expect(cmd).toContain('-prune');
+    expect(cmd).toContain('-printf');
+    expect(cmd).toContain('*.md');
+  });
+
+  it('falls back to host worktree when the container exec fails', async () => {
+    execMock.mockRejectedValue(new Error('container stopped'));
+
+    const res = await app.inject({ method: 'GET', url: '/pods/abc/files' });
+    expect(res.statusCode).toBe(200);
+    const paths = (res.json().files as FileEntry[]).map((f) => f.path);
+    expect(paths).toContain('OLD.md');
+  });
+
+  it('reads file content from the container, scoped to /workspace', async () => {
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stderr: '',
+      stdout: 'regular file\t1234\n',
+    });
+    readMock.mockResolvedValue('# fresh content from container');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/abc/files/content',
+      query: { path: 'docs/foo.md' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().content).toBe('# fresh content from container');
+
+    // stat is invoked with absolute container path under /workspace
+    const statCmd = execMock.mock.calls[0][0] as string[];
+    expect(statCmd[0]).toBe('stat');
+    expect(statCmd).toContain('/workspace/docs/foo.md');
+    expect(readMock).toHaveBeenCalledWith('c1', '/workspace/docs/foo.md');
+  });
+
+  it('returns 413 for files in the container that exceed the size cap', async () => {
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stderr: '',
+      stdout: `regular file\t${1024 * 1024 * 5}\n`,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/abc/files/content',
+      query: { path: 'big.md' },
+    });
+    expect(res.statusCode).toBe(413);
+    expect(readMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects path-traversal attempts before exec', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/abc/files/content',
+      query: { path: '../etc/passwd' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(execMock).not.toHaveBeenCalled();
+    expect(readMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects absolute paths before exec', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/abc/files/content',
+      query: { path: '/etc/passwd' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to host worktree when in-container stat fails', async () => {
+    // stat in container returns non-zero (file doesn't exist there).
+    execMock.mockResolvedValue({ exitCode: 1, stderr: 'no such file', stdout: '' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/abc/files/content',
+      query: { path: 'OLD.md' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().content).toBe('# old');
+    expect(readMock).not.toHaveBeenCalled();
   });
 });

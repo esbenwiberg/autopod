@@ -1,7 +1,8 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import type { PodManager } from '../../pods/pod-manager.js';
+import type { ContainerManager } from '../../interfaces/container-manager.js';
+import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 
 interface FileEntry {
   path: string;
@@ -22,7 +23,8 @@ interface ContentResponse {
 const DEFAULT_EXTENSIONS = ['md'];
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_LIST_FILES = 2000;
-const SKIP_DIRS = new Set([
+const CONTAINER_WORKDIR = '/workspace';
+const SKIP_DIRS = [
   '.git',
   'node_modules',
   'dist',
@@ -44,14 +46,32 @@ const SKIP_DIRS = new Set([
   '.yarn',
   '.vercel',
   '.svelte-kit',
-]);
+];
+const SKIP_DIRS_SET = new Set(SKIP_DIRS);
 
-export function filesRoutes(app: FastifyInstance, podManager: PodManager): void {
+export function filesRoutes(
+  app: FastifyInstance,
+  podManager: PodManager,
+  containerManagerFactory?: ContainerManagerFactory,
+): void {
   // GET /pods/:podId/files — list files in the pod worktree filtered by extension.
+  // Prefers the live container's /workspace when available so workspace pods (which
+  // only sync /workspace → host worktree at completion) don't appear empty mid-run.
   app.get('/pods/:podId/files', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     const query = request.query as { ext?: string };
     const pod = podManager.getSession(podId);
+
+    const extensions = parseExtensions(query.ext);
+
+    if (containerManagerFactory && pod.containerId) {
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      const fromContainer = await tryListFromContainer(cm, pod.containerId, extensions);
+      if (fromContainer) {
+        fromContainer.sort((a, b) => a.path.localeCompare(b.path));
+        return { files: fromContainer } satisfies ListResponse;
+      }
+    }
 
     const rootPath = pod.worktreePath ?? pod.artifactsPath;
     if (!rootPath) {
@@ -59,7 +79,6 @@ export function filesRoutes(app: FastifyInstance, podManager: PodManager): void 
       return { error: 'No files available for this pod' };
     }
 
-    const extensions = parseExtensions(query.ext);
     const root = path.resolve(rootPath);
     const files = await walk(root, extensions);
     files.sort((a, b) => a.path.localeCompare(b.path));
@@ -68,21 +87,39 @@ export function filesRoutes(app: FastifyInstance, podManager: PodManager): void 
   });
 
   // GET /pods/:podId/files/content?path=... — read a file from the pod worktree.
+  // Same container-first preference as the listing endpoint.
   app.get('/pods/:podId/files/content', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     const query = request.query as { path?: string };
     const pod = podManager.getSession(podId);
 
-    const rootPath = pod.worktreePath ?? pod.artifactsPath;
-    if (!rootPath) {
-      reply.status(404);
-      return { error: 'No files available for this pod' };
-    }
-
     const relPath = query.path;
     if (!relPath || typeof relPath !== 'string') {
       reply.status(400);
       return { error: 'path query parameter is required' };
+    }
+
+    if (!isSafeContainerRelPath(relPath)) {
+      reply.status(400);
+      return { error: 'path escapes the pod root' };
+    }
+
+    if (containerManagerFactory && pod.containerId) {
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      const fromContainer = await tryReadFromContainer(cm, pod.containerId, relPath);
+      if (fromContainer === 'too-large') {
+        reply.status(413);
+        return { error: `file exceeds ${MAX_FILE_BYTES} bytes` };
+      }
+      if (fromContainer) {
+        return fromContainer satisfies ContentResponse;
+      }
+    }
+
+    const rootPath = pod.worktreePath ?? pod.artifactsPath;
+    if (!rootPath) {
+      reply.status(404);
+      return { error: 'No files available for this pod' };
     }
 
     const root = path.resolve(rootPath);
@@ -146,7 +183,7 @@ async function walk(root: string, extensions: Set<string>): Promise<FileEntry[]>
       const full = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(entry.name)) continue;
+        if (SKIP_DIRS_SET.has(entry.name)) continue;
         await visit(full);
         continue;
       }
@@ -171,4 +208,116 @@ async function walk(root: string, extensions: Set<string>): Promise<FileEntry[]>
 
   await visit(root);
   return out;
+}
+
+async function tryListFromContainer(
+  cm: ContainerManager,
+  containerId: string,
+  extensions: Set<string>,
+): Promise<FileEntry[] | null> {
+  const cmd = buildContainerFindCommand(extensions);
+  let result: Awaited<ReturnType<ContainerManager['execInContainer']>>;
+  try {
+    result = await cm.execInContainer(containerId, cmd, { timeout: 15_000 });
+  } catch {
+    return null;
+  }
+  if (result.exitCode !== 0 && !result.stdout.trim()) {
+    return null;
+  }
+
+  const out: FileEntry[] = [];
+  for (const line of result.stdout.split('\n')) {
+    if (out.length >= MAX_LIST_FILES) break;
+    if (!line) continue;
+    const parts = line.split('\t');
+    if (parts.length < 3) continue;
+    const [relPath, sizeStr, mtimeStr] = parts;
+    if (!relPath) continue;
+    const size = Number(sizeStr);
+    const mtimeSec = Number(mtimeStr);
+    out.push({
+      path: relPath,
+      size: Number.isFinite(size) ? size : 0,
+      modified: Number.isFinite(mtimeSec) ? mtimeSec * 1000 : 0,
+    });
+  }
+  return out;
+}
+
+function buildContainerFindCommand(extensions: Set<string>): string[] {
+  const args: string[] = ['find', CONTAINER_WORKDIR];
+
+  // Prune skip-dirs branch: ( -type d ( -name X -o -name Y ... ) ) -prune
+  args.push('-type', 'd', '(');
+  SKIP_DIRS.forEach((dir, i) => {
+    if (i > 0) args.push('-o');
+    args.push('-name', dir);
+  });
+  args.push(')', '-prune', '-o');
+
+  // Match-files branch: -type f ( -name *.md -o -name *.txt ... ) -printf ...
+  args.push('-type', 'f', '(');
+  [...extensions].forEach((ext, i) => {
+    if (i > 0) args.push('-o');
+    args.push('-name', `*.${ext}`);
+  });
+  args.push(')', '-printf', '%P\t%s\t%T@\n');
+
+  return args;
+}
+
+async function tryReadFromContainer(
+  cm: ContainerManager,
+  containerId: string,
+  relPath: string,
+): Promise<ContentResponse | 'too-large' | null> {
+  const fullPath = `${CONTAINER_WORKDIR}/${relPath}`;
+
+  let statResult: Awaited<ReturnType<ContainerManager['execInContainer']>>;
+  try {
+    // %F = file type, %s = size in bytes
+    statResult = await cm.execInContainer(containerId, ['stat', '-c', '%F\t%s', fullPath], {
+      timeout: 5_000,
+    });
+  } catch {
+    return null;
+  }
+
+  if (statResult.exitCode !== 0) {
+    return null;
+  }
+
+  const [fileType, sizeStr] = statResult.stdout.trim().split('\t');
+  if (fileType !== 'regular file' && fileType !== 'regular empty file') {
+    return null;
+  }
+  const size = Number(sizeStr);
+  if (!Number.isFinite(size)) return null;
+  if (size > MAX_FILE_BYTES) return 'too-large';
+
+  let content: string;
+  try {
+    content = await cm.readFile(containerId, fullPath);
+  } catch {
+    return null;
+  }
+
+  return { path: relPath, content, size };
+}
+
+/**
+ * Reject any path that could escape /workspace when joined: leading slash,
+ * a `..` segment, or a `~` segment. We pass the resulting path as a literal
+ * argv to `stat` and `getArchive` (no shell), so the only thing that matters
+ * is path resolution, not shell-meta escaping.
+ */
+function isSafeContainerRelPath(relPath: string): boolean {
+  if (relPath.length === 0) return false;
+  if (relPath.startsWith('/')) return false;
+  const segments = relPath.split('/');
+  for (const seg of segments) {
+    if (seg === '..' || seg === '~') return false;
+  }
+  return true;
 }
