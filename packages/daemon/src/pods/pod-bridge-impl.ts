@@ -246,19 +246,37 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>,
     ): void {
       podManager.touchHeartbeat(podId);
+      // Lock taskSummary on first write. Validation failures loop the same
+      // pod back through running → validating, and the system prompt tells
+      // the agent to call report_task_summary "as your very last step" each
+      // time. Without this guard, the original task summary gets clobbered
+      // by a fix-cycle summary like "Fixed the two medium-severity issues…".
+      // acChecklist is intentionally still updatable — verified counts can
+      // legitimately flip as later iterations fix failing criteria.
+      const existing = podRepo.getOrThrow(podId);
+      const summaryAlreadySet = existing.taskSummary != null;
       logger.info(
         {
           podId,
           deviationCount: deviations.length,
           acChecklistCount: acChecklist?.length ?? 0,
           actualSummary: actualSummary.slice(0, 100),
+          preservedExistingSummary: summaryAlreadySet,
         },
-        'Agent reported task summary',
+        summaryAlreadySet
+          ? 'Agent reported task summary again — preserving original, ignoring overwrite'
+          : 'Agent reported task summary',
       );
-      podRepo.update(podId, {
-        taskSummary: { actualSummary, how, deviations },
-        ...(acChecklist != null ? { acSelfReport: acChecklist } : {}),
-      });
+      const updates: Parameters<typeof podRepo.update>[1] = {};
+      if (!summaryAlreadySet) {
+        updates.taskSummary = { actualSummary, how, deviations };
+      }
+      if (acChecklist != null) {
+        updates.acSelfReport = acChecklist;
+      }
+      if (Object.keys(updates).length > 0) {
+        podRepo.update(podId, updates);
+      }
       eventBus.emit({
         type: 'pod.agent_activity',
         timestamp: new Date().toISOString(),

@@ -1142,6 +1142,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         completedAt: null,
         claudeSessionId: null,
         preSubmitReview: null,
+        // report_task_summary is locked-on-first-write in pod-bridge-impl,
+        // so the reused fix pod must drop the prior round's summary to let
+        // the new run record its own.
+        taskSummary: null,
         fixIteration: newIteration,
       });
 

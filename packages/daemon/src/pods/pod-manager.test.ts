@@ -2882,6 +2882,84 @@ describe('PodManager', () => {
       expect(refreshedParent.fixPodId).toBe(firstFixId);
     });
 
+    it('clears taskSummary and preSubmitReview on the reused fix pod so the new run can record its own', async () => {
+      const ctx = createTestContext();
+      ctx.db.prepare(`UPDATE profiles SET reuse_fix_pod = 1 WHERE name = 'test-profile'`).run();
+
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        merged: false,
+        open: true,
+        blockReason: 'CHANGES_REQUESTED',
+        ciFailures: [],
+        reviewComments: [{ body: 'please address', path: null }],
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Original work' },
+        'user-1',
+      );
+
+      ctx.podRepo.update(parent.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/wt',
+        containerId: 'c',
+        startedAt: new Date().toISOString(),
+      });
+      for (const status of [
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(parent.id, { status });
+      }
+      ctx.podRepo.update(parent.id, { prUrl: 'https://github.com/org/repo/pull/42' });
+
+      // First spawn — fix pod is created and driven to complete with stale
+      // taskSummary + preSubmitReview baked in.
+      await manager.spawnFixSession(parent.id, 'first round');
+      const firstFix = ctx.podRepo.list({}).find((p) => p.linkedPodId === parent.id);
+      const firstFixId = firstFix?.id ?? '';
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(firstFixId, { status });
+      }
+      ctx.podRepo.update(firstFixId, {
+        taskSummary: {
+          actualSummary: 'first-round summary',
+          how: 'how-1',
+          deviations: [],
+        },
+        preSubmitReview: {
+          status: 'pass',
+          diffHash: 'abc123',
+          model: 'sonnet',
+          checkedAt: new Date().toISOString(),
+          reasoning: 'looked fine',
+          issues: [],
+        },
+      });
+
+      await manager.spawnFixSession(parent.id, 'second round');
+
+      const reused = ctx.podRepo.getOrThrow(firstFixId);
+      expect(reused.status).toBe('queued');
+      // Stale state from the prior incarnation is wiped — the new run gets
+      // a clean slate to record its own summary and review verdict.
+      expect(reused.taskSummary).toBeNull();
+      expect(reused.preSubmitReview).toBeNull();
+    });
+
     it('falls back to spawning a new fix pod when reuseFixPod is false (default)', async () => {
       const ctx = createTestContext();
       // reuse_fix_pod is 0 by default — explicit for clarity.

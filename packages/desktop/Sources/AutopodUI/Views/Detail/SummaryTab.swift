@@ -27,11 +27,6 @@ struct SummaryTab: View {
                     planCard(plan)
                 }
 
-                // Pre-submit reviewer verdict (set when the agent called pre_submit_review)
-                if let verdict = pod.preSubmitReview {
-                    preSubmitReviewCard(verdict)
-                }
-
                 // Task summary (persistent once reported)
                 if let summary = pod.taskSummary {
                     taskSummaryCard(summary)
@@ -40,6 +35,13 @@ struct SummaryTab: View {
                 // Proof of work — smoke-page screenshots for web features
                 if let shots = pod.validationChecks?.proofOfWorkScreenshots, !shots.isEmpty {
                     proofOfWorkCard(shots)
+                }
+
+                // Pre-submit reviewer verdict (set when the agent called pre_submit_review).
+                // Tucked at the bottom — the headline is the plan + summary;
+                // the latest review verdict belongs at the end.
+                if let verdict = pod.preSubmitReview {
+                    preSubmitReviewCard(verdict)
                 }
             }
             .padding(20)
