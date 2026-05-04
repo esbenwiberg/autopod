@@ -1,5 +1,10 @@
+import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import type { AcDefinition } from '@autopod/shared';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type {
   ValidationEngineConfig,
@@ -798,6 +803,29 @@ describe('validate() — hasWebUi gating', () => {
   function stubContainerManager(): ContainerManager {
     const fail = (name: string) =>
       vi.fn(() => Promise.reject(new Error(`stub: ${name} unexpectedly called`)));
+    // Pre-validation `resetWorktreeToHead` always calls execInContainer with
+    // `git reset --hard HEAD && git clean -fd`. Allow that one call through;
+    // anything else still fails so phase-gating assertions stay meaningful.
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+        options?: { cwd?: string },
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        if (
+          command[0] === 'sh' &&
+          command[1] === '-c' &&
+          typeof command[2] === 'string' &&
+          command[2].includes('git reset --hard HEAD') &&
+          command[2].includes('git clean')
+        ) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        throw new Error(
+          `stub: execInContainer unexpectedly called with command=${JSON.stringify(command)} cwd=${options?.cwd ?? 'unset'}`,
+        );
+      },
+    );
     return {
       spawn: fail('spawn'),
       kill: fail('kill'),
@@ -808,7 +836,7 @@ describe('validate() — hasWebUi gating', () => {
       readFile: fail('readFile'),
       extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
       getStatus: fail('getStatus'),
-      execInContainer: fail('execInContainer'),
+      execInContainer,
       execStreaming: fail('execStreaming'),
     } as unknown as ContainerManager;
   }
@@ -849,9 +877,15 @@ describe('validate() — hasWebUi gating', () => {
       callbacks,
     );
 
-    // execInContainer should never be called — buildCommand is empty (skip),
-    // and Health is short-circuited before runHealthCheck would exec the start command.
-    expect(cm.execInContainer).not.toHaveBeenCalled();
+    // Only the pre-validation worktree reset should hit execInContainer —
+    // buildCommand is empty (skip), and Health is short-circuited before
+    // runHealthCheck would exec the start command. Any non-cleanup call would
+    // throw via the stub.
+    const execMock = cm.execInContainer as unknown as ReturnType<typeof vi.fn>;
+    expect(execMock).toHaveBeenCalledTimes(1);
+    const [, cleanupCommand] = execMock.mock.calls[0] as [string, string[]];
+    expect(cleanupCommand[2]).toContain('git reset --hard HEAD');
+    expect(cleanupCommand[2]).toContain('git clean');
 
     expect(result.smoke.health.status).toBe('skip');
     expect(result.smoke.health.responseCode).toBeNull();
@@ -881,6 +915,200 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.smoke.build.status).toBe('fail');
     expect(result.smoke.health.status).toBe('fail');
     expect(result.smoke.health.url).toBe('http://127.0.0.1:9999/');
+  });
+});
+
+// ── Pre-validation worktree reset (regression for `sporting-coral`) ─────────────
+// Untracked files were being picked up by the build (filesystem walk, not git
+// index) and read by the agentic reviewer (unrestricted Read on worktreePath),
+// driving false-positive validation failures. The fix runs
+// `git reset --hard HEAD && git clean -fd` against both the container and host
+// worktrees at the top of validate(), before phase 1.
+
+describe('validate() — pre-validation worktree reset', () => {
+  const execFileAsync = promisify(execFile);
+
+  function recordingContainerManager(): {
+    cm: ContainerManager;
+    calls: { command: string[]; cwd?: string }[];
+  } {
+    const calls: { command: string[]; cwd?: string }[] = [];
+    const fail = (name: string) =>
+      vi.fn(() => Promise.reject(new Error(`stub: ${name} unexpectedly called`)));
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+        options?: { cwd?: string },
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        calls.push({ command, cwd: options?.cwd });
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+    const cm = {
+      spawn: fail('spawn'),
+      kill: fail('kill'),
+      refreshFirewall: fail('refreshFirewall'),
+      stop: fail('stop'),
+      start: fail('start'),
+      writeFile: fail('writeFile'),
+      readFile: fail('readFile'),
+      extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
+      getStatus: fail('getStatus'),
+      execInContainer,
+      execStreaming: fail('execStreaming'),
+    } as unknown as ContainerManager;
+    return { cm, calls };
+  }
+
+  function minimalConfig(overrides: Partial<ValidationEngineConfig> = {}): ValidationEngineConfig {
+    return {
+      podId: 'pod-test',
+      containerId: 'container-test',
+      previewUrl: 'http://127.0.0.1:9999',
+      buildCommand: '',
+      startCommand: '',
+      healthPath: '/',
+      healthTimeout: 1,
+      smokePages: [],
+      attempt: 1,
+      task: 'test task',
+      diff: '',
+      hasWebUi: false,
+      skipPhases: ['review'],
+      ...overrides,
+    };
+  }
+
+  it('issues git reset + clean inside the container at /workspace before phase 1', async () => {
+    const { cm, calls } = recordingContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    await engine.validate(minimalConfig());
+
+    expect(calls).toHaveLength(1);
+    const first = calls[0];
+    expect(first).toBeDefined();
+    if (!first) throw new Error('expected at least one execInContainer call');
+    expect(first.cwd).toBe('/workspace');
+    expect(first.command[0]).toBe('sh');
+    expect(first.command[1]).toBe('-c');
+    expect(first.command[2]).toContain('git reset --hard HEAD');
+    expect(first.command[2]).toContain('git clean -fd');
+  });
+
+  it('uses /workspace for cleanup even when buildWorkDir is set', async () => {
+    // Cleanup is deliberately NOT scoped to buildWorkDir — we want untracked
+    // files anywhere in the repo gone, not just under the build subdir.
+    const { cm, calls } = recordingContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    await engine.validate(minimalConfig({ buildWorkDir: 'apps/web' }));
+
+    const cleanup = calls[0];
+    expect(cleanup).toBeDefined();
+    if (!cleanup) throw new Error('expected at least one execInContainer call');
+    expect(cleanup.cwd).toBe('/workspace');
+  });
+
+  it('cleans untracked + uncommitted files on the host worktree when worktreePath is set', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-reset-'));
+    try {
+      await execFileAsync('git', ['init', '--initial-branch=main'], { cwd: tmpDir });
+      await execFileAsync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir });
+      await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir });
+      await execFileAsync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmpDir });
+
+      // Committed file → must survive cleanup.
+      await fs.writeFile(path.join(tmpDir, 'README.md'), '# committed\n');
+      await execFileAsync('git', ['add', 'README.md'], { cwd: tmpDir });
+      await execFileAsync('git', ['commit', '-m', 'init'], { cwd: tmpDir });
+
+      // Untracked file → must be removed (the `sporting-coral` failure mode).
+      await fs.writeFile(path.join(tmpDir, 'AADGroups.cs'), 'using PF.Graph;\n');
+      // Uncommitted modification of a tracked file → must be reverted.
+      await fs.writeFile(path.join(tmpDir, 'README.md'), '# modified locally\n');
+
+      // Sanity: status is dirty before validation.
+      const dirty = await execFileAsync('git', ['status', '--porcelain'], { cwd: tmpDir });
+      expect(dirty.stdout).toContain('AADGroups.cs');
+      expect(dirty.stdout).toContain('README.md');
+
+      const { cm } = recordingContainerManager();
+      const engine = createLocalValidationEngine(cm);
+
+      await engine.validate(minimalConfig({ worktreePath: tmpDir }));
+
+      // After cleanup: no untracked, no modifications.
+      const clean = await execFileAsync('git', ['status', '--porcelain'], { cwd: tmpDir });
+      expect(clean.stdout.trim()).toBe('');
+
+      // Untracked file is gone, committed file is restored to HEAD content.
+      await expect(fs.access(path.join(tmpDir, 'AADGroups.cs'))).rejects.toThrow();
+      const readme = await fs.readFile(path.join(tmpDir, 'README.md'), 'utf-8');
+      expect(readme).toBe('# committed\n');
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves gitignored files (build caches) on the host worktree', async () => {
+    // `git clean -fd` (without -x) must not nuke node_modules / dist / etc.
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-reset-ign-'));
+    try {
+      await execFileAsync('git', ['init', '--initial-branch=main'], { cwd: tmpDir });
+      await execFileAsync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir });
+      await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir });
+      await execFileAsync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmpDir });
+
+      await fs.writeFile(path.join(tmpDir, '.gitignore'), 'node_modules/\ndist/\n');
+      await fs.writeFile(path.join(tmpDir, 'README.md'), '# committed\n');
+      await execFileAsync('git', ['add', '.'], { cwd: tmpDir });
+      await execFileAsync('git', ['commit', '-m', 'init'], { cwd: tmpDir });
+
+      // Gitignored caches with content.
+      await fs.mkdir(path.join(tmpDir, 'node_modules'), { recursive: true });
+      await fs.writeFile(path.join(tmpDir, 'node_modules', 'pkg.txt'), 'cached');
+      await fs.mkdir(path.join(tmpDir, 'dist'), { recursive: true });
+      await fs.writeFile(path.join(tmpDir, 'dist', 'bundle.js'), 'compiled');
+
+      const { cm } = recordingContainerManager();
+      const engine = createLocalValidationEngine(cm);
+
+      await engine.validate(minimalConfig({ worktreePath: tmpDir }));
+
+      await expect(
+        fs.access(path.join(tmpDir, 'node_modules', 'pkg.txt')),
+      ).resolves.toBeUndefined();
+      await expect(fs.access(path.join(tmpDir, 'dist', 'bundle.js'))).resolves.toBeUndefined();
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not throw when host cleanup fails (degraded, not broken)', async () => {
+    // Point worktreePath at a non-git directory; the host-side reset will fail.
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-reset-broken-'));
+    try {
+      const { cm } = recordingContainerManager();
+      const engine = createLocalValidationEngine(cm);
+
+      // Should not throw — failure is logged and validation continues.
+      await expect(engine.validate(minimalConfig({ worktreePath: tmpDir }))).resolves.toBeDefined();
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips host-side cleanup silently when worktreePath is omitted', async () => {
+    const { cm, calls } = recordingContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    await engine.validate(minimalConfig()); // no worktreePath
+
+    // Container cleanup still runs.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command[2]).toContain('git reset --hard HEAD');
   });
 });
 

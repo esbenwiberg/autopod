@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type {
   AcCheckResult,
   AcDefinition,
@@ -16,6 +18,69 @@ import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.j
 
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Reset the worktree to HEAD on both filesystems validation evaluates against:
+ * the container's `/workspace` (build/lint/sast/test/health/pages/ac all run
+ * there via `execInContainer`) and the daemon-host worktree at `worktreePath`
+ * (Tier-2/3 reviewers run there with `Read`/`read_file` access).
+ *
+ * Without this, untracked files leak into validation in two distinct ways:
+ *   1. Native build tools (`dotnet build`, etc.) discover source files via
+ *      filesystem walk, not the git index, so untracked `.cs`/`.ts` files
+ *      get compiled and surface as build failures unrelated to the PR.
+ *   2. The agentic reviewer can `Read` any path under `worktreePath`, so even
+ *      with prompt-level "DO NOT FLAG" carve-outs it routinely cites untracked
+ *      files as scope creep when triggered by other signals (e.g. build
+ *      output naming the file).
+ *
+ * `git clean -fd` (NOT `-fdx`) preserves gitignored caches like `node_modules`,
+ * `bin/`, `obj/`, `dist/`, `.next/` so subsequent build phases keep their
+ * incremental state. Combined with `git reset --hard HEAD` it restores the
+ * worktree to "exactly what's committed" — which is the only thing validation
+ * should be evaluating.
+ *
+ * Cleanup is best-effort: failures are logged and swallowed. Losing cleanup is
+ * degraded mode, not broken mode.
+ */
+async function resetWorktreeToHead(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<void> {
+  const cmd = 'git reset --hard HEAD && git clean -fd';
+
+  // Container side — feeds Lint/SAST/Build/Tests/Health/Pages/AC.
+  // Always run at /workspace (repo root) regardless of buildWorkDir, so
+  // untracked files anywhere in the worktree are removed, not just the
+  // build subdir.
+  try {
+    const result = await containerManager.execInContainer(config.containerId, ['sh', '-c', cmd], {
+      cwd: '/workspace',
+      timeout: 30_000,
+    });
+    if (result.exitCode !== 0) {
+      log?.warn(
+        { exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) },
+        'pre-validation worktree reset returned non-zero in container — continuing',
+      );
+    }
+  } catch (err) {
+    log?.warn({ err }, 'pre-validation worktree reset failed in container — continuing');
+  }
+
+  // Host side — feeds Tier-2/3 review (worktreePath is optional; only set
+  // for review-eligible runs). Skip silently otherwise.
+  if (config.worktreePath) {
+    try {
+      await execFileAsync('sh', ['-c', cmd], { cwd: config.worktreePath, timeout: 30_000 });
+    } catch (err) {
+      log?.warn({ err }, 'pre-validation worktree reset failed on host — continuing');
+    }
+  }
+}
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { runAgenticReview } from './review-agentic-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
@@ -72,6 +137,12 @@ export function createLocalValidationEngine(
 
       try {
         const skipPhases = config.skipPhases ?? [];
+
+        // ── Phase 0: Reset worktree to HEAD ─────────────────────────────
+        // Untracked / uncommitted files must not influence validation.
+        // See `resetWorktreeToHead` for the full failure-mode rationale.
+        checkAbort();
+        await resetWorktreeToHead(containerManager, config, log);
 
         // ── Phase 1: Lint ──────────────────────────────────────────────
         checkAbort();
