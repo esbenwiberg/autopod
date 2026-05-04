@@ -3822,6 +3822,44 @@ describe('PodManager', () => {
       }
     });
 
+    it('does not auto-fail interactive workspace pods even when silent', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'workspace session',
+            options: { agentMode: 'interactive', output: 'branch' },
+          },
+          'user-1',
+        );
+        // Wedge into running with a stale lastAgentEventAt — for an auto pod
+        // the watchdog would kill this; for an interactive pod it must not.
+        const stale = new Date(Date.now() - 35 * 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/worktree/ws',
+          containerId: 'container-workspace',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
+
+        manager.startStuckPodWatchdog({ intervalMs: 50, thresholdMs: 30 * 60 * 1000 });
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        const refreshed = manager.getSession(pod.id);
+        expect(refreshed.status).toBe('running');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('is idempotent — calling start twice does not stack timers', () => {
       vi.useFakeTimers();
       try {

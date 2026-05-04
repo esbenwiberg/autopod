@@ -496,32 +496,53 @@ public struct DetailPanelView: View {
                 .tint(.red)
 
             case .failed:
-                // Resume — token-free recovery. Promoted to primary because it's the
-                // cheapest path: pushes/opens the PR if validation passed, otherwise
-                // re-runs validation only. Disabled when the worktree is unrecoverable.
-                Button {
-                    Task { await actions.resume(pod.id) }
-                } label: {
-                    Label("Resume", systemImage: "arrow.uturn.forward")
+                if pod.isWorkspace {
+                    // Restart — workspace pods have no agent, so the "Resume" /
+                    // "Rework" distinction doesn't apply. The same /validate
+                    // endpoint re-provisions a fresh container against the
+                    // existing worktree. No tokens spent.
+                    Button {
+                        Task { await actions.rework(pod.id) }
+                    } label: {
+                        Label("Restart", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.blue)
+                    .disabled(pod.worktreeCompromised || !pod.hasWorktree)
+                    .help(pod.worktreeCompromised
+                        ? "Worktree is compromised — recover it before restarting."
+                        : !pod.hasWorktree
+                        ? "Pod has no worktree to restart from."
+                        : "Spin up a fresh container against the same worktree. No agent runs, no tokens spent.")
+                } else {
+                    // Resume — token-free recovery. Promoted to primary because it's the
+                    // cheapest path: pushes/opens the PR if validation passed, otherwise
+                    // re-runs validation only. Disabled when the worktree is unrecoverable.
+                    Button {
+                        Task { await actions.resume(pod.id) }
+                    } label: {
+                        Label("Resume", systemImage: "arrow.uturn.forward")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.blue)
+                    .disabled(pod.worktreeCompromised || !pod.hasWorktree)
+                    .help(pod.worktreeCompromised
+                        ? "Worktree is compromised — recover it before resuming."
+                        : !pod.hasWorktree
+                        ? "Pod has no worktree to resume from."
+                        : "Retry the cheapest recovery path — push + open PR if validation passed, otherwise re-run validation. No agent rework, no token spend.")
+                    Button {
+                        Task { await actions.rework(pod.id) }
+                    } label: {
+                        Label("Rework", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.orange)
+                    .help("Re-run the agent from scratch with feedback. Spends tokens.")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.blue)
-                .disabled(pod.worktreeCompromised || !pod.hasWorktree)
-                .help(pod.worktreeCompromised
-                    ? "Worktree is compromised — recover it before resuming."
-                    : !pod.hasWorktree
-                    ? "Pod has no worktree to resume from."
-                    : "Retry the cheapest recovery path — push + open PR if validation passed, otherwise re-run validation. No agent rework, no token spend.")
-                Button {
-                    Task { await actions.rework(pod.id) }
-                } label: {
-                    Label("Rework", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.orange)
-                .help("Re-run the agent from scratch with feedback. Spends tokens.")
                 Button {
                     Task { await actions.fixManually(pod.id) }
                 } label: {
@@ -564,11 +585,15 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.rework(pod.id) }
                 } label: {
-                    Label("Rework", systemImage: "arrow.clockwise")
+                    Label(pod.isWorkspace ? "Restart" : "Rework",
+                          systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .tint(.orange)
+                .tint(pod.isWorkspace ? .blue : .orange)
+                .help(pod.isWorkspace
+                    ? "Spin up a fresh container against the same worktree. No agent runs, no tokens spent."
+                    : "Re-run the agent from scratch with feedback. Spends tokens.")
                 forkButton
                 Button(role: .destructive) {
                     showDeleteConfirmation = true

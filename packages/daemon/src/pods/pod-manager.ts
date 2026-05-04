@@ -7484,6 +7484,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const running = podRepo.list({ status: 'running' as PodStatus });
           const now = Date.now();
           for (const pod of running) {
+            // Workspace (interactive) pods have no agent by design — the human
+            // drives the container directly. They will never emit agent events,
+            // so silence-based timeout cannot apply.
+            if (pod.options?.agentMode === 'interactive') continue;
             // Use lastAgentEventAt when present; fall back to startedAt/updatedAt
             // for pods created before the migration or that never emitted an event.
             const reference =
