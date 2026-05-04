@@ -67,6 +67,15 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
     return join(sessionDir(podId), 'screenshots');
   }
 
+  // The generated Playwright script uses `createRequire(import.meta.url)` to
+  // load `playwright`. Module resolution walks up from the file's location, not
+  // from cwd — so the script must live somewhere under pwCwd for the walk to
+  // reach `<pwCwd>/node_modules/playwright`. node_modules/.cache is the
+  // conventional tooling-cache spot and is already gitignored.
+  function scriptDir(podId: string): string | null {
+    return pwCwd ? join(pwCwd, 'node_modules', '.cache', 'autopod-browser', podId) : null;
+  }
+
   function childSpawnOpts(): { env: NodeJS.ProcessEnv; cwd?: string } {
     return {
       env: { ...process.env },
@@ -108,9 +117,15 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
       script: string,
       opts: { timeout: number; podId: string },
     ): Promise<BrowserRunResult> {
-      const dir = sessionDir(opts.podId);
+      const dir = scriptDir(opts.podId);
+      if (!dir) {
+        throw new Error(
+          'Host browser runner: cannot resolve Playwright package directory; isAvailable() should have returned false',
+        );
+      }
       const ssDir = screenshotDir(opts.podId);
       await mkdir(ssDir, { recursive: true });
+      await mkdir(dir, { recursive: true });
 
       const scriptPath = join(dir, `${randomUUID()}.mjs`);
       await writeFile(scriptPath, script, 'utf-8');
@@ -140,6 +155,14 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
         await rm(sessionDir(podId), { recursive: true, force: true });
       } catch {
         // Best-effort cleanup
+      }
+      const sDir = scriptDir(podId);
+      if (sDir) {
+        try {
+          await rm(sDir, { recursive: true, force: true });
+        } catch {
+          // Best-effort cleanup
+        }
       }
     },
 
