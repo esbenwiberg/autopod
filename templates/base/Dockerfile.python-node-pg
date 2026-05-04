@@ -1,10 +1,10 @@
 FROM python:3.12-slim
 
-# System deps + Node.js 22 + PostgreSQL 15
-# postgresql-15 + postgresql-contrib-15 give us the server binaries (initdb, pg_ctl,
+# System deps + Node.js 22 + PostgreSQL 17
+# postgresql-17 + postgresql-contrib-17 give us the server binaries (initdb, pg_ctl,
 # postgres) so agent-serve.sh-style scripts can spin up a transient validation DB.
-# Pinned to 15 because it's bookworm's default and the PATH below references the
-# version directory — bumping requires updating both lines together.
+# Pinned to 17 because it's trixie's default (python:3.12-slim is now trixie-based);
+# the PATH below references the version directory — bumping requires updating both lines together.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     tmux \
     build-essential \
-    postgresql-15 \
-    postgresql-contrib-15 \
+    postgresql-17 \
+    postgresql-contrib-17 \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
@@ -65,14 +65,17 @@ USER autopod
 # not /usr/bin — without this addition initdb/pg_ctl/postgres aren't on PATH.
 # PGDATA defaults to a tmp dir so an agent's agent-serve.sh can `initdb -D $PGDATA`
 # and `pg_ctl -D $PGDATA start` without writing into the image layer or /workspace.
-ENV PATH="/usr/lib/postgresql/15/bin:$PATH"
+ENV PATH="/usr/lib/postgresql/17/bin:$PATH"
 ENV PGDATA=/tmp/pgdata
 
-# Allow bare imports of globally installed packages (e.g. playwright in validation scripts)
-ENV NODE_PATH=/usr/local/lib/node_modules
+# Allow bare imports of globally installed packages (e.g. playwright in validation
+# scripts). Debian's apt-packaged nodejs lives at /usr/lib/node_modules with
+# headers under /usr/include/node — NOT /usr/local/* like the upstream node:slim
+# images. node22-pw's NODE_PATH=/usr/local/* would silently break here.
+ENV NODE_PATH=/usr/lib/node_modules
 ENV TURBO_CACHE_DIR=/tmp/.turbo
-ENV npm_config_nodedir=/usr/local
-RUN echo "nodedir=/usr/local" >> /home/autopod/.npmrc
+ENV npm_config_nodedir=/usr
+RUN echo "nodedir=/usr" >> /home/autopod/.npmrc
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
