@@ -84,6 +84,7 @@ async function resetWorktreeToHead(
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { runAgenticReview } from './review-agentic-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
+import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
@@ -2286,6 +2287,7 @@ Core principles:
 - Auto-formatter changes (whitespace, punctuation, quote normalization applied by pre-commit hooks like Prettier or ESLint --fix) are expected commit side-effects. Never flag them as scope creep or unrelated changes.
 - Files at paths matching \`specs/*/handovers/*.md\` are required Series Handover Protocol artifacts — agents in a series are explicitly instructed to write them. Their presence in the diff is mandatory and must NOT be flagged as scope violation or undisclosed deviation.
 - Untracked files (\`??\` in git status) are NOT part of this PR. They are leftover worktree state from build artifacts, tooling, or prior pod runs. Evaluate ONLY the changes shown in the DIFF section — do not flag, cite, or read untracked files unless investigating a \`.gitignore\` violation explicitly listed under Warnings.
+- HARD RULE — every issue you raise MUST cite a file path that appears as a header in the DIFF section above (\`+++ b/<path>\` or \`--- a/<path>\`). If a file is not in the DIFF, you may Read it for CONTEXT only — never to flag a new issue in it. Findings citing only paths outside the diff are automatically discarded by the harness; including them wastes the cycle.
 - Use the CODEBASE CONTEXT section (if present) to verify claims made in the diff. Auto-detected warnings are high-confidence signals — investigate them seriously.
 ${repoRulesSection}
 ## TASK
@@ -2566,7 +2568,12 @@ async function runTaskReview(
           timeout: reviewTimeout,
         });
 
-        tier1Parsed = enforceRequirementsStatus(parseReviewJson(stdout.trim()));
+        tier1Parsed = applyDiffFilterToParsed(
+          enforceRequirementsStatus(parseReviewJson(stdout.trim())),
+          config.diff,
+          log,
+          1,
+        );
         if (!tier1Parsed) {
           log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
           return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
@@ -2648,7 +2655,12 @@ async function runTaskReview(
         apiKey: config.reviewerApiKey,
       });
 
-      const tier2Parsed = enforceRequirementsStatus(parseReviewJson(tier2Result.stdout.trim()));
+      const tier2Parsed = applyDiffFilterToParsed(
+        enforceRequirementsStatus(parseReviewJson(tier2Result.stdout.trim())),
+        config.diff,
+        log,
+        2,
+      );
       const tier2TokenUsage = tier2Result.tokenUsage;
       if (tier2Parsed && tier2Parsed.status !== 'uncertain') {
         log?.info({ status: tier2Parsed.status, tier: 2 }, 'Tier 2 tool-use review resolved');
@@ -2680,7 +2692,12 @@ async function runTaskReview(
             timeout: reviewTimeout,
           });
 
-          const tier3Parsed = enforceRequirementsStatus(parseReviewJson(tier3Result.stdout.trim()));
+          const tier3Parsed = applyDiffFilterToParsed(
+            enforceRequirementsStatus(parseReviewJson(tier3Result.stdout.trim())),
+            config.diff,
+            log,
+            3,
+          );
           if (tier3Parsed) {
             log?.info({ status: tier3Parsed.status, tier: 3 }, 'Tier 3 agentic review complete');
             return {

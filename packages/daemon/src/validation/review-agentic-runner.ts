@@ -36,8 +36,6 @@ export async function runAgenticReview(config: AgenticReviewConfig): Promise<{ s
         'text',
         '--allowedTools',
         'Read',
-        'Grep',
-        'Glob',
         'Bash(git log:*)',
         'Bash(git status:*)',
         'Bash(git show:*)',
@@ -47,12 +45,14 @@ export async function runAgenticReview(config: AgenticReviewConfig): Promise<{ s
         '--add-dir',
         config.worktreePath,
         '--system-prompt',
-        'You are an expert code reviewer with full read-only access to the repository. ' +
-          'Use the tools to investigate the codebase as needed to verify claims in the diff. ' +
-          'CRITICAL: Untracked files in the worktree (lines starting with `??` in git status) are NOT part of this PR — ' +
+        'You are an expert code reviewer with read-only access to the repository for VERIFYING claims in the diff. ' +
+          'Use the tools to confirm or refute specific things the diff is doing — not to discover unrelated issues. ' +
+          'HARD RULE — every issue you raise MUST cite a file path that appears as a header in the DIFF section ' +
+          '(`+++ b/<path>` or `--- a/<path>`). If a file is not in the DIFF, Read it ONLY for context — never to flag ' +
+          'a new issue in it. Findings citing only paths outside the diff are automatically discarded by the harness. ' +
+          'CRITICAL: Untracked files (lines starting with `??` in git status) are NOT part of this PR — ' +
           'they are leftover worktree state from build artifacts, tooling, or prior pod runs. ' +
-          'Evaluate ONLY the changes shown in the DIFF section. Do not flag, cite, or read untracked files ' +
-          "unless investigating a `.gitignore` violation explicitly listed under the prompt's Warnings section. " +
+          "Do not flag, cite, or read untracked files unless investigating a `.gitignore` violation explicitly listed under the prompt's Warnings section. " +
           'When done investigating, output ONLY a JSON object with your review verdict. ' +
           'Do not wrap the JSON in markdown fences. ' +
           'The JSON must have: "status" ("pass"|"fail"|"uncertain"), "reasoning" (string), "issues" (string[]).',
