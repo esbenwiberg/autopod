@@ -189,6 +189,16 @@ public struct DiffTab: View {
               Text("-\(totalRemoved)")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.red)
+              if let onRefresh {
+                Button {
+                  onRefresh()
+                } label: {
+                  Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help("Refresh diff")
+              }
             }
             .padding(10)
 
