@@ -15,6 +15,12 @@ describe('buildWorkspaceToolsDoc', () => {
     expect(doc).toContain('localhost');
   });
 
+  it('explains how to reach the dev server from the host browser via $PREVIEW_URL', () => {
+    const doc = buildWorkspaceToolsDoc({ httpServerNames: ['escalation'], stdioServerNames: [] });
+    expect(doc).toContain('$PREVIEW_URL');
+    expect(doc).toContain('host browser');
+  });
+
   it('does not list "escalation" as a profile MCP server', () => {
     const doc = buildWorkspaceToolsDoc({ httpServerNames: ['escalation'], stdioServerNames: [] });
     expect(doc).not.toContain('## Profile MCP servers');
@@ -64,6 +70,12 @@ describe('buildBashrcHintBlock', () => {
   it('only echoes when the doc file exists (no-op if missing)', () => {
     const block = buildBashrcHintBlock('/some/path');
     expect(block).toContain('if [ -f "/some/path" ]; then');
+  });
+
+  it('prints the host preview URL when PREVIEW_URL is set', () => {
+    const block = buildBashrcHintBlock('/some/path');
+    expect(block).toContain('PREVIEW_URL');
+    expect(block).toContain('Host browser URL');
   });
 });
 

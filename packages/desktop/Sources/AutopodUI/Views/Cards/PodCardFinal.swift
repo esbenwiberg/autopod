@@ -508,6 +508,18 @@ public struct SessionCardFinal: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
 
+                if pod.containerUrl != nil {
+                    Button {
+                        if let url = pod.containerUrl { NSWorkspace.shared.open(url) }
+                    } label: {
+                        Label("Open App", systemImage: "safari")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Open the host-side preview URL in your browser (port-mapped from container :3000)")
+                }
+
                 if pod.linkedSessionId == nil {
                     Button {
                         showLaunchWorker = true

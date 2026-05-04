@@ -3070,6 +3070,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           POD_ID: podId,
           PORT: String(CONTAINER_APP_PORT),
           HOST: '0.0.0.0', // bind to all interfaces inside container for Docker port forwarding
+          // Host-side preview URL — same value the daemon writes to pod.previewUrl.
+          // Surfaced inside the container so workspace users (and `claude`) know
+          // which port to open from their host browser; container-local fetches
+          // should still hit http://localhost:3000.
+          PREVIEW_URL: `http://127.0.0.1:${hostPort}`,
           ...(isDotnet
             ? {
                 MSBUILDNODECOUNT: '4',

@@ -26,6 +26,24 @@ export function buildWorkspaceToolsDoc(opts: WorkspaceToolsDocOptions): string {
   );
   lines.push('');
 
+  lines.push('## Reach your dev server from your laptop browser');
+  lines.push('');
+  lines.push(
+    'The container forwards port 3000 to a random port on your host. The full host URL is in',
+  );
+  lines.push('`$PREVIEW_URL` inside this shell — open it in your browser:');
+  lines.push('');
+  lines.push('```');
+  lines.push('echo "$PREVIEW_URL"        # http://127.0.0.1:<random>');
+  lines.push('open "$PREVIEW_URL"        # macOS only — opens the host browser');
+  lines.push('```');
+  lines.push('');
+  lines.push(
+    '`http://localhost:3000` only works from **inside** the container (curl, validate_in_browser, etc.).',
+  );
+  lines.push('From your laptop browser you must use `$PREVIEW_URL`.');
+  lines.push('');
+
   lines.push('## validate_in_browser — verify your dev server in a real browser');
   lines.push('');
   lines.push(
@@ -102,6 +120,9 @@ export function buildBashrcHintBlock(toolsDocPath: string): string {
     HINT_START,
     `if [ -f "${toolsDocPath}" ]; then`,
     `  echo "[autopod] MCP tools available — run 'cat ${toolsDocPath}' for usage (validate_in_browser, ask_ai, ...)."`,
+    'fi',
+    'if [ -n "${PREVIEW_URL:-}" ]; then',
+    '  echo "[autopod] Host browser URL: $PREVIEW_URL (use this from your laptop — localhost:3000 only works inside the container)."',
     'fi',
     HINT_END,
     '',
