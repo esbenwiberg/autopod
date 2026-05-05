@@ -33,6 +33,7 @@ import type {
   ValidationOverride,
   ValidationOverridePayload,
   ValidationPhase,
+  ValidationResult,
 } from '@autopod/shared';
 import {
   AUTOPOD_INSTRUCTIONS_PATH,
@@ -129,6 +130,31 @@ import {
  * Strips any existing userinfo first to avoid double-injection. */
 function injectPatIntoUrl(url: string, pat: string): string {
   return url.replace(/^https:\/\/([^@]*@)?/, `https://x-access-token:${pat}@`);
+}
+
+/** Single-line per-phase summary used in activity log lines. Covers all eight
+ * phases the validation engine produces — partial summaries can otherwise
+ * contradict an `overall: fail` (e.g. tests/pages failed but only build/health
+ * shown). Order matches pipeline order so the first `fail` is the failing gate. */
+function summarizeValidationPhases(result: ValidationResult): string {
+  const lintStatus = result.lint?.status ?? 'skip';
+  const sastStatus = result.sast?.status ?? 'skip';
+  const buildStatus = result.smoke.build.status;
+  const testStatus = result.test?.status ?? 'skip';
+  const healthStatus = result.smoke.health.status;
+  const pagesStatus =
+    result.smoke.pages.length === 0
+      ? 'skip'
+      : result.smoke.pages.every((p) => p.status === 'pass')
+        ? 'pass'
+        : 'fail';
+  const acStatus = result.acValidation?.status ?? 'skip';
+  const reviewStatus = result.taskReview?.status ?? 'skip';
+  return (
+    `lint: ${lintStatus}, sast: ${sastStatus}, build: ${buildStatus}, ` +
+    `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
+    `ac: ${acStatus}, review: ${reviewStatus}`
+  );
 }
 
 /** Format a `mergeBlockReason` string for a rebase that produced conflicts.
@@ -2687,6 +2713,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               'Failed to sync workspace back during handoff — agent may miss in-flight changes',
             );
           }
+          // Recover MAX/PRO OAuth tokens before tearing down the workspace
+          // container. Claude CLI rotates refresh tokens during the human's
+          // interactive session; if we stop the container without persisting,
+          // the auto-pod resume will hit invalid_grant on its first refresh.
+          if (profile.modelProvider === 'max') {
+            try {
+              await persistRefreshedCredentials(
+                pod.containerId,
+                cm,
+                profileStore,
+                pod.profileName,
+                logger,
+              );
+            } catch (err) {
+              logger.warn(
+                { err, podId },
+                'Failed to persist rotated credentials before handoff stop — refresh may fail',
+              );
+            }
+          }
           try {
             await cm.stop(pod.containerId);
           } catch (err) {
@@ -4147,6 +4193,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         await this.handleCompletion(podId);
       } catch (err) {
         logger.error({ err, podId }, 'Pod processing error');
+        // Best-effort: recover rotated MAX/PRO tokens before the failure path
+        // tears the container down. The happy-path persist at the end of the
+        // try block was bypassed, so without this the latest refresh token
+        // dies with the container.
+        try {
+          const failingPod = podRepo.getOrThrow(podId);
+          if (failingPod.containerId) {
+            const failingProfile = profileStore.get(failingPod.profileName);
+            if (failingProfile.modelProvider === 'max') {
+              await persistRefreshedCredentials(
+                failingPod.containerId,
+                containerManagerFactory.get(failingPod.executionTarget),
+                profileStore,
+                failingPod.profileName,
+                logger,
+              );
+            }
+          }
+        } catch (persistErr) {
+          logger.warn(
+            { err: persistErr, podId },
+            'Failed to persist rotated credentials after pod error — proceeding',
+          );
+        }
         // Transition to failed — keeps series dependents queued so they can run once the parent
         // is recovered/retried. 'killed' is reserved for explicit user termination only.
         try {
@@ -5219,8 +5289,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         await cleanupTestRunBranches(podId);
         // Kill container
         if (pod.containerId) {
+          const cm = containerManagerFactory.get(pod.executionTarget);
+          // Best-effort: recover rotated MAX/PRO tokens before the container
+          // dies. Otherwise a kill mid-session strands the latest refresh
+          // token in the doomed container, and the next pod hits invalid_grant.
           try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
+            const profile = profileStore.get(pod.profileName);
+            if (profile.modelProvider === 'max') {
+              await persistRefreshedCredentials(
+                pod.containerId,
+                cm,
+                profileStore,
+                pod.profileName,
+                logger,
+              );
+            }
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to persist rotated credentials during kill — proceeding',
+            );
+          }
+          try {
             await cm.kill(pod.containerId);
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to kill container');
@@ -6020,13 +6110,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Emit detailed validation result
-        const buildStatus = result.smoke.build.status;
-        const healthStatus = result.smoke.health.status;
-        const acStatus = result.acValidation?.status ?? 'skip';
-        const reviewStatus = result.taskReview?.status ?? 'skip';
         emitActivityStatus(
           podId,
-          `Validation ${result.overall} — build: ${buildStatus}, health: ${healthStatus}, ac: ${acStatus}, review: ${reviewStatus}`,
+          `Validation ${result.overall} — ${summarizeValidationPhases(result)}`,
         );
 
         // Surface review feedback so the user can see why it failed
@@ -6771,14 +6857,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Validation failed — stay in failed state, no agent rework
-        const buildStatus2 = result.smoke.build.status;
-        const healthStatus2 = result.smoke.health.status;
-        const acStatus2 = result.acValidation?.status ?? 'skip';
-        const reviewStatus2 = result.taskReview?.status ?? 'skip';
-        emitActivityStatus(
-          podId,
-          `Revalidation fail — build: ${buildStatus2}, health: ${healthStatus2}, ac: ${acStatus2}, review: ${reviewStatus2}`,
-        );
+        emitActivityStatus(podId, `Revalidation fail — ${summarizeValidationPhases(result)}`);
         if (result.taskReview && result.taskReview.status !== 'pass') {
           if (result.taskReview.reasoning) {
             emitActivityStatus(podId, `Review: ${result.taskReview.reasoning}`);
@@ -6873,27 +6952,52 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      // Clean up container if still present
-      await killSidecarsForPod(podId);
-      await cleanupTestRunBranches(podId);
-      if (pod.containerId) {
+      // Cap cleanup so a hung Docker stop or slow worktree rm-rf can't blow
+      // past the desktop's 30s URLSession timeout and leave the pod undeletable.
+      // Mirror killSession's pattern: best-effort cleanup, always finalize the row.
+      const DELETE_TIMEOUT_MS = 25_000;
+      const cleanup = async () => {
         try {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          await cm.kill(pod.containerId);
+          await killSidecarsForPod(podId);
         } catch (err) {
-          logger.warn({ err, podId }, 'Failed to kill container during delete');
+          logger.warn({ err, podId }, 'Failed to kill sidecars during delete');
         }
-      }
-      await destroyPodNetwork(podId);
+        try {
+          await cleanupTestRunBranches(podId);
+        } catch (err) {
+          logger.warn({ err, podId }, 'Failed to cleanup test branches during delete');
+        }
+        if (pod.containerId) {
+          try {
+            const cm = containerManagerFactory.get(pod.executionTarget);
+            await cm.kill(pod.containerId);
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to kill container during delete');
+          }
+        }
+        try {
+          await destroyPodNetwork(podId);
+        } catch (err) {
+          logger.warn({ err, podId }, 'Failed to destroy network during delete');
+        }
+        if (pod.worktreePath) {
+          try {
+            await worktreeManager.cleanup(pod.worktreePath);
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to cleanup worktree during delete');
+          }
+        }
+      };
 
-      // Clean up worktree if still present
-      if (pod.worktreePath) {
-        try {
-          await worktreeManager.cleanup(pod.worktreePath);
-        } catch (err) {
-          logger.warn({ err, podId }, 'Failed to cleanup worktree during delete');
-        }
-      }
+      await Promise.race([
+        cleanup(),
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            logger.warn({ podId }, 'Delete cleanup timed out — finalizing');
+            resolve();
+          }, DELETE_TIMEOUT_MS),
+        ),
+      ]);
 
       podRepo.delete(podId);
       logger.info({ podId }, 'Pod deleted');
