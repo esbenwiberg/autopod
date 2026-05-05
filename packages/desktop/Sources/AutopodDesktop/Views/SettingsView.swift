@@ -36,6 +36,7 @@ public struct SettingsView: View {
     public let connectionManager: ConnectionManager
     public let profiles: [Profile]
     public let actionCatalog: [ActionCatalogItem]
+    public let builtinSkills: [BuiltinSkillEntry]
     public let profileError: String?
     public var onSaveProfile: ((Profile) async throws -> Void)?
     public var onCreateProfile: ((Profile) async throws -> Void)?
@@ -52,6 +53,7 @@ public struct SettingsView: View {
 
     public init(connectionManager: ConnectionManager, profiles: [Profile],
                 actionCatalog: [ActionCatalogItem] = [],
+                builtinSkills: [BuiltinSkillEntry] = [],
                 profileError: String? = nil,
                 onSaveProfile: ((Profile) async throws -> Void)? = nil, onCreateProfile: ((Profile) async throws -> Void)? = nil,
                 onAuthenticateProfile: ProfileAuthHandler? = nil,
@@ -67,6 +69,7 @@ public struct SettingsView: View {
         self.connectionManager = connectionManager
         self.profiles = profiles
         self.actionCatalog = actionCatalog
+        self.builtinSkills = builtinSkills
         self.profileError = profileError
         self.onSaveProfile = onSaveProfile
         self.onCreateProfile = onCreateProfile
@@ -243,6 +246,7 @@ public struct SettingsView: View {
                 .background(Color.red.opacity(0.08))
             }
             ProfileListView(profiles: profiles, actionCatalog: actionCatalog,
+                           builtinSkills: builtinSkills,
                            onSave: onSaveProfile, onCreate: onCreateProfile,
                            onAuthenticate: onAuthenticateProfile,
                            onLoadEditor: onLoadProfileEditor,
