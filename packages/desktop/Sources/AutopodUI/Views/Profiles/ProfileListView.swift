@@ -1,6 +1,25 @@
 import AutopodClient
 import SwiftUI
 
+private enum ProfileSegment: String, CaseIterable, Identifiable {
+    case all, bases, overrides
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .all: return "All"
+        case .bases: return "Bases"
+        case .overrides: return "Overrides"
+        }
+    }
+}
+
+private struct ProfileRow: Identifiable {
+    let profile: Profile
+    let isInlineChild: Bool
+    let derivedCount: Int
+    var id: String { isInlineChild ? "child:\(profile.name)" : profile.name }
+}
+
 /// Profile list — shows all profiles with quick stats, click to edit.
 public struct ProfileListView: View {
     public let profiles: [Profile]
@@ -44,42 +63,18 @@ public struct ProfileListView: View {
     /// When the kind picker returns "Base", we open the classic editor.
     @State private var creatingBase = false
 
+    @State private var searchText: String = ""
+    @State private var segment: ProfileSegment = .all
+    @State private var expandedBases: Set<String> = []
+    @State private var highlightedName: String?
+
     public var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Profiles")
-                    .font(.headline)
-                Text("\(profiles.count)")
-                    .font(.system(.caption2).weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.blue.opacity(0.1))
-                    .foregroundStyle(.blue)
-                    .clipShape(Capsule())
-                Spacer()
-                Button {
-                    showCreateSheet = true
-                } label: {
-                    Label("New Profile", systemImage: "plus")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-            .padding(16)
-
+            header
             Divider()
-
-            // Profile cards
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(profiles) { profile in
-                        ProfileCard(profile: profile)
-                            .onTapGesture { selectedProfile = profile }
-                    }
-                }
-                .padding(16)
-            }
+            toolbar
+            Divider()
+            scrollList
         }
         .sheet(item: $selectedProfile) { profile in
             ProfileEditorView(
@@ -97,8 +92,6 @@ public struct ProfileListView: View {
             NewProfileKindSheet(
                 availableParents: profiles.map(\.name).sorted(),
                 onEmpty: {
-                    // Defer to next runloop so the kind sheet closes cleanly
-                    // before the editor sheet opens.
                     DispatchQueue.main.async { creatingBase = true }
                 },
                 onDerived: { parent in
@@ -130,6 +123,261 @@ public struct ProfileListView: View {
             )
         }
     }
+
+    // MARK: - Sections
+
+    private var header: some View {
+        HStack {
+            Text("Profiles").font(.headline)
+            countBadge(profiles.count, color: .blue)
+            Spacer()
+            Button {
+                showCreateSheet = true
+            } label: {
+                Label("New Profile", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(16)
+    }
+
+    private var toolbar: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Search name, repo, or parent…", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
+
+            Picker("Filter", selection: $segment) {
+                ForEach(ProfileSegment.allCases) { seg in
+                    Text("\(seg.label) \(count(for: seg))").tag(seg)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var scrollList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                let rows = displayedRows
+                LazyVStack(spacing: 10) {
+                    if rows.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(rows) { row in
+                            ProfileCard(
+                                profile: row.profile,
+                                derivedCount: row.derivedCount,
+                                isExpanded: expandedBases.contains(row.profile.name),
+                                isInlineChild: row.isInlineChild,
+                                isHighlighted: highlightedName == row.profile.name,
+                                onExpandToggle: row.derivedCount > 0 ? {
+                                    handleExpandTap(for: row.profile.name)
+                                } : nil,
+                                onExtendsTap: parentJumpHandler(for: row.profile, proxy: proxy)
+                            )
+                            .id(row.profile.name)
+                            .onTapGesture {
+                                selectedProfile = row.profile
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.tertiary)
+            Text(emptyMessage)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    private var emptyMessage: String {
+        if !searchText.isEmpty {
+            return "No matches for \"\(searchText)\""
+        }
+        switch segment {
+        case .bases: return "No base profiles yet"
+        case .overrides: return "No override profiles yet"
+        case .all: return "No profiles yet"
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func countBadge(_ n: Int, color: Color) -> some View {
+        Text("\(n)")
+            .font(.system(.caption2).weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.1))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+
+    private func count(for seg: ProfileSegment) -> Int {
+        switch seg {
+        case .all: return profiles.count
+        case .bases: return profiles.filter { $0.extendsProfile == nil }.count
+        case .overrides: return profiles.filter { $0.extendsProfile != nil }.count
+        }
+    }
+
+    private var derivedByParent: [String: [Profile]] {
+        Dictionary(grouping: profiles.filter { $0.extendsProfile != nil }) {
+            $0.extendsProfile ?? ""
+        }
+    }
+
+    private var baseNames: Set<String> {
+        Set(profiles.filter { $0.extendsProfile == nil }.map(\.name))
+    }
+
+    private var displayedRows: [ProfileRow] {
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        func match(_ p: Profile) -> Bool {
+            guard !q.isEmpty else { return true }
+            if p.name.lowercased().contains(q) { return true }
+            if p.repoUrl.lowercased().contains(q) { return true }
+            if let parent = p.extendsProfile, parent.lowercased().contains(q) { return true }
+            return false
+        }
+
+        switch segment {
+        case .bases:
+            return profiles
+                .filter { $0.extendsProfile == nil }
+                .filter(match)
+                .sorted { $0.name < $1.name }
+                .map { ProfileRow(
+                    profile: $0,
+                    isInlineChild: false,
+                    derivedCount: derivedByParent[$0.name]?.count ?? 0
+                ) }
+
+        case .overrides:
+            return profiles
+                .filter { $0.extendsProfile != nil }
+                .filter(match)
+                .sorted { $0.name < $1.name }
+                .map { ProfileRow(profile: $0, isInlineChild: false, derivedCount: 0) }
+
+        case .all:
+            var rows: [ProfileRow] = []
+            let bases = profiles.filter { $0.extendsProfile == nil }.sorted { $0.name < $1.name }
+            let knownBases = baseNames
+            for base in bases {
+                let kids = (derivedByParent[base.name] ?? []).sorted { $0.name < $1.name }
+                let baseHit = match(base)
+                let kidHits = kids.filter(match)
+                if !q.isEmpty, !baseHit, kidHits.isEmpty { continue }
+                rows.append(ProfileRow(
+                    profile: base,
+                    isInlineChild: false,
+                    derivedCount: kids.count
+                ))
+                let isExpanded = expandedBases.contains(base.name)
+                let showKids = !q.isEmpty ? !kidHits.isEmpty : isExpanded
+                if showKids {
+                    let visibleKids = !q.isEmpty ? kidHits : kids
+                    for kid in visibleKids {
+                        rows.append(ProfileRow(profile: kid, isInlineChild: true, derivedCount: 0))
+                    }
+                }
+            }
+            // Orphan derived profiles (parent missing) — show flat at the end so they're not lost.
+            let orphans = profiles
+                .filter { $0.extendsProfile != nil
+                    && !knownBases.contains($0.extendsProfile ?? "") }
+                .filter(match)
+                .sorted { $0.name < $1.name }
+            for orphan in orphans {
+                rows.append(ProfileRow(profile: orphan, isInlineChild: false, derivedCount: 0))
+            }
+            return rows
+        }
+    }
+
+    private func parentJumpHandler(for profile: Profile, proxy: ScrollViewProxy) -> ((String) -> Void)? {
+        guard let parent = profile.extendsProfile, baseNames.contains(parent) else { return nil }
+        return { name in jumpToParent(name, proxy: proxy) }
+    }
+
+    private func handleExpandTap(for name: String) {
+        if segment == .bases {
+            // In Bases-only view there's nothing to expand into — promote to All so children appear.
+            withAnimation(.easeOut(duration: 0.15)) {
+                segment = .all
+                expandedBases.insert(name)
+            }
+            return
+        }
+        toggleExpand(name)
+    }
+
+    private func toggleExpand(_ name: String) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            if expandedBases.contains(name) {
+                expandedBases.remove(name)
+            } else {
+                expandedBases.insert(name)
+            }
+        }
+    }
+
+    private func jumpToParent(_ parentName: String, proxy: ScrollViewProxy) {
+        searchText = ""
+        withAnimation(.easeOut(duration: 0.15)) {
+            segment = .all
+            expandedBases.insert(parentName)
+        }
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(parentName, anchor: .center)
+            }
+            highlightedName = parentName
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            if highlightedName == parentName { highlightedName = nil }
+        }
+    }
 }
 
 extension String: @retroactive Identifiable {
@@ -140,16 +388,38 @@ extension String: @retroactive Identifiable {
 
 struct ProfileCard: View {
     let profile: Profile
+    var derivedCount: Int = 0
+    var isExpanded: Bool = false
+    var isInlineChild: Bool = false
+    var isHighlighted: Bool = false
+    var onExpandToggle: (() -> Void)?
+    var onExtendsTap: ((String) -> Void)?
+
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 14) {
-            // Template icon
-            templateIcon
+        HStack(spacing: 0) {
+            if isInlineChild {
+                indentRail
+            }
+            cardContent
+        }
+    }
 
-            // Info
+    private var indentRail: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .frame(maxHeight: .infinity)
+            .padding(.leading, 14)
+            .padding(.trailing, 12)
+    }
+
+    private var cardContent: some View {
+        HStack(spacing: 14) {
+            templateIcon
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Text(profile.name)
                         .font(.system(.callout, design: .monospaced).weight(.semibold))
                     Text(profile.template.label)
@@ -168,21 +438,37 @@ struct ProfileCard: View {
                             .foregroundStyle(.purple)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
                     }
+                    if derivedCount > 0, let onExpandToggle {
+                        Button(action: onExpandToggle) {
+                            HStack(spacing: 3) {
+                                Text("+\(derivedCount)")
+                                    .font(.system(.caption2).weight(.semibold))
+                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 8, weight: .semibold))
+                            }
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(.green.opacity(0.12))
+                            .foregroundStyle(.green)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                        .buttonStyle(.plain)
+                        .help(isExpanded
+                            ? "Hide overrides"
+                            : "Show \(derivedCount) override\(derivedCount == 1 ? "" : "s")")
+                    }
                 }
                 Text(profile.repoUrl)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if let parent = profile.extendsProfile {
-                    Label("extends \(parent)", systemImage: "arrow.turn.down.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    extendsLabel(parent: parent)
                 }
             }
 
             Spacer()
 
-            // Quick stats
             HStack(spacing: 12) {
                 if profile.networkEnabled {
                     statBadge(icon: "shield.checkered", label: profile.networkMode.label, color: .green)
@@ -206,15 +492,44 @@ struct ProfileCard: View {
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(nsColor: .controlBackgroundColor))
-                .shadow(color: .black.opacity(isHovered ? 0.08 : 0.03), radius: isHovered ? 6 : 3, y: 1)
+                .shadow(color: .black.opacity(isHovered ? 0.08 : 0.03),
+                        radius: isHovered ? 6 : 3, y: 1)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                .stroke(strokeColor, lineWidth: strokeWidth)
         )
         .scaleEffect(isHovered ? 1.005 : 1.0)
         .animation(.easeOut(duration: 0.12), value: isHovered)
+        .animation(.easeOut(duration: 0.2), value: isHighlighted)
         .onHover { isHovered = $0 }
+    }
+
+    @ViewBuilder
+    private func extendsLabel(parent: String) -> some View {
+        if let onExtendsTap {
+            Button {
+                onExtendsTap(parent)
+            } label: {
+                Label("extends \(parent)", systemImage: "arrow.turn.down.right")
+                    .font(.caption2)
+                    .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help("Jump to \(parent)")
+        } else {
+            Label("extends \(parent)", systemImage: "arrow.turn.down.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var strokeColor: Color {
+        isHighlighted ? Color.accentColor : Color(nsColor: .separatorColor)
+    }
+
+    private var strokeWidth: CGFloat {
+        isHighlighted ? 2 : 0.5
     }
 
     private var templateIcon: some View {
@@ -251,5 +566,5 @@ struct ProfileCard: View {
 
 #Preview("Profile list") {
     ProfileListView(profiles: MockProfiles.all)
-        .frame(width: 700, height: 400)
+        .frame(width: 700, height: 500)
 }

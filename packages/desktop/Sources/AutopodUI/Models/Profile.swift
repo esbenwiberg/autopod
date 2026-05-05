@@ -751,7 +751,35 @@ public struct InjectedSkill: Sendable {
 // MARK: - Mock profiles
 
 public enum MockProfiles: Sendable {
-    public static let all: [Profile] = [myApp, webapp, backend]
+    public static let all: [Profile] = [
+        myApp, myAppFast, myAppCi, webapp, backend, backendStaging, orphanDerived,
+    ]
+
+    public static let myAppFast = Profile(
+        name: "my-app-fast",
+        repoUrl: "https://github.com/org/my-app.git",
+        defaultModel: "haiku",
+        extendsProfile: "my-app"
+    )
+
+    public static let myAppCi = Profile(
+        name: "my-app-ci",
+        repoUrl: "https://github.com/org/my-app.git",
+        networkEnabled: true, networkMode: .denyAll,
+        extendsProfile: "my-app"
+    )
+
+    public static let backendStaging = Profile(
+        name: "backend-staging",
+        repoUrl: "https://github.com/org/backend.git",
+        extendsProfile: "backend"
+    )
+
+    public static let orphanDerived = Profile(
+        name: "legacy-derived",
+        repoUrl: "https://github.com/org/legacy.git",
+        extendsProfile: "missing-parent"
+    )
 
     public static let myApp = Profile(
         name: "my-app",
