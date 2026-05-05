@@ -6,7 +6,15 @@ import { formatFeedback } from './feedback-formatter.js';
 export interface CorrectionContext {
   task: string;
   customInstructions: string | null;
-  failedStep: 'build' | 'health' | 'smoke' | 'ac_validation' | 'task_review';
+  failedStep:
+    | 'lint'
+    | 'sast'
+    | 'build'
+    | 'tests'
+    | 'health'
+    | 'smoke'
+    | 'ac_validation'
+    | 'task_review';
   validationResult: ValidationResult;
   previousDiff: string;
   screenshotDescriptions: string[];
@@ -41,6 +49,31 @@ export async function buildCorrectionContext(
 
   // 3. Grab text descriptions of what went wrong
   const screenshotDescriptions: string[] = [];
+
+  // Lint failures
+  if (validationResult.lint?.status === 'fail') {
+    const out = validationResult.lint.output?.trim();
+    screenshotDescriptions.push(out ? `Lint failed:\n${out.slice(0, 2_000)}` : 'Lint failed');
+  }
+
+  // SAST failures
+  if (validationResult.sast?.status === 'fail') {
+    const out = validationResult.sast.output?.trim();
+    screenshotDescriptions.push(
+      out ? `Security scan failed:\n${out.slice(0, 2_000)}` : 'Security scan failed',
+    );
+  }
+
+  // Test failures
+  if (validationResult.test?.status === 'fail') {
+    const testOutput = [validationResult.test.stdout, validationResult.test.stderr]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    screenshotDescriptions.push(
+      testOutput ? `Tests failed:\n${testOutput.slice(0, 2_000)}` : 'Tests failed',
+    );
+  }
 
   // Page validation failures
   const failedPages = validationResult.smoke.pages.filter((p) => p.status === 'fail');
@@ -85,7 +118,12 @@ export async function buildCorrectionContext(
 }
 
 export function determineFailedStep(result: ValidationResult): CorrectionContext['failedStep'] {
+  // Order matches the validation engine's pipeline order so the first failing
+  // gate wins — that's the one the agent should focus on fixing first.
+  if (result.lint?.status === 'fail') return 'lint';
+  if (result.sast?.status === 'fail') return 'sast';
   if (result.smoke.build.status === 'fail') return 'build';
+  if (result.test?.status === 'fail') return 'tests';
   if (result.smoke.health.status === 'fail') return 'health';
   const hasPageFailure = result.smoke.pages.some((p) => p.status === 'fail');
   if (hasPageFailure) return 'smoke';

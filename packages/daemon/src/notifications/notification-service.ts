@@ -10,6 +10,7 @@ import type {
   ProcessContentConfig,
   SystemEvent,
   ValidationCompletedEvent,
+  ValidationResult,
 } from '@autopod/shared';
 import { sanitize } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -26,6 +27,23 @@ import type { NotificationConfig } from './types.js';
 
 export interface SessionLookup {
   getSession(podId: string): Pod;
+}
+
+/** Pick a human-readable reason string for a failed validation. Walks the
+ * pipeline in execution order and picks the first failing phase, falling back
+ * to the task reviewer's reasoning, then a generic label. */
+function pickFailureReason(result: ValidationResult): string {
+  if (result.lint?.status === 'fail') return 'Lint failed';
+  if (result.sast?.status === 'fail') return 'Security scan failed';
+  if (result.smoke.build.status === 'fail') return 'Build failed';
+  if (result.test?.status === 'fail') return 'Tests failed';
+  if (result.smoke.health.status === 'fail') return 'Health check failed';
+  if (result.smoke.pages.some((p) => p.status === 'fail')) return 'Page checks failed';
+  if (result.acValidation?.status === 'fail') return 'Acceptance criteria failed';
+  if (result.taskReview?.status === 'fail') {
+    return result.taskReview.reasoning?.trim() || 'Task review failed';
+  }
+  return 'Validation failed';
 }
 
 export interface NotificationService {
@@ -130,12 +148,7 @@ export function createNotificationService(deps: {
       const notificationType: NotificationType = 'pod_failed';
       if (!canSendForSession(event.podId, notificationType, pod.profileName)) return;
 
-      const reason =
-        (event.result.taskReview?.reasoning ?? event.result.smoke.build.status === 'fail')
-          ? 'Build failed'
-          : event.result.smoke.health.status === 'fail'
-            ? 'Health check failed'
-            : 'Validation failed';
+      const reason = pickFailureReason(event.result);
 
       const notification: PodFailedNotification = {
         type: notificationType,

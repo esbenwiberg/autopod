@@ -91,7 +91,10 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
 
 function mockValidationResult(
   overrides: {
+    lintFailed?: boolean;
+    sastFailed?: boolean;
     buildFailed?: boolean;
+    testsFailed?: boolean;
     healthFailed?: boolean;
     pageFailed?: boolean;
     taskReviewFailed?: boolean;
@@ -129,6 +132,15 @@ function mockValidationResult(
           ]
         : [],
     },
+    test: overrides.testsFailed
+      ? { status: 'fail', duration: 1500, stdout: 'expected 1 to equal 2', stderr: '' }
+      : { status: 'skip', duration: 0 },
+    lint: overrides.lintFailed
+      ? { status: 'fail', output: 'Linting errors found', duration: 50 }
+      : { status: 'skip', output: '', duration: 0 },
+    sast: overrides.sastFailed
+      ? { status: 'fail', output: 'High severity finding', duration: 50 }
+      : { status: 'skip', output: '', duration: 0 },
     taskReview: overrides.taskReviewFailed
       ? {
           status: 'fail',
@@ -200,6 +212,32 @@ describe('determineFailedStep', () => {
   it('prioritizes build over health', () => {
     expect(
       determineFailedStep(mockValidationResult({ buildFailed: true, healthFailed: true })),
+    ).toBe('build');
+  });
+
+  it('returns lint when lint fails', () => {
+    expect(determineFailedStep(mockValidationResult({ lintFailed: true }))).toBe('lint');
+  });
+
+  it('returns sast when sast fails (lint passes)', () => {
+    expect(determineFailedStep(mockValidationResult({ sastFailed: true }))).toBe('sast');
+  });
+
+  it('returns tests when test phase fails (build passes)', () => {
+    expect(determineFailedStep(mockValidationResult({ testsFailed: true }))).toBe('tests');
+  });
+
+  it('prioritizes lint over everything else', () => {
+    expect(
+      determineFailedStep(
+        mockValidationResult({ lintFailed: true, sastFailed: true, buildFailed: true }),
+      ),
+    ).toBe('lint');
+  });
+
+  it('prioritizes build over tests', () => {
+    expect(
+      determineFailedStep(mockValidationResult({ buildFailed: true, testsFailed: true })),
     ).toBe('build');
   });
 });
@@ -291,6 +329,21 @@ describe('buildCorrectionContext', () => {
     expect(context.screenshotDescriptions).not.toContainEqual(
       expect.stringContaining('Has toggle'),
     );
+  });
+
+  it('includes test/lint/sast failures in screenshot descriptions', async () => {
+    const cm = mockContainerManager();
+    const result = mockValidationResult({
+      lintFailed: true,
+      sastFailed: true,
+      testsFailed: true,
+    });
+    const context = await buildCorrectionContext(mockSession(), mockProfile(), result, cm);
+    expect(context.screenshotDescriptions).toContainEqual(expect.stringContaining('Lint failed'));
+    expect(context.screenshotDescriptions).toContainEqual(
+      expect.stringContaining('Security scan failed'),
+    );
+    expect(context.screenshotDescriptions).toContainEqual(expect.stringContaining('Tests failed'));
   });
 
   it('handles exec error gracefully', async () => {
