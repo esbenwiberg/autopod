@@ -43,6 +43,11 @@ scan codebase again → ask ONE question → wait → ... → exit test passes �
   question. New answers open new search paths — always follow them.
 - If the codebase already answers a question, don't ask — cite the finding
   and move on.
+- **If a fact or ADR answers a question, don't ask — cite it and move on.**
+  Before forming any question, scan the loaded facts and ADRs for a match.
+  If found, mark the dimension green and note the source inline
+  (e.g. `📋 fact-003`, `📋 ADR-012`). Only escalate to the user when no
+  fact, ADR, or codebase evidence covers it.
 - Never draft `purpose.md`, `design.md`, briefs, or ADRs during the loop.
   Writing happens only after the exit test passes and the user has greenlit.
 - **The coverage checklist is the only stop sign — not a question count.**
@@ -64,9 +69,16 @@ Before asking anything, scan for 3–5 minutes:
 2. Where are the seams — places where one module hands off to another?
 3. What shared types/interfaces cross module boundaries?
 4. What's the test coverage like in the blast radius?
-5. Are there existing ADRs in `docs/decisions/` (or `decisions/`,
-   `docs/adrs/`) relevant here? Read every ADR before forming the first
-   question — they are baseline knowledge.
+5. Load the knowledge indexes:
+   a. Run `./scripts/generate-knowledge-index.sh` if the script exists
+      (ensures indexes are fresh without loading every file).
+   b. Read `docs/decisions/index.md` (or `decisions/index.md`,
+      `docs/adrs/index.md` — match the existing ADR folder convention).
+      If no index exists, fall back to reading every ADR directly.
+   c. Read `docs/facts/index.md` if it exists.
+   d. From both indexes, identify which ADRs and facts are relevant to
+      this feature. Read only those full files — not every entry.
+   Prior decisions are baseline knowledge; facts are pre-answered questions.
 6. Are there CLAUDE.md sections, READMEs, or pinned docs the executor will
    need? Note them; they go into `design.md` → Reference reading.
 
@@ -586,6 +598,11 @@ loop was not done.
 
 - Writing any output before the exit test passes.
 - Asking a question the codebase already answers.
+- Asking a question already answered by a fact or ADR — check both indexes
+  before forming each question; citing a fact costs nothing, asking wastes a turn.
+- Loading every ADR or fact in full without consulting the index first — at
+  scale this floods context; use the index to pick relevant entries, then
+  read only those.
 - Batching two questions in one turn.
 - Stopping after 2–3 questions on a multi-module feature (e.g. "New
   scheduler UI" answered with "what screens?" + "what component library?"
