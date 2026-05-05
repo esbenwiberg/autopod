@@ -624,14 +624,22 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private func acCriterionCard(criterion: AcDefinition, result: AcCheckDetail?, index _: Int) -> some View {
-    let statusColor: Color = result.map { $0.passed ? .green : .red } ?? Color.secondary
+    let firing = acIsFiring(criterion, result)
+    let statusColor: Color = firing
+      ? (result.map { $0.passed ? .green : .red } ?? Color.secondary)
+      : Color.secondary
     HStack(alignment: .top, spacing: 0) {
       Rectangle()
         .fill(statusColor.opacity(0.7))
         .frame(width: 3)
       VStack(alignment: .leading, spacing: 8) {
         HStack(alignment: .top, spacing: 8) {
-          if let result {
+          if !firing {
+            Image(systemName: "minus.circle")
+              .font(.system(size: 13))
+              .foregroundStyle(Color.secondary)
+              .padding(.top, 1)
+          } else if let result {
             Image(systemName: result.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
               .font(.system(size: 13))
               .foregroundStyle(result.passed ? .green : .red)
@@ -644,9 +652,11 @@ public struct ValidationTab: View {
           }
           Text(criterion.test)
             .font(.callout.weight(.medium))
+            .foregroundStyle(firing ? .primary : .secondary)
             .fixedSize(horizontal: false, vertical: true)
           Spacer(minLength: 4)
           HStack(spacing: 4) {
+            if !firing { decorativeAcBadge() }
             if criterion.type != .none { acTypeBadge(criterion.type) }
             if let type = result?.validationType { triageBadge(type) }
           }
@@ -889,8 +899,15 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private func acListSection(criteria: [AcDefinition], acChecks: [AcCheckDetail]?) -> some View {
+    let firing = firingCount(criteria, acChecks)
+    let total = criteria.count
+    let title: String = total == 0
+      ? "Acceptance Criteria (0)"
+      : (firing == total
+          ? "Acceptance Criteria (\(total))"
+          : "Acceptance Criteria (\(firing) firing / \(total))")
     CollapsibleSection(
-      title: "Acceptance Criteria (\(criteria.count))",
+      title: title,
       icon: "checklist",
       initiallyExpanded: acChecks?.contains(where: { !$0.passed }) == true
     ) {
@@ -901,6 +918,16 @@ public struct ValidationTab: View {
             Text(source).font(.system(.caption2, design: .monospaced))
           }
           .foregroundStyle(.tertiary)
+        }
+        if total > 0 && firing == 0 {
+          HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "info.circle").font(.system(size: 10))
+            Text("No firing checks — every criterion is `none` (build/test/grep commands and undeclared types are no-ops). Pass/fail falls back to the diff reviewer + pipeline build/test.")
+              .font(.caption2)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          .foregroundStyle(.secondary)
+          .padding(.bottom, 4)
         }
         ForEach(Array(criteria.enumerated()), id: \.offset) { idx, criterion in
           let result: AcCheckDetail? = {
@@ -914,10 +941,51 @@ public struct ValidationTab: View {
     }
   }
 
+  /// True when this AC actually gates pass/fail in the validation engine.
+  /// Mirrors `local-validation-engine.ts` — `api`, `web`, and `cmd` types fire.
+  /// Any criterion classified to `none` post-execution is decorative (the
+  /// banlist demotes shell-command ACs that look like build/test/lint to none).
+  private func acIsFiring(_ criterion: AcDefinition, _ result: AcCheckDetail?) -> Bool {
+    if let v = result?.validationType {
+      return v == "api" || v == "web-ui" || v == "cmd"
+    }
+    if isCommandLikeAcText(criterion.test) { return false }
+    return criterion.type == .api || criterion.type == .web || criterion.type == .cmd
+  }
+
+  private func firingCount(_ criteria: [AcDefinition], _ checks: [AcCheckDetail]?) -> Int {
+    criteria.enumerated().reduce(0) { acc, pair in
+      let (idx, c) = pair
+      let result: AcCheckDetail? = {
+        guard let checks else { return nil }
+        return checks.first(where: { $0.criterion == c.test })
+            ?? (idx < checks.count ? checks[idx] : nil)
+      }()
+      return acc + (acIsFiring(c, result) ? 1 : 0)
+    }
+  }
+
+  /// Mirrors `COMMAND_LIKE_AC_PATTERNS` in
+  /// `packages/daemon/src/validation/local-validation-engine.ts` so the desktop
+  /// can pre-classify shell-command ACs as decorative before the engine runs.
+  private func isCommandLikeAcText(_ text: String) -> Bool {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if t.isEmpty { return false }
+    let lower = t.lowercased()
+    if lower.hasPrefix("run `") || lower.hasPrefix("execute `") { return true }
+    if t.hasPrefix("`") && t.hasSuffix("`") && !t.dropFirst().dropLast().contains("`") { return true }
+    let prefixes = ["dotnet ", "npm ", "npx ", "pnpm ", "yarn ", "cargo ", "make "]
+    if prefixes.contains(where: { lower.hasPrefix($0) }) { return true }
+    if t.hasPrefix("./") && t.count > 2 { return true }
+    if t.hasPrefix("/"), t.count > 1, let c = t.dropFirst().first, c.isLetter { return true }
+    return false
+  }
+
   private func acTypeBadge(_ type: AcDefinition.AcType) -> some View {
     let color: Color = switch type {
     case .web: .blue
     case .api: .orange
+    case .cmd: .purple
     case .none: .secondary
     }
     return Text(type.label.lowercased())
@@ -928,10 +996,21 @@ public struct ValidationTab: View {
       .clipShape(Capsule())
   }
 
+  private func decorativeAcBadge() -> some View {
+    Text("decorative")
+      .font(.system(.caption2, design: .monospaced))
+      .padding(.horizontal, 5).padding(.vertical, 2)
+      .background(Color.secondary.opacity(0.12))
+      .foregroundStyle(Color.secondary)
+      .clipShape(Capsule())
+      .help("Not gated by the validation engine — pass/fail falls back to the diff reviewer.")
+  }
+
   private func triageBadge(_ type: String) -> some View {
     let (label, color): (String, Color) = switch type {
     case "web-ui": ("web-ui", .blue)
     case "api":    ("api",    .orange)
+    case "cmd":    ("cmd",    .purple)
     default:       ("none",   Color.secondary)
     }
     return Text(label)

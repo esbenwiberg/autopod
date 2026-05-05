@@ -16,6 +16,7 @@ import {
   createLocalValidationEngine,
   deduplicateAcsByBaseText,
   enforceRequirementsStatus,
+  executeCmdChecks,
   normalizeReviewIssue,
   parseAcInstructionsJson,
   parseAcResults,
@@ -302,6 +303,167 @@ describe('classifyAcTypes', () => {
   it('returns [] for empty input without invoking the LLM', async () => {
     const result = await classifyAcTypes(configWith([]));
     expect(result).toEqual([]);
+  });
+
+  it('passes brief `type: cmd` through as engine `cmd`', async () => {
+    const acs: AcDefinition[] = [
+      {
+        type: 'cmd',
+        test: "rg -l 'OldEventEmitter' packages/daemon/src",
+        pass: 'no matches',
+        fail: 'any match',
+      },
+    ];
+    const result = await classifyAcTypes(configWith(acs));
+    expect(result).toHaveLength(1);
+    expect(result?.[0]?.validationType).toBe('cmd');
+    expect(result?.[0]?.pass).toBe('no matches');
+  });
+
+  it('demotes banned build/test/lint commands to none even when declared cmd', async () => {
+    // The banlist runs before declared-type evaluation, so anything matching
+    // COMMAND_LIKE_AC_PATTERNS lands as 'none' regardless of authorial intent.
+    const acs: AcDefinition[] = [
+      { type: 'cmd', test: 'pnpm build', pass: 'exit 0', fail: 'non-0' },
+      { type: 'cmd', test: 'dotnet test ./Tests', pass: 'all green', fail: 'any red' },
+      { type: 'cmd', test: 'npx tsc --noEmit', pass: '0 errors', fail: 'any error' },
+    ];
+    const result = await classifyAcTypes(configWith(acs));
+    expect(result).toHaveLength(3);
+    for (const r of result ?? []) {
+      expect(r.validationType).toBe('none');
+    }
+  });
+});
+
+describe('executeCmdChecks', () => {
+  function configWith(): ValidationEngineConfig {
+    return {
+      podId: 'sess-1',
+      containerId: 'c1',
+      previewUrl: 'http://localhost:3000',
+      buildCommand: 'npm run build',
+      startCommand: 'npm start',
+      healthPath: '/health',
+      healthTimeout: 30_000,
+      smokePages: [],
+      attempt: 1,
+      task: 'test task',
+      diff: '',
+      reviewerModel: 'sonnet',
+      acceptanceCriteria: [],
+      hasWebUi: true,
+    };
+  }
+
+  function makeContainerManager(
+    handler: (cmd: string[]) => { stdout: string; stderr: string; exitCode: number },
+  ): ContainerManager {
+    const execInContainer = vi.fn(async (_id: string, cmd: string[]) => handler(cmd));
+    return { execInContainer } as unknown as ContainerManager;
+  }
+
+  it('passes when an exit-0 command runs and pass-hint expects exit 0', async () => {
+    const cm = makeContainerManager(() => ({ stdout: 'ok\n', stderr: '', exitCode: 0 }));
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: 'test -f Application/Auth/NewMw.cs',
+        validationType: 'cmd',
+        reason: 'declared in brief',
+        pass: 'exit 0',
+        fail: 'non-zero',
+      },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.passed).toBe(true);
+    expect(result[0]?.validationType).toBe('cmd');
+  });
+
+  it('fails when an exit-0 command was expected but the command fails', async () => {
+    const cm = makeContainerManager(() => ({
+      stdout: '',
+      stderr: 'no such file',
+      exitCode: 1,
+    }));
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: 'test -f Application/Auth/NewMw.cs',
+        validationType: 'cmd',
+        reason: 'declared in brief',
+        pass: 'exit 0',
+        fail: 'non-zero',
+      },
+    ]);
+    expect(result[0]?.passed).toBe(false);
+    expect(result[0]?.reasoning).toContain('no such file');
+  });
+
+  it('treats grep-style "no match" pass-hint as pass when stdout is empty', async () => {
+    // rg returns exit 1 when there are no matches; that's the pass condition.
+    const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 1 }));
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: "rg -l 'OldEventEmitter' packages/daemon/src",
+        validationType: 'cmd',
+        reason: 'declared in brief',
+        pass: 'no matches',
+        fail: 'any match',
+      },
+    ]);
+    expect(result[0]?.passed).toBe(true);
+  });
+
+  it('fails the "no match" expectation when stdout shows a match', async () => {
+    const cm = makeContainerManager(() => ({
+      stdout: 'packages/daemon/src/old.ts\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: "rg -l 'OldEventEmitter' packages/daemon/src",
+        validationType: 'cmd',
+        reason: 'declared in brief',
+        pass: 'no matches',
+        fail: 'any match',
+      },
+    ]);
+    expect(result[0]?.passed).toBe(false);
+    expect(result[0]?.reasoning).toContain('packages/daemon/src/old.ts');
+  });
+
+  it('returns failed results when the container is missing', async () => {
+    const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 0 }));
+    const config = { ...configWith(), containerId: undefined as unknown as string };
+    const result = await executeCmdChecks(cm, config, [
+      {
+        criterion: 'echo hi',
+        validationType: 'cmd',
+        reason: 'declared in brief',
+        pass: 'exit 0',
+        fail: '',
+      },
+    ]);
+    expect(result[0]?.passed).toBe(false);
+    expect(result[0]?.reasoning).toMatch(/no container/i);
+  });
+
+  it('captures execInContainer errors as a failed result', async () => {
+    const execInContainer = vi.fn(async () => {
+      throw new Error('docker exec timeout');
+    });
+    const cm = { execInContainer } as unknown as ContainerManager;
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: 'echo hi',
+        validationType: 'cmd',
+        reason: 'declared in brief',
+        pass: 'exit 0',
+        fail: '',
+      },
+    ]);
+    expect(result[0]?.passed).toBe(false);
+    expect(result[0]?.reasoning).toContain('docker exec timeout');
   });
 });
 

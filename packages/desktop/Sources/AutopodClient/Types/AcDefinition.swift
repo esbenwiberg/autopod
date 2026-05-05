@@ -6,13 +6,14 @@ import Foundation
 /// criterion at the right tier (api / web / none).
 public struct AcDefinition: Codable, Sendable, Hashable, Identifiable {
   public enum AcType: String, Codable, CaseIterable, Sendable {
-    case none, api, web
+    case none, api, web, cmd
 
     public var label: String {
       switch self {
       case .none: "None"
       case .api:  "API"
       case .web:  "Web"
+      case .cmd:  "Cmd"
       }
     }
   }

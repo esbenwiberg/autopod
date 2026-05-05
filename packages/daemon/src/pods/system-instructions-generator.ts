@@ -329,7 +329,14 @@ export function generateSystemInstructions(
     // Acceptance criteria are user-supplied — wrap in boundary markers.
     lines.push('<!-- BEGIN USER ACCEPTANCE CRITERIA -->');
     for (const ac of pod.acceptanceCriteria) {
-      const typeLabel = ac.type === 'web' ? 'browser' : ac.type === 'api' ? 'API' : 'code';
+      const typeLabel =
+        ac.type === 'web'
+          ? 'browser'
+          : ac.type === 'api'
+            ? 'API'
+            : ac.type === 'cmd'
+              ? 'cmd'
+              : 'code';
       lines.push(`- [${typeLabel}] ${ac.test}`);
       lines.push(`  - Pass: ${ac.pass}`);
       lines.push(`  - Fail: ${ac.fail}`);

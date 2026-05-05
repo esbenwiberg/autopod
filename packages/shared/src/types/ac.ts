@@ -1,4 +1,4 @@
-export type AcType = 'none' | 'api' | 'web';
+export type AcType = 'none' | 'api' | 'web' | 'cmd';
 
 export interface AcDefinition {
   type: AcType;

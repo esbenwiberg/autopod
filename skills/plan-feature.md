@@ -135,10 +135,38 @@ justification) before writing.
 13. **Pod sizing** — Is any brief's `Touches` list approaching 8 files? Then
     split. Rule of thumb: > 8 files = too big.
     → briefs/ structure
-14. **Acceptance criteria** — Per brief, observable, no human judgment. The
-    final brief (or one designated brief) MUST have an AC whose `pass`
-    directly validates the success signal from #3 — otherwise the spec can
-    finish "green" without shipping the actual outcome.
+14. **Acceptance criteria** — Per brief, only when a real automated check
+    validates the behaviour. The validation pipeline runs `buildCommand`
+    and the test suite automatically — **never list build/test/lint as
+    ACs**. Three firing types exist:
+    - `api` — HTTP probe against the running container (single request
+      or short create-then-read chain). Don't use against endpoints
+      requiring a role the test harness can't impersonate (`[Authorize]`
+      / `RequiresUserType(<role>)`) — they 401.
+    - `web` — browser DOM check via `validate_in_browser` (only when
+      the profile has a web UI).
+    - `cmd` — arbitrary shell command in the validation container, gates
+      on exit code. For **structural / workspace-state** assertions:
+      file existence, ref removal, JSON/YAML flag values, single named
+      tests by filter. NOT for build / test / lint as a whole — those
+      patterns are banned and force-classified to `none`. NOT for
+      behavioural claims — those go to `api` / `web`.
+
+    **Decompose fuzzy claims before writing ACs.** "X migrated to Y" /
+    "X works with Y" / "X integrates with Y" should expand into 2–5
+    concrete checks, each pinned to a single observable. If a brief has
+    one fuzzy bullet, the interview isn't done. Example: "auth migrated
+    to new middleware" → (a) `cmd: test -f Application/Auth/NewMw.cs`,
+    (b) `cmd: ! grep -r OldMw Api/`, (c) `api: GET /api/protected
+    without token → 401`, (d) `api: with valid token → 200`,
+    (e) `cmd: grep '"auth": "migrated"' inventory.json`.
+
+    `type: none` exists but is a no-op — auto-passed and excluded from
+    gating. Use it only when the diff reviewer is the only possible
+    verification (rare). Prefer **zero ACs** + a thorough Test
+    expectations section over padding with `none`. The success signal
+    from #3 must be tied to a firing AC, or the success signal itself
+    must be rewritten until it is.
     → briefs/*.md frontmatter
 15. **Hard-to-reverse decisions** — Anything surprising or with long-lived
     consequences. ADRs are written **per decision**, numbered globally in
@@ -214,8 +242,11 @@ For every brief you're about to write, confirm you can name:
 - The files it must NOT touch (the `does_not_touch` list — both lists are
   advisory; reviewer adjudicates deviations)
 - The interfaces it must respect (cite the contract section in design.md)
-- The ACs it must satisfy (every brief has at least one `none` AC for
-  build + tests passing)
+- The ACs it must satisfy — every AC must be `type: api` or `type: web`
+  and actually fire in the validation engine. Build + tests run
+  automatically via the pipeline; do NOT list them as ACs. If no
+  `api`/`web` check is possible for a brief, write zero ACs and lean on
+  Test expectations + the diff reviewer for anchoring.
 - The dependency graph, without guessing
 
 Verify the **outcome → AC link**: cite which brief's AC validates the
@@ -394,12 +425,13 @@ parallel.
 
 ```yaml
 ---
-title: "Add events repository"
+title: "Add events API endpoints"
 depends_on: [01-types]
 acceptance_criteria:
-  - { type: none, test: "npx pnpm build", pass: "exit 0", fail: "any TS error" }
-  - { type: none, test: "npx pnpm test --filter @autopod/daemon", pass: "all tests pass", fail: "any failure" }
-  - { type: api,  test: "GET /events?since=now", pass: "200, body.events array", fail: "non-200 or missing field" }
+  - { type: api, test: "POST /api/v2/events with valid body", pass: "201 with body.id (uuid)", fail: "non-201 or missing id" }
+  - { type: api, test: "GET /api/v2/events?since=now", pass: "200 with body.events array", fail: "non-200 or missing field" }
+  - { type: web, test: "navigate /events and click first row", pass: "detail panel renders with event title", fail: "no panel or no title" }
+  - { type: cmd, test: "rg -l 'OldEventEmitter' packages/daemon/src", pass: "no matches", fail: "any match means a caller still uses the deleted symbol" }
 touches:
   - packages/daemon/src/pods/events-repository.ts
   - packages/daemon/src/db/migrations/    # directory shorthand — anything under here
@@ -409,15 +441,49 @@ require_sidecars: [dagger]   # only when needed
 ---
 ```
 
+A brief that genuinely cannot be validated by `api`, `web`, or `cmd` (e.g.
+it only adds a TypeScript interface, only flips a JSON migration flag, or
+only edits CLI / desktop code with no inspectable surface) should ship
+with **zero** `acceptance_criteria` entries. The Test expectations body
+section + the validation pipeline + the diff reviewer do the anchoring
+instead. Do not pad the frontmatter with `none`-typed entries — they are
+no-ops and create false confidence. And do not stuff the redundant
+build/test commands the pipeline already runs into `cmd` either; the
+banlist forces those back to `none`.
+
 Field rules:
 
 - `title` — verb-led to match filename convention.
 - `depends_on` — filenames or stems of earlier briefs.
-- `acceptance_criteria` — at least one `none` AC must gate on build + tests
-  passing. ACs are observable; "looks correct" is never a pass condition.
-  Types: `none` (build/test/diff inspection), `api` (HTTP call), `web`
-  (browser via `validate_in_browser`). Infer the type — only ask when
-  genuinely ambiguous.
+- `acceptance_criteria` — every entry must be a real automated check the
+  validation engine actually runs. Three types fire:
+  - `api` — single HTTP call (or short create-then-read chain) against
+    the running container. The harness has no role-impersonation, so an
+    endpoint behind `[Authorize]`/`RequiresUserType(<role>)` will 401 —
+    don't write `api` ACs for those paths; either point at an
+    unauthenticated endpoint that observes the same state, or use a
+    `cmd` AC instead.
+  - `web` — browser DOM check via `validate_in_browser` (only when the
+    profile has a web UI; downgraded to `none` otherwise).
+  - `cmd` — narrow shell check inside the container (typically `rg` /
+    `grep` / a tiny one-liner) for things `api`/`web` cannot observe:
+    a symbol stopped existing, a config flag flipped, a generated file
+    exists, a registration line is present. Banlist: `pnpm build`,
+    `pnpm test`, `dotnet build`, `dotnet test`, `npm test`, `tsc`,
+    `eslint`, `biome`, `cargo build`, `cargo test`, `make` — these are
+    force-classified to `none` because the pipeline already runs build
+    + tests; restating them is theatre.
+
+  `type: none` exists but is a no-op for pass/fail determination — the
+  engine auto-marks it `passed: true` and excludes it from gating
+  (`local-validation-engine.ts:1442-1480`). Any banned build/test/lint
+  command is force-classified to `none` by `isCommandLikeAc()`
+  regardless of declared type.
+
+  When no `api`, `web`, or `cmd` check applies, leave `acceptance_criteria`
+  out entirely. ACs are observable behavioural assertions, never "the
+  code compiles" (the pipeline checks that anyway) and never "looks
+  correct".
 - `touches` / `does_not_touch` — **advisory, not enforced**. The reviewer
   flags deviations as discussion items, never as failures. Use directory
   shorthand (path ending in `/`) to mean "anything under this directory".
@@ -442,6 +508,14 @@ Same paths as the YAML `does_not_touch` list — repeat for the same reason.
 ## Constraints
 Patterns and rules from `design.md` this brief must honor. Quote 2–3
 lines and link to design.md rather than restating.
+
+## Test expectations
+Which test files to add and what each covers, per behaviour (happy path,
+edge cases, error paths). Required for any brief that adds new code —
+this is the real anchor when the frontmatter has zero `api`/`web` ACs
+(which is most briefs, since most code is not behind an HTTP surface
+the test harness can probe). Skip only when the brief is pure config /
+docs / dependency bumps with no logic to test.
 ```
 
 Optional sections (include only when they add value):
@@ -459,10 +533,6 @@ intermediate gates (e.g. types must compile before logic).
 Things the planner suspects could go wrong. Migration prefix collisions,
 known-fragile modules, race conditions, etc. Cite past landmines from the
 codebase scan when relevant.
-
-## Test expectations
-Which test files to add and what they cover. Include only when
-non-obvious from "Touches".
 ```
 
 Required wrap-up section, always last:
@@ -529,6 +599,28 @@ loop was not done.
 - Producing one oversized spec when the scope is genuinely two specs.
 - Skipping the "ready to write — green light?" confirmation.
 - ACs that require human judgment ("looks good", "feels right").
+- Wrapping build / test / lint commands as ACs (`pnpm build`,
+  `dotnet test`, `tsc`, `biome`, `cargo build`, `make`) —
+  `isCommandLikeAc()` force-classifies them to `none`, which the
+  engine auto-passes and excludes from gating. The pipeline already
+  runs build + tests as its first phase; listing them as ACs is
+  duplication that creates false confidence. Use `cmd` only for
+  *narrow* checks the pipeline does not do (e.g. `rg -l 'OldSymbol'`
+  must return no matches).
+- Padding `acceptance_criteria` with `none`-typed entries when no
+  `api`/`web`/`cmd` check applies. Zero ACs + a thorough Test
+  expectations section is honest; an all-`none` AC list is theatre.
+- Writing an `api` AC against an endpoint behind `[Authorize]` /
+  `RequiresUserType(<role>)` — the harness has no role impersonation
+  and the request will 401. Either point the AC at an unauthenticated
+  endpoint that observes the same state, swap to a `cmd` AC that
+  observes the same change a different way (a config flag, a registered
+  route, a generated file), or skip the AC for that brief.
+- Treating fuzzy claims like "auth migrated to new middleware" or
+  "feature X removed" as one AC. They aren't observable. Decompose
+  into 2–5 narrow `cmd` / `api` checks (new file exists, old symbol
+  has zero refs, new endpoint responds, inventory flag flipped) — or
+  drop the AC and rely on Test expectations + reviewer.
 - A brief whose `touches` list exceeds 8 files and not splitting it.
 - Writing ADRs in `specs/<feature>/decisions/` instead of repo-level
   `docs/decisions/` — they belong in the durable, globally-numbered home.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPodRequestSchema } from './pod.schema.js';
+import { acDefinitionSchema, createPodRequestSchema } from './pod.schema.js';
 
 describe('createPodRequestSchema', () => {
   it('preserves referenceRepos with sourceProfile through parse', () => {
@@ -47,5 +47,28 @@ describe('createPodRequestSchema', () => {
       referenceRepoPat: 'should-be-stripped',
     } as unknown as Parameters<typeof createPodRequestSchema.parse>[0]);
     expect(parsed).not.toHaveProperty('referenceRepoPat');
+  });
+});
+
+describe('acDefinitionSchema', () => {
+  it.each(['none', 'api', 'web', 'cmd'] as const)('accepts type=%s', (type) => {
+    const parsed = acDefinitionSchema.parse({
+      type,
+      test: "rg -l 'X' src/",
+      pass: 'no matches',
+      fail: 'any match',
+    });
+    expect(parsed.type).toBe(type);
+  });
+
+  it('rejects unknown ac types', () => {
+    expect(() =>
+      acDefinitionSchema.parse({
+        type: 'shell',
+        test: 'echo hi',
+        pass: 'exit 0',
+        fail: 'non-zero',
+      }),
+    ).toThrow();
   });
 });

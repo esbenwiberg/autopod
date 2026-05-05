@@ -1061,7 +1061,7 @@ function makeSyntheticFailure(path: string, error: string): PageResult {
 
 // ── AC Validation phase ─────────────────────────────────────────────────────
 
-export type AcValidationType = 'web-ui' | 'api' | 'none';
+export type AcValidationType = 'web-ui' | 'api' | 'cmd' | 'none';
 
 export interface ClassifiedAc {
   criterion: string;
@@ -1075,7 +1075,9 @@ export interface ClassifiedAc {
 
 /** Map brief-declared `AcType` to the engine's internal `AcValidationType`. */
 function mapBriefType(t: AcType): AcValidationType {
-  return t === 'web' ? 'web-ui' : t;
+  if (t === 'web') return 'web-ui';
+  if (t === 'cmd') return 'cmd';
+  return t;
 }
 
 const COMMAND_LIKE_AC_PATTERNS: RegExp[] = [
@@ -1151,7 +1153,7 @@ export async function classifyAcTypes(
   // Brief frontmatter and the pod repository both produce `AcDefinition` with a
   // declared `type` — trust it and skip the LLM classification entirely.
   const allDeclared = acs.every(
-    (ac) => ac.type === 'none' || ac.type === 'api' || ac.type === 'web',
+    (ac) => ac.type === 'none' || ac.type === 'api' || ac.type === 'web' || ac.type === 'cmd',
   );
 
   let classifiedRemaining: ClassifiedAc[];
@@ -1259,7 +1261,7 @@ export function parseClassificationJson(
     const parsed = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(parsed)) return null;
 
-    const validTypes = new Set<string>(['web-ui', 'api', 'none']);
+    const validTypes = new Set<string>(['web-ui', 'api', 'cmd', 'none']);
     const results = parsed.filter(
       (item: unknown): item is ClassifiedAc =>
         typeof item === 'object' &&
@@ -1427,6 +1429,7 @@ async function runAcValidation(
     {
       webUi: classified.filter((c) => c.validationType === 'web-ui').length,
       api: classified.filter((c) => c.validationType === 'api').length,
+      cmd: classified.filter((c) => c.validationType === 'cmd').length,
       none: classified.filter((c) => c.validationType === 'none').length,
       deduped: config.acceptanceCriteria.length - dedupedCriteria.length,
     },
@@ -1436,6 +1439,7 @@ async function runAcValidation(
   // Step 3: Split by type
   const webUiAcs = classified.filter((c) => c.validationType === 'web-ui');
   const apiAcs = classified.filter((c) => c.validationType === 'api');
+  const cmdAcs = classified.filter((c) => c.validationType === 'cmd');
   const noneAcs = classified.filter((c) => c.validationType === 'none');
 
   // Step 4: Execute each bucket (using dedupedConfig so the LLM sees clean, non-duplicate ACs)
@@ -1447,6 +1451,9 @@ async function runAcValidation(
   }));
 
   const apiResults = apiAcs.length > 0 ? await executeApiChecks(dedupedConfig, apiAcs, log) : [];
+
+  const cmdResults =
+    cmdAcs.length > 0 ? await executeCmdChecks(containerManager, dedupedConfig, cmdAcs, log) : [];
 
   let browserResults: AcCheckResult[] = [];
   if (webUiAcs.length > 0) {
@@ -1472,7 +1479,12 @@ async function runAcValidation(
   // Step 5: Expand deduplicated results back to original criteria.
   // When two original ACs mapped to the same canonical form (e.g., one has a
   // parenthetical suffix), both get the same result so neither shows as "missing".
-  const compactResults: AcCheckResult[] = [...browserResults, ...apiResults, ...noneResults];
+  const compactResults: AcCheckResult[] = [
+    ...browserResults,
+    ...apiResults,
+    ...cmdResults,
+    ...noneResults,
+  ];
   const results: AcCheckResult[] = expandResult(compactResults);
 
   // Only count automated checks (web-ui and api) for pass/fail determination
@@ -1873,6 +1885,87 @@ export function parseApiCheckSpecs(raw: string, log?: Logger): ApiCheckSpec[] | 
   } catch {
     return null;
   }
+}
+
+/**
+ * Execute `cmd`-typed ACs as shell commands inside the container. Each AC's
+ * criterion text *is* the command to run. Pass/fail is decided from the exit
+ * code, with a small set of pass-hint heuristics for grep-style "no match"
+ * semantics.
+ *
+ * `cmd` ACs are intended for narrow assertions the api/web buckets cannot
+ * observe (a symbol stopped existing, a generated file is present, an
+ * inventory flag flipped). Build / test / lint commands are filtered out
+ * upstream by `isCommandLikeAc()` and never reach this path.
+ *
+ * @internal Exported for testing.
+ */
+export async function executeCmdChecks(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  cmdAcs: ClassifiedAc[],
+  log?: Logger,
+): Promise<AcCheckResult[]> {
+  const containerId = config.containerId;
+  if (!containerId) {
+    return cmdAcs.map((c) => ({
+      criterion: c.criterion,
+      passed: false,
+      validationType: 'cmd' as const,
+      reasoning: 'No container available to execute cmd AC',
+    }));
+  }
+
+  const NEGATIVE_HINTS = [
+    'no match',
+    'no matches',
+    '0 matches',
+    'zero matches',
+    'empty',
+    'not found',
+    'no output',
+  ];
+
+  function expectNoOutput(passHint: string | undefined, failHint: string | undefined): boolean {
+    const hay = `${passHint ?? ''} ${failHint ?? ''}`.toLowerCase();
+    return NEGATIVE_HINTS.some((h) => hay.includes(h));
+  }
+
+  const results = await Promise.all(
+    cmdAcs.map(async (ac) => {
+      try {
+        const exec = await containerManager.execInContainer(
+          containerId,
+          ['sh', '-c', ac.criterion],
+          { timeout: 30_000 },
+        );
+        const stdoutTrimmed = exec.stdout.trim();
+        const stdoutPreview = exec.stdout.slice(0, 800);
+        const stderrPreview = exec.stderr.slice(0, 400);
+        const negative = expectNoOutput(ac.pass, ac.fail);
+        const passed = negative ? exec.exitCode !== 0 || stdoutTrimmed === '' : exec.exitCode === 0;
+        const reasoning = passed
+          ? `Command exited ${exec.exitCode}${stdoutTrimmed ? ` with output: ${stdoutPreview}` : ' (no output)'}`
+          : `Command exited ${exec.exitCode}. stdout: ${stdoutPreview || '(empty)'} stderr: ${stderrPreview || '(empty)'}`;
+        return {
+          criterion: ac.criterion,
+          passed,
+          validationType: 'cmd' as const,
+          reasoning,
+        } satisfies AcCheckResult;
+      } catch (err) {
+        log?.warn({ err, criterion: ac.criterion }, 'cmd AC execution failed');
+        return {
+          criterion: ac.criterion,
+          passed: false,
+          validationType: 'cmd' as const,
+          reasoning: `cmd AC failed to execute: ${err instanceof Error ? err.message : String(err)}`,
+        } satisfies AcCheckResult;
+      }
+    }),
+  );
+
+  return results;
 }
 
 function buildAcScriptPrompt(

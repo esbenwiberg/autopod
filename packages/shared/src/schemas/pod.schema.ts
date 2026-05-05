@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
 
-export const acTypeSchema = z.enum(['none', 'api', 'web']);
+export const acTypeSchema = z.enum(['none', 'api', 'web', 'cmd']);
 
 export const acDefinitionSchema = z.object({
   type: acTypeSchema,

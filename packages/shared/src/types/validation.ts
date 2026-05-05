@@ -89,7 +89,7 @@ export interface AcCheckResult {
   /** Reviewer/executor reasoning about why it passed or failed */
   reasoning: string;
   /** How this criterion was (or was not) validated */
-  validationType?: 'web-ui' | 'api' | 'none';
+  validationType?: 'web-ui' | 'api' | 'cmd' | 'none';
 }
 
 export interface AcValidationResult {
