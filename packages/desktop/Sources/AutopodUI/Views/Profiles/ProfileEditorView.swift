@@ -170,6 +170,7 @@ public struct ProfileEditorView: View {
     @State public var profile: Profile
     public let isNew: Bool
     public let actionCatalog: [ActionCatalogItem]
+    public let builtinSkills: [BuiltinSkillEntry]
     public var onSave: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
     public var memoryEntries: [MemoryEntry] = []
@@ -215,6 +216,7 @@ public struct ProfileEditorView: View {
 
     public init(profile: Profile, isNew: Bool,
                 actionCatalog: [ActionCatalogItem] = [],
+                builtinSkills: [BuiltinSkillEntry] = [],
                 onSave: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 memoryEntries: [MemoryEntry] = [],
@@ -233,6 +235,7 @@ public struct ProfileEditorView: View {
         self._profile = State(initialValue: profile)
         self.isNew = isNew
         self.actionCatalog = actionCatalog
+        self.builtinSkills = builtinSkills
         self.onSave = onSave
         self.onAuthenticate = onAuthenticate
         self.memoryEntries = memoryEntries
@@ -2034,60 +2037,8 @@ public struct ProfileEditorView: View {
         fieldRow("Skills", help: "Slash commands available to the agent in the container.") {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(profile.skills.indices, id: \.self) { i in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            TextField("name", text: $profile.skills[i].name)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(width: 140)
-                            TextField("description", text: Binding(
-                                get: { profile.skills[i].description ?? "" },
-                                set: { profile.skills[i].description = $0.isEmpty ? nil : $0 }
-                            ))
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.caption, design: .monospaced))
-                            Button {
-                                profile.skills.remove(at: i)
-                            } label: {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundStyle(.red.opacity(0.6))
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                        HStack(spacing: 6) {
-                            Picker("", selection: $profile.skills[i].sourceType) {
-                                Text("local").tag("local")
-                                Text("github").tag("github")
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(width: 140)
-                            .labelsHidden()
-
-                            if profile.skills[i].sourceType == "local" {
-                                TextField(
-                                    "absolute or cwd-relative path to .md file",
-                                    text: $profile.skills[i].localPath
-                                )
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.caption, design: .monospaced))
-                            } else {
-                                TextField("owner/repo", text: $profile.skills[i].githubRepo)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .frame(width: 160)
-                                TextField(
-                                    "path (defaults to <name>.md)",
-                                    text: $profile.skills[i].githubPath
-                                )
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.caption, design: .monospaced))
-                                TextField("ref (default: main)", text: $profile.skills[i].githubRef)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .frame(width: 110)
-                            }
-                        }
-                        .padding(.leading, 4)
+                    SkillRowEditor(skill: $profile.skills[i], builtinSkills: builtinSkills) {
+                        profile.skills.remove(at: i)
                     }
                 }
                 Button {
@@ -3386,53 +3337,7 @@ public struct ProfileEditorView: View {
             itemLabel: { $0.name.isEmpty ? "(unnamed)" : $0.name },
             emptyItem: { InjectedSkill() },
             itemEditor: { $item in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        TextField("name", text: $item.name)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.caption, design: .monospaced))
-                            .frame(width: 160)
-                        TextField("description", text: Binding(
-                            get: { item.description ?? "" },
-                            set: { item.description = $0.isEmpty ? nil : $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.caption))
-                    }
-                    HStack(spacing: 6) {
-                        Picker("", selection: $item.sourceType) {
-                            Text("local").tag("local")
-                            Text("github").tag("github")
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 140)
-                        .labelsHidden()
-
-                        if item.sourceType == "local" {
-                            TextField(
-                                "absolute or cwd-relative path to .md file",
-                                text: $item.localPath
-                            )
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.caption, design: .monospaced))
-                        } else {
-                            TextField("owner/repo", text: $item.githubRepo)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(width: 160)
-                            TextField(
-                                "path (defaults to <name>.md)",
-                                text: $item.githubPath
-                            )
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.caption, design: .monospaced))
-                            TextField("ref (default: main)", text: $item.githubRef)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(width: 110)
-                        }
-                    }
-                }
+                SkillRowEditor(skill: $item, builtinSkills: builtinSkills)
             }
         )
     }
@@ -4523,6 +4428,105 @@ private struct DeploymentAllowedScriptsEditor: View {
     private func sync() {
         let next = rows.map(\.glob).filter { !$0.isEmpty }
         if next != scripts { scripts = next }
+    }
+}
+
+// MARK: - SkillRowEditor
+
+/// Inline editor for a single InjectedSkill entry.
+/// Shows a source-type picker (builtin / local / github) and the appropriate
+/// fields for each type. When `builtin` is selected and `builtinSkills` is
+/// non-empty a dropdown lets the user pick by name; otherwise a free-text
+/// field is shown as a fallback.
+private struct SkillRowEditor: View {
+    @Binding var skill: InjectedSkill
+    let builtinSkills: [BuiltinSkillEntry]
+    var onRemove: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                // Name — free-text for local/github, picker or free-text for builtin
+                if skill.sourceType == "builtin" && !builtinSkills.isEmpty {
+                    Picker("", selection: $skill.name) {
+                        Text("Select skill…").tag("")
+                        ForEach(builtinSkills) { entry in
+                            Text(entry.name).tag(entry.name)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
+                    .onChange(of: skill.name) { _, newName in
+                        // Auto-fill description from daemon metadata when unset
+                        if skill.description == nil || skill.description?.isEmpty == true,
+                           let entry = builtinSkills.first(where: { $0.name == newName }),
+                           let desc = entry.description {
+                            skill.description = desc
+                        }
+                    }
+                } else {
+                    TextField("name", text: $skill.name)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 140)
+                }
+                TextField("description (optional)", text: Binding(
+                    get: { skill.description ?? "" },
+                    set: { skill.description = $0.isEmpty ? nil : $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.caption, design: .monospaced))
+                if let onRemove {
+                    Button(action: onRemove) {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.red.opacity(0.6))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            HStack(spacing: 6) {
+                Picker("", selection: $skill.sourceType) {
+                    Text("builtin").tag("builtin")
+                    Text("local").tag("local")
+                    Text("github").tag("github")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                .labelsHidden()
+
+                switch skill.sourceType {
+                case "builtin":
+                    if builtinSkills.isEmpty {
+                        Text("No builtin skills found — check SKILLS_DIR")
+                            .font(.system(.caption))
+                            .foregroundStyle(.secondary)
+                    }
+                case "local":
+                    TextField(
+                        "absolute or cwd-relative path to .md file",
+                        text: $skill.localPath
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                default: // github
+                    TextField("owner/repo", text: $skill.githubRepo)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 160)
+                    TextField(
+                        "path (defaults to <name>.md)",
+                        text: $skill.githubPath
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    TextField("ref (default: main)", text: $skill.githubRef)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 110)
+                }
+            }
+            .padding(.leading, 4)
+        }
     }
 }
 

@@ -47,6 +47,7 @@ import { podRoutes } from './routes/pods.js';
 import { profileRoutes } from './routes/profiles.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
 import { seriesRoutes } from './routes/series.js';
+import { skillRoutes } from './routes/skills.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { websocketHandler } from './websocket.js';
 import './types.js';
@@ -178,6 +179,9 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   if (deps.actionRegistry) {
     actionRoutes(app, deps.actionRegistry);
   }
+
+  // Builtin skills catalog
+  skillRoutes(app);
 
   // Diff routes (requires container manager)
   if (deps.containerManagerFactory) {

@@ -207,17 +207,18 @@ public enum ProfileMapper {
         ["heading": $0.heading, "content": $0.content]
       },
       "skills": profile.skills.map { s -> [String: Any] in
-        // Daemon's InjectedSkill schema requires `source`. Pass through the
-        // user-configured source dict; fall back to a local default keyed on
-        // name if the editor left it unset or blank so the patch validates —
-        // resolution at pod-run time still requires the file to exist on the
-        // daemon host.
         var r: [String: Any] = ["name": s.name]
         var src = s.source ?? [:]
-        if (src["type"] ?? "local") == "local" && (src["path"]?.isEmpty ?? true) {
+        let sourceType = src["type"] ?? "local"
+        if sourceType == "builtin" {
+          // builtin only needs the type discriminator; name identifies the skill.
+          src = ["type": "builtin"]
+        } else if sourceType == "local" && (src["path"]?.isEmpty ?? true) {
+          // Fall back to a cwd-relative path so the patch validates.
           src = ["type": "local", "path": "\(s.name).md"]
+        } else if src["type"] == nil {
+          src["type"] = "local"
         }
-        if src["type"] == nil { src["type"] = "local" }
         r["source"] = src
         if let d = s.description, !d.isEmpty { r["description"] = d }
         return r

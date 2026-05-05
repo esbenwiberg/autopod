@@ -696,9 +696,13 @@ public struct InjectedSkill: Sendable {
                 s.removeValue(forKey: "repo")
                 s.removeValue(forKey: "ref")
                 s.removeValue(forKey: "token")
-            } else if newValue == "github" {
-                // Keep `path` — it is valid for both types.
+            } else if newValue == "builtin" {
+                s.removeValue(forKey: "path")
+                s.removeValue(forKey: "repo")
+                s.removeValue(forKey: "ref")
+                s.removeValue(forKey: "token")
             }
+            // github: keep `path` — it is valid for both local and github types.
             source = s
         }
     }

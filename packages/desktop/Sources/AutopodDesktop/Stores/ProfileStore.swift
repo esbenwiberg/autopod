@@ -9,6 +9,7 @@ public final class ProfileStore {
 
   public private(set) var profiles: [Profile] = []
   public private(set) var actionCatalog: [ActionCatalogItem] = []
+  public private(set) var builtinSkills: [BuiltinSkillEntry] = []
   public private(set) var isLoading = false
   public var error: String?
 
@@ -39,9 +40,12 @@ public final class ProfileStore {
     }
     isLoading = false
 
-    // Fetch action catalog in the background (non-blocking, best-effort)
+    // Fetch action catalog and builtin skills in the background (non-blocking, best-effort)
     if actionCatalog.isEmpty {
       await loadActionCatalog()
+    }
+    if builtinSkills.isEmpty {
+      await loadBuiltinSkills()
     }
   }
 
@@ -55,6 +59,16 @@ public final class ProfileStore {
     } catch {
       print("[ProfileStore] Failed to load action catalog: \(error)")
       // Non-fatal — UI falls back to group checkboxes
+    }
+  }
+
+  public func loadBuiltinSkills() async {
+    guard let api else { return }
+    do {
+      builtinSkills = try await api.fetchBuiltinSkills()
+    } catch {
+      print("[ProfileStore] Failed to load builtin skills: \(error)")
+      // Non-fatal — UI falls back to free-text name entry
     }
   }
 

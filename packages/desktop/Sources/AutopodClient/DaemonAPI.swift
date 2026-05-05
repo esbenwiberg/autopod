@@ -385,6 +385,14 @@ public actor DaemonAPI {
     try await request("GET", "/actions/catalog")
   }
 
+  // MARK: - Skills
+
+  public func fetchBuiltinSkills() async throws -> [BuiltinSkillEntry] {
+    struct Response: Codable { let skills: [BuiltinSkillEntry] }
+    let res: Response = try await request("GET", "/api/skills")
+    return res.skills
+  }
+
   // MARK: - Memory
 
   public func createMemoryWorkspace(profileName: String) async throws -> SessionResponse {

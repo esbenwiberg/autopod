@@ -1,6 +1,53 @@
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { type InjectedSkill, processContent } from '@autopod/shared';
 import type { Logger } from 'pino';
+
+/** Directory scanned for builtin (daemon-bundled) skills. Override via SKILLS_DIR env var. */
+export const BUILTIN_SKILLS_DIR = process.env.SKILLS_DIR ?? path.resolve(process.cwd(), 'skills');
+
+export interface BuiltinSkillMeta {
+  name: string;
+  description: string | null;
+}
+
+/**
+ * List all .md files in the builtin skills directory and extract their frontmatter name/description.
+ * Returns an empty array if the directory doesn't exist.
+ */
+export async function listBuiltinSkills(): Promise<BuiltinSkillMeta[]> {
+  let entries: string[];
+  try {
+    const dirents = await fs.readdir(BUILTIN_SKILLS_DIR);
+    entries = dirents.filter((f) => f.endsWith('.md'));
+  } catch {
+    return [];
+  }
+
+  const results = await Promise.all(
+    entries.map(async (file): Promise<BuiltinSkillMeta> => {
+      const name = file.replace(/\.md$/, '');
+      try {
+        const content = await fs.readFile(path.join(BUILTIN_SKILLS_DIR, file), 'utf-8');
+        const description = extractFrontmatterField(content, 'description');
+        return { name, description };
+      } catch {
+        return { name, description: null };
+      }
+    }),
+  );
+
+  return results.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function extractFrontmatterField(content: string, field: string): string | null {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match || !match[1]) return null;
+  const block = match[1];
+  // Handle multi-line quoted values (description: "..." or description: >)
+  const inlineMatch = block.match(new RegExp(`^${field}:\\s*["']?(.+?)["']?\\s*$`, 'm'));
+  return inlineMatch?.[1]?.trim() ?? null;
+}
 
 export interface ResolvedSkill {
   /** Skill name — used as the slash command name and filename */
@@ -46,6 +93,8 @@ async function resolveOne(skill: InjectedSkill, logger: Logger): Promise<Resolve
     switch (source.type) {
       case 'local':
         return await resolveLocal(skill, source.path, logger);
+      case 'builtin':
+        return await resolveLocal(skill, path.join(BUILTIN_SKILLS_DIR, `${skill.name}.md`), logger);
       case 'github':
         return await resolveGithub(skill, source, logger);
       default:

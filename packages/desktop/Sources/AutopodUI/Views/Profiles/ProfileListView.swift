@@ -24,6 +24,7 @@ private struct ProfileRow: Identifiable {
 public struct ProfileListView: View {
     public let profiles: [Profile]
     public let actionCatalog: [ActionCatalogItem]
+    public let builtinSkills: [BuiltinSkillEntry]
     public var onSave: ((Profile) async throws -> Void)?
     public var onCreate: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
@@ -36,6 +37,7 @@ public struct ProfileListView: View {
     )?
     public var onDelete: ((String) async throws -> Void)?
     public init(profiles: [Profile], actionCatalog: [ActionCatalogItem] = [],
+                builtinSkills: [BuiltinSkillEntry] = [],
                 onSave: ((Profile) async throws -> Void)? = nil, onCreate: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 onLoadEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
@@ -47,6 +49,7 @@ public struct ProfileListView: View {
                 )? = nil,
                 onDelete: ((String) async throws -> Void)? = nil) {
         self.profiles = profiles; self.actionCatalog = actionCatalog
+        self.builtinSkills = builtinSkills
         self.onSave = onSave; self.onCreate = onCreate
         self.onAuthenticate = onAuthenticate
         self.onLoadEditor = onLoadEditor
@@ -81,6 +84,7 @@ public struct ProfileListView: View {
                 profile: profile,
                 isNew: false,
                 actionCatalog: actionCatalog,
+                builtinSkills: builtinSkills,
                 onSave: onSave,
                 onAuthenticate: onAuthenticate,
                 onLoadEditor: onLoadEditor,
@@ -104,6 +108,7 @@ public struct ProfileListView: View {
                 profile: Profile(name: "", repoUrl: ""),
                 isNew: true,
                 actionCatalog: actionCatalog,
+                builtinSkills: builtinSkills,
                 onSave: onCreate
             )
         }
@@ -116,6 +121,7 @@ public struct ProfileListView: View {
                 ),
                 isNew: true,
                 actionCatalog: actionCatalog,
+                builtinSkills: builtinSkills,
                 onSave: onCreate,
                 onLoadEditor: onLoadEditor,
                 onSaveWithInheritance: onSaveWithInheritance,

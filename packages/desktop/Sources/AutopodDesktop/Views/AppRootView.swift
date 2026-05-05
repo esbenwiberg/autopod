@@ -177,6 +177,7 @@ public struct AppRootView: View {
         connectionManager: connectionManager,
         profiles: profileStore.profiles,
         actionCatalog: profileStore.actionCatalog,
+        builtinSkills: profileStore.builtinSkills,
         profileError: profileStore.error,
         onSaveProfile: { [profileStore] profile in
           try await profileStore.saveProfile(profile)
