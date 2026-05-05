@@ -44,7 +44,16 @@ export async function refreshOAuthToken(
 
   if (!response.ok) {
     const body = await response.text().catch(() => '(no body)');
-    if (response.status === 401 || response.status === 403) {
+    // OAuth 2.0 RFC 6749 §5.2: a token endpoint surfaces "invalid_grant",
+    // "invalid_token", or "expired_token" as the auth-failure class — and
+    // implementations are free to use 400 (Anthropic does), 401, or 403 for
+    // these. Status alone is unreliable; classify on the body's `error` field
+    // so the operator-facing message tells them to re-authenticate.
+    const isReauthError =
+      response.status === 401 ||
+      response.status === 403 ||
+      /\b(invalid_grant|invalid_token|expired_token)\b/.test(body);
+    if (isReauthError) {
       throw new Error(
         `OAuth refresh token expired or revoked (HTTP ${response.status}). ` +
           `Re-authenticate the MAX/PRO account and update the profile credentials. Body: ${body}`,

@@ -83,6 +83,48 @@ describe('refreshOAuthToken', () => {
     );
   });
 
+  it('classifies HTTP 400 with invalid_grant body as a re-auth error', async () => {
+    // Anthropic's token endpoint returns 400 (not 401) when the refresh token
+    // has been rotated/revoked. The error body is the source of truth — must
+    // surface re-auth wording so operators know to log in again.
+    const creds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'expired',
+      refreshToken: 'rotated-out',
+      expiresAt: new Date('2026-03-20T11:00:00Z').toISOString(),
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () =>
+        '{"error": "invalid_grant", "error_description": "Refresh token not found or invalid"}',
+    });
+
+    await expect(refreshOAuthToken(creds, logger)).rejects.toThrow(
+      'refresh token expired or revoked',
+    );
+  });
+
+  it('classifies HTTP 400 with expired_token body as a re-auth error', async () => {
+    const creds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'expired',
+      refreshToken: 'expired-token',
+      expiresAt: new Date('2026-03-20T11:00:00Z').toISOString(),
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => '{"error": "expired_token"}',
+    });
+
+    await expect(refreshOAuthToken(creds, logger)).rejects.toThrow(
+      'refresh token expired or revoked',
+    );
+  });
+
   it('retries once on 500 error', async () => {
     const creds: MaxCredentials = {
       provider: 'max',
