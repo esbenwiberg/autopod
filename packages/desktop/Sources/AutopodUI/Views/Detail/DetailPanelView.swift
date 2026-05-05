@@ -32,6 +32,10 @@ public struct DetailPanelView: View {
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
     public var onReloadLogs: (() -> Void)?
+    /// Open the Create Series sheet pre-filled with this pod's branch + profile.
+    /// Available on workspace pods (interactive) — both running (mid-flight handoff)
+    /// and complete (post-hoc spawn). Nil-safe — menu items are gated on this being set.
+    public var onLaunchSeriesFromPod: ((Pod) -> Void)?
     @Binding public var requestedTab: DetailTab?
 
     public init(
@@ -54,6 +58,7 @@ public struct DetailPanelView: View {
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
         onReloadLogs: (() -> Void)? = nil,
+        onLaunchSeriesFromPod: ((Pod) -> Void)? = nil,
         requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
         self.pod = pod; self.events = events; self.actions = actions
@@ -75,6 +80,7 @@ public struct DetailPanelView: View {
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
         self.onReloadLogs = onReloadLogs
+        self.onLaunchSeriesFromPod = onLaunchSeriesFromPod
         self._requestedTab = requestedTab
     }
 
@@ -342,6 +348,23 @@ public struct DetailPanelView: View {
                                 Task { await actions.promote(pod.id, "pr", nil, true) }
                             }
                         }
+                        // Spawn a series from this workspace's briefs. Doesn't change
+                        // this pod — just opens the Create Series sheet pre-filled
+                        // with the workspace's branch + profile so the new pods stack
+                        // on top of the user's in-flight work. We commit+push first
+                        // so "Path on branch" can read briefs the user just authored
+                        // (workspace pods don't auto-push until container exit).
+                        // Best-effort: open the sheet even if sync fails so the user
+                        // can fall back to local-folder mode.
+                        if let onLaunchSeriesFromPod {
+                            Divider()
+                            Button("Hand off → Series") {
+                                Task {
+                                    _ = await actions.syncWorkspaceBranch(pod.id)
+                                    onLaunchSeriesFromPod(pod)
+                                }
+                            }
+                        }
                     } label: {
                         Label("Complete", systemImage: "checkmark.circle")
                     }
@@ -606,6 +629,21 @@ public struct DetailPanelView: View {
             default:
                 if pod.isTerminal {
                     if pod.status == .complete {
+                        // Completed workspace pods can spawn a series from their
+                        // (now-pushed) branch. Same flow as PodCardFinal's context
+                        // menu, exposed here so users don't have to right-click the
+                        // card to find it.
+                        if pod.isWorkspace, let onLaunchSeriesFromPod {
+                            Button {
+                                onLaunchSeriesFromPod(pod)
+                            } label: {
+                                Label("Launch Series", systemImage: "rectangle.3.group.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .tint(.purple)
+                            .help("Open the Create Series sheet pre-filled with this workspace's branch + profile.")
+                        }
                         if let prUrl = pod.prUrl {
                             Button {
                                 NSWorkspace.shared.open(prUrl)

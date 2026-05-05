@@ -517,6 +517,26 @@ export function podRoutes(
     }
   });
 
+  // POST /pods/:podId/sync-branch — commit + push a running workspace's branch
+  // without changing pod state. Called by the desktop right before opening the
+  // Create Series sheet so "Path on branch" can read briefs the user just wrote
+  // (workspace pods don't auto-push until container exit). Best-effort: errors
+  // are returned in the body so the caller can fall through to a folder-based
+  // brief preview instead of failing the whole flow.
+  app.post('/pods/:podId/sync-branch', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    try {
+      const result = await podManager.syncWorkspaceBranch(podId);
+      return { ok: !result.error, ...result };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
   // POST /pods/:podId/kill — kill pod
   app.post('/pods/:podId/kill', async (request) => {
     const { podId } = request.params as { podId: string };

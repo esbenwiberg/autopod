@@ -108,9 +108,20 @@ public struct SessionCardFinal: View {
                     Label("Spawn follow-up pod", systemImage: "arrow.branch")
                 }
             }
-            if let onLaunchSeriesFromPod, pod.isWorkspace, pod.status == .complete {
+            if let onLaunchSeriesFromPod, pod.isWorkspace {
                 Button {
-                    onLaunchSeriesFromPod(pod)
+                    // For a still-running workspace, commit+push briefs first so
+                    // the Create Series sheet's "Path on branch" mode can read
+                    // them. For a complete workspace the branch is already
+                    // pushed, but the call is cheap and idempotent — daemon
+                    // returns committed=false/pushed=false when there's nothing
+                    // to do. Best-effort: open the sheet either way.
+                    Task {
+                        if !pod.isTerminal {
+                            _ = await actions.syncWorkspaceBranch(pod.id)
+                        }
+                        onLaunchSeriesFromPod(pod)
+                    }
                 } label: {
                     Label("Launch series from here", systemImage: "rectangle.3.group.fill")
                 }

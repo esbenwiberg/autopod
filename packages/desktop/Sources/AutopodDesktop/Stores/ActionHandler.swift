@@ -102,6 +102,9 @@ public final class ActionHandler {
           acceptanceCriteria: ac,
           baseBranch: base
         ) ?? nil
+      },
+      syncWorkspaceBranch: { [weak self] id in
+        await self?.syncWorkspaceBranch(id) ?? nil
       }
     )
   }
@@ -556,6 +559,17 @@ public final class ActionHandler {
         podStore.upsertSession(pod)
       }
       return response.seriesId
+    } catch {
+      lastError = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func syncWorkspaceBranch(_ podId: String) async -> SyncBranchResponse? {
+    pendingAction = "sync-branch-\(podId)"
+    defer { pendingAction = nil }
+    do {
+      return try await api.syncWorkspaceBranch(podId)
     } catch {
       lastError = error.localizedDescription
       return nil

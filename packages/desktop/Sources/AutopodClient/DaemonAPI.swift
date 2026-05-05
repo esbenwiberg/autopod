@@ -84,6 +84,14 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/kill")
   }
 
+  /// Commit + push a running workspace's branch without changing pod state.
+  /// Best-effort — daemon returns ok=false with an error string on failure
+  /// rather than throwing, so callers can fall through (e.g. open the Create
+  /// Series sheet anyway and let the user pick local-folder mode).
+  public func syncWorkspaceBranch(_ id: String) async throws -> SyncBranchResponse {
+    return try await request("POST", "/pods/\(id)/sync-branch")
+  }
+
   public func completeSession(
     _ id: String,
     promoteTo: String? = nil,
@@ -658,6 +666,13 @@ public struct ResumeResponse: Codable, Sendable {
   public let ok: Bool?
   /// Either "retry-pr" (Path 1: push + open PR) or "revalidate" (Path 2: re-run validation only).
   public let action: String?
+}
+
+public struct SyncBranchResponse: Codable, Sendable {
+  public let ok: Bool?
+  public let committed: Bool?
+  public let pushed: Bool?
+  public let error: String?
 }
 
 struct KickBody: Codable {

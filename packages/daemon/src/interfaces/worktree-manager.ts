@@ -109,7 +109,7 @@ export interface WorktreeManager {
   pushBranch(
     worktreePath: string,
     expectedBranch: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; pat?: string },
   ): Promise<void>;
   /** Pull latest changes from origin for the current branch. */
   pullBranch(worktreePath: string): Promise<{ newCommits: boolean }>;

@@ -83,6 +83,11 @@ public struct PodActions: Sendable {
     _ acceptanceCriteria: [AcDefinition]?,
     _ baseBranch: String?
   ) async -> String?
+  /// Commit + push a workspace pod's branch without changing pod state.
+  /// Used right before opening the Create Series sheet so "Path on branch"
+  /// preview can read briefs the user just authored. Returns the daemon
+  /// response — caller should fall through (open sheet anyway) on failure.
+  public var syncWorkspaceBranch: @MainActor @Sendable (String) async -> SyncBranchResponse?
 
   public init(
     approve: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -122,7 +127,8 @@ public struct PodActions: Sendable {
     previewSeriesOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> SeriesPreviewResponse? = { _, _, _ in nil },
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
     createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
-    spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, [AcDefinition]?, String?) async -> String? = { _, _, _, _, _, _, _ in nil }
+    spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, [AcDefinition]?, String?) async -> String? = { _, _, _, _, _, _, _ in nil },
+    syncWorkspaceBranch: @escaping @MainActor @Sendable (String) async -> SyncBranchResponse? = { _ in nil }
   ) {
     self.approve = approve
     self.reject = reject
@@ -162,6 +168,7 @@ public struct PodActions: Sendable {
     self.lastPreviewError = lastPreviewError
     self.createSeries = createSeries
     self.spawnDependent = spawnDependent
+    self.syncWorkspaceBranch = syncWorkspaceBranch
   }
 
   /// No-op instance for previews

@@ -432,38 +432,45 @@ export class LocalWorktreeManager implements WorktreeManager {
     try {
       const bufOpts = { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 };
 
-      // Committed changes: base..HEAD
-      const { stdout: committedDiff } = await git(
-        ['diff', base, 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
-        bufOpts,
-      );
-
-      // Uncommitted changes: working tree vs HEAD (staged + unstaged)
-      const { stdout: uncommittedDiff } = await git(
-        ['diff', 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
-        bufOpts,
-      );
-
-      const combined =
-        uncommittedDiff.length > 0 ? `${committedDiff}\n${uncommittedDiff}` : committedDiff;
+      // Single working-tree-vs-base diff. Earlier versions ran `git diff base HEAD`
+      // and `git diff HEAD` separately and concatenated the output, which produced
+      // a diff text that double-counted files touched by BOTH a commit and the
+      // working tree. The classic failure mode: the agent committed adding `foo.cs`
+      // (e.g. via the workspace handoff auto-commit) and then later `rm`'d it in
+      // the working tree without committing the deletion. The combined output
+      // contained two file sections — one "+++ foo.cs (added)" hunk from the
+      // committed diff and one "--- foo.cs (deleted)" hunk from the uncommitted
+      // diff — and AI reviewers latched onto the first hunk and flagged it as
+      // scope creep, even though the net delta against base was zero.
+      //
+      // `git diff <base>` (single ref) compares the working tree directly to
+      // <base>'s tree: committed and uncommitted changes are folded into one
+      // coherent net delta. Files added then removed cancel out; files modified
+      // multiple times show as a single end-state diff. This is what every
+      // current caller (pre-submit reviewer, AI task reviewer, re-validation
+      // reviewer) actually wants — they evaluate "what is the agent proposing
+      // to land", not the intermediate commit history.
+      //
+      // Untracked files are still excluded (matches prior behaviour) — they
+      // require `--no-index` or `git status -uall` and are intentionally not
+      // part of the reviewer's scope.
+      const { stdout: rawDiff } = await git(['diff', base, ...DIFF_EXCLUDE_PATHSPECS], bufOpts);
 
       // If sinceCommit produced an empty diff, fall back to merge-base.
       // This handles the case where the worktree wasn't synced from the container
       // (git history didn't carry over) but the branch diverged from defaultBranch.
-      if (!combined.trim() && sinceCommit) {
+      if (!rawDiff.trim() && sinceCommit) {
         const mergeBase = await this.resolveMergeBase(worktreePath, baseBranch);
         if (mergeBase && mergeBase !== sinceCommit) {
-          const { stdout: mbCommitted } = await git(
-            ['diff', mergeBase, 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
+          const { stdout: mbDiff } = await git(
+            ['diff', mergeBase, ...DIFF_EXCLUDE_PATHSPECS],
             bufOpts,
           );
-          const mbCombined =
-            uncommittedDiff.length > 0 ? `${mbCommitted}\n${uncommittedDiff}` : mbCommitted;
-          return truncateDiffAtFileBoundary(stripModeOnlyChanges(mbCombined), maxLength);
+          return truncateDiffAtFileBoundary(stripModeOnlyChanges(mbDiff), maxLength);
         }
       }
 
-      return truncateDiffAtFileBoundary(stripModeOnlyChanges(combined), maxLength);
+      return truncateDiffAtFileBoundary(stripModeOnlyChanges(rawDiff), maxLength);
     } catch (err) {
       this.logger.warn({ err: sanitizeGitError(err), worktreePath }, 'getDiff: git diff failed');
       return '';
@@ -633,7 +640,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   async pushBranch(
     worktreePath: string,
     expectedBranch: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; pat?: string },
   ): Promise<void> {
     const force = options?.force === true;
     this.logger.info({ worktreePath, expectedBranch, force }, 'Pushing branch to origin');
@@ -644,6 +651,13 @@ export class LocalWorktreeManager implements WorktreeManager {
       throw new Error(
         `Expected HEAD to be on branch '${expectedBranch}' but it is on '${actualBranch.trim()}'`,
       );
+    }
+    if (options?.pat) {
+      const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
+        cwd: worktreePath,
+      });
+      const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
+      this.patCache.set(bareRepoPath, options.pat);
     }
     const authUrl = await this.getAuthUrl(worktreePath);
     // --force-with-lease (not --force) — refuses the push if origin/<branch> moved

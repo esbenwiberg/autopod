@@ -393,6 +393,7 @@ public struct MainView: View {
                     isLoadingLogs: isLoadingLogs,
                     logsLoadError: logsLoadError,
                     onReloadLogs: onReloadLogs,
+                    onLaunchSeriesFromPod: { seriesFromPod = $0 },
                     requestedTab: $requestedDetailTab
                 )
                 .id(pod.id)

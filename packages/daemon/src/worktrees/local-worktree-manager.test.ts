@@ -319,23 +319,27 @@ describe('LocalWorktreeManager', () => {
       expect(result).not.toContain('x'.repeat(200));
     });
 
-    it('combines committed and uncommitted diffs', async () => {
-      const committedDiff = 'diff --git a/foo.ts b/foo.ts\n+committed\n';
-      const uncommittedDiff = 'diff --git a/bar.ts b/bar.ts\n+uncommitted\n';
-      let diffCallCount = 0;
+    it('uses a single working-tree-vs-base diff so committed and uncommitted changes fold into one net delta', async () => {
+      // Regression: the previous implementation ran `git diff base HEAD` and
+      // `git diff HEAD` separately and concatenated the output. When the same
+      // file was touched by both a commit and the working tree (e.g. agent
+      // committed an addition then `rm`'d it without committing the deletion),
+      // the diff text contained two file sections — added + deleted — and AI
+      // reviewers latched onto the first hunk and flagged scope creep even
+      // when the net delta was zero.
+      const netDiff =
+        'diff --git a/foo.ts b/foo.ts\n+committed\n' +
+        'diff --git a/bar.ts b/bar.ts\n+uncommitted\n';
+      const diffCallArgs: string[][] = [];
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
           const cmd = args.join(' ');
           if (cmd.includes('merge-base')) {
             cb(null, { stdout: 'abc1234\n', stderr: '' });
-          } else if (cmd.includes('diff')) {
-            diffCallCount++;
-            if (diffCallCount === 1) {
-              cb(null, { stdout: committedDiff, stderr: '' });
-            } else {
-              cb(null, { stdout: uncommittedDiff, stderr: '' });
-            }
+          } else if (args[0] === 'diff') {
+            diffCallArgs.push([...args]);
+            cb(null, { stdout: netDiff, stderr: '' });
           } else {
             cb(null, { stdout: '', stderr: '' });
           }
@@ -344,7 +348,43 @@ describe('LocalWorktreeManager', () => {
       );
 
       const result = await manager.getDiff('/tmp/worktree/sess', 'main');
-      expect(result).toBe(`${committedDiff}\n${uncommittedDiff}`);
+      expect(result).toBe(netDiff);
+      // Exactly one diff invocation, single-arg form (working tree vs base).
+      expect(diffCallArgs).toHaveLength(1);
+      // The diff command must NOT pass HEAD as a second positional ref —
+      // that's the two-arg form that produces the double-counted output.
+      const positional = diffCallArgs[0]?.filter((a) => !a.startsWith(':(exclude)')) ?? [];
+      expect(positional).toEqual(['diff', 'abc1234']);
+    });
+
+    it('cancels file added in commit and removed in working tree (the AADGroups regression)', async () => {
+      // End-to-end shape of the screenshot-#4 bug. The workspace handoff
+      // committed `AADGroups.cs` (the warm-image leak), then the agent rm'd
+      // the file in the working tree without committing the deletion. The
+      // single-arg `git diff <base>` collapses this to an empty net delta —
+      // exactly what `git diff main..HEAD` would show after the deletion
+      // commit lands.
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('merge-base')) {
+            cb(null, { stdout: 'base-sha\n', stderr: '' });
+          } else if (args[0] === 'diff') {
+            // Working-tree-vs-base sees no AADGroups.cs in either tree — the
+            // file was added then removed within the [base, working tree] range
+            // and git folds those into nothing.
+            cb(null, { stdout: '', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.getDiff('/tmp/worktree/sess', 'main', undefined, 'base-sha');
+      expect(result).toBe('');
+      expect(result).not.toContain('AADGroups');
     });
 
     it('returns empty string on error', async () => {

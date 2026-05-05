@@ -274,10 +274,12 @@ export interface Pod {
   /** Operator-supplied reason for the force-complete. Null when not force-completed. */
   forceCompletedReason: string | null;
   /**
-   * ISO timestamp of the most recent AgentEvent consumed for this pod. The stuck-pod
-   * watchdog reads this to detect `running` pods whose agent stream has gone silent
-   * (container hang, network blip) and auto-fails them so the concurrency slot frees up.
-   * Null until the first event arrives.
+   * ISO timestamp of the most recent liveness signal for this pod — either an
+   * AgentEvent from the runtime stream or a system status emission during
+   * bootstrap/recovery. The stuck-pod watchdog reads this to detect `running`
+   * pods that have gone silent (container hang, network blip) and auto-fails
+   * them so the concurrency slot frees up. Null until the first signal arrives.
+   * The DB column is `last_agent_event_at` for historical reasons.
    */
   lastAgentEventAt: string | null;
   /**

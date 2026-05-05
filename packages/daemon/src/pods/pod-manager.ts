@@ -614,6 +614,20 @@ export interface PodManager {
       skipAgent?: boolean;
     },
   ): Promise<{ pushError?: string; promotedTo?: 'pr' | 'branch' | 'artifact' | 'none' }>;
+  /**
+   * Sync a running interactive workspace's branch to origin without changing
+   * pod state — used when the desktop wants to spawn a series from briefs that
+   * live in the workspace's worktree. Mirrors the sync+commit+push of
+   * `completeSession` but skips worktree cleanup and the `complete` transition,
+   * so the user can keep iterating after the handoff. Best-effort: errors are
+   * surfaced in the return value rather than thrown so the caller can still
+   * fall through to a folder-based brief preview.
+   */
+  syncWorkspaceBranch(podId: string): Promise<{
+    committed: boolean;
+    pushed: boolean;
+    error?: string;
+  }>;
   /** Promote an interactive pod to auto on the same pod ID.
    *  `options.instructions` is the raw human-typed handoff text from the desktop sheet
    *  (or `--instructions` on the CLI); persisted as `handoffInstructions` and consumed
@@ -947,13 +961,32 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const validationAbortControllers = new Map<string, AbortController>();
 
   /**
-   * Per-pod throttle for `last_agent_event_at` DB writes. Bumped every agent event
-   * but persisted at most once per `EVENT_TIMESTAMP_WRITE_THROTTLE_MS` to avoid
-   * hammering SQLite during chatty streams. The watchdog threshold is in the
-   * tens of minutes so 10 s granularity is fine.
+   * Per-pod throttle for `last_agent_event_at` DB writes. Bumped on any liveness
+   * signal — agent stream events AND system status emissions during bootstrap
+   * or recovery — but persisted at most once per `EVENT_TIMESTAMP_WRITE_THROTTLE_MS`
+   * to avoid hammering SQLite. The watchdog threshold is in the tens of minutes
+   * so 10 s granularity is fine.
    */
   const lastEventWriteAt = new Map<string, number>();
   const EVENT_TIMESTAMP_WRITE_THROTTLE_MS = 10_000;
+
+  /**
+   * Throttled write of `last_agent_event_at`. Called from both the agent stream
+   * loop and `emitActivityStatus` so that bootstrap/recovery progress messages
+   * count as liveness — without this, the watchdog only sees the agent SSE
+   * stream and kills pods that are still mid-provisioning.
+   */
+  function bumpActivityTimestamp(podId: string): void {
+    const eventNow = Date.now();
+    const lastWrite = lastEventWriteAt.get(podId) ?? 0;
+    if (eventNow - lastWrite < EVENT_TIMESTAMP_WRITE_THROTTLE_MS) return;
+    lastEventWriteAt.set(podId, eventNow);
+    try {
+      podRepo.update(podId, { lastAgentEventAt: new Date(eventNow).toISOString() });
+    } catch (err) {
+      logger.warn({ err, podId }, 'Failed to bump lastAgentEventAt');
+    }
+  }
 
   /** Stuck-running watchdog interval handle (single global timer). */
   let stuckPodWatchdog: ReturnType<typeof setInterval> | null = null;
@@ -1973,6 +2006,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId,
       event: { type: 'status', timestamp: new Date().toISOString(), message },
     });
+    // Status emissions are also liveness signals — bootstrap/recovery progress
+    // would otherwise be invisible to the watchdog and trigger a false auto-fail
+    // before the agent process has even spawned.
+    bumpActivityTimestamp(podId);
   }
 
   /** Per-phase WebSocket events that drive the desktop Validation tab chips.
@@ -3225,6 +3262,46 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               );
             }
           }
+
+          // Strip untracked files left behind by the warm image. The image is built with
+          // `RUN git clone --depth 1` of the base branch at image-build time, then runs
+          // pre-warm install + build, then `rm -rf /workspace/.git`. Source files from
+          // that older clone stay in `/workspace/` as plain files. The earlier
+          // `cp -a /mnt/worktree/. /workspace/` is additive — it never deletes — so any
+          // file that the host worktree's branch has dropped (e.g. deleted in a later
+          // PR on main) survives in `/workspace` as an untracked file. `git restore .`
+          // only touches tracked paths, so it doesn't help.
+          //
+          // For workspace pods the leak is severe: on promote/handoff, syncWorkspaceBack
+          // does `cp -a /workspace/* /mnt/worktree/` and the subsequent `git add -A` in
+          // commitPendingChanges sweeps those stale files into a commit on the branch.
+          // For auto pods it shows up as build noise (native build tools discover
+          // sources via filesystem walk) and reviewer scope creep.
+          //
+          // `-fd` (no `-x`): preserves gitignored caches like node_modules, bin/, obj/,
+          // dist/, .next/ so subsequent build phases keep their incremental state.
+          // Combined with the prior `cp -a` + `git restore .`, the worktree now contains
+          // exactly what the branch tip has, plus the warm-image dependency caches —
+          // and nothing else.
+          const clean = await containerManager.execInContainer(
+            containerId,
+            ['git', '-C', '/workspace', 'clean', '-fd'],
+            { timeout: 30_000 },
+          );
+          if (clean.exitCode !== 0) {
+            // Non-fatal: a failure here means the agent may see stale untracked files,
+            // which is the bug we are fixing — but it's still better than aborting
+            // pod start. Log loudly so operators can correlate with downstream
+            // contamination reports.
+            logger.warn(
+              {
+                podId,
+                exitCode: clean.exitCode,
+                stderr: clean.stderr.slice(0, 500),
+              },
+              'git clean -fd failed in /workspace — image-baked untracked files may leak into the worktree',
+            );
+          }
         }
 
         // Pre-fill global git author identity so the user (or agent) doesn't hit
@@ -4101,19 +4178,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             event,
           });
 
-          // Throttled bump for the stuck-running watchdog. Accepts up to
-          // EVENT_TIMESTAMP_WRITE_THROTTLE_MS staleness — fine because the
-          // watchdog threshold dwarfs the throttle window.
-          const eventNow = Date.now();
-          const lastWrite = lastEventWriteAt.get(podId) ?? 0;
-          if (eventNow - lastWrite >= EVENT_TIMESTAMP_WRITE_THROTTLE_MS) {
-            lastEventWriteAt.set(podId, eventNow);
-            try {
-              podRepo.update(podId, { lastAgentEventAt: new Date(eventNow).toISOString() });
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to bump lastAgentEventAt');
-            }
-          }
+          bumpActivityTimestamp(podId);
 
           if (event.type === 'escalation') {
             const pod = podRepo.getOrThrow(podId);
@@ -5534,6 +5599,104 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       logger.info({ podId, pushError }, 'Workspace pod completed');
       return { pushError };
+    },
+
+    async syncWorkspaceBranch(
+      podId: string,
+    ): Promise<{ committed: boolean; pushed: boolean; error?: string }> {
+      const pod = podRepo.getOrThrow(podId);
+
+      if (pod.options.agentMode !== 'interactive') {
+        throw new AutopodError(
+          'sync-branch is only valid for interactive workspace pods',
+          'INVALID_OUTPUT_MODE',
+          400,
+        );
+      }
+      if (pod.status !== 'running') {
+        throw new AutopodError(
+          `Cannot sync workspace branch in status '${pod.status}' — pod must be running`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!pod.worktreePath || !pod.branch) {
+        throw new AutopodError(
+          'Pod has no worktree or branch — nothing to sync',
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      // Pull container changes back to the host worktree so any uncommitted
+      // briefs the user just wrote land on disk. Mirrors the first step of
+      // completeSession but stops short of pushing + cleaning up.
+      if (pod.containerId) {
+        try {
+          const cm = containerManagerFactory.get(pod.executionTarget);
+          await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+        } catch (err) {
+          logger.warn({ err, podId }, 'syncWorkspaceBranch: sync-back failed — continuing');
+        }
+      }
+
+      // Stage ONLY .md files. Workspace pods can have unrelated content sitting
+      // staged-or-untracked in the worktree (e.g. files copied from a stale
+      // container snapshot, or in-progress code work the user hasn't decided
+      // to commit yet). A blanket `git add -A` would sweep all of that into
+      // the handoff commit and trigger repo-local pre-commit hooks (build/lint
+      // checks) that have nothing to do with brief authoring. Scoping to .md
+      // keeps the snapshot tight: briefs, design.md, purpose.md, skill docs.
+      const profile = profileStore.get(pod.profileName);
+      const headBefore = await worktreeManager
+        .getCommitLog(pod.worktreePath, pod.branch, 1)
+        .catch(() => '');
+      try {
+        // List every .md path that differs from HEAD or is untracked. Using
+        // `git ls-files` with the `--others`/`--modified` flags catches both
+        // existing-but-edited briefs and brand-new ones in one pass.
+        const { stdout: mdListed } = await execFileAsync(
+          'git',
+          ['ls-files', '--modified', '--others', '--exclude-standard', '--', '*.md'],
+          { cwd: pod.worktreePath, maxBuffer: 10 * 1024 * 1024 },
+        );
+        const mdPaths = mdListed
+          .split('\n')
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0);
+
+        if (mdPaths.length === 0) {
+          logger.info(
+            { podId, branch: pod.branch },
+            'syncWorkspaceBranch: no .md changes to commit',
+          );
+          return { committed: false, pushed: false };
+        }
+
+        await worktreeManager.commitFiles(
+          pod.worktreePath,
+          mdPaths,
+          'chore: sync workspace for series handoff',
+        );
+
+        await worktreeManager.pushBranch(pod.worktreePath, pod.branch, {
+          pat: selectGitPat(profile),
+        });
+
+        const headAfter = await worktreeManager
+          .getCommitLog(pod.worktreePath, pod.branch, 1)
+          .catch(() => '');
+        const committed = headBefore !== headAfter;
+        logger.info(
+          { podId, branch: pod.branch, committed, mdFiles: mdPaths.length },
+          'syncWorkspaceBranch: briefs synced + pushed to origin',
+        );
+        return { committed, pushed: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn({ err, podId }, 'syncWorkspaceBranch: commit/push failed');
+        return { committed: false, pushed: false, error: message };
+      }
     },
 
     async triggerValidation(podId: string, options?: { force?: boolean }): Promise<void> {
@@ -7497,12 +7660,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // drives the container directly. They will never emit agent events,
             // so silence-based timeout cannot apply.
             if (pod.options?.agentMode === 'interactive') continue;
-            // Use lastAgentEventAt when present; fall back to startedAt/updatedAt
-            // for pods created before the migration or that never emitted an event.
-            const reference =
-              pod.lastAgentEventAt ?? pod.startedAt ?? pod.updatedAt ?? pod.createdAt;
-            const refMs = new Date(reference).getTime();
-            if (Number.isNaN(refMs)) continue;
+            // Reference is the most recent of (lastAgentEventAt, startedAt) —
+            // both are real liveness signals scoped to the current run.
+            // `startedAt` is reset on every transition into provisioning, so it
+            // acts as a freshness floor that prevents a stale `lastAgentEventAt`
+            // (from a prior life of the same pod, e.g. across recovery) from
+            // dragging the reference back across the threshold.
+            // Fall back to updatedAt/createdAt only when both primary signals
+            // are missing (pods predating the migration that added these fields).
+            const primary = [pod.lastAgentEventAt, pod.startedAt]
+              .filter((t): t is string => typeof t === 'string')
+              .map((t) => new Date(t).getTime())
+              .filter((ms) => !Number.isNaN(ms));
+            let refMs: number;
+            if (primary.length > 0) {
+              refMs = Math.max(...primary);
+            } else {
+              const fallback = pod.updatedAt ?? pod.createdAt;
+              refMs = new Date(fallback).getTime();
+              if (Number.isNaN(refMs)) continue;
+            }
             const ageMs = now - refMs;
             if (ageMs < thresholdMs) continue;
 

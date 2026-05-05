@@ -2433,6 +2433,42 @@ describe('PodManager', () => {
         expect(updated.startCommitSha).toBe(fakeSha);
       });
 
+      it('runs git clean -fd in /workspace during provisioning to strip image-baked untracked files', async () => {
+        // Regression: the warm Docker image is built with `git clone --depth 1` of the
+        // base branch at image-build time, then runs pre-warm install + build, then
+        // strips /workspace/.git. Source files from that older clone stay in /workspace.
+        // The pod-start `cp -a /mnt/worktree/. /workspace/` is additive (never deletes),
+        // so any file dropped from the branch since image-build survives as an untracked
+        // file. Workspace pods then commit those stale files via syncWorkspaceBack +
+        // `git add -A`, contaminating the branch. `git clean -fd` after `git restore .`
+        // is the upstream guard.
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace pod',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        await manager.processPod(pod.id);
+
+        const cleanCalls = ctx.containerManager.execInContainer.mock.calls.filter(
+          ([, cmd]) =>
+            Array.isArray(cmd) && cmd[0] === 'git' && cmd.includes('clean') && cmd.includes('-fd'),
+        );
+        expect(cleanCalls.length).toBeGreaterThanOrEqual(1);
+        // Must run inside /workspace (the container's overlayfs copy), not /mnt/worktree.
+        expect(cleanCalls[0]?.[1]).toEqual(['git', '-C', '/workspace', 'clean', '-fd']);
+        // Must NOT include `-x` — gitignored caches (node_modules, bin/, obj/, dist/)
+        // are required for subsequent build phases to keep their incremental state.
+        expect(cleanCalls[0]?.[1]).not.toContain('-x');
+        expect(cleanCalls[0]?.[1]).not.toContain('-fdx');
+      });
+
       it('reads acFrom file and populates acceptanceCriteria', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
@@ -3933,6 +3969,44 @@ describe('PodManager', () => {
         expect(ctx.containerManager.stop).not.toHaveBeenCalled();
         const refreshed = manager.getSession(pod.id);
         expect(refreshed.status).toBe('running');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not auto-fail a recovered pod whose lastAgentEventAt is stale from a prior run', async () => {
+      // Repro: the original Claude run died overnight (lastAgentEventAt is 8h old).
+      // Recovery re-provisions the container and transitions the pod through
+      // queued → provisioning → running, refreshing `startedAt` along the way.
+      // The fresh `startedAt` must take precedence over the stale `lastAgentEventAt`,
+      // otherwise the watchdog kills the pod the moment it enters 'running' again.
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'do thing' },
+          'user-1',
+        );
+        const ancient = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(); // 8h ago
+        const fresh = new Date(Date.now() - 30 * 1000).toISOString(); // 30s ago — current run
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/worktree/recovered',
+          containerId: 'container-recovered',
+          startedAt: fresh,
+        });
+        // Stale lastAgentEventAt left over from the prior life of this pod.
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: ancient });
+
+        manager.startStuckPodWatchdog({ intervalMs: 50, thresholdMs: 30 * 60 * 1000 });
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('running');
       } finally {
         vi.useRealTimers();
       }
