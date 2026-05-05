@@ -112,7 +112,7 @@ export interface PodBridge {
     scope: MemoryScope,
     path: string,
     content: string,
-    rationale?: string,
+    rationale: string,
   ): string;
 
   /** Trigger revalidation on a linked failed worker pod (pull + validate, no agent). */

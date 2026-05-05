@@ -137,11 +137,6 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe(
           'Deviations from the original plan. Use an empty array if you followed the plan exactly.',
         ),
-      memoriesSuggested: z
-        .boolean()
-        .describe(
-          'Set true if you called memory_suggest this pod. Set false if you had nothing worth capturing — filler suggestions are actively discouraged.',
-        ),
       acChecklist: z
         .array(
           z.object({
@@ -304,7 +299,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'memory_suggest',
-    'Suggest a memory for human approval. Only suggest if a future agent starting cold on this repo would benefit. Skip filler and restatements of CLAUDE.md. Include rationale explaining why the memory matters.',
+    'Suggest a memory for human approval. **Default is to skip.** Only suggest if you can name a specific future pod, on this profile, doing a different task, that would waste >5 minutes without this exact note. If you cannot picture the stuck moment concretely, do not call this tool. Filler is worse than nothing — an approval queue full of trivia gets ignored. Rationale is required and must name the future-pod scenario.',
     {
       scope: z
         .enum(['global', 'profile', 'pod'])
@@ -317,9 +312,8 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       content: z.string().describe('The memory content (markdown supported, ≤400 chars preferred)'),
       rationale: z
         .string()
-        .optional()
         .describe(
-          'One sentence on why a future agent needs this. Strongly recommended — suggestions without rationale are harder to approve and more likely to be rejected.',
+          'Required. One sentence naming the specific future-pod scenario this saves: "a pod doing X on this profile would waste Y minutes hitting Z". If you can\'t fill that in concretely, do not suggest the memory.',
         ),
     },
     async (input) => {

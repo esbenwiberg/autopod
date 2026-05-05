@@ -181,7 +181,7 @@ export function generateSystemInstructions(
   lines.push('  - memory_search — search memories by keyword');
   lines.push(
     '  - memory_suggest — suggest a new memory for human approval ' +
-      '(use to capture conventions, patterns, or reusable knowledge discovered during the pod)',
+      '(rare — see "Optional postscript" section; default is to skip)',
   );
 
   // Action tools live on the same MCP server — list them in the same bullet list
@@ -435,7 +435,7 @@ export function generateSystemInstructions(
       'The following knowledge entries are available. ' +
         'Review the list and use `memory_read` with the entry ID to retrieve full content for entries relevant to your task. ' +
         'Use `memory_search` to find entries by keyword. ' +
-        'To suggest new memories use `memory_suggest` — a human will review before it becomes active.',
+        'New suggestions are rare and gated by a high bar — see the "Optional postscript" section in the Workflow.',
     );
     lines.push('');
     for (const m of shown) {
@@ -524,52 +524,7 @@ export function generateSystemInstructions(
     '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
   );
   lines.push(
-    '5. **Capture knowledge for future agents**: Before finishing, call `memory_suggest` ' +
-      'if — and only if — you learned something worth preserving. ' +
-      "Skip it if you didn't. **Filler is worse than nothing** — an approval queue full of trivia gets ignored.",
-  );
-  lines.push('');
-  lines.push('   **Strong candidates** (suggest these):');
-  lines.push(
-    '   - Gotchas that fail silently or surprise you (API quirks, env assumptions, race conditions)',
-  );
-  lines.push(
-    "   - Integration details that aren't obvious from reading the code (auth flows, required headers, ordering constraints)",
-  );
-  lines.push('   - Decision rationale — *why* a pattern exists, not just that it does');
-  lines.push(
-    "   - Debugging lessons — what looked broken but wasn't, or what looked fine but hid a bug",
-  );
-  lines.push(
-    '   - Workflow tricks that saved time (or the failed path you tried first, so the next agent skips it)',
-  );
-  lines.push(
-    '   - Cross-cutting patterns specific to this codebase (error handling, retries, logging conventions)',
-  );
-  lines.push('');
-  lines.push('   **Weak candidates** (skip these):');
-  lines.push('   - Restating what `CLAUDE.md` already says');
-  lines.push('   - Generic best practices any competent agent already knows');
-  lines.push('   - What command you ran — only the *non-obvious* outcome matters');
-  lines.push('');
-  lines.push(
-    '   **Always pass a `rationale`** — one sentence on why a future agent needs this. ' +
-      "If you can't articulate why it matters, don't suggest it. " +
-      'Reviewers read the rationale first; a suggestion without one is usually rejected.',
-  );
-  lines.push('');
-  lines.push(
-    '   **Format**: Compact (≤400 chars content). One concept per entry. Prose, not code blocks — ' +
-      'include only the non-obvious line(s).\n' +
-      '   **Scope** — ask yourself "If a future pod is assigned a completely different task on this profile, does this memory still help them?"\n' +
-      '   - `profile` — yes, always true regardless of task (structural invariants, codebase-wide gotchas, auth patterns, architectural constraints)\n' +
-      '   - `pod` — no, only relevant to this task or this brief series (path explored, decision made for this PR, gotcha specific to these files)\n' +
-      '   - `global` — useful across all repos/profiles (universal tool quirks, cross-cutting patterns)\n' +
-      '   When in doubt, prefer `pod` — a narrow profile memory is noise; a well-targeted pod memory is gold.' +
-      ' Prefer updating an existing memory over creating a near-duplicate.',
-  );
-  lines.push(
-    '6. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
+    '5. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
   );
   lines.push(
     '   - `actualSummary`: 2–4 sentences describing what the user gains — focus on outcomes and ' +
@@ -599,11 +554,69 @@ export function generateSystemInstructions(
       'whether they were justified. A well-reasoned deviation is better than silently skipping a step.',
   );
   lines.push(
-    '7. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
+    '6. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
   );
   lines.push('   - Exploration → Implementation → Testing → Cleanup');
   lines.push('   - Analysis → Design → Build → Verify');
   lines.push('   - Investigation → Fix → Test → Document');
+  lines.push('');
+
+  // Memory suggestions are an OPTIONAL postscript — not a step in the
+  // workflow checklist above. Default behaviour is to skip; the bar is
+  // deliberately high to keep the human approval queue useful.
+  lines.push('### Optional postscript — capture knowledge (skip by default)');
+  lines.push('');
+  lines.push(
+    'Most pods finish without calling `memory_suggest`, and that is the expected outcome. ' +
+      'A queue full of filler gets ignored, so the bar is high.',
+  );
+  lines.push('');
+  lines.push(
+    '**The test** — picture a *specific* future pod on this profile working on a *different* task. ' +
+      'Can you name the moment it would get stuck without this exact note? ' +
+      'Would it waste more than 5 minutes? ' +
+      'If you cannot picture the stuck moment concretely, skip. ' +
+      'If you only realised the lesson after deciding to suggest it, that is a sign it is not memorable enough.',
+  );
+  lines.push('');
+  lines.push('**Do NOT suggest** (these are the patterns clogging the queue):');
+  lines.push(
+    '- Specific resource names, container app names, subscription IDs, region codes — re-derivable from `az`/config in seconds',
+  );
+  lines.push(
+    '- One-off namespace or import fixes confined to a single PR — the next pod will not touch the same files',
+  );
+  lines.push(
+    '- Re-statements of `CLAUDE.md`, `git log`, or anything visible from reading the code',
+  );
+  lines.push(
+    '- Command outputs or build invocations any competent agent would run anyway — only the *non-obvious* outcome matters',
+  );
+  lines.push(
+    '- Findings of the form "X exists" without "and silently fails when Y" — facts without traps are not memories',
+  );
+  lines.push(
+    '- Anything you would describe as "might be useful" — the bar is "future pod on a different task gets unblocked"',
+  );
+  lines.push('');
+  lines.push('**If — after that filter — you still have something worth capturing**:');
+  lines.push(
+    '- `rationale` is required. One sentence naming the future-pod scenario: "a pod doing X on this profile would waste >5 min hitting Y". ' +
+      'If you cannot fill that in concretely, do not call the tool.',
+  );
+  lines.push(
+    '- Format: compact (≤400 chars content), one concept per entry, prose not code blocks, only the non-obvious line(s).',
+  );
+  lines.push('- Scope:');
+  lines.push(
+    '  - `profile` — applies to *every* future task on this profile (structural invariants, codebase-wide gotchas)',
+  );
+  lines.push('  - `pod` — only this task / brief series (auto-approved, ephemeral working notes)');
+  lines.push('  - `global` — useful across *all* repos and profiles (rare; universal tool quirks)');
+  lines.push(
+    '  - When in doubt, prefer `pod`. A narrow profile memory is noise; a well-targeted pod memory is gold. ' +
+      'Prefer updating an existing memory over creating a near-duplicate.',
+  );
   lines.push('');
 
   lines.push('## Guidelines');

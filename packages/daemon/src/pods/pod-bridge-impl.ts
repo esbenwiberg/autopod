@@ -575,9 +575,15 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       scope: MemoryScope,
       path: string,
       content: string,
-      rationale?: string,
+      rationale: string,
     ): string {
       if (!memoryRepo) throw new Error('Memory store not available');
+      const trimmedRationale = rationale.trim();
+      if (!trimmedRationale) {
+        throw new Error(
+          'Memory suggestion rejected: rationale is required and must name the specific future-pod scenario this saves. If you cannot articulate the stuck moment concretely, do not suggest the memory.',
+        );
+      }
       // Rate-limit agent-sourced suggestions per pod to curb approval-fatigue
       // prompt-injection attacks on the global/profile memory pool.
       if (scope !== 'pod') {
@@ -600,7 +606,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         scopeId,
         path,
         content,
-        rationale: rationale ?? null,
+        rationale: trimmedRationale,
         approved,
         createdByPodId: podId,
       });
