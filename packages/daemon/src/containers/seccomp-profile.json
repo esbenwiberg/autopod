@@ -24,6 +24,19 @@
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 1
+    },
+    {
+      "_comment": "Block AF_ALG (38) socket creation. Mitigates CVE-2026-31431 (Copy Fail) and the broader algif_* attack surface. AF_ALG is the userspace front-door to the kernel crypto API; nothing autopod containers run uses it (OpenSSL/GnuTLS/SSH/kTLS all bypass AF_ALG).",
+      "names": ["socket", "socketpair"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        {
+          "index": 0,
+          "value": 38,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
     }
   ]
 }
