@@ -411,6 +411,45 @@ describe('reconcileLocalSessions', () => {
     expect(pod.containerId).toBe('ctr-alive');
   });
 
+  it('re-enqueues handoff pod with status preserved so processPod runs the handoff branch', async () => {
+    const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'ses-handoff',
+      profileName: 'test-profile',
+      task: 'Promoted task',
+      status: 'handoff',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ses-handoff',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('ses-handoff', {
+      containerId: 'ctr-handoff',
+      worktreePath: '/tmp/worktree/ses-handoff',
+      recoveryWorktreePath: '/tmp/worktree/ses-handoff',
+    });
+
+    const result = await reconcileLocalSessions(deps);
+
+    expect(result.recovered).toContain('ses-handoff');
+    expect(enqueuedSessions).toContain('ses-handoff');
+
+    const pod = podRepo.getOrThrow('ses-handoff');
+    // status must stay 'handoff' so processPod's handoff branch runs (sync workspace
+    // back from the live interactive container, stop it, compose handoffContext)
+    expect(pod.status).toBe('handoff');
+    expect(pod.containerId).toBe('ctr-handoff');
+    expect(vi.mocked(containerManager.kill)).not.toHaveBeenCalledWith('ctr-handoff');
+  });
+
   it('finishes pod stuck in killing state', async () => {
     const { deps, podRepo } = createReconcilerDeps();
 
@@ -442,7 +481,7 @@ describe('reconcileLocalSessions', () => {
     expect(pod.completedAt).not.toBeNull();
   });
 
-  it('skips pod in queued state', async () => {
+  it('re-enqueues queued pod with no dependencies after restart', async () => {
     const { deps, podRepo, enqueuedSessions } = createReconcilerDeps();
 
     podRepo.insert({
@@ -465,16 +504,59 @@ describe('reconcileLocalSessions', () => {
 
     const result = await reconcileLocalSessions(deps);
 
-    expect(result.skipped).toContain('ses-4');
-    expect(result.recovered).not.toContain('ses-4');
-    expect(result.killed).not.toContain('ses-4');
+    // The in-memory queue is empty after a restart, so a queued pod with no
+    // unresolved deps must be re-enqueued or it sits forever.
+    expect(result.recovered).toContain('ses-4');
+    expect(enqueuedSessions).toContain('ses-4');
 
-    // Should NOT have been re-enqueued by the reconciler
-    expect(enqueuedSessions).not.toContain('ses-4');
-
-    // Status unchanged
+    // Status unchanged — still queued, just back on the in-memory queue
     const pod = podRepo.getOrThrow('ses-4');
     expect(pod.status).toBe('queued');
+  });
+
+  it('does NOT re-enqueue a queued series dependent — rehydrate handles those', async () => {
+    const { deps, podRepo, enqueuedSessions } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'ses-parent',
+      profileName: 'test-profile',
+      task: 'Parent task',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ses-parent',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.insert({
+      id: 'ses-dep',
+      profileName: 'test-profile',
+      task: 'Dependent task',
+      status: 'queued',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ses-dep',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+      dependsOnPodIds: ['ses-parent'],
+    });
+
+    const result = await reconcileLocalSessions(deps);
+
+    expect(result.skipped).toContain('ses-dep');
+    expect(enqueuedSessions).not.toContain('ses-dep');
   });
 
   it('handles old container kill failure gracefully', async () => {

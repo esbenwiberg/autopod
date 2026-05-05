@@ -44,6 +44,7 @@ export async function reconcileLocalSessions(
     'validating',
     'paused',
     'killing',
+    'handoff',
   ] as const;
 
   for (const status of orphanStatuses) {
@@ -94,7 +95,21 @@ async function reconcileSession(
     }
   }
 
-  // 1. Sessions already in `killing` → finish the kill
+  // 1. Sessions in `handoff` → re-enqueue with status preserved so processPod's
+  //    handoff branch runs (sync workspace from interactive container, stop it,
+  //    compose handoffContext, then transition to provisioning). The interactive
+  //    container typically survives the daemon restart since Docker is independent.
+  if (pod.status === 'handoff') {
+    enqueueSession(pod.id);
+    result.recovered.push(pod.id);
+    logger.info(
+      { podId: pod.id, containerId: pod.containerId, worktreePath: pod.worktreePath },
+      'Handoff pod re-enqueued — processPod will resume handoff flow',
+    );
+    return;
+  }
+
+  // 2. Sessions already in `killing` → finish the kill
   if (pod.status === 'killing') {
     logger.info({ podId: pod.id }, 'Finishing kill for pod stuck in killing state');
     podRepo.update(pod.id, {
@@ -107,10 +122,23 @@ async function reconcileSession(
     return;
   }
 
-  // 2. Sessions in `queued` → leave alone, they'll be processed normally
+  // 2. Sessions in `queued` → re-enqueue. The queue is in-memory only, so a
+  //    daemon restart drops every pod that was waiting in it. Without this,
+  //    queued pods sit forever (no code path enqueues them post-startup).
+  //
+  //    Series dependents are skipped here — `rehydrateDependentSessions()`
+  //    runs later in startup and enqueues only the deps whose parents are
+  //    actually done. Enqueueing them here would race the parent's worktree.
   if (pod.status === 'queued') {
-    logger.debug({ podId: pod.id }, 'Skipping queued pod — will be processed normally');
-    result.skipped.push(pod.id);
+    const hasUnresolvedDeps = pod.dependsOnPodIds.length > 0 || !!pod.dependsOnPodId;
+    if (hasUnresolvedDeps) {
+      result.skipped.push(pod.id);
+      logger.debug({ podId: pod.id }, 'Queued series dep — leaving for rehydrateDependentSessions');
+      return;
+    }
+    enqueueSession(pod.id);
+    result.recovered.push(pod.id);
+    logger.info({ podId: pod.id }, 'Queued pod re-enqueued after daemon restart');
     return;
   }
 
