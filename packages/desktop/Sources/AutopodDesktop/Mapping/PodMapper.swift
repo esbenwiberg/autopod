@@ -88,7 +88,7 @@ public enum PodMapper {
         duration: v.smoke.health.duration,
         responseBody: v.smoke.health.responseBody
       )
-      let pages: [PageDetail]? = v.smoke.status == "pass" ? nil : v.smoke.pages.map { p in
+      let pages: [PageDetail]? = v.smoke.pages.isEmpty ? nil : v.smoke.pages.map { p in
         PageDetail(
           path: p.path,
           status: p.status,
