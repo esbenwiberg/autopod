@@ -62,7 +62,7 @@ export interface InjectedSkill {
   /** Unique name — used as the skill directory name, slash-command name, and merge key */
   name: string;
   /** Where to source the skill content from */
-  source: LocalSkillSource | GithubSkillSource;
+  source: LocalSkillSource | GithubSkillSource | BuiltinSkillSource;
   /** Human-readable description (shown in CLAUDE.md) */
   description?: string;
 }
@@ -83,6 +83,16 @@ export interface GithubSkillSource {
   ref?: string;
   /** Optional GitHub token for private repos */
   token?: string;
+}
+
+/**
+ * References a skill by name from the daemon's built-in skills directory
+ * (SKILLS_DIR env var, defaults to `<daemon-cwd>/skills`).
+ * The resolver looks for `<skillsDir>/<name>.md`.
+ * This is the simplest source type — no path needed, just pick by name.
+ */
+export interface BuiltinSkillSource {
+  type: 'builtin';
 }
 
 /**
