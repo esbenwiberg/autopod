@@ -14,6 +14,7 @@ public struct AnalyticsView: View {
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
+    @State private var scoresLoadError: String?
 
     public init(
         pods: [Pod],
@@ -37,6 +38,7 @@ public struct AnalyticsView: View {
     }
 
     private var avgQualityValue: String {
+        if scoresLoadError != nil { return "Error" }
         guard !scores.isEmpty else { return "—" }
         let total = scores.reduce(0) { $0 + $1.score }
         return "\(Int((Double(total) / Double(scores.count)).rounded()))"
@@ -84,7 +86,12 @@ public struct AnalyticsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
             guard let loadScores else { return }
-            do { scores = try await loadScores() } catch {}
+            do {
+                scores = try await loadScores()
+                scoresLoadError = nil
+            } catch {
+                scoresLoadError = error.localizedDescription
+            }
         }
     }
 }

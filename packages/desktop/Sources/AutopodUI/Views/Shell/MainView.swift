@@ -360,9 +360,10 @@ public struct MainView: View {
                     pods: pods,
                     loadScores: loadQualityScores,
                     onSelectPod: { sessionId in
-                        selectedAnalyticsCard = nil
-                        sidebarSelection = .all
-                        selectedSessionId = sessionId
+                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                        selectedAnalyticsCard = result.card
+                        sidebarSelection = result.sidebar
+                        selectedSessionId = result.session
                     }
                 )
             } else if sidebarSelection == .salesPitch {
