@@ -12,6 +12,7 @@ public struct AnalyticsRightPaneView: View {
     public let pods: [Pod]
     public let loadScores: (() async throws -> [PodQualityScore])?
     public let loadCost: (() async throws -> CostAnalyticsResponse)?
+    public let loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
     public let onSelectPod: ((String) -> Void)?
 
     public init(
@@ -19,12 +20,14 @@ public struct AnalyticsRightPaneView: View {
         pods: [Pod],
         loadScores: (() async throws -> [PodQualityScore])? = nil,
         loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
+        loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
         onSelectPod: ((String) -> Void)? = nil
     ) {
         self.card = card
         self.pods = pods
         self.loadScores = loadScores
         self.loadCost = loadCost
+        self.loadReliability = loadReliability
         self.onSelectPod = onSelectPod
     }
 
@@ -36,6 +39,8 @@ public struct AnalyticsRightPaneView: View {
             QualityDrillView(pods: pods, loadScores: loadScores, onSelectPod: onSelectPod)
         case .status:
             StatusDrillView(pods: pods)
+        case .reliability:
+            ReliabilityDrillView(loadReliability: loadReliability, onSelectPod: onSelectPod)
         case .none:
             VStack(spacing: 8) {
                 Spacer()

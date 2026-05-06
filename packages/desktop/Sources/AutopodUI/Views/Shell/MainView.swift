@@ -42,6 +42,7 @@ public struct MainView: View {
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
     public var loadCostAnalytics: (() async throws -> CostAnalyticsResponse)?
+    public var loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)?
     /// Per-pod persisted quality scores keyed by pod id. Used to render the
     /// score pill on completed pod cards. Empty when scores haven't loaded yet.
     public var qualityScores: [String: PodQualityScore]
@@ -100,6 +101,7 @@ public struct MainView: View {
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
         loadCostAnalytics: (() async throws -> CostAnalyticsResponse)? = nil,
+        loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
         qualityScores: [String: PodQualityScore] = [:],
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
@@ -149,6 +151,7 @@ public struct MainView: View {
         self.loadQuality = loadQuality
         self.loadQualityScores = loadQualityScores
         self.loadCostAnalytics = loadCostAnalytics
+        self.loadReliabilityAnalytics = loadReliabilityAnalytics
         self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
@@ -267,6 +270,7 @@ public struct MainView: View {
                         pods: pods,
                         loadScores: loadQualityScores,
                         loadCost: loadCostAnalytics,
+                        loadReliability: loadReliabilityAnalytics,
                         selectedCard: $selectedAnalyticsCard
                     )
                     .frame(minWidth: 600)
@@ -364,6 +368,7 @@ public struct MainView: View {
                     pods: pods,
                     loadScores: loadQualityScores,
                     loadCost: loadCostAnalytics,
+                    loadReliability: loadReliabilityAnalytics,
                     onSelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)
                         selectedAnalyticsCard = result.card

@@ -138,6 +138,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.escalationRepo,
     deps.qualityScoreRepo,
     deps.validationRepo,
+    deps.db,
   );
   if (deps.worktreeManager) {
     seriesRoutes(app, deps.podManager, deps.profileStore, deps.worktreeManager);
