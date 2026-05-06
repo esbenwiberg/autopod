@@ -20,11 +20,8 @@ public struct ScreenshotThumbnail: View {
   public var fillMode: Bool = false
 
   @Environment(\.daemonAuthToken) private var token
-  @State private var loadedImage: NSImage?
-  @State private var phase: LoadPhase = .idle
+  @State private var loader = AuthenticatedImageLoader()
   @State private var retryToken = UUID()
-
-  private enum LoadPhase { case idle, loading, loaded, failed }
 
   public init(
     ref: ScreenshotRef?,
@@ -50,7 +47,7 @@ public struct ScreenshotThumbnail: View {
   private func thumbnailContent(_ ref: ScreenshotRef) -> some View {
     let frameShape = RoundedRectangle(cornerRadius: 6)
     Group {
-      switch phase {
+      switch loader.phase {
       case .idle, .loading:
         ProgressView()
           .frame(height: min(maxHeight, 60))
@@ -58,21 +55,19 @@ public struct ScreenshotThumbnail: View {
           .background(Color.secondary.opacity(0.06))
           .clipShape(frameShape)
 
-      case .loaded:
-        if let img = loadedImage {
-          Image(nsImage: img)
-            .resizable()
-            .aspectRatio(contentMode: fillMode ? .fill : .fit)
-            .frame(maxHeight: maxHeight)
-            .clipShape(frameShape)
-            .overlay(frameShape.stroke(Color.secondary.opacity(0.3), lineWidth: 1))
-            .contentShape(frameShape)
-            .onTapGesture {
-              let idx = allRefs.firstIndex(where: { $0.id == ref.id }) ?? 0
-              onOpen(idx)
-            }
-            .cursor(.pointingHand)
-        }
+      case .loaded(let img):
+        Image(nsImage: img)
+          .resizable()
+          .aspectRatio(contentMode: fillMode ? .fill : .fit)
+          .frame(maxHeight: maxHeight)
+          .clipShape(frameShape)
+          .overlay(frameShape.stroke(Color.secondary.opacity(0.3), lineWidth: 1))
+          .contentShape(frameShape)
+          .onTapGesture {
+            let idx = allRefs.firstIndex(where: { $0.id == ref.id }) ?? 0
+            onOpen(idx)
+          }
+          .cursor(.pointingHand)
 
       case .failed:
         VStack(spacing: 4) {
@@ -91,29 +86,7 @@ public struct ScreenshotThumbnail: View {
       }
     }
     .task(id: "\(ref.url.absoluteString)-\(retryToken)") {
-      await loadImage(url: ref.url)
-    }
-  }
-
-  private func loadImage(url: URL) async {
-    phase = .loading
-    loadedImage = nil
-    var request = URLRequest(url: url)
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    do {
-      let (data, response) = try await URLSession.shared.data(for: request)
-      guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-        phase = .failed
-        return
-      }
-      guard let img = NSImage(data: data) else {
-        phase = .failed
-        return
-      }
-      loadedImage = img
-      phase = .loaded
-    } catch {
-      phase = .failed
+      await loader.load(url: ref.url, token: token)
     }
   }
 }

@@ -545,4 +545,17 @@ import AutopodUI
   let reviewShots = pod.validationChecks?.taskReviewScreenshots
   #expect(reviewShots?.count == 1)
   #expect(reviewShots?.first?.source == .review)
+
+  // Combined canonical ordering (mirrors ValidationTab.screenshotSet: smoke → ac → review).
+  // This is the array the lightbox receives for arrow-key navigation.
+  let combined: [ScreenshotRef] =
+    (pod.validationChecks?.proofOfWorkScreenshots ?? []) +
+    (pod.validationChecks?.acChecks?.compactMap { $0.screenshot } ?? []) +
+    (pod.validationChecks?.taskReviewScreenshots ?? [])
+  #expect(combined.count == 4)
+  #expect(combined.map(\.source) == [.smoke, .smoke, .ac, .review])
+  #expect(combined[0].label == "/about")
+  #expect(combined[1].label == "/root")
+  #expect(combined[2].label == "AC1")
+  #expect(combined[3].label == "0")
 }

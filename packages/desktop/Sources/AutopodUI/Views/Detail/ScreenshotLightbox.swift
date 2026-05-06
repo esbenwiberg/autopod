@@ -18,11 +18,8 @@ public struct ScreenshotLightbox: View {
   @Binding public var isPresented: Bool
 
   @Environment(\.daemonAuthToken) private var token
-  @State private var loadedImage: NSImage?
-  @State private var phase: LoadPhase = .idle
+  @State private var loader = AuthenticatedImageLoader()
   @State private var retryToken = UUID()
-
-  private enum LoadPhase { case idle, loading, loaded, failed }
 
   public init(refs: [ScreenshotRef], currentIndex: Binding<Int>, isPresented: Binding<Bool>) {
     self.refs = refs
@@ -68,19 +65,17 @@ public struct ScreenshotLightbox: View {
 
         // Image area
         ZStack {
-          switch phase {
+          switch loader.phase {
           case .idle, .loading:
             ProgressView()
               .tint(.white)
               .scaleEffect(1.4)
 
-          case .loaded:
-            if let img = loadedImage {
-              Image(nsImage: img)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+          case .loaded(let img):
+            Image(nsImage: img)
+              .resizable()
+              .aspectRatio(contentMode: .fit)
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
 
           case .failed:
             VStack(spacing: 10) {
@@ -142,11 +137,10 @@ public struct ScreenshotLightbox: View {
       return .handled
     }
     .task(id: "\(currentIndex)-\(retryToken)") {
-      if let ref = currentRef { await loadImage(url: ref.url) }
+      if let ref = currentRef { await loader.load(url: ref.url, token: token) }
     }
     .onChange(of: currentIndex) { _, _ in
-      loadedImage = nil
-      phase = .idle
+      loader.reset()
     }
   }
 
@@ -154,27 +148,5 @@ public struct ScreenshotLightbox: View {
 
   private func pathCaption(_ ref: ScreenshotRef) -> String {
     ref.url.path
-  }
-
-  private func loadImage(url: URL) async {
-    phase = .loading
-    loadedImage = nil
-    var request = URLRequest(url: url)
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    do {
-      let (data, response) = try await URLSession.shared.data(for: request)
-      guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-        phase = .failed
-        return
-      }
-      guard let img = NSImage(data: data) else {
-        phase = .failed
-        return
-      }
-      loadedImage = img
-      phase = .loaded
-    } catch {
-      phase = .failed
-    }
   }
 }

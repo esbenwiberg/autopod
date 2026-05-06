@@ -38,17 +38,6 @@ struct SummaryTab: View {
                 // Proof of work — smoke-page screenshots for web features
                 if let shots = pod.validationChecks?.proofOfWorkScreenshots, !shots.isEmpty {
                     proofOfWorkCard(shots)
-                        .overlay {
-                            if isLightboxPresented {
-                                ScreenshotLightbox(
-                                    refs: shots,
-                                    currentIndex: $lightboxIndex,
-                                    isPresented: $isLightboxPresented
-                                )
-                                .transition(.opacity)
-                            }
-                        }
-                        .animation(.easeInOut(duration: 0.18), value: isLightboxPresented)
                 }
 
                 // Pre-submit reviewer verdict (set when the agent called pre_submit_review).
@@ -63,6 +52,17 @@ struct SummaryTab: View {
         .task(id: pod.id) {
             await fetchQuality()
         }
+        .overlay {
+            if isLightboxPresented, let shots = pod.validationChecks?.proofOfWorkScreenshots, !shots.isEmpty {
+                ScreenshotLightbox(
+                    refs: shots,
+                    currentIndex: $lightboxIndex,
+                    isPresented: $isLightboxPresented
+                )
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: isLightboxPresented)
     }
 
     // MARK: - Quality
