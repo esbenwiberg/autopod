@@ -284,6 +284,7 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var outputMode: String?
   public var pod: PodConfigRequest?
   public var baseBranch: String?
+  public var branchPrefix: String?
   public var acFrom: String?
   public var linkedSessionId: String?
   public var pimGroups: [PimGroupRequest]?
@@ -309,6 +310,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     outputMode: String? = nil,
     pod: PodConfigRequest? = nil,
     baseBranch: String? = nil,
+    branchPrefix: String? = nil,
     acFrom: String? = nil,
     linkedSessionId: String? = nil,
     pimGroups: [PimGroupRequest]? = nil,
@@ -329,6 +331,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.outputMode = outputMode
     self.pod = pod
     self.baseBranch = baseBranch
+    self.branchPrefix = branchPrefix
     self.acFrom = acFrom
     self.linkedSessionId = linkedSessionId
     self.pimGroups = pimGroups
@@ -345,7 +348,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     case profileName, task, model, runtime, executionTarget, branch
     case skipValidation, acceptanceCriteria, outputMode
     case pod = "options"
-    case baseBranch, acFrom, linkedSessionId, pimGroups
+    case baseBranch, branchPrefix, acFrom, linkedSessionId, pimGroups
     case dependsOnPodIds, seriesId, seriesName, requireSidecars
     case referenceRepos
   }

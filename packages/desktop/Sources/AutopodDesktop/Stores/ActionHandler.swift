@@ -37,11 +37,12 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createPod: { [weak self] profile, task, model, pod, ac, base, acFrom, pimGroups, sidecars, refRepos in
+      createPod: { [weak self] profile, task, model, pod, ac, base, branchPrefix, acFrom, pimGroups, sidecars, refRepos in
         await self?.createPod(
           profileName: profile, task: task, model: model,
           pod: pod, acceptanceCriteria: ac,
-          baseBranch: base, acFrom: acFrom, pimGroups: pimGroups,
+          baseBranch: base, branchPrefix: branchPrefix,
+          acFrom: acFrom, pimGroups: pimGroups,
           requireSidecars: sidecars,
           referenceRepos: refRepos
         )
@@ -313,7 +314,8 @@ public final class ActionHandler {
   public func createPod(
     profileName: String, task: String, model: String?,
     pod: PodConfigRequest?, acceptanceCriteria: [AcDefinition]?,
-    baseBranch: String?, acFrom: String?, pimGroups: [PimGroupRequest]? = nil,
+    baseBranch: String?, branchPrefix: String? = nil,
+    acFrom: String?, pimGroups: [PimGroupRequest]? = nil,
     requireSidecars: [String]? = nil,
     referenceRepos: [ReferenceRepoRequest]? = nil
   ) async -> String? {
@@ -325,6 +327,7 @@ public final class ActionHandler {
       acceptanceCriteria: acceptanceCriteria?.filter { !$0.test.isEmpty },
       pod: pod,
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
+      branchPrefix: branchPrefix?.isEmpty == true ? nil : branchPrefix,
       acFrom: acFrom?.isEmpty == true ? nil : acFrom,
       pimGroups: pimGroups?.filter { !$0.groupId.isEmpty },
       requireSidecars: (requireSidecars?.isEmpty ?? true) ? nil : requireSidecars,

@@ -315,7 +315,8 @@ const createProfileBaseSchema = z.object({
     .string()
     .min(1)
     .max(64)
-    .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch prefix contains invalid characters')
+    .regex(/^[a-zA-Z0-9.\-_/]+$/, 'Branch prefix contains invalid characters')
+    .refine((s) => !s.includes('..'), 'Branch prefix cannot contain ".."')
     .nullable()
     .default('autopod/'),
   containerMemoryGb: z.number().min(0.5).max(64).nullable().default(null),

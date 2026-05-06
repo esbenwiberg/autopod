@@ -31,6 +31,7 @@ public struct CreateSessionSheet: View {
     @State private var outputTarget: String = "pr"
     @State private var validate: Bool = true
     @State private var baseBranch = ""
+    @State private var branchPrefix = ""
     @State private var acFromPath = ""
     @State private var criteria: [AcDefinition] = [AcDefinition()]
     @State private var showBulkImport = false
@@ -278,6 +279,26 @@ public struct CreateSessionSheet: View {
                         }
                     }
 
+                    // Branch prefix (optional — overrides profile default)
+                    if !isInteractive {
+                        formSection("Branch Prefix (optional)") {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.branch")
+                                    .foregroundStyle(.tertiary)
+                                    .font(.system(size: 11))
+                                TextField(
+                                    selectedProfileDetail?.branchPrefix ?? "autopod/",
+                                    text: $branchPrefix
+                                )
+                                .textFieldStyle(.plain)
+                                .font(.system(.callout, design: .monospaced))
+                            }
+                            .padding(8)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+
                     // AC from file (optional)
                     if !isInteractive {
                         formSection("AC File Path (optional)") {
@@ -485,10 +506,12 @@ public struct CreateSessionSheet: View {
                         // Briefs and CLI can still pass requireSidecars for
                         // additive opt-in to non-auto-attached sidecars.
                         let refs = resolvedReferenceRepos()
+                        let trimmedPrefix = branchPrefix.trimmingCharacters(in: .whitespaces)
                         _ = await actions.createPod(
                             selectedProfile, task, model.isEmpty ? nil : model,
                             pod, ac.isEmpty ? nil : ac,
                             baseBranch.isEmpty ? nil : baseBranch,
+                            trimmedPrefix.isEmpty ? nil : trimmedPrefix,
                             acFromPath.isEmpty ? nil : acFromPath,
                             pim.isEmpty ? nil : pim,
                             nil,

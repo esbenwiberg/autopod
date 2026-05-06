@@ -21,13 +21,15 @@ export const createPodRequestSchema = z
       .string()
       .min(1)
       .max(128)
-      .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch name contains invalid characters')
+      .regex(/^[a-zA-Z0-9.\-_/]+$/, 'Branch name contains invalid characters')
+      .refine((s) => !s.includes('..'), 'Branch name cannot contain ".."')
       .optional(),
     branchPrefix: z
       .string()
       .min(1)
       .max(64)
-      .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch prefix contains invalid characters')
+      .regex(/^[a-zA-Z0-9.\-_/]+$/, 'Branch prefix contains invalid characters')
+      .refine((s) => !s.includes('..'), 'Branch prefix cannot contain ".."')
       .optional(),
     skipValidation: z.boolean().optional(),
     acceptanceCriteria: z.array(acDefinitionSchema).optional(),
@@ -37,7 +39,8 @@ export const createPodRequestSchema = z
       .string()
       .min(1)
       .max(128)
-      .regex(/^[a-zA-Z0-9\-_/]+$/, 'Branch name contains invalid characters')
+      .regex(/^[a-zA-Z0-9.\-_/]+$/, 'Branch name contains invalid characters')
+      .refine((s) => !s.includes('..'), 'Branch name cannot contain ".."')
       .optional(),
     acFrom: z
       .string()

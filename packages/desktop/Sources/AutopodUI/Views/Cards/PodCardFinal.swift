@@ -188,6 +188,7 @@ public struct SessionCardFinal: View {
                         PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
                         pod.acceptanceCriteria,
                         pod.branch,
+                        nil,
                         pod.acFrom,
                         nil,
                         nil,
