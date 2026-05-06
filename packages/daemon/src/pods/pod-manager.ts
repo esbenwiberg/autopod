@@ -796,14 +796,11 @@ export interface PodManager {
  *   - 1 + highest rework N present (e.g. {agent_initial, agent_rework_2} → 3)
  */
 function deriveAgentAttempt(phaseTokenUsage: PhaseTokenUsage | null): number {
-  if (!phaseTokenUsage) return 0;
-  const keys = Object.keys(phaseTokenUsage);
-  if (!keys.includes('agent_initial')) return 0;
+  if (!phaseTokenUsage || !('agent_initial' in phaseTokenUsage)) return 0;
   let highestRework = 0;
-  for (const key of keys) {
-    const match = key.match(/^agent_rework_(\d+)$/);
-    if (match) {
-      const n = Number.parseInt(match[1], 10);
+  for (const key of Object.keys(phaseTokenUsage)) {
+    if (key.startsWith('agent_rework_')) {
+      const n = Number.parseInt(key.slice('agent_rework_'.length), 10);
       if (n > highestRework) highestRework = n;
     }
   }
