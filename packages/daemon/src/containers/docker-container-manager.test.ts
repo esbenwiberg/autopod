@@ -1,7 +1,7 @@
 import { PassThrough } from 'node:stream';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DockerContainerManager } from './docker-container-manager.js';
 
 // ─── Mock helpers ────────────────────────────────────────────
@@ -780,6 +780,96 @@ describe('DockerContainerManager', () => {
       expect(container.exec).toHaveBeenCalledWith(
         expect.objectContaining({ Cmd: ['sh', '/tmp/firewall.sh'] }),
       );
+    });
+  });
+
+  // ─── Layer 3: bounded Dockerode calls ───────────────────────
+  //
+  // Verifies that a wedged daemon (calls that never resolve) cannot pin
+  // pod-manager. AUTOPOD_DOCKER_CALL_TIMEOUT_MS is set tiny so the bounded
+  // helper fires fast enough for tests to run in-band.
+
+  describe('wedge handling (bounded calls)', () => {
+    const originalEnv = process.env.AUTOPOD_DOCKER_CALL_TIMEOUT_MS;
+
+    beforeEach(() => {
+      process.env.AUTOPOD_DOCKER_CALL_TIMEOUT_MS = '50';
+    });
+
+    afterEach(() => {
+      if (originalEnv === undefined) {
+        Reflect.deleteProperty(process.env, 'AUTOPOD_DOCKER_CALL_TIMEOUT_MS');
+      } else {
+        process.env.AUTOPOD_DOCKER_CALL_TIMEOUT_MS = originalEnv;
+      }
+    });
+
+    it('stop() rejects with timeout instead of hanging when daemon is wedged', async () => {
+      container.stop.mockReturnValue(new Promise(() => {})); // never resolves
+      const start = Date.now();
+      await expect(manager.stop('abc123')).rejects.toThrow(/timed out/);
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('start() rejects with timeout instead of hanging', async () => {
+      container.start.mockReturnValue(new Promise(() => {}));
+      const start = Date.now();
+      await expect(manager.start('abc123')).rejects.toThrow(/timed out/);
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('kill() proceeds to force-remove when stop hangs', async () => {
+      container.stop.mockReturnValue(new Promise(() => {})); // wedged
+      container.remove.mockResolvedValue(undefined); // remove still works
+      const start = Date.now();
+      await expect(manager.kill('abc123')).resolves.toBeUndefined();
+      expect(container.remove).toHaveBeenCalledWith({ force: true });
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('kill() rejects with timeout when remove also hangs', async () => {
+      container.stop.mockReturnValue(new Promise(() => {}));
+      container.remove.mockReturnValue(new Promise(() => {}));
+      const start = Date.now();
+      await expect(manager.kill('abc123')).rejects.toThrow(/timed out/);
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('getStatus() returns "unknown" when inspect hangs (graceful degradation)', async () => {
+      container.inspect.mockReturnValue(new Promise(() => {}));
+      const start = Date.now();
+      const status = await manager.getStatus('abc123');
+      expect(status).toBe('unknown');
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('writeFile() rejects with timeout when putArchive hangs', async () => {
+      container.putArchive.mockReturnValue(new Promise(() => {}));
+      const start = Date.now();
+      await expect(manager.writeFile('abc123', '/workspace/x', 'y')).rejects.toThrow(/timed out/);
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('readFile() rejects with timeout when getArchive hangs', async () => {
+      container.getArchive.mockReturnValue(new Promise(() => {}));
+      const start = Date.now();
+      await expect(manager.readFile('abc123', '/workspace/x')).rejects.toThrow(/timed out/);
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('execInContainer() falls back to exit code 1 when exec.inspect hangs', async () => {
+      const muxStream = new PassThrough();
+      muxStream.resume();
+      process.nextTick(() => muxStream.end());
+      const exec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockReturnValue(new Promise(() => {})), // never resolves
+      };
+      container.exec.mockResolvedValue(exec);
+      const start = Date.now();
+      const result = await manager.execInContainer('abc123', ['true']);
+      expect(result.exitCode).toBe(1);
+      expect(Date.now() - start).toBeLessThan(500);
     });
   });
 });

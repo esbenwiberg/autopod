@@ -1,5 +1,6 @@
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
+import { DOCKER_CALL_TIMEOUTS, boundedDockerCall } from './docker-bounds.js';
 
 /**
  * Check whether a Dockerode error matches one of the expected HTTP status
@@ -33,7 +34,11 @@ export async function createContainerWithStaleRetry(
   logger: Logger,
 ): Promise<Dockerode.Container> {
   try {
-    return await docker.createContainer(opts);
+    return await boundedDockerCall(docker.createContainer(opts), {
+      label: 'docker.createContainer',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.createContainer,
+      logger,
+    });
   } catch (err: unknown) {
     if (!isExpectedDockerError(err, [409])) throw err;
     if (!opts.name) throw err;
@@ -43,11 +48,24 @@ export async function createContainerWithStaleRetry(
     );
     const stale = docker.getContainer(opts.name);
     try {
-      await stale.stop({ t: 5 });
+      await boundedDockerCall(stale.stop({ t: 5 }), {
+        label: 'container.stop (stale-cleanup)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.stop,
+        logger,
+      });
     } catch {
-      // Already stopped — continue to remove.
+      // Already stopped, daemon wedged, or expected error — continue to remove
+      // anyway. force-remove is what actually clears the name conflict.
     }
-    await stale.remove({ force: true });
-    return docker.createContainer(opts);
+    await boundedDockerCall(stale.remove({ force: true }), {
+      label: 'container.remove (stale-cleanup)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
+      logger,
+    });
+    return boundedDockerCall(docker.createContainer(opts), {
+      label: 'docker.createContainer (post-stale-retry)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.createContainer,
+      logger,
+    });
   }
 }

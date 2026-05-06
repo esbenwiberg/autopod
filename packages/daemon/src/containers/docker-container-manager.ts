@@ -13,6 +13,11 @@ import type {
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import {
+  DOCKER_CALL_TIMEOUTS,
+  DockerCallTimeoutError,
+  boundedDockerCall,
+} from './docker-bounds.js';
+import {
   alignMemoryToPageSize,
   createContainerWithStaleRetry,
   isExpectedDockerError,
@@ -154,7 +159,12 @@ export class DockerContainerManager implements ContainerManager {
       this.logger,
     );
 
-    await container.start();
+    await boundedDockerCall(container.start(), {
+      label: 'container.start (spawn)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.start,
+      logger: this.logger,
+      containerId: container.id,
+    });
 
     this.logger.info({ containerId: container.id, containerName }, 'Docker container started');
 
@@ -186,10 +196,12 @@ export class DockerContainerManager implements ContainerManager {
             'Firewall setup failed for isolated pod — aborting spawn (fail-closed)',
           );
           // Tear down the container before surfacing the error so it doesn't leak.
-          await this.docker
-            .getContainer(container.id)
-            .remove({ force: true })
-            .catch(() => {});
+          await boundedDockerCall(this.docker.getContainer(container.id).remove({ force: true }), {
+            label: 'container.remove (firewall-fail cleanup)',
+            timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
+            logger: this.logger,
+            containerId: container.id,
+          }).catch(() => {});
           throw new Error(
             `Firewall setup failed for ${config.networkPolicyMode} pod — aborting spawn: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -216,7 +228,12 @@ export class DockerContainerManager implements ContainerManager {
   async stop(containerId: string): Promise<void> {
     try {
       const container = this.docker.getContainer(containerId);
-      await container.stop({ t: 10 });
+      await boundedDockerCall(container.stop({ t: 10 }), {
+        label: 'container.stop',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.stop,
+        logger: this.logger,
+        containerId,
+      });
       this.logger.info({ containerId }, 'Docker container stopped');
     } catch (err: unknown) {
       if (isExpectedDockerError(err, [304, 404])) {
@@ -231,7 +248,12 @@ export class DockerContainerManager implements ContainerManager {
   async start(containerId: string): Promise<void> {
     try {
       const container = this.docker.getContainer(containerId);
-      await container.start();
+      await boundedDockerCall(container.start(), {
+        label: 'container.start',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.start,
+        logger: this.logger,
+        containerId,
+      });
       this.logger.info({ containerId }, 'Docker container started');
     } catch (err: unknown) {
       if (isExpectedDockerError(err, [304])) {
@@ -247,16 +269,42 @@ export class DockerContainerManager implements ContainerManager {
     try {
       const container = this.docker.getContainer(containerId);
       try {
-        await container.stop({ t: 10 });
+        await boundedDockerCall(container.stop({ t: 10 }), {
+          label: 'container.stop (kill)',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.stop,
+          logger: this.logger,
+          containerId,
+        });
       } catch (err: unknown) {
-        // Swallow "not running" — container may already be stopped
-        if (!isExpectedDockerError(err, [304, 404])) {
+        if (err instanceof DockerCallTimeoutError) {
+          // Stop hung but force-remove can still succeed. Falling through is
+          // the whole point of bounding cleanup paths.
+          this.logger.warn(
+            { containerId },
+            'Stop timed out during kill — proceeding to force-remove',
+          );
+        } else if (!isExpectedDockerError(err, [304, 404])) {
+          // Preserve original semantics: an unexpected stop error skips
+          // remove and propagates. Callers that rely on this contract see
+          // the same behaviour they always have.
           throw err;
         }
       }
       try {
-        await container.remove({ force: true });
+        await boundedDockerCall(container.remove({ force: true }), {
+          label: 'container.remove (kill)',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
+          logger: this.logger,
+          containerId,
+        });
       } catch (err: unknown) {
+        if (err instanceof DockerCallTimeoutError) {
+          this.logger.error(
+            { containerId },
+            'Remove timed out during kill — container may leak (daemon wedged)',
+          );
+          throw err;
+        }
         // Swallow "not found" — container may already be removed
         if (!isExpectedDockerError(err, [404])) {
           throw err;
@@ -309,7 +357,12 @@ export class DockerContainerManager implements ContainerManager {
     });
     const tarBuffer = Buffer.concat(chunks);
 
-    await container.putArchive(tarBuffer, { path: '/' });
+    await boundedDockerCall(container.putArchive(tarBuffer, { path: '/' }), {
+      label: 'container.putArchive',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.putArchive,
+      logger: this.logger,
+      containerId,
+    });
     this.logger.debug({ containerId, filePath }, 'File written to container');
   }
 
@@ -317,7 +370,12 @@ export class DockerContainerManager implements ContainerManager {
     const container = this.docker.getContainer(containerId);
 
     // getArchive returns a tar stream of the file/directory at the given path
-    const archiveStream = await container.getArchive({ path: filePath });
+    const archiveStream = await boundedDockerCall(container.getArchive({ path: filePath }), {
+      label: 'container.getArchive (readFile)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.getArchive,
+      logger: this.logger,
+      containerId,
+    });
 
     // Extract the single file from the tar archive
     const extract = tar.extract();
@@ -346,7 +404,12 @@ export class DockerContainerManager implements ContainerManager {
   ): Promise<void> {
     const container = this.docker.getContainer(containerId);
     // getArchive works on stopped containers — safe to call after container exits
-    const archiveStream = await container.getArchive({ path: containerPath });
+    const archiveStream = await boundedDockerCall(container.getArchive({ path: containerPath }), {
+      label: 'container.getArchive (extractDirectoryFromContainer)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.getArchive,
+      logger: this.logger,
+      containerId,
+    });
 
     // Clear host directory contents before extracting (mirrors exec-based sync behaviour),
     // skipping any entries that are in the excludes list.
@@ -409,9 +472,16 @@ export class DockerContainerManager implements ContainerManager {
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
     try {
       const container = this.docker.getContainer(containerId);
-      const info = await container.inspect();
+      const info = await boundedDockerCall(container.inspect(), {
+        label: 'container.inspect (getStatus)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+        containerId,
+      });
       return info.State.Running ? 'running' : 'stopped';
     } catch {
+      // Includes DockerCallTimeoutError — a wedged daemon looks the same as
+      // "container gone" for status-polling purposes; both yield 'unknown'.
       return 'unknown';
     }
   }
@@ -436,13 +506,37 @@ export class DockerContainerManager implements ContainerManager {
       ...(envList ? { Env: envList } : {}),
     };
 
-    const exec = await container.exec(execCreateOptions);
-    const stream = await exec.start({ hijack: true, stdin: false });
+    const exec = await boundedDockerCall(container.exec(execCreateOptions), {
+      label: 'container.exec (execInContainer)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.exec,
+      logger: this.logger,
+      containerId,
+    });
+    const stream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
+      label: 'exec.start (execInContainer)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
+      logger: this.logger,
+      containerId,
+    });
 
     const { stdout, stderr } = await collectDemuxedOutput(stream, this.docker, options?.timeout);
 
-    const inspection = await exec.inspect();
-    const exitCode = inspection.ExitCode ?? 1;
+    let exitCode = 1;
+    try {
+      const inspection = await boundedDockerCall(exec.inspect(), {
+        label: 'exec.inspect (execInContainer)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
+        logger: this.logger,
+        containerId,
+      });
+      exitCode = inspection.ExitCode ?? 1;
+    } catch (err: unknown) {
+      if (err instanceof DockerCallTimeoutError) {
+        this.logger.warn({ containerId, command }, 'exec.inspect timed out — assuming exit code 1');
+      } else {
+        throw err;
+      }
+    }
 
     this.logger.debug({ containerId, command, exitCode }, 'Exec completed');
     return { stdout, stderr, exitCode };
@@ -459,15 +553,28 @@ export class DockerContainerManager implements ContainerManager {
       ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
       : undefined;
 
-    const exec = await container.exec({
-      Cmd: command,
-      AttachStdout: true,
-      AttachStderr: true,
-      ...(options?.cwd ? { WorkingDir: options.cwd } : {}),
-      ...(envList ? { Env: envList } : {}),
-    });
+    const exec = await boundedDockerCall(
+      container.exec({
+        Cmd: command,
+        AttachStdout: true,
+        AttachStderr: true,
+        ...(options?.cwd ? { WorkingDir: options.cwd } : {}),
+        ...(envList ? { Env: envList } : {}),
+      }),
+      {
+        label: 'container.exec (execStreaming)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.exec,
+        logger: this.logger,
+        containerId,
+      },
+    );
 
-    const muxStream = await exec.start({ hijack: true, stdin: false });
+    const muxStream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
+      label: 'exec.start (execStreaming)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
+      logger: this.logger,
+      containerId,
+    });
 
     const stdoutStream = new PassThrough();
     const stderrStream = new PassThrough();
@@ -490,13 +597,23 @@ export class DockerContainerManager implements ContainerManager {
 
     // Resolve exit code once the stream closes and we can inspect the exec.
     // Listen to 'end', 'error', and 'close' — destroy() only emits 'close'.
+    // The inspect call is bounded so a wedged daemon can't pin the exit-code
+    // promise forever; on timeout we fall back to exit code 1, which the
+    // runtime layer's awaitExitCodeBounded then surfaces as a non-fatal error.
+    const containerIdForLog = containerId;
+    const logger = this.logger;
     const exitCode = new Promise<number>((resolve) => {
       let resolved = false;
       const checkExit = async () => {
         if (resolved) return;
         resolved = true;
         try {
-          const inspection = await exec.inspect();
+          const inspection = await boundedDockerCall(exec.inspect(), {
+            label: 'exec.inspect (execStreaming)',
+            timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
+            logger,
+            containerId: containerIdForLog,
+          });
           resolve(inspection.ExitCode ?? 1);
         } catch {
           resolve(1);
@@ -531,17 +648,35 @@ export class DockerContainerManager implements ContainerManager {
 
     // Execute as root (iptables requires root)
     const container = this.docker.getContainer(containerId);
-    const exec = await container.exec({
-      Cmd: ['sh', '/tmp/firewall.sh'],
-      AttachStdout: true,
-      AttachStderr: true,
-      User: 'root',
-    });
+    const exec = await boundedDockerCall(
+      container.exec({
+        Cmd: ['sh', '/tmp/firewall.sh'],
+        AttachStdout: true,
+        AttachStderr: true,
+        User: 'root',
+      }),
+      {
+        label: 'container.exec (refreshFirewall)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.exec,
+        logger: this.logger,
+        containerId,
+      },
+    );
 
-    const stream = await exec.start({ hijack: true, stdin: false });
+    const stream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
+      label: 'exec.start (refreshFirewall)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
+      logger: this.logger,
+      containerId,
+    });
     const { stdout, stderr } = await collectDemuxedOutput(stream, this.docker, 30_000);
 
-    const inspection = await exec.inspect();
+    const inspection = await boundedDockerCall(exec.inspect(), {
+      label: 'exec.inspect (refreshFirewall)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
+      logger: this.logger,
+      containerId,
+    });
     if (inspection.ExitCode !== 0) {
       this.logger.warn(
         { exitCode: inspection.ExitCode, stderr, stdout },
