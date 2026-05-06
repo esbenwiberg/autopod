@@ -2,6 +2,20 @@
 
 A living plan for the macOS desktop analytics rebuild. Each phase below is sized to be its own `/plan-feature` invocation: self-contained scope, clear data deps, ships user-visible value at the end.
 
+## Status
+
+| # | Phase | Spec | State |
+|---|-------|------|-------|
+| 0 | Analytics shell | [`specs/analytics-shell/`](../specs/analytics-shell/) | Spec'd |
+| 1 | Cost drill-in | [`specs/analytics-cost/`](../specs/analytics-cost/) | Spec'd |
+| 2 | Lifecycle funnel + reliability | — | Pending |
+| 3 | Quality drill-down | — | Pending |
+| 4 | Safety / Guardrails | — | Pending |
+| 5 | Throughput, heatmap, escalations | — | Pending |
+| 6 | Models leaderboard + what-if | — | Pending |
+
+ADRs introduced so far: [ADR-015](decisions/ADR-015-model-pricing-bundled-json.md) (bundled JSON pricing), [ADR-016](decisions/ADR-016-phase-token-per-attempt-taxonomy.md) (per-attempt phase token taxonomy).
+
 ## Vision
 
 Turn the existing `AnalyticsView` from a stats wall into a **drill-in dashboard**. Three-pane shell becomes:
@@ -214,9 +228,11 @@ Phases 1–3 are independent after Phase 0 ships and could be parallelized if we
 
 For each phase, run `/plan-feature` and paste the corresponding section as the seed. The plan-feature skill will interview, scan the codebase, and produce a `specs/<phase-name>/` folder with `purpose.md`, `design.md`, and per-module briefs.
 
+After a phase is spec'd, update the Status table at the top of this doc with a link to its `specs/<phase-name>/` folder so progress is trackable from one place.
+
 Suggested phase names for `/plan-feature`:
-- `analytics-shell`
-- `analytics-cost`
+- `analytics-shell` ✅
+- `analytics-cost` ✅
 - `analytics-reliability-funnel`
 - `analytics-quality`
 - `analytics-safety`
