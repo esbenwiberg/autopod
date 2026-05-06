@@ -11,27 +11,27 @@ public struct AnalyticsView: View {
     public let pods: [Pod]
     /// Fetches persisted quality scores for the Quality card value.
     public var loadScores: (() async throws -> [PodQualityScore])?
+    /// Fetches cost analytics from the daemon for the Cost card.
+    public var loadCost: (() async throws -> CostAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
     @State private var scoresLoadError: String?
+    @State private var costData: CostAnalyticsResponse?
 
     public init(
         pods: [Pod],
         loadScores: (() async throws -> [PodQualityScore])? = nil,
+        loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
         selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
         self.loadScores = loadScores
+        self.loadCost = loadCost
         self._selectedCard = selectedCard
     }
 
     // MARK: - Computed stats (card values)
-
-    private var totalCost: Double {
-        pods.filter { $0.status != .running && $0.status != .paused }
-            .reduce(0) { $0 + $1.costUsd }
-    }
 
     private var statusCounts: [StatusCount] {
         analyticsStatusCounts(pods: pods)
@@ -63,7 +63,14 @@ public struct AnalyticsView: View {
                 ) {
                     AnalyticsCard(
                         title: "Cost",
-                        value: totalCost > 0 ? String(format: "$%.2f", totalCost) : "—",
+                        value: costData.map { String(format: "$%.2f", $0.total) } ?? "—",
+                        sparkline: costData.map { $0.sparkline.map(\.costUsd) },
+                        delta: costData.map {
+                            AnalyticsCardDelta(
+                                value: formatCostDelta($0.deltaVsPrior),
+                                direction: AnalyticsCardDelta.Direction($0.deltaVsPrior.direction)
+                            )
+                        },
                         isSelected: selectedCard == .cost,
                         onClick: { selectedCard = selectedCard == .cost ? nil : .cost }
                     )
@@ -85,107 +92,18 @@ public struct AnalyticsView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
-            guard let loadScores else { return }
-            do {
-                scores = try await loadScores()
-                scoresLoadError = nil
-            } catch {
-                scoresLoadError = error.localizedDescription
-            }
-        }
-    }
-}
-
-// MARK: - CostDrillView
-
-/// Per-profile cost breakdown — right-pane drill for the Cost card.
-struct CostDrillView: View {
-    let pods: [Pod]
-
-    private var workerSessions: [Pod] { pods.filter { !$0.isWorkspace } }
-
-    private var profileStats: [ProfileStat] {
-        let profiles = Array(Set(workerSessions.map(\.profileName))).sorted()
-        return profiles.map { profile in
-            let s = workerSessions.filter { $0.profileName == profile }
-            let completed = s.filter { $0.status == .complete }.count
-            let cost = s.reduce(0.0) { $0 + $1.costUsd }
-            let avgCost = s.isEmpty ? 0 : cost / Double(s.count)
-            let linesAdded = s.compactMap(\.diffStats).reduce(0) { $0 + $1.added }
-            return ProfileStat(
-                name: profile,
-                sessionCount: s.count,
-                successRate: s.isEmpty ? 0 : Double(completed) / Double(s.count),
-                avgCost: avgCost,
-                totalLinesAdded: linesAdded
-            )
-        }
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Cost by Profile")
-                    .font(.title3.weight(.semibold))
-
-                if profileStats.isEmpty {
-                    Text("No profile data available yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                } else {
-                    ForEach(profileStats) { stat in
-                        profileRow(stat)
-                    }
+            if let loadScores {
+                do {
+                    scores = try await loadScores()
+                    scoresLoadError = nil
+                } catch {
+                    scoresLoadError = error.localizedDescription
                 }
             }
-            .padding(24)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private func profileRow(_ stat: ProfileStat) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(stat.name)
-                    .font(.system(.subheadline).weight(.medium))
-                    .lineLimit(1)
-                HStack(spacing: 12) {
-                    Text("\(stat.sessionCount) pods")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if stat.avgCost > 0 {
-                        Text(String(format: "avg $%.2f", stat.avgCost))
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    if stat.totalLinesAdded > 0 {
-                        Text("+\(stat.totalLinesAdded) lines")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(stat.sessionCount > 0 ? String(format: "%.0f%%", stat.successRate * 100) : "—")
-                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                    .monospacedDigit()
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.secondary.opacity(0.15))
-                        .frame(width: 48, height: 3)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(stat.successRate > 0.5 ? Color.green.opacity(0.7) : Color.orange.opacity(0.7))
-                        .frame(width: max(48 * stat.successRate, 0), height: 3)
-                }
+            if let loadCost {
+                do { costData = try await loadCost() } catch { }
             }
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -462,6 +380,26 @@ struct StatusDrillView: View {
     }
 }
 
+// MARK: - Cost delta helpers
+
+private func formatCostDelta(_ delta: CostDelta) -> String {
+    switch delta.direction {
+    case .flat: return "flat"
+    case .up:   return String(format: "+$%.2f", delta.value)
+    case .down: return String(format: "-$%.2f", abs(delta.value))
+    }
+}
+
+extension AnalyticsCardDelta.Direction {
+    init(_ direction: CostDelta.Direction) {
+        switch direction {
+        case .up:   self = .up
+        case .down: self = .down
+        case .flat: self = .flat
+        }
+    }
+}
+
 // MARK: - File-level helpers (shared by drill views)
 
 // Cached formatters — ISO8601DateFormatter and DateFormatter are expensive to allocate.
@@ -523,15 +461,6 @@ private func analyticsDailyAverages(for group: [PodQualityScore]) -> [Double] {
 }
 
 // MARK: - Supporting types
-
-struct ProfileStat: Identifiable {
-    let name: String
-    let sessionCount: Int
-    let successRate: Double
-    let avgCost: Double
-    let totalLinesAdded: Int
-    var id: String { name }
-}
 
 struct StatusCount: Identifiable {
     let status: PodStatus

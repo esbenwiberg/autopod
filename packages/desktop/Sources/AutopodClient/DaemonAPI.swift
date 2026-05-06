@@ -257,6 +257,12 @@ public actor DaemonAPI {
     try await request("GET", "/pods/quality/trends", query: ["days": "\(days)"])
   }
 
+  /// GET /pods/analytics/cost — 30-day cost breakdown with sparkline, per-phase,
+  /// profile×model, top-10, and waste summary.
+  public func getCostAnalytics(days: Int = 30) async throws -> CostAnalyticsResponse {
+    try await request("GET", "/pods/analytics/cost", query: ["days": "\(days)"])
+  }
+
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
     try await request("GET", "/pods/\(id)/diff")
   }

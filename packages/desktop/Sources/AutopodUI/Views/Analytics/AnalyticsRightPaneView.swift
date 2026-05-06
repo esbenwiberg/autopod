@@ -11,24 +11,27 @@ public struct AnalyticsRightPaneView: View {
     public let card: AnalyticsCardKind?
     public let pods: [Pod]
     public let loadScores: (() async throws -> [PodQualityScore])?
+    public let loadCost: (() async throws -> CostAnalyticsResponse)?
     public let onSelectPod: ((String) -> Void)?
 
     public init(
         card: AnalyticsCardKind?,
         pods: [Pod],
         loadScores: (() async throws -> [PodQualityScore])? = nil,
+        loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
         onSelectPod: ((String) -> Void)? = nil
     ) {
         self.card = card
         self.pods = pods
         self.loadScores = loadScores
+        self.loadCost = loadCost
         self.onSelectPod = onSelectPod
     }
 
     public var body: some View {
         switch card {
         case .cost:
-            CostDrillView(pods: pods)
+            CostDrillView(loadCost: loadCost, onSelectPod: onSelectPod)
         case .quality:
             QualityDrillView(pods: pods, loadScores: loadScores, onSelectPod: onSelectPod)
         case .status:
