@@ -18,3 +18,5 @@
 | `ADR-012` | ADR 001: DB-Driven Polling Scheduler | — | We need to fire sessions on a recurring schedule. The daemon runs locally on a |
 | `ADR-013` | ADR 002: One Catch-Up Prompt Per Job (Not Per Missed Fire) | — | When the daemon starts after a period of downtime, some scheduled jobs will have |
 | `ADR-014` | ADR 003: Skip New Fire If Previous Run Is Still Active | — | A scheduled job fires at T+0, spawning a session. That session is still running |
+| `ADR-015` | ADR-015: Model pricing as bundled JSON in @autopod/shared | Accepted | Cost analytics need a per-model price catalog so pods that don't carry a |
+| `ADR-016` | ADR-016: Per-attempt phase token taxonomy | Accepted | `pods.phase_token_usage` (migration `089`) was introduced as a |
