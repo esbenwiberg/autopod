@@ -15,9 +15,9 @@ describe('MODEL_PRICING', () => {
   });
 
   it('contains short aliases', () => {
-    expect(MODEL_PRICING['opus']).toBeDefined();
-    expect(MODEL_PRICING['sonnet']).toBeDefined();
-    expect(MODEL_PRICING['haiku']).toBeDefined();
+    expect(MODEL_PRICING.opus).toBeDefined();
+    expect(MODEL_PRICING.sonnet).toBeDefined();
+    expect(MODEL_PRICING.haiku).toBeDefined();
   });
 });
 
@@ -46,7 +46,12 @@ describe('computeCost', () => {
 describe('effectiveCostUsd', () => {
   it('returns costUsd directly when it is non-zero (Claude path)', () => {
     expect(
-      effectiveCostUsd({ costUsd: 1.23, model: 'claude-opus-4-7', inputTokens: 1_000_000, outputTokens: 0 }),
+      effectiveCostUsd({
+        costUsd: 1.23,
+        model: 'claude-opus-4-7',
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
     ).toBe(1.23);
   });
 
@@ -58,7 +63,12 @@ describe('effectiveCostUsd', () => {
 
   it('returns 0 when costUsd is 0 and model is unknown', () => {
     expect(
-      effectiveCostUsd({ costUsd: 0, model: 'unknown', inputTokens: 1_000_000, outputTokens: 1_000_000 }),
+      effectiveCostUsd({
+        costUsd: 0,
+        model: 'unknown',
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      }),
     ).toBe(0);
   });
 });
