@@ -1,43 +1,101 @@
 import AutopodClient
 import SwiftUI
 
-/// Analytics dashboard — aggregate stats across all pods.
+// MARK: - AnalyticsView (Overview card grid)
+
+/// Analytics Overview — three clickable cards in the middle pane.
+/// Drill-in content is rendered by `AnalyticsRightPaneView` when a card is
+/// selected. `selectedCard` is held as `@State` in `MainView` so the selection
+/// persists across sidebar navigation.
 public struct AnalyticsView: View {
     public let pods: [Pod]
-    /// Optional closure for fetching persisted quality scores. When nil
-    /// (previews, disconnected), the Session Quality section is hidden.
+    /// Fetches persisted quality scores for the Quality card value.
     public var loadScores: (() async throws -> [PodQualityScore])?
-    /// Optional callback fired when a row in the scores table is clicked.
-    /// Typically: route to the pod detail view (switch sidebar + set selection).
-    public var onSelectPod: ((String) -> Void)?
+    @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
-    @State private var scoresLoadError: String? = nil
-    @State private var isLoadingScores: Bool = false
-    @State private var sortOrder: [KeyPathComparator<PodQualityScore>] = [
-        KeyPathComparator(\.computedAt, order: .reverse)
-    ]
 
     public init(
         pods: [Pod],
         loadScores: (() async throws -> [PodQualityScore])? = nil,
-        onSelectPod: ((String) -> Void)? = nil
+        selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
         self.loadScores = loadScores
-        self.onSelectPod = onSelectPod
+        self._selectedCard = selectedCard
     }
 
-    // MARK: - Computed stats
+    // MARK: - Computed stats (card values)
+
+    private var totalCost: Double {
+        pods.filter { $0.status != .running && $0.status != .paused }
+            .reduce(0) { $0 + $1.costUsd }
+    }
+
+    private var statusCounts: [StatusCount] {
+        analyticsStatusCounts(pods: pods)
+    }
+
+    private var avgQualityValue: String {
+        guard !scores.isEmpty else { return "—" }
+        let total = scores.reduce(0) { $0 + $1.score }
+        return "\(Int((Double(total) / Double(scores.count)).rounded()))"
+    }
+
+    private var dominantStatusValue: String {
+        guard let top = statusCounts.max(by: { $0.count < $1.count }) else { return "—" }
+        return "\(top.count) \(top.status.label)"
+    }
+
+    // MARK: - Body
+
+    public var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Overview")
+                    .font(.title2.weight(.semibold))
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 280), spacing: 12)],
+                    spacing: 12
+                ) {
+                    AnalyticsCard(
+                        title: "Cost",
+                        value: totalCost > 0 ? String(format: "$%.2f", totalCost) : "—",
+                        isSelected: selectedCard == .cost,
+                        onClick: { selectedCard = selectedCard == .cost ? nil : .cost }
+                    )
+                    AnalyticsCard(
+                        title: "Quality",
+                        value: avgQualityValue,
+                        isSelected: selectedCard == .quality,
+                        onClick: { selectedCard = selectedCard == .quality ? nil : .quality }
+                    )
+                    AnalyticsCard(
+                        title: "Status",
+                        value: dominantStatusValue,
+                        isSelected: selectedCard == .status,
+                        onClick: { selectedCard = selectedCard == .status ? nil : .status }
+                    )
+                }
+            }
+            .padding(24)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .task {
+            guard let loadScores else { return }
+            do { scores = try await loadScores() } catch {}
+        }
+    }
+}
+
+// MARK: - CostDrillView
+
+/// Per-profile cost breakdown — right-pane drill for the Cost card.
+struct CostDrillView: View {
+    let pods: [Pod]
 
     private var workerSessions: [Pod] { pods.filter { !$0.isWorkspace } }
-    private var totalSessions: Int { workerSessions.count }
-    private var successCount: Int { workerSessions.filter { $0.status == .complete }.count }
-    private var successRate: Double { totalSessions > 0 ? Double(successCount) / Double(totalSessions) : 0 }
-    private var totalCost: Double { pods.filter { $0.status != .running && $0.status != .paused }.reduce(0) { $0 + $1.costUsd } }
-    private var totalInputTokens: Int { pods.reduce(0) { $0 + $1.inputTokens } }
-    private var totalOutputTokens: Int { pods.reduce(0) { $0 + $1.outputTokens } }
-    private var totalLinesAdded: Int { pods.compactMap(\.diffStats).reduce(0) { $0 + $1.added } }
 
     private var profileStats: [ProfileStat] {
         let profiles = Array(Set(workerSessions.map(\.profileName))).sorted()
@@ -57,61 +115,87 @@ public struct AnalyticsView: View {
         }
     }
 
-    private var statusCounts: [StatusCount] {
-        let relevantStatuses: [PodStatus] = [
-            .complete, .failed, .reviewRequired, .running, .validated,
-            .validating, .awaitingInput, .killed, .queued, .provisioning,
-        ]
-        return relevantStatuses.compactMap { status in
-            let count = pods.filter { $0.status == status }.count
-            guard count > 0 else { return nil }
-            return StatusCount(status: status, count: count)
-        }
-    }
-
-    public var body: some View {
+    var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("Analytics")
-                    .font(.title2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Cost by Profile")
+                    .font(.title3.weight(.semibold))
 
-                heroStats
-
-                secondaryStats
-
-                if !statusCounts.isEmpty {
-                    statusProportionBar
-                }
-
-                if !profileStats.isEmpty {
-                    profileBreakdown
-                }
-
-                if loadScores != nil {
-                    qualitySection
+                if profileStats.isEmpty {
+                    Text("No profile data available yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                } else {
+                    ForEach(profileStats) { stat in
+                        profileRow(stat)
+                    }
                 }
             }
             .padding(24)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .task {
-            await fetchScores()
-        }
     }
 
-    // MARK: - Session Quality (Phase 3e)
+    private func profileRow(_ stat: ProfileStat) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(stat.name)
+                    .font(.system(.subheadline).weight(.medium))
+                    .lineLimit(1)
+                HStack(spacing: 12) {
+                    Text("\(stat.sessionCount) pods")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if stat.avgCost > 0 {
+                        Text(String(format: "avg $%.2f", stat.avgCost))
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    if stat.totalLinesAdded > 0 {
+                        Text("+\(stat.totalLinesAdded) lines")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
 
-    private func fetchScores() async {
-        guard let loadScores else { return }
-        isLoadingScores = true
-        defer { isLoadingScores = false }
-        do {
-            scores = try await loadScores()
-            scoresLoadError = nil
-        } catch {
-            scoresLoadError = error.localizedDescription
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(stat.sessionCount > 0 ? String(format: "%.0f%%", stat.successRate * 100) : "—")
+                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                    .monospacedDigit()
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(width: 48, height: 3)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(stat.successRate > 0.5 ? Color.green.opacity(0.7) : Color.orange.opacity(0.7))
+                        .frame(width: max(48 * stat.successRate, 0), height: 3)
+                }
+            }
         }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
+}
+
+// MARK: - QualityDrillView
+
+/// Runtime/model summary cards + sortable scores table — right-pane drill for the Quality card.
+struct QualityDrillView: View {
+    let pods: [Pod]
+    let loadScores: (() async throws -> [PodQualityScore])?
+    let onSelectPod: ((String) -> Void)?
+
+    @State private var scores: [PodQualityScore] = []
+    @State private var scoresLoadError: String? = nil
+    @State private var isLoadingScores: Bool = false
+    @State private var sortOrder: [KeyPathComparator<PodQualityScore>] = [
+        KeyPathComparator(\.computedAt, order: .reverse)
+    ]
 
     private var runtimeModelStats: [RuntimeModelStat] {
         let groups = Dictionary(grouping: scores) { score -> String in
@@ -125,89 +209,74 @@ public struct AnalyticsView: View {
                 let total = group.reduce(0) { $0 + $1.score }
                 let avgScore = Double(total) / Double(group.count)
                 let avgCost = group.reduce(0.0) { $0 + $1.costUsd } / Double(group.count)
-                // Daily averages for the sparkline — last 30 days, sorted ascending.
-                let dayAverages = Self.dailyAverages(for: group)
                 return RuntimeModelStat(
                     runtime: runtime,
                     model: model,
                     count: group.count,
                     avgScore: avgScore,
                     avgCost: avgCost,
-                    dailyAverages: dayAverages
+                    dailyAverages: analyticsDailyAverages(for: group)
                 )
             }
             .sorted { $0.count > $1.count }
     }
 
-    /// Groups scores by calendar day and returns sorted daily averages (ascending).
-    private static func dailyAverages(for group: [PodQualityScore]) -> [Double] {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        let byDay = Dictionary(grouping: group.filter {
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let d = iso.date(from: $0.completedAt) ?? ISO8601DateFormatter().date(from: $0.completedAt) ?? Date.distantPast
-            return d >= cutoff
-        }) { score -> String in
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let d = iso.date(from: score.completedAt) ?? ISO8601DateFormatter().date(from: score.completedAt) ?? Date.distantPast
-            return fmt.string(from: d)
-        }
-        return byDay.keys.sorted().compactMap { day -> Double? in
-            guard let group = byDay[day], !group.isEmpty else { return nil }
-            return Double(group.reduce(0) { $0 + $1.score }) / Double(group.count)
-        }
-    }
+    private var sortedScores: [PodQualityScore] { scores.sorted(using: sortOrder) }
 
-    private var sortedScores: [PodQualityScore] {
-        scores.sorted(using: sortOrder)
-    }
-
-    private var qualitySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "speedometer")
-                    .foregroundStyle(.secondary)
-                Text("Session Quality")
-                    .font(.title3.weight(.semibold))
-                Spacer()
-                if isLoadingScores {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text("\(scores.count) pod\(scores.count == 1 ? "" : "s")")
-                        .font(.caption)
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "speedometer")
                         .foregroundStyle(.secondary)
-                }
-            }
-
-            if let err = scoresLoadError {
-                Text("Couldn't load scores: \(err)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            } else if scores.isEmpty && !isLoadingScores {
-                Text("No completed pods scored yet. Run a pod to completion and it'll show up here.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
-            } else {
-                // Per-(runtime, model) aggregate cards — the model-drift sniffer.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(runtimeModelStats) { stat in
-                            runtimeModelCard(stat)
-                        }
+                    Text("Session Quality")
+                        .font(.title3.weight(.semibold))
+                    Spacer()
+                    if isLoadingScores {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("\(scores.count) pod\(scores.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
-                // Recent scores table — sortable via KeyPathComparator.
-                scoresTable
+                if let err = scoresLoadError {
+                    Text("Couldn't load scores: \(err)")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else if scores.isEmpty && !isLoadingScores {
+                    Text("No completed pods scored yet. Run a pod to completion and it'll show up here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(runtimeModelStats) { stat in
+                                runtimeModelCard(stat)
+                            }
+                        }
+                    }
+                    scoresTable
+                }
             }
+            .padding(24)
         }
-        .padding(16)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(Color(nsColor: .windowBackgroundColor))
+        .task { await fetchScores() }
+    }
+
+    private func fetchScores() async {
+        guard let loadScores else { return }
+        isLoadingScores = true
+        defer { isLoadingScores = false }
+        do {
+            scores = try await loadScores()
+            scoresLoadError = nil
+        } catch {
+            scoresLoadError = error.localizedDescription
+        }
     }
 
     private func runtimeModelCard(_ stat: RuntimeModelStat) -> some View {
@@ -229,7 +298,7 @@ public struct AnalyticsView: View {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text("\(Int(stat.avgScore.rounded()))")
                     .font(.system(.title2, design: .rounded).weight(.bold))
-                    .foregroundStyle(scoreColor(Int(stat.avgScore.rounded())))
+                    .foregroundStyle(analyticsScoreColor(Int(stat.avgScore.rounded())))
                     .monospacedDigit()
                 Text("avg")
                     .font(.caption2)
@@ -241,7 +310,7 @@ public struct AnalyticsView: View {
                     .foregroundStyle(.tertiary)
             }
             if stat.dailyAverages.count >= 2 {
-                SparklineView(values: stat.dailyAverages, color: scoreColor(Int(stat.avgScore.rounded())))
+                SparklineView(values: stat.dailyAverages, color: analyticsScoreColor(Int(stat.avgScore.rounded())))
                     .frame(height: 24)
                     .padding(.top, 2)
             }
@@ -257,7 +326,7 @@ public struct AnalyticsView: View {
             TableColumn("Score", value: \.score) { s in
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(scoreColor(s.score))
+                        .fill(analyticsScoreColor(s.score))
                         .frame(width: 8, height: 8)
                     Text("\(s.score)")
                         .font(.system(.body, design: .monospaced).weight(.semibold))
@@ -291,7 +360,7 @@ public struct AnalyticsView: View {
             .width(min: 60, ideal: 70, max: 90)
 
             TableColumn("Completed", value: \.completedAt) { s in
-                Text(relativeDate(s.completedAt))
+                Text(analyticsRelativeDate(s.completedAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -312,269 +381,129 @@ public struct AnalyticsView: View {
         }
         .frame(minHeight: 260)
     }
+}
 
-    private func scoreColor(_ score: Int) -> Color {
-        switch score {
-        case 80...: return .green
-        case 60..<80: return .yellow
-        default: return .red
-        }
-    }
+// MARK: - StatusDrillView
 
-    private func relativeDate(_ iso: String) -> String {
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let parsed = fmt.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        guard let date = parsed else { return iso }
-        let rel = RelativeDateTimeFormatter()
-        rel.unitsStyle = .short
-        return rel.localizedString(for: date, relativeTo: Date())
-    }
+/// Expanded status proportion bar + row-style legend — right-pane drill for the Status card.
+struct StatusDrillView: View {
+    let pods: [Pod]
 
-    // MARK: - Hero stats (top 3 KPIs)
+    private var statusCounts: [StatusCount] { analyticsStatusCounts(pods: pods) }
 
-    private var heroStats: some View {
-        HStack(spacing: 0) {
-            heroStat(
-                value: "\(totalSessions)",
-                label: "Pods",
-                icon: "square.stack.3d.up"
-            )
-            Spacer()
-            heroStat(
-                value: totalSessions > 0 ? String(format: "%.0f%%", successRate * 100) : "—",
-                label: "Success Rate",
-                icon: "checkmark.circle"
-            )
-            Spacer()
-            heroStat(
-                value: totalCost > 0 ? String(format: "$%.2f", totalCost) : "—",
-                label: "Total Cost",
-                icon: "dollarsign.circle"
-            )
-        }
-        .padding(20)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Status Distribution")
+                    .font(.title3.weight(.semibold))
 
-    private func heroStat(value: String, label: String, icon: String) -> some View {
-        VStack(spacing: 6) {
-            Text(value)
-                .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10))
-                Text(label)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: - Secondary stats
-
-    private var secondaryStats: some View {
-        HStack(spacing: 12) {
-            secondaryStat(
-                icon: "arrow.up.right",
-                value: totalLinesAdded > 0 ? "+\(totalLinesAdded)" : "—",
-                label: "Lines Added"
-            )
-            secondaryStat(
-                icon: "arrow.up.circle",
-                value: totalInputTokens > 0 ? formatTokens(totalInputTokens) : "—",
-                label: "Input Tokens"
-            )
-            secondaryStat(
-                icon: "arrow.down.circle",
-                value: totalOutputTokens > 0 ? formatTokens(totalOutputTokens) : "—",
-                label: "Output Tokens"
-            )
-        }
-    }
-
-    private func secondaryStat(icon: String, value: String, label: String) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.system(.title3, design: .rounded).weight(.semibold))
-                .monospacedDigit()
-            HStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 9))
-                Text(label)
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    // MARK: - Status proportion bar (GitHub language bar style)
-
-    private var statusProportionBar: some View {
-        let total = statusCounts.reduce(0) { $0 + $1.count }
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Status Distribution")
-                .font(.subheadline.weight(.semibold))
-
-            // Segmented bar
-            GeometryReader { geo in
-                HStack(spacing: 1) {
-                    ForEach(statusCounts) { item in
-                        let fraction = CGFloat(item.count) / CGFloat(max(total, 1))
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(item.status.color)
-                            .frame(width: max(fraction * geo.size.width - 1, 4))
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-            .frame(height: 10)
-
-            // Legend
-            FlowLayout(spacing: 12) {
-                ForEach(statusCounts) { item in
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(item.status.color)
-                            .frame(width: 7, height: 7)
-                        Text(item.status.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("\(item.count)")
-                            .font(.system(.caption, design: .monospaced).weight(.medium))
-                            .monospacedDigit()
-                    }
-                }
-            }
-        }
-        .padding(16)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    // MARK: - Profile breakdown (card rows)
-
-    private var profileBreakdown: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("By Profile")
-                .font(.subheadline.weight(.semibold))
-
-            ForEach(profileStats) { stat in
-                profileCard(stat)
-            }
-        }
-    }
-
-    private func profileCard(_ stat: ProfileStat) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(stat.name)
-                    .font(.system(.subheadline).weight(.medium))
-                    .lineLimit(1)
-                HStack(spacing: 12) {
-                    Text("\(stat.sessionCount) pods")
+                if statusCounts.isEmpty {
+                    Text("No pod data available yet.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if stat.avgCost > 0 {
-                        Text(String(format: "avg $%.2f", stat.avgCost))
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    if stat.totalLinesAdded > 0 {
-                        Text("+\(stat.totalLinesAdded) lines")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
+                        .padding(.top, 4)
+                } else {
+                    proportionBar
+                    Divider()
+                    legendRows
                 }
             }
-
-            Spacer()
-
-            // Success rate with inline bar
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(stat.sessionCount > 0 ? String(format: "%.0f%%", stat.successRate * 100) : "—")
-                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                    .monospacedDigit()
-                // Tiny progress bar
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.secondary.opacity(0.15))
-                        .frame(width: 48, height: 3)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(stat.successRate > 0.5 ? Color.green.opacity(0.7) : Color.orange.opacity(0.7))
-                        .frame(width: max(48 * stat.successRate, 0), height: 3)
-                }
-            }
+            .padding(24)
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    // MARK: - Helpers
-
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1_000 {
-            return String(format: "%.1fK", Double(count) / 1_000)
+    private var proportionBar: some View {
+        let total = statusCounts.reduce(0) { $0 + $1.count }
+        return GeometryReader { geo in
+            HStack(spacing: 1) {
+                ForEach(statusCounts) { item in
+                    let fraction = CGFloat(item.count) / CGFloat(max(total, 1))
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(item.status.color)
+                        .frame(width: max(fraction * geo.size.width - 1, 4))
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4))
         }
-        return "\(count)"
+        .frame(height: 12)
+    }
+
+    private var legendRows: some View {
+        let lastId = statusCounts.last?.id
+        return VStack(spacing: 0) {
+            ForEach(statusCounts) { item in
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(item.status.color)
+                        .frame(width: 10, height: 10)
+                    Text(item.status.label)
+                        .font(.body)
+                    Spacer()
+                    Text("\(item.count)")
+                        .font(.system(.body, design: .monospaced).weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 4)
+                if item.id != lastId {
+                    Divider()
+                }
+            }
+        }
     }
 }
 
-// MARK: - Flow layout for legend wrapping
+// MARK: - File-level helpers (shared by drill views)
 
-private struct FlowLayout: Layout {
-    var spacing: CGFloat
+private func analyticsStatusCounts(pods: [Pod]) -> [StatusCount] {
+    let relevantStatuses: [PodStatus] = [
+        .complete, .failed, .reviewRequired, .running, .validated,
+        .validating, .awaitingInput, .killed, .queued, .provisioning,
+    ]
+    return relevantStatuses.compactMap { status in
+        let count = pods.filter { $0.status == status }.count
+        guard count > 0 else { return nil }
+        return StatusCount(status: status, count: count)
+    }
+}
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = computeRows(proposal: proposal, subviews: subviews)
-        var height: CGFloat = 0
-        for (index, row) in rows.enumerated() {
-            let rowHeight = row.map { subviews[$0].sizeThatFits(.unspecified).height }.max() ?? 0
-            height += rowHeight
-            if index < rows.count - 1 { height += spacing / 2 }
-        }
-        return CGSize(width: proposal.width ?? 0, height: height)
+private func analyticsScoreColor(_ score: Int) -> Color {
+    switch score {
+    case 80...: return .green
+    case 60..<80: return .yellow
+    default: return .red
+    }
+}
+
+private func analyticsRelativeDate(_ iso: String) -> String {
+    let fmtFull = ISO8601DateFormatter()
+    fmtFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let fmtBasic = ISO8601DateFormatter()
+    guard let date = fmtFull.date(from: iso) ?? fmtBasic.date(from: iso) else { return iso }
+    let rel = RelativeDateTimeFormatter()
+    rel.unitsStyle = .short
+    return rel.localizedString(for: date, relativeTo: Date())
+}
+
+private func analyticsDailyAverages(for group: [PodQualityScore]) -> [Double] {
+    let dayFmt = DateFormatter()
+    dayFmt.dateFormat = "yyyy-MM-dd"
+    let isoFull = ISO8601DateFormatter()
+    isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let isoBasic = ISO8601DateFormatter()
+
+    func parseDate(_ s: String) -> Date {
+        isoFull.date(from: s) ?? isoBasic.date(from: s) ?? Date.distantPast
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let rows = computeRows(proposal: proposal, subviews: subviews)
-        var y = bounds.minY
-        for row in rows {
-            let rowHeight = row.map { subviews[$0].sizeThatFits(.unspecified).height }.max() ?? 0
-            var x = bounds.minX
-            for index in row {
-                let size = subviews[index].sizeThatFits(.unspecified)
-                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-                x += size.width + spacing
-            }
-            y += rowHeight + spacing / 2
-        }
-    }
-
-    private func computeRows(proposal: ProposedViewSize, subviews: Subviews) -> [[Int]] {
-        let maxWidth = proposal.width ?? .infinity
-        var rows: [[Int]] = [[]]
-        var currentWidth: CGFloat = 0
-        for (index, subview) in subviews.enumerated() {
-            let size = subview.sizeThatFits(.unspecified)
-            if currentWidth + size.width > maxWidth && !rows[rows.count - 1].isEmpty {
-                rows.append([])
-                currentWidth = 0
-            }
-            rows[rows.count - 1].append(index)
-            currentWidth += size.width + spacing
-        }
-        return rows
+    let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+    let recent = group.filter { parseDate($0.completedAt) >= cutoff }
+    let byDay = Dictionary(grouping: recent) { dayFmt.string(from: parseDate($0.completedAt)) }
+    return byDay.keys.sorted().compactMap { day -> Double? in
+        guard let g = byDay[day], !g.isEmpty else { return nil }
+        return Double(g.reduce(0) { $0 + $1.score }) / Double(g.count)
     }
 }
 
@@ -605,7 +534,9 @@ struct RuntimeModelStat: Identifiable {
     var id: String { "\(runtime)/\(model)" }
 }
 
-/// Mini line chart for the runtime/model quality score over the last 30 days.
+// MARK: - SparklineView
+
+/// Mini line chart — path-based, no axes or labels.
 private struct SparklineView: View {
     let values: [Double]
     let color: Color
@@ -620,7 +551,6 @@ private struct SparklineView: View {
             let step = w / CGFloat(values.count - 1)
 
             ZStack(alignment: .bottomLeading) {
-                // Fill
                 Path { path in
                     path.move(to: CGPoint(x: 0, y: h))
                     for (i, v) in values.enumerated() {
@@ -634,7 +564,6 @@ private struct SparklineView: View {
                 }
                 .fill(color.opacity(0.12))
 
-                // Line
                 Path { path in
                     for (i, v) in values.enumerated() {
                         let x = CGFloat(i) * step
@@ -651,7 +580,7 @@ private struct SparklineView: View {
 
 // MARK: - Preview
 
-#Preview("Analytics") {
+#Preview("Analytics Overview") {
     AnalyticsView(pods: MockData.all)
-        .frame(width: 800, height: 600)
+        .frame(width: 700, height: 400)
 }
