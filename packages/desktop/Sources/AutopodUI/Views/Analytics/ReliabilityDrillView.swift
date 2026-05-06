@@ -128,7 +128,7 @@ private struct ReliabilityFunnelSectionView: View {
                 .frame(height: CGFloat(funnel.bands.count) * 52)
 
                 // Drop disclosures rendered outside GeometryReader for natural height
-                ForEach(funnel.drops, id: \.self) { drop in
+                ForEach(funnel.drops, id: { "\($0.from.rawValue)-\($0.to.rawValue)" }) { drop in
                     dropDisclosure(drop)
                 }
             }
@@ -152,7 +152,7 @@ private struct ReliabilityFunnelSectionView: View {
                 // Drop arrows at the right edge of band
                 HStack(spacing: 4) {
                     Spacer().frame(width: bandWidth)
-                    ForEach(drops, id: \.self) { drop in
+                    ForEach(drops, id: { "\($0.from.rawValue)-\($0.to.rawValue)" }) { drop in
                         dropArrow(drop)
                     }
                 }
@@ -249,18 +249,6 @@ private struct ReliabilityFunnelSectionView: View {
 
     private func dropKey(_ drop: DropEntry) -> String {
         "\(drop.from.rawValue)-\(drop.to.rawValue)"
-    }
-}
-
-extension DropEntry: Hashable {
-    public static func == (lhs: DropEntry, rhs: DropEntry) -> Bool {
-        lhs.from == rhs.from && lhs.to == rhs.to && lhs.count == rhs.count
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(from)
-        hasher.combine(to)
-        hasher.combine(count)
     }
 }
 
