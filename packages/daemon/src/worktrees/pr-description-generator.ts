@@ -1,9 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import Anthropic from '@anthropic-ai/sdk';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Profile, TaskSummary } from '@autopod/shared';
 import type { Logger } from 'pino';
+import {
+  type ProfileLlmClientUnavailableReason,
+  createProfileAnthropicClient,
+} from '../providers/llm-client.js';
 import { buildPrTitle } from './pr-body-builder.js';
 
 const execFileAsync = promisify(execFile);
@@ -13,20 +16,8 @@ const API_TIMEOUT_MS = 15_000;
 const MAX_TITLE_LENGTH = 72;
 const DEFAULT_DESCRIPTION_MODEL = 'claude-haiku-4-5';
 
-const MODEL_ALIASES: Record<string, string> = {
-  opus: 'claude-opus-4-6',
-  sonnet: 'claude-sonnet-4-6',
-  haiku: 'claude-haiku-4-5',
-};
-
-function resolveModelId(model: string): string {
-  return MODEL_ALIASES[model] ?? model;
-}
-
 function pickDescriptionModel(profile: Profile, podModel: string): string {
-  return resolveModelId(
-    profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_DESCRIPTION_MODEL,
-  );
+  return profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_DESCRIPTION_MODEL;
 }
 
 const TITLE_SYSTEM_PROMPT =
@@ -63,9 +54,13 @@ export interface PrNarrative {
  * Stable reason codes for daemon-side LLM fallback paths. Greppable in logs and
  * serializable into pod activity events / PR body footers so the user can see
  * exactly why a template fallback was used instead of an LLM-generated body.
+ *
+ * The first four codes mirror `ProfileLlmClientUnavailableReason` — the LLM
+ * call never reached the API. The trailing three describe failures after the
+ * call was attempted.
  */
 export type LlmFallbackReason =
-  | 'no_anthropic_api_key'
+  | ProfileLlmClientUnavailableReason
   | 'api_call_failed'
   | 'output_invalid'
   | 'json_parse_failed';
@@ -146,15 +141,16 @@ function buildUserMessage(input: PrDescriptionInput, diff: string): string {
 }
 
 /**
- * Generate an LLM PR title in conventional-commit format using the daemon
- * host's `ANTHROPIC_API_KEY`. Mirrors how AI review authenticates: profile
- * credentials are intentionally NOT used — MAX OAuth, copilot, and
- * foundry-openai are not daemon-callable, so unifying on the host key keeps a
- * single working path.
+ * Generate an LLM PR title in conventional-commit format using the same
+ * provider credentials the agent ran on (Anthropic API key, MAX OAuth, or
+ * Foundry token). Routes through `createProfileAnthropicClient`, so workspace
+ * pods on MAX/Foundry get LLM-generated titles without the daemon needing a
+ * separate `ANTHROPIC_API_KEY`.
  *
- * Falls back to `buildPrTitle()` on any error or when the env var is unset.
- * Always returns a usable title — the `usedFallback` flag tells callers
- * whether the LLM path succeeded or template was used (and why).
+ * Falls back to `buildPrTitle()` on any error or when the profile cannot back
+ * a daemon-side LLM call. Always returns a usable title — the `usedFallback`
+ * flag tells callers whether the LLM path succeeded or template was used
+ * (and why).
  */
 export async function generatePrTitle(
   input: PrDescriptionInput,
@@ -166,22 +162,20 @@ export async function generatePrTitle(
     input.seriesDescription,
   );
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    logger.error(
-      { profile: input.profile.name, reason: 'no_anthropic_api_key' },
-      'pr-description-generator: ANTHROPIC_API_KEY not set on daemon host, using fallback title',
-    );
-    return { title: fallbackTitle, usedFallback: true, fallbackReason: 'no_anthropic_api_key' };
+  const llm = await createProfileAnthropicClient(
+    input.profile,
+    pickDescriptionModel(input.profile, input.podModel),
+    logger,
+  );
+  if (!llm.ok) {
+    return { title: fallbackTitle, usedFallback: true, fallbackReason: llm.reason };
   }
 
-  const client = new Anthropic({ apiKey });
-  const model = pickDescriptionModel(input.profile, input.podModel);
   const diff = await readBranchDiff(input.worktreePath, input.baseBranch, logger);
 
   try {
-    const response = await client.messages.create({
-      model,
+    const response = await llm.client.messages.create({
+      model: llm.model,
       max_tokens: 100,
       system: TITLE_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
@@ -225,8 +219,11 @@ export async function generatePrTitle(
 
 /**
  * Generate LLM narrative sections (Why / What / How / Review Focus) for a PR
- * body using the daemon host's `ANTHROPIC_API_KEY`. Mirrors AI review's auth
- * path; profile credentials are intentionally NOT used.
+ * body using the same provider credentials the agent ran on (Anthropic API
+ * key, MAX OAuth, or Foundry token). Routes through
+ * `createProfileAnthropicClient`, so workspace pods on MAX/Foundry get
+ * diff-grounded bodies without the daemon needing a separate
+ * `ANTHROPIC_API_KEY`.
  *
  * Falls back to plain task / taskSummary text on any error.
  * Always returns a usable narrative — the `usedFallback` flag tells callers
@@ -243,29 +240,27 @@ export async function generatePrNarrative(
     how: input.taskSummary?.how,
   };
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    logger.error(
-      { profile: input.profile.name, reason: 'no_anthropic_api_key' },
-      'pr-description-generator: ANTHROPIC_API_KEY not set on daemon host, using fallback narrative',
-    );
+  const llm = await createProfileAnthropicClient(
+    input.profile,
+    pickDescriptionModel(input.profile, input.podModel),
+    logger,
+  );
+  if (!llm.ok) {
     return {
       narrative: fallbackNarrative,
       usedFallback: true,
-      fallbackReason: 'no_anthropic_api_key',
+      fallbackReason: llm.reason,
     };
   }
 
-  const client = new Anthropic({ apiKey });
-  const model = pickDescriptionModel(input.profile, input.podModel);
   const diff = await readBranchDiff(input.worktreePath, input.baseBranch, logger);
   const systemPrompt = compact
     ? NARRATIVE_SYSTEM_PROMPT + NARRATIVE_COMPACT_SUFFIX
     : NARRATIVE_SYSTEM_PROMPT;
 
   try {
-    const response = await client.messages.create({
-      model,
+    const response = await llm.client.messages.create({
+      model: llm.model,
       max_tokens: compact ? 400 : 800,
       system: systemPrompt,
       messages: [{ role: 'user', content: buildUserMessage(input, diff) }],

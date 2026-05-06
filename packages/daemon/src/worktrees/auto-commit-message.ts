@@ -1,9 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import Anthropic from '@anthropic-ai/sdk';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
+import {
+  type ProfileLlmClientUnavailableReason,
+  createProfileAnthropicClient,
+} from '../providers/llm-client.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -13,15 +16,8 @@ const API_TIMEOUT_MS = 10_000;
 const MAX_MESSAGE_LENGTH = 100;
 const DEFAULT_MODEL = 'claude-haiku-4-5';
 
-const MODEL_ALIASES: Record<string, string> = {
-  opus: 'claude-opus-4-6',
-  sonnet: 'claude-sonnet-4-6',
-  haiku: 'claude-haiku-4-5',
-};
-
 function pickModel(profile: Profile, podModel: string): string {
-  const raw = profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_MODEL;
-  return MODEL_ALIASES[raw] ?? raw;
+  return profile.reviewerModel || profile.defaultModel || podModel || DEFAULT_MODEL;
 }
 
 const SYSTEM_PROMPT =
@@ -43,7 +39,7 @@ export interface AutoCommitMessageInput {
 export type AutoCommitFallbackReason =
   | 'git_stat_failed'
   | 'git_diff_failed'
-  | 'no_anthropic_api_key'
+  | ProfileLlmClientUnavailableReason
   | 'api_call_failed'
   | 'output_invalid';
 
@@ -57,10 +53,12 @@ export interface AutoCommitMessageResult {
 /**
  * Generate a commit message for staged changes in `worktreePath`.
  *
- * Uses the daemon host's `ANTHROPIC_API_KEY` (mirrors AI review's auth path).
- * On any failure falls back to a deterministic `git diff --cached --stat`-based
- * message. As a last resort returns a generic chore message so the caller can
- * always commit.
+ * Uses the same provider credentials the agent ran on (Anthropic API key,
+ * MAX OAuth, or Foundry token) via `createProfileAnthropicClient`. Workspace
+ * pods on MAX/Foundry get LLM-generated messages without the daemon needing
+ * a separate `ANTHROPIC_API_KEY`. On any failure falls back to a
+ * deterministic `git diff --cached --stat`-based message. As a last resort
+ * returns a generic chore message so the caller can always commit.
  *
  * Never throws. The returned `usedFallback` flag tells callers whether the
  * LLM path succeeded or template was used (and why).
@@ -89,13 +87,13 @@ export async function generateAutoCommitMessage(
 
   const heuristic = buildHeuristicMessage(stat);
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    logger.warn(
-      { worktreePath, profile: input.profile.name, reason: 'no_anthropic_api_key' },
-      'auto-commit message: ANTHROPIC_API_KEY not set on daemon host, using heuristic',
-    );
-    return { message: heuristic, usedFallback: true, fallbackReason: 'no_anthropic_api_key' };
+  const llm = await createProfileAnthropicClient(
+    input.profile,
+    pickModel(input.profile, input.podModel),
+    logger,
+  );
+  if (!llm.ok) {
+    return { message: heuristic, usedFallback: true, fallbackReason: llm.reason };
   }
 
   let diff = '';
@@ -116,13 +114,10 @@ export async function generateAutoCommitMessage(
     };
   }
 
-  const client = new Anthropic({ apiKey });
-  const model = pickModel(input.profile, input.podModel);
-
   try {
     const taskLine = podTask ? `Pod task: ${podTask}\n\n` : '';
-    const response = await client.messages.create({
-      model,
+    const response = await llm.client.messages.create({
+      model: llm.model,
       max_tokens: 100,
       system: SYSTEM_PROMPT,
       messages: [

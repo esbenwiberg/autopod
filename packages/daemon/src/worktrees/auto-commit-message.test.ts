@@ -1,15 +1,15 @@
 import type { ChildProcess } from 'node:child_process';
 import type { Profile } from '@autopod/shared';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildHeuristicMessage, generateAutoCommitMessage } from './auto-commit-message.js';
 
 const logger = pino({ level: 'silent' });
 
-const { execFileMock, anthropicCreateMock, anthropicCtorMock } = vi.hoisted(() => ({
+const { execFileMock, anthropicCreateMock, createClientMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
   anthropicCreateMock: vi.fn(),
-  anthropicCtorMock: vi.fn(),
+  createClientMock: vi.fn(),
 }));
 
 vi.mock('node:child_process', async () => {
@@ -17,13 +17,9 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile: execFileMock };
 });
 
-vi.mock('@anthropic-ai/sdk', () => {
-  const Anthropic = vi.fn().mockImplementation((opts: unknown) => {
-    anthropicCtorMock(opts);
-    return { messages: { create: anthropicCreateMock } };
-  });
-  return { default: Anthropic };
-});
+vi.mock('../providers/llm-client.js', () => ({
+  createProfileAnthropicClient: createClientMock,
+}));
 
 type ExecCallback = (error: Error | null, result: unknown, stderr?: string) => void;
 
@@ -71,6 +67,14 @@ function setupExec(opts: { stat?: string; diff?: string; statError?: Error; diff
   );
 }
 
+function mockClientOk(model = 'claude-haiku-4-5') {
+  createClientMock.mockResolvedValue({
+    ok: true,
+    client: { messages: { create: anthropicCreateMock } },
+    model,
+  });
+}
+
 const SAMPLE_PROFILE = {
   name: 'test-profile',
   modelProvider: 'max',
@@ -90,12 +94,8 @@ describe('generateAutoCommitMessage', () => {
   beforeEach(() => {
     execFileMock.mockReset();
     anthropicCreateMock.mockReset();
-    anthropicCtorMock.mockReset();
-    process.env.ANTHROPIC_API_KEY = 'test-key';
-  });
-
-  afterEach(() => {
-    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
+    createClientMock.mockReset();
+    mockClientOk();
   });
 
   it('returns the model output verbatim on a successful call', async () => {
@@ -125,8 +125,8 @@ describe('generateAutoCommitMessage', () => {
     expect(result.fallbackDetail).toContain('429');
   });
 
-  it('skips the API call entirely when ANTHROPIC_API_KEY is unset (no_anthropic_api_key)', async () => {
-    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
+  it('skips the API call entirely when the profile cannot back a daemon-side LLM call (no_anthropic_api_key)', async () => {
+    createClientMock.mockResolvedValueOnce({ ok: false, reason: 'no_anthropic_api_key' });
     setupExec({});
 
     const result = await generateAutoCommitMessage(baseInput, logger);
@@ -134,6 +134,25 @@ describe('generateAutoCommitMessage', () => {
     expect(result.usedFallback).toBe(true);
     expect(result.fallbackReason).toBe('no_anthropic_api_key');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates no_credentials when profile creds are missing', async () => {
+    createClientMock.mockResolvedValueOnce({ ok: false, reason: 'no_credentials' });
+    setupExec({});
+
+    const result = await generateAutoCommitMessage(baseInput, logger);
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('no_credentials');
+    expect(anthropicCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates provider_not_callable for copilot profiles', async () => {
+    createClientMock.mockResolvedValueOnce({ ok: false, reason: 'provider_not_callable' });
+    setupExec({});
+
+    const result = await generateAutoCommitMessage(baseInput, logger);
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('provider_not_callable');
   });
 
   it('rejects model output that contains newlines and falls back (output_invalid)', async () => {
@@ -168,6 +187,7 @@ describe('generateAutoCommitMessage', () => {
     expect(result.usedFallback).toBe(true);
     expect(result.fallbackReason).toBe('git_stat_failed');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
+    expect(createClientMock).not.toHaveBeenCalled();
   });
 
   it('falls back to heuristic when reading the full diff fails (git_diff_failed)', async () => {
@@ -180,14 +200,36 @@ describe('generateAutoCommitMessage', () => {
     expect(anthropicCreateMock).not.toHaveBeenCalled();
   });
 
-  it('instantiates the Anthropic SDK with the host env var', async () => {
+  it('routes through createProfileAnthropicClient with the picked model', async () => {
     setupExec({});
     anthropicCreateMock.mockResolvedValueOnce({
       content: [{ type: 'text', text: 'feat: ok' }],
     });
 
+    await generateAutoCommitMessage(
+      {
+        ...baseInput,
+        profile: { ...SAMPLE_PROFILE, reviewerModel: 'sonnet' } as unknown as Profile,
+      },
+      logger,
+    );
+    expect(createClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'test-profile' }),
+      'sonnet',
+      logger,
+    );
+  });
+
+  it('uses the model returned by the client when calling messages.create', async () => {
+    setupExec({});
+    mockClientOk('claude-opus-4-6');
+    anthropicCreateMock.mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'feat: ok' }],
+    });
+
     await generateAutoCommitMessage(baseInput, logger);
-    expect(anthropicCtorMock).toHaveBeenCalledWith({ apiKey: 'test-key' });
+    const callArgs = anthropicCreateMock.mock.calls[0]?.[0] as { model: string };
+    expect(callArgs.model).toBe('claude-opus-4-6');
   });
 });
 
