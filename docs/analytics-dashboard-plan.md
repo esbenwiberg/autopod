@@ -44,6 +44,21 @@ Every card has a sparkline + delta. Every card opens a deep view in the right pa
 - **Every drill-in has an "Open as workspace" CTA.** Reuses existing `history-workspace` to launch a forensic pod against the filtered set.
 - **No backfill of historical metrics.** New tables capture forward; existing tables already have what we need for the rest.
 
+## Established conventions (locked by Phase 0 + Phase 1)
+
+Future phases consume these as-is — don't re-litigate during `/plan-feature`.
+
+- **Card API** (Phase 0): `AnalyticsCard` takes `title: String`, `value: String`, `sparkline: [Double]?`, `delta: AnalyticsCardDelta?`, `isSelected: Bool`, `onClick: () -> Void`. Pre-formatted strings, not numbers. Source: `specs/analytics-shell/design.md`.
+- **Card kind enum** (Phase 0): `AnalyticsCardKind` is an enum with `.cost`, `.quality`, `.status`. New phases extend the enum with their card kind (e.g. `.reliability`, `.safety`, `.throughput`, `.models`).
+- **Right-pane routing** (Phase 0): `AnalyticsRightPaneView` switches on `AnalyticsCardKind?` and renders `<Kind>DrillView`. New phases add a private drill view, not a new routing layer.
+- **Sidebar sub-rows** (Phase 0): every analytics sub-row exists but ships `.disabled(true)`. Enabling a sub-row is part of the phase that fills its drill.
+- **Trailing-window query** (Phase 1): `datetime('now', '-' || @days || ' days')`. Precedent: `quality-score-repository.ts:167`. Default window is 30 days; endpoints accept `?days=N` (≥ 1).
+- **Pod filter** (Phase 1): every analytics aggregation applies `isWorkspace = false` AND `status IN ('complete','killed','failed','rejected')` AND `completedAt` ∈ window. Don't widen without superseding `purpose.md` non-goals.
+- **Effective cost** (Phase 1, ADR-015): `effectiveCostUsd(pod) = pod.costUsd > 0 ? pod.costUsd : computeCost(model, in, out)`. Anything that surfaces a $ value uses this helper, not raw `pod.costUsd`.
+- **Phase token taxonomy** (Phase 1, ADR-016): `phase_token_usage` carries `agent_initial`, `agent_rework_<N>`, `review`, `plan_eval`. Pre-Phase-1 pods reconstruct as synthetic `agent_legacy` at aggregation time. Forward-only — no backfill.
+- **Endpoint shape** (Phase 1): one composite endpoint per card (`GET /pods/analytics/<kind>?days=N`) returning everything the drill needs. Don't fan out into per-section endpoints.
+- **Audience** (cross-cutting): operator-grade for Esben. Not audit-grade. Skip PDF exports, retention guarantees, compliance attestation.
+
 ## What each phase delivers
 
 Each phase ships a working slice: migration (if any) → daemon endpoint → Swift API client → middle-pane card → right-pane drill-in.
@@ -97,6 +112,8 @@ Each phase ships a working slice: migration (if any) → daemon endpoint → Swi
 
 ## Phase 2 — Lifecycle funnel + reliability
 
+**Read first:** `specs/analytics-shell/design.md` (card + right-pane contracts), `specs/analytics-cost/design.md` (trailing-window + pod filter conventions), `packages/daemon/src/db/migrations/` for the latest validation/state-history columns.
+
 **Goal:** show *where pods leak* through the state machine, and *which validation stage* is the most common failure mode.
 
 **Scope**
@@ -117,6 +134,8 @@ Each phase ships a working slice: migration (if any) → daemon endpoint → Swi
 
 ## Phase 3 — Quality drill-down
 
+**Read first:** `specs/analytics-shell/design.md`, `specs/analytics-cost/design.md`, `packages/daemon/src/pods/quality-score-repository.ts` (existing scoring).
+
 **Goal:** upgrade the existing quality view to actually be diagnostic, not just descriptive.
 
 **Scope**
@@ -135,6 +154,8 @@ Each phase ships a working slice: migration (if any) → daemon endpoint → Swi
 ---
 
 ## Phase 4 — Safety / Guardrails
+
+**Read first:** `specs/analytics-shell/design.md`, `specs/analytics-cost/design.md`, `packages/daemon/src/actions/action-audit-repository.ts` (PII / quarantine columns), `packages/shared/src/sanitize/` (pattern definitions), `packages/daemon/src/pods/issue-watcher-service.ts` (the writer hook for `safety_events`). This is the first phase that introduces a new table — bump the migration prefix off the highest existing one (see `CLAUDE.md` Database / Migrations rule).
 
 **Goal:** prove guardrails are working, with a real story in numbers. Operator-grade, not audit-grade.
 
@@ -163,6 +184,8 @@ Each phase ships a working slice: migration (if any) → daemon endpoint → Swi
 
 ## Phase 5 — Throughput, heatmap, escalations
 
+**Read first:** `specs/analytics-shell/design.md`, `specs/analytics-cost/design.md`, `packages/daemon/src/pods/escalation-repository.ts`, `packages/daemon/src/pods/pod-repository.ts` (state transition timestamps).
+
 **Goal:** answer "how busy is this thing, when, and what's blocking forward motion?"
 
 **Scope**
@@ -186,6 +209,8 @@ Each phase ships a working slice: migration (if any) → daemon endpoint → Swi
 ---
 
 ## Phase 6 — Models leaderboard + what-if
+
+**Read first:** `specs/analytics-shell/design.md`, `specs/analytics-cost/design.md`, `packages/shared/src/pricing/` (the pricing module; what-if math runs through `effectiveCostUsd`), prior phases' aggregation modules for per-model rollup precedent.
 
 **Goal:** make model-mix decisions data-driven, not vibes-driven.
 
