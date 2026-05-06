@@ -58,6 +58,16 @@ export interface RequestCredentialPayload {
   service: 'github' | 'ado';
   /** Human-readable reason the agent needs this credential */
   reason: string;
+  /**
+   * Where the missing credential is needed.
+   *  - `agent` (default): the agent inside the container needs auth — daemon
+   *    writes the PAT into the container on resume.
+   *  - `host_push`: the daemon's own host-side git push hit a credential
+   *    failure (e.g. post-validation branch push). On resume the daemon
+   *    re-reads the profile's PAT and retries the push; nothing is written
+   *    into the container.
+   */
+  source?: 'agent' | 'host_push';
 }
 
 export interface EscalationResponse {

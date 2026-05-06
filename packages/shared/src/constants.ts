@@ -37,7 +37,11 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   queued: ['provisioning', 'killing'],
   provisioning: ['running', 'killing', 'failed'],
   running: ['awaiting_input', 'validating', 'paused', 'handoff', 'killing', 'complete', 'failed'],
-  awaiting_input: ['running', 'killing', 'failed'],
+  // `validating` covers the case where the daemon parked the pod after a
+  // post-validation push failed on missing/invalid credentials — once the
+  // operator updates the profile PAT, the daemon retries the push from the
+  // validating state without re-running the agent.
+  awaiting_input: ['running', 'validating', 'killing', 'failed'],
   paused: ['running', 'killing', 'failed'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
   validated: ['approved', 'running', 'validating', 'killing', 'queued'],

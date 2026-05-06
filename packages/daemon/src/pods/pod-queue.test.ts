@@ -146,6 +146,35 @@ describe('pod-queue', () => {
     expect(processor).toHaveBeenCalledTimes(1);
   });
 
+  it('clearStuckEntry recovers a pod whose finally never ran', async () => {
+    const processed: string[] = [];
+    // Concurrency=1 so the second enqueue can't slip in even without dedup —
+    // isolates the stale-activeIds path from the queue-fullness path.
+    const stuckPromise = new Promise<void>(() => {}); // never resolves
+    const processor = vi.fn(async (id: string) => {
+      if (id === 'stuck') return stuckPromise;
+      processed.push(id);
+    });
+
+    const queue = createPodQueue(2, processor, logger);
+    queue.enqueue('stuck');
+    expect(queue.processing).toBe(1);
+
+    // Re-enqueueing while active is silently dropped — matching the kick-button bug.
+    queue.enqueue('stuck');
+    expect(queue.pending).toBe(0);
+
+    // Operator clears the stale activeIds entry. Slot is freed.
+    expect(queue.clearStuckEntry('stuck')).toBe(true);
+    expect(queue.processing).toBe(0);
+    expect(queue.clearStuckEntry('stuck')).toBe(false); // idempotent
+
+    // A fresh enqueue now goes through (would have been dedup'd before clear).
+    queue.enqueue('next');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(processed).toEqual(['next']);
+  });
+
   it('processes items in FIFO order', async () => {
     const processed: string[] = [];
     const processor = vi.fn(async (id: string) => {

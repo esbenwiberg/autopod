@@ -43,17 +43,52 @@ export class DeletionGuardError extends Error {
 // Prepend the canonical git locations so the binary is found regardless of how the daemon started.
 const GIT_PATH_PREPEND = ['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin'].join(':');
 
-/** Env vars applied to every git subprocess to prevent interactive prompts from hanging the daemon. */
+/**
+ * Env vars applied to every git subprocess to prevent interactive prompts
+ * from hanging the daemon AND to stop ambient credential helpers (macOS
+ * keychain, libsecret, gh CLI's helper) from silently answering on the
+ * daemon's behalf. We want missing PATs to surface as a clear error here,
+ * not authenticate as whichever user happens to be cached on the host.
+ */
 const GIT_ENV: Record<string, string> = {
   ...process.env,
   PATH: `${GIT_PATH_PREPEND}:${process.env.PATH ?? ''}`,
+  // Block tty prompts.
   GIT_TERMINAL_PROMPT: '0',
+  // Block any GUI askpass helper that git might spawn for HTTPS auth.
+  // Pointing both vars at /bin/true makes them resolve to a no-op binary
+  // that prints nothing — git interprets the empty answer as "no creds".
+  GIT_ASKPASS: '/bin/true',
+  SSH_ASKPASS: '/bin/true',
+  // SSH must never prompt either.
   GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
 } as Record<string, string>;
 
+/**
+ * Env vars that disable ambient credential helpers for daemon-spawned git.
+ * `credential.helper=` (empty value) clears the helper chain for this invocation
+ * only — the host's user/system git config is untouched. Without this, a
+ * `git push https://github.com/...` (no token in URL) would hit `osxkeychain`
+ * or `manager-core` and silently authenticate with whatever account is cached.
+ *
+ * Set via `GIT_CONFIG_COUNT/KEY/VALUE` env vars rather than `-c k=v` CLI args
+ * so tests and tools that introspect git argv don't have to special-case the
+ * prefix. Git applies these as ad-hoc config for the single invocation.
+ */
+const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_0: 'credential.helper',
+  GIT_CONFIG_VALUE_0: '',
+  GIT_CONFIG_KEY_1: 'core.askPass',
+  GIT_CONFIG_VALUE_1: '',
+};
+
 /** Wrapper so every git call in this file gets GIT_ENV — no env-less calls allowed. */
 function git(args: string[], options: { cwd?: string; timeout?: number; maxBuffer?: number } = {}) {
-  return execFileAsync('git', args, { ...options, env: GIT_ENV });
+  return execFileAsync('git', args, {
+    ...options,
+    env: { ...GIT_ENV, ...GIT_NO_AMBIENT_CREDS_ENV },
+  });
 }
 
 /**
@@ -82,16 +117,102 @@ const DIFF_EXCLUDE_PATHSPECS: readonly string[] = [
   ':(exclude)*.min.css',
 ];
 
+/**
+ * Thrown when a git remote operation fails because the daemon either has no
+ * PAT for this repo or the PAT it has is rejected by the remote. Distinct
+ * from generic git errors so the pod manager can park the pod in
+ * `awaiting_input` (operator updates the profile, daemon retries) instead of
+ * failing terminally.
+ */
+export class GitCredentialError extends Error {
+  /** Inferred remote provider — picks the right PAT slot to refresh. */
+  readonly service: 'github' | 'ado';
+  /** Original git stderr (sanitized) for debugging. */
+  readonly stderr: string;
+  /** The op that hit the failure ('push' / 'fetch'). */
+  readonly op: string;
+  constructor(message: string, service: 'github' | 'ado', op: string, stderr: string) {
+    super(message);
+    this.name = 'GitCredentialError';
+    this.service = service;
+    this.op = op;
+    this.stderr = stderr;
+  }
+}
+
+/**
+ * Heuristic match for credential-class git failures. Covers the wording
+ * across HTTPS/SSH, GitHub, ADO, and BitBucket: missing token, wrong token,
+ * insufficient PAT scope. Excludes "Repository not found" (404) on its own
+ * because GitHub also surfaces that for genuinely missing repos — only flag
+ * it when it co-occurs with auth wording.
+ */
+const CREDENTIAL_ERROR_PATTERNS: readonly RegExp[] = [
+  /authentication failed/i,
+  /could not read (username|password)/i,
+  /terminal prompts disabled/i,
+  /invalid username or token/i,
+  /password authentication is not supported/i,
+  /permission to .+ denied to /i,
+  /remote: permission denied/i,
+  /\b403\b/,
+  /\b401\b/,
+  /tf401019/i, // ADO: "git was unable to authenticate"
+  /tf400813/i, // ADO: "user .* is not authorized"
+  /support for password authentication was removed/i,
+];
+
+function inferGitService(stderr: string, cmd: string): 'github' | 'ado' {
+  const blob = `${cmd}\n${stderr}`.toLowerCase();
+  if (
+    blob.includes('dev.azure.com') ||
+    blob.includes('visualstudio.com') ||
+    /\btf\d{6}\b/i.test(blob)
+  ) {
+    return 'ado';
+  }
+  return 'github';
+}
+
+/**
+ * Inspect a sanitized git error and return a `GitCredentialError` if it
+ * looks like an auth/permission failure, otherwise return the original
+ * error unchanged. Pass results through this AFTER `sanitizeGitError` so
+ * regexes match the same text the operator sees in logs.
+ */
+export function classifyGitError(err: unknown, op: string): unknown {
+  if (!(err instanceof Error)) return err;
+  const errAsRecord = err as unknown as Record<string, unknown>;
+  const stderrRaw = errAsRecord.stderr;
+  const cmdRaw = errAsRecord.cmd;
+  const stderr = typeof stderrRaw === 'string' ? stderrRaw : '';
+  const cmd = typeof cmdRaw === 'string' ? cmdRaw : '';
+  const blob = `${err.message}\n${stderr}`;
+  const isCredential = CREDENTIAL_ERROR_PATTERNS.some((re) => re.test(blob));
+  if (!isCredential) return err;
+  const service = inferGitService(stderr, cmd);
+  const wrapped = new GitCredentialError(
+    `git ${op} rejected: credentials missing or unauthorized for ${service}. Update the profile PAT (it must have write access to the target repo) and resume the pod.`,
+    service,
+    op,
+    stderr.slice(0, 500),
+  );
+  wrapped.stack = err.stack;
+  return wrapped;
+}
+
 /** Strip credentials from git error messages/commands so PATs never leak into logs. */
 const PAT_PATTERN = /https:\/\/[^@]*@/g;
 function sanitizeGitError(err: unknown): unknown {
   if (err instanceof Error) {
     const cleaned = new Error(err.message.replace(PAT_PATTERN, 'https://***@'));
     cleaned.stack = err.stack?.replace(PAT_PATTERN, 'https://***@');
+    const errRecord = err as unknown as Record<string, unknown>;
+    const cleanedRecord = cleaned as unknown as Record<string, unknown>;
     for (const key of ['cmd', 'stderr', 'stdout'] as const) {
-      const val = (err as Record<string, unknown>)[key];
+      const val = errRecord[key];
       if (typeof val === 'string') {
-        (cleaned as Record<string, unknown>)[key] = val.replace(PAT_PATTERN, 'https://***@');
+        cleanedRecord[key] = val.replace(PAT_PATTERN, 'https://***@');
       }
     }
     return cleaned;
@@ -535,7 +656,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         cwd: worktreePath,
       });
     } catch (err) {
-      throw sanitizeGitError(err);
+      throw classifyGitError(sanitizeGitError(err), 'push');
     }
   }
 
@@ -669,7 +790,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     try {
       await git(pushArgs, { cwd: worktreePath });
     } catch (err) {
-      throw sanitizeGitError(err);
+      throw classifyGitError(sanitizeGitError(err), 'push');
     }
   }
 

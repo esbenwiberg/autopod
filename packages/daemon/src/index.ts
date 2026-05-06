@@ -483,6 +483,7 @@ podManager = createPodManager({
   prManagerFactory,
   actionEngine: actionRegistry,
   enqueueSession: (id) => podQueue.enqueue(id),
+  clearStuckQueueEntry: (id) => podQueue.clearStuckEntry(id),
   mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? 'host.docker.internal'}:${PORT}`,
   daemonConfig: {
     mcpServers: JSON.parse(process.env.DAEMON_MCP_SERVERS ?? '[]'),

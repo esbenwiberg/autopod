@@ -82,7 +82,7 @@ import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
-import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
+import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { readAcFile } from './ac-file-parser.js';
 import { buildCorrectionMessage } from './correction-context.js';
@@ -585,6 +585,13 @@ export interface PodManagerDependencies {
   memoryRepo?: import('./memory-repository.js').MemoryRepository;
   pendingOverrideRepo?: import('./pending-override-repository.js').PendingOverrideRepository;
   enqueueSession: (podId: string) => void;
+  /**
+   * Operator-only: clear a stale `activeIds` entry from the queue. Used by
+   * `kickPod` to recover from the stuck-queued bug where a previous run's
+   * finally never cleaned up, leaving `enqueue` to silently dedup forever.
+   * Returns `true` if the entry was cleared.
+   */
+  clearStuckQueueEntry?: (podId: string) => boolean;
   mcpBaseUrl: string;
   daemonConfig: Pick<DaemonConfig, 'mcpServers' | 'claudeMdSections' | 'skills'>;
   /** Pending MCP ask_human requests keyed by podId — used to resolve escalations */
@@ -793,6 +800,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     sidecarManager,
     prManagerFactory,
     enqueueSession,
+    clearStuckQueueEntry,
     mcpBaseUrl,
     daemonConfig,
     logger,
@@ -2098,6 +2106,44 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * plus an activity-status line. Returns true if the error was a guard trip so callers can
    * skip redundant warnings about the same condition.
    */
+  /**
+   * Park a pod in `awaiting_input` after a daemon-side git push failed on
+   * credentials. The operator updates the profile PAT and replies/nudges; the
+   * resume handler picks up the escalation, retries the push from
+   * `validating`, and continues to PR creation — no agent re-run, no lost
+   * validation work. Returns true so the call site can `return` cleanly.
+   */
+  function parkOnCredentialFailure(podId: string, err: GitCredentialError): true {
+    const pod = podRepo.getOrThrow(podId);
+    const escalation: EscalationRequest = {
+      id: generateId(12),
+      podId,
+      type: 'request_credential',
+      timestamp: new Date().toISOString(),
+      payload: {
+        service: err.service,
+        reason: `git ${err.op} was rejected by ${err.service}. Update the profile's ${err.service === 'github' ? 'githubPat' : 'adoPat'} with a token that has write access to the target repo, then resume the pod.`,
+        source: 'host_push',
+      },
+      response: null,
+    };
+    escalationRepo.insert(escalation);
+    podRepo.update(podId, {
+      pendingEscalation: escalation,
+      escalationCount: pod.escalationCount + 1,
+    });
+    transition(pod, 'awaiting_input');
+    emitActivityStatus(
+      podId,
+      `Push blocked — ${err.service} credentials missing or unauthorized. Update PAT and resume.`,
+    );
+    logger.warn(
+      { podId, service: err.service, op: err.op, escalationId: escalation.id },
+      'Daemon-side git push parked in awaiting_input on credential failure',
+    );
+    return true;
+  }
+
   function handleDeletionGuardError(podId: string, err: unknown): boolean {
     if (!(err instanceof DeletionGuardError)) return false;
     try {
@@ -2164,6 +2210,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: branch push failed');
+      // Bubble GitCredentialError up untouched so the caller can park the pod
+      // in awaiting_input instead of failing terminally on a fixable PAT issue.
+      if (err instanceof GitCredentialError) {
+        throw err;
+      }
       if (handleDeletionGuardError(podId, err)) {
         throw new AutopodError(message, 'WORKTREE_COMPROMISED', 409);
       }
@@ -4656,6 +4707,142 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // ── Credential injection ──────────────────────────────────────────
       if (pod.pendingEscalation?.type === 'request_credential') {
         const payload = pod.pendingEscalation.payload as RequestCredentialPayload;
+
+        // Daemon-side push failure: skip container injection (no agent waiting)
+        // and retry the post-validation push from the host with the freshly
+        // updated profile PAT.
+        if (payload.source === 'host_push') {
+          const profile = profileStore.get(pod.profileName);
+          const pat = selectGitPat(profile);
+          if (!pat) {
+            throw new AutopodError(
+              `Profile '${pod.profileName}' still has no PAT for ${payload.service}. Add the ${payload.service === 'github' ? 'githubPat' : 'adoPat'} to the profile (must have write access to the target repo) and try again.`,
+              'MISSING_CREDENTIAL',
+              400,
+            );
+          }
+
+          if (!pod.worktreePath) {
+            throw new AutopodError(
+              `Pod ${podId} has no worktree — cannot retry push`,
+              'INVALID_STATE',
+              409,
+            );
+          }
+
+          escalationRepo.update(pod.pendingEscalation.id, {
+            respondedAt: new Date().toISOString(),
+            respondedBy: 'human',
+            response: 'pat_updated',
+          });
+          // awaiting_input → validating: park-then-retry without re-running the
+          // agent. The validation result we already passed is still authoritative.
+          const validatingPod = transition(pod, 'validating', { pendingEscalation: null });
+          const carryForwardPrUrl = validatingPod.prUrl;
+          emitActivityStatus(
+            podId,
+            carryForwardPrUrl
+              ? `${payload.service} PAT updated — retrying push to existing PR…`
+              : `${payload.service} PAT updated — retrying branch push and PR creation…`,
+          );
+
+          try {
+            // Always push first — same shape as the original post-validation
+            // path. maxDeletions=0 mirrors `pushAndCreatePr`: the container is
+            // already stopped/gone so a phantom mass-delete must not slip in.
+            await worktreeManager.mergeBranch({
+              worktreePath: validatingPod.worktreePath ?? '',
+              targetBranch: validatingPod.branch,
+              pat,
+              maxDeletions: 0,
+              podTask: validatingPod.task,
+              profile,
+              podModel: validatingPod.model,
+            });
+
+            // Only open a new PR if this isn't a fix pod carrying one forward.
+            let newPrUrl = carryForwardPrUrl;
+            if (!newPrUrl) {
+              const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+              if (prManager) {
+                emitActivityStatus(podId, 'Creating PR…');
+                const baseBranch = profile.defaultBranch ?? 'main';
+                const refreshed = podRepo.getOrThrow(podId);
+                const createResult = await prManager.createPr({
+                  // biome-ignore lint/style/noNonNullAssertion: validated above
+                  worktreePath: refreshed.worktreePath!,
+                  repoUrl: profile.repoUrl ?? undefined,
+                  branch: refreshed.branch,
+                  baseBranch,
+                  podId,
+                  task: refreshed.task,
+                  profileName: refreshed.profileName,
+                  profile,
+                  podModel: refreshed.model,
+                  handoffInstructions: refreshed.handoffInstructions ?? undefined,
+                  validationResult: refreshed.lastValidationResult ?? null,
+                  filesChanged: refreshed.filesChanged,
+                  linesAdded: refreshed.linesAdded,
+                  linesRemoved: refreshed.linesRemoved,
+                  previewUrl: refreshed.previewUrl,
+                  screenshots: [],
+                  taskSummary: refreshed.taskSummary ?? undefined,
+                  seriesDescription: refreshed.seriesDescription ?? undefined,
+                  seriesName: refreshed.seriesName ?? undefined,
+                  securityFindings: getLatestPushFindings(podId),
+                });
+                newPrUrl = createResult.url ?? null;
+                if (newPrUrl) {
+                  emitActivityStatus(podId, `PR created: ${newPrUrl}`);
+                }
+              }
+            } else {
+              emitActivityStatus(podId, `Carrying forward existing PR: ${carryForwardPrUrl}`);
+            }
+
+            const validatedPod = transition(podRepo.getOrThrow(podId), 'validated', {
+              prUrl: newPrUrl,
+              lastCorrectionMessage: null,
+            });
+            maybeTriggerDependents(validatedPod);
+
+            // Stop the container post-validation (mirrors the original push path).
+            if (validatedPod.containerId) {
+              try {
+                const cm = containerManagerFactory.get(validatedPod.executionTarget);
+                await cm.stop(validatedPod.containerId);
+              } catch (stopErr) {
+                logger.warn(
+                  { err: stopErr, podId },
+                  'Failed to stop container after host_push retry',
+                );
+              }
+            }
+
+            if (validatedPod.autoApprove) {
+              logger.info({ podId }, 'Auto-approving pod after host_push retry');
+              setImmediate(() => {
+                this.approveSession(podId).catch((err) =>
+                  logger.warn({ err, podId }, 'Auto-approve after host_push retry failed'),
+                );
+              });
+            }
+          } catch (err) {
+            // Fresh PAT is still bad — re-park rather than fail terminally.
+            if (err instanceof GitCredentialError) {
+              parkOnCredentialFailure(podId, err);
+              return;
+            }
+            logger.error({ err, podId }, 'host_push retry failed after credential fix');
+            const s = podRepo.getOrThrow(podId);
+            if (!isTerminalState(s.status)) {
+              transition(s, 'failed');
+            }
+            throw err;
+          }
+          return;
+        }
+
         const authMessage = await performCredentialInjection(podId, payload.service);
 
         escalationRepo.update(pod.pendingEscalation.id, {
@@ -6287,6 +6474,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               });
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to push branch for PR');
+              // Credential-class failures are recoverable: park the pod in
+              // awaiting_input so the operator can update the PAT and resume,
+              // instead of burning the validated work on a fixable error.
+              if (err instanceof GitCredentialError) {
+                parkOnCredentialFailure(podId, err);
+                return;
+              }
               if (!handleDeletionGuardError(podId, err)) {
                 throw err;
               }
@@ -7700,8 +7894,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const nowIso = new Date().toISOString();
 
       if (pod.status === 'queued') {
-        // The queue's dedup is `!queue.includes && !activeIds.has`. A pod stuck in
-        // 'queued' has been removed from both, so a fresh enqueue will accept it.
+        // A pod that has been in `queued` long enough for an operator to kick is
+        // past any live processPod (status would have moved to provisioning). If the
+        // queue still tracks it as active, that's a stale entry from a previous run
+        // whose finally never ran — clear it so the upcoming enqueue isn't silently
+        // dedup'd. Without this, the kick endpoint reports success but the pod sits
+        // forever because `enqueue`'s `activeIds.has(podId)` check returns true.
+        const cleared = clearStuckQueueEntry?.(podId) ?? false;
         podRepo.update(podId, { kickedAt: nowIso, kickedReason: trimmedReason });
         enqueueSession(podId);
         emitActivityStatus(
@@ -7709,7 +7908,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           trimmedReason ? `Re-enqueued by operator: ${trimmedReason}` : 'Re-enqueued by operator',
         );
         logger.warn(
-          { podId, reason: trimmedReason },
+          { podId, reason: trimmedReason, clearedStuckEntry: cleared },
           'Pod kicked by operator — re-enqueued from queued',
         );
         return { action: 'requeued' };

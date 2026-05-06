@@ -3,7 +3,9 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DeletionGuardError,
+  GitCredentialError,
   LocalWorktreeManager,
+  classifyGitError,
   truncateDiffAtFileBoundary,
 } from './local-worktree-manager.js';
 
@@ -1229,5 +1231,130 @@ describe('truncateDiffAtFileBoundary', () => {
   it('instructs reviewer to use read_file tools', () => {
     const result = truncateDiffAtFileBoundary(h1 + h2, h1.length + 5);
     expect(result).toContain('read_file');
+  });
+});
+
+describe('classifyGitError', () => {
+  function makeGitError(message: string, stderr: string, cmd = 'git push origin main'): Error {
+    return Object.assign(new Error(message), { stderr, cmd });
+  }
+
+  it('wraps GitHub 403 "Permission denied" as GitCredentialError(github)', () => {
+    const err = makeGitError(
+      'Command failed: git push',
+      'remote: Permission to esbenwiberg/autopod.git denied to esbenwiberg.\nfatal: unable to access ...: The requested URL returned error: 403',
+      'git push https://github.com/esbenwiberg/autopod.git HEAD:main',
+    );
+    const out = classifyGitError(err, 'push');
+    expect(out).toBeInstanceOf(GitCredentialError);
+    const credErr = out as GitCredentialError;
+    expect(credErr.service).toBe('github');
+    expect(credErr.op).toBe('push');
+    expect(credErr.stderr).toContain('Permission to esbenwiberg/autopod.git denied');
+  });
+
+  it('infers ado when stderr contains TF401019', () => {
+    const err = makeGitError(
+      'Command failed: git push',
+      'remote: TF401019: The Git repository ... access denied.',
+      'git push https://dev.azure.com/contoso/_git/repo HEAD:main',
+    );
+    const out = classifyGitError(err, 'push');
+    expect(out).toBeInstanceOf(GitCredentialError);
+    expect((out as GitCredentialError).service).toBe('ado');
+  });
+
+  it('infers ado from dev.azure.com remote even with generic 401 wording', () => {
+    const err = makeGitError(
+      'Command failed: git push',
+      'fatal: Authentication failed for https://dev.azure.com/contoso/_git/repo',
+      'git push https://dev.azure.com/contoso/_git/repo HEAD:main',
+    );
+    const out = classifyGitError(err, 'push');
+    expect(out).toBeInstanceOf(GitCredentialError);
+    expect((out as GitCredentialError).service).toBe('ado');
+  });
+
+  it('infers ado from visualstudio.com remote', () => {
+    const err = makeGitError(
+      'Command failed: git push',
+      'fatal: Authentication failed',
+      'git push https://contoso.visualstudio.com/_git/repo HEAD:main',
+    );
+    const out = classifyGitError(err, 'push');
+    expect(out).toBeInstanceOf(GitCredentialError);
+    expect((out as GitCredentialError).service).toBe('ado');
+  });
+
+  it('matches "could not read Username" (terminal prompts disabled)', () => {
+    const err = makeGitError(
+      'Command failed: git push',
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    );
+    const out = classifyGitError(err, 'push');
+    expect(out).toBeInstanceOf(GitCredentialError);
+    expect((out as GitCredentialError).service).toBe('github');
+  });
+
+  it('matches bare "401" status code', () => {
+    const err = makeGitError(
+      'Command failed: git push',
+      'fatal: unable to access: The requested URL returned error: 401',
+    );
+    const out = classifyGitError(err, 'push');
+    expect(out).toBeInstanceOf(GitCredentialError);
+  });
+
+  it('returns the original error untouched for non-credential failures', () => {
+    const err = makeGitError(
+      'Command failed: git push',
+      'fatal: not a git repository (or any of the parent directories): .git',
+    );
+    const out = classifyGitError(err, 'push');
+    expect(out).toBe(err);
+    expect(out).not.toBeInstanceOf(GitCredentialError);
+  });
+
+  it('returns the original error for merge conflicts (no auth wording)', () => {
+    const err = makeGitError(
+      'Command failed: git merge',
+      'CONFLICT (content): Merge conflict in foo.ts\nAutomatic merge failed; fix conflicts and then commit the result.',
+    );
+    const out = classifyGitError(err, 'push');
+    expect(out).toBe(err);
+  });
+
+  it('returns non-Error inputs untouched', () => {
+    expect(classifyGitError('string error', 'push')).toBe('string error');
+    expect(classifyGitError(null, 'push')).toBeNull();
+    expect(classifyGitError(undefined, 'push')).toBeUndefined();
+  });
+
+  it('handles errors missing stderr/cmd fields (matches on message only)', () => {
+    const bareErr = new Error('fatal: Authentication failed for https://github.com/foo/bar.git');
+    const out = classifyGitError(bareErr, 'push');
+    expect(out).toBeInstanceOf(GitCredentialError);
+    expect((out as GitCredentialError).service).toBe('github');
+  });
+
+  it('truncates very long stderr to 500 chars', () => {
+    const longStderr = `remote: Permission to foo/bar denied to baz.\n${'x'.repeat(2000)}`;
+    const err = makeGitError('Command failed', longStderr);
+    const out = classifyGitError(err, 'push') as GitCredentialError;
+    expect(out.stderr.length).toBe(500);
+  });
+
+  it('preserves the original stack', () => {
+    const err = makeGitError('Command failed', 'remote: Permission to a/b denied to c');
+    const originalStack = err.stack;
+    const out = classifyGitError(err, 'push') as GitCredentialError;
+    expect(out.stack).toBe(originalStack);
+  });
+
+  it('records the op in the wrapped error', () => {
+    const err = makeGitError('Command failed', 'fatal: Authentication failed');
+    expect((classifyGitError(err, 'push') as GitCredentialError).op).toBe('push');
+    expect((classifyGitError(err, 'fetch') as GitCredentialError).op).toBe('fetch');
+    expect((classifyGitError(err, 'clone') as GitCredentialError).op).toBe('clone');
   });
 });

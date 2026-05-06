@@ -2,6 +2,15 @@ import type { Logger } from 'pino';
 
 export interface PodQueue {
   enqueue(podId: string): void;
+  /**
+   * Operator-only: clear a stale `activeIds` entry whose `processPod` finally
+   * never ran (e.g. uncaught throw above the try/finally, or a hot-reload that
+   * dropped the closure). Caller must assert no `processPod` is running for
+   * this id — kickPod gates on `pod.status === 'queued'`, which is unreachable
+   * from a live processPod past the queued→provisioning transition.
+   * Returns `true` if the entry was cleared, `false` if it wasn't present.
+   */
+  clearStuckEntry(podId: string): boolean;
   readonly pending: number;
   readonly processing: number;
   drain(): Promise<void>; // wait for all in-flight to complete
@@ -59,6 +68,14 @@ export function createPodQueue(
         queue.push(podId);
       }
       processNext();
+    },
+    clearStuckEntry(podId: string) {
+      if (!activeIds.has(podId)) return false;
+      activeIds.delete(podId);
+      activeCount = Math.max(0, activeCount - 1);
+      logger.warn({ podId, activeCount }, 'Cleared stuck activeIds entry from pod queue');
+      checkDrain();
+      return true;
     },
     get pending() {
       return queue.length;
