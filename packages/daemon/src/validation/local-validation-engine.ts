@@ -268,19 +268,37 @@ export function createLocalValidationEngine(
         }
         callbacks?.onPhaseCompleted?.('pages', pagesStatus, pages);
 
+        // ── Tier-1 gate ────────────────────────────────────────────────
+        // Cheap deterministic phases (lint/sast/build/test/health/pages) must
+        // all pass-or-skip before we spend money on the AI tiers. If any
+        // failed, AC + Review are skipped — the agent gets the tier-1 findings
+        // first and AI checks only run on code that's actually buildable.
+        // 'skip' counts as pass (legit skips: no test command, no smoke pages,
+        // no web UI, profile-level skipPhases).
+        const tier1Pass =
+          lintResult.status !== 'fail' &&
+          sastResult.status !== 'fail' &&
+          buildResult.status === 'pass' &&
+          testResult.status !== 'fail' &&
+          healthResult.status !== 'fail' &&
+          pagesStatus !== 'fail';
+
         // ── Phase 7: AC Validation ────────────────────────────────────
-        // Run when health passed, or when health was skipped because the
-        // profile has no web UI — in the latter case web-ui criteria are
-        // auto-downgraded to 'none' and routed through the diff reviewer.
+        // Run when tier-1 is fully green AND health passed-or-skipped.
+        // (Health-skip means the profile has no web UI; web-ui criteria are
+        // auto-downgraded to 'none' and routed through the diff reviewer.)
         checkAbort();
         let acValidation: Awaited<ReturnType<typeof runAcValidation>> | null;
         let acStatus: 'pass' | 'fail' | 'skip';
+        let acSkipReason: ValidationResult['acSkipReason'];
         if (skipPhases.includes('ac')) {
           acValidation = null;
           acStatus = 'skip';
+          acSkipReason = 'profile-skip';
         } else {
           callbacks?.onPhaseStarted?.('ac');
-          const acGateOk = healthResult.status === 'pass' || healthResult.status === 'skip';
+          const healthGateOk = healthResult.status === 'pass' || healthResult.status === 'skip';
+          const acGateOk = tier1Pass && healthGateOk;
           if (acGateOk && config.acceptanceCriteria?.length)
             onProgress?.('Checking acceptance criteria…');
           acValidation = acGateOk
@@ -293,6 +311,15 @@ export function createLocalValidationEngine(
               )
             : null;
           acStatus = acValidation?.status ?? 'skip';
+          if (acValidation === null) {
+            acSkipReason = !tier1Pass
+              ? 'upstream-failed'
+              : !healthGateOk
+                ? 'health-failed'
+                : config.acceptanceCriteria?.length
+                  ? undefined
+                  : 'no-criteria';
+          }
         }
         callbacks?.onPhaseCompleted?.('ac', acStatus, acValidation);
 
@@ -306,9 +333,18 @@ export function createLocalValidationEngine(
         checkAbort();
         let taskReview: TaskReviewResult | null;
         let reviewSkipReason: string | undefined;
+        let reviewSkipKind: ValidationResult['reviewSkipKind'];
         if (skipPhases.includes('review')) {
           taskReview = null;
           reviewSkipReason = 'Skipped by profile configuration';
+          reviewSkipKind = 'profile-skip';
+        } else if (!tier1Pass) {
+          // Don't burn AI tokens reviewing code that doesn't build, lint, or
+          // pass tests — the agent will rewrite it on the next attempt.
+          callbacks?.onPhaseStarted?.('review');
+          taskReview = null;
+          reviewSkipReason = 'Skipped — earlier validation phases failed';
+          reviewSkipKind = 'upstream-failed';
         } else {
           callbacks?.onPhaseStarted?.('review');
           onProgress?.('Running AI task review…');
@@ -330,6 +366,13 @@ export function createLocalValidationEngine(
           const reviewRun = await runTaskReview(config, log, reviewContext, noneAcCriteria);
           taskReview = reviewRun.result;
           reviewSkipReason = reviewRun.skipReason;
+          if (taskReview === null && reviewRun.skipReason) {
+            reviewSkipKind = reviewRun.skipReason.startsWith('Review failed:')
+              ? 'review-failed'
+              : reviewRun.skipReason.startsWith('Review timed out')
+                ? 'review-timeout'
+                : 'no-changes';
+          }
         }
         // Map 'uncertain' to 'pass' for the chip status — the detail view shows the full result.
         const reviewStatus: 'pass' | 'fail' | 'skip' =
@@ -344,21 +387,15 @@ export function createLocalValidationEngine(
             ? ('pass' as const)
             : ('fail' as const);
 
-        const testFailed = testResult.status === 'fail';
         const acFailed = acValidation !== null && acValidation.status === 'fail';
         // Timeouts and infra errors during review are not code quality failures.
         // Only treat review as a blocker when it returns an actual opinion (pass/fail).
         // `Review timed out:` is set by runTaskReview when it catches a
         // ClaudeCliError with kind='timeout'; everything else flagged as
         // `Review failed:` is treated as a blocker.
-        const isReviewBlocker = reviewSkipReason?.startsWith('Review failed:') ?? false;
-        const lintFailed = lintResult.status === 'fail';
-        const sastFailed = sastResult.status === 'fail';
+        const isReviewBlocker = reviewSkipKind === 'review-failed';
         const overall =
-          smokeStatus === 'pass' &&
-          !testFailed &&
-          !lintFailed &&
-          !sastFailed &&
+          tier1Pass &&
           !acFailed &&
           ((taskReview === null && !isReviewBlocker) || taskReview?.status === 'pass')
             ? ('pass' as const)
@@ -380,8 +417,10 @@ export function createLocalValidationEngine(
           lint: lintResult,
           sast: sastResult,
           acValidation,
+          acSkipReason,
           taskReview,
           reviewSkipReason,
+          reviewSkipKind,
           overall,
           duration,
         };
@@ -422,8 +461,10 @@ function makeInterruptedResult(
     },
     test: { status: 'skip', duration: 0 },
     acValidation: null,
+    acSkipReason: 'upstream-failed',
     taskReview: null,
     reviewSkipReason: reason,
+    reviewSkipKind: 'upstream-failed',
     overall: 'fail',
     duration: Date.now() - startTime,
   };

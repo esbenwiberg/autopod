@@ -10,9 +10,22 @@ export interface ValidationResult {
   lint?: LintResult;
   sast?: SastResult;
   acValidation?: AcValidationResult | null;
+  /**
+   * Machine-readable reason when acValidation is null. Lets the UI distinguish
+   * "skipped because earlier phases failed" from "skipped because no criteria
+   * were defined" without parsing free-form strings.
+   */
+  acSkipReason?: 'upstream-failed' | 'profile-skip' | 'health-failed' | 'no-criteria';
   taskReview: TaskReviewResult | null;
   /** Human-readable reason when taskReview is null (e.g. "No code changes detected") */
   reviewSkipReason?: string;
+  /** Machine-readable kind for taskReview skip — paired with reviewSkipReason. */
+  reviewSkipKind?:
+    | 'upstream-failed'
+    | 'profile-skip'
+    | 'no-changes'
+    | 'review-failed'
+    | 'review-timeout';
   overall: 'pass' | 'fail';
   duration: number;
 }

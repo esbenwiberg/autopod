@@ -568,7 +568,8 @@ public struct ValidationTab: View {
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "All criteria verified",
-                     failLabel: "Some criteria failed", skipLabel: "AC validation skipped")
+                     failLabel: "Some criteria failed",
+                     skipLabel: acSkipLabel(reason: checks?.acSkipReason))
       if let criteria, !criteria.isEmpty {
         acListSection(criteria: criteria, acChecks: acChecks)
       } else if let acChecks, !acChecks.isEmpty {
@@ -688,6 +689,7 @@ public struct ValidationTab: View {
     let issues: [String] = detail?.issues ?? checks?.reviewIssues ?? []
     let reasoning: String? = detail?.reasoning ?? checks?.reviewReasoning
     let skipReason: String? = checks?.reviewSkipReason
+    let skipKind: String? = checks?.reviewSkipKind
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? checks?.requirementsCheck
     let screenshots: [String] = detail?.screenshots ?? checks?.taskReviewScreenshots ?? []
 
@@ -696,7 +698,7 @@ public struct ValidationTab: View {
         status: status,
         passLabel: detail?.status == "uncertain" ? "Review uncertain — treated as pass" : "AI review passed",
         failLabel: "Review flagged issues",
-        skipLabel: skipReason ?? "Review skipped"
+        skipLabel: reviewSkipLabel(kind: skipKind, reason: skipReason)
       )
       if let reasoning, !reasoning.isEmpty {
         Text(reasoning)
@@ -804,6 +806,34 @@ public struct ValidationTab: View {
         .background(Color.black.opacity(0.2))
         .clipShape(RoundedRectangle(cornerRadius: 6))
       }
+    }
+  }
+
+  /// Label for the AC chip when status is .skipped, derived from the backend's
+  /// machine-readable `acSkipReason` so the UI can distinguish "tier-1 failed"
+  /// from "no criteria configured" instead of showing a generic message.
+  private func acSkipLabel(reason: String?) -> String {
+    switch reason {
+    case "upstream-failed": return "Skipped — earlier validation phases failed"
+    case "profile-skip": return "AC validation disabled by profile"
+    case "health-failed": return "Skipped — health check failed"
+    case "no-criteria": return "No acceptance criteria configured"
+    default: return "AC validation skipped"
+    }
+  }
+
+  /// Label for the Review chip when status is .skipped. `kind` carries the
+  /// machine-readable category; `reason` is the original free-form string we
+  /// fall back to when no kind is known (legacy results from before the
+  /// tier-1 gate landed).
+  private func reviewSkipLabel(kind: String?, reason: String?) -> String {
+    switch kind {
+    case "upstream-failed": return "Skipped — earlier validation phases failed"
+    case "profile-skip": return "AI review disabled by profile"
+    case "review-timeout": return reason ?? "Review timed out"
+    case "review-failed": return reason ?? "Review failed"
+    case "no-changes": return reason ?? "No code changes to review"
+    default: return reason ?? "Review skipped"
     }
   }
 

@@ -1080,6 +1080,167 @@ describe('validate() — hasWebUi gating', () => {
   });
 });
 
+describe('validate() — tier-1 gate', () => {
+  function stubContainerManager(): ContainerManager {
+    const fail = (name: string) =>
+      vi.fn(() => Promise.reject(new Error(`stub: ${name} unexpectedly called`)));
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        if (
+          command[0] === 'sh' &&
+          command[1] === '-c' &&
+          typeof command[2] === 'string' &&
+          command[2].includes('git reset --hard HEAD')
+        ) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        throw new Error(`stub: execInContainer unexpectedly called: ${JSON.stringify(command)}`);
+      },
+    );
+    return {
+      spawn: fail('spawn'),
+      kill: fail('kill'),
+      refreshFirewall: fail('refreshFirewall'),
+      stop: fail('stop'),
+      start: fail('start'),
+      writeFile: fail('writeFile'),
+      readFile: fail('readFile'),
+      extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
+      getStatus: fail('getStatus'),
+      execInContainer,
+      execStreaming: fail('execStreaming'),
+    } as unknown as ContainerManager;
+  }
+
+  function baseConfig(overrides: Partial<ValidationEngineConfig> = {}): ValidationEngineConfig {
+    return {
+      podId: 'pod-test',
+      containerId: 'container-test',
+      previewUrl: 'http://127.0.0.1:9999',
+      buildCommand: '',
+      startCommand: 'node server.js',
+      healthPath: '/',
+      healthTimeout: 1,
+      smokePages: [{ path: '/' }],
+      attempt: 1,
+      task: 'test task',
+      diff: '',
+      hasWebUi: false,
+      ...overrides,
+    };
+  }
+
+  it('skips AC + Review with upstream-failed reason when build fails', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const completed: Array<{ phase: string; status: string }> = [];
+    const result = await engine.validate(
+      baseConfig({ buildCommand: 'npm run build', acceptanceCriteria: ['AC: it works'] }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(result.smoke.build.status).toBe('fail');
+    expect(result.acValidation).toBeNull();
+    expect(result.acSkipReason).toBe('upstream-failed');
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipKind).toBe('upstream-failed');
+    expect(result.reviewSkipReason).toMatch(/earlier validation phases failed/i);
+    expect(result.overall).toBe('fail');
+
+    const acEvent = completed.find((c) => c.phase === 'ac');
+    const reviewEvent = completed.find((c) => c.phase === 'review');
+    expect(acEvent?.status).toBe('skip');
+    expect(reviewEvent?.status).toBe('skip');
+  });
+
+  it('skips AC + Review when lint fails', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({ lintCommand: 'eslint .', acceptanceCriteria: ['AC: it works'] }),
+    );
+
+    expect(result.lint?.status).toBe('fail');
+    expect(result.acSkipReason).toBe('upstream-failed');
+    expect(result.reviewSkipKind).toBe('upstream-failed');
+    expect(result.overall).toBe('fail');
+  });
+
+  it('skips AC + Review when SAST fails', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({ sastCommand: 'semgrep', acceptanceCriteria: ['AC: it works'] }),
+    );
+
+    expect(result.sast?.status).toBe('fail');
+    expect(result.acSkipReason).toBe('upstream-failed');
+    expect(result.reviewSkipKind).toBe('upstream-failed');
+    expect(result.overall).toBe('fail');
+  });
+
+  it('skips AC + Review when tests fail', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({ testCommand: 'vitest', acceptanceCriteria: ['AC: it works'] }),
+    );
+
+    expect(result.test?.status).toBe('fail');
+    expect(result.acSkipReason).toBe('upstream-failed');
+    expect(result.reviewSkipKind).toBe('upstream-failed');
+    expect(result.overall).toBe('fail');
+  });
+
+  it('runs AC + Review when all tier-1 phases pass-or-skip', async () => {
+    // hasWebUi=false → health/pages auto-skip. No build/test/lint/sast commands
+    // → those skip too. tier1Pass should be true and AC should be invoked.
+    // diff='' makes the review short-circuit with 'No code changes detected',
+    // which classifies as 'no-changes' (NOT upstream-failed).
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfig());
+
+    // No AC criteria configured → AC is null but reason is no-criteria, not upstream-failed
+    expect(result.acSkipReason).toBe('no-criteria');
+    // Review path was taken (no diff → 'no-changes' kind)
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipKind).toBe('no-changes');
+    expect(result.reviewSkipReason).toBe('No code changes detected');
+    expect(result.overall).toBe('pass');
+  });
+
+  it('marks profile-skip on AC when skipPhases includes ac', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfig({ skipPhases: ['ac'] }));
+
+    expect(result.acValidation).toBeNull();
+    expect(result.acSkipReason).toBe('profile-skip');
+  });
+
+  it('marks profile-skip on Review when skipPhases includes review', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfig({ skipPhases: ['review'] }));
+
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipKind).toBe('profile-skip');
+  });
+});
+
 // ── Pre-validation worktree reset (regression for `sporting-coral`) ─────────────
 // Untracked files were being picked up by the build (filesystem walk, not git
 // index) and read by the agentic reviewer (unrestricted Read on worktreePath),

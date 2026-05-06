@@ -184,6 +184,20 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('');
   }
 
+  // When AC + Review were gated out by tier-1 failures, tell the agent why
+  // those sections are missing — otherwise it may assume those checks passed.
+  if (
+    result.acSkipReason === 'upstream-failed' &&
+    result.reviewSkipKind === 'upstream-failed' &&
+    result.acValidation === null &&
+    result.taskReview === null
+  ) {
+    lines.push(
+      'Note: acceptance-criteria checks and AI code review were skipped because earlier validation phases failed. They will run automatically once the issues above are fixed.',
+    );
+    lines.push('');
+  }
+
   // Reminder of original task
   lines.push('### Original Task');
   lines.push(task);

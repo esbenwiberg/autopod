@@ -138,6 +138,8 @@ public enum PodMapper {
         dismissedFindingIds: dismissedFindingIds,
         reviewReasoning: v.taskReview?.reasoning,
         reviewSkipReason: v.reviewSkipReason,
+        reviewSkipKind: v.reviewSkipKind,
+        acSkipReason: v.acSkipReason,
         healthCheck: healthCheck,
         pages: pages,
         acValidation: acValidation,

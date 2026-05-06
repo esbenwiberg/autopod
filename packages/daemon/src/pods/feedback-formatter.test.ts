@@ -310,6 +310,37 @@ describe('formatFeedback', () => {
       expect(result).toContain('### Original Task');
       expect(result).toContain('Add a contact page with email and phone fields');
     });
+
+    it('mentions upstream-skipped AC + Review when tier-1 failed', () => {
+      const base = mockValidationResult({ buildFailed: true });
+      const result = formatFeedback({
+        type: 'validation_failure',
+        result: {
+          ...base,
+          acValidation: null,
+          acSkipReason: 'upstream-failed',
+          taskReview: null,
+          reviewSkipKind: 'upstream-failed',
+          reviewSkipReason: 'Skipped — earlier validation phases failed',
+        },
+        task: 'Add a contact page',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(result).toContain('Build Errors');
+      expect(result).toContain('skipped because earlier validation phases failed');
+    });
+
+    it('does not mention upstream-skipped note when AC and Review actually ran', () => {
+      const result = formatFeedback({
+        type: 'validation_failure',
+        result: mockValidationResult({ buildFailed: true, taskReviewFailed: true }),
+        task: 'Add a contact page',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(result).not.toContain('skipped because earlier validation phases failed');
+    });
   });
 
   describe('human_rejection', () => {

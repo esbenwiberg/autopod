@@ -176,6 +176,10 @@ public struct ValidationChecks: Sendable {
     public let dismissedFindingIds: Set<String>
     public let reviewReasoning: String?
     public let reviewSkipReason: String?
+    /// Machine-readable kind paired with reviewSkipReason — see backend ValidationResult.
+    public let reviewSkipKind: String?
+    /// Machine-readable reason when AC was skipped — see backend ValidationResult.
+    public let acSkipReason: String?
     public let healthCheck: HealthCheckDetail?
     public let pages: [PageDetail]?
     public let acValidation: Bool?
@@ -194,6 +198,8 @@ public struct ValidationChecks: Sendable {
         dismissedFindingIds: Set<String> = [],
         reviewReasoning: String? = nil,
         reviewSkipReason: String? = nil,
+        reviewSkipKind: String? = nil,
+        acSkipReason: String? = nil,
         healthCheck: HealthCheckDetail? = nil,
         pages: [PageDetail]? = nil,
         acValidation: Bool? = nil,
@@ -211,6 +217,8 @@ public struct ValidationChecks: Sendable {
         self.dismissedFindingIds = dismissedFindingIds
         self.reviewReasoning = reviewReasoning
         self.reviewSkipReason = reviewSkipReason
+        self.reviewSkipKind = reviewSkipKind
+        self.acSkipReason = acSkipReason
         self.healthCheck = healthCheck; self.pages = pages
         self.acValidation = acValidation; self.acChecks = acChecks
         self.requirementsCheck = requirementsCheck

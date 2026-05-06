@@ -173,7 +173,9 @@ public final class EventStream {
         lint: PodMapper.mapTriState(result.lint?.status),
         sast: PodMapper.mapTriState(result.sast?.status),
         review: PodMapper.mapTriState(result.taskReview?.status),
-        reviewSkipReason: result.reviewSkipReason
+        reviewSkipReason: result.reviewSkipReason,
+        reviewSkipKind: result.reviewSkipKind,
+        acSkipReason: result.acSkipReason
       )
       podStore.setValidationChecks(podId, checks: checks)
       // Notification

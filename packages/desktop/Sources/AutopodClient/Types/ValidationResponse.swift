@@ -31,8 +31,15 @@ public struct ValidationResponse: Codable, Sendable {
   public let lint: LintResultResponse?
   public let sast: SastResultResponse?
   public let acValidation: AcValidationResponse?
+  /// Machine-readable skip reason when acValidation is null. Lets the UI tell
+  /// "skipped because earlier phases failed" apart from "no criteria configured".
+  /// Values: "upstream-failed" | "profile-skip" | "health-failed" | "no-criteria".
+  public let acSkipReason: String?
   public let taskReview: TaskReviewResponse?
   public let reviewSkipReason: String?
+  /// Machine-readable kind paired with reviewSkipReason. Values:
+  /// "upstream-failed" | "profile-skip" | "no-changes" | "review-failed" | "review-timeout".
+  public let reviewSkipKind: String?
   public let overall: String  // "pass" | "fail"
   public let duration: Int
 }
