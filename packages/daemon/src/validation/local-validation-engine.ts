@@ -87,7 +87,7 @@ import { type ReviewContext, gatherReviewContext } from './review-context-builde
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
-import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { hashDiff } from './pre-submit-review.js';
 
 /**
@@ -348,11 +348,10 @@ export function createLocalValidationEngine(
         const acFailed = acValidation !== null && acValidation.status === 'fail';
         // Timeouts and infra errors during review are not code quality failures.
         // Only treat review as a blocker when it returns an actual opinion (pass/fail).
-        const isReviewInfraFailure =
-          reviewSkipReason?.startsWith('Review failed:') &&
-          (reviewSkipReason.includes('timed out') || reviewSkipReason.includes('timed_out'));
-        const isReviewBlocker =
-          reviewSkipReason?.startsWith('Review failed:') && !isReviewInfraFailure;
+        // `Review timed out:` is set by runTaskReview when it catches a
+        // ClaudeCliError with kind='timeout'; everything else flagged as
+        // `Review failed:` is treated as a blocker.
+        const isReviewBlocker = reviewSkipReason?.startsWith('Review failed:') ?? false;
         const lintFailed = lintResult.status === 'fail';
         const sastFailed = sastResult.status === 'fail';
         const overall =
@@ -2854,6 +2853,22 @@ async function runTaskReview(
       };
     }
   } catch (err) {
+    if (err instanceof ClaudeCliError) {
+      log?.warn(
+        {
+          kind: err.kind,
+          exitCode: err.exitCode,
+          signal: err.signal,
+          durationMs: err.durationMs,
+          stderrPreview: err.stderr.slice(0, 500),
+        },
+        'task review failed, continuing without review',
+      );
+      if (err.kind === 'timeout') {
+        return { result: null, skipReason: `Review timed out: ${err.message}` };
+      }
+      return { result: null, skipReason: `Review failed: ${err.message}` };
+    }
     const message = err instanceof Error ? err.message : String(err);
     log?.warn({ err }, 'task review failed, continuing without review');
     return { result: null, skipReason: `Review failed: ${message}` };
