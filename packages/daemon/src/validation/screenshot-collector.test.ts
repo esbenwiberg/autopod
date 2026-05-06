@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises';
 import type { PageResult, ScreenshotRef } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildGitHubImageUrl, collectScreenshots } from './screenshot-collector.js';
+import { buildAdoAttachmentRef, buildGitHubImageUrl, collectScreenshots } from './screenshot-collector.js';
 
 vi.mock('node:fs/promises');
 const mockedFs = vi.mocked(fsp);
@@ -155,5 +155,40 @@ describe('buildGitHubImageUrl', () => {
     expect(url).toBe(
       'https://github.com/org/repo/blob/feature/test/.autopod/screenshots/about.png?raw=true',
     );
+  });
+});
+
+describe('buildAdoAttachmentRef', () => {
+  it('returns { pagePath, imageUrl } with the given attachment URL — no GitHub URL baked in', () => {
+    const ref = buildAdoAttachmentRef('/about', 'https://dev.azure.com/myorg/proj/_git/repo/pullRequest/42/attachments/smoke-1-about.png');
+    expect(ref).toEqual({
+      pagePath: '/about',
+      imageUrl: 'https://dev.azure.com/myorg/proj/_git/repo/pullRequest/42/attachments/smoke-1-about.png',
+    });
+    // No URL field from @autopod/shared ScreenshotRef shape — just pagePath + imageUrl
+    expect(Object.keys(ref)).toEqual(['pagePath', 'imageUrl']);
+  });
+
+  it('collector returns CollectedScreenshot[] with no URL field on the ref', async () => {
+    // Verify the collector itself never sets a URL — URL generation is downstream
+    const pngBuffer = Buffer.from('fake-png-data');
+    vi.mocked(fsp.readFile).mockResolvedValue(pngBuffer);
+    const pages: PageResult[] = [
+      {
+        path: '/',
+        status: 'pass',
+        screenshotPath: '/workspace/.autopod/screenshots/root.png',
+        consoleErrors: [],
+        assertions: [],
+        loadTime: 100,
+      },
+    ];
+    const store = makeMockStore();
+    const result = await collectScreenshots('/tmp/wt', pages, store, 'pod-x');
+    expect(result).toHaveLength(1);
+    // ScreenshotRef has no URL field
+    expect(result[0]?.ref).not.toHaveProperty('url');
+    expect(result[0]?.ref).not.toHaveProperty('imageUrl');
+    expect(result[0]?.ref).toHaveProperty('relativePath');
   });
 });

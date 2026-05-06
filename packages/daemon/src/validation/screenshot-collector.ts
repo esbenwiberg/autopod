@@ -58,3 +58,18 @@ export function buildGitHubImageUrl(repoUrl: string, branch: string, relativePat
   const clean = repoUrl.replace(/\.git$/, '');
   return `${clean}/blob/${branch}/${relativePath}?raw=true`;
 }
+
+/**
+ * Build a PR-body screenshot ref from a stored on-disk ref and the attachment
+ * URL returned by the ADO PR attachments API.
+ *
+ * This is the ADO counterpart to buildGitHubImageUrl — it maps a stored
+ * ScreenshotRef + the upload-response URL to the { pagePath, imageUrl } shape
+ * consumed by pr-body-builder.ts:buildPrBody.
+ */
+export function buildAdoAttachmentRef(
+  pagePath: string,
+  attachmentUrl: string,
+): { pagePath: string; imageUrl: string } {
+  return { pagePath, imageUrl: attachmentUrl };
+}

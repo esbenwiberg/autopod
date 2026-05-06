@@ -448,7 +448,7 @@ function prManagerFactory(
     }
     try {
       const { orgUrl, project, repoName } = parseAdoRepoUrl(profile.repoUrl);
-      return new AdoPrManager({ orgUrl, project, repoName, pat: profile.adoPat, logger });
+      return new AdoPrManager({ orgUrl, project, repoName, pat: profile.adoPat, logger, screenshotStore });
     } catch (err) {
       logger.warn(
         { err, profileName: profile.name },

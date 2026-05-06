@@ -6605,20 +6605,32 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               logger.warn({ err, podId }, 'Failed to recompute diff stats after merge');
             }
 
-            // Build screenshot URLs for the PR body (only for pods with a repo URL)
+            // Build screenshot refs for the PR body, provider-aware.
+            // GitHub: embed raw GitHub URLs (committed screenshots on the branch).
+            // ADO: pass stored on-disk refs so AdoPrManager can upload them as
+            //      PR attachments and embed the returned attachment URLs instead
+            //      of GitHub URLs that would 404 on ADO reviewers.
+            const isAdoPod = profile.prProvider === 'ado';
             const repoUrlForScreenshots = profile.repoUrl;
-            const screenshotRefs = repoUrlForScreenshots
+            const screenshotRefs =
+              !isAdoPod && repoUrlForScreenshots
+                ? result.smoke.pages
+                    .filter((p) => p.screenshotPath)
+                    .map((p) => ({
+                      pagePath: p.path,
+                      imageUrl: buildGitHubImageUrl(
+                        repoUrlForScreenshots,
+                        s2.branch,
+                        p.screenshotPath.replace(/^\/workspace\//, ''),
+                      ),
+                    }))
+                : [];
+            // Raw refs for ADO: page.screenshot is set by collectScreenshots above.
+            const rawScreenshots = isAdoPod
               ? result.smoke.pages
-                  .filter((p) => p.screenshotPath)
-                  .map((p) => ({
-                    pagePath: p.path,
-                    imageUrl: buildGitHubImageUrl(
-                      repoUrlForScreenshots,
-                      s2.branch,
-                      p.screenshotPath.replace(/^\/workspace\//, ''),
-                    ),
-                  }))
-              : [];
+                  .filter((p) => p.screenshot != null)
+                  .map((p) => ({ pagePath: p.path, ref: p.screenshot! }))
+              : undefined;
 
             if (!prUrl) {
               try {
@@ -6643,6 +6655,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   linesRemoved: s3.linesRemoved,
                   previewUrl: s2.previewUrl,
                   screenshots: screenshotRefs,
+                  rawScreenshots,
                   taskSummary: s3.taskSummary ?? undefined,
                   seriesDescription: s2.seriesDescription ?? undefined,
                   seriesName: s2.seriesName ?? undefined,
