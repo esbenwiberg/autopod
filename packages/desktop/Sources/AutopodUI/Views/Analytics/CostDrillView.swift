@@ -34,6 +34,7 @@ struct CostDrillView: View {
                         Spacer()
                         Button("Retry") { Task { await fetchCost() } }
                             .font(.caption)
+                            .disabled(isLoadingCost)
                     }
                     .padding(10)
                     .background(Color.red.opacity(0.08))
@@ -63,7 +64,7 @@ struct CostDrillView: View {
     }
 
     private func fetchCost() async {
-        guard let loadCost else { return }
+        guard let loadCost, !isLoadingCost else { return }
         isLoadingCost = true
         do {
             costData = try await loadCost()

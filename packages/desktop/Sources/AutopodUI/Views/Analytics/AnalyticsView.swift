@@ -46,8 +46,7 @@ public struct AnalyticsView: View {
     }
 
     private var costCardValue: String {
-        if costLoadError != nil { return "Error" }
-        return costData.map { String(format: "$%.2f", $0.total) } ?? "—"
+        costData.map { String(format: "$%.2f", $0.total) } ?? "—"
     }
 
     private var dominantStatusValue: String {
@@ -98,22 +97,29 @@ public struct AnalyticsView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
-            if let loadScores {
-                do {
-                    scores = try await loadScores()
-                    scoresLoadError = nil
-                } catch {
-                    scoresLoadError = error.localizedDescription
+            // Both fetches are independent — kick off concurrently and await both.
+            let scoreTask = Task {
+                if let loadScores {
+                    do {
+                        scores = try await loadScores()
+                        scoresLoadError = nil
+                    } catch {
+                        scoresLoadError = error.localizedDescription
+                    }
                 }
             }
-            if let loadCost {
-                do {
-                    costData = try await loadCost()
-                    costLoadError = nil
-                } catch {
-                    costLoadError = error.localizedDescription
+            let costTask = Task {
+                if let loadCost {
+                    do {
+                        costData = try await loadCost()
+                        costLoadError = nil
+                    } catch {
+                        costLoadError = error.localizedDescription
+                    }
                 }
             }
+            await scoreTask.value
+            await costTask.value
         }
     }
 }
