@@ -142,6 +142,8 @@ export type {
   AcCheckResult,
   ValidationFinding,
   ValidationOverride,
+  ScreenshotRef,
+  ScreenshotSource,
 } from './types/validation.js';
 
 export type { DeviationItem, TaskSummary, DeviationsAssessment } from './types/task-summary.js';

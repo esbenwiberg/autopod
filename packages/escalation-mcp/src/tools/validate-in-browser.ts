@@ -1,3 +1,4 @@
+import type { ScreenshotRef } from '@autopod/shared';
 import type { PodBridge } from '../pod-bridge.js';
 
 export interface ValidateInBrowserInput {
@@ -8,7 +9,7 @@ export interface ValidateInBrowserInput {
 export interface BrowserCheckResult {
   check: string;
   passed: boolean;
-  screenshot?: string;
+  screenshot?: ScreenshotRef;
   reasoning: string;
 }
 
@@ -93,13 +94,14 @@ async function tryHostExecution(
 
   const results = parseResults(execResult.stdout, input.checks);
 
-  // Collect screenshots from host filesystem
+  // Collect screenshots from host filesystem and write to the on-disk store
   for (let i = 0; i < results.length; i++) {
     try {
       const b64 = await bridge.readHostScreenshot(`${hostScreenshotDir}/check-${i}.png`);
       const entry = results[i];
       if (entry && b64) {
-        entry.screenshot = b64;
+        const bytes = Buffer.from(b64, 'base64');
+        entry.screenshot = await bridge.storeScreenshot(podId, 'ac', `check-${i}.png`, bytes);
       }
     } catch {
       // Screenshot may not exist if the check crashed before taking one
@@ -133,7 +135,7 @@ async function runInContainer(
 
   const results = parseResults(execResult.stdout, input.checks);
 
-  // Collect screenshots from container
+  // Collect screenshots from container and write to the on-disk store
   for (let i = 0; i < results.length; i++) {
     try {
       const b64 = await bridge.execInContainer(
@@ -143,7 +145,8 @@ async function runInContainer(
       );
       const entry = results[i];
       if (entry && b64.exitCode === 0 && b64.stdout.trim()) {
-        entry.screenshot = b64.stdout.trim();
+        const bytes = Buffer.from(b64.stdout.trim(), 'base64');
+        entry.screenshot = await bridge.storeScreenshot(podId, 'ac', `check-${i}.png`, bytes);
       }
     } catch {
       // Screenshot may not exist if the check crashed before taking one

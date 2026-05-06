@@ -7,7 +7,6 @@ export interface StoredValidation {
   podId: string;
   attempt: number;
   result: ValidationResult;
-  screenshots: string[];
   createdAt: string;
 }
 
@@ -22,7 +21,6 @@ function rowToStoredValidation(row: Record<string, unknown>): StoredValidation {
     podId: row.pod_id as string,
     attempt: row.attempt as number,
     result: JSON.parse(row.result as string) as ValidationResult,
-    screenshots: JSON.parse(row.screenshots as string) as string[],
     createdAt: row.created_at as string,
   };
 }
@@ -30,23 +28,14 @@ function rowToStoredValidation(row: Record<string, unknown>): StoredValidation {
 export function createValidationRepository(db: Database.Database): ValidationRepository {
   return {
     insert(podId: string, attempt: number, result: ValidationResult): void {
-      // Collect base64 screenshots from page results
-      const screenshots: string[] = [];
-      for (const page of result.smoke.pages) {
-        if (page.screenshotBase64) {
-          screenshots.push(page.screenshotBase64);
-        }
-      }
-
       db.prepare(
-        `INSERT INTO validations (id, pod_id, attempt, result, screenshots)
-         VALUES (@id, @podId, @attempt, @result, @screenshots)`,
+        `INSERT INTO validations (id, pod_id, attempt, result)
+         VALUES (@id, @podId, @attempt, @result)`,
       ).run({
         id: generateId(),
         podId,
         attempt,
         result: JSON.stringify(result),
-        screenshots: JSON.stringify(screenshots),
       });
     },
 

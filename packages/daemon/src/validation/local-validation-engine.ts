@@ -107,6 +107,7 @@ export function createLocalValidationEngine(
   containerManager: ContainerManager,
   logger?: Logger,
   hostBrowserRunner?: HostBrowserRunner,
+  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
 ): ValidationEngine {
   const log = logger?.child({ component: 'local-validation-engine' });
   // Cache classification results within this engine instance.
@@ -290,6 +291,7 @@ export function createLocalValidationEngine(
                 log,
                 hostBrowserRunner,
                 acClassificationCache,
+                screenshotStore,
               )
             : null;
           acStatus = acValidation?.status ?? 'skip';
@@ -1372,6 +1374,7 @@ async function runAcValidation(
   log?: Logger,
   hostBrowserRunner?: HostBrowserRunner,
   acClassificationCache?: Map<string, ClassifiedAc[]>,
+  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
 ): Promise<AcValidationResult | null> {
   if (!config.acceptanceCriteria || config.acceptanceCriteria.length === 0) {
     log?.info('no acceptance criteria provided, skipping AC validation');
@@ -1464,6 +1467,7 @@ async function runAcValidation(
         webUiInstructions,
         log,
         hostBrowserRunner,
+        screenshotStore,
       );
     } else {
       browserResults = webUiAcs.map((c) => ({
@@ -2016,6 +2020,7 @@ async function executeAcChecks(
   instructions: Array<{ criterion: string; instruction: string }>,
   log?: Logger,
   hostBrowserRunner?: HostBrowserRunner,
+  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
 ): Promise<AcCheckResult[]> {
   const useHost = hostBrowserRunner && (await hostBrowserRunner.isAvailable());
   const reviewTimeout = config.reviewTimeout ?? 300_000;
@@ -2064,6 +2069,7 @@ async function executeAcChecks(
         instructions,
         execTimeout,
         log,
+        screenshotStore,
       );
       if (hostResult !== null) return hostResult;
       // Host Playwright produced no markers — fall back to container with a freshly generated script
@@ -2076,6 +2082,7 @@ async function executeAcChecks(
         instructions,
         execTimeout,
         log,
+        screenshotStore,
       );
     }
 
@@ -2087,6 +2094,7 @@ async function executeAcChecks(
       instructions,
       execTimeout,
       log,
+      screenshotStore,
     );
   } catch (err) {
     log?.warn({ err }, 'AC check execution failed');
@@ -2105,6 +2113,7 @@ async function executeAcOnHost(
   instructions: Array<{ criterion: string; instruction: string }>,
   timeout: number,
   log?: Logger,
+  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
 ): Promise<AcCheckResult[] | null> {
   const screenshotDir = `${hostBrowserRunner.screenshotDir(config.podId)}/ac`;
 
@@ -2131,7 +2140,11 @@ async function executeAcOnHost(
   for (let i = 0; i < parsed.length; i++) {
     try {
       const b64 = await hostBrowserRunner.readScreenshot(`${screenshotDir}/check-${i}.png`);
-      parsed[i].screenshot = b64;
+      if (screenshotStore) {
+        const bytes = Buffer.from(b64, 'base64');
+        const filename = `${config.attempt}-${i}.png`;
+        parsed[i].screenshot = await screenshotStore.write(config.podId, 'ac', filename, bytes);
+      }
     } catch {
       // Screenshot might not exist
     }
@@ -2149,6 +2162,7 @@ async function executeAcInContainer(
   instructions: Array<{ criterion: string; instruction: string }>,
   timeout: number,
   log?: Logger,
+  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
 ): Promise<AcCheckResult[]> {
   const scriptPath = '/tmp/autopod-ac-validation.mjs';
   await containerManager.writeFile(config.containerId, scriptPath, script);
@@ -2174,8 +2188,10 @@ async function executeAcInContainer(
         ['sh', '-c', `base64 -w0 /tmp/autopod-ac-screenshots/check-${i}.png 2>/dev/null`],
         { timeout: 10_000 },
       );
-      if (b64Result.exitCode === 0 && b64Result.stdout.trim()) {
-        parsed[i].screenshot = b64Result.stdout.trim();
+      if (b64Result.exitCode === 0 && b64Result.stdout.trim() && screenshotStore) {
+        const bytes = Buffer.from(b64Result.stdout.trim(), 'base64');
+        const filename = `${config.attempt}-${i}.png`;
+        parsed[i].screenshot = await screenshotStore.write(config.podId, 'ac', filename, bytes);
       }
     } catch {
       // Screenshot might not exist if the check crashed

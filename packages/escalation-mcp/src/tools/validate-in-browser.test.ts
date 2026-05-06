@@ -186,6 +186,13 @@ describe('stripMarkdownFences', () => {
 // ─── Full tool flow (with mocked bridge) ─────────────────────────
 
 describe('validateInBrowser', () => {
+  const MOCK_SCREENSHOT_REF = {
+    podId: 'sess-1',
+    source: 'ac' as const,
+    filename: 'check-0.png',
+    relativePath: 'screenshots/sess-1/ac/check-0.png',
+  };
+
   function makeBridge(scriptOutput: string) {
     return {
       callReviewerModel: vi.fn().mockResolvedValue('console.log("script")'),
@@ -210,6 +217,8 @@ describe('validateInBrowser', () => {
       getHostScreenshotDir: vi.fn().mockReturnValue(null),
       // Daemon-side URL gate — no-op in tests (real implementation is in pod-bridge-impl)
       validateBrowserUrl: vi.fn(),
+      // Screenshot store
+      storeScreenshot: vi.fn().mockResolvedValue(MOCK_SCREENSHOT_REF),
     };
   }
 
@@ -245,7 +254,7 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
     expect(parsed.passed).toBe(true);
     expect(parsed.results).toHaveLength(1);
     expect(parsed.results[0].passed).toBe(true);
-    expect(parsed.results[0].screenshot).toBe('base64data');
+    expect(parsed.results[0].screenshot).toEqual(MOCK_SCREENSHOT_REF);
   });
 
   it('returns passed=false when any check fails', async () => {
@@ -310,6 +319,7 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
       readHostScreenshot: vi.fn().mockResolvedValue('hostbase64'),
       getHostScreenshotDir: vi.fn().mockReturnValue('/tmp/autopod-browser/sess-1/screenshots'),
       validateBrowserUrl: vi.fn(),
+      storeScreenshot: vi.fn().mockResolvedValue(MOCK_SCREENSHOT_REF),
     };
 
     const result = await validateInBrowser(
@@ -320,7 +330,7 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
 
     const parsed = JSON.parse(result);
     expect(parsed.passed).toBe(true);
-    expect(parsed.results[0].screenshot).toBe('hostbase64');
+    expect(parsed.results[0].screenshot).toEqual(MOCK_SCREENSHOT_REF);
 
     // Should NOT have written to container or exec'd in container
     expect(bridge.writeFileInContainer).not.toHaveBeenCalled();

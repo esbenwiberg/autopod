@@ -1,6 +1,16 @@
 import type { PageAssertion } from './profile.js';
 import type { DeviationsAssessment } from './task-summary.js';
 
+export type ScreenshotSource = 'smoke' | 'ac' | 'review';
+
+export interface ScreenshotRef {
+  podId: string;
+  source: ScreenshotSource;
+  filename: string;
+  /** Path relative to the data dir, e.g. `screenshots/abc12345/smoke/root.png`. */
+  relativePath: string;
+}
+
 export interface ValidationResult {
   podId: string;
   attempt: number;
@@ -64,8 +74,8 @@ export interface PageResult {
   path: string;
   status: 'pass' | 'fail';
   screenshotPath: string;
-  /** Base64-encoded PNG screenshot (populated after collection from host filesystem) */
-  screenshotBase64?: string;
+  /** Reference to the on-disk screenshot (populated after collection from host filesystem) */
+  screenshot?: ScreenshotRef;
   consoleErrors: string[];
   assertions: AssertionResult[];
   loadTime: number;
@@ -84,8 +94,8 @@ export interface AcCheckResult {
   criterion: string;
   /** Whether the check passed */
   passed: boolean;
-  /** Base64-encoded PNG screenshot of the relevant page state */
-  screenshot?: string;
+  /** Reference to the on-disk screenshot of the relevant page state */
+  screenshot?: ScreenshotRef;
   /** Reviewer/executor reasoning about why it passed or failed */
   reasoning: string;
   /** How this criterion was (or was not) validated */
@@ -110,7 +120,7 @@ export interface TaskReviewResult {
   reasoning: string;
   issues: string[];
   model: string;
-  screenshots: string[];
+  screenshots: ScreenshotRef[];
   diff: string;
   /** Per-AC requirements coverage check */
   requirementsCheck?: RequirementsCheckItem[];

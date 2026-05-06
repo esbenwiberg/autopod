@@ -58,6 +58,7 @@ import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-sche
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
+import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { GhPrManager, GitHubApiPrManager } from './worktrees/pr-manager.js';
@@ -128,7 +129,7 @@ const migrationsDir =
     path.join(__dirname, '..', 'src', 'db', 'migrations'),
   ].find((dir) => fs.existsSync(dir)) ?? path.join(__dirname, '..', 'src', 'db', 'migrations');
 
-runMigrations(db, migrationsDir, logger);
+runMigrations(db, migrationsDir, logger, DB_PATH);
 
 const backupManager = createDbBackupManager(db, DB_PATH, logger, {
   intervalMs: process.env.AUTOPOD_BACKUP_INTERVAL_MS
@@ -359,7 +360,8 @@ const runtimeRegistry = createRuntimeRegistry([
   new CopilotRuntime(logger, containerManager),
 ]);
 const hostBrowserRunner = createHostBrowserRunner(logger);
-const validationEngine = createLocalValidationEngine(containerManager, logger, hostBrowserRunner);
+const screenshotStore = createScreenshotStore(resolveDataDir());
+const validationEngine = createLocalValidationEngine(containerManager, logger, hostBrowserRunner, screenshotStore);
 
 // Pod queue + manager (circular dep resolved via closure)
 // biome-ignore lint/style/useConst: assigned after podQueue to break circular dependency
@@ -497,6 +499,7 @@ podManager = createPodManager({
   getSecret: (ref: string) => process.env[ref],
   repoScanner,
   scanRepo,
+  screenshotStore,
   logger,
 });
 
@@ -543,6 +546,7 @@ const podBridge = createSessionBridge({
   logger,
   hostBrowserRunner,
   worktreeManager,
+  screenshotStore,
 });
 
 // Notifications (opt-in via TEAMS_WEBHOOK_URL)
