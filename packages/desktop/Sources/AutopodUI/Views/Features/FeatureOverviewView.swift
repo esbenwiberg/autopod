@@ -562,7 +562,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             ["server.ts", "pod-bridge.ts", "pending-requests.ts", "validate-in-browser.ts", "ask-human.ts", "memory-suggest.ts"]
         case .validationPipeline:
-            ["local-validation-engine.ts", "playwright-script.ts", "parse-results.ts", "report-generator.ts", "pending-override-repository.ts"]
+            ["local-validation-engine.ts", "playwright-script.ts", "parse-results.ts", "pending-override-repository.ts"]
         case .profileManagement:
             ["profile-store.ts", "inheritance.ts", "skill-resolver.ts", "system-instructions-generator.ts", "registry-injector.ts", "credentials-cipher.ts"]
         case .realTimeMonitoring:

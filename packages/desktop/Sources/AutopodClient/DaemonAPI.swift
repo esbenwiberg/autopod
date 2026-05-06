@@ -280,11 +280,6 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)/files/content", query: ["path": path])
   }
 
-  public func getReportToken(_ id: String) async throws -> (token: String?, reportUrl: String) {
-    let res: ReportTokenResponse = try await request("GET", "/pods/\(id)/report/token")
-    return (res.token, res.reportUrl)
-  }
-
   // MARK: - Series
 
   public func getSeries(_ seriesId: String) async throws -> SeriesResponse {
@@ -625,11 +620,6 @@ struct HealthResponse: Codable {
 
 struct VersionResponse: Codable {
   let version: String
-}
-
-struct ReportTokenResponse: Codable {
-  let token: String?
-  let reportUrl: String
 }
 
 struct MessageBody: Codable {

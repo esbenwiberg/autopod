@@ -132,7 +132,6 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   podRoutes(
     app,
     deps.podManager,
-    deps.sessionTokenIssuer,
     deps.eventRepo,
     deps.pendingOverrideRepo,
     deps.podRepo,

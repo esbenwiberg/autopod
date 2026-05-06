@@ -6,7 +6,6 @@ import {
   sendMessageSchema,
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
-import type { PodTokenIssuer } from '../../crypto/pod-tokens.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import type { EventRepository } from '../../pods/event-repository.js';
@@ -16,12 +15,10 @@ import type { PodRepository } from '../../pods/pod-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
-import { generateValidationReport } from '../../validation/report-generator.js';
 
 export function podRoutes(
   app: FastifyInstance,
   podManager: PodManager,
-  sessionTokenIssuer?: PodTokenIssuer,
   eventRepo?: EventRepository,
   pendingOverrideRepo?: PendingOverrideRepository,
   podRepo?: PodRepository,
@@ -197,52 +194,6 @@ export function podRoutes(
       since: query.since,
       limit: query.limit ? Number.parseInt(query.limit, 10) : undefined,
     });
-  });
-
-  // GET /pods/:podId/report — HTML validation report.
-  // Uses auth: false + manual token validation so the browser page-load can authenticate
-  // via ?token= (pod HMAC only — not user tokens, which must never appear in URLs).
-  app.get('/pods/:podId/report', { config: { auth: false } }, async (request, reply) => {
-    const { podId } = request.params as { podId: string };
-
-    // Accept token from ?token= (browser page-load) or Authorization: Bearer (API clients).
-    // Only pod-scoped HMAC tokens are accepted — Entra user tokens are rejected here.
-    const queryToken = (request.query as Record<string, string>)?.token;
-    const authHeader = request.headers.authorization;
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
-    const token = bearerToken ?? queryToken;
-
-    if (sessionTokenIssuer) {
-      if (!token) {
-        reply.status(401).send({ error: 'Missing token' });
-        return;
-      }
-      const verifiedPodId = sessionTokenIssuer.verify(token);
-      if (!verifiedPodId || verifiedPodId !== podId) {
-        reply.status(403).send({ error: 'Invalid or mismatched pod token' });
-        return;
-      }
-    }
-
-    const pod = podManager.getSession(podId);
-    const validations = podManager.getValidationHistory(podId);
-    const html = generateValidationReport(pod, validations, token);
-    reply.type('text/html').send(html);
-  });
-
-  // GET /pods/:podId/report/token — generate a pod token for report access
-  app.get('/pods/:podId/report/token', async (request) => {
-    const { podId } = request.params as { podId: string };
-    // Verify pod exists
-    podManager.getSession(podId);
-    if (!sessionTokenIssuer) {
-      return { token: null, reportUrl: `/pods/${podId}/report` };
-    }
-    const token = sessionTokenIssuer.generate(podId);
-    return {
-      token,
-      reportUrl: `/pods/${podId}/report?token=${encodeURIComponent(token)}`,
-    };
   });
 
   // POST /pods/:podId/validate — trigger validation (agent rework on failure)

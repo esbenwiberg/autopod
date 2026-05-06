@@ -6,7 +6,6 @@
  * - POST /pods/:id/message
  * - POST /pods/:id/nudge
  * - GET /pods/:id/validations
- * - GET /pods/:id/report/token
  * - POST /pods/:id/approve (error path — only valid from validated state)
  * - POST /pods/:id/reject (error path)
  * - POST /pods/approve-all
@@ -465,41 +464,6 @@ describe('Extended Route Tests', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/pods/nonexistent/validations',
-        headers: authHeaders,
-      });
-      expect(res.statusCode).toBe(404);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Report token
-  // -------------------------------------------------------------------------
-
-  describe('GET /pods/:id/report/token', () => {
-    it('returns null token when no pod token issuer is configured', async () => {
-      const createRes = await app.inject({
-        method: 'POST',
-        url: '/pods',
-        headers: authHeaders,
-        payload: { profileName: 'test-app', task: 'Task' },
-      });
-      const podId = createRes.json().id;
-
-      const res = await app.inject({
-        method: 'GET',
-        url: `/pods/${podId}/report/token`,
-        headers: authHeaders,
-      });
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(body.token).toBeNull();
-      expect(body.reportUrl).toContain(podId);
-    });
-
-    it('returns 404 for nonexistent pod', async () => {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/pods/nonexistent/report/token',
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(404);

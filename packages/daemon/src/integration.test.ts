@@ -619,47 +619,6 @@ describe('Integration', () => {
     });
   });
 
-  describe('Validation report', () => {
-    beforeEach(async () => {
-      await app.inject({
-        method: 'POST',
-        url: '/profiles',
-        headers: { authorization: 'Bearer test-token' },
-        payload: validProfileInput,
-      });
-    });
-
-    it('GET /pods/:podId/report returns HTML', async () => {
-      const createRes = await app.inject({
-        method: 'POST',
-        url: '/pods',
-        headers: { authorization: 'Bearer test-token' },
-        payload: { profileName: 'test-app', task: 'Build a widget' },
-      });
-      const podId = createRes.json().id;
-
-      const res = await app.inject({
-        method: 'GET',
-        url: `/pods/${podId}/report`,
-        headers: { authorization: 'Bearer test-token' },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.headers['content-type']).toContain('text/html');
-      expect(res.body).toContain('<!DOCTYPE html>');
-      expect(res.body).toContain('Build a widget');
-      expect(res.body).toContain(podId);
-    });
-
-    it('GET /pods/:podId/report returns 404 for nonexistent pod', async () => {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/pods/nonexistent/report',
-        headers: { authorization: 'Bearer test-token' },
-      });
-      expect(res.statusCode).toBe(404);
-    });
-  });
-
   describe('Preview', () => {
     beforeEach(async () => {
       await app.inject({
