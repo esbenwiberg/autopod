@@ -192,7 +192,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'pre_submit_review',
-    "Run a fast critic pass on your current diff using the profile reviewer model. Call this AFTER `validate_locally` succeeds and BEFORE `report_task_summary` — it catches logic/security/scope issues the lint/build/test pipeline cannot. Returns structured findings; if `status` is `fail`, address the issues and call again. Significantly cheaper than discovering the same problems after the daemon's full validation cycle (~5–30 minutes).",
+    "Run a fast critic pass on your **cumulative diff** — every change you've made since the pod started, NOT just your latest commit. The reviewer sees the same bytes the daemon's full reviewer will see after `report_task_summary`, so a clean verdict here lets the daemon skip its Tier 1 review. Call AFTER `validate_locally` succeeds and BEFORE `report_task_summary`. Findings are scoped to medium-and-above issues (logic bugs, security, broken contracts, undisclosed scope creep) — style/format is out of scope. The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` so you can verify what was reviewed; if those numbers look wrong, your worktree state is the issue, not the verdict. Re-calling with an unchanged diff returns a cached verdict (`reusedCache: true`) — fixing issues changes the diff and triggers a fresh review.",
     {
       plannedSummary: z
         .string()

@@ -256,18 +256,50 @@ describe('PodBridge.runPreSubmitReview', () => {
     mockRunPreSubmitReview.mockReset();
   });
 
-  function buildBridgeWithWorktree(opts: {
-    diff: string;
+  /** Sample diff used to verify the bridge wires the container/worktree output through. */
+  const SAMPLE_DIFF =
+    'diff --git a/src/foo.ts b/src/foo.ts\n' +
+    '--- a/src/foo.ts\n' +
+    '+++ b/src/foo.ts\n' +
+    '@@ -1 +1,2 @@\n' +
+    ' line1\n' +
+    '+added\n';
+
+  interface BuildOpts {
+    /** Diff returned by the in-container `git diff`. Used when containerId is set. */
+    containerDiff?: string;
+    /** Diff returned by the host worktree fallback. */
+    worktreeDiff?: string;
+    /** Pre-existing pre-submit verdict on the pod (for cache-hit tests). */
+    cachedVerdict?: {
+      status: 'pass' | 'fail' | 'uncertain' | 'skipped';
+      diffHash: string;
+      reasoning: string;
+      issues: string[];
+      model: string;
+      checkedAt: string;
+    };
+    /** Container id on the pod. Set null to force the host worktree fallback. */
+    containerId?: string | null;
     runResult: Awaited<ReturnType<typeof runPreSubmitReview>>;
-  }): { bridge: PodBridge; podId: string; podRepo: ReturnType<typeof createTestDb>['prepare'] } {
+  }
+
+  function buildBridgeWithWorktree(opts: BuildOpts): {
+    bridge: PodBridge;
+    podId: string;
+    podRepo: ReturnType<typeof createTestDb>['prepare'];
+    containerExecMock: ReturnType<typeof vi.fn>;
+    worktreeGetDiffMock: ReturnType<typeof vi.fn>;
+  } {
     const db = createTestDb();
     const podId = 'pre-1';
     insertTestProfile(db, { name: 'proj', defaultBranch: 'main', reviewerModel: 'sonnet' });
 
+    const containerId = opts.containerId === undefined ? 'container-abc' : opts.containerId;
     db.prepare(
       `INSERT INTO pods (id, profile_name, task, model, branch, user_id, container_id, worktree_path)
-       VALUES (@id, 'proj', 'Add a feature', 'opus', 'main', 'u', 'container-abc', '/tmp/worktree')`,
-    ).run({ id: podId });
+       VALUES (@id, 'proj', 'Add a feature', 'opus', 'main', 'u', @containerId, '/tmp/worktree')`,
+    ).run({ id: podId, containerId });
 
     mockRunPreSubmitReview.mockResolvedValue(opts.runResult);
 
@@ -277,7 +309,10 @@ describe('PodBridge.runPreSubmitReview', () => {
         profileName: 'proj',
         task: 'Add a feature',
         worktreePath: '/tmp/worktree',
-        startCommitSha: null,
+        startCommitSha: 'start-sha',
+        containerId,
+        executionTarget: 'local',
+        preSubmitReview: opts.cachedVerdict ?? null,
       })),
       touchHeartbeat: vi.fn(),
     } as unknown as Deps['podManager'];
@@ -291,9 +326,21 @@ describe('PodBridge.runPreSubmitReview', () => {
       }),
     } as unknown as Deps['profileStore'];
 
+    const worktreeGetDiffMock = vi.fn().mockResolvedValue(opts.worktreeDiff ?? '');
     const worktreeManager = {
-      getDiff: vi.fn().mockResolvedValue(opts.diff),
+      getDiff: worktreeGetDiffMock,
     } as unknown as Deps['worktreeManager'];
+
+    const containerExecMock = vi.fn().mockImplementation(async (_id: string, cmd: string[]) => {
+      if (cmd[0] === 'git' && cmd[1] === 'diff') {
+        if (opts.containerDiff === undefined) {
+          // Force the bridge to fall back to the host worktree.
+          return { stdout: '', stderr: 'no container diff', exitCode: 1 };
+        }
+        return { stdout: opts.containerDiff, stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
 
     const podRepo = {
       update: vi.fn(),
@@ -308,19 +355,25 @@ describe('PodBridge.runPreSubmitReview', () => {
       nudgeRepo: stub,
       profileStore,
       containerManagerFactory: {
-        get: vi.fn().mockReturnValue({ execInContainer: vi.fn() }),
+        get: vi.fn().mockReturnValue({ execInContainer: containerExecMock }),
       } as unknown as Deps['containerManagerFactory'],
       pendingRequestsByPod: new Map(),
       logger,
       worktreeManager,
     });
 
-    return { bridge, podId, podRepo: podRepo as never };
+    return {
+      bridge,
+      podId,
+      podRepo: podRepo as never,
+      containerExecMock,
+      worktreeGetDiffMock,
+    };
   }
 
-  it('forwards the diff and reviewer model to runPreSubmitReview', async () => {
-    const { bridge, podId } = buildBridgeWithWorktree({
-      diff: 'diff --git a/foo b/foo\n+hello',
+  it('reads the diff from inside the container when one is running', async () => {
+    const { bridge, podId, containerExecMock, worktreeGetDiffMock } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
       runResult: {
         status: 'pass',
         reasoning: 'looks good',
@@ -334,20 +387,113 @@ describe('PodBridge.runPreSubmitReview', () => {
     const result = await bridge.runPreSubmitReview(podId, {});
 
     expect(result.status).toBe('pass');
-    expect(result.issues).toEqual([]);
+    // The reviewer was given the container diff, not an empty/stale worktree diff.
     expect(mockRunPreSubmitReview).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: 'Add a feature',
-        diff: 'diff --git a/foo b/foo\n+hello',
-        reviewerModel: 'sonnet',
+        diff: expect.stringContaining('+added'),
       }),
+      expect.anything(),
+    );
+    // In-container exec was invoked.
+    const gitDiffCalls = containerExecMock.mock.calls.filter(
+      (c: unknown[]) => Array.isArray(c[1]) && (c[1] as string[])[1] === 'diff',
+    );
+    expect(gitDiffCalls.length).toBeGreaterThan(0);
+    // Host worktree was not used as fallback because the container path succeeded.
+    expect(worktreeGetDiffMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the host worktree when the in-container diff fails', async () => {
+    const { bridge, podId, worktreeGetDiffMock } = buildBridgeWithWorktree({
+      // containerDiff is undefined → exec returns exitCode=1, fetcher falls back.
+      worktreeDiff: SAMPLE_DIFF,
+      runResult: {
+        status: 'pass',
+        reasoning: 'looks good',
+        issues: [],
+        model: 'sonnet',
+        diffHash: 'abc',
+        durationMs: 42,
+      },
+    });
+
+    await bridge.runPreSubmitReview(podId, {});
+
+    expect(worktreeGetDiffMock).toHaveBeenCalledWith(
+      '/tmp/worktree',
+      'main',
+      expect.any(Number),
+      'start-sha',
+    );
+    expect(mockRunPreSubmitReview).toHaveBeenCalledWith(
+      expect.objectContaining({ diff: expect.stringContaining('+added') }),
       expect.anything(),
     );
   });
 
-  it('caches the verdict on the pod via podRepo.update', async () => {
+  it('echoes scope (filesReviewed / linesAdded / linesRemoved) in the response', async () => {
+    const { bridge, podId } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      runResult: {
+        status: 'pass',
+        reasoning: 'ok',
+        issues: [],
+        model: 'sonnet',
+        diffHash: 'h',
+        durationMs: 1,
+      },
+    });
+
+    const result = await bridge.runPreSubmitReview(podId, {});
+
+    expect(result.filesReviewed).toBe(1);
+    expect(result.linesAdded).toBe(1);
+    expect(result.linesRemoved).toBe(0);
+  });
+
+  it('returns the cached verdict without re-running the reviewer when the diff hash matches', async () => {
+    // Compute the hash the bridge will derive from the diff so the cache key
+    // matches. Use the same hashing the bridge uses (sha256 / first 16 hex chars).
+    const { hashDiff } = await import('../validation/pre-submit-review.js');
+    const finalizedDiff = SAMPLE_DIFF; // No mode-only sections to strip.
+    const expectedHash = hashDiff(finalizedDiff);
+
     const { bridge, podId, podRepo } = buildBridgeWithWorktree({
-      diff: 'diff body',
+      containerDiff: SAMPLE_DIFF,
+      cachedVerdict: {
+        status: 'fail',
+        diffHash: expectedHash,
+        reasoning: 'cached: missing tests',
+        issues: ['src/foo.ts:1: needs a test'],
+        model: 'sonnet',
+        checkedAt: '2025-01-01T00:00:00.000Z',
+      },
+      runResult: {
+        // This must NOT be returned — the cache hit short-circuits.
+        status: 'pass',
+        reasoning: 'should not be visible',
+        issues: [],
+        model: 'sonnet',
+        diffHash: 'fresh',
+        durationMs: 1,
+      },
+    });
+
+    const result = await bridge.runPreSubmitReview(podId, {});
+
+    expect(result.reusedCache).toBe(true);
+    expect(result.status).toBe('fail');
+    expect(result.reasoning).toBe('cached: missing tests');
+    expect(result.issues).toEqual(['src/foo.ts:1: needs a test']);
+    expect(mockRunPreSubmitReview).not.toHaveBeenCalled();
+    // Cache is not re-written when we just returned from it.
+    const update = (podRepo as unknown as { update: ReturnType<typeof vi.fn> }).update;
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('caches the verdict on the pod via podRepo.update on a fresh review', async () => {
+    const { bridge, podId, podRepo } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
       runResult: {
         status: 'pass',
         reasoning: 'all good',
@@ -376,7 +522,7 @@ describe('PodBridge.runPreSubmitReview', () => {
 
   it('passes plannedSummary and plannedDeviations through', async () => {
     const { bridge, podId } = buildBridgeWithWorktree({
-      diff: 'diff body',
+      containerDiff: SAMPLE_DIFF,
       runResult: {
         status: 'pass',
         reasoning: 'ok',

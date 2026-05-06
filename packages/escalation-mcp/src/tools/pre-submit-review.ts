@@ -12,6 +12,11 @@ export async function preSubmitReview(
 /**
  * The bridge result is already structured. We just clean it up for display
  * so the agent sees a focused summary instead of internal-only fields.
+ *
+ * `filesReviewed` / `linesAdded` / `linesRemoved` are echoed so the agent has
+ * a ground-truth anchor for the diff that was reviewed — if those numbers
+ * disagree with what the agent expects, the worktree state is the issue, not
+ * the verdict.
  */
 function formatForAgent(result: PreSubmitReviewToolResult): {
   status: PreSubmitReviewToolResult['status'];
@@ -20,6 +25,10 @@ function formatForAgent(result: PreSubmitReviewToolResult): {
   skipReason?: string;
   model: string;
   durationMs: number;
+  filesReviewed: number;
+  linesAdded: number;
+  linesRemoved: number;
+  reusedCache?: boolean;
 } {
   return {
     status: result.status,
@@ -28,5 +37,9 @@ function formatForAgent(result: PreSubmitReviewToolResult): {
     ...(result.skipReason ? { skipReason: result.skipReason } : {}),
     model: result.model,
     durationMs: result.durationMs,
+    filesReviewed: result.filesReviewed,
+    linesAdded: result.linesAdded,
+    linesRemoved: result.linesRemoved,
+    ...(result.reusedCache ? { reusedCache: true } : {}),
   };
 }

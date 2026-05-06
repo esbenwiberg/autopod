@@ -16,6 +16,11 @@ import type {
 } from '../interfaces/worktree-manager.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
 import { generateAutoCommitMessage } from './auto-commit-message.js';
+import {
+  DIFF_EXCLUDE_PATHSPECS,
+  stripModeOnlyChanges,
+  truncateDiffAtFileBoundary,
+} from './diff-utils.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -90,32 +95,6 @@ function git(args: string[], options: { cwd?: string; timeout?: number; maxBuffe
     env: { ...GIT_ENV, ...GIT_NO_AMBIENT_CREDS_ENV },
   });
 }
-
-/**
- * Remove diff sections that only change file mode (chmod) with no content hunks.
- * Git records these as "old mode / new mode" lines without any +/- content.
- * They are environment artifacts inside containers and add noise to the AI reviewer.
- */
-function stripModeOnlyChanges(diff: string): string {
-  const sections = diff.split(/(?=^diff --git )/m);
-  return sections
-    .filter((section) => {
-      if (!section.startsWith('diff --git ')) return true;
-      return /^@@/m.test(section) || /^[+-](?![+-][+-])/m.test(section);
-    })
-    .join('');
-}
-
-const DIFF_EXCLUDE_PATHSPECS: readonly string[] = [
-  ':(exclude)pnpm-lock.yaml',
-  ':(exclude)package-lock.json',
-  ':(exclude)yarn.lock',
-  ':(exclude)*.lock',
-  ':(exclude)*.lockb',
-  ':(exclude)go.sum',
-  ':(exclude)*.min.js',
-  ':(exclude)*.min.css',
-];
 
 /**
  * Thrown when a git remote operation fails because the daemon either has no
@@ -1207,36 +1186,4 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 }
 
-/**
- * Truncates a unified diff at file boundaries rather than mid-hunk.
- * Splits on `diff --git` headers, includes whole files until `maxLength` is
- * exceeded, then appends a summary of omitted file paths so reviewers know
- * to fetch them via tools.
- */
-export function truncateDiffAtFileBoundary(diff: string, maxLength: number): string {
-  if (diff.length <= maxLength) return diff;
-
-  // Split into per-file chunks — the separator is "diff --git "
-  const chunks = diff.split(/(?=^diff --git )/m).filter(Boolean);
-
-  const included: string[] = [];
-  const omitted: string[] = [];
-  let size = 0;
-
-  for (const chunk of chunks) {
-    if (size + chunk.length <= maxLength) {
-      included.push(chunk);
-      size += chunk.length;
-    } else {
-      // Extract the file path from the header for the omitted list
-      const match = chunk.match(/^diff --git a\/.+ b\/(.+)$/m);
-      omitted.push(match ? match[1] : '(unknown file)');
-    }
-  }
-
-  if (omitted.length === 0) return diff;
-
-  const warning = `\n⚠ DIFF TRUNCATED: ${omitted.length} file${omitted.length > 1 ? 's' : ''} omitted (diff exceeded ${maxLength} chars).\nOmitted files — use read_file / Read tools to inspect them:\n${omitted.map((f) => `  - ${f}`).join('\n')}\n`;
-
-  return included.join('') + warning;
-}
+export { truncateDiffAtFileBoundary } from './diff-utils.js';

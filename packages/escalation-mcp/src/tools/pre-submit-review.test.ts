@@ -16,6 +16,9 @@ describe('preSubmitReview', () => {
       issues: ['src/api/users.ts:42: validate the email field'],
       model: 'sonnet',
       durationMs: 8123,
+      filesReviewed: 1,
+      linesAdded: 1,
+      linesRemoved: 0,
     });
 
     const raw = await preSubmitReview('pod-1', {}, bridge);
@@ -28,6 +31,43 @@ describe('preSubmitReview', () => {
     expect(parsed.durationMs).toBe(8123);
   });
 
+  it('echoes scope (filesReviewed / linesAdded / linesRemoved) so agents can sanity-check what was reviewed', async () => {
+    const bridge = makeBridge({
+      status: 'pass',
+      reasoning: 'all good',
+      issues: [],
+      model: 'sonnet',
+      durationMs: 1200,
+      filesReviewed: 4,
+      linesAdded: 87,
+      linesRemoved: 12,
+    });
+
+    const parsed = JSON.parse(await preSubmitReview('pod-1', {}, bridge));
+
+    expect(parsed.filesReviewed).toBe(4);
+    expect(parsed.linesAdded).toBe(87);
+    expect(parsed.linesRemoved).toBe(12);
+  });
+
+  it('forwards reusedCache=true when the bridge returned a cached verdict', async () => {
+    const bridge = makeBridge({
+      status: 'pass',
+      reasoning: 'cached',
+      issues: [],
+      model: 'sonnet',
+      durationMs: 0,
+      filesReviewed: 2,
+      linesAdded: 10,
+      linesRemoved: 0,
+      reusedCache: true,
+    });
+
+    const parsed = JSON.parse(await preSubmitReview('pod-1', {}, bridge));
+
+    expect(parsed.reusedCache).toBe(true);
+  });
+
   it('omits skipReason when the bridge result does not include one', async () => {
     const bridge = makeBridge({
       status: 'pass',
@@ -35,6 +75,9 @@ describe('preSubmitReview', () => {
       issues: [],
       model: 'sonnet',
       durationMs: 4200,
+      filesReviewed: 1,
+      linesAdded: 5,
+      linesRemoved: 0,
     });
 
     const raw = await preSubmitReview('pod-1', {}, bridge);
@@ -51,6 +94,9 @@ describe('preSubmitReview', () => {
       skipReason: 'no-diff',
       model: 'sonnet',
       durationMs: 0,
+      filesReviewed: 0,
+      linesAdded: 0,
+      linesRemoved: 0,
     });
 
     const raw = await preSubmitReview('pod-1', {}, bridge);
@@ -67,6 +113,9 @@ describe('preSubmitReview', () => {
       issues: [],
       model: 'sonnet',
       durationMs: 0,
+      filesReviewed: 0,
+      linesAdded: 0,
+      linesRemoved: 0,
     });
 
     await preSubmitReview(

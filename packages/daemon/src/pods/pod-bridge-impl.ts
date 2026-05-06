@@ -24,12 +24,13 @@ import { isPrivateIp } from '../api/ssrf-guard.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
-import { runPreSubmitReview } from '../validation/pre-submit-review.js';
+import { hashDiff, runPreSubmitReview } from '../validation/pre-submit-review.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { evaluatePlanAgainstAc } from './plan-evaluator.js';
+import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
@@ -633,19 +634,55 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
       const reviewerModel = profile.reviewerModel || profile.defaultModel || 'sonnet';
+      const defaultBranch = profile.defaultBranch ?? 'main';
 
-      let diff = '';
-      if (worktreeManager && pod.worktreePath) {
-        try {
-          diff = await worktreeManager.getDiff(
-            pod.worktreePath,
-            profile.defaultBranch ?? 'main',
-            MAX_DIFF_LENGTH,
-            pod.startCommitSha ?? undefined,
-          );
-        } catch (err) {
-          logger.warn({ err, podId }, 'pre-submit review: failed to fetch diff');
-        }
+      // Read the diff from inside the live container when possible — the
+      // host worktree is only synced at validation/handoff checkpoints, so
+      // mid-run it is stale and would hide every commit the agent has made.
+      // Falls back to the host worktree if the container is gone.
+      const containerManager = pod.containerId
+        ? containerManagerFactory.get(pod.executionTarget)
+        : undefined;
+      const { diff } = await computePodDiff({
+        pod: {
+          containerId: pod.containerId ?? null,
+          worktreePath: pod.worktreePath ?? null,
+          startCommitSha: pod.startCommitSha ?? null,
+        },
+        defaultBranch,
+        containerManager,
+        worktreeManager,
+        maxLength: MAX_DIFF_LENGTH,
+        logger,
+      });
+
+      const scope = summarizeDiff(diff);
+      const startedAt = Date.now();
+
+      // Short-circuit identical-diff re-calls. Without this, an agent that
+      // re-runs pre_submit_review with "clarified" inputs (but the same diff
+      // bytes) burns reviewer tokens and risks getting a different verdict
+      // due to LLM nondeterminism — deepening the confusion that motivated
+      // the re-call in the first place.
+      const currentDiffHash = hashDiff(diff);
+      const cached = pod.preSubmitReview;
+      if (diff && cached && cached.diffHash === currentDiffHash) {
+        logger.info(
+          { podId, diffHash: currentDiffHash, status: cached.status },
+          'pre-submit review: returning cached verdict for unchanged diff',
+        );
+        return {
+          status: cached.status,
+          reasoning: cached.reasoning,
+          issues: cached.issues,
+          ...(cached.status === 'skipped' ? { skipReason: 'cached' } : {}),
+          model: cached.model,
+          durationMs: Date.now() - startedAt,
+          filesReviewed: scope.filesReviewed,
+          linesAdded: scope.linesAdded,
+          linesRemoved: scope.linesRemoved,
+          reusedCache: true,
+        };
       }
 
       const result = await runPreSubmitReview(
@@ -683,6 +720,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         ...(result.skipReason ? { skipReason: result.skipReason } : {}),
         model: result.model,
         durationMs: result.durationMs,
+        filesReviewed: scope.filesReviewed,
+        linesAdded: scope.linesAdded,
+        linesRemoved: scope.linesRemoved,
       };
     },
 

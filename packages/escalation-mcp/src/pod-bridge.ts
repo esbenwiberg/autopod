@@ -189,6 +189,18 @@ export interface PreSubmitReviewToolResult {
   skipReason?: string;
   model: string;
   durationMs: number;
+  /**
+   * Number of files in the diff that was reviewed. Echoed back so the agent has
+   * a ground-truth anchor for what scope the verdict applies to (the cumulative
+   * pod delta, not just the latest commit).
+   */
+  filesReviewed: number;
+  /** Sum of '+' lines in the reviewed diff (excluding headers). */
+  linesAdded: number;
+  /** Sum of '-' lines in the reviewed diff (excluding headers). */
+  linesRemoved: number;
+  /** True when the call returned a previously-cached verdict for an unchanged diff. */
+  reusedCache?: boolean;
 }
 
 export interface ValidationPhaseResult {

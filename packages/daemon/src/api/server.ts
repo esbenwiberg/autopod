@@ -185,7 +185,13 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
 
   // Diff routes (requires container manager)
   if (deps.containerManagerFactory) {
-    diffRoutes(app, deps.podManager, deps.containerManagerFactory, deps.profileStore);
+    diffRoutes(
+      app,
+      deps.podManager,
+      deps.containerManagerFactory,
+      deps.profileStore,
+      deps.worktreeManager,
+    );
   }
 
   // Files routes — browse/read files from pod worktree (markdown viewer, etc.)
