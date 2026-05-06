@@ -330,3 +330,6 @@ export {
 
 // Model pricing helpers
 export * from './pricing/index.js';
+
+// Analytics response types
+export type { CostAnalyticsResponse } from './types/analytics.js';

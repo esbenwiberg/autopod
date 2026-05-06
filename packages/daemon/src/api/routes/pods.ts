@@ -7,6 +7,7 @@ import {
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { PodTokenIssuer } from '../../crypto/pod-tokens.js';
+import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import type { EventRepository } from '../../pods/event-repository.js';
 import type { PodManager } from '../../pods/index.js';
@@ -160,6 +161,20 @@ export function podRoutes(
     const query = request.query as { days?: string };
     const days = query.days ? Number.parseInt(query.days, 10) : 30;
     return qualityScoreRepo.getTrends(days);
+  });
+
+  // GET /pods/analytics/cost — trailing-window cost analytics
+  app.get('/pods/analytics/cost', async (request, reply) => {
+    if (!podRepo) {
+      reply.status(503);
+      return { error: 'Cost analytics unavailable — repository not wired' };
+    }
+    const days = parseDays(request.query as Record<string, unknown>);
+    if (days === null) {
+      reply.status(400);
+      return { error: 'days must be a positive integer', code: 'invalid_days' };
+    }
+    return aggregateCost({ podRepo }, { days });
   });
 
   // GET /pods/scores — persisted quality-score leaderboard / history

@@ -4055,7 +4055,10 @@ describe('PodManager', () => {
       await manager.processPod(pod.id);
 
       const result = manager.getSession(pod.id);
-      expect(result.phaseTokenUsage?.agent_initial).toEqual({ inputTokens: 1000, outputTokens: 500 });
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
     });
 
     it('one rework writes agent_rework_1 without trampling agent_initial', async () => {
@@ -4092,9 +4095,15 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       // agent_initial must be unchanged
-      expect(result.phaseTokenUsage?.agent_initial).toEqual({ inputTokens: 1000, outputTokens: 500 });
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
       // agent_rework_1 must have the rework tokens
-      expect(result.phaseTokenUsage?.agent_rework_1).toEqual({ inputTokens: 300, outputTokens: 200 });
+      expect(result.phaseTokenUsage?.agent_rework_1).toEqual({
+        inputTokens: 300,
+        outputTokens: 200,
+      });
     });
 
     it('multiple complete events in one attempt accumulate into the same bucket', async () => {
@@ -4129,7 +4138,10 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       // Both events accumulate into agent_initial (same attempt=0)
-      expect(result.phaseTokenUsage?.agent_initial).toEqual({ inputTokens: 1000, outputTokens: 500 });
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
     });
 
     it('existing review writes still land under phaseTokenUsage.review and do not trample agent buckets', async () => {
@@ -4162,7 +4174,10 @@ describe('PodManager', () => {
       // Review tokens must be present
       expect(result.phaseTokenUsage?.review).toEqual({ inputTokens: 2000, outputTokens: 150 });
       // agent_initial must be untouched
-      expect(result.phaseTokenUsage?.agent_initial).toEqual({ inputTokens: 1000, outputTokens: 500 });
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
     });
 
     it('recovery-case: pod with prior phaseTokenUsage starts next write at agent_rework_3', async () => {
@@ -4198,10 +4213,16 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       // Must write to agent_rework_3 (= deriveAgentAttempt({agent_initial, agent_rework_2}) = 1+2=3)
-      expect(result.phaseTokenUsage?.agent_rework_3).toEqual({ inputTokens: 400, outputTokens: 300 });
+      expect(result.phaseTokenUsage?.agent_rework_3).toEqual({
+        inputTokens: 400,
+        outputTokens: 300,
+      });
       // Prior buckets must be preserved
       expect(result.phaseTokenUsage?.agent_initial).toEqual({ inputTokens: 100, outputTokens: 50 });
-      expect(result.phaseTokenUsage?.agent_rework_2).toEqual({ inputTokens: 200, outputTokens: 100 });
+      expect(result.phaseTokenUsage?.agent_rework_2).toEqual({
+        inputTokens: 200,
+        outputTokens: 100,
+      });
     });
 
     it('null phaseTokenUsage starts at attempt 0 (agent_initial)', async () => {
@@ -4231,7 +4252,10 @@ describe('PodManager', () => {
       await manager.processPod(pod.id);
 
       const result = manager.getSession(pod.id);
-      expect(result.phaseTokenUsage?.agent_initial).toEqual({ inputTokens: 1000, outputTokens: 500 });
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
       // No rework keys should exist
       expect(result.phaseTokenUsage?.agent_rework_1).toBeUndefined();
     });

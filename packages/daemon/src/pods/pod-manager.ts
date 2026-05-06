@@ -618,7 +618,11 @@ export interface PodCreator {
 export interface PodManager {
   createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod;
   processPod(podId: string): Promise<void>;
-  consumeAgentEvents(podId: string, events: AsyncIterable<AgentEvent>, attempt?: number): Promise<void>;
+  consumeAgentEvents(
+    podId: string,
+    events: AsyncIterable<AgentEvent>,
+    attempt?: number,
+  ): Promise<void>;
   handleCompletion(podId: string): Promise<void>;
   sendMessage(podId: string, message: string): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
@@ -4311,7 +4315,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
-    async consumeAgentEvents(podId: string, events: AsyncIterable<AgentEvent>, attempt = 0): Promise<void> {
+    async consumeAgentEvents(
+      podId: string,
+      events: AsyncIterable<AgentEvent>,
+      attempt = 0,
+    ): Promise<void> {
       startCommitPolling(podId);
       try {
         for await (const event of events) {

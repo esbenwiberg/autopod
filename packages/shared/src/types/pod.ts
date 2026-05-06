@@ -39,10 +39,7 @@ export interface ReferenceRepo {
  */
 export type PhaseTokenUsage = Partial<
   Record<
-    | 'agent_initial'
-    | `agent_rework_${number}`
-    | 'review'
-    | 'plan_eval',
+    'agent_initial' | `agent_rework_${number}` | 'review' | 'plan_eval',
     { inputTokens: number; outputTokens: number }
   >
 >;
