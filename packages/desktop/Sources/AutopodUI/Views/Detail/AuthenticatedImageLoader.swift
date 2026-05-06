@@ -9,7 +9,17 @@ import Observation
 
   private(set) var phase: Phase = .idle
 
-  func load(url: URL, token: String) async {
+  /// Fetches the image at `url`, attaching a Bearer token.
+  /// - Parameters:
+  ///   - trustedHost: When non-nil, the request is rejected (`.failed`) if the URL's
+  ///     host differs from this value. Prevents forwarding the auth token to a
+  ///     non-daemon host when the daemon supplies an unexpected absolute URL.
+  func load(url: URL, token: String, trustedHost: String? = nil) async {
+    // Guard: only forward the auth token to the daemon's own host.
+    if let trustedHost, url.host != trustedHost {
+      phase = .failed
+      return
+    }
     phase = .loading
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

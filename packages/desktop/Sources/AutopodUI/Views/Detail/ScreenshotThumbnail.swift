@@ -20,6 +20,7 @@ public struct ScreenshotThumbnail: View {
   public var fillMode: Bool = false
 
   @Environment(\.daemonAuthToken) private var token
+  @Environment(\.daemonBaseURL) private var daemonBaseURL
   @State private var loader = AuthenticatedImageLoader()
   @State private var retryToken = UUID()
 
@@ -86,7 +87,7 @@ public struct ScreenshotThumbnail: View {
       }
     }
     .task(id: "\(ref.url.absoluteString)-\(retryToken)") {
-      await loader.load(url: ref.url, token: token)
+      await loader.load(url: ref.url, token: token, trustedHost: daemonBaseURL?.host)
     }
   }
 }
@@ -95,10 +96,12 @@ public struct ScreenshotThumbnail: View {
 
 private extension View {
   /// Adds a pointing-hand cursor on hover (macOS only).
+  /// Uses set()/arrow.set() instead of push()/pop() to avoid stack imbalance
+  /// when the view is removed while the cursor is already pushed.
   @ViewBuilder
   func cursor(_ cursor: NSCursor) -> some View {
     self.onHover { inside in
-      if inside { cursor.push() } else { NSCursor.pop() }
+      if inside { cursor.set() } else { NSCursor.arrow.set() }
     }
   }
 }

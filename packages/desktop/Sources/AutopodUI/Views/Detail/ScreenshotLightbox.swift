@@ -18,8 +18,10 @@ public struct ScreenshotLightbox: View {
   @Binding public var isPresented: Bool
 
   @Environment(\.daemonAuthToken) private var token
+  @Environment(\.daemonBaseURL) private var daemonBaseURL
   @State private var loader = AuthenticatedImageLoader()
   @State private var retryToken = UUID()
+  @FocusState private var isFocused: Bool
 
   public init(refs: [ScreenshotRef], currentIndex: Binding<Int>, isPresented: Binding<Bool>) {
     self.refs = refs
@@ -128,6 +130,8 @@ public struct ScreenshotLightbox: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .focusable()
+    .focused($isFocused)
+    .onAppear { isFocused = true }
     .onKeyPress(.leftArrow) {
       if currentIndex > 0 { currentIndex -= 1 }
       return .handled
@@ -137,7 +141,7 @@ public struct ScreenshotLightbox: View {
       return .handled
     }
     .task(id: "\(currentIndex)-\(retryToken)") {
-      if let ref = currentRef { await loader.load(url: ref.url, token: token) }
+      if let ref = currentRef { await loader.load(url: ref.url, token: token, trustedHost: daemonBaseURL?.host) }
     }
     .onChange(of: currentIndex) { _, _ in
       loader.reset()
