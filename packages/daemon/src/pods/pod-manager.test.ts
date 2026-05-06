@@ -3648,19 +3648,19 @@ describe('PodManager', () => {
       expect(refreshed.forceCompletedReason).toBeNull();
     });
 
-    it('stops the underlying container as part of the override', async () => {
+    it('kills the underlying container as part of the override', async () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedPod(ctx, { containerId: 'container-stuck' });
 
       await manager.forceComplete(pod.id);
 
-      expect(ctx.containerManager.stop).toHaveBeenCalledWith('container-stuck');
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('container-stuck');
     });
 
-    it('still completes when the container stop fails (best-effort cleanup)', async () => {
+    it('still completes when the container kill fails (best-effort cleanup)', async () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedPod(ctx);
-      (ctx.containerManager.stop as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      (ctx.containerManager.kill as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new Error('container already gone'),
       );
 
@@ -3671,13 +3671,13 @@ describe('PodManager', () => {
       expect(refreshed.forceCompletedReason).toBe('cleanup');
     });
 
-    it('does not call container.stop when the pod has no containerId', async () => {
+    it('does not call container.kill when the pod has no containerId', async () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedPod(ctx, { containerId: null });
 
       await manager.forceComplete(pod.id);
 
-      expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
       const refreshed = manager.getSession(pod.id);
       expect(refreshed.status).toBe('complete');
     });

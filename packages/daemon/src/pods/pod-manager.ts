@@ -863,6 +863,51 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  /** Hard ceiling on container cleanup at terminal transitions. A wedged Docker
+   *  daemon must never keep an operator endpoint hanging — once the pod is
+   *  conceptually done, we proceed even if Docker is still chewing on the API
+   *  call. 15s is generous for a cooperative `stop -t 10` + remove. */
+  const CONTAINER_CLEANUP_TIMEOUT_MS = 15_000;
+
+  /**
+   * Best-effort container cleanup with a hard timeout. Use at terminal
+   * transitions (complete, force-complete) and operator escape hatches (kick)
+   * so a wedged Docker engine can't tie up the request. Never throws — the
+   * caller has already decided the pod is done.
+   *
+   * mode='kill' stops + removes (terminal — pod will never restart).
+   * mode='stop' only stops, leaving the container so it can be restarted later
+   * (preview, rejection retry, resume).
+   */
+  async function cleanupContainer(
+    pod: Pod,
+    label: string,
+    mode: 'kill' | 'stop' = 'kill',
+  ): Promise<void> {
+    if (!pod.containerId) return;
+    const cm = containerManagerFactory.get(pod.executionTarget);
+    const op = mode === 'kill' ? cm.kill(pod.containerId) : cm.stop(pod.containerId);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      op
+        .catch((err) =>
+          logger.warn({ err, podId: pod.id, label, mode }, `${label}: container ${mode} failed`),
+        )
+        .finally(() => {
+          if (timer) clearTimeout(timer);
+        }),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          logger.warn(
+            { podId: pod.id, label, mode, timeoutMs: CONTAINER_CLEANUP_TIMEOUT_MS },
+            `${label}: container ${mode} timed out — proceeding without waiting`,
+          );
+          resolve();
+        }, CONTAINER_CLEANUP_TIMEOUT_MS);
+      }),
+    ]);
+  }
+
   /** Pre-push security scan helper. Runs the repo scanner at the `push`
    *  checkpoint and acts on the decision:
    *   - `block` (non-workspace) → throws AutopodError; the pod's outer handler
@@ -1361,6 +1406,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         if (status.merged) {
           emitActivityStatus(podId, 'PR merged successfully');
+          await cleanupContainer(pod, 'pr-merged-complete');
           const mergedPod = transition(pod, 'complete', {
             completedAt: new Date().toISOString(),
             mergeBlockReason: null,
@@ -4574,6 +4620,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Transition to complete — skip validation entirely
+        await cleanupContainer(pod, 'artifact-complete');
         transition(pod, 'complete');
         return;
       }
@@ -5068,6 +5115,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           const s1 = transition(pod, 'approved');
           const s2 = transition(s1, 'merging');
+          await cleanupContainer(pod, 'approve-no-changes');
           const noChangePod = transition(s2, 'complete', {
             completedAt: new Date().toISOString(),
           });
@@ -5375,6 +5423,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       emitActivityStatus(podId, 'Pod complete');
+      await cleanupContainer(pod, 'approve-complete');
       const completedPod = transition(s2, 'complete', { completedAt: new Date().toISOString() });
 
       eventBus.emit({
@@ -5848,6 +5897,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       emitActivityStatus(podId, 'Pod complete');
+      await cleanupContainer(pod, 'workspace-complete');
       transition(pod, 'complete', { completedAt: new Date().toISOString() });
 
       // Deactivate PIM groups on pod completion
@@ -7902,16 +7952,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      // Stop any container that's still around so we don't leak runtime resources.
-      // Best-effort: a stopped/missing container shouldn't block the override.
-      if (pod.containerId) {
-        try {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          await cm.stop(pod.containerId);
-        } catch (err) {
-          logger.warn({ err, podId }, 'force-complete: failed to stop container');
-        }
-      }
+      // Force-complete is terminal — kill+remove the container so it doesn't
+      // linger as a stopped record in Docker. Bounded so a wedged engine can't
+      // hang the operator endpoint.
+      await cleanupContainer(pod, 'force-complete');
 
       const trimmedReason = reason?.trim() || null;
       const now = new Date().toISOString();
@@ -7959,14 +8003,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       if (pod.status === 'running' || pod.status === 'provisioning') {
-        if (pod.containerId) {
-          try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await cm.stop(pod.containerId);
-          } catch (err) {
-            logger.warn({ err, podId }, 'kick: failed to stop container');
-          }
-        }
+        // Bounded — the whole point of kick is to free a slot when something
+        // upstream (often Docker itself) is wedged. The transition to `failed`
+        // must not depend on Docker cooperating. Mode='stop' so a subsequent
+        // `resume` can still restart the same container if Docker recovers.
+        await cleanupContainer(pod, 'kick', 'stop');
         podRepo.update(podId, { kickedAt: nowIso, kickedReason: trimmedReason });
         transition(pod, 'failed', { completedAt: nowIso });
         emitActivityStatus(
