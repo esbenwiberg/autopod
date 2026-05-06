@@ -566,6 +566,7 @@ const notificationService = createNotificationService({
   rateLimiter: createRateLimiter(),
   sessionLookup: podManager,
   logger,
+  screenshotStore,
 });
 notificationService.start();
 
@@ -626,6 +627,7 @@ const app = await createServer({
   pendingOverrideRepo,
   scheduledJobManager,
   issueWatcherRepo,
+  screenshotStore,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),

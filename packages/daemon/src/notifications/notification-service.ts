@@ -8,6 +8,7 @@ import type {
   PodStatusChangedEvent,
   PodValidatedNotification,
   ProcessContentConfig,
+  ScreenshotRef,
   SystemEvent,
   ValidationCompletedEvent,
   ValidationResult,
@@ -15,6 +16,7 @@ import type {
 import { sanitize } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { EventBus } from '../pods/event-bus.js';
+import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import {
   buildErrorCard,
   buildFailedCard,
@@ -60,15 +62,48 @@ export function createNotificationService(deps: {
   logger: Logger;
   /** Content processing config — sanitizes notification payloads (task descriptions, escalation content) */
   contentProcessing?: ProcessContentConfig;
+  /** Screenshot store — when provided, smoke screenshots are read from disk and embedded in Teams cards */
+  screenshotStore?: ScreenshotStore;
 }): NotificationService {
-  const { eventBus, config, teamsAdapter, rateLimiter, sessionLookup, logger, contentProcessing } =
-    deps;
+  const {
+    eventBus,
+    config,
+    teamsAdapter,
+    rateLimiter,
+    sessionLookup,
+    logger,
+    contentProcessing,
+    screenshotStore,
+  } = deps;
 
   /** Sanitize a string for notification display (strip PII) */
   function sanitizeText(text: string): string {
     if (!contentProcessing?.sanitization) return text;
     return sanitize(text, contentProcessing.sanitization);
   }
+
+  /**
+   * Read a screenshot from the store and return its base64 string.
+   * Returns null on ENOENT (retention-pruned) and logs a warning.
+   * Other errors are re-thrown.
+   */
+  async function readScreenshotBase64(ref: ScreenshotRef): Promise<string | null> {
+    if (!screenshotStore) return null;
+    try {
+      const buf = await screenshotStore.read(ref);
+      return buf.toString('base64');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        logger.warn(
+          { podId: ref.podId, source: ref.source, filename: ref.filename },
+          'Screenshot missing from disk (retention-pruned?) — omitting from Teams card',
+        );
+        return null;
+      }
+      throw err;
+    }
+  }
+
   const unsubscribers: Array<() => void> = [];
 
   function isEventEnabled(type: NotificationType, profileName: string): boolean {
@@ -121,9 +156,16 @@ export function createNotificationService(deps: {
       const notificationType: NotificationType = 'pod_validated';
       if (!canSendForSession(event.podId, notificationType, pod.profileName)) return;
 
-      // Screenshots are now on-disk (ScreenshotRef) — brief 02-api wires the disk-read path.
-      // For now, Teams cards have no inline screenshot until that brief lands.
+      // Read smoke screenshots from disk and base64-encode for the Teams card.
+      // Fails-soft: missing files are skipped (logged), notification still fires.
       const screenshots: Array<{ pagePath: string; base64: string }> = [];
+      for (const page of event.result.smoke.pages) {
+        if (!page.screenshot) continue;
+        const base64 = await readScreenshotBase64(page.screenshot);
+        if (base64 !== null) {
+          screenshots.push({ pagePath: page.path, base64 });
+        }
+      }
 
       const notification: PodValidatedNotification = {
         type: notificationType,

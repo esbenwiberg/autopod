@@ -1,6 +1,8 @@
 import {
   AutopodError,
   type PodStatus,
+  type ScreenshotRef,
+  type ValidationResult,
   createPodRequestSchema,
   processContent,
   sendMessageSchema,
@@ -15,6 +17,72 @@ import type { PodRepository } from '../../pods/pod-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
+
+/**
+ * Wire shape for screenshot references sent to API consumers (desktop, CLI).
+ * Internal `ScreenshotRef` (which carries `relativePath`, `podId`, etc.) must
+ * never be sent on the wire — desktop decodes by these three fields only.
+ */
+interface ScreenshotRefDto {
+  /** Relative URL: /pods/:podId/screenshots/:source/:filename */
+  url: string;
+  source: 'smoke' | 'ac' | 'review';
+  /**
+   * Context label for the screenshot:
+   * - smoke: the page URL path (e.g. `/`, `/about`)
+   * - ac: the criterion text the screenshot was taken for
+   * - review: the screenshot's 0-based array index as a string
+   */
+  path: string;
+}
+
+function toScreenshotRefDto(ref: ScreenshotRef, contextPath: string): ScreenshotRefDto {
+  return {
+    url: `/pods/${ref.podId}/screenshots/${ref.source}/${ref.filename}`,
+    source: ref.source,
+    path: contextPath,
+  };
+}
+
+/**
+ * Transform a stored ValidationResult, replacing all ScreenshotRef fields with
+ * ScreenshotRefDto shapes suitable for the API wire format.
+ * Returns a new object — does not mutate the input.
+ */
+function serializeValidationResult(result: ValidationResult): unknown {
+  const pages = result.smoke.pages.map((page) => {
+    if (!page.screenshot) return page;
+    const { screenshot, ...rest } = page;
+    return { ...rest, screenshot: toScreenshotRefDto(screenshot, page.path) };
+  });
+
+  const acValidation = result.acValidation
+    ? {
+        ...result.acValidation,
+        results: result.acValidation.results.map((check) => {
+          if (!check.screenshot) return check;
+          const { screenshot, ...rest } = check;
+          return { ...rest, screenshot: toScreenshotRefDto(screenshot, check.criterion) };
+        }),
+      }
+    : result.acValidation;
+
+  const taskReview = result.taskReview
+    ? {
+        ...result.taskReview,
+        screenshots: result.taskReview.screenshots.map((ref, i) =>
+          toScreenshotRefDto(ref, String(i)),
+        ),
+      }
+    : result.taskReview;
+
+  return {
+    ...result,
+    smoke: { ...result.smoke, pages },
+    acValidation,
+    taskReview,
+  };
+}
 
 export function podRoutes(
   app: FastifyInstance,
@@ -103,9 +171,12 @@ export function podRoutes(
   });
 
   // GET /pods/:podId/validations — validation history
+  // ScreenshotRef fields are converted to ScreenshotRefDto (url/source/path) at
+  // serialisation time so the desktop never receives internal path information.
   app.get('/pods/:podId/validations', async (request) => {
     const { podId } = request.params as { podId: string };
-    return podManager.getValidationHistory(podId);
+    const history = podManager.getValidationHistory(podId);
+    return history.map((v) => ({ ...v, result: serializeValidationResult(v.result) }));
   });
 
   // GET /pods/:podId/events — agent activity events for log replay

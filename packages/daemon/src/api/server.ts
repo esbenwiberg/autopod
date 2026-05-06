@@ -25,6 +25,7 @@ import type {
   PodRepository,
   QualityScoreRepository,
 } from '../pods/index.js';
+import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
@@ -39,6 +40,7 @@ import { actionRoutes } from './routes/actions.js';
 import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
+import { screenshotRoutes } from './routes/screenshots.js';
 import { historyRoutes } from './routes/history.js';
 import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
@@ -77,6 +79,7 @@ export interface ServerDependencies {
   pendingOverrideRepo?: PendingOverrideRepository;
   scheduledJobManager?: ScheduledJobManager;
   issueWatcherRepo?: IssueWatcherRepository;
+  screenshotStore?: ScreenshotStore;
   logLevel?: string;
   prettyLog?: boolean;
   onShutdown?: () => void;
@@ -195,6 +198,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
 
   // Files routes — browse/read files from pod worktree (markdown viewer, etc.)
   filesRoutes(app, deps.podManager, deps.containerManagerFactory);
+
+  // Screenshot routes — serve proof-of-work PNG screenshots by pod/source/filename
+  if (deps.screenshotStore) {
+    screenshotRoutes(app, deps.screenshotStore);
+  }
 
   // Terminal WebSocket (requires docker instance)
   if (deps.containerManagerFactory && deps.docker) {
