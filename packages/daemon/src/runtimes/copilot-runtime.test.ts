@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream';
+import type { AgentErrorEvent, AgentEvent } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -221,6 +222,61 @@ describe('CopilotRuntime', () => {
       expect(errorEvent).toBeDefined();
       expect(errorEvent?.message).toContain('exited with code 1');
       expect(errorEvent?.fatal).toBe(true);
+    });
+
+    it('terminates within idle window when stdout stalls and probe says wedged', async () => {
+      // Copilot's parser only emits `complete` after stdout closes — so a
+      // mid-stream wedge can't be caught by withPostCompleteGrace alone.
+      // Layer 2 (idle liveness probe) covers this case.
+      process.env.AUTOPOD_IDLE_PROBE_MS = '50';
+      process.env.AUTOPOD_IDLE_PROBE_TIMEOUT_MS = '50';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
+
+      try {
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        // Probe always reports the container is dead.
+        cm.execInContainer = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 137 }));
+
+        const runtime = new CopilotRuntime(logger, cm);
+
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write('Working on it...\n');
+          // Deliberately do NOT close stdout, do NOT resolve exit code.
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        const start = Date.now();
+        for await (const event of runtime.spawn({
+          podId: 'wedged-copilot',
+          task: 'Task',
+          model: 'sonnet',
+          workDir: '/workspace',
+          containerId: 'container-123',
+          env: {},
+        })) {
+          events.push(event);
+        }
+        const elapsed = Date.now() - start;
+
+        expect(elapsed).toBeLessThan(800);
+        expect((handle.stdout as PassThrough).writableEnded).toBe(true);
+
+        const livenessError = events.find(
+          (e) =>
+            e.type === 'error' &&
+            (e as AgentErrorEvent).fatal === true &&
+            (e as AgentErrorEvent).message.includes('liveness probe failed'),
+        );
+        expect(livenessError).toBeDefined();
+      } finally {
+        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
+        delete process.env.AUTOPOD_IDLE_PROBE_MS;
+        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
+        delete process.env.AUTOPOD_IDLE_PROBE_TIMEOUT_MS;
+        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
+        delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      }
     });
 
     it('cleans up handle tracking after completion', async () => {

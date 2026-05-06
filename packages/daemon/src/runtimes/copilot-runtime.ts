@@ -4,6 +4,11 @@ import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { CopilotStreamParser } from './copilot-stream-parser.js';
+import {
+  awaitExitCodeBounded,
+  withIdleLivenessProbe,
+  withPostCompleteGrace,
+} from './stream-grace.js';
 
 /** Directory inside the container where Copilot stores its config. */
 const COPILOT_HOME = `${CONTAINER_HOME_DIR}/.copilot`;
@@ -76,18 +81,36 @@ export class CopilotRuntime implements Runtime {
     });
 
     try {
-      for await (const event of CopilotStreamParser.parse(
-        handle.stdout,
-        config.podId,
-        this.logger,
-      )) {
-        yield event;
-      }
+      yield* withPostCompleteGrace(
+        withIdleLivenessProbe(CopilotStreamParser.parse(handle.stdout, config.podId, this.logger), {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'copilot-runtime',
+          podId: config.podId,
+          logger: this.logger,
+          containerManager: this.containerManager,
+          containerId: config.containerId,
+        }),
+        {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'copilot-runtime',
+          podId: config.podId,
+          logger: this.logger,
+        },
+      );
     } finally {
       this.handles.delete(config.podId);
     }
 
-    const [exitCode, stderrText] = await Promise.all([handle.exitCode, stderrPromise]);
+    // Bounded exit-code wait — wedged dockerd would otherwise hang us here
+    // even after the stream-grace timer destroyed stdout.
+    const [exitResult, stderrText] = await Promise.all([
+      awaitExitCodeBounded(handle.exitCode, {
+        runtimeName: 'copilot-runtime',
+        podId: config.podId,
+        logger: this.logger,
+      }),
+      stderrPromise,
+    ]);
 
     if (stderrText.trim()) {
       this.logger.warn(
@@ -100,12 +123,19 @@ export class CopilotRuntime implements Runtime {
       );
     }
 
-    if (exitCode !== 0) {
+    if (exitResult.timedOut) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Copilot exit code did not resolve — container may be unresponsive',
+        fatal: false,
+      };
+    } else if (exitResult.code !== 0) {
       const stderrSummary = stderrText.trim() ? `: ${stderrText.trim().slice(-500)}` : '';
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: `Copilot process exited with code ${exitCode}${stderrSummary}`,
+        message: `Copilot process exited with code ${exitResult.code}${stderrSummary}`,
         fatal: true,
       };
     }

@@ -2,6 +2,11 @@ import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { CodexStreamParser } from './codex-stream-parser.js';
+import {
+  awaitExitCodeBounded,
+  withIdleLivenessProbe,
+  withPostCompleteGrace,
+} from './stream-grace.js';
 
 /**
  * Codex CLI runtime adapter.
@@ -42,18 +47,45 @@ export class CodexRuntime implements Runtime {
     this.handles.set(config.podId, handle);
 
     try {
-      yield* CodexStreamParser.parse(handle.stdout, config.podId, this.logger);
+      yield* withPostCompleteGrace(
+        withIdleLivenessProbe(CodexStreamParser.parse(handle.stdout, config.podId, this.logger), {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'codex-runtime',
+          podId: config.podId,
+          logger: this.logger,
+          containerManager: this.containerManager,
+          containerId: config.containerId,
+        }),
+        {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'codex-runtime',
+          podId: config.podId,
+          logger: this.logger,
+        },
+      );
     } finally {
       this.handles.delete(config.podId);
     }
 
-    // Check exit code after stream is consumed
-    const exitCode = await handle.exitCode;
-    if (exitCode !== 0) {
+    // Bounded exit-code wait — wedged dockerd would otherwise hang us here
+    // even after the stream-grace timer destroyed stdout.
+    const exitResult = await awaitExitCodeBounded(handle.exitCode, {
+      runtimeName: 'codex-runtime',
+      podId: config.podId,
+      logger: this.logger,
+    });
+    if (exitResult.timedOut) {
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: `Codex process exited with code ${exitCode}`,
+        message: 'Codex exit code did not resolve — container may be unresponsive',
+        fatal: false,
+      };
+    } else if (exitResult.code !== 0) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: `Codex process exited with code ${exitResult.code}`,
         fatal: true,
       };
     }
@@ -89,7 +121,22 @@ export class CodexRuntime implements Runtime {
     this.handles.set(podId, handle);
 
     try {
-      yield* CodexStreamParser.parse(handle.stdout, podId, this.logger);
+      yield* withPostCompleteGrace(
+        withIdleLivenessProbe(CodexStreamParser.parse(handle.stdout, podId, this.logger), {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'codex-runtime',
+          podId,
+          logger: this.logger,
+          containerManager: this.containerManager,
+          containerId,
+        }),
+        {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'codex-runtime',
+          podId,
+          logger: this.logger,
+        },
+      );
     } finally {
       this.handles.delete(podId);
     }

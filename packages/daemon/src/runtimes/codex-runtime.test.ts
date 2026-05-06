@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream';
+import type { AgentErrorEvent, AgentEvent } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -145,6 +146,64 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).message).toContain('exited with code 1');
       // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((errorEvent as any).fatal).toBe(true);
+    });
+
+    it('terminates within grace window when stdout never closes after turn_complete', async () => {
+      // Wedged-container parity with claude-runtime: emit the parser's
+      // `complete` event then deliberately leave stdout open and exit code
+      // unresolved. The grace timer should end stdout and the bounded
+      // exit-code wait should fall through with a non-fatal error.
+      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '50';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
+
+      try {
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(logger, cm);
+
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({
+              id: '1',
+              msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'Done' },
+            })}\n`,
+          );
+          // Deliberately do NOT close stdout or resolve exit code.
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        const start = Date.now();
+        for await (const event of runtime.spawn({
+          podId: 'wedged-codex',
+          task: 'Task',
+          model: 'o3-mini',
+          workDir: '/workspace',
+          containerId: 'container-123',
+          env: {},
+        })) {
+          events.push(event);
+        }
+        const elapsed = Date.now() - start;
+
+        expect(elapsed).toBeLessThan(500);
+        expect((handle.stdout as PassThrough).writableEnded).toBe(true);
+
+        const completeEvent = events.find((e) => e.type === 'complete');
+        expect(completeEvent).toBeDefined();
+
+        const wedgeError = events.find(
+          (e) =>
+            e.type === 'error' &&
+            (e as AgentErrorEvent).fatal === false &&
+            (e as AgentErrorEvent).message.includes('Codex exit code did not resolve'),
+        );
+        expect(wedgeError).toBeDefined();
+      } finally {
+        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
+        delete process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
+        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
+        delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      }
     });
 
     it('cleans up handle tracking after completion', async () => {

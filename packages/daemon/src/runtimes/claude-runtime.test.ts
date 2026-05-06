@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import type { AgentErrorEvent, SpawnConfig } from '@autopod/shared';
+import type { AgentErrorEvent, AgentEvent, SpawnConfig } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -567,6 +567,71 @@ describe('ClaudeRuntime', () => {
           'track-sess',
         ),
       ).toBe(false);
+    });
+
+    it('terminates within grace window when stdout never closes after result event', async () => {
+      // Simulate the wedged-container case: agent emits its final result event
+      // (which the parser maps to a `complete` AgentEvent) but stdout never
+      // EOFs. Without the post-complete grace, the for-await would hang
+      // indefinitely. Bound the grace and exit-code timeouts via env so the
+      // test stays fast.
+      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '50';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
+
+      try {
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new ClaudeRuntime(logger, cm);
+
+        setTimeout(() => {
+          emitLine(handle.stdout as PassThrough, {
+            type: 'result',
+            subtype: 'success',
+            result: 'Done',
+          });
+          // Deliberately do NOT close stdout or resolve exit code — simulates
+          // a wedged container.
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        const start = Date.now();
+        for await (const event of runtime.spawn({
+          podId: 'wedged-sess',
+          task: 'Task',
+          model: 'opus',
+          workDir: '/workspace',
+          containerId: 'container-123',
+          env: {},
+        })) {
+          events.push(event);
+        }
+        const elapsed = Date.now() - start;
+
+        // Should have terminated within grace + exit-code timeout + a little
+        // tolerance for scheduling.
+        expect(elapsed).toBeLessThan(500);
+
+        // Grace timer should have ended stdout (signals EOF to readline).
+        expect((handle.stdout as PassThrough).writableEnded).toBe(true);
+
+        // The result event should have come through as a `complete` event.
+        const completeEvent = events.find((e) => e.type === 'complete');
+        expect(completeEvent).toBeDefined();
+
+        // Exit code never resolved → synthetic non-fatal error event.
+        const wedgeError = events.find(
+          (e) =>
+            e.type === 'error' &&
+            (e as AgentErrorEvent).fatal === false &&
+            (e as AgentErrorEvent).message.includes('Claude exit code did not resolve'),
+        );
+        expect(wedgeError).toBeDefined();
+      } finally {
+        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
+        delete process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
+        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
+        delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      }
     });
   });
 

@@ -4,6 +4,11 @@ import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
+import {
+  awaitExitCodeBounded,
+  withIdleLivenessProbe,
+  withPostCompleteGrace,
+} from './stream-grace.js';
 
 /** Path inside the container where the MCP config JSON is written. */
 const MCP_CONFIG_PATH = '/home/autopod/.autopod/mcp-config.json';
@@ -75,12 +80,10 @@ export class ClaudeRuntime implements Runtime {
       });
     });
 
-    try {
-      for await (const event of ClaudeStreamParser.parse(
-        handle.stdout,
-        config.podId,
-        this.logger,
-      )) {
+    const claudeSessionIds = this.claudeSessionIds;
+    const podLogger = this.logger;
+    const enriched = (async function* parseWithEnrichments(): AsyncIterable<AgentEvent> {
+      for await (const event of ClaudeStreamParser.parse(handle.stdout, config.podId, podLogger)) {
         // Flush any stderr events that arrived before the next stdout event
         for (const e of stderrEvents.splice(0)) yield e;
 
@@ -88,24 +91,55 @@ export class ClaudeRuntime implements Runtime {
         if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
           if (match?.[1]) {
-            this.claudeSessionIds.set(config.podId, match[1]);
+            claudeSessionIds.set(config.podId, match[1]);
           }
         }
         yield event;
       }
       // Flush any remaining stderr events after stdout closes
       for (const e of stderrEvents.splice(0)) yield e;
+    })();
+
+    try {
+      yield* withPostCompleteGrace(
+        withIdleLivenessProbe(enriched, {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'claude-runtime',
+          podId: config.podId,
+          logger: this.logger,
+          containerManager: this.containerManager,
+          containerId: config.containerId,
+        }),
+        {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'claude-runtime',
+          podId: config.podId,
+          logger: this.logger,
+        },
+      );
     } finally {
       this.handles.delete(config.podId);
     }
 
-    // Check exit code after stream is consumed
-    const exitCode = await handle.exitCode;
-    if (exitCode !== 0) {
+    // Bounded exit-code wait — wedged dockerd would otherwise hang us here
+    // even after the stream-grace timer destroyed stdout.
+    const exitResult = await awaitExitCodeBounded(handle.exitCode, {
+      runtimeName: 'claude-runtime',
+      podId: config.podId,
+      logger: this.logger,
+    });
+    if (exitResult.timedOut) {
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: `Claude process exited with code ${exitCode}`,
+        message: 'Claude exit code did not resolve — container may be unresponsive',
+        fatal: false,
+      };
+    } else if (exitResult.code !== 0) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: `Claude process exited with code ${exitResult.code}`,
         fatal: true,
       };
     }
@@ -161,19 +195,40 @@ export class ClaudeRuntime implements Runtime {
       });
     });
 
-    try {
-      for await (const event of ClaudeStreamParser.parse(handle.stdout, podId, this.logger)) {
+    const claudeSessionIds = this.claudeSessionIds;
+    const podLogger = this.logger;
+    const enriched = (async function* parseWithEnrichments(): AsyncIterable<AgentEvent> {
+      for await (const event of ClaudeStreamParser.parse(handle.stdout, podId, podLogger)) {
         for (const e of stderrEvents.splice(0)) yield e;
         // Update Claude pod ID on resume too
         if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
           if (match?.[1]) {
-            this.claudeSessionIds.set(podId, match[1]);
+            claudeSessionIds.set(podId, match[1]);
           }
         }
         yield event;
       }
       for (const e of stderrEvents.splice(0)) yield e;
+    })();
+
+    try {
+      yield* withPostCompleteGrace(
+        withIdleLivenessProbe(enriched, {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'claude-runtime',
+          podId,
+          logger: this.logger,
+          containerManager: this.containerManager,
+          containerId,
+        }),
+        {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'claude-runtime',
+          podId,
+          logger: this.logger,
+        },
+      );
     } finally {
       this.handles.delete(podId);
     }
