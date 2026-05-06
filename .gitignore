@@ -15,6 +15,7 @@ coverage/
 *.key
 .autopod-data/
 tmp/
+.agentry/
 *.onnx
 packages/desktop/.build/
 packages/desktop/.swiftpm/xcode/xcuserdata/
