@@ -13,22 +13,28 @@ public struct AnalyticsView: View {
     public var loadScores: (() async throws -> [PodQualityScore])?
     /// Fetches cost analytics from the daemon for the Cost card.
     public var loadCost: (() async throws -> CostAnalyticsResponse)?
+    /// Fetches reliability analytics from the daemon for the Reliability card.
+    public var loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
     @State private var scoresLoadError: String?
     @State private var costData: CostAnalyticsResponse?
     @State private var costLoadError: String?
+    @State private var reliabilityData: ReliabilityAnalyticsResponse?
+    @State private var reliabilityLoadError: String?
 
     public init(
         pods: [Pod],
         loadScores: (() async throws -> [PodQualityScore])? = nil,
         loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
+        loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
         selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
         self.loadScores = loadScores
         self.loadCost = loadCost
+        self.loadReliability = loadReliability
         self._selectedCard = selectedCard
     }
 
@@ -47,6 +53,15 @@ public struct AnalyticsView: View {
 
     private var costCardValue: String {
         costData.map { String(format: "$%.2f", $0.total) } ?? "—"
+    }
+
+    /// Non-nil only when there is actual data in the window; nil means "no data" (show "—").
+    private var reliabilityDataIfPopulated: ReliabilityAnalyticsResponse? {
+        reliabilityData.flatMap { $0.summary.totalPodsInWindow > 0 ? $0 : nil }
+    }
+
+    private var reliabilityCardValue: String {
+        reliabilityDataIfPopulated.map { String(format: "%.0f%%", $0.firstPassRate * 100) } ?? "—"
     }
 
     private var dominantStatusValue: String {
@@ -91,13 +106,26 @@ public struct AnalyticsView: View {
                         isSelected: selectedCard == .status,
                         onClick: { selectedCard = selectedCard == .status ? nil : .status }
                     )
+                    AnalyticsCard(
+                        title: "Reliability",
+                        value: reliabilityCardValue,
+                        sparkline: reliabilityDataIfPopulated.map { $0.firstPassRateSparkline.map(\.rate) },
+                        delta: reliabilityDataIfPopulated.map {
+                            AnalyticsCardDelta(
+                                value: String(format: "%+.1fpp", $0.firstPassRateDelta.value),
+                                direction: AnalyticsCardDelta.Direction($0.firstPassRateDelta.direction)
+                            )
+                        },
+                        isSelected: selectedCard == .reliability,
+                        onClick: { selectedCard = selectedCard == .reliability ? nil : .reliability }
+                    )
                 }
             }
             .padding(24)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
-            // Both fetches are independent — kick off concurrently and await both.
+            // All fetches are independent — kick off concurrently and await all.
             let scoreTask = Task {
                 if let loadScores {
                     do {
@@ -118,8 +146,19 @@ public struct AnalyticsView: View {
                     }
                 }
             }
+            let reliabilityTask = Task {
+                if let loadReliability {
+                    do {
+                        reliabilityData = try await loadReliability()
+                        reliabilityLoadError = nil
+                    } catch {
+                        reliabilityLoadError = error.localizedDescription
+                    }
+                }
+            }
             await scoreTask.value
             await costTask.value
+            await reliabilityTask.value
         }
     }
 }
@@ -415,6 +454,14 @@ extension AnalyticsCardDelta.Direction {
         case .flat: self = .flat
         }
     }
+
+    init(_ direction: ReliabilityDelta.Direction) {
+        switch direction {
+        case .up:   self = .up
+        case .down: self = .down
+        case .flat: self = .flat
+        }
+    }
 }
 
 // MARK: - File-level helpers (shared by drill views)
@@ -462,7 +509,7 @@ private func analyticsScoreColor(_ score: Int) -> Color {
     }
 }
 
-private func analyticsRelativeDate(_ iso: String) -> String {
+func analyticsRelativeDate(_ iso: String) -> String {
     let date = analyticsParseDate(iso)
     guard date != Date.distantPast else { return iso }
     return _relFmt.localizedString(for: date, relativeTo: Date())

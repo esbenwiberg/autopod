@@ -263,6 +263,12 @@ public actor DaemonAPI {
     try await request("GET", "/pods/analytics/cost", query: ["days": "\(days)"])
   }
 
+  /// GET /pods/analytics/reliability — trailing-window first-pass rate, funnel,
+  /// stage failures, profile heatmap, and summary.
+  public func getReliabilityAnalytics(days: Int = 30) async throws -> ReliabilityAnalyticsResponse {
+    try await request("GET", "/pods/analytics/reliability", query: ["days": "\(days)"])
+  }
+
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
     try await request("GET", "/pods/\(id)/diff")
   }
