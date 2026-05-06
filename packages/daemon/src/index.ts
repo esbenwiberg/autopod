@@ -58,6 +58,7 @@ import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-sche
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
+import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
@@ -363,6 +364,21 @@ const hostBrowserRunner = createHostBrowserRunner(logger);
 const screenshotStore = createScreenshotStore(resolveDataDir());
 const validationEngine = createLocalValidationEngine(containerManager, logger, hostBrowserRunner, screenshotStore);
 
+const retentionDays = Number.parseInt(
+  process.env.AUTOPOD_SCREENSHOT_RETENTION_DAYS ?? '30',
+  10,
+);
+if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
+  throw new Error('AUTOPOD_SCREENSHOT_RETENTION_DAYS must be a positive integer');
+}
+const screenshotRetention = new ScreenshotRetention({
+  retentionDays,
+  sweepIntervalMs: 60 * 60 * 1000, // 1 hour — not configurable via env (YAGNI)
+  podRepository: podRepo,
+  screenshotStore,
+  logger: logger.child({ component: 'screenshot-retention' }),
+});
+
 // Pod queue + manager (circular dep resolved via closure)
 // biome-ignore lint/style/useConst: assigned after podQueue to break circular dependency
 let podManager: ReturnType<typeof createPodManager>;
@@ -666,6 +682,9 @@ if (securityMlEnabled && modelManager) {
   });
 }
 
+// Start screenshot retention sweeper — runs immediately then hourly
+screenshotRetention.start();
+
 // Start scheduled job scheduler AFTER server is listening
 scheduledJobScheduler.start();
 
@@ -751,10 +770,11 @@ async function shutdown(signal: string) {
   // Stop accepting new requests
   await app.close();
 
-  // Stop notifications, quality recorder, and issue watcher
+  // Stop notifications, quality recorder, issue watcher, and screenshot retention
   notificationService.stop();
   qualityScoreRecorder.stop();
   issueWatcherService.stop();
+  screenshotRetention.stop();
 
   // Stop scheduled job scheduler
   scheduledJobScheduler.stop();
