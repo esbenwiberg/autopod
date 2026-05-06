@@ -170,6 +170,17 @@ public struct AppRootView: View {
     .onChange(of: actionHandler?.lastError) { old, new in
       if new != nil, new != old { showError = true }
     }
+    .alert(
+      "Scheduled Job Error",
+      isPresented: Binding(
+        get: { scheduledJobStore.error != nil },
+        set: { if !$0 { scheduledJobStore.error = nil } }
+      )
+    ) {
+      Button("OK") { scheduledJobStore.error = nil }
+    } message: {
+      Text(scheduledJobStore.error ?? "Unknown error")
+    }
     .sheet(isPresented: $showSetup) {
       SetupSheet(
         isPresented: $showSetup,

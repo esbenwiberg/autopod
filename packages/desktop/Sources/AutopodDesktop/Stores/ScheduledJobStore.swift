@@ -69,39 +69,69 @@ public final class ScheduledJobStore {
 
   public func runCatchup(_ jobId: String) async throws {
     guard let api else { return }
-    _ = try await api.runScheduledJobCatchup(jobId)
-    await refreshJob(jobId)
+    do {
+      _ = try await api.runScheduledJobCatchup(jobId)
+      await refreshJob(jobId)
+    } catch {
+      self.error = error.localizedDescription
+      throw error
+    }
   }
 
   public func skipCatchup(_ jobId: String) async throws {
     guard let api else { return }
-    try await api.skipScheduledJobCatchup(jobId)
-    await refreshJob(jobId)
+    do {
+      try await api.skipScheduledJobCatchup(jobId)
+      await refreshJob(jobId)
+    } catch {
+      self.error = error.localizedDescription
+      throw error
+    }
   }
 
   public func triggerJob(_ jobId: String) async throws {
     guard let api else { return }
-    _ = try await api.triggerScheduledJob(jobId)
-    await refreshJob(jobId)
+    do {
+      _ = try await api.triggerScheduledJob(jobId)
+      await refreshJob(jobId)
+    } catch {
+      self.error = error.localizedDescription
+      throw error
+    }
   }
 
   public func createJob(_ request: CreateScheduledJobRequest) async throws {
     guard let api else { return }
-    let job = try await api.createScheduledJob(request)
-    jobs.append(job)
+    do {
+      let job = try await api.createScheduledJob(request)
+      jobs.append(job)
+    } catch {
+      self.error = error.localizedDescription
+      throw error
+    }
   }
 
   public func updateJob(_ jobId: String, _ request: UpdateScheduledJobRequest) async throws {
     guard let api else { return }
-    let updated = try await api.updateScheduledJob(jobId, request)
-    if let idx = jobs.firstIndex(where: { $0.id == jobId }) {
-      jobs[idx] = updated
+    do {
+      let updated = try await api.updateScheduledJob(jobId, request)
+      if let idx = jobs.firstIndex(where: { $0.id == jobId }) {
+        jobs[idx] = updated
+      }
+    } catch {
+      self.error = error.localizedDescription
+      throw error
     }
   }
 
   public func deleteJob(_ jobId: String) async throws {
     guard let api else { return }
-    try await api.deleteScheduledJob(jobId)
-    jobs.removeAll { $0.id == jobId }
+    do {
+      try await api.deleteScheduledJob(jobId)
+      jobs.removeAll { $0.id == jobId }
+    } catch {
+      self.error = error.localizedDescription
+      throw error
+    }
   }
 }
