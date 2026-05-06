@@ -5,6 +5,7 @@ import {
   processContent,
   sendMessageSchema,
 } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import type { PodTokenIssuer } from '../../crypto/pod-tokens.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
@@ -15,6 +16,7 @@ import type { PendingOverrideRepository } from '../../pods/pending-override-repo
 import type { PodRepository } from '../../pods/pod-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
+import { computeReliabilityAnalytics } from '../../pods/reliability-aggregator.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
 import { generateValidationReport } from '../../validation/report-generator.js';
 
@@ -28,6 +30,7 @@ export function podRoutes(
   escalationRepo?: EscalationRepository,
   qualityScoreRepo?: QualityScoreRepository,
   validationRepo?: ValidationRepository,
+  db?: Database.Database,
 ): void {
   // POST /pods — create a new pod
   app.post('/pods', async (request, reply) => {
@@ -175,6 +178,20 @@ export function podRoutes(
       return { error: 'days must be a positive integer', code: 'invalid_days' };
     }
     return aggregateCost({ podRepo }, { days });
+  });
+
+  // GET /pods/analytics/reliability — trailing-window reliability funnel + stage failure analytics
+  app.get('/pods/analytics/reliability', async (request, reply) => {
+    if (!db) {
+      reply.status(503);
+      return { error: 'Reliability analytics unavailable — db not wired' };
+    }
+    const days = parseDays(request.query as Record<string, unknown>);
+    if (days === null || days > 365) {
+      reply.status(400);
+      return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
+    }
+    return computeReliabilityAnalytics(db, days);
   });
 
   // GET /pods/scores — persisted quality-score leaderboard / history
