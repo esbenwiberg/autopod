@@ -24,9 +24,23 @@ public enum PodMapper {
         ?? Date()
   }
 
+  // MARK: - Screenshot ref mapping
+
+  /// Maps a `ScreenshotRefResponse` DTO to the UI model `ScreenshotRef`.
+  /// Returns nil when `dto` is nil or `baseURL` is nil or the source string is unrecognised.
+  static func mapScreenshotRef(
+    _ dto: ScreenshotRefResponse?,
+    baseURL: URL?
+  ) -> ScreenshotRef? {
+    guard let dto, let baseURL else { return nil }
+    guard let source = ScreenshotRef.Source(rawValue: dto.source) else { return nil }
+    guard let url = URL(string: dto.url, relativeTo: baseURL)?.absoluteURL else { return nil }
+    return ScreenshotRef(url: url, source: source, label: dto.path)
+  }
+
   // MARK: - SessionResponse → Pod
 
-  public static func map(_ response: SessionResponse) -> Pod {
+  public static func map(_ response: SessionResponse, baseURL: URL? = nil) -> Pod {
     let status = PodStatus(rawValue: response.status) ?? .queued
     // The daemon always ships PodOptions under `options` on the wire (Pod.options is
     // non-optional in shared). If it's missing, we're talking to an incompatible
@@ -97,24 +111,28 @@ public enum PodMapper {
             AssertionDetail(selector: a.selector, type: a.type, expected: a.expected, actual: a.actual, passed: a.passed)
           },
           loadTime: p.loadTime,
-          screenshotBase64: p.screenshotBase64
+          screenshot: mapScreenshotRef(p.screenshot, baseURL: baseURL)
         )
       }
       let acValidation: Bool? = v.acValidation.flatMap { $0.status == "skip" ? nil : ($0.status == "pass") }
       let acChecks: [AcCheckDetail]? = v.acValidation?.results.map { r in
-        AcCheckDetail(criterion: r.criterion, passed: r.passed, reasoning: r.reasoning, screenshot: r.screenshot, validationType: r.validationType)
+        AcCheckDetail(
+          criterion: r.criterion, passed: r.passed, reasoning: r.reasoning,
+          screenshot: mapScreenshotRef(r.screenshot, baseURL: baseURL),
+          validationType: r.validationType
+        )
       }
       let requirementsCheck: [RequirementCheckDetail]? = v.taskReview?.requirementsCheck?.map { r in
         RequirementCheckDetail(criterion: r.criterion, met: r.met, note: r.note)
       }
-      let taskReviewScreenshots: [String]? = {
+      let taskReviewScreenshots: [ScreenshotRef]? = {
         guard let ss = v.taskReview?.screenshots, !ss.isEmpty else { return nil }
-        return ss
+        let refs = ss.compactMap { mapScreenshotRef($0, baseURL: baseURL) }
+        return refs.isEmpty ? nil : refs
       }()
-      let proofOfWorkScreenshots: [PageScreenshot]? = {
-        let shots = v.smoke.pages.compactMap { p -> PageScreenshot? in
-          guard let b64 = p.screenshotBase64, !b64.isEmpty else { return nil }
-          return PageScreenshot(path: p.path, base64: b64)
+      let proofOfWorkScreenshots: [ScreenshotRef]? = {
+        let shots = v.smoke.pages.compactMap { p in
+          mapScreenshotRef(p.screenshot, baseURL: baseURL)
         }
         return shots.isEmpty ? nil : shots
       }()
@@ -295,8 +313,8 @@ public enum PodMapper {
 
   // MARK: - Batch mapping
 
-  public static func map(_ responses: [SessionResponse]) -> [Pod] {
-    responses.map { map($0) }
+  public static func map(_ responses: [SessionResponse], baseURL: URL? = nil) -> [Pod] {
+    responses.map { map($0, baseURL: baseURL) }
   }
 
   // MARK: - Helpers

@@ -71,7 +71,7 @@ public final class PodStore {
     error = nil
     do {
       let responses = try await api.listPods()
-      let fresh = PodMapper.map(responses)
+      let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       // Preserve in-memory WebSocket state that REST doesn't carry (validationProgress is
       // transient — set by phase events, never serialised to the database).
       let savedProgress = Dictionary(
@@ -116,7 +116,7 @@ public final class PodStore {
     guard let api else { return }
     do {
       let response = try await api.getPod(id)
-      var updated = PodMapper.map(response)
+      var updated = PodMapper.map(response, baseURL: api.baseURL)
       if let index = pods.firstIndex(where: { $0.id == id }) {
         // Preserve live WebSocket state that REST doesn't carry
         if updated.status == .validating && pods[index].validationProgress == nil {

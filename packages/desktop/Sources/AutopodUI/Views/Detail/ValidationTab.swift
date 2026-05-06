@@ -28,6 +28,10 @@ public struct ValidationTab: View {
   @State private var overrideReason: String = ""
   @State private var overrideGuidance: String = ""
   @State private var dismissedFindingIds: Set<String> = []
+  // Lightbox state — one instance at the tab level; thumbnails write into these
+  @State private var lightboxRefs: [ScreenshotRef] = []
+  @State private var lightboxIndex: Int = 0
+  @State private var isLightboxPresented: Bool = false
 
   public init(pod: Pod, checks: ValidationChecks? = nil, actions: PodActions = .preview) {
     self.pod = pod
@@ -41,6 +45,21 @@ public struct ValidationTab: View {
 
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
   private var displayPhase: ValidationPhase? { selectedPhase ?? progress?.activePhase }
+
+  /// Combined ordered screenshot set for lightbox navigation: smoke → ac → review.
+  /// Derived from whichever source is live (progress from events, or final checks).
+  private var screenshotSet: [ScreenshotRef] {
+    let pageShots = (progress?.pageDetails ?? checks?.pages ?? []).compactMap { $0.screenshot }
+    let acShots = (progress?.acChecks ?? checks?.acChecks ?? []).compactMap { $0.screenshot }
+    let reviewShots = progress?.reviewDetail?.screenshots ?? checks?.taskReviewScreenshots ?? []
+    return pageShots + acShots + reviewShots
+  }
+
+  private func openLightbox(_ index: Int) {
+    lightboxRefs = screenshotSet
+    lightboxIndex = index
+    isLightboxPresented = true
+  }
 
   /// Context-aware label for the override confirm button.
   private var overrideConfirmLabel: String {
@@ -159,6 +178,17 @@ public struct ValidationTab: View {
       // Reset user selection when a new validation attempt starts
       selectedPhase = nil
     }
+    .overlay {
+      if isLightboxPresented {
+        ScreenshotLightbox(
+          refs: lightboxRefs,
+          currentIndex: $lightboxIndex,
+          isPresented: $isLightboxPresented
+        )
+        .transition(.opacity)
+      }
+    }
+    .animation(.easeInOut(duration: 0.18), value: isLightboxPresented)
   }
 
   // MARK: - Header
@@ -551,7 +581,9 @@ public struct ValidationTab: View {
           }
         }
       }
-      screenshotThumbnail(page.screenshotBase64)
+      if let ref = page.screenshot {
+        ScreenshotThumbnail(ref: ref, allRefs: screenshotSet, onOpen: { openLightbox($0) })
+      }
     }
     .padding(10)
     .background(page.status == "pass"
@@ -613,7 +645,9 @@ public struct ValidationTab: View {
             .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
-        screenshotThumbnail(check.screenshot)
+        if let ref = check.screenshot {
+          ScreenshotThumbnail(ref: ref, allRefs: screenshotSet, onOpen: { openLightbox($0) })
+        }
       }
       .padding(10)
     }
@@ -672,7 +706,9 @@ public struct ValidationTab: View {
             .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
-        screenshotThumbnail(result?.screenshot)
+        if let ref = result?.screenshot {
+          ScreenshotThumbnail(ref: ref, allRefs: screenshotSet, onOpen: { openLightbox($0) })
+        }
       }
       .padding(10)
     }
@@ -689,7 +725,7 @@ public struct ValidationTab: View {
     let reasoning: String? = detail?.reasoning ?? checks?.reviewReasoning
     let skipReason: String? = checks?.reviewSkipReason
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? checks?.requirementsCheck
-    let screenshots: [String] = detail?.screenshots ?? checks?.taskReviewScreenshots ?? []
+    let screenshots: [ScreenshotRef] = detail?.screenshots ?? checks?.taskReviewScreenshots ?? []
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(
@@ -775,8 +811,8 @@ public struct ValidationTab: View {
           Text("Review Screenshots")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
-          ForEach(Array(screenshots.enumerated()), id: \.offset) { _, ss in
-            screenshotThumbnail(ss)
+          ForEach(screenshots) { ss in
+            ScreenshotThumbnail(ref: ss, allRefs: screenshotSet, onOpen: { openLightbox($0) })
           }
         }
       }

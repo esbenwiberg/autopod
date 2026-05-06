@@ -306,3 +306,243 @@ import AutopodUI
   #expect(pod.isWorkspace == true)
   #expect(pod.artifactsPath == "/Users/ewi/.autopod-data/artifacts/research-pod")
 }
+
+// MARK: - Screenshot ref tests (brief 03-desktop)
+
+/// Decoder round-trip: a ScreenshotRefResponse decodes its three fields correctly.
+@Test func decodesScreenshotRefResponse() throws {
+  let json = """
+  {
+    "url": "/pods/abc12345/screenshots/smoke/root.png",
+    "source": "smoke",
+    "path": "/root"
+  }
+  """.data(using: .utf8)!
+
+  let ref = try JSONDecoder().decode(ScreenshotRefResponse.self, from: json)
+  #expect(ref.url == "/pods/abc12345/screenshots/smoke/root.png")
+  #expect(ref.source == "smoke")
+  #expect(ref.path == "/root")
+}
+
+/// Decoder absent fields: a page with no `screenshot` key → nil; empty screenshots array → empty.
+@Test func decodesAbsentScreenshotFields() throws {
+  // PageResultResponse without screenshot field
+  let pageJson = """
+  {
+    "path": "/root",
+    "status": "pass",
+    "consoleErrors": [],
+    "assertions": [],
+    "loadTime": 120
+  }
+  """.data(using: .utf8)!
+  let page = try JSONDecoder().decode(PageResultResponse.self, from: pageJson)
+  #expect(page.screenshot == nil)
+
+  // TaskReviewResponse with empty screenshots array
+  let reviewJson = """
+  {
+    "status": "pass",
+    "reasoning": "All good",
+    "issues": [],
+    "model": "claude",
+    "screenshots": [],
+    "diff": ""
+  }
+  """.data(using: .utf8)!
+  let review = try JSONDecoder().decode(TaskReviewResponse.self, from: reviewJson)
+  #expect(review.screenshots.isEmpty)
+}
+
+/// Mapper URL resolution: the daemon's relative URL is resolved against the provided base URL.
+@Test func mapperResolvesScreenshotURL() throws {
+  let sessionJson = """
+  {
+    "id": "abc12345",
+    "profileName": "app",
+    "task": "Build feature",
+    "status": "complete",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/x",
+    "containerId": null,
+    "worktreePath": null,
+    "validationAttempts": 1,
+    "maxValidationAttempts": 3,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:00Z",
+    "completedAt": "2026-04-01T09:10:00Z",
+    "updatedAt": "2026-04-01T09:10:00Z",
+    "userId": "user-1",
+    "filesChanged": 0,
+    "linesAdded": 0,
+    "linesRemoved": 0,
+    "previewUrl": null,
+    "prUrl": null,
+    "plan": null,
+    "progress": null,
+    "acceptanceCriteria": null,
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "baseBranch": null,
+    "acFrom": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "commitCount": 1,
+    "lastCommitAt": null,
+    "lastValidationResult": {
+      "podId": "abc12345",
+      "attempt": 1,
+      "timestamp": "2026-04-01T09:08:00Z",
+      "overall": "pass",
+      "duration": 30000,
+      "smoke": {
+        "status": "pass",
+        "build": { "status": "pass", "output": "", "duration": 5000 },
+        "health": { "status": "pass", "url": "http://localhost:3001", "responseCode": 200, "duration": 200 },
+        "pages": [
+          {
+            "path": "/root",
+            "status": "pass",
+            "consoleErrors": [],
+            "assertions": [],
+            "loadTime": 300,
+            "screenshot": {
+              "url": "/pods/abc12345/screenshots/smoke/root.png",
+              "source": "smoke",
+              "path": "/root"
+            }
+          }
+        ]
+      }
+    }
+  }
+  """.data(using: .utf8)!
+
+  let baseURL = URL(string: "http://127.0.0.1:3100")!
+  let response = try JSONDecoder().decode(SessionResponse.self, from: sessionJson)
+  let pod = PodMapper.map(response, baseURL: baseURL)
+
+  let screenshot = pod.validationChecks?.proofOfWorkScreenshots?.first
+  #expect(screenshot != nil)
+  #expect(screenshot?.url.absoluteString == "http://127.0.0.1:3100/pods/abc12345/screenshots/smoke/root.png")
+  #expect(screenshot?.source == .smoke)
+  #expect(screenshot?.label == "/root")
+}
+
+/// Set ordering: smoke → ac → review refs from a full validation result map through in canonical order.
+@Test func mapperPreservesScreenshotSetOrdering() throws {
+  let sessionJson = """
+  {
+    "id": "ord-test",
+    "profileName": "app",
+    "task": "Test ordering",
+    "status": "complete",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/ord",
+    "containerId": null,
+    "worktreePath": null,
+    "validationAttempts": 1,
+    "maxValidationAttempts": 3,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:00Z",
+    "completedAt": "2026-04-01T09:10:00Z",
+    "updatedAt": "2026-04-01T09:10:00Z",
+    "userId": "user-1",
+    "filesChanged": 0, "linesAdded": 0, "linesRemoved": 0,
+    "previewUrl": null, "prUrl": null,
+    "plan": null, "progress": null, "acceptanceCriteria": null,
+    "claudeSessionId": null, "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "baseBranch": null, "acFrom": null, "recoveryWorktreePath": null, "lastHeartbeatAt": null,
+    "inputTokens": 0, "outputTokens": 0, "costUsd": 0, "commitCount": 0, "lastCommitAt": null,
+    "lastValidationResult": {
+      "podId": "ord-test",
+      "attempt": 1,
+      "timestamp": "2026-04-01T09:08:00Z",
+      "overall": "pass",
+      "duration": 10000,
+      "smoke": {
+        "status": "pass",
+        "build": { "status": "pass", "output": "", "duration": 1000 },
+        "health": { "status": "pass", "url": "http://localhost:3001", "responseCode": 200, "duration": 100 },
+        "pages": [
+          {
+            "path": "/about",
+            "status": "pass",
+            "consoleErrors": [],
+            "assertions": [],
+            "loadTime": 100,
+            "screenshot": { "url": "/pods/ord-test/screenshots/smoke/about.png", "source": "smoke", "path": "/about" }
+          },
+          {
+            "path": "/root",
+            "status": "pass",
+            "consoleErrors": [],
+            "assertions": [],
+            "loadTime": 90,
+            "screenshot": { "url": "/pods/ord-test/screenshots/smoke/root.png", "source": "smoke", "path": "/root" }
+          }
+        ]
+      },
+      "acValidation": {
+        "status": "pass",
+        "model": "claude",
+        "results": [
+          {
+            "criterion": "AC1",
+            "passed": true,
+            "reasoning": "ok",
+            "screenshot": { "url": "/pods/ord-test/screenshots/ac/0.png", "source": "ac", "path": "AC1" }
+          }
+        ]
+      },
+      "taskReview": {
+        "status": "pass",
+        "reasoning": "good",
+        "issues": [],
+        "model": "claude",
+        "diff": "",
+        "screenshots": [
+          { "url": "/pods/ord-test/screenshots/review/0.png", "source": "review", "path": "0" }
+        ]
+      }
+    }
+  }
+  """.data(using: .utf8)!
+
+  let baseURL = URL(string: "http://127.0.0.1:3100")!
+  let response = try JSONDecoder().decode(SessionResponse.self, from: sessionJson)
+  let pod = PodMapper.map(response, baseURL: baseURL)
+
+  // proofOfWorkScreenshots = smoke only (2 pages), in page order
+  let pow = pod.validationChecks?.proofOfWorkScreenshots
+  #expect(pow?.count == 2)
+  #expect(pow?.first?.source == .smoke)
+  #expect(pow?.first?.label == "/about")  // first page in JSON
+  #expect(pow?.last?.label == "/root")
+
+  // AC screenshot
+  let acShot = pod.validationChecks?.acChecks?.first?.screenshot
+  #expect(acShot?.source == .ac)
+  #expect(acShot?.url.absoluteString == "http://127.0.0.1:3100/pods/ord-test/screenshots/ac/0.png")
+
+  // Review screenshots
+  let reviewShots = pod.validationChecks?.taskReviewScreenshots
+  #expect(reviewShots?.count == 1)
+  #expect(reviewShots?.first?.source == .review)
+}

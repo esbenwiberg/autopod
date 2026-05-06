@@ -155,6 +155,7 @@ public struct AppRootView: View {
       },
       onLoadMemories: { await memoryStore.loadMemories() }
     )
+    .environment(\.daemonAuthToken, connectionManager.activeToken ?? "")
     .task(id: podStore.selectedSessionId) {
       // Fires on initial appear AND whenever the selected pod changes.
       // `.onChange` (used by onSelectSession) doesn't fire on mount, so a pod

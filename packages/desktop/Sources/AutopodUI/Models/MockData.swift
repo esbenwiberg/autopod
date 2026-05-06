@@ -25,16 +25,18 @@ public enum MockData: Sendable {
         validationChecks: ValidationChecks(
             smoke: true, tests: true, review: true,
             proofOfWorkScreenshots: [
-                PageScreenshot(path: "/", base64: tinyPngBase64),
-                PageScreenshot(path: "/cart", base64: tinyPngBase64),
+                ScreenshotRef(
+                    url: URL(string: "http://127.0.0.1:3100/pods/mock/screenshots/smoke/root.png")!,
+                    source: .smoke, label: "/"
+                ),
+                ScreenshotRef(
+                    url: URL(string: "http://127.0.0.1:3100/pods/mock/screenshots/smoke/cart.png")!,
+                    source: .smoke, label: "/cart"
+                ),
             ]
         ),
         containerUrl: URL(string: "http://localhost:3001")
     )
-
-    /// 1×1 red PNG — just enough payload to prove the screenshot card renders in SwiftUI previews.
-    private static let tinyPngBase64 =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8//8/AwAI/AL+5Tpv/wAAAABJRU5ErkJggg=="
 
     public static let validatedFailed = Pod(
         status: .validated, branch: "fix/auth-flow", profileName: "webapp", model: "claude-sonnet",

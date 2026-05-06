@@ -86,6 +86,25 @@ public struct DiffStats: Sendable {
     }
 }
 
+// MARK: - Screenshot reference (UI model)
+
+/// A screenshot captured during pod validation, resolved to an absolute URL.
+/// Set ordering for lightbox navigation: `smoke → ac → review`, filename-sorted within bucket.
+public struct ScreenshotRef: Hashable, Sendable, Identifiable {
+    public var id: String { url.absoluteString }
+    public let url: URL
+    public let source: Source
+    public let label: String  // page path | criterion text | review index
+
+    public enum Source: String, Sendable {
+        case smoke, ac, review
+    }
+
+    public init(url: URL, source: Source, label: String) {
+        self.url = url; self.source = source; self.label = label
+    }
+}
+
 // MARK: - Validation detail types
 
 public struct HealthCheckDetail: Sendable {
@@ -119,22 +138,11 @@ public struct PageDetail: Sendable {
     public let consoleErrors: [String]
     public let assertions: [AssertionDetail]
     public let loadTime: Int
-    public let screenshotBase64: String?
-    public init(path: String, status: String, consoleErrors: [String], assertions: [AssertionDetail], loadTime: Int, screenshotBase64: String? = nil) {
+    public let screenshot: ScreenshotRef?
+    public init(path: String, status: String, consoleErrors: [String], assertions: [AssertionDetail], loadTime: Int, screenshot: ScreenshotRef? = nil) {
         self.path = path; self.status = status
         self.consoleErrors = consoleErrors; self.assertions = assertions; self.loadTime = loadTime
-        self.screenshotBase64 = screenshotBase64
-    }
-}
-
-/// A page screenshot surfaced on the Summary tab as proof-of-work.
-/// Populated from smoke.pages regardless of pass/fail so reviewers can eyeball the result.
-public struct PageScreenshot: Sendable, Identifiable {
-    public let id = UUID()
-    public let path: String
-    public let base64: String
-    public init(path: String, base64: String) {
-        self.path = path; self.base64 = base64
+        self.screenshot = screenshot
     }
 }
 
@@ -142,9 +150,9 @@ public struct AcCheckDetail: Sendable {
     public let criterion: String
     public let passed: Bool
     public let reasoning: String
-    public let screenshot: String?
+    public let screenshot: ScreenshotRef?
     public let validationType: String?  // "web-ui" | "api" | "none"
-    public init(criterion: String, passed: Bool, reasoning: String, screenshot: String? = nil, validationType: String? = nil) {
+    public init(criterion: String, passed: Bool, reasoning: String, screenshot: ScreenshotRef? = nil, validationType: String? = nil) {
         self.criterion = criterion; self.passed = passed; self.reasoning = reasoning
         self.screenshot = screenshot; self.validationType = validationType
     }
@@ -181,9 +189,9 @@ public struct ValidationChecks: Sendable {
     public let acValidation: Bool?
     public let acChecks: [AcCheckDetail]?
     public let requirementsCheck: [RequirementCheckDetail]?
-    public let taskReviewScreenshots: [String]?
+    public let taskReviewScreenshots: [ScreenshotRef]?
     /// Smoke-page screenshots surfaced on the Summary tab as proof-of-work (independent of pass/fail).
-    public let proofOfWorkScreenshots: [PageScreenshot]?
+    public let proofOfWorkScreenshots: [ScreenshotRef]?
     /// The formatted markdown feedback that was sent back to the agent after a failed validation attempt.
     public let correctionMessage: String?
     public init(
@@ -199,8 +207,8 @@ public struct ValidationChecks: Sendable {
         acValidation: Bool? = nil,
         acChecks: [AcCheckDetail]? = nil,
         requirementsCheck: [RequirementCheckDetail]? = nil,
-        taskReviewScreenshots: [String]? = nil,
-        proofOfWorkScreenshots: [PageScreenshot]? = nil,
+        taskReviewScreenshots: [ScreenshotRef]? = nil,
+        proofOfWorkScreenshots: [ScreenshotRef]? = nil,
         correctionMessage: String? = nil
     ) {
         self.smoke = smoke; self.tests = tests; self.lint = lint; self.sast = sast
@@ -269,10 +277,10 @@ public struct ReviewPhaseDetail: Sendable {
     public let reasoning: String
     public let issues: [String]
     public let requirementsCheck: [RequirementCheckDetail]?
-    public let screenshots: [String]
+    public let screenshots: [ScreenshotRef]
     public init(
         status: String, reasoning: String, issues: [String],
-        requirementsCheck: [RequirementCheckDetail]?, screenshots: [String]
+        requirementsCheck: [RequirementCheckDetail]?, screenshots: [ScreenshotRef]
     ) {
         self.status = status; self.reasoning = reasoning; self.issues = issues
         self.requirementsCheck = requirementsCheck; self.screenshots = screenshots
@@ -392,7 +400,7 @@ public struct ValidationProgress: Sendable {
                         )
                     },
                     loadTime: page.loadTime,
-                    screenshotBase64: page.screenshotBase64
+                    screenshot: nil  // populated after REST refresh; no baseURL available in event stream
                 )
             }
         case .ac:
@@ -401,7 +409,7 @@ public struct ValidationProgress: Sendable {
             acChecks = result.acResult?.results.map { check in
                 AcCheckDetail(
                     criterion: check.criterion, passed: check.passed,
-                    reasoning: check.reasoning, screenshot: check.screenshot,
+                    reasoning: check.reasoning, screenshot: nil,  // populated after REST refresh
                     validationType: check.validationType
                 )
             }
@@ -413,7 +421,7 @@ public struct ValidationProgress: Sendable {
                     requirementsCheck: r.requirementsCheck?.map { rc in
                         RequirementCheckDetail(criterion: rc.criterion, met: rc.met, note: rc.note)
                     },
-                    screenshots: r.screenshots
+                    screenshots: []  // populated after REST refresh; no baseURL available in event stream
                 )
             }
         }

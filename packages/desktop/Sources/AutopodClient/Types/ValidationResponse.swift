@@ -20,6 +20,16 @@ public struct ValidationFindingResponse: Codable, Sendable {
   public let reasoning: String?
 }
 
+// MARK: - Screenshot reference (replaces base64 inline images)
+
+/// DTO for a screenshot served at `GET /pods/:id/screenshots/:source/:filename`.
+/// Field names match the daemon's wire shape exactly — no remapping.
+public struct ScreenshotRefResponse: Codable, Sendable, Hashable {
+  public let url: String     // "/pods/:podId/screenshots/:source/:filename"
+  public let source: String  // "smoke" | "ac" | "review"
+  public let path: String    // page path | criterion text | index
+}
+
 // MARK: - Validation result (mirrors packages/shared/src/types/validation.ts)
 
 public struct ValidationResponse: Codable, Sendable {
@@ -63,8 +73,7 @@ public struct HealthResultResponse: Codable, Sendable {
 public struct PageResultResponse: Codable, Sendable {
   public let path: String
   public let status: String
-  public let screenshotPath: String
-  public let screenshotBase64: String?
+  public let screenshot: ScreenshotRefResponse?
   public let consoleErrors: [String]
   public let assertions: [AssertionResultResponse]
   public let loadTime: Int
@@ -123,7 +132,7 @@ public struct AcValidationResponse: Codable, Sendable {
 public struct AcCheckResponse: Codable, Sendable {
   public let criterion: String
   public let passed: Bool
-  public let screenshot: String?
+  public let screenshot: ScreenshotRefResponse?
   public let reasoning: String
   public let validationType: String?  // "web-ui" | "api" | "none"
 
@@ -131,7 +140,7 @@ public struct AcCheckResponse: Codable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     criterion = try c.decode(String.self, forKey: .criterion)
     passed = try decodeBoolOrInt(c, key: .passed)
-    screenshot = try c.decodeIfPresent(String.self, forKey: .screenshot)
+    screenshot = try c.decodeIfPresent(ScreenshotRefResponse.self, forKey: .screenshot)
     reasoning = try c.decode(String.self, forKey: .reasoning)
     validationType = try c.decodeIfPresent(String.self, forKey: .validationType)
   }
@@ -144,7 +153,7 @@ public struct TaskReviewResponse: Codable, Sendable {
   public let reasoning: String
   public let issues: [String]
   public let model: String
-  public let screenshots: [String]
+  public let screenshots: [ScreenshotRefResponse]
   public let diff: String
   public let requirementsCheck: [RequirementsCheckResponse]?
 }
