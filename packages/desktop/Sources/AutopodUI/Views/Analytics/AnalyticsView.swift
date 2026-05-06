@@ -18,6 +18,7 @@ public struct AnalyticsView: View {
     @State private var scores: [PodQualityScore] = []
     @State private var scoresLoadError: String?
     @State private var costData: CostAnalyticsResponse?
+    @State private var costLoadError: String?
 
     public init(
         pods: [Pod],
@@ -44,6 +45,11 @@ public struct AnalyticsView: View {
         return "\(Int((Double(total) / Double(scores.count)).rounded()))"
     }
 
+    private var costCardValue: String {
+        if costLoadError != nil { return "Error" }
+        return costData.map { String(format: "$%.2f", $0.total) } ?? "—"
+    }
+
     private var dominantStatusValue: String {
         guard let top = statusCounts.max(by: { $0.count < $1.count }) else { return "—" }
         return "\(top.count) \(top.status.label)"
@@ -63,7 +69,7 @@ public struct AnalyticsView: View {
                 ) {
                     AnalyticsCard(
                         title: "Cost",
-                        value: costData.map { String(format: "$%.2f", $0.total) } ?? "—",
+                        value: costCardValue,
                         sparkline: costData.map { $0.sparkline.map(\.costUsd) },
                         delta: costData.map {
                             AnalyticsCardDelta(
@@ -101,7 +107,12 @@ public struct AnalyticsView: View {
                 }
             }
             if let loadCost {
-                do { costData = try await loadCost() } catch { }
+                do {
+                    costData = try await loadCost()
+                    costLoadError = nil
+                } catch {
+                    costLoadError = error.localizedDescription
+                }
             }
         }
     }
