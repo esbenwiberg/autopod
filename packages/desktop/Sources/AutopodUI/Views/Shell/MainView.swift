@@ -177,6 +177,7 @@ public struct MainView: View {
     @State private var cardDensity: CardDensity = .detailed
     @State private var sortOrder: SortOrder = .created
     @State private var selectedFeature: FeatureCategory?
+    @State private var selectedAnalyticsCard: AnalyticsCardKind?
     @State private var requestedDetailTab: DetailTab?
 
     private var selectedSession: Pod? {
@@ -201,28 +202,34 @@ public struct MainView: View {
     }
 
     private var filteredSessions: [Pod] {
-        let filtered: [Pod] = switch sidebarSelection {
-        case .attention:      pods.filter { $0.status.needsAttention }
-        case .active:         pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
-        case .running:        pods.filter { $0.status.isActive && !$0.isWorkspace }
-        case .workspaces:     pods.filter { $0.isWorkspace }
-        case .completed:      pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
-        case .all:            pods
-        case .analytics:        []
-        case .history:          []
-        case .memory:           []
-        case .scheduledJobs:    []
-        case .featureOverview:  []
-        case .salesPitch:       []
-        case .profile(let p):   pods.filter { $0.profileName == p }
-        case .series(let id):   pods.filter { $0.seriesId == id }
-        case .seriesAll:        Self.seriesRepresentatives(pods)
-        }
+        let filtered = Self.filterPods(pods, for: sidebarSelection)
         return filtered.sorted { a, b in
             switch sortOrder {
             case .created:    a.startedAt > b.startedAt
             case .lastActive: a.updatedAt > b.updatedAt
             }
+        }
+    }
+
+    /// Maps a sidebar selection to a filtered pod list.
+    /// Extracted as a static helper so unit tests can call it without constructing a full view.
+    static func filterPods(_ pods: [Pod], for selection: SidebarItem) -> [Pod] {
+        switch selection {
+        case .attention:             pods.filter { $0.status.needsAttention }
+        case .active:                pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
+        case .running:               pods.filter { $0.status.isActive && !$0.isWorkspace }
+        case .workspaces:            pods.filter { $0.isWorkspace }
+        case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
+        case .all:                   pods
+        case .analyticsSection:      []
+        case .history:               []
+        case .memory:                []
+        case .scheduledJobs:         []
+        case .featureOverview:       []
+        case .salesPitch:            []
+        case .profile(let p):        pods.filter { $0.profileName == p }
+        case .series(let id):        pods.filter { $0.seriesId == id }
+        case .seriesAll:             seriesRepresentatives(pods)
         }
     }
 
@@ -251,16 +258,25 @@ public struct MainView: View {
                 onShowSettings: onShowSettings
             )
         } content: {
-            if sidebarSelection == .analytics {
-                AnalyticsView(
-                    pods: pods,
-                    loadScores: loadQualityScores,
-                    onSelectPod: { podId in
-                        sidebarSelection = .all
-                        selectedSessionId = podId
+            if case .analyticsSection(let section) = sidebarSelection {
+                if section == .overview {
+                    AnalyticsView(
+                        pods: pods,
+                        loadScores: loadQualityScores,
+                        selectedCard: $selectedAnalyticsCard
+                    )
+                    .frame(minWidth: 600)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: section.icon)
+                            .font(.system(size: 36))
+                            .foregroundStyle(.tertiary)
+                        Text("\(section.label) analytics \u{2014} ships in Phase \(section.phaseNumber)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                )
-                .frame(minWidth: 600)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else if sidebarSelection == .history {
                 HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames)
                     .frame(minWidth: 600)
@@ -338,7 +354,19 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if sidebarSelection == .salesPitch {
+            if case .analyticsSection = sidebarSelection {
+                AnalyticsRightPaneView(
+                    card: selectedAnalyticsCard,
+                    pods: pods,
+                    loadScores: loadQualityScores,
+                    onSelectPod: { sessionId in
+                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                        selectedAnalyticsCard = result.card
+                        sidebarSelection = result.sidebar
+                        selectedSessionId = result.session
+                    }
+                )
+            } else if sidebarSelection == .salesPitch {
                 VStack(spacing: 10) {
                     Image(systemName: "bolt.fill")
                         .font(.system(size: 36))
@@ -679,6 +707,19 @@ public struct MainView: View {
                 .tag(pod.id)
         }
         .listStyle(.inset)
+    }
+
+    // MARK: - Analytics wiring helpers (static so unit tests can call them)
+
+    /// Pure toggle: tapping the same card de-selects it; tapping a different card selects it.
+    static func toggleAnalyticsCard(_ current: AnalyticsCardKind?, tapping: AnalyticsCardKind) -> AnalyticsCardKind? {
+        current == tapping ? nil : tapping
+    }
+
+    /// Returns the state tuple produced by the `onSelectPod` handler in the detail pane.
+    /// Extracted for unit testing without constructing the full view.
+    static func analyticsSelectPodResult(sessionId: String) -> (card: AnalyticsCardKind?, sidebar: SidebarItem, session: String) {
+        (card: nil, sidebar: .all, session: sessionId)
     }
 
     // MARK: - Empty detail

@@ -96,10 +96,16 @@ public struct SidebarView: View {
                     sidebarRow(.seriesAll, icon: "rectangle.3.group.fill", color: .accentColor, badge: activeSeriesCount)
                     sidebarRow(.completed, icon: "checkmark.circle.fill", color: .secondary, badge: completedCount)
                     sidebarRow(.all, icon: "square.grid.2x2", color: .secondary, badge: pods.count)
-                    sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
                     sidebarRow(.history, icon: "clock.arrow.circlepath", color: .secondary, badge: 0)
                     sidebarRow(.memory, icon: "brain", color: .purple, badge: pendingMemoryCount)
                     sidebarRow(.scheduledJobs, icon: "clock.badge.checkmark", color: catchupPendingCount > 0 ? .orange : .secondary, badge: catchupPendingCount > 0 ? catchupPendingCount : scheduledJobCount)
+                }
+
+                Section("Analytics") {
+                    ForEach(AnalyticsSection.allCases, id: \.self) { section in
+                        analyticsSectionRow(section)
+                            .disabled(!section.isShipped)
+                    }
                 }
 
                 Section("Profiles") {
@@ -201,6 +207,17 @@ public struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
+    private func analyticsSectionRow(_ section: AnalyticsSection) -> some View {
+        Label {
+            Text(section.label)
+                .foregroundStyle(section.isShipped ? Color.primary : Color.tertiary)
+        } icon: {
+            Image(systemName: section.icon)
+                .foregroundStyle(section.isShipped ? Color.secondary : Color.tertiary)
+        }
+        .tag(SidebarItem.analyticsSection(section))
+    }
+
     private func sidebarRow(_ item: SidebarItem, icon: String, color: Color, badge: Int) -> some View {
         Label {
             HStack {
@@ -236,7 +253,7 @@ public enum SidebarItem: Hashable {
     case seriesAll
     case completed
     case all
-    case analytics
+    case analyticsSection(AnalyticsSection)
     case history
     case memory
     case profile(String)
@@ -256,7 +273,7 @@ public enum SidebarItem: Hashable {
         case .seriesAll: "Series"
         case .completed: "Completed"
         case .all: "All Pods"
-        case .analytics: "Analytics"
+        case .analyticsSection(let s): s.label
         case .history: "History"
         case .memory: "Memory"
         case .profile(let name): name
