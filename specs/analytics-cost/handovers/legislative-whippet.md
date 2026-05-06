@@ -14,7 +14,8 @@ Build and tests pass (`npx pnpm --filter @autopod/shared build` + `test`).
 
 ## Deviations from brief
 
-- The type cast in `pricing/index.ts` uses `as unknown as Record<string, ModelPrice>` instead of the brief's `as Record<string, ModelPrice>`. This is required because the `$comment` key in the JSON has type `string`, which is incompatible with `ModelPrice` — TypeScript's DTS build rejected the direct cast. The double cast via `unknown` is the correct fix; `$comment` is filtered out at read time since no caller iterates all keys.
+- The type cast in `pricing/index.ts` uses `as unknown as Record<string, ModelPrice>` instead of the brief's `as Record<string, ModelPrice>`. This is required because the `$comment` key in the JSON has type `string`, which is incompatible with `ModelPrice` — TypeScript's DTS build rejected the direct cast.
+- `$comment` is explicitly stripped via destructuring before exporting `MODEL_PRICING`: `const { '$comment': _comment, ...modelPrices } = pricingData as unknown as ...`. This ensures `Object.entries(MODEL_PRICING)` in Brief 03 never encounters the string-valued comment key, preventing `NaN` or `TypeError` at aggregation time.
 
 ## Interfaces and contracts downstream pods must know
 
@@ -40,5 +41,5 @@ Build and tests pass (`npx pnpm --filter @autopod/shared build` + `test`).
 ## Constraints and landmines
 
 - **JSON import attribute syntax** (`with { type: 'json' }`): works with tsup 8.5.1 + Node 22. If Brief 03 or later hits a bundler that rejects this syntax, the fallback is to drop the `with { type: 'json' }` clause — `resolveJsonModule: true` in `tsconfig.base.json` makes the bare import form work too.
-- **`$comment` in JSON**: filtered by the type cast; never shows up as a `ModelPrice`. Do not rely on `Object.keys(MODEL_PRICING)` returning only model IDs without filtering — the key will be there at runtime.
+- **`$comment` in JSON**: stripped at module load via destructuring — `MODEL_PRICING` contains only valid `ModelPrice` entries. `Object.entries(MODEL_PRICING)` is safe in Brief 03.
 - **Short aliases**: `opus`, `sonnet`, `haiku` map to the same prices as their full-ID counterparts. If `profile.defaultModel` gains new aliases they must be added to the JSON.

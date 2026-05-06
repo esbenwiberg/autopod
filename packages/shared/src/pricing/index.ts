@@ -5,8 +5,9 @@ export interface ModelPrice {
   outputPer1M: number;
 }
 
-export const MODEL_PRICING: Readonly<Record<string, ModelPrice>> =
-  pricingData as unknown as Record<string, ModelPrice>;
+// Strip the $comment documentation key so MODEL_PRICING contains only ModelPrice entries.
+const { '$comment': _comment, ...modelPrices } = pricingData as unknown as Record<string, ModelPrice>;
+export const MODEL_PRICING: Readonly<Record<string, ModelPrice>> = modelPrices;
 
 export function computeCost(
   model: string | null,
