@@ -20,3 +20,4 @@
 | `ADR-014` | ADR 003: Skip New Fire If Previous Run Is Still Active | — | A scheduled job fires at T+0, spawning a session. That session is still running |
 | `ADR-015` | ADR-015: Model pricing as bundled JSON in @autopod/shared | Accepted | Cost analytics need a per-model price catalog so pods that don't carry a |
 | `ADR-016` | ADR-016: Per-attempt phase token taxonomy | Accepted | `pods.phase_token_usage` (migration `089`) was introduced as a |
+| `ADR-017` | ADR-017: Proof-of-work screenshots on disk with retention | Accepted (partially supersedes ADR-010's screenshot carve-out) | Validation screenshots — Playwright smoke pages, `validate_in_browser` |
