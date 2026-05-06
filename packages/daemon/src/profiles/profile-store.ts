@@ -152,7 +152,10 @@ export function rowToProfile(
     mergePollIntervalSec: nullableNum(row.merge_poll_interval_sec),
     preflightConflictPolicy: nullableStr(row.preflight_conflict_policy) as 'warn' | 'block' | null,
     fixPodCooldownSec: nullableNum(row.fix_pod_cooldown_sec),
-    reuseFixPod: ((row.reuse_fix_pod as number) ?? 0) === 1,
+    reuseFixPod:
+      row.reuse_fix_pod === null || row.reuse_fix_pod === undefined
+        ? null
+        : (row.reuse_fix_pod as number) === 1,
     prProvider: nullableStr(row.pr_provider) as Profile['prProvider'],
     adoPat: decryptPat(row.ado_pat),
     githubPat: decryptPat(row.github_pat),
@@ -380,7 +383,12 @@ export function createProfileStore(
         mergePollIntervalSec: parsed.mergePollIntervalSec ?? null,
         preflightConflictPolicy: parsed.preflightConflictPolicy ?? null,
         fixPodCooldownSec: parsed.fixPodCooldownSec ?? null,
-        reuseFixPod: parsed.reuseFixPod ? 1 : 0,
+        reuseFixPod:
+          parsed.reuseFixPod === null || parsed.reuseFixPod === undefined
+            ? null
+            : parsed.reuseFixPod
+              ? 1
+              : 0,
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
         githubPat: encryptPat(parsed.githubPat),
@@ -395,9 +403,18 @@ export function createProfileStore(
         tokenBudgetWarnAt: parsed.tokenBudgetWarnAt,
         tokenBudgetPolicy: parsed.tokenBudgetPolicy,
         maxBudgetExtensions: parsed.maxBudgetExtensions ?? null,
-        hasWebUi: parsed.hasWebUi === null ? null : parsed.hasWebUi ? 1 : 0,
+        hasWebUi:
+          parsed.hasWebUi === null || parsed.hasWebUi === undefined
+            ? null
+            : parsed.hasWebUi
+              ? 1
+              : 0,
         issueWatcherEnabled:
-          parsed.issueWatcherEnabled === null ? null : parsed.issueWatcherEnabled ? 1 : 0,
+          parsed.issueWatcherEnabled === null || parsed.issueWatcherEnabled === undefined
+            ? null
+            : parsed.issueWatcherEnabled
+              ? 1
+              : 0,
         issueWatcherLabelPrefix: parsed.issueWatcherLabelPrefix,
         pimActivations: parsed.pimActivations ? JSON.stringify(parsed.pimActivations) : null,
         mergeStrategy: JSON.stringify(parsed.mergeStrategy ?? {}),
@@ -695,7 +712,10 @@ export function createProfileStore(
       }
       if (parsed.reuseFixPod !== undefined) {
         setClauses.push('reuse_fix_pod = @reuseFixPod');
-        fieldMap.reuseFixPod = parsed.reuseFixPod ? 1 : 0;
+        // Preserve null so derived profiles can clear the override and fall
+        // back to the parent value. `null ? 1 : 0` would coerce to 0 (false)
+        // and silently re-override the field on every save.
+        fieldMap.reuseFixPod = parsed.reuseFixPod === null ? null : parsed.reuseFixPod ? 1 : 0;
       }
       if (parsed.tokenBudget !== undefined) {
         setClauses.push('token_budget = @tokenBudget');

@@ -301,7 +301,11 @@ const createProfileBaseSchema = z.object({
    * same parent PR. Defaults to false (today's behavior: one fresh fix pod
    * per round).
    */
-  reuseFixPod: z.boolean().nullable().optional().default(false),
+  // null = inherit from parent (or use built-in default of `false` on base
+  // profiles). Do NOT use `.default(false)` here — it materializes `false`
+  // for every PATCH that doesn't include the field, silently re-overriding
+  // the column on every save and clobbering inheritance.
+  reuseFixPod: z.boolean().nullable().optional(),
   prProvider: z.enum(['github', 'ado']).nullable().default('github'),
   adoPat: z.string().min(1).nullable().default(null),
   githubPat: z.string().min(1).nullable().default(null),
@@ -319,8 +323,13 @@ const createProfileBaseSchema = z.object({
   tokenBudgetWarnAt: z.number().min(0.1).max(0.99).nullable().default(0.8),
   tokenBudgetPolicy: z.enum(['soft', 'hard']).nullable().default('soft'),
   maxBudgetExtensions: z.number().int().min(0).nullable().default(null),
-  hasWebUi: z.boolean().nullable().default(true),
-  issueWatcherEnabled: z.boolean().nullable().default(false),
+  // hasWebUi / issueWatcherEnabled: null = inherit from parent (or fall back
+  // to the consumer's built-in default — `?? true` for hasWebUi, falsy for
+  // issueWatcherEnabled). Do NOT use `.default(...)` here — Zod materializes
+  // the default for every PATCH that doesn't include the field, silently
+  // re-overriding the column on every save and clobbering inheritance.
+  hasWebUi: z.boolean().nullable().optional(),
+  issueWatcherEnabled: z.boolean().nullable().optional(),
   issueWatcherLabelPrefix: z
     .string()
     .min(1)
@@ -331,9 +340,11 @@ const createProfileBaseSchema = z.object({
   pimActivations: z.array(pimActivationConfigSchema).nullable().default(null),
   mergeStrategy: mergeStrategySchema,
   sidecars: sidecarsConfigSchema.nullable().default(null),
-  // trustedSource gates privileged sidecars. Safe default is false — privileged
-  // sidecars won't be spawned until the profile author explicitly sets true.
-  trustedSource: z.boolean().nullable().default(false),
+  // trustedSource gates privileged sidecars. Consumers use a strict
+  // `!== true` check, so null behaves as "untrusted" — the safe default. Do
+  // NOT use `.default(false)` here; it would re-stamp the column on every
+  // PATCH and clobber inheritance (see hasWebUi/issueWatcherEnabled above).
+  trustedSource: z.boolean().nullable().optional(),
   testPipeline: testPipelineConfigSchema.nullable().default(null),
   securityScan: securityScanPolicySchema.nullable().default(null),
   codeIntelligence: codeIntelligenceConfigSchema.nullable().default(null),
