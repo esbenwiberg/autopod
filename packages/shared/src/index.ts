@@ -2,6 +2,7 @@
 export type { AcType, AcDefinition } from './types/ac.js';
 
 export type {
+  PhaseTokenUsage,
   PodStatus,
   Pod,
   CreatePodRequest,

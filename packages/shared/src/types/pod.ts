@@ -31,6 +31,22 @@ export interface ReferenceRepo {
   sourceProfile?: string;
 }
 
+/**
+ * Token counts per processing phase for a pod. Agent phases use open-ended
+ * `agent_rework_N` keys (N ≥ 1); `agent_initial` covers the first run.
+ * `review` and `plan_eval` cover harness-side AI calls. Indexed as a Partial
+ * record so missing phases are treated as zero.
+ */
+export type PhaseTokenUsage = Partial<
+  Record<
+    | 'agent_initial'
+    | `agent_rework_${number}`
+    | 'review'
+    | 'plan_eval',
+    { inputTokens: number; outputTokens: number }
+  >
+>;
+
 export type PodStatus =
   | 'queued'
   | 'provisioning'
@@ -311,13 +327,11 @@ export interface Pod {
    */
   acSelfReport: Array<{ criterion: string; verified: boolean; notes?: string }> | null;
   /**
-   * Token counts consumed by harness-side AI calls (e.g. AI review, plan evaluation).
-   * Keyed by phase name. Populated as each phase completes; null until any harness
-   * AI call runs.
+   * Token counts consumed by harness-side AI calls (e.g. AI review, plan evaluation)
+   * and per-attempt agent runs. Keyed by phase name. Populated as each phase completes;
+   * null until any harness AI call or agent run completes.
    */
-  phaseTokenUsage: Partial<
-    Record<'review' | 'plan_eval', { inputTokens: number; outputTokens: number }>
-  > | null;
+  phaseTokenUsage: PhaseTokenUsage | null;
 }
 
 export interface CreatePodRequest {
