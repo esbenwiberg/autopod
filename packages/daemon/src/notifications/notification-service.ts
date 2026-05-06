@@ -121,10 +121,9 @@ export function createNotificationService(deps: {
       const notificationType: NotificationType = 'pod_validated';
       if (!canSendForSession(event.podId, notificationType, pod.profileName)) return;
 
-      // Extract screenshots from page results for Teams card
-      const screenshots = event.result.smoke.pages
-        .filter((p) => p.screenshotBase64)
-        .map((p) => ({ pagePath: p.path, base64: p.screenshotBase64 ?? '' }));
+      // Screenshots are now on-disk (ScreenshotRef) — brief 02-api wires the disk-read path.
+      // For now, Teams cards have no inline screenshot until that brief lands.
+      const screenshots: Array<{ pagePath: string; base64: string }> = [];
 
       const notification: PodValidatedNotification = {
         type: notificationType,
