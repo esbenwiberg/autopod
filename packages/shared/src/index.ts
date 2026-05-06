@@ -2,6 +2,7 @@
 export type { AcType, AcDefinition } from './types/ac.js';
 
 export type {
+  PhaseTokenUsage,
   PodStatus,
   Pod,
   CreatePodRequest,
@@ -326,3 +327,9 @@ export {
   numericPrefix,
   parseBriefs,
 } from './series/parse-briefs.js';
+
+// Model pricing helpers
+export * from './pricing/index.js';
+
+// Analytics response types
+export type { CostAnalyticsResponse } from './types/analytics.js';

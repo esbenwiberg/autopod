@@ -20,6 +20,7 @@ import type {
   McpServerConfig,
   NetworkPolicy,
   PageResult,
+  PhaseTokenUsage,
   Pod,
   PodOptions,
   PodStatus,
@@ -617,7 +618,11 @@ export interface PodCreator {
 export interface PodManager {
   createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod;
   processPod(podId: string): Promise<void>;
-  consumeAgentEvents(podId: string, events: AsyncIterable<AgentEvent>): Promise<void>;
+  consumeAgentEvents(
+    podId: string,
+    events: AsyncIterable<AgentEvent>,
+    attempt?: number,
+  ): Promise<void>;
   handleCompletion(podId: string): Promise<void>;
   sendMessage(podId: string, message: string): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
@@ -783,6 +788,27 @@ export interface PodManager {
    * and retries the auto-commit. Clears `worktreeCompromised` on success.
    */
   recoverWorktree(podId: string): Promise<{ recovered: boolean; message: string }>;
+}
+
+/**
+ * Derive the agent attempt counter from an existing phaseTokenUsage snapshot.
+ * Used at the top of processPod() so a recovered/re-queued pod continues its
+ * rework sequence instead of resetting to agent_initial.
+ *
+ * Returns the *next* attempt to write to:
+ *   - 0 when no agent buckets are present (fresh or legacy pod)
+ *   - 1 + highest rework N present (e.g. {agent_initial, agent_rework_2} → 3)
+ */
+function deriveAgentAttempt(phaseTokenUsage: PhaseTokenUsage | null): number {
+  if (!phaseTokenUsage || !('agent_initial' in phaseTokenUsage)) return 0;
+  let highestRework = 0;
+  for (const key of Object.keys(phaseTokenUsage)) {
+    if (key.startsWith('agent_rework_')) {
+      const n = Number.parseInt(key.slice('agent_rework_'.length), 10);
+      if (n > highestRework) highestRework = n;
+    }
+  }
+  return 1 + highestRework;
 }
 
 export function createPodManager(deps: PodManagerDependencies): PodManager {
@@ -2728,6 +2754,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async processPod(podId: string): Promise<void> {
       let pod = podRepo.getOrThrow(podId);
+      const startingAttempt = deriveAgentAttempt(pod.phaseTokenUsage);
 
       // Defense-in-depth: processPod must only run for pods in queued/handoff state.
       // The queue's activeIds dedup prevents most races, but this guard ensures
@@ -4221,7 +4248,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
         }
 
-        await this.consumeAgentEvents(podId, events);
+        await this.consumeAgentEvents(podId, events, startingAttempt);
 
         // Persist rotated OAuth credentials if provider requires it (MAX/PRO token rotation)
         if (providerResult.requiresPostExecPersistence) {
@@ -4288,7 +4315,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
-    async consumeAgentEvents(podId: string, events: AsyncIterable<AgentEvent>): Promise<void> {
+    async consumeAgentEvents(
+      podId: string,
+      events: AsyncIterable<AgentEvent>,
+      attempt = 0,
+    ): Promise<void> {
       startCommitPolling(podId);
       try {
         for await (const event of events) {
@@ -4363,6 +4394,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (event.totalInputTokens !== undefined || event.totalOutputTokens !== undefined) {
               tokenUpdates.inputTokens = newInputTokens;
               tokenUpdates.outputTokens = newOutputTokens;
+              const bucketKey =
+                attempt === 0
+                  ? ('agent_initial' as const)
+                  : (`agent_rework_${attempt}` as `agent_rework_${number}`);
+              const existing = currentSession.phaseTokenUsage ?? {};
+              const prev = existing[bucketKey] ?? { inputTokens: 0, outputTokens: 0 };
+              tokenUpdates.phaseTokenUsage = {
+                ...existing,
+                [bucketKey]: {
+                  inputTokens: prev.inputTokens + (event.totalInputTokens ?? 0),
+                  outputTokens: prev.outputTokens + (event.totalOutputTokens ?? 0),
+                },
+              };
             }
             if (event.costUsd !== undefined) {
               tokenUpdates.costUsd = currentSession.costUsd + event.costUsd;
@@ -4911,7 +4955,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const runtime = runtimeRegistry.get(pod.runtime);
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
-            await this.consumeAgentEvents(podId, events);
+            await this.consumeAgentEvents(podId, events, pod.validationAttempts);
             await this.handleCompletion(podId);
           } catch (err) {
             logger.error({ err, podId }, 'Failed to resume agent after override guidance');
@@ -4952,7 +4996,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const runtime = runtimeRegistry.get(pod.runtime);
         if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
         const events = runtime.resume(podId, message, pod.containerId, resumeEnv);
-        await this.consumeAgentEvents(podId, events);
+        await this.consumeAgentEvents(podId, events, pod.validationAttempts);
         await this.handleCompletion(podId);
       } catch (err) {
         logger.error({ err, podId }, 'Failed to resume agent after message');
@@ -5398,7 +5442,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const resumeEnv = await getResumeEnv(pod);
         const runtime = runtimeRegistry.get(pod.runtime);
         const events = runtime.resume(podId, rejectionMessage, pod.containerId, resumeEnv);
-        await this.consumeAgentEvents(podId, events);
+        await this.consumeAgentEvents(podId, events, deriveAgentAttempt(pod.phaseTokenUsage));
         await this.handleCompletion(podId);
       } catch (err) {
         // Roll back to failed — don't leave the pod stuck in 'running' with no agent
@@ -6639,7 +6683,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const runtime = runtimeRegistry.get(s2.runtime);
           if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
           const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
-          await this.consumeAgentEvents(podId, events);
+          await this.consumeAgentEvents(podId, events, attempt);
           emitActivityStatus(podId, 'Agent finished applying fixes');
           await this.handleCompletion(podId);
 

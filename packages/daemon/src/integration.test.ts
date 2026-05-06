@@ -79,12 +79,13 @@ const validProfileInput = {
 describe('Integration', () => {
   let db: Database.Database;
   let app: FastifyInstance;
+  let podRepo: ReturnType<typeof createPodRepository>;
 
   beforeEach(async () => {
     db = createTestDb();
 
     const profileStore = createProfileStore(db);
-    const podRepo = createPodRepository(db);
+    podRepo = createPodRepository(db);
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
@@ -218,6 +219,7 @@ describe('Integration', () => {
       worktreeManager: worktreeManager as unknown as WorktreeManager,
       eventBus,
       eventRepo,
+      podRepo,
       podBridge,
       pendingRequestsByPod: new Map(),
       logLevel: 'silent',
@@ -1294,6 +1296,95 @@ describe('Integration', () => {
       for (const pod of pods) {
         expect(pod.options.agentMode).toBe('auto');
       }
+    });
+  });
+
+  describe('Cost analytics', () => {
+    it('GET /pods/analytics/cost (no params) returns 200 with full response shape', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/analytics/cost',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(typeof body.total).toBe('number');
+      expect(Array.isArray(body.sparkline)).toBe(true);
+      expect(body.sparkline).toHaveLength(30);
+      expect(Array.isArray(body.byPhase)).toBe(true);
+      expect(Array.isArray(body.byProfileModel)).toBe(true);
+      expect(Array.isArray(body.top10)).toBe(true);
+      expect(body.top10.length).toBeLessThanOrEqual(10);
+      expect(typeof body.waste.total).toBe('number');
+      expect(typeof body.waste.podCount).toBe('number');
+      expect(typeof body.deltaVsPrior.value).toBe('number');
+      expect(['up', 'down', 'flat']).toContain(body.deltaVsPrior.direction);
+    });
+
+    it('GET /pods/analytics/cost?days=7 returns sparkline of length 7', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/analytics/cost?days=7',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().sparkline).toHaveLength(7);
+    });
+
+    it('GET /pods/analytics/cost?days=0 returns 400 with invalid_days code', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/analytics/cost?days=0',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe('invalid_days');
+      expect(res.json().error).toBeTruthy();
+    });
+
+    it('GET /pods/analytics/cost?days=-1 returns 400', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/analytics/cost?days=-1',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBeTruthy();
+    });
+
+    it('GET /pods/analytics/cost?days=abc returns 400', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/analytics/cost?days=abc',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe('invalid_days');
+    });
+
+    it('GET /pods/analytics/cost?days=1.5 returns 400', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/analytics/cost?days=1.5',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe('invalid_days');
+    });
+
+    it('empty DB returns all required keys with zero values', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/analytics/cost',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.total).toBe(0);
+      expect(body.waste).toEqual({ total: 0, podCount: 0 });
+      expect(body.byPhase).toEqual([]);
+      expect(body.byProfileModel).toEqual([]);
+      expect(body.top10).toEqual([]);
     });
   });
 });

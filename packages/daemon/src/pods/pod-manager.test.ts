@@ -4029,4 +4029,235 @@ describe('PodManager', () => {
       }
     });
   });
+
+  describe('phaseTokenUsage per-attempt bucket writes', () => {
+    it('initial run writes agent_initial', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Initial task', skipValidation: true },
+        'user-1',
+      );
+
+      (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'done',
+            totalInputTokens: 1000,
+            totalOutputTokens: 500,
+          };
+        },
+      );
+
+      await manager.processPod(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
+    });
+
+    it('one rework writes agent_rework_1 without trampling agent_initial', async () => {
+      const ctx = createTestContext({ overall: 'fail' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Rework task' },
+        'user-1',
+      );
+
+      // Simulate that the initial agent run already completed and wrote agent_initial
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+        phaseTokenUsage: { agent_initial: { inputTokens: 1000, outputTokens: 500 } },
+      });
+
+      // First resume (after attempt 1 fails) emits 300/200 tokens
+      (ctx.runtime.resume as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'rework done',
+            totalInputTokens: 300,
+            totalOutputTokens: 200,
+          };
+        },
+      );
+
+      await manager.triggerValidation(pod.id);
+
+      const result = manager.getSession(pod.id);
+      // agent_initial must be unchanged
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
+      // agent_rework_1 must have the rework tokens
+      expect(result.phaseTokenUsage?.agent_rework_1).toEqual({
+        inputTokens: 300,
+        outputTokens: 200,
+      });
+    });
+
+    it('multiple complete events in one attempt accumulate into the same bucket', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Multi-event task', skipValidation: true },
+        'user-1',
+      );
+
+      (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'first',
+            totalInputTokens: 600,
+            totalOutputTokens: 400,
+          };
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'second',
+            totalInputTokens: 400,
+            totalOutputTokens: 100,
+          };
+        },
+      );
+
+      await manager.processPod(pod.id);
+
+      const result = manager.getSession(pod.id);
+      // Both events accumulate into agent_initial (same attempt=0)
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
+    });
+
+    it('existing review writes still land under phaseTokenUsage.review and do not trample agent buckets', async () => {
+      const ctx = createTestContext({
+        overall: 'pass',
+        taskReview: {
+          status: 'pass' as const,
+          issues: [],
+          reasoning: 'Looks good',
+          tokenUsage: { inputTokens: 2000, outputTokens: 150 },
+        },
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Review task' },
+        'user-1',
+      );
+
+      // Pre-set agent_initial so we can confirm it is preserved
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        phaseTokenUsage: { agent_initial: { inputTokens: 1000, outputTokens: 500 } },
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const result = manager.getSession(pod.id);
+      // Review tokens must be present
+      expect(result.phaseTokenUsage?.review).toEqual({ inputTokens: 2000, outputTokens: 150 });
+      // agent_initial must be untouched
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
+    });
+
+    it('recovery-case: pod with prior phaseTokenUsage starts next write at agent_rework_3', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Recovered task', skipValidation: true },
+        'user-1',
+      );
+
+      // Simulate a re-queued pod with two prior rework cycles already completed
+      ctx.podRepo.update(pod.id, {
+        phaseTokenUsage: {
+          agent_initial: { inputTokens: 100, outputTokens: 50 },
+          agent_rework_2: { inputTokens: 200, outputTokens: 100 },
+        },
+      });
+
+      (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'recovered',
+            totalInputTokens: 400,
+            totalOutputTokens: 300,
+          };
+        },
+      );
+
+      await manager.processPod(pod.id);
+
+      const result = manager.getSession(pod.id);
+      // Must write to agent_rework_3 (= deriveAgentAttempt({agent_initial, agent_rework_2}) = 1+2=3)
+      expect(result.phaseTokenUsage?.agent_rework_3).toEqual({
+        inputTokens: 400,
+        outputTokens: 300,
+      });
+      // Prior buckets must be preserved
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({ inputTokens: 100, outputTokens: 50 });
+      expect(result.phaseTokenUsage?.agent_rework_2).toEqual({
+        inputTokens: 200,
+        outputTokens: 100,
+      });
+    });
+
+    it('null phaseTokenUsage starts at attempt 0 (agent_initial)', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fresh task', skipValidation: true },
+        'user-1',
+      );
+
+      // Ensure phaseTokenUsage is null (it already is for a new pod, but be explicit)
+      ctx.podRepo.update(pod.id, { phaseTokenUsage: null });
+
+      (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'done',
+            totalInputTokens: 1000,
+            totalOutputTokens: 500,
+          };
+        },
+      );
+
+      await manager.processPod(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1000,
+        outputTokens: 500,
+      });
+      // No rework keys should exist
+      expect(result.phaseTokenUsage?.agent_rework_1).toBeUndefined();
+    });
+  });
 });

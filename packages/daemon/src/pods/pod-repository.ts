@@ -4,6 +4,7 @@ import type {
   ExecutionTarget,
   OutputMode,
   OutputTarget,
+  PhaseTokenUsage,
   PimGroupConfig,
   Pod,
   PodOptions,
@@ -170,9 +171,7 @@ export interface PodUpdates {
   skipAgent?: boolean;
   deployBaselineHashes?: Record<string, string> | null;
   acSelfReport?: Array<{ criterion: string; verified: boolean; notes?: string }> | null;
-  phaseTokenUsage?: Partial<
-    Record<'review' | 'plan_eval', { inputTokens: number; outputTokens: number }>
-  > | null;
+  phaseTokenUsage?: PhaseTokenUsage | null;
 }
 
 export interface PodStats {
