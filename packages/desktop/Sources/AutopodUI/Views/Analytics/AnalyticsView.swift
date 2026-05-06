@@ -457,6 +457,28 @@ struct StatusDrillView: View {
 
 // MARK: - File-level helpers (shared by drill views)
 
+// Cached formatters — ISO8601DateFormatter and DateFormatter are expensive to allocate.
+private let _isoFullFmt: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+private let _isoBasicFmt = ISO8601DateFormatter()
+private let _dayFmt: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    return f
+}()
+private let _relFmt: RelativeDateTimeFormatter = {
+    let f = RelativeDateTimeFormatter()
+    f.unitsStyle = .short
+    return f
+}()
+
+private func analyticsParseDate(_ s: String) -> Date {
+    _isoFullFmt.date(from: s) ?? _isoBasicFmt.date(from: s) ?? Date.distantPast
+}
+
 private func analyticsStatusCounts(pods: [Pod]) -> [StatusCount] {
     let relevantStatuses: [PodStatus] = [
         .complete, .failed, .reviewRequired, .running, .validated,
@@ -478,29 +500,15 @@ private func analyticsScoreColor(_ score: Int) -> Color {
 }
 
 private func analyticsRelativeDate(_ iso: String) -> String {
-    let fmtFull = ISO8601DateFormatter()
-    fmtFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let fmtBasic = ISO8601DateFormatter()
-    guard let date = fmtFull.date(from: iso) ?? fmtBasic.date(from: iso) else { return iso }
-    let rel = RelativeDateTimeFormatter()
-    rel.unitsStyle = .short
-    return rel.localizedString(for: date, relativeTo: Date())
+    let date = analyticsParseDate(iso)
+    guard date != Date.distantPast else { return iso }
+    return _relFmt.localizedString(for: date, relativeTo: Date())
 }
 
 private func analyticsDailyAverages(for group: [PodQualityScore]) -> [Double] {
-    let dayFmt = DateFormatter()
-    dayFmt.dateFormat = "yyyy-MM-dd"
-    let isoFull = ISO8601DateFormatter()
-    isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let isoBasic = ISO8601DateFormatter()
-
-    func parseDate(_ s: String) -> Date {
-        isoFull.date(from: s) ?? isoBasic.date(from: s) ?? Date.distantPast
-    }
-
     let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-    let recent = group.filter { parseDate($0.completedAt) >= cutoff }
-    let byDay = Dictionary(grouping: recent) { dayFmt.string(from: parseDate($0.completedAt)) }
+    let recent = group.filter { analyticsParseDate($0.completedAt) >= cutoff }
+    let byDay = Dictionary(grouping: recent) { _dayFmt.string(from: analyticsParseDate($0.completedAt)) }
     return byDay.keys.sorted().compactMap { day -> Double? in
         guard let g = byDay[day], !g.isEmpty else { return nil }
         return Double(g.reduce(0) { $0 + $1.score }) / Double(g.count)
