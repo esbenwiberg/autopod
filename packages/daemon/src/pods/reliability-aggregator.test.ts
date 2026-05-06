@@ -321,10 +321,9 @@ describe('computeReliabilityAnalytics', () => {
     for (let i = 0; i < days.length - 1; i++) {
       expect(days[i]!.day < days[i + 1]!.day).toBe(true);
     }
-    // Last entry should be most recent (today or yesterday depending on window math)
+    // Last entry should be today (the sparkline window ends at today, inclusive)
     const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-    expect([today, yesterday]).toContain(days[days.length - 1]!.day);
+    expect(days[days.length - 1]!.day).toBe(today);
   });
 
   // ── Delta direction thresholds ──────────────────────────────────────────────

@@ -147,12 +147,12 @@ function terminalCohortWhere(): string {
     AND completed_at >= datetime('now', '-' || @days || ' days')`;
 }
 
-/** Generate the list of calendar dates for the sparkline (UTC, YYYY-MM-DD). */
+/** Generate the list of calendar dates for the sparkline (UTC, YYYY-MM-DD).
+ *  The last entry is today; the first entry is (days-1) days ago. */
 function sparklineDays(days: number): string[] {
   const nowMs = Date.now();
-  const windowStartMs = nowMs - days * 86_400_000;
   return Array.from({ length: days }, (_, i) =>
-    new Date(windowStartMs + i * 86_400_000).toISOString().slice(0, 10),
+    new Date(nowMs - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10),
   );
 }
 
@@ -204,9 +204,6 @@ export function computeReliabilityAnalytics(
   const totalPodsInWindow = cohort.length;
   if (totalPodsInWindow === 0) return emptyResponse(days);
 
-  const cohortIds = cohort.map((p) => p.id);
-  const placeholders = cohortIds.map(() => '?').join(', ');
-
   // First-pass: complete with no rework.
   const firstPassCount = cohort.filter(
     (p) => p.status === 'complete' && p.reworkCount === 0,
@@ -247,15 +244,17 @@ export function computeReliabilityAnalytics(
     deltaValue > 0.5 ? 'up' : deltaValue < -0.5 ? 'down' : 'flat';
 
   // Funnel: derive per-pod band sets from status-change events.
+  // Use a subquery instead of an IN-clause with spread params to avoid hitting
+  // SQLite's SQLITE_MAX_VARIABLE_NUMBER limit on large cohorts.
   const eventRows = db
     .prepare(
       `SELECT pod_id AS podId,
               json_extract(payload, '$.newStatus') AS newStatus
        FROM events
        WHERE type = 'pod.status_changed'
-         AND pod_id IN (${placeholders})`,
+         AND pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
     )
-    .all(...cohortIds) as Array<{ podId: string; newStatus: string | null }>;
+    .all({ days }) as Array<{ podId: string; newStatus: string | null }>;
 
   // Deduplicated set of happy-path bands reached per pod.
   const podBands = new Map<string, Set<string>>();
@@ -312,13 +311,14 @@ export function computeReliabilityAnalytics(
   });
 
   // Stage failures: walk validation rows; use Sets for ever-failed semantics across attempts.
+  // Same subquery pattern as events to avoid SQLITE_MAX_VARIABLE_NUMBER on large cohorts.
   const validationRows = db
     .prepare(
       `SELECT pod_id AS podId, result
        FROM validations
-       WHERE pod_id IN (${placeholders})`,
+       WHERE pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
     )
-    .all(...cohortIds) as Array<{ podId: string; result: string }>;
+    .all({ days }) as Array<{ podId: string; result: string }>;
 
   const podValidations = new Map<string, StoredValidationResult[]>();
   for (const row of validationRows) {
