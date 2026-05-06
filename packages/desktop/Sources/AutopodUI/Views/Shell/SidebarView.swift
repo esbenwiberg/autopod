@@ -210,10 +210,10 @@ public struct SidebarView: View {
     private func analyticsSectionRow(_ section: AnalyticsSection) -> some View {
         Label {
             Text(section.label)
-                .foregroundStyle(section.isShipped ? Color.primary : Color.tertiary)
+                .foregroundStyle(section.isShipped ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
         } icon: {
             Image(systemName: section.icon)
-                .foregroundStyle(section.isShipped ? Color.secondary : Color.tertiary)
+                .foregroundStyle(section.isShipped ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
         }
         .tag(SidebarItem.analyticsSection(section))
     }

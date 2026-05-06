@@ -1,6 +1,6 @@
 import Foundation
 
-public struct CostAnalyticsResponse: Decodable, Equatable {
+public struct CostAnalyticsResponse: Decodable, Equatable, Sendable {
     public let total: Double
     public let sparkline: [SparklinePoint]
     public let deltaVsPrior: CostDelta
@@ -10,35 +10,40 @@ public struct CostAnalyticsResponse: Decodable, Equatable {
     public let waste: WasteSummary
 }
 
-public struct SparklinePoint: Decodable, Equatable {
+public struct SparklinePoint: Decodable, Equatable, Sendable {
     /// "YYYY-MM-DD"
     public let day: String
     public let costUsd: Double
 }
 
-public struct CostDelta: Decodable, Equatable {
+public struct CostDelta: Decodable, Equatable, Sendable {
     public let value: Double
     public let direction: Direction
 
-    public enum Direction: String, Decodable {
+    public enum Direction: String, Decodable, Sendable {
         case up, down, flat
     }
 }
 
-public struct PhaseSegment: Decodable, Equatable {
+public struct PhaseSegment: Decodable, Equatable, Sendable {
     /// e.g. "agent_initial", "agent_rework_1", "review", "plan_eval", "agent_legacy"
     public let phase: String
     public let costUsd: Double
+
+    public init(phase: String, costUsd: Double) {
+        self.phase = phase
+        self.costUsd = costUsd
+    }
 }
 
-public struct ProfileModelCell: Decodable, Equatable {
+public struct ProfileModelCell: Decodable, Equatable, Sendable {
     public let profile: String
     public let model: String?
     public let costUsd: Double
     public let podCount: Int
 }
 
-public struct TopPodEntry: Decodable, Equatable {
+public struct TopPodEntry: Decodable, Equatable, Sendable {
     public let podId: String
     public let profile: String
     public let model: String?
@@ -49,7 +54,7 @@ public struct TopPodEntry: Decodable, Equatable {
     public let completedAt: String
 }
 
-public struct WasteSummary: Decodable, Equatable {
+public struct WasteSummary: Decodable, Equatable, Sendable {
     public let total: Double
     public let podCount: Int
 }

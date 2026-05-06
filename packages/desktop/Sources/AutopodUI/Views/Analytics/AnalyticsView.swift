@@ -420,18 +420,19 @@ extension AnalyticsCardDelta.Direction {
 // MARK: - File-level helpers (shared by drill views)
 
 // Cached formatters — ISO8601DateFormatter and DateFormatter are expensive to allocate.
-private let _isoFullFmt: ISO8601DateFormatter = {
+// `nonisolated(unsafe)` because Foundation documents these as thread-safe after configuration.
+nonisolated(unsafe) private let _isoFullFmt: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     return f
 }()
-private let _isoBasicFmt = ISO8601DateFormatter()
+nonisolated(unsafe) private let _isoBasicFmt = ISO8601DateFormatter()
 private let _dayFmt: DateFormatter = {
     let f = DateFormatter()
     f.dateFormat = "yyyy-MM-dd"
     return f
 }()
-private let _relFmt: RelativeDateTimeFormatter = {
+nonisolated(unsafe) private let _relFmt: RelativeDateTimeFormatter = {
     let f = RelativeDateTimeFormatter()
     f.unitsStyle = .short
     return f
