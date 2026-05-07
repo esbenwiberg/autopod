@@ -128,7 +128,7 @@ private struct ReliabilityFunnelSectionView: View {
                 .frame(height: CGFloat(funnel.bands.count) * 52)
 
                 // Drop disclosures rendered outside GeometryReader for natural height
-                ForEach(funnel.drops, id: { "\($0.from.rawValue)-\($0.to.rawValue)" }) { drop in
+                ForEach(funnel.drops) { drop in
                     dropDisclosure(drop)
                 }
             }
@@ -152,7 +152,7 @@ private struct ReliabilityFunnelSectionView: View {
                 // Drop arrows at the right edge of band
                 HStack(spacing: 4) {
                     Spacer().frame(width: bandWidth)
-                    ForEach(drops, id: { "\($0.from.rawValue)-\($0.to.rawValue)" }) { drop in
+                    ForEach(drops) { drop in
                         dropArrow(drop)
                     }
                 }
@@ -285,7 +285,7 @@ private struct ReliabilityStageFailureSectionView: View {
                 .chartXAxis {
                     AxisMarks(values: [0, 0.25, 0.5, 0.75, 1.0]) {
                         AxisGridLine()
-                        AxisValueLabel(format: .percent)
+                        AxisValueLabel(format: FloatingPointFormatStyle<Double>.Percent())
                     }
                 }
                 .frame(height: CGFloat(sorted.count) * 32 + 20)

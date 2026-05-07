@@ -70,4 +70,22 @@ public struct QualityReasons: Decodable, Equatable, Sendable {
     public let editChurn: Int
     /// tellsCount > 0
     public let tells: Int
+
+    public init(
+        lowReadEditRatio: Int,
+        editsWithoutPriorRead: Int,
+        userInterrupts: Int,
+        validationFailed: Int,
+        prFixAttempts: Int,
+        editChurn: Int,
+        tells: Int
+    ) {
+        self.lowReadEditRatio = lowReadEditRatio
+        self.editsWithoutPriorRead = editsWithoutPriorRead
+        self.userInterrupts = userInterrupts
+        self.validationFailed = validationFailed
+        self.prFixAttempts = prFixAttempts
+        self.editChurn = editChurn
+        self.tells = tells
+    }
 }

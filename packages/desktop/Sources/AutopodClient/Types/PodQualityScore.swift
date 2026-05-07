@@ -2,7 +2,7 @@ import Foundation
 
 /// One row from `GET /pods/scores` — the persisted quality-score table.
 /// Written by the daemon's `QualityScoreRecorder` on `pod.completed`.
-public struct PodQualityScore: Codable, Sendable, Identifiable {
+public struct PodQualityScore: Codable, Equatable, Sendable, Identifiable {
   public let podId: String
   public let score: Int
   public let readCount: Int

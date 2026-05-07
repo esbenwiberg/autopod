@@ -52,12 +52,14 @@ public enum FinalStatus: String, Decodable, Sendable {
     case complete, killed, failed
 }
 
-public struct DropEntry: Decodable, Equatable, Sendable {
+public struct DropEntry: Decodable, Equatable, Identifiable, Sendable {
     public let from: FunnelBand
     public let to: FinalStatus
     public let count: Int
     public let topPods: [DropPodEntry]
     public let overflow: Int
+
+    public var id: String { "\(from.rawValue)-\(to.rawValue)" }
 }
 
 public struct DropPodEntry: Decodable, Equatable, Sendable {

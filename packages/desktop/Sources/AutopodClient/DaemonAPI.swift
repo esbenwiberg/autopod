@@ -3,7 +3,7 @@ import Foundation
 /// Async REST client for the Autopod daemon API.
 /// Actor-isolated for thread safety — all methods are safe to call from any context.
 public actor DaemonAPI {
-  public let baseURL: URL
+  public nonisolated let baseURL: URL
   public let token: String
   private let pod: URLSession
   private let decoder: JSONDecoder

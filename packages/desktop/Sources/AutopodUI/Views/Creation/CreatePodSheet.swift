@@ -38,6 +38,7 @@ public struct CreateSessionSheet: View {
     @State private var bulkText = ""
     @State private var pimGroups: [PimGroupRequest] = []
     @State private var showAdvanced = false
+    @State private var showInteractiveRefRepos = false
     @State private var refProfileNames: Set<String> = []
     @State private var adHocRefUrls: [String] = []
 
@@ -228,11 +229,21 @@ public struct CreateSessionSheet: View {
                         .background(.teal.opacity(0.06))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                        // Reference Repos is the primary configuration for interactive
-                        // pods (no Task / AC / sidecars / PIM apply), so surface it as a
-                        // top-level section instead of burying it in Advanced.
-                        VStack(alignment: .leading, spacing: 10) {
-                            referenceReposSection()
+                        // Reference Repos: collapsed by default. Most interactive pods
+                        // don't pull in extra repos, and the long profile list dominated
+                        // the sheet. Users who need it can expand to pick.
+                        DisclosureGroup(isExpanded: $showInteractiveRefRepos) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                referenceReposSection(showHeader: false)
+                            }
+                            .padding(.top, 8)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("Reference Repos")
+                                    .font(.system(.caption).weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                HelpBadge(text: "Read-only repos cloned into /repos/<name>/ alongside the primary worktree. Use for cross-repo audits, comparing implementations, or letting the agent reference docs/pipeline definitions while it works.")
+                            }
                         }
                     }
 
@@ -262,41 +273,41 @@ public struct CreateSessionSheet: View {
                         }
                     }
 
-                    // Base branch (optional — for workspace handoff)
-                    if !isInteractive {
-                        formSection("Base Branch (optional)") {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.branch")
-                                    .foregroundStyle(.tertiary)
-                                    .font(.system(size: 11))
-                                TextField("main", text: $baseBranch)
-                                    .textFieldStyle(.plain)
-                                    .font(.system(.callout, design: .monospaced))
-                            }
-                            .padding(8)
-                            .background(Color(nsColor: .controlBackgroundColor))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                    }
-
-                    // Branch prefix (optional — overrides profile default)
-                    if !isInteractive {
-                        formSection("Branch Prefix (optional)") {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.branch")
-                                    .foregroundStyle(.tertiary)
-                                    .font(.system(size: 11))
-                                TextField(
-                                    selectedProfileDetail?.branchPrefix ?? "autopod/",
-                                    text: $branchPrefix
-                                )
+                    // Base branch (optional). Applies to both modes:
+                    //  - agent: branches off this ref before the agent starts
+                    //  - interactive: workspace pod's worktree branches off this ref
+                    formSection("Base Branch (optional)") {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.branch")
+                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 11))
+                            TextField("main", text: $baseBranch)
                                 .textFieldStyle(.plain)
                                 .font(.system(.callout, design: .monospaced))
-                            }
-                            .padding(8)
-                            .background(Color(nsColor: .controlBackgroundColor))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
+                        .padding(8)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    // Branch prefix (optional — overrides profile default).
+                    // Used to autogen the working branch name for both agent and
+                    // interactive pods (`<prefix><podId>`).
+                    formSection("Branch Prefix (optional)") {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.branch")
+                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 11))
+                            TextField(
+                                selectedProfileDetail?.branchPrefix ?? "autopod/",
+                                text: $branchPrefix
+                            )
+                            .textFieldStyle(.plain)
+                            .font(.system(.callout, design: .monospaced))
+                        }
+                        .padding(8)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
 
                     // AC from file (optional)
@@ -593,19 +604,21 @@ public struct CreateSessionSheet: View {
             .filter { !$0.isEmpty }
     }
 
-    /// Reference Repos picker — same UI used for both interactive (top-level)
-    /// and agent-mode (inside Advanced) call sites. Renders its own caption-
-    /// weight title with HelpBadge, so callers don't need to wrap it in a
-    /// `formSection` (doing so would duplicate the title).
+    /// Reference Repos picker — same UI used for both interactive (inside its
+    /// own collapsed DisclosureGroup) and agent-mode (inside Advanced).
+    /// `showHeader` controls the inner title; suppress it when the caller's
+    /// DisclosureGroup label already says "Reference Repos".
     @ViewBuilder
-    private func referenceReposSection() -> some View {
+    private func referenceReposSection(showHeader: Bool = true) -> some View {
         // Reference repos — read-only mounts at /repos/<name>/.
-        HStack {
-            Text("Reference Repos")
-                .font(.system(.caption).weight(.semibold))
-                .foregroundStyle(.secondary)
-            HelpBadge(text: "Read-only repos cloned into /repos/<name>/ alongside the primary worktree. Use for cross-repo audits, comparing implementations, or letting the agent reference docs/pipeline definitions while it works.")
-            Spacer()
+        if showHeader {
+            HStack {
+                Text("Reference Repos")
+                    .font(.system(.caption).weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HelpBadge(text: "Read-only repos cloned into /repos/<name>/ alongside the primary worktree. Use for cross-repo audits, comparing implementations, or letting the agent reference docs/pipeline definitions while it works.")
+                Spacer()
+            }
         }
 
         if refRepoCandidates.isEmpty && adHocRefUrls.isEmpty {
