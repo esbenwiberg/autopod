@@ -192,8 +192,9 @@ describe('QualityScoreRepository.getQualityAnalytics', () => {
 
   it('deltaVsPrior — direction and value match avg-score difference', () => {
     // Prior window: 30-60 days ago, avg score 60
-    const priorAt = (db.prepare(`SELECT datetime('now', '-45 days') AS t`).get() as { t: string })
-      .t;
+    const priorAt = (
+      db.prepare(`SELECT datetime('now', '-45 days') AS t`).get() as { t: string }
+    ).t;
     repo.insert(baseScore({ podId: 'prior', score: 60, completedAt: priorAt }));
     // Current window: last 30 days, avg score 80
     repo.insert(baseScore({ podId: 'current', score: 80 }));

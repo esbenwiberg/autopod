@@ -1,9 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { ScreenshotRef, ValidationResult } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ScreenshotRef, ValidationResult } from '@autopod/shared';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import { createScreenshotStore } from '../pods/screenshot-store.js';
 import { generateValidationReport } from './report-generator.js';

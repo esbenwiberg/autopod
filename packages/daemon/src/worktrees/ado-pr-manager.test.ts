@@ -1,6 +1,6 @@
-import type { ScreenshotRef } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ScreenshotRef } from '@autopod/shared';
 import { AdoPrManager, parseAdoRepoUrl } from './ado-pr-manager.js';
 
 const logger = pino({ level: 'silent' });
@@ -573,7 +573,9 @@ describe('AdoPrManager.createPr — screenshot attachments', () => {
   });
 
   it('no-screenshot pod with store: empty rawScreenshots skips all attachment logic', async () => {
-    const fetchMock = makeFetch([{ ok: true, body: { pullRequestId: 42, webUrl: PR_URL } }]);
+    const fetchMock = makeFetch([
+      { ok: true, body: { pullRequestId: 42, webUrl: PR_URL } },
+    ]);
     vi.stubGlobal('fetch', fetchMock);
 
     const store = makeMockStore();

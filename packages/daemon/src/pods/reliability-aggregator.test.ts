@@ -99,16 +99,7 @@ function makeValidationResult(overrides: Record<string, unknown> = {}): Record<s
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-const ALL_BANDS = [
-  'queued',
-  'provisioning',
-  'running',
-  'validating',
-  'validated',
-  'approved',
-  'merging',
-  'complete',
-];
+const ALL_BANDS = ['queued', 'provisioning', 'running', 'validating', 'validated', 'approved', 'merging', 'complete'];
 
 function insertAllBandEvents(db: Database.Database, podId: string): void {
   const transitions = [
@@ -229,27 +220,14 @@ describe('computeReliabilityAnalytics', () => {
 
   it('smoke page failure: podsFailed>=1 for smoke, topFailureStage=smoke', () => {
     const podId = insertPod(db, { status: 'complete' });
-    insertValidation(
-      db,
-      podId,
-      makeValidationResult({
-        smoke: {
-          status: 'fail',
-          build: { status: 'pass', output: '', duration: 100 },
-          health: { status: 'pass', url: 'http://localhost/', responseCode: 200, duration: 50 },
-          pages: [
-            {
-              path: '/',
-              status: 'fail',
-              screenshotPath: '',
-              consoleErrors: [],
-              assertions: [],
-              loadTime: 100,
-            },
-          ],
-        },
-      }),
-    );
+    insertValidation(db, podId, makeValidationResult({
+      smoke: {
+        status: 'fail',
+        build: { status: 'pass', output: '', duration: 100 },
+        health: { status: 'pass', url: 'http://localhost/', responseCode: 200, duration: 50 },
+        pages: [{ path: '/', status: 'fail', screenshotPath: '', consoleErrors: [], assertions: [], loadTime: 100 }],
+      },
+    }));
 
     const result = computeReliabilityAnalytics(db, 30);
 
@@ -264,24 +242,14 @@ describe('computeReliabilityAnalytics', () => {
     const podId = insertPod(db, { status: 'complete' });
 
     // Attempt 0: test fails
-    insertValidation(
-      db,
-      podId,
-      makeValidationResult({
-        test: { status: 'fail', duration: 100 },
-      }),
-      0,
-    );
+    insertValidation(db, podId, makeValidationResult({
+      test: { status: 'fail', duration: 100 },
+    }), 0);
 
     // Attempt 1: everything passes
-    insertValidation(
-      db,
-      podId,
-      makeValidationResult({
-        test: { status: 'pass', duration: 100 },
-      }),
-      1,
-    );
+    insertValidation(db, podId, makeValidationResult({
+      test: { status: 'pass', duration: 100 },
+    }), 1);
 
     const result = computeReliabilityAnalytics(db, 30);
 
@@ -295,14 +263,10 @@ describe('computeReliabilityAnalytics', () => {
   it('profile that never ran sast: no sast entry in heatmap stages', () => {
     const podId = insertPod(db, { status: 'complete', profileName: 'test-profile' });
     // Validation with no sast field
-    insertValidation(
-      db,
-      podId,
-      makeValidationResult({
-        test: { status: 'pass', duration: 100 },
-        // no sast
-      }),
-    );
+    insertValidation(db, podId, makeValidationResult({
+      test: { status: 'pass', duration: 100 },
+      // no sast
+    }));
 
     const result = computeReliabilityAnalytics(db, 30);
 
@@ -426,18 +390,14 @@ describe('computeReliabilityAnalytics', () => {
 
   it('build failure in smoke.build is counted for build stage (not smoke stage)', () => {
     const podId = insertPod(db, { status: 'complete' });
-    insertValidation(
-      db,
-      podId,
-      makeValidationResult({
-        smoke: {
-          status: 'fail',
-          build: { status: 'fail', output: 'error', duration: 100 },
-          health: { status: 'pass', url: 'http://localhost/', responseCode: 200, duration: 50 },
-          pages: [], // no page failures → smoke stage does NOT fail
-        },
-      }),
-    );
+    insertValidation(db, podId, makeValidationResult({
+      smoke: {
+        status: 'fail',
+        build: { status: 'fail', output: 'error', duration: 100 },
+        health: { status: 'pass', url: 'http://localhost/', responseCode: 200, duration: 50 },
+        pages: [], // no page failures → smoke stage does NOT fail
+      },
+    }));
 
     const result = computeReliabilityAnalytics(db, 30);
 
@@ -452,29 +412,16 @@ describe('computeReliabilityAnalytics', () => {
 
   it('profile heatmap stages are in canonical stage order', () => {
     const podId = insertPod(db, { status: 'complete' });
-    insertValidation(
-      db,
-      podId,
-      makeValidationResult({
-        test: { status: 'pass', duration: 100 },
-        lint: { status: 'pass', output: '', duration: 50 },
-      }),
-    );
+    insertValidation(db, podId, makeValidationResult({
+      test: { status: 'pass', duration: 100 },
+      lint: { status: 'pass', output: '', duration: 50 },
+    }));
 
     const result = computeReliabilityAnalytics(db, 30);
 
     const entry = result.profileHeatmap[0]!;
     const stageNames = entry.stages.map((s) => s.stage);
-    const canonical = [
-      'build',
-      'health',
-      'smoke',
-      'test',
-      'lint',
-      'sast',
-      'acValidation',
-      'taskReview',
-    ];
+    const canonical = ['build', 'health', 'smoke', 'test', 'lint', 'sast', 'acValidation', 'taskReview'];
     const filtered = canonical.filter((s) => stageNames.includes(s as never));
     expect(stageNames).toEqual(filtered);
   });
@@ -489,22 +436,14 @@ describe('computeReliabilityAnalytics', () => {
     // After two pods: test fails for both → rate 1.0, podsFailed 2
     //                 lint fails for pod1 only → rate 0.5, podsFailed 1
     // top failure = test (higher podsFailed)
-    insertValidation(
-      db,
-      pod1,
-      makeValidationResult({
-        test: { status: 'fail', duration: 100 },
-        lint: { status: 'fail', output: '', duration: 50 },
-      }),
-    );
-    insertValidation(
-      db,
-      pod2,
-      makeValidationResult({
-        test: { status: 'fail', duration: 100 },
-        lint: { status: 'pass', output: '', duration: 50 },
-      }),
-    );
+    insertValidation(db, pod1, makeValidationResult({
+      test: { status: 'fail', duration: 100 },
+      lint: { status: 'fail', output: '', duration: 50 },
+    }));
+    insertValidation(db, pod2, makeValidationResult({
+      test: { status: 'fail', duration: 100 },
+      lint: { status: 'pass', output: '', duration: 50 },
+    }));
 
     const result = computeReliabilityAnalytics(db, 30);
     expect(result.summary.topFailureStage).toBe('test');
@@ -526,14 +465,8 @@ describe('computeReliabilityAnalytics', () => {
     expect(result.funnel.bands).toHaveLength(8);
     const bandNames = result.funnel.bands.map((b) => b.band);
     expect(bandNames).toEqual([
-      'queued',
-      'provisioning',
-      'running',
-      'validating',
-      'validated',
-      'approved',
-      'merging',
-      'complete',
+      'queued', 'provisioning', 'running', 'validating',
+      'validated', 'approved', 'merging', 'complete',
     ]);
   });
 });

@@ -57,12 +57,7 @@ function snapshotBeforeCutover(dbPath: string, logger: Logger): void {
   }
 }
 
-export function runMigrations(
-  db: Database.Database,
-  migrationsDir: string,
-  logger: Logger,
-  dbPath = ':memory:',
-): void {
+export function runMigrations(db: Database.Database, migrationsDir: string, logger: Logger, dbPath = ':memory:'): void {
   // Ensure schema_version table exists (bootstrap)
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (

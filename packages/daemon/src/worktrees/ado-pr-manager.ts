@@ -1,5 +1,5 @@
-import type { ScreenshotRef } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ScreenshotRef } from '@autopod/shared';
 import type {
   CiFailureDetail,
   CreatePrConfig,

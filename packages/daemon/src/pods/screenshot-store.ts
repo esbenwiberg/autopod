@@ -7,12 +7,7 @@ export type { ScreenshotRef, ScreenshotSource };
 /** On-disk screenshot store — one directory tree per pod. */
 export interface ScreenshotStore {
   /** Write a PNG to the per-pod source bucket; returns the canonical ref. */
-  write(
-    podId: string,
-    source: ScreenshotSource,
-    filename: string,
-    bytes: Buffer,
-  ): Promise<ScreenshotRef>;
+  write(podId: string, source: ScreenshotSource, filename: string, bytes: Buffer): Promise<ScreenshotRef>;
   /** Read raw bytes for serving via HTTP / inline embedding. */
   read(ref: ScreenshotRef): Promise<Buffer>;
   /**
@@ -36,24 +31,19 @@ const SAFE_FILENAME_RE = /^[A-Za-z0-9._-]+$/;
  */
 function validateFilename(filename: string): string {
   if (!filename || filename.includes('/') || filename.includes('\\')) {
-    throw new Error(
-      `Screenshot filename must not contain path separators: ${JSON.stringify(filename)}`,
-    );
+    throw new Error(`Screenshot filename must not contain path separators: ${JSON.stringify(filename)}`);
   }
   if (filename.includes('..')) {
     throw new Error(`Screenshot filename must not contain '..': ${JSON.stringify(filename)}`);
   }
   // Coerce extension to lowercase before whitelist check
-  const lower =
-    filename.slice(0, -path.extname(filename).length) + path.extname(filename).toLowerCase();
+  const lower = filename.slice(0, -path.extname(filename).length) + path.extname(filename).toLowerCase();
   if (!lower.endsWith('.png')) {
     throw new Error(`Screenshot filename must have .png extension: ${JSON.stringify(filename)}`);
   }
   const base = lower.slice(0, -4); // strip .png
   if (!SAFE_FILENAME_RE.test(lower) || !base) {
-    throw new Error(
-      `Screenshot filename contains invalid characters (allowed: [A-Za-z0-9._-]): ${JSON.stringify(filename)}`,
-    );
+    throw new Error(`Screenshot filename contains invalid characters (allowed: [A-Za-z0-9._-]): ${JSON.stringify(filename)}`);
   }
   return lower;
 }
@@ -154,6 +144,9 @@ export function resolveDataDir(): string {
  * Includes a 0-based index prefix to avoid clashes between paths like `/foo` and `/foo/`.
  */
 export function slugifyPagePath(pagePath: string, idx: number): string {
-  const base = pagePath.replace(/[^A-Za-z0-9]/g, '_').replace(/^_+|_+$/g, '') || 'root';
+  const base =
+    pagePath
+      .replace(/[^A-Za-z0-9]/g, '_')
+      .replace(/^_+|_+$/g, '') || 'root';
   return `${idx}-${base}`;
 }
