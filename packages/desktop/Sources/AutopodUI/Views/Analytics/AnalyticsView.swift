@@ -17,6 +17,8 @@ public struct AnalyticsView: View {
     public var loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
     /// Fetches quality analytics from the daemon for the Quality card (sparkline, delta, sub-line).
     public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
+    /// Fetches safety analytics from the daemon for the Safety card (sparkline, delta, sub-line).
+    public var loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
@@ -27,6 +29,8 @@ public struct AnalyticsView: View {
     @State private var reliabilityLoadError: String?
     @State private var qualityData: QualityAnalyticsResponse?
     @State private var qualityLoadError: String?
+    @State private var safetyData: SafetyAnalyticsResponse?
+    @State private var safetyLoadError: String?
 
     public init(
         pods: [Pod],
@@ -34,6 +38,7 @@ public struct AnalyticsView: View {
         loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
         loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
+        loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
@@ -41,6 +46,7 @@ public struct AnalyticsView: View {
         self.loadCost = loadCost
         self.loadReliability = loadReliability
         self.loadQualityAnalytics = loadQualityAnalytics
+        self.loadSafetyAnalytics = loadSafetyAnalytics
         self._selectedCard = selectedCard
     }
 
@@ -93,6 +99,32 @@ public struct AnalyticsView: View {
     private var dominantStatusValue: String {
         guard let top = statusCounts.max(by: { $0.count < $1.count }) else { return "—" }
         return "\(top.count) \(top.status.label)"
+    }
+
+    private var safetyCardValue: String {
+        safetyData.map { String($0.summary.totalEvents) } ?? "—"
+    }
+
+    private var safetyCardSparkline: [Double]? {
+        safetyData.map { $0.summary.sparkline.map { Double($0.count) } }
+    }
+
+    private var safetyCardDelta: AnalyticsCardDelta? {
+        safetyData.map {
+            AnalyticsCardDelta(
+                value: String(format: "%+d", $0.summary.deltaVsPrior.value),
+                direction: AnalyticsCardDelta.Direction($0.summary.deltaVsPrior.direction)
+            )
+        }
+    }
+
+    private var safetyCardSubline: String? {
+        guard let s = safetyData,
+              s.summary.totalEvents > 0 || s.summary.quarantineCount > 0 else { return nil }
+        let piiCount = s.summary.byKind.pii
+        let quarantineCount = s.summary.quarantineCount
+        let injectionCount = s.summary.byKind.injection
+        return "\(piiCount) PII \u{00B7} \(quarantineCount) quar \u{00B7} \(injectionCount) inj"
     }
 
     // MARK: - Body
@@ -148,6 +180,15 @@ public struct AnalyticsView: View {
                         isSelected: selectedCard == .reliability,
                         onClick: { selectedCard = selectedCard == .reliability ? nil : .reliability }
                     )
+                    AnalyticsCard(
+                        title: "Safety",
+                        value: safetyCardValue,
+                        sparkline: safetyCardSparkline,
+                        delta: safetyCardDelta,
+                        subline: safetyCardSubline,
+                        isSelected: selectedCard == .safety,
+                        onClick: { selectedCard = selectedCard == .safety ? nil : .safety }
+                    )
                 }
             }
             .padding(24)
@@ -195,10 +236,21 @@ public struct AnalyticsView: View {
                     }
                 }
             }
+            let safetyTask = Task {
+                if let loadSafetyAnalytics {
+                    do {
+                        safetyData = try await loadSafetyAnalytics(30)
+                        safetyLoadError = nil
+                    } catch {
+                        safetyLoadError = error.localizedDescription
+                    }
+                }
+            }
             await scoreTask.value
             await costTask.value
             await reliabilityTask.value
             await qualityTask.value
+            await safetyTask.value
         }
     }
 }
@@ -303,6 +355,14 @@ extension AnalyticsCardDelta.Direction {
     }
 
     init(_ direction: QualityDelta.Direction) {
+        switch direction {
+        case .up:   self = .up
+        case .down: self = .down
+        case .flat: self = .flat
+        }
+    }
+
+    init(_ direction: SafetyDelta.Direction) {
         switch direction {
         case .up:   self = .up
         case .down: self = .down
