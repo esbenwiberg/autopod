@@ -75,6 +75,20 @@ export interface RebaseOntoBaseResult {
   conflicts: string[];
 }
 
+export interface RestoreFromHeadResult {
+  /** True when the working tree was successfully restored to match HEAD. */
+  restored: boolean;
+  /**
+   * Human-readable explanation. On `restored=true`, summarizes what was
+   * restored (e.g. "Restored 62 deleted files from HEAD"). On `restored=false`,
+   * names the safety check that refused (e.g. "Refusing to restore — 3 modified
+   * files would be lost") so the caller can surface it to the operator.
+   */
+  reason: string;
+  /** Number of paths restored (zero on refusal). */
+  restoredCount: number;
+}
+
 export interface WorktreeResult {
   worktreePath: string;
   bareRepoPath: string;
@@ -161,6 +175,24 @@ export interface WorktreeManager {
     relPath: string;
     pat?: string;
   }): Promise<BranchFolderContents>;
+  /**
+   * Restore the working tree to match HEAD when (and only when) the dirty
+   * state is exclusively unstaged deletions of HEAD-tracked files. This is
+   * the post-mortem recovery path for a partial container→host sync — the
+   * `find … rm` half ran but `cp -a` was killed (often a Docker-engine stall
+   * after laptop sleep), leaving phantom deletions on disk while the agent's
+   * real commits are already safe on the bare via the in-container push.
+   *
+   * Refuses (returns `restored: false` with a reason) the moment it sees:
+   *   - any modified, added, renamed, copied, or unmerged path
+   *   - any staged change at all
+   *   - any untracked file
+   *   - working tree clean (nothing to restore — caller used wrong recovery path)
+   *
+   * On the safe path, runs `git checkout -- .` so HEAD and the index are
+   * untouched — only deleted working-tree files come back.
+   */
+  restoreFromHead(worktreePath: string): Promise<RestoreFromHeadResult>;
 }
 
 export interface BranchFolderContents {

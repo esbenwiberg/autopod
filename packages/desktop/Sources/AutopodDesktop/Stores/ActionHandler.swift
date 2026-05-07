@@ -81,6 +81,7 @@ public final class ActionHandler {
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       resume: { [weak self] id in await self?.resume(id) },
+      recoverWorktree: { [weak self] id in await self?.recoverWorktree(id) ?? nil },
       forceComplete: { [weak self] id, reason in await self?.forceComplete(id, reason: reason) },
       kick: { [weak self] id, reason in await self?.kick(id, reason: reason) },
       previewSeriesFolder: { [weak self] path in
@@ -282,6 +283,25 @@ public final class ActionHandler {
       lastError = error.localizedDescription
     }
     pendingAction = nil
+  }
+
+  public func recoverWorktree(_ podId: String) async -> RecoverWorktreeResponse? {
+    pendingAction = "recover-worktree-\(podId)"
+    defer { pendingAction = nil }
+    do {
+      let result = try await api.recoverWorktree(podId)
+      // The daemon clears `worktreeCompromised` on success, so refresh now to
+      // re-enable Resume/Rework. On failure the flag stays set; the surfaced
+      // message tells the operator what to do next.
+      await podStore.refreshSession(podId)
+      if !result.recovered {
+        lastError = "Recovery failed: \(result.message)"
+      }
+      return result
+    } catch {
+      lastError = error.localizedDescription
+      return nil
+    }
   }
 
   public func forceComplete(_ podId: String, reason: String?) async {

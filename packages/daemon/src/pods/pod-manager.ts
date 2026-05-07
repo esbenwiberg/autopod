@@ -1727,6 +1727,108 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   /**
+   * True when an error looks like a Docker engine stall — the kind that
+   * resolves itself once the Docker Desktop VM finishes resuming after the
+   * host's laptop sleep. We retry on these. Domain errors (e.g. `rm: cannot
+   * remove`, non-zero git exit) bubble out unretried.
+   */
+  function looksLikeEngineStall(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    const msg = `${err.message}`.toLowerCase();
+    return (
+      msg.includes('econnrefused') ||
+      msg.includes('econnreset') ||
+      msg.includes('epipe') ||
+      msg.includes('etimedout') ||
+      msg.includes('socket hang up') ||
+      msg.includes('connect enoent') || // unix socket missing while VM is paused
+      msg.includes('eai_again') ||
+      // Dockerode rethrows engine 5xx as plain Error with these substrings.
+      msg.includes('server error') ||
+      msg.includes('502 bad gateway')
+    );
+  }
+
+  /**
+   * Poll `cm.getStatus(containerId)` until the engine reports `running`, the
+   * container is definitively `stopped`, or the budget runs out. Returns
+   * `'ready'` when the container is back, `'gone'` if the engine is reachable
+   * but the container is gone, `'timeout'` if the budget expired before either
+   * outcome. Never throws — engine-unreachable errors are treated as "still
+   * stalled, keep polling."
+   */
+  async function waitForContainerReachable(
+    containerId: string,
+    cm: ContainerManager,
+    maxWaitMs: number,
+  ): Promise<'ready' | 'gone' | 'timeout'> {
+    const start = Date.now();
+    const probeIntervalMs = 2_000;
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const status = await cm.getStatus(containerId);
+        if (status === 'running') return 'ready';
+        if (status === 'stopped') return 'gone';
+        // 'unknown' → keep polling, engine may still be coming back.
+      } catch {
+        // Engine still unreachable — that's exactly the case we wait through.
+      }
+      await new Promise((resolve) => setTimeout(resolve, probeIntervalMs));
+    }
+    return 'timeout';
+  }
+
+  /**
+   * Run a sync-back operation, retrying past Docker-engine stalls. Each retry
+   * waits for the engine + container to come back before re-issuing the op,
+   * up to a hard cap so a wedged engine can't hang the pod cleanup forever.
+   *
+   * Why retry: laptop sleep → Docker Desktop pauses → in-flight `cm.exec` /
+   * `getArchive` calls fail with transient socket errors. Without retry, the
+   * one-shot sync command leaves the host worktree partially populated (the
+   * `find … rm` half ran, `cp -a` got killed) → next auto-commit trips the
+   * deletion guard → operator sees "Worktree out of sync with container."
+   * The whole sync is idempotent (rm is no-op on missing, cp re-copies, git
+   * push is fast-forward or no-op), so re-running on the same container is
+   * safe.
+   */
+  async function withEngineStallRetry<T>(
+    containerId: string,
+    cm: ContainerManager,
+    op: () => Promise<T>,
+    label: string,
+  ): Promise<T> {
+    const backoffsMs = [5_000, 15_000];
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
+      if (attempt > 0) {
+        const waitBudget = backoffsMs[attempt - 1] ?? 15_000;
+        logger.warn(
+          { containerId, attempt, waitBudget, label },
+          'Engine stall detected — waiting for container to come back before retry',
+        );
+        const result = await waitForContainerReachable(containerId, cm, waitBudget);
+        if (result === 'gone') {
+          // Container is definitively stopped — no point retrying the op.
+          throw lastErr ?? new Error(`${label}: container stopped during retry wait`);
+        }
+        // 'ready' or 'timeout' → either way we try the op once more; if the
+        // engine is still wedged, the next throw will end the loop.
+      }
+      try {
+        return await op();
+      } catch (err) {
+        if (!looksLikeEngineStall(err)) {
+          // Domain error — rethrow without retry so callers handle it.
+          throw err;
+        }
+        lastErr = err;
+      }
+    }
+    throw lastErr ?? new Error(`${label}: retries exhausted`);
+  }
+
+  /**
    * Copy workspace changes from container back to the host worktree (bind mount).
    * The worktree is bind-mounted at /mnt/worktree while the agent works on the
    * container's native /workspace (overlayfs) — this avoids VirtioFS getcwd() bugs
@@ -1741,8 +1843,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    * If the container is already stopped, falls back to Docker's archive API. In that case
    * we extract /workspace (minus .git) then extract /workspace/.git separately and push
    * from the host side.
+   *
+   * The whole flow is wrapped in `withEngineStallRetry` so a Docker Desktop
+   * VM pause (typically: laptop sleep) won't leave the host worktree
+   * partially populated — see that helper for the rationale.
    */
   async function syncWorkspaceBack(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+  ): Promise<{ pushed: boolean }> {
+    return withEngineStallRetry(
+      containerId,
+      cm,
+      () => syncWorkspaceBackOnce(containerId, worktreePath, cm),
+      'syncWorkspaceBack',
+    );
+  }
+
+  async function syncWorkspaceBackOnce(
     containerId: string,
     worktreePath: string,
     cm: ContainerManager,
@@ -8230,38 +8349,74 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           409,
         );
       }
-      if (!pod.containerId || !pod.worktreePath) {
+      if (!pod.worktreePath) {
         return {
           recovered: false,
-          message: 'Pod has no container or worktree — manual extraction needed',
+          message: 'Pod has no worktree — manual extraction needed',
         };
       }
-      const cm = containerManagerFactory.get(pod.executionTarget);
-      const recovered = await recoverWorktreeFromContainer(pod.containerId, pod.worktreePath, cm);
-      if (!recovered) {
-        return {
-          recovered: false,
-          message: 'Container not reachable — manual extraction needed',
-        };
-      }
-      try {
-        const profileForRecovery = profileStore.get(pod.profileName);
-        await worktreeManager.commitPendingChangesWithGeneratedMessage(
+
+      // Path A — container is alive: pull /workspace from the live container,
+      // overwrite the partial host worktree, then auto-commit. Most powerful
+      // recovery because it captures any uncommitted state still inside the
+      // container's overlayfs.
+      if (pod.containerId) {
+        const cm = containerManagerFactory.get(pod.executionTarget);
+        const recovered = await recoverWorktreeFromContainer(
+          pod.containerId,
           pod.worktreePath,
-          pod.task,
-          profileForRecovery,
-          pod.model,
-          { maxDeletions: 100 },
+          cm,
         );
-        podRepo.update(podId, { worktreeCompromised: false });
-        emitActivityStatus(podId, 'Worktree recovered from container and committed successfully');
-        return { recovered: true, message: 'Worktree recovered and committed' };
-      } catch (err) {
+        if (recovered) {
+          try {
+            const profileForRecovery = profileStore.get(pod.profileName);
+            await worktreeManager.commitPendingChangesWithGeneratedMessage(
+              pod.worktreePath,
+              pod.task,
+              profileForRecovery,
+              pod.model,
+              { maxDeletions: 100 },
+            );
+            podRepo.update(podId, { worktreeCompromised: false });
+            emitActivityStatus(
+              podId,
+              'Worktree recovered from container and committed successfully',
+            );
+            return { recovered: true, message: 'Worktree recovered and committed' };
+          } catch (err) {
+            return {
+              recovered: false,
+              message: `Recovery failed at commit stage: ${err instanceof Error ? err.message : String(err)}`,
+            };
+          }
+        }
+        // Live recovery failed — fall through to the bare-repo path. The
+        // agent's commits may still be on the bare from a successful
+        // in-container push during the original sync-back attempt.
+        logger.info(
+          { podId },
+          'Live container recovery failed — trying bare-repo restore fallback',
+        );
+      }
+
+      // Path B — no container (or live recovery failed): the agent's commits
+      // are typically already on the bare via the in-container `git push` step
+      // of syncWorkspaceBack, even when the file-copy half timed out. The host
+      // worktree's HEAD/index point at those commits — only working-tree files
+      // are missing on disk. `restoreFromHead` is a safe `git checkout -- .`
+      // gated on the dirty state being purely deletions.
+      const restored = await worktreeManager.restoreFromHead(pod.worktreePath);
+      if (!restored.restored) {
         return {
           recovered: false,
-          message: `Recovery failed at commit stage: ${err instanceof Error ? err.message : String(err)}`,
+          message: pod.containerId
+            ? `Container not reachable and bare-repo restore refused: ${restored.reason}`
+            : `No container to recover from; bare-repo restore refused: ${restored.reason}`,
         };
       }
+      podRepo.update(podId, { worktreeCompromised: false });
+      emitActivityStatus(podId, `Worktree recovered from HEAD — ${restored.reason}`);
+      return { recovered: true, message: restored.reason };
     },
   };
 }

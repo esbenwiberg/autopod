@@ -192,6 +192,17 @@ public struct DetailPanelView: View {
         } message: {
             Text("Send a message to resume the agent. Leave blank for a default resume.")
         }
+        .alert(
+            recoverWorktreeSuccess ? "Worktree recovered" : "Recovery failed",
+            isPresented: Binding(
+                get: { recoverWorktreeResult != nil },
+                set: { if !$0 { recoverWorktreeResult = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { recoverWorktreeResult = nil }
+        } message: {
+            Text(recoverWorktreeResult ?? "")
+        }
     }
 
     // MARK: - Header
@@ -519,6 +530,26 @@ public struct DetailPanelView: View {
                 .tint(.red)
 
             case .failed:
+                // When the worktree is compromised, offer recovery as the
+                // primary action — every other path (Resume, Rework, Create
+                // PR, etc.) is disabled until the flag clears, so without
+                // this the operator has no in-app way out.
+                if pod.worktreeCompromised && pod.hasWorktree {
+                    Button {
+                        Task {
+                            if let result = await actions.recoverWorktree(pod.id) {
+                                recoverWorktreeResult = result.message
+                                recoverWorktreeSuccess = result.recovered
+                            }
+                        }
+                    } label: {
+                        Label("Recover Worktree", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.orange)
+                    .help("Repopulate the host worktree from the live container or, if the container is gone, restore deleted files from the agent's last commit on the bare repo. Clears the compromised flag on success.")
+                }
                 if pod.isWorkspace {
                     // Restart — workspace pods have no agent, so the "Resume" /
                     // "Rework" distinction doesn't apply. The same /validate
@@ -730,6 +761,8 @@ public struct DetailPanelView: View {
     @State private var forceCompleteReasonText = ""
     @State private var showKickSheet = false
     @State private var kickReasonText = ""
+    @State private var recoverWorktreeResult: String? = nil
+    @State private var recoverWorktreeSuccess: Bool = false
 
     private func copyPodName() {
         NSPasteboard.general.clearContents()

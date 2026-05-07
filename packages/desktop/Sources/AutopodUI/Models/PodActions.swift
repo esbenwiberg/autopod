@@ -51,6 +51,9 @@ public struct PodActions: Sendable {
   /// Token-free recovery for a `failed` pod — pushes + opens PR if validation already passed,
   /// otherwise re-runs validation only (no agent rework). Cheapest possible path forward.
   public var resume: @MainActor @Sendable (String) async -> Void
+  /// Recover a worktree-compromised pod. Returns the daemon's response
+  /// (recovered + human-readable message) so the UI can surface the outcome.
+  public var recoverWorktree: @MainActor @Sendable (String) async -> RecoverWorktreeResponse?
   /// Admin override: transition `failed` → `complete`, skipping push/PR/merge.
   /// Use when the agent's work is fine but a downstream step is stuck and re-running
   /// would just burn tokens. Reason is optional, persisted for audit.
@@ -121,6 +124,7 @@ public struct PodActions: Sendable {
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    recoverWorktree: @escaping @MainActor @Sendable (String) async -> RecoverWorktreeResponse? = { _ in nil },
     forceComplete: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     kick: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
@@ -161,6 +165,7 @@ public struct PodActions: Sendable {
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
     self.resume = resume
+    self.recoverWorktree = recoverWorktree
     self.forceComplete = forceComplete
     self.kick = kick
     self.previewSeriesFolder = previewSeriesFolder

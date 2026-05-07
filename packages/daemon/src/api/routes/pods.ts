@@ -515,13 +515,16 @@ export function podRoutes(
     }
   });
 
-  // POST /pods/:podId/recover-worktree — attempt to recover a worktree-compromised pod
-  // by pulling files from its still-running container and retrying the auto-commit.
+  // POST /pods/:podId/recover-worktree — attempt to recover a worktree-compromised pod.
+  // First tries pulling files from the live container; falls back to restoring deleted
+  // files from HEAD when the bare repo already has the agent's commits. Returns 200
+  // with `{recovered, message}` either way — recovery success/failure is in the body,
+  // not the HTTP status, so the UI gets the human-readable reason on both paths.
+  // 4xx is reserved for semantic failures (pod doesn't exist, not compromised, etc.).
   app.post('/pods/:podId/recover-worktree', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     try {
       const result = await podManager.recoverWorktree(podId);
-      reply.status(result.recovered ? 200 : 409);
       return result;
     } catch (err) {
       if (err instanceof AutopodError) {

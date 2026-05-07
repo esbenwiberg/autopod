@@ -11,6 +11,7 @@ import type {
   MergeBranchConfig,
   RebaseOntoBaseConfig,
   RebaseOntoBaseResult,
+  RestoreFromHeadResult,
   WorktreeCreateConfig,
   WorktreeManager,
   WorktreeResult,
@@ -717,17 +718,27 @@ export class LocalWorktreeManager implements WorktreeManager {
    * directories. The exclude list lets us keep daemon-injected code-intel
    * caches (`.serena`, `.roslyn-codelens`, etc.) out of agent commits without
    * polluting the repo's `.gitignore`.
+   *
+   * Subtle git quirk: `git add -A -- . :(exclude)X` exits 1 with "paths are
+   * ignored by one of your .gitignore files" when X is already in `.gitignore`
+   * — git treats the explicit pathspec mention (even for exclude!) as a user
+   * request to add that ignored path. We pre-filter via `check-ignore` and
+   * drop excludes that gitignore already covers, since the pathspec would be
+   * redundant *and* fatal in that case.
    */
   private async stageAllChanges(
     worktreePath: string,
     excludePaths?: readonly string[],
   ): Promise<boolean> {
     const args = ['add', '-A'];
-    if (excludePaths && excludePaths.length > 0) {
+    const effective = excludePaths?.length
+      ? await this.filterExcludePathsForStaging(worktreePath, excludePaths)
+      : [];
+    if (effective.length > 0) {
       // `-- . :(exclude)<path>` — git pathspec magic. The leading `.` is required:
       // without it, the exclude pathspecs match nothing because `git add -A` defaults
       // to "everything" but pathspecs must be explicit when any are present.
-      args.push('--', '.', ...excludePaths.map((p) => `:(exclude)${p}`));
+      args.push('--', '.', ...effective.map((p) => `:(exclude)${p}`));
     }
     await git(args, { cwd: worktreePath });
     try {
@@ -737,6 +748,30 @@ export class LocalWorktreeManager implements WorktreeManager {
     } catch {
       return true;
     }
+  }
+
+  /**
+   * Drop exclude paths that gitignore already covers. `check-ignore -q` exits
+   * 0 when the path is ignored, 1 otherwise. An ignored path doesn't need an
+   * explicit `:(exclude)` pathspec — and the pathspec is actively harmful
+   * (see stageAllChanges note). We keep paths that gitignore does NOT cover
+   * so the exclude still defends against tracked-but-undesired regressions.
+   */
+  private async filterExcludePathsForStaging(
+    worktreePath: string,
+    excludePaths: readonly string[],
+  ): Promise<string[]> {
+    const kept: string[] = [];
+    for (const p of excludePaths) {
+      try {
+        await git(['check-ignore', '-q', p], { cwd: worktreePath });
+        // Exit 0 → already gitignored → drop, the pathspec would be redundant
+      } catch {
+        // Exit 1 (not ignored) or any other error → keep the explicit exclude
+        kept.push(p);
+      }
+    }
+    return kept;
   }
 
   private async commitStagedChanges(
@@ -763,6 +798,73 @@ export class LocalWorktreeManager implements WorktreeManager {
       cwd: worktreePath,
     });
     return stdout.trim().split('\n').filter(Boolean).length;
+  }
+
+  async restoreFromHead(worktreePath: string): Promise<RestoreFromHeadResult> {
+    // `--porcelain=v1` gives a stable two-character status code per path:
+    //   columns are XY where X=staged, Y=unstaged. Space = clean.
+    //   ' D' → unstaged deletion of a HEAD-tracked file (the one case we recover).
+    //   '??' → untracked.
+    //   Anything else (' M', 'M ', 'A ', 'R ', 'U?', etc.) means real work might be present.
+    const { stdout } = await git(['status', '--porcelain=v1', '-z'], { cwd: worktreePath });
+    // -z uses NUL as record separator. Split + drop trailing empty.
+    const records = stdout.split('\0').filter((r) => r.length > 0);
+
+    if (records.length === 0) {
+      return {
+        restored: false,
+        reason: 'Working tree is clean — nothing to restore from HEAD',
+        restoredCount: 0,
+      };
+    }
+
+    const deletions: string[] = [];
+    const blockers: string[] = [];
+    for (const rec of records) {
+      // Format: "XY path" — first 2 chars are status, char 3 is space, rest is path.
+      // Renames/copies use "XY orig\0new" but our filter doesn't allow R/C anyway.
+      const xy = rec.slice(0, 2);
+      const pathPart = rec.slice(3);
+      if (xy === ' D') {
+        deletions.push(pathPart);
+      } else {
+        blockers.push(`${xy} ${pathPart}`);
+      }
+    }
+
+    if (blockers.length > 0) {
+      // Cap the sample so a 1000-file dirty tree doesn't dump everything into the log.
+      const sample = blockers.slice(0, 5).join('; ');
+      return {
+        restored: false,
+        reason: `Refusing to restore — ${blockers.length} non-deletion change${blockers.length === 1 ? '' : 's'} present (sample: ${sample})`,
+        restoredCount: 0,
+      };
+    }
+
+    // All entries are unstaged deletions of HEAD-tracked files. `git checkout
+    // -- .` restores them from the index without touching HEAD or the index
+    // itself — safer than `git reset --hard HEAD`, which would also blow away
+    // any state we missed in the porcelain check.
+    try {
+      await git(['checkout', '--', '.'], { cwd: worktreePath });
+    } catch (err) {
+      return {
+        restored: false,
+        reason: `git checkout failed: ${err instanceof Error ? err.message : String(err)}`,
+        restoredCount: 0,
+      };
+    }
+
+    this.logger.info(
+      { worktreePath, restoredCount: deletions.length },
+      'Restored deleted files from HEAD',
+    );
+    return {
+      restored: true,
+      reason: `Restored ${deletions.length} deleted file${deletions.length === 1 ? '' : 's'} from HEAD`,
+      restoredCount: deletions.length,
+    };
   }
 
   async pushBranch(

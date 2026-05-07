@@ -183,6 +183,14 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/retry-pr")
   }
 
+  /// Recover a worktree-compromised pod. The daemon tries the live container
+  /// first, then falls back to restoring deleted files from HEAD when the
+  /// agent's commits are already safe on the bare repo. Returns the daemon's
+  /// outcome so the UI can surface the human-readable reason on either path.
+  public func recoverWorktree(_ id: String) async throws -> RecoverWorktreeResponse {
+    try await request("POST", "/pods/\(id)/recover-worktree")
+  }
+
   /// Operator escape hatch for `failed` pods — picks the cheapest recovery path
   /// (push + open PR if validation already passed, otherwise re-run validation).
   /// Returns the action the daemon took, so the UI can confirm what happened.
@@ -682,6 +690,15 @@ public struct ResumeResponse: Codable, Sendable {
   public let ok: Bool?
   /// Either "retry-pr" (Path 1: push + open PR) or "revalidate" (Path 2: re-run validation only).
   public let action: String?
+}
+
+/// Daemon's response to POST /pods/:id/recover-worktree. `recovered=true` means
+/// the worktreeCompromised flag was cleared and the pod is resumable again.
+/// `message` is human-readable context (e.g. "Restored 62 deleted files from
+/// HEAD" on success, or the safety check that refused on failure).
+public struct RecoverWorktreeResponse: Codable, Sendable {
+  public let recovered: Bool
+  public let message: String
 }
 
 public struct SyncBranchResponse: Codable, Sendable {

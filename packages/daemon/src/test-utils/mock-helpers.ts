@@ -168,6 +168,11 @@ export function createMockWorktreeManager(): WorktreeManager {
       purposeMd: '',
       designMd: '',
     })),
+    restoreFromHead: vi.fn(async () => ({
+      restored: true,
+      reason: 'Restored 0 deleted files from HEAD',
+      restoredCount: 0,
+    })),
   };
 }
 

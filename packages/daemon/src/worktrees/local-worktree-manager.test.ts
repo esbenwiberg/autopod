@@ -531,8 +531,187 @@ describe('LocalWorktreeManager', () => {
   });
 
   // -------------------------------------------------------------------------
+  // stageAllChanges — excludePaths interaction with .gitignore
+  //
+  // Regression: `git add -A -- . :(exclude)X` exits 1 with "paths are ignored"
+  // when X is in .gitignore (git treats the explicit pathspec mention as a
+  // user request to add the ignored path). We pre-filter via `check-ignore`
+  // and drop excludes that gitignore already covers.
+  // -------------------------------------------------------------------------
+
+  describe('stageAllChanges excludePaths filtering', () => {
+    /**
+     * Capture the args passed to `git add -A`, simulating a configurable
+     * check-ignore response per path. Returns the captured add args (or null
+     * if `git add` wasn't called) so the test can assert which excludes
+     * survived filtering.
+     */
+    function setupAddCapture(ignoredPaths: ReadonlySet<string>) {
+      let addArgs: string[] | null = null;
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          if (args[0] === 'check-ignore') {
+            // -q on, last arg is the path
+            const p = args[args.length - 1];
+            if (ignoredPaths.has(p)) {
+              cb(null, { stdout: '', stderr: '' });
+            } else {
+              cb(Object.assign(new Error('not ignored'), { code: 1 }), {
+                stdout: '',
+                stderr: '',
+              });
+            }
+          } else if (args[0] === 'add') {
+            addArgs = args;
+            cb(null, { stdout: '', stderr: '' });
+          } else if (args.join(' ').includes('diff --cached --quiet')) {
+            // Pretend nothing was staged so commitPendingChanges short-circuits.
+            cb(null, { stdout: '', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+      return () => addArgs;
+    }
+
+    it('drops exclude paths that gitignore already covers', async () => {
+      const getAddArgs = setupAddCapture(new Set(['.serena']));
+
+      await manager.commitPendingChanges('/tmp/wt', 'msg', {
+        excludePaths: ['.serena', '.roslyn-codelens'],
+      });
+
+      const addArgs = getAddArgs();
+      expect(addArgs).not.toBeNull();
+      expect(addArgs).not.toContain(':(exclude).serena');
+      expect(addArgs).toContain(':(exclude).roslyn-codelens');
+    });
+
+    it('omits the pathspec block entirely when every exclude is gitignored', async () => {
+      const getAddArgs = setupAddCapture(new Set(['.serena', '.roslyn-codelens']));
+
+      await manager.commitPendingChanges('/tmp/wt', 'msg', {
+        excludePaths: ['.serena', '.roslyn-codelens'],
+      });
+
+      const addArgs = getAddArgs();
+      expect(addArgs).toEqual(['add', '-A']);
+    });
+
+    it('keeps every exclude when none are gitignored', async () => {
+      const getAddArgs = setupAddCapture(new Set());
+
+      await manager.commitPendingChanges('/tmp/wt', 'msg', {
+        excludePaths: ['.serena', '.roslyn-codelens'],
+      });
+
+      const addArgs = getAddArgs();
+      expect(addArgs).toContain(':(exclude).serena');
+      expect(addArgs).toContain(':(exclude).roslyn-codelens');
+      expect(addArgs).toContain('.');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // mergeBranch — guard propagation
   // -------------------------------------------------------------------------
+
+  describe('restoreFromHead', () => {
+    /**
+     * Mock `git status --porcelain=v1 -z` with the supplied porcelain records.
+     * Each record is a literal `XY path` string (no NUL — we add the
+     * separator). All other git commands return success with empty output, so
+     * tests can assert what `restoreFromHead` does with the status output
+     * without wiring up every command individually.
+     */
+    function mockStatusPorcelain(records: string[]) {
+      const stdout = records.map((r) => `${r}\0`).join('');
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('status --porcelain=v1 -z')) {
+            cb(null, { stdout, stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+    }
+
+    it('restores the working tree when every change is an unstaged deletion', async () => {
+      mockStatusPorcelain([
+        ' D README.md',
+        ' D src/index.ts',
+        ' D docs/decisions/ADR-001-foo.md',
+      ]);
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(true);
+      expect(result.restoredCount).toBe(3);
+      expect(result.reason).toContain('3 deleted files');
+
+      // The actual restore: `git checkout -- .` must have been issued.
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      expect(calls).toContain('checkout -- .');
+    });
+
+    it('refuses when any modified files are present', async () => {
+      mockStatusPorcelain([' M src/touched.ts', ' D src/deleted.ts']);
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(false);
+      expect(result.restoredCount).toBe(0);
+      expect(result.reason).toMatch(/Refusing to restore/);
+
+      // Critical: must NOT have run checkout — that would silently lose the modification.
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      expect(calls).not.toContain('checkout -- .');
+    });
+
+    it('refuses when staged changes are present', async () => {
+      mockStatusPorcelain(['M  src/staged.ts']);
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(false);
+      expect(result.reason).toMatch(/Refusing to restore/);
+    });
+
+    it('refuses when untracked files are present', async () => {
+      mockStatusPorcelain(['?? new-file.txt', ' D src/deleted.ts']);
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(false);
+      expect(result.reason).toMatch(/Refusing to restore/);
+    });
+
+    it('reports a clean working tree as nothing to restore', async () => {
+      mockStatusPorcelain([]);
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(false);
+      expect(result.reason).toMatch(/clean/i);
+    });
+
+    it('handles a single-file deletion correctly (singular phrasing)', async () => {
+      mockStatusPorcelain([' D only-one.ts']);
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(true);
+      expect(result.restoredCount).toBe(1);
+      expect(result.reason).toContain('1 deleted file from HEAD');
+    });
+  });
 
   describe('mergeBranch deletion guard', () => {
     /**
