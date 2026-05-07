@@ -9,7 +9,7 @@ A living plan for the macOS desktop analytics rebuild. Each phase below is sized
 | 0 | Analytics shell | [`specs/analytics-shell/`](../specs/analytics-shell/) | Spec'd |
 | 1 | Cost drill-in | [`specs/analytics-cost/`](../specs/analytics-cost/) | Spec'd |
 | 2 | Lifecycle funnel + reliability | [`specs/analytics-reliability-funnel/`](../specs/analytics-reliability-funnel/) | Spec'd |
-| 3 | Quality drill-down | — | Pending |
+| 3 | Quality drill-down | [`specs/analytics-quality/`](../specs/analytics-quality/) | Spec'd |
 | 4 | Safety / Guardrails | — | Pending |
 | 5 | Throughput, heatmap, escalations | — | Pending |
 | 6 | Models leaderboard + what-if | — | Pending |
