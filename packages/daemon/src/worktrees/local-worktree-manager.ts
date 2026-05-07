@@ -811,9 +811,14 @@ export class LocalWorktreeManager implements WorktreeManager {
     const records = stdout.split('\0').filter((r) => r.length > 0);
 
     if (records.length === 0) {
+      // Clean tree means the worktree already matches HEAD — semantically
+      // "restored" (nothing to do, nothing wrong). Return success so the
+      // caller can clear worktreeCompromised. Refusing here would trap the
+      // pod in a state where the user can't get out of compromised after
+      // they manually committed/stashed dirty changes.
       return {
-        restored: false,
-        reason: 'Working tree is clean — nothing to restore from HEAD',
+        restored: true,
+        reason: 'Working tree already matches HEAD — no restore needed',
         restoredCount: 0,
       };
     }

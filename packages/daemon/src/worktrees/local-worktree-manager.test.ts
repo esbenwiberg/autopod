@@ -693,13 +693,16 @@ describe('LocalWorktreeManager', () => {
       expect(result.reason).toMatch(/Refusing to restore/);
     });
 
-    it('reports a clean working tree as nothing to restore', async () => {
+    it('treats a clean working tree as restored (nothing to do, no compromise)', async () => {
       mockStatusPorcelain([]);
 
       const result = await manager.restoreFromHead('/tmp/worktree/sess');
 
-      expect(result.restored).toBe(false);
-      expect(result.reason).toMatch(/clean/i);
+      // Clean tree = matches HEAD = caller can safely clear worktreeCompromised.
+      // Returning false here would trap users who manually fixed the dirty state.
+      expect(result.restored).toBe(true);
+      expect(result.restoredCount).toBe(0);
+      expect(result.reason).toMatch(/matches HEAD/i);
     });
 
     it('handles a single-file deletion correctly (singular phrasing)', async () => {
