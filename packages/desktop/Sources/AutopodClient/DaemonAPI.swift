@@ -269,6 +269,12 @@ public actor DaemonAPI {
     try await request("GET", "/pods/analytics/reliability", query: ["days": "\(days)"])
   }
 
+  /// GET /pods/analytics/quality — trailing-window quality score analytics with
+  /// histogram, reason breakdown, and full scores list.
+  public func getQualityAnalytics(days: Int = 30) async throws -> QualityAnalyticsResponse {
+    try await request("GET", "/pods/analytics/quality", query: ["days": "\(days)"])
+  }
+
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
     try await request("GET", "/pods/\(id)/diff")
   }

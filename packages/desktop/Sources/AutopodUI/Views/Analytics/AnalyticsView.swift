@@ -15,6 +15,8 @@ public struct AnalyticsView: View {
     public var loadCost: (() async throws -> CostAnalyticsResponse)?
     /// Fetches reliability analytics from the daemon for the Reliability card.
     public var loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
+    /// Fetches quality analytics from the daemon for the Quality card (sparkline, delta, sub-line).
+    public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
@@ -23,18 +25,22 @@ public struct AnalyticsView: View {
     @State private var costLoadError: String?
     @State private var reliabilityData: ReliabilityAnalyticsResponse?
     @State private var reliabilityLoadError: String?
+    @State private var qualityData: QualityAnalyticsResponse?
+    @State private var qualityLoadError: String?
 
     public init(
         pods: [Pod],
         loadScores: (() async throws -> [PodQualityScore])? = nil,
         loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
+        loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
         self.loadScores = loadScores
         self.loadCost = loadCost
         self.loadReliability = loadReliability
+        self.loadQualityAnalytics = loadQualityAnalytics
         self._selectedCard = selectedCard
     }
 
@@ -45,10 +51,30 @@ public struct AnalyticsView: View {
     }
 
     private var avgQualityValue: String {
+        if let q = qualityData { return "\(Int(q.summary.avgScore.rounded()))" }
+        if qualityLoadError != nil { return "Error" }
         if scoresLoadError != nil { return "Error" }
         guard !scores.isEmpty else { return "—" }
         let total = scores.reduce(0) { $0 + $1.score }
         return "\(Int((Double(total) / Double(scores.count)).rounded()))"
+    }
+
+    private var qualityCardSparkline: [Double]? {
+        qualityData.map { $0.sparkline.map(\.avgScore) }
+    }
+
+    private var qualityCardDelta: AnalyticsCardDelta? {
+        qualityData.map {
+            AnalyticsCardDelta(
+                value: String(format: "%+.0fpp", $0.summary.deltaVsPrior.value),
+                direction: AnalyticsCardDelta.Direction($0.summary.deltaVsPrior.direction)
+            )
+        }
+    }
+
+    private var qualityCardSubline: String? {
+        guard let q = qualityData, q.summary.redCount > 0 else { return nil }
+        return "\(q.summary.redCount) red pod\(q.summary.redCount == 1 ? "" : "s")"
     }
 
     private var costCardValue: String {
@@ -97,6 +123,9 @@ public struct AnalyticsView: View {
                     AnalyticsCard(
                         title: "Quality",
                         value: avgQualityValue,
+                        sparkline: qualityCardSparkline,
+                        delta: qualityCardDelta,
+                        subline: qualityCardSubline,
                         isSelected: selectedCard == .quality,
                         onClick: { selectedCard = selectedCard == .quality ? nil : .quality }
                     )
@@ -156,211 +185,21 @@ public struct AnalyticsView: View {
                     }
                 }
             }
+            let qualityTask = Task {
+                if let loadQualityAnalytics {
+                    do {
+                        qualityData = try await loadQualityAnalytics(30)
+                        qualityLoadError = nil
+                    } catch {
+                        qualityLoadError = error.localizedDescription
+                    }
+                }
+            }
             await scoreTask.value
             await costTask.value
             await reliabilityTask.value
+            await qualityTask.value
         }
-    }
-}
-
-// MARK: - QualityDrillView
-
-/// Runtime/model summary cards + sortable scores table — right-pane drill for the Quality card.
-struct QualityDrillView: View {
-    let pods: [Pod]
-    let loadScores: (() async throws -> [PodQualityScore])?
-    let onSelectPod: ((String) -> Void)?
-
-    @State private var scores: [PodQualityScore] = []
-    @State private var scoresLoadError: String? = nil
-    @State private var isLoadingScores: Bool = false
-    @State private var sortOrder: [KeyPathComparator<PodQualityScore>] = [
-        KeyPathComparator(\.computedAt, order: .reverse)
-    ]
-
-    private var runtimeModelStats: [RuntimeModelStat] {
-        let groups = Dictionary(grouping: scores) { score -> String in
-            "\(score.runtime)\u{0001}\(score.model ?? "—")"
-        }
-        return groups
-            .map { key, group -> RuntimeModelStat in
-                let parts = key.split(separator: "\u{0001}", maxSplits: 1).map(String.init)
-                let runtime = parts.first ?? "?"
-                let model = parts.count > 1 ? parts[1] : "—"
-                let total = group.reduce(0) { $0 + $1.score }
-                let avgScore = Double(total) / Double(group.count)
-                let avgCost = group.reduce(0.0) { $0 + $1.costUsd } / Double(group.count)
-                return RuntimeModelStat(
-                    runtime: runtime,
-                    model: model,
-                    count: group.count,
-                    avgScore: avgScore,
-                    avgCost: avgCost,
-                    dailyAverages: analyticsDailyAverages(for: group)
-                )
-            }
-            .sorted { $0.count > $1.count }
-    }
-
-    private var sortedScores: [PodQualityScore] { scores.sorted(using: sortOrder) }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "speedometer")
-                        .foregroundStyle(.secondary)
-                    Text("Session Quality")
-                        .font(.title3.weight(.semibold))
-                    Spacer()
-                    if isLoadingScores {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("\(scores.count) pod\(scores.count == 1 ? "" : "s")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let err = scoresLoadError {
-                    Text("Couldn't load scores: \(err)")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                } else if scores.isEmpty && !isLoadingScores {
-                    Text("No completed pods scored yet. Run a pod to completion and it'll show up here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 4)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(runtimeModelStats) { stat in
-                                runtimeModelCard(stat)
-                            }
-                        }
-                    }
-                    scoresTable
-                }
-            }
-            .padding(24)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .task { await fetchScores() }
-    }
-
-    private func fetchScores() async {
-        guard let loadScores else { return }
-        isLoadingScores = true
-        defer { isLoadingScores = false }
-        do {
-            scores = try await loadScores()
-            scoresLoadError = nil
-        } catch {
-            scoresLoadError = error.localizedDescription
-        }
-    }
-
-    private func runtimeModelCard(_ stat: RuntimeModelStat) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                Text(stat.runtime)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                Spacer()
-                Text("\(stat.count)")
-                    .font(.system(.caption, design: .monospaced).weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            Text(stat.model)
-                .font(.system(.caption, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("\(Int(stat.avgScore.rounded()))")
-                    .font(.system(.title2, design: .rounded).weight(.bold))
-                    .foregroundStyle(analyticsScoreColor(Int(stat.avgScore.rounded())))
-                    .monospacedDigit()
-                Text("avg")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            if stat.avgCost > 0 {
-                Text(String(format: "avg $%.2f", stat.avgCost))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-            if stat.dailyAverages.count >= 2 {
-                SparklineView(values: stat.dailyAverages, color: analyticsScoreColor(Int(stat.avgScore.rounded())))
-                    .frame(height: 24)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(10)
-        .frame(minWidth: 160, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var scoresTable: some View {
-        Table(sortedScores, sortOrder: $sortOrder) {
-            TableColumn("Score", value: \.score) { s in
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(analyticsScoreColor(s.score))
-                        .frame(width: 8, height: 8)
-                    Text("\(s.score)")
-                        .font(.system(.body, design: .monospaced).weight(.semibold))
-                        .monospacedDigit()
-                }
-            }
-            .width(min: 60, ideal: 70, max: 90)
-
-            TableColumn("Profile", value: \.profileName) { s in
-                Text(s.profileName).lineLimit(1)
-            }
-            .width(min: 110, ideal: 150)
-
-            TableColumn("Runtime", value: \.runtime) { s in
-                Text(s.runtime).font(.system(.body, design: .monospaced))
-            }
-            .width(min: 70, ideal: 80, max: 100)
-
-            TableColumn("Model") { (s: PodQualityScore) in
-                Text(s.model ?? "—")
-                    .font(.system(.caption, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .width(min: 120, ideal: 180)
-
-            TableColumn("Cost", value: \.costUsd) { s in
-                Text(String(format: "$%.2f", s.costUsd))
-                    .font(.system(.body, design: .monospaced).monospacedDigit())
-            }
-            .width(min: 60, ideal: 70, max: 90)
-
-            TableColumn("Completed", value: \.completedAt) { s in
-                Text(analyticsRelativeDate(s.completedAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 100, ideal: 140)
-
-            TableColumn("Pod") { (s: PodQualityScore) in
-                Button {
-                    onSelectPod?(s.podId)
-                } label: {
-                    Text(String(s.podId.suffix(8)))
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.blue)
-                }
-                .buttonStyle(.plain)
-                .help("Open pod \(s.podId)")
-            }
-            .width(min: 80, ideal: 100)
-        }
-        .frame(minHeight: 260)
     }
 }
 
@@ -462,6 +301,14 @@ extension AnalyticsCardDelta.Direction {
         case .flat: self = .flat
         }
     }
+
+    init(_ direction: QualityDelta.Direction) {
+        switch direction {
+        case .up:   self = .up
+        case .down: self = .down
+        case .flat: self = .flat
+        }
+    }
 }
 
 // MARK: - File-level helpers (shared by drill views)
@@ -501,7 +348,7 @@ private func analyticsStatusCounts(pods: [Pod]) -> [StatusCount] {
     }
 }
 
-private func analyticsScoreColor(_ score: Int) -> Color {
+func analyticsScoreColor(_ score: Int) -> Color {
     switch score {
     case 80...: return .green
     case 60..<80: return .yellow

@@ -43,6 +43,7 @@ public struct MainView: View {
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
     public var loadCostAnalytics: (() async throws -> CostAnalyticsResponse)?
     public var loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)?
+    public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
     /// Per-pod persisted quality scores keyed by pod id. Used to render the
     /// score pill on completed pod cards. Empty when scores haven't loaded yet.
     public var qualityScores: [String: PodQualityScore]
@@ -102,6 +103,7 @@ public struct MainView: View {
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
         loadCostAnalytics: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
+        loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         qualityScores: [String: PodQualityScore] = [:],
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
@@ -152,6 +154,7 @@ public struct MainView: View {
         self.loadQualityScores = loadQualityScores
         self.loadCostAnalytics = loadCostAnalytics
         self.loadReliabilityAnalytics = loadReliabilityAnalytics
+        self.loadQualityAnalytics = loadQualityAnalytics
         self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
@@ -227,7 +230,7 @@ public struct MainView: View {
         case .workspaces:            pods.filter { $0.isWorkspace }
         case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:                   pods
-        case .analyticsSection:      []
+        case .analytics:             []
         case .history:               []
         case .memory:                []
         case .scheduledJobs:         []
@@ -264,27 +267,16 @@ public struct MainView: View {
                 onShowSettings: onShowSettings
             )
         } content: {
-            if case .analyticsSection(let section) = sidebarSelection {
-                if section == .overview {
-                    AnalyticsView(
-                        pods: pods,
-                        loadScores: loadQualityScores,
-                        loadCost: loadCostAnalytics,
-                        loadReliability: loadReliabilityAnalytics,
-                        selectedCard: $selectedAnalyticsCard
-                    )
-                    .frame(minWidth: 600)
-                } else {
-                    VStack(spacing: 8) {
-                        Image(systemName: section.icon)
-                            .font(.system(size: 36))
-                            .foregroundStyle(.tertiary)
-                        Text("\(section.label) analytics \u{2014} ships in Phase \(section.phaseNumber)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+            if sidebarSelection == .analytics {
+                AnalyticsView(
+                    pods: pods,
+                    loadScores: loadQualityScores,
+                    loadCost: loadCostAnalytics,
+                    loadReliability: loadReliabilityAnalytics,
+                    loadQualityAnalytics: loadQualityAnalytics,
+                    selectedCard: $selectedAnalyticsCard
+                )
+                .frame(minWidth: 600)
             } else if sidebarSelection == .history {
                 HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames)
                     .frame(minWidth: 600)
@@ -362,18 +354,26 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if case .analyticsSection = sidebarSelection {
+            if sidebarSelection == .analytics {
                 AnalyticsRightPaneView(
                     card: selectedAnalyticsCard,
                     pods: pods,
                     loadScores: loadQualityScores,
                     loadCost: loadCostAnalytics,
                     loadReliability: loadReliabilityAnalytics,
+                    loadQuality: loadQualityAnalytics,
                     onSelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)
                         selectedAnalyticsCard = result.card
                         sidebarSelection = result.sidebar
                         selectedSessionId = result.session
+                    },
+                    onQualitySelectPod: { sessionId in
+                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                        selectedAnalyticsCard = result.card
+                        sidebarSelection = result.sidebar
+                        selectedSessionId = result.session
+                        requestedDetailTab = .summary
                     }
                 )
             } else if sidebarSelection == .salesPitch {

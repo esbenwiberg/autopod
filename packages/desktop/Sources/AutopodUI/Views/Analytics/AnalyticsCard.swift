@@ -46,6 +46,8 @@ public struct AnalyticsCard: View {
     public let sparkline: [Double]?
     /// When non-nil, renders a direction arrow + value string. `nil` hides it.
     public let delta: AnalyticsCardDelta?
+    /// Optional secondary label rendered below the delta line (e.g. "3 red pods").
+    public let subline: String?
     public let isSelected: Bool
     public let onClick: () -> Void
 
@@ -54,6 +56,7 @@ public struct AnalyticsCard: View {
         value: String,
         sparkline: [Double]? = nil,
         delta: AnalyticsCardDelta? = nil,
+        subline: String? = nil,
         isSelected: Bool = false,
         onClick: @escaping () -> Void
     ) {
@@ -61,6 +64,7 @@ public struct AnalyticsCard: View {
         self.value = value
         self.sparkline = sparkline
         self.delta = delta
+        self.subline = subline
         self.isSelected = isSelected
         self.onClick = onClick
     }
@@ -89,6 +93,12 @@ public struct AnalyticsCard: View {
                     }
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(delta.direction.color)
+                }
+
+                if let subline {
+                    Text(subline)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(16)

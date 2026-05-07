@@ -20,6 +20,7 @@ import {
   createPodRepository,
 } from '../../pods/index.js';
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
+import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { createProfileStore } from '../../profiles/index.js';
 
 // ── DB setup (mirrors routes-extended.test.ts pattern) ────────────────────────
@@ -355,5 +356,245 @@ describe('GET /pods/analytics/reliability', () => {
     const body = res.json();
     expect(body.summary.totalPodsInWindow).toBe(1);
     expect(body.firstPassRate).toBe(1);
+  });
+});
+
+// ── GET /pods/analytics/quality ───────────────────────────────────────────────
+
+describe('GET /pods/analytics/quality', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+  let qualityRepo: ReturnType<typeof createQualityScoreRepository>;
+
+  beforeEach(async () => {
+    podSeq = 0;
+    db = createTestDb();
+    db.pragma('foreign_keys = OFF');
+    qualityRepo = createQualityScoreRepository(db);
+
+    const profileStore = createProfileStore(db);
+    const podRepo = createPodRepository(db);
+    const eventRepo = createEventRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    const nudgeRepo = createNudgeRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const authModule = createMockAuthModule();
+
+    const worktreeManager = {
+      create: vi.fn(),
+      cleanup: vi.fn(),
+      getDiffStats: vi.fn(),
+      getDiff: vi.fn(),
+      mergeBranch: vi.fn(),
+      commitFiles: vi.fn(),
+      pushBranch: vi.fn(),
+      getCommitLog: vi.fn(),
+    };
+
+    const runtimeRegistry = {
+      get: vi.fn().mockReturnValue({
+        type: 'claude' as const,
+        spawn: vi.fn().mockReturnValue(
+          (async function* () {
+            yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'done' };
+          })(),
+        ),
+        resume: vi.fn(),
+        abort: vi.fn(),
+        suspend: vi.fn(),
+      }),
+    };
+
+    const validationEngine = {
+      validate: vi.fn().mockResolvedValue({
+        podId: 'x',
+        attempt: 0,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'pass',
+          build: { status: 'pass', output: '', duration: 100 },
+          health: { status: 'pass', url: 'http://localhost/', responseCode: 200, duration: 50 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'pass',
+        duration: 200,
+      }),
+    };
+
+    // biome-ignore lint/style/useConst: circular dependency break
+    let podManager: ReturnType<typeof createPodManager>;
+
+    const podQueue = createPodQueue(
+      1,
+      async (podId) => podManager.processPod(podId),
+      logger,
+    );
+
+    podManager = createPodManager({
+      podRepo,
+      escalationRepo,
+      nudgeRepo,
+      profileStore,
+      eventBus,
+      containerManagerFactory: {
+        get: vi.fn(() => ({
+          spawn: vi.fn().mockResolvedValue('c-1'),
+          kill: vi.fn(),
+          stop: vi.fn(),
+          start: vi.fn(),
+          refreshFirewall: vi.fn(),
+          writeFile: vi.fn(),
+          readFile: vi.fn(),
+          getStatus: vi.fn().mockResolvedValue('running' as const),
+          execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+          execStreaming: vi.fn(),
+        })),
+      },
+      worktreeManager,
+      runtimeRegistry,
+      validationEngine,
+      enqueueSession: (id) => podQueue.enqueue(id),
+      mcpBaseUrl: 'http://localhost:3100',
+      daemonConfig: { mcpServers: [], claudeMdSections: [] },
+      logger,
+    });
+
+    const podBridge = {
+      createEscalation: vi.fn(),
+      resolveEscalation: vi.fn(),
+      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getMaxAiCalls: vi.fn().mockReturnValue(5),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
+      getReviewerModel: vi.fn().mockReturnValue('sonnet'),
+      callReviewerModel: vi.fn().mockResolvedValue('ok'),
+      incrementEscalationCount: vi.fn(),
+      reportPlan: vi.fn(),
+      reportProgress: vi.fn(),
+      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      executeAction: vi.fn(),
+      getAvailableActions: vi.fn().mockReturnValue([]),
+      writeFileInContainer: vi.fn(),
+      execInContainer: vi.fn(),
+    };
+
+    app = await createServer({
+      authModule,
+      podManager,
+      profileStore,
+      eventBus,
+      eventRepo,
+      podBridge,
+      pendingRequestsByPod: new Map(),
+      db,
+      qualityScoreRepo: qualityRepo,
+      logLevel: 'silent',
+      prettyLog: false,
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('returns 200 with correct top-level shape', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/quality?days=30',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(typeof body.summary.totalPodsScored).toBe('number');
+    expect(Array.isArray(body.sparkline)).toBe(true);
+    expect(body.distribution).toHaveLength(10);
+    expect(typeof body.reasons.lowReadEditRatio).toBe('number');
+    expect(typeof body.reasons.editsWithoutPriorRead).toBe('number');
+    expect(typeof body.reasons.userInterrupts).toBe('number');
+    expect(typeof body.reasons.validationFailed).toBe('number');
+    expect(typeof body.reasons.prFixAttempts).toBe('number');
+    expect(typeof body.reasons.editChurn).toBe('number');
+    expect(typeof body.reasons.tells).toBe('number');
+    expect(Array.isArray(body.scores)).toBe(true);
+  });
+
+  it('missing days defaults to 30 sparkline entries', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/quality',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().sparkline).toHaveLength(30);
+  });
+
+  it('days=0 returns 400', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/quality?days=0',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toHaveProperty('error');
+  });
+
+  it('days=400 returns 400 (exceeds max of 365)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/quality?days=400',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toHaveProperty('error');
+  });
+
+  it('days=30 returns 200', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/quality?days=30',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('seeded pod appears in response scores and updates summary counts', async () => {
+    qualityRepo.insert({
+      podId: 'q1',
+      score: 85,
+      readCount: 10,
+      editCount: 5,
+      readEditRatio: 2,
+      editsWithoutPriorRead: 0,
+      userInterrupts: 0,
+      editChurnCount: 0,
+      tellsCount: 0,
+      prFixAttempts: 0,
+      validationPassed: true,
+      inputTokens: 1000,
+      outputTokens: 500,
+      costUsd: 0.1,
+      runtime: 'claude',
+      profileName: 'test-profile',
+      model: 'claude-opus-4-7',
+      finalStatus: 'complete',
+      completedAt: new Date().toISOString(),
+      computedAt: new Date().toISOString(),
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/quality?days=30',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.summary.totalPodsScored).toBe(1);
+    expect(body.summary.greenCount).toBe(1);
+    expect(body.scores).toHaveLength(1);
+    expect(body.scores[0].podId).toBe('q1');
   });
 });
