@@ -102,10 +102,7 @@ public struct SidebarView: View {
                 }
 
                 Section("Analytics") {
-                    ForEach(AnalyticsSection.allCases, id: \.self) { section in
-                        analyticsSectionRow(section)
-                            .disabled(!section.isShipped)
-                    }
+                    sidebarRow(.analytics, icon: "square.grid.2x2", color: .secondary, badge: 0)
                 }
 
                 Section("Profiles") {
@@ -207,17 +204,6 @@ public struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
-    private func analyticsSectionRow(_ section: AnalyticsSection) -> some View {
-        Label {
-            Text(section.label)
-                .foregroundStyle(section.isShipped ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-        } icon: {
-            Image(systemName: section.icon)
-                .foregroundStyle(section.isShipped ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-        }
-        .tag(SidebarItem.analyticsSection(section))
-    }
-
     private func sidebarRow(_ item: SidebarItem, icon: String, color: Color, badge: Int) -> some View {
         Label {
             HStack {
@@ -253,7 +239,7 @@ public enum SidebarItem: Hashable {
     case seriesAll
     case completed
     case all
-    case analyticsSection(AnalyticsSection)
+    case analytics
     case history
     case memory
     case profile(String)
@@ -273,7 +259,7 @@ public enum SidebarItem: Hashable {
         case .seriesAll: "Series"
         case .completed: "Completed"
         case .all: "All Pods"
-        case .analyticsSection(let s): s.label
+        case .analytics: "Analytics"
         case .history: "History"
         case .memory: "Memory"
         case .profile(let name): name

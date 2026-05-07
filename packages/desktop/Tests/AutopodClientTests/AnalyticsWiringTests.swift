@@ -52,6 +52,14 @@ import Testing
     #expect(card == .cost)
 }
 
+// MARK: - filterPods for analytics
+
+@Test func filterPodsReturnsEmptyForAnalytics() {
+    let pods: [Pod] = []
+    let result = MainView.filterPods(pods, for: .analytics)
+    #expect(result.isEmpty)
+}
+
 // MARK: - onSelectPod handler
 
 @Test func analyticsSelectPodClearsCardAndNavigates() {

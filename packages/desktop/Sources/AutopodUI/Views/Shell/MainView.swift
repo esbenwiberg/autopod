@@ -227,7 +227,7 @@ public struct MainView: View {
         case .workspaces:            pods.filter { $0.isWorkspace }
         case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:                   pods
-        case .analyticsSection:      []
+        case .analytics:             []
         case .history:               []
         case .memory:                []
         case .scheduledJobs:         []
@@ -264,27 +264,15 @@ public struct MainView: View {
                 onShowSettings: onShowSettings
             )
         } content: {
-            if case .analyticsSection(let section) = sidebarSelection {
-                if section == .overview {
-                    AnalyticsView(
-                        pods: pods,
-                        loadScores: loadQualityScores,
-                        loadCost: loadCostAnalytics,
-                        loadReliability: loadReliabilityAnalytics,
-                        selectedCard: $selectedAnalyticsCard
-                    )
-                    .frame(minWidth: 600)
-                } else {
-                    VStack(spacing: 8) {
-                        Image(systemName: section.icon)
-                            .font(.system(size: 36))
-                            .foregroundStyle(.tertiary)
-                        Text("\(section.label) analytics \u{2014} ships in Phase \(section.phaseNumber)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+            if sidebarSelection == .analytics {
+                AnalyticsView(
+                    pods: pods,
+                    loadScores: loadQualityScores,
+                    loadCost: loadCostAnalytics,
+                    loadReliability: loadReliabilityAnalytics,
+                    selectedCard: $selectedAnalyticsCard
+                )
+                .frame(minWidth: 600)
             } else if sidebarSelection == .history {
                 HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames)
                     .frame(minWidth: 600)
@@ -362,7 +350,7 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if case .analyticsSection = sidebarSelection {
+            if sidebarSelection == .analytics {
                 AnalyticsRightPaneView(
                     card: selectedAnalyticsCard,
                     pods: pods,
