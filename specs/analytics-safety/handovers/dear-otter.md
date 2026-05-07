@@ -7,7 +7,7 @@ Three instrumentation sites + one type-safe column snapshot.
 ### 1. `section-resolver.ts` — CLAUDE.md section safety events
 At the `processContent` call on fetched section content, writes per-pattern `safety_events` rows:
 - Injection threats (`processed.threats`) → `kind='injection'`, `source='claude_md_section'`, `severity` from `ThreatIndicator`
-- PII-only (`processed.sanitized && processed.threats.length === 0`) → `kind='pii'`, `source='claude_md_section'`, `severity=null`, patterns from `collectPiiPatternNames(rawText)` (pre-sanitize)
+- PII (`processed.sanitized`) → `kind='pii'`, `source='claude_md_section'`, `severity=null`, patterns from `collectPiiPatternNames(rawText)` (pre-sanitize). Written alongside injection rows when content triggers both kinds — no `threats.length === 0` guard.
 - `payload_excerpt` = first 256 chars of post-sanitize text, or `null` if empty
 - Non-fatal: `repo.insert` throws → warn + continue; sanitized content still flows through
 - `podId` required to write; if missing, writes are skipped entirely
@@ -16,7 +16,7 @@ At the `processContent` call on fetched section content, writes per-pattern `saf
 `ResolveSectionsOptions` now carries `safetyEventsRepo?: SafetyEventsRepository` and `podId?: string`. The function signature is backward-compatible (all new fields optional).
 
 ### 2. `skill-resolver.ts` — skill content safety events
-`sanitizeSkillContent` went from 1 parameter to 5: `(content, skillName, podId, safetyEventsRepo, logger)`. Same injection/PII fanout as section-resolver, `source='skill_content'`. Pod_id threaded from `resolveSkills(skills, logger, podId?, safetyEventsRepo?)` → `resolveOne` → `resolveLocal` / `resolveGithub` → `sanitizeSkillContent`.
+`sanitizeSkillContent` went from 1 parameter to 5: `(content, skillName, podId, safetyEventsRepo, logger)`. Same injection/PII fanout as section-resolver, `source='skill_content'`. PII rows are written alongside injection rows when content triggers both kinds (no `threats.length === 0` guard). Pod_id threaded from `resolveSkills(skills, logger, podId?, safetyEventsRepo?)` → `resolveOne` → `resolveLocal` / `resolveGithub` → `sanitizeSkillContent`.
 
 Guard: `podId ? safetyEventsRepo : undefined` — if no pod_id, repo is not passed to `sanitizeSkillContent`, preventing NULL-attributed rows from these sites. Skills that fail to fetch never reach `sanitizeSkillContent`, so no safety rows for timeout/error paths.
 

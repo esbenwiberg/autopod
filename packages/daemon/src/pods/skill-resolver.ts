@@ -89,8 +89,8 @@ function sanitizeSkillContent(
           payloadExcerpt: excerpt,
         });
       }
-      if (result.sanitized && result.threats.length === 0) {
-        // PII-only: collect patterns from raw pre-sanitize text
+      if (result.sanitized) {
+        // PII: collect patterns from raw pre-sanitize text (written alongside any injection rows)
         for (const name of collectPiiPatternNames(content)) {
           safetyEventsRepo.insert({
             podId,

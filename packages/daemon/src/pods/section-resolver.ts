@@ -107,8 +107,8 @@ async function resolveOne(
                 payloadExcerpt: excerpt,
               });
             }
-            if (processed.sanitized && processed.threats.length === 0) {
-              // PII-only: collect patterns from raw pre-sanitize text
+            if (processed.sanitized) {
+              // PII: collect patterns from raw pre-sanitize text (written alongside any injection rows)
               for (const name of collectPiiPatternNames(rawText)) {
                 repo.insert({
                   podId,
