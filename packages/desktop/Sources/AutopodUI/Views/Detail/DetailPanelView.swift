@@ -105,6 +105,16 @@ public struct DetailPanelView: View {
             // Pod header
             detailHeader
 
+            // Worktree-compromised banner sits outside the header so its
+            // multi-line text can't deform the header HStack's layout — the
+            // failed-pod action row is already wide and the combination used
+            // to clip the header to zero height in narrow detail columns.
+            if pod.worktreeCompromised {
+                worktreeCompromisedBanner
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
+
             // Tab bar
             tabBar
 
@@ -195,41 +205,26 @@ public struct DetailPanelView: View {
 
     private var detailHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                StatusDot(status: pod.status)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(pod.id)
-                            .font(.system(.title3, design: .monospaced).weight(.semibold))
-                            .foregroundStyle(pod.status == .complete ? .green : pod.status == .killed ? .red.opacity(0.6) : .primary)
-                            .lineLimit(1)
-                        Image(systemName: didCopyName ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 10))
-                            .foregroundStyle(didCopyName ? Color.green : Color.secondary.opacity(0.6))
-                            .transition(.opacity)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { copyPodName() }
-                    .help(didCopyName ? "Copied!" : "Click to copy name")
-                    HStack(spacing: 6) {
-                        Text(pod.profileName)
-                            .lineLimit(1)
-                        Text("·")
-                            .foregroundStyle(.quaternary)
-                        Text(pod.model)
-                            .lineLimit(1)
-                        Text("·")
-                            .foregroundStyle(.quaternary)
-                        Text(pod.duration)
-                            .contentTransition(.numericText())
-                            .lineLimit(1)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            // Pick whichever fits horizontally — wide single row, else wrap
+            // the action buttons onto a second (scrollable) row so they can't
+            // squeeze the identity column to zero or push the header off
+            // screen when there are many actions (failed pods can show 6+).
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    podIdentity
+                    Spacer(minLength: 8)
+                    headerActions
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                headerActions
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        podIdentity
+                        Spacer(minLength: 0)
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        headerActions
+                    }
+                }
             }
 
             if !pod.task.isEmpty {
@@ -244,15 +239,48 @@ public struct DetailPanelView: View {
                     .onTapGesture { isTaskExpanded.toggle() }
                     .help("Click to \(isTaskExpanded ? "collapse" : "expand") task")
             }
-
-            if pod.worktreeCompromised {
-                worktreeCompromisedBanner
-                    .padding(.top, 10)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var podIdentity: some View {
+        HStack(spacing: 10) {
+            StatusDot(status: pod.status)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(pod.id)
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(pod.status == .complete ? .green : pod.status == .killed ? .red.opacity(0.6) : .primary)
+                        .lineLimit(1)
+                    Image(systemName: didCopyName ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundStyle(didCopyName ? Color.green : Color.secondary.opacity(0.6))
+                        .transition(.opacity)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { copyPodName() }
+                .help(didCopyName ? "Copied!" : "Click to copy name")
+                HStack(spacing: 6) {
+                    Text(pod.profileName)
+                        .lineLimit(1)
+                    Text("·")
+                        .foregroundStyle(.quaternary)
+                    Text(pod.model)
+                        .lineLimit(1)
+                    Text("·")
+                        .foregroundStyle(.quaternary)
+                    Text(pod.duration)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
+        }
     }
 
     private var worktreeCompromisedBanner: some View {
