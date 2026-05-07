@@ -7664,9 +7664,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async forceApprove(podId: string, reason?: string): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'failed' && pod.status !== 'review_required') {
+      const allowed =
+        pod.status === 'failed' ||
+        pod.status === 'review_required' ||
+        pod.status === 'awaiting_input';
+      if (!allowed) {
         throw new AutopodError(
-          `Cannot force-approve pod ${podId} in status ${pod.status} — only failed or review_required pods`,
+          `Cannot force-approve pod ${podId} in status ${pod.status} — only failed, review_required, or awaiting_input pods`,
           'INVALID_STATE',
           409,
         );
@@ -7675,9 +7679,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ? `[FORCE APPROVED] ${reason}`
         : '[FORCE APPROVED] Human overrode validation — no further agent run needed';
       podRepo.update(podId, { lastCorrectionMessage: note });
-      transition(pod, 'validated');
+
+      // Resolve any pending escalation so it doesn't dangle in the audit trail
+      // and pendingEscalation gets cleared on the transition.
+      const updates: Partial<Pod> = {};
+      if (pod.pendingEscalation) {
+        escalationRepo.update(pod.pendingEscalation.id, {
+          respondedAt: new Date().toISOString(),
+          respondedBy: 'human',
+          response: `[force-approve] ${reason ?? 'human override'}`,
+        });
+        updates.pendingEscalation = null;
+      }
+      const approvedPod = transition(pod, 'validated', updates);
       emitActivityStatus(podId, 'Force approved — validation bypassed by human');
       logger.info({ podId, reason }, 'Pod force-approved, transitioning to validated');
+      maybeTriggerDependents(approvedPod);
     },
 
     async extendPrAttempts(podId: string, additionalAttempts: number): Promise<void> {
@@ -7724,13 +7741,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     setSkipValidation(podId: string, skip: boolean): void {
-      podRepo.getOrThrow(podId);
+      const pod = podRepo.getOrThrow(podId);
       podRepo.update(podId, { skipValidation: skip });
       const msg = skip
         ? 'Skip-validation toggled on — next validation result will be bypassed'
         : 'Skip-validation toggled off — validation will run normally';
       emitActivityStatus(podId, msg);
       logger.info({ podId, skip }, 'skip_validation updated by user');
+
+      // Pods parked in awaiting_input on a validation_override escalation never
+      // re-enter the validation flow on their own — the flag alone leaves them
+      // hung. Treat skip=true as "I don't care about validation, just approve":
+      // resolve the escalation and transition straight to validated.
+      if (
+        skip &&
+        pod.status === 'awaiting_input' &&
+        pod.pendingEscalation?.type === 'validation_override'
+      ) {
+        const escalationId = pod.pendingEscalation.id;
+        escalationRepo.update(escalationId, {
+          respondedAt: new Date().toISOString(),
+          respondedBy: 'human',
+          response: '[skip-validation] dismissed by human',
+        });
+        const updated = transition(pod, 'validated', { pendingEscalation: null });
+        emitActivityStatus(podId, 'Validation skipped — recurring findings dismissed by human');
+        logger.info(
+          { podId, escalationId },
+          'skip_validation resolved validation_override escalation',
+        );
+        maybeTriggerDependents(updated);
+      }
     },
 
     async refreshNetworkPolicy(profileName: string): Promise<void> {

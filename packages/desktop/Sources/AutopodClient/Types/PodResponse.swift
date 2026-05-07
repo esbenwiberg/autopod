@@ -224,6 +224,10 @@ public struct EscalationPayload: Codable, Sendable {
   // Action approval fields
   public let actionName: String?
   public let params: [String: AnyCodable]?
+  // Validation override fields (when escalation type == "validation_override")
+  public let findings: [ValidationFindingResponse]?
+  public let attempt: Int?
+  public let maxAttempts: Int?
 }
 
 public struct EscalationReply: Codable, Sendable {

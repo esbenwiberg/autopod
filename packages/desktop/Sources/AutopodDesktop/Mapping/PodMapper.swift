@@ -71,6 +71,25 @@ public enum PodMapper {
         }
         return "Approve action: \(actionName)"
       }
+      // validation_override: payload has findings/attempt/maxAttempts but no
+      // question/description — synthesise one so the input card renders. Without
+      // this the pod sits in awaiting_input with no UI to respond.
+      if esc.type == "validation_override" {
+        let findings = esc.payload.findings ?? []
+        let header: String = {
+          if let attempt = esc.payload.attempt, let max = esc.payload.maxAttempts {
+            return "Validation found \(findings.count) recurring finding(s) after \(attempt)/\(max) attempts."
+          }
+          return "Validation found \(findings.count) recurring finding(s)."
+        }()
+        let body = findings.isEmpty
+          ? ""
+          : "\n\n" + findings.enumerated()
+              .map { "\($0.offset + 1). \($0.element.description)" }
+              .joined(separator: "\n")
+        let hint = "\n\nReply `dismiss` to override all, `dismiss 1,3` for specific items, or any other text as guidance for the agent."
+        return header + body + hint
+      }
       return esc.payload.question ?? esc.payload.description
     }()
     let escalationOptions: [String]? = {

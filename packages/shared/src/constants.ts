@@ -41,7 +41,10 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   // post-validation push failed on missing/invalid credentials — once the
   // operator updates the profile PAT, the daemon retries the push from the
   // validating state without re-running the agent.
-  awaiting_input: ['running', 'validating', 'killing', 'failed'],
+  // `validated` is the human-override path: setSkipValidation/forceApprove on
+  // a pod parked here (e.g. on a validation_override escalation) jumps straight
+  // to validated without re-running the agent or validation.
+  awaiting_input: ['running', 'validating', 'validated', 'killing', 'failed'],
   paused: ['running', 'killing', 'failed'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
   validated: ['approved', 'running', 'validating', 'killing', 'queued'],
