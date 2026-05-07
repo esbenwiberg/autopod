@@ -13,6 +13,7 @@ public struct AnalyticsRightPaneView: View {
     public let loadScores: (() async throws -> [PodQualityScore])?
     public let loadCost: (() async throws -> CostAnalyticsResponse)?
     public let loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
+    public let loadQuality: ((Int) async throws -> QualityAnalyticsResponse)?
     public let onSelectPod: ((String) -> Void)?
 
     public init(
@@ -21,6 +22,7 @@ public struct AnalyticsRightPaneView: View {
         loadScores: (() async throws -> [PodQualityScore])? = nil,
         loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
+        loadQuality: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         onSelectPod: ((String) -> Void)? = nil
     ) {
         self.card = card
@@ -28,6 +30,7 @@ public struct AnalyticsRightPaneView: View {
         self.loadScores = loadScores
         self.loadCost = loadCost
         self.loadReliability = loadReliability
+        self.loadQuality = loadQuality
         self.onSelectPod = onSelectPod
     }
 
@@ -36,7 +39,20 @@ public struct AnalyticsRightPaneView: View {
         case .cost:
             CostDrillView(loadCost: loadCost, onSelectPod: onSelectPod)
         case .quality:
-            QualityDrillView(pods: pods, loadScores: loadScores, onSelectPod: onSelectPod)
+            if let loadQuality {
+                QualityDrillView(load: loadQuality, onSelectPod: onSelectPod)
+            } else {
+                VStack(spacing: 8) {
+                    Spacer()
+                    Image(systemName: "speedometer")
+                        .font(.system(size: 48, weight: .thin))
+                        .foregroundStyle(.tertiary)
+                    Text("Quality analytics not available")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         case .status:
             StatusDrillView(pods: pods)
         case .reliability:

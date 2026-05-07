@@ -43,6 +43,7 @@ public struct MainView: View {
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
     public var loadCostAnalytics: (() async throws -> CostAnalyticsResponse)?
     public var loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)?
+    public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
     /// Per-pod persisted quality scores keyed by pod id. Used to render the
     /// score pill on completed pod cards. Empty when scores haven't loaded yet.
     public var qualityScores: [String: PodQualityScore]
@@ -102,6 +103,7 @@ public struct MainView: View {
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
         loadCostAnalytics: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
+        loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         qualityScores: [String: PodQualityScore] = [:],
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
@@ -152,6 +154,7 @@ public struct MainView: View {
         self.loadQualityScores = loadQualityScores
         self.loadCostAnalytics = loadCostAnalytics
         self.loadReliabilityAnalytics = loadReliabilityAnalytics
+        self.loadQualityAnalytics = loadQualityAnalytics
         self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
@@ -270,6 +273,7 @@ public struct MainView: View {
                     loadScores: loadQualityScores,
                     loadCost: loadCostAnalytics,
                     loadReliability: loadReliabilityAnalytics,
+                    loadQualityAnalytics: loadQualityAnalytics,
                     selectedCard: $selectedAnalyticsCard
                 )
                 .frame(minWidth: 600)
@@ -357,11 +361,13 @@ public struct MainView: View {
                     loadScores: loadQualityScores,
                     loadCost: loadCostAnalytics,
                     loadReliability: loadReliabilityAnalytics,
+                    loadQuality: loadQualityAnalytics,
                     onSelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)
                         selectedAnalyticsCard = result.card
                         sidebarSelection = result.sidebar
                         selectedSessionId = result.session
+                        requestedDetailTab = .summary
                     }
                 )
             } else if sidebarSelection == .salesPitch {
