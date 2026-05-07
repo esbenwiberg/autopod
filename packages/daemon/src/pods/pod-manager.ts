@@ -86,6 +86,7 @@ import { buildGitHubImageUrl, collectScreenshots } from '../validation/screensho
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { readAcFile } from './ac-file-parser.js';
+import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -3474,6 +3475,55 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               },
               'git clean -fd failed in /workspace — image-baked untracked files may leak into the worktree',
             );
+          }
+
+          // Hide daemon-injected code-intel state (`.serena/`, `.roslyn-codelens/`, …)
+          // from the agent's `git add -A`. The system instructions tell the agent to run
+          // `git add -A && git commit` for normal commits — without this, those caches get
+          // swept into the feature branch on pod A, then pod B's fresh container has no
+          // such files, and host-side `git add -A` perceives the absence as a mass-deletion
+          // and trips DeletionGuardError. We've seen this fire repeatedly in practice.
+          //
+          // Two-step protection inside the container:
+          //   1. Add the paths to `.git/info/exclude` (repo-local, never tracked).
+          //   2. `git rm --cached -r --ignore-unmatch` to detrack any entries a previous
+          //      pod already committed (idempotent; no-op when nothing is tracked).
+          // The .git/info/exclude write is idempotent via a `grep -qF` guard so re-runs
+          // don't duplicate lines.
+          const cachePaths = agentToolingCachePaths(profile.codeIntelligence);
+          if (cachePaths.length > 0) {
+            const marker = '# autopod: code-intel cache exclusions';
+            const excludeLines = [marker, ...cachePaths.map((p) => `/${p}/`)].join('\n');
+            const detrackArgs = cachePaths.flatMap((p) => [p]);
+            const script = [
+              'set -e',
+              'mkdir -p /workspace/.git/info',
+              'touch /workspace/.git/info/exclude',
+              `if ! grep -qF ${shellQuote(marker)} /workspace/.git/info/exclude; then`,
+              `  printf '\\n%s\\n' ${shellQuote(excludeLines)} >> /workspace/.git/info/exclude`,
+              'fi',
+              `git -C /workspace rm --cached -r --ignore-unmatch -- ${detrackArgs
+                .map(shellQuote)
+                .join(' ')} >/dev/null 2>&1 || true`,
+            ].join('\n');
+            const cacheGuard = await containerManager.execInContainer(
+              containerId,
+              ['sh', '-c', script],
+              { timeout: 10_000 },
+            );
+            if (cacheGuard.exitCode !== 0) {
+              // Non-fatal: worst case is the historical deletion-guard loop returns. Log
+              // loudly so we can correlate if it ever fires after this lands.
+              logger.warn(
+                {
+                  podId,
+                  exitCode: cacheGuard.exitCode,
+                  stderr: cacheGuard.stderr.slice(0, 500),
+                  cachePaths,
+                },
+                'Failed to install code-intel cache exclusions in /workspace/.git/info/exclude',
+              );
+            }
           }
         }
 

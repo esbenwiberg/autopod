@@ -36,6 +36,23 @@ export interface MergeBranchConfig {
   podModel?: string;
 }
 
+/** Options shared by both auto-commit entry points on `WorktreeManager`. */
+export interface CommitPendingChangesOptions {
+  /**
+   * Maximum number of files that may be staged for deletion. Defaults to 100.
+   * Pass 0 when the worktree may be out of sync with the container so a ghost
+   * mass-deletion does not get committed over real work.
+   */
+  maxDeletions?: number;
+  /**
+   * Pathspec exclusions applied to `git add -A`. Each entry is a path relative
+   * to the worktree root (no `:!` prefix needed — the implementation wraps it).
+   * Used to keep daemon-injected code-intel state (`.serena`, `.roslyn-codelens`,
+   * etc.) out of agent commits — see `agent-tooling-cache-paths.ts` for why.
+   */
+  excludePaths?: readonly string[];
+}
+
 export interface DiffStats {
   filesChanged: number;
   linesAdded: number;
@@ -89,7 +106,7 @@ export interface WorktreeManager {
   commitPendingChanges(
     worktreePath: string,
     message: string,
-    options?: { maxDeletions?: number },
+    options?: CommitPendingChangesOptions,
   ): Promise<boolean>;
   /**
    * Stage all changes and commit using a message generated from the staged
@@ -103,7 +120,7 @@ export interface WorktreeManager {
     podTask: string | undefined,
     profile: import('@autopod/shared').Profile,
     podModel: string,
-    options?: { maxDeletions?: number },
+    options?: CommitPendingChangesOptions,
   ): Promise<boolean>;
   /** Push the current branch to origin. Verifies HEAD is on `expectedBranch` before pushing. */
   pushBranch(

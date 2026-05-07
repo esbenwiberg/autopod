@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import type { Logger } from 'pino';
 import type {
   BranchFolderContents,
+  CommitPendingChangesOptions,
   DiffStats,
   MergeBranchConfig,
   RebaseOntoBaseConfig,
@@ -14,6 +15,7 @@ import type {
   WorktreeManager,
   WorktreeResult,
 } from '../interfaces/worktree-manager.js';
+import { agentToolingCachePaths } from '../pods/agent-tooling-cache-paths.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
 import { generateAutoCommitMessage } from './auto-commit-message.js';
 import {
@@ -592,9 +594,15 @@ export class LocalWorktreeManager implements WorktreeManager {
     // Commit any uncommitted work (with deletion guard). Callers that know the worktree may be
     // out of sync with the container should pass `maxDeletions: 0` so a ghost mass-deletion
     // cannot be committed over the agent's real work.
+    //
+    // Daemon-injected code-intel servers (serena, roslyn-codelens) write per-project state
+    // into /workspace at runtime. Excluding those paths here keeps the auto-commit immune to
+    // tracked-then-missing flips between container generations — see agent-tooling-cache-paths.ts.
+    const excludePaths = agentToolingCachePaths(config.profile?.codeIntelligence);
     if (config.commitMessage) {
       await this.commitPendingChanges(worktreePath, config.commitMessage, {
         maxDeletions: config.maxDeletions ?? 100,
+        excludePaths,
       });
     } else if (config.profile && config.podModel) {
       await this.commitPendingChangesWithGeneratedMessage(
@@ -602,7 +610,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         config.podTask,
         config.profile,
         config.podModel,
-        { maxDeletions: config.maxDeletions ?? 100 },
+        { maxDeletions: config.maxDeletions ?? 100, excludePaths },
       );
     } else {
       // No profile context (rare — only happens for callers that haven't been
@@ -615,7 +623,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       await this.commitPendingChanges(
         worktreePath,
         'chore: auto-commit uncommitted agent changes',
-        { maxDeletions: config.maxDeletions ?? 100 },
+        { maxDeletions: config.maxDeletions ?? 100, excludePaths },
       );
     }
 
@@ -665,9 +673,9 @@ export class LocalWorktreeManager implements WorktreeManager {
   async commitPendingChanges(
     worktreePath: string,
     message: string,
-    options?: { maxDeletions?: number },
+    options?: CommitPendingChangesOptions,
   ): Promise<boolean> {
-    const hasStaged = await this.stageAllChanges(worktreePath);
+    const hasStaged = await this.stageAllChanges(worktreePath, options?.excludePaths);
     if (!hasStaged) return false;
     return this.commitStagedChanges(worktreePath, message, options?.maxDeletions ?? 100);
   }
@@ -677,9 +685,13 @@ export class LocalWorktreeManager implements WorktreeManager {
     podTask: string | undefined,
     profile: import('@autopod/shared').Profile,
     podModel: string,
-    options?: { maxDeletions?: number },
+    options?: CommitPendingChangesOptions,
   ): Promise<boolean> {
-    const hasStaged = await this.stageAllChanges(worktreePath);
+    // Default the exclude list from the profile when callers haven't supplied one
+    // explicitly. mergeBranch already passes an explicit list; direct callers
+    // (e.g. recovery in pod-manager) get the right behavior automatically.
+    const excludePaths = options?.excludePaths ?? agentToolingCachePaths(profile.codeIntelligence);
+    const hasStaged = await this.stageAllChanges(worktreePath, excludePaths);
     if (!hasStaged) return false;
     const result = await generateAutoCommitMessage(
       { worktreePath, podTask, profile, podModel },
@@ -700,8 +712,24 @@ export class LocalWorktreeManager implements WorktreeManager {
     return this.commitStagedChanges(worktreePath, result.message, options?.maxDeletions ?? 100);
   }
 
-  private async stageAllChanges(worktreePath: string): Promise<boolean> {
-    await git(['add', '-A'], { cwd: worktreePath });
+  /**
+   * Stage every change in the worktree, optionally skipping pathspec-excluded
+   * directories. The exclude list lets us keep daemon-injected code-intel
+   * caches (`.serena`, `.roslyn-codelens`, etc.) out of agent commits without
+   * polluting the repo's `.gitignore`.
+   */
+  private async stageAllChanges(
+    worktreePath: string,
+    excludePaths?: readonly string[],
+  ): Promise<boolean> {
+    const args = ['add', '-A'];
+    if (excludePaths && excludePaths.length > 0) {
+      // `-- . :(exclude)<path>` — git pathspec magic. The leading `.` is required:
+      // without it, the exclude pathspecs match nothing because `git add -A` defaults
+      // to "everything" but pathspecs must be explicit when any are present.
+      args.push('--', '.', ...excludePaths.map((p) => `:(exclude)${p}`));
+    }
+    await git(args, { cwd: worktreePath });
     try {
       await git(['diff', '--cached', '--quiet'], { cwd: worktreePath });
       // Exit 0 → nothing staged
