@@ -4,6 +4,10 @@ import Observation
 /// Observable image loader that fetches content via an authenticated HTTP request.
 /// Shared by ScreenshotThumbnail and ScreenshotLightbox — centralises URLSession,
 /// auth-header injection, and error handling so future changes apply in one place.
+///
+/// `@MainActor` ensures all `@Observable`-tracked property mutations occur on the
+/// main actor — required for correct SwiftUI observation and Swift 6 strict concurrency.
+@MainActor
 @Observable final class AuthenticatedImageLoader {
   enum Phase { case idle, loading, loaded(NSImage), failed }
 
@@ -25,6 +29,9 @@ import Observation
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     do {
       let (data, response) = try await URLSession.shared.data(for: request)
+      // A cancelled task can land here after .task(id:) cancels a prior load — don't
+      // clobber the new task's already-set .loading phase.
+      guard !Task.isCancelled else { return }
       guard let http = response as? HTTPURLResponse, http.statusCode == 200,
             let img = NSImage(data: data) else {
         phase = .failed
@@ -32,7 +39,10 @@ import Observation
       }
       phase = .loaded(img)
     } catch {
-      phase = .failed
+      // Ignore CancellationError — it means a newer load superseded this one.
+      if !Task.isCancelled {
+        phase = .failed
+      }
     }
   }
 
