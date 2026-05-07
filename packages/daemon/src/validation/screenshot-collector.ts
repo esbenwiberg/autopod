@@ -1,34 +1,37 @@
-import fs from 'node:fs/promises';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
-import type { PageResult } from '@autopod/shared';
+import type { PageResult, ScreenshotRef } from '@autopod/shared';
+import type { ScreenshotStore } from '../pods/screenshot-store.js';
+import { slugifyPagePath } from '../pods/screenshot-store.js';
 
 export interface CollectedScreenshot {
   /** Validation page path (e.g. '/', '/about') */
   pagePath: string;
-  /** Host filesystem path to the PNG file */
-  hostPath: string;
-  /** Path relative to the worktree root (for git add / PR URLs) */
-  relativePath: string;
-  /** Base64-encoded PNG data (for inline embedding in Teams cards) */
-  base64: string;
+  /** The stored screenshot reference */
+  ref: ScreenshotRef;
 }
 
 /**
- * After page validation, reads screenshot PNGs from the host worktree
- * and returns them as base64-encoded data with paths for both git
- * (relative path) and Teams (base64 data URI).
+ * After page validation, reads screenshot PNGs from the host worktree,
+ * writes them to the on-disk screenshot store, and returns refs.
  *
  * The screenshots exist on the host because `/workspace` inside the
  * container is volume-mounted from the worktree directory.
+ *
+ * The `.autopod/screenshots/` directory is left in place — it is committed
+ * to the feature branch so GitHub PR reviewers can see screenshots.
  */
 export async function collectScreenshots(
   worktreePath: string,
   pageResults: PageResult[],
+  store: ScreenshotStore,
+  podId: string,
 ): Promise<CollectedScreenshot[]> {
-  const screenshots: CollectedScreenshot[] = [];
+  const collected: CollectedScreenshot[] = [];
 
-  for (const page of pageResults) {
-    if (!page.screenshotPath) continue;
+  for (let idx = 0; idx < pageResults.length; idx++) {
+    const page = pageResults[idx];
+    if (!page?.screenshotPath) continue;
 
     // Convert container path → host path
     // Container: /workspace/.autopod/screenshots/root.png
@@ -37,19 +40,16 @@ export async function collectScreenshots(
     const hostPath = path.join(worktreePath, relativePath);
 
     try {
-      const buffer = await fs.readFile(hostPath);
-      screenshots.push({
-        pagePath: page.path,
-        hostPath,
-        relativePath,
-        base64: buffer.toString('base64'),
-      });
+      const buffer = await fsp.readFile(hostPath);
+      const filename = `${slugifyPagePath(page.path, idx)}.png`;
+      const ref = await store.write(podId, 'smoke', filename, buffer);
+      collected.push({ pagePath: page.path, ref });
     } catch {
       // Screenshot file doesn't exist (validation may have failed before capture)
     }
   }
 
-  return screenshots;
+  return collected;
 }
 
 /** Build a GitHub raw content URL for a file on a branch. */
@@ -57,4 +57,19 @@ export function buildGitHubImageUrl(repoUrl: string, branch: string, relativePat
   // repoUrl: https://github.com/org/repo or https://github.com/org/repo.git
   const clean = repoUrl.replace(/\.git$/, '');
   return `${clean}/blob/${branch}/${relativePath}?raw=true`;
+}
+
+/**
+ * Build a PR-body screenshot ref from a stored on-disk ref and the attachment
+ * URL returned by the ADO PR attachments API.
+ *
+ * This is the ADO counterpart to buildGitHubImageUrl — it maps a stored
+ * ScreenshotRef + the upload-response URL to the { pagePath, imageUrl } shape
+ * consumed by pr-body-builder.ts:buildPrBody.
+ */
+export function buildAdoAttachmentRef(
+  pagePath: string,
+  attachmentUrl: string,
+): { pagePath: string; imageUrl: string } {
+  return { pagePath, imageUrl: attachmentUrl };
 }

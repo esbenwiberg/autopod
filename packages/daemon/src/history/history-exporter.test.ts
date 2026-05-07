@@ -63,7 +63,7 @@ function makeValidationResult(overall: 'pass' | 'fail'): ValidationResult {
           path: '/',
           status: 'pass',
           screenshotPath: '/tmp/screenshot.png',
-          screenshotBase64: 'base64data',
+          screenshot: undefined,
           consoleErrors: [],
           assertions: [],
           loadTime: 200,

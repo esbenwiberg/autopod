@@ -1,5 +1,6 @@
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ScreenshotRef } from '@autopod/shared';
 import { AdoPrManager, parseAdoRepoUrl } from './ado-pr-manager.js';
 
 const logger = pino({ level: 'silent' });
@@ -27,6 +28,65 @@ function makeFetch(responses: Array<{ ok: boolean; body: unknown; status?: numbe
     };
   });
 }
+
+/** Minimal mock screenshot store. */
+function makeMockStore(readBytes: Buffer = Buffer.from('fake-png')) {
+  return {
+    write: vi.fn(),
+    read: vi.fn().mockResolvedValue(readBytes),
+    list: vi.fn(),
+    delete: vi.fn(),
+  };
+}
+
+const MOCK_REF_1: ScreenshotRef = {
+  podId: 'pod-test',
+  source: 'smoke',
+  filename: '0-root.png',
+  relativePath: 'screenshots/pod-test/smoke/0-root.png',
+};
+
+const MOCK_REF_2: ScreenshotRef = {
+  podId: 'pod-test',
+  source: 'smoke',
+  filename: '1-about.png',
+  relativePath: 'screenshots/pod-test/smoke/1-about.png',
+};
+
+const RAW_SCREENSHOTS = [
+  { pagePath: '/', ref: MOCK_REF_1 },
+  { pagePath: '/about', ref: MOCK_REF_2 },
+];
+
+// Minimal CreatePrConfig used across createPr tests
+const MINIMAL_CONFIG = {
+  worktreePath: '/tmp/wt',
+  branch: 'autopod/test',
+  baseBranch: 'main',
+  podId: 'pod-test',
+  task: 'Test task',
+  profileName: 'test-profile',
+  // biome-ignore lint/suspicious/noExplicitAny: test stub
+  profile: {} as any,
+  podModel: 'sonnet',
+  validationResult: null,
+  filesChanged: 1,
+  linesAdded: 10,
+  linesRemoved: 5,
+  previewUrl: null,
+};
+
+// Mock the LLM generator functions so createPr tests don't make real API calls
+vi.mock('./pr-description-generator.js', () => ({
+  generatePrTitle: vi.fn().mockResolvedValue({
+    title: 'feat: test task',
+    usedFallback: false,
+  }),
+  generatePrNarrative: vi.fn().mockResolvedValue({
+    narrative: { why: 'Test why', what: 'Test what' },
+    usedFallback: false,
+  }),
+}));
 
 describe('parseAdoRepoUrl', () => {
   it('parses dev.azure.com URL', () => {
@@ -359,5 +419,170 @@ describe('AdoPrManager.getPrStatus', () => {
     expect(policyUrl).toContain('/_apis/policy/evaluations');
     expect(policyUrl).toContain('repo-guid-123');
     expect(policyUrl).toContain('42'); // PR id
+  });
+});
+
+describe('AdoPrManager.createPr — screenshot attachments', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('happy path: uploads two screenshots and patches PR body with attachment URLs', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: { pullRequestId: 42, webUrl: PR_URL } }, // PR creation
+      { ok: true, body: { url: 'https://dev.azure.com/myorg/42/1' } }, // upload smoke-0-root.png
+      { ok: true, body: { url: 'https://dev.azure.com/myorg/42/2' } }, // upload smoke-1-about.png
+      { ok: true, body: {} }, // PATCH description
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const store = makeMockStore();
+    const manager = new AdoPrManager({ ...BASE_CONFIG, screenshotStore: store });
+
+    const result = await manager.createPr({ ...MINIMAL_CONFIG, rawScreenshots: RAW_SCREENSHOTS });
+
+    expect(result.url).toBe(PR_URL);
+    // 4 calls: create + 2 uploads + patch
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    // store.read called once per screenshot
+    expect(store.read).toHaveBeenCalledTimes(2);
+    expect(store.read).toHaveBeenCalledWith(MOCK_REF_1);
+    expect(store.read).toHaveBeenCalledWith(MOCK_REF_2);
+
+    // PATCH body must contain both attachment URLs
+    const patchCall = (fetchMock.mock.calls as Array<[string, { body?: string }]>)[3];
+    const patchBody = JSON.parse(patchCall?.[1]?.body ?? '{}') as { description: string };
+    expect(patchBody.description).toContain('https://dev.azure.com/myorg/42/1');
+    expect(patchBody.description).toContain('https://dev.azure.com/myorg/42/2');
+  });
+
+  it('two-pass order: PR creation is the first API call; attachment uploads come after', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: { pullRequestId: 42, webUrl: PR_URL } },
+      { ok: true, body: { url: 'https://dev.azure.com/myorg/42/1' } },
+      { ok: true, body: {} },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const store = makeMockStore();
+    const manager = new AdoPrManager({ ...BASE_CONFIG, screenshotStore: store });
+
+    await manager.createPr({
+      ...MINIMAL_CONFIG,
+      rawScreenshots: [{ pagePath: '/', ref: MOCK_REF_1 }],
+    });
+
+    const calls = fetchMock.mock.calls as Array<[string, { method: string }]>;
+    // First call creates the PR
+    expect(calls[0]?.[0]).toContain('/pullrequests?');
+    expect(calls[0]?.[1]?.method).toBe('POST');
+    // Second call uploads the attachment (requires the PR ID from the first call)
+    expect(calls[1]?.[0]).toContain('/pullRequests/42/attachments/');
+    expect(calls[1]?.[1]?.method).toBe('POST');
+  });
+
+  it('upload failure: PR is still created; failed screenshot is omitted from body; no throw', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const fetchMock = makeFetch([
+      { ok: true, body: { pullRequestId: 42, webUrl: PR_URL } }, // PR creation
+      { ok: false, status: 500, body: { message: 'Internal error' } }, // first upload fails
+      { ok: true, body: { url: 'https://dev.azure.com/myorg/42/2' } }, // second upload succeeds
+      { ok: true, body: {} }, // PATCH with only the successful URL
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const store = makeMockStore();
+    const manager = new AdoPrManager({ ...BASE_CONFIG, screenshotStore: store });
+
+    await expect(
+      manager.createPr({ ...MINIMAL_CONFIG, rawScreenshots: RAW_SCREENSHOTS }),
+    ).resolves.not.toThrow();
+
+    // PR was created (first fetch call happened)
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/pullrequests?');
+
+    // Warning was logged for the failed upload
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ pagePath: '/' }),
+      expect.stringContaining('ADO screenshot attachment upload failed'),
+    );
+
+    // PATCH still happened with the successful screenshot's URL
+    const patchCall = (fetchMock.mock.calls as Array<[string, { body?: string }]>)[3];
+    const patchBody = JSON.parse(patchCall?.[1]?.body ?? '{}') as { description: string };
+    expect(patchBody.description).toContain('https://dev.azure.com/myorg/42/2');
+    expect(patchBody.description).not.toContain('42/1'); // failed upload not present
+  });
+
+  it('auth: attachment upload POST carries the same Authorization header as PR creation', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: { pullRequestId: 42, webUrl: PR_URL } },
+      { ok: true, body: { url: 'https://dev.azure.com/myorg/42/1' } },
+      { ok: true, body: {} },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const store = makeMockStore();
+    const manager = new AdoPrManager({ ...BASE_CONFIG, screenshotStore: store });
+
+    await manager.createPr({
+      ...MINIMAL_CONFIG,
+      rawScreenshots: [{ pagePath: '/', ref: MOCK_REF_1 }],
+    });
+
+    const expectedAuth = `Basic ${Buffer.from(':secret').toString('base64')}`;
+    const calls = fetchMock.mock.calls as Array<[string, { headers?: Record<string, string> }]>;
+    // All calls (create, upload, patch) must carry the same auth header
+    for (const [, opts] of calls) {
+      expect(opts?.headers?.Authorization).toBe(expectedAuth);
+    }
+  });
+
+  it('attachment filename uses source prefix to avoid bucket collisions', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: { pullRequestId: 42, webUrl: PR_URL } },
+      { ok: true, body: { url: 'https://dev.azure.com/myorg/42/1' } },
+      { ok: true, body: {} },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const store = makeMockStore();
+    const manager = new AdoPrManager({ ...BASE_CONFIG, screenshotStore: store });
+
+    await manager.createPr({
+      ...MINIMAL_CONFIG,
+      rawScreenshots: [{ pagePath: '/', ref: MOCK_REF_1 }],
+    });
+
+    // Attachment URL must contain `smoke-0-root.png` (source prefix + original filename)
+    const uploadCall = (fetchMock.mock.calls as Array<[string, unknown]>)[1];
+    expect(uploadCall?.[0]).toContain('smoke-0-root.png');
+  });
+
+  it('no-screenshot pod: zero attachment calls; PR body has no screenshots section', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: { pullRequestId: 42, webUrl: PR_URL } }, // only PR creation
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const manager = new AdoPrManager(BASE_CONFIG); // no screenshotStore
+    await manager.createPr(MINIMAL_CONFIG); // no rawScreenshots
+
+    // Only the PR creation call fired; no uploads, no PATCH
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('no-screenshot pod with store: empty rawScreenshots skips all attachment logic', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: { pullRequestId: 42, webUrl: PR_URL } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const store = makeMockStore();
+    const manager = new AdoPrManager({ ...BASE_CONFIG, screenshotStore: store });
+    await manager.createPr({ ...MINIMAL_CONFIG, rawScreenshots: [] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(store.read).not.toHaveBeenCalled();
   });
 });

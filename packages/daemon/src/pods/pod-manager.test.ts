@@ -4151,6 +4151,9 @@ describe('PodManager', () => {
           status: 'pass' as const,
           issues: [],
           reasoning: 'Looks good',
+          model: 'claude-3-5-sonnet',
+          screenshots: [],
+          diff: '',
           tokenUsage: { inputTokens: 2000, outputTokens: 150 },
         },
       });

@@ -192,6 +192,11 @@ export interface PodRepository {
   getPodsDependingOn(podId: string): Pod[];
   getPodsBySeries(seriesId: string): Pod[];
   listNonTerminalPodIds(): string[];
+  /**
+   * Pods in terminal states (`complete`, `killed`, `failed`) whose `completed_at`
+   * is before or equal to `cutoffIso`. Used by the screenshot retention sweeper.
+   */
+  listTerminalPodsCompletedBefore(cutoffIso: string): Pod[];
 }
 
 /**
@@ -944,6 +949,19 @@ export function createPodRepository(db: Database.Database): PodRepository {
       const rows = db
         .prepare('SELECT * FROM pods WHERE series_id = ? ORDER BY created_at ASC')
         .all(seriesId) as Record<string, unknown>[];
+      return rows.map(rowToSession);
+    },
+
+    listTerminalPodsCompletedBefore(cutoffIso: string): Pod[] {
+      const rows = db
+        .prepare(
+          `SELECT * FROM pods
+           WHERE status IN ('complete', 'killed', 'failed')
+             AND completed_at IS NOT NULL
+             AND completed_at <= @cutoffIso
+           ORDER BY completed_at ASC`,
+        )
+        .all({ cutoffIso }) as Record<string, unknown>[];
       return rows.map(rowToSession);
     },
   };

@@ -1,4 +1,5 @@
 import type { Logger } from 'pino';
+import type { ScreenshotRef } from '@autopod/shared';
 import type {
   CiFailureDetail,
   CreatePrConfig,
@@ -9,6 +10,8 @@ import type {
   PrMergeStatus,
   ReviewCommentDetail,
 } from '../interfaces/pr-manager.js';
+import type { ScreenshotStore } from '../pods/screenshot-store.js';
+import { buildAdoAttachmentRef } from '../validation/screenshot-collector.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
   type PrNarrativeResult,
@@ -50,6 +53,12 @@ export interface AdoPrManagerConfig {
   /** Personal access token with Code (Read & Write) scope */
   pat: string;
   logger: Logger;
+  /**
+   * On-disk screenshot store. When provided and rawScreenshots are passed to
+   * createPr, screenshots are uploaded as ADO PR attachments after creation
+   * and the PR description is patched with the returned attachment URLs.
+   */
+  screenshotStore?: ScreenshotStore;
 }
 
 /**
@@ -123,6 +132,7 @@ export class AdoPrManager implements PrManager {
   private readonly repoName: string;
   private readonly authHeader: string;
   private readonly logger: Logger;
+  private readonly screenshotStore: ScreenshotStore | undefined;
 
   constructor(config: AdoPrManagerConfig) {
     this.orgUrl = config.orgUrl.replace(/\/$/, '');
@@ -130,6 +140,7 @@ export class AdoPrManager implements PrManager {
     this.repoName = config.repoName;
     this.authHeader = `Basic ${Buffer.from(`:${config.pat}`).toString('base64')}`;
     this.logger = config.logger;
+    this.screenshotStore = config.screenshotStore;
   }
 
   private get baseUrl(): string {
@@ -173,6 +184,56 @@ export class AdoPrManager implements PrManager {
     );
   }
 
+  /**
+   * Upload screenshots as ADO PR attachments and return body refs with attachment URLs.
+   *
+   * Uploads are sequential — ADO rate-limits attachment bursts and parallel uploads
+   * can fail half the set. Failures are non-fatal: the failed screenshot is skipped
+   * and a warning is logged. If all uploads fail, an empty array is returned and the
+   * PR body omits the screenshots section.
+   *
+   * Filename format: `{source}-{filename}` (e.g. `smoke-0-root.png`). Concatenating
+   * the source bucket prevents collisions when smoke, ac, and review buckets contain
+   * files with the same base name within the same PR.
+   *
+   * If uploads 401/403, the ADO PAT likely lacks Code (Read & Write) scope
+   * (vso.code_full). This is logged explicitly so operators can diagnose quickly.
+   */
+  private async uploadScreenshotAttachments(
+    prId: number,
+    rawScreenshots: Array<{ pagePath: string; ref: ScreenshotRef }>,
+  ): Promise<Array<{ pagePath: string; imageUrl: string }>> {
+    const results: Array<{ pagePath: string; imageUrl: string }> = [];
+
+    for (const { pagePath, ref } of rawScreenshots) {
+      try {
+        // biome-ignore lint/style/noNonNullAssertion: screenshotStore is checked before this method is called
+        const bytes = await this.screenshotStore!.read(ref);
+        // Source prefix prevents filename collisions across smoke/ac/review buckets
+        const attachmentFilename = `${ref.source}-${ref.filename}`;
+        const response = (await this.rawFetch(
+          `${this.baseUrl}/pullRequests/${prId}/attachments/${encodeURIComponent(attachmentFilename)}?api-version=7.1`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: bytes as unknown as BodyInit,
+          },
+        )) as { url: string };
+        results.push(buildAdoAttachmentRef(pagePath, response.url));
+      } catch (err) {
+        // Non-fatal — PR is already created.
+        // If 401/403, the ADO PAT may lack Code (Read & Write) / vso.code_full scope.
+        this.logger.warn(
+          { err, pagePath, podId: ref.podId },
+          'ADO screenshot attachment upload failed — screenshot omitted from PR body. ' +
+            'If 401/403, verify the ADO PAT has Code (Read & Write) scope (vso.code_full).',
+        );
+      }
+    }
+
+    return results;
+  }
+
   async createPr(config: CreatePrConfig): Promise<CreatePrResult> {
     const descInput = {
       task: config.task,
@@ -192,7 +253,17 @@ export class AdoPrManager implements PrManager {
       generatePrTitle(descInput, this.logger),
       generatePrNarrative(descInput, this.logger, true),
     ]);
-    const description = buildPrBody({
+
+    const narrativeFallback = narrativeResult.usedFallback
+      ? {
+          reason: narrativeResult.fallbackReason ?? 'unknown',
+          detail: narrativeResult.fallbackDetail,
+        }
+      : undefined;
+
+    // Parameters shared between the initial body (no screenshots) and the patched
+    // body (with uploaded attachment URLs).
+    const bodyParams = {
       task: config.task,
       podId: config.podId,
       profileName: config.profileName,
@@ -201,20 +272,25 @@ export class AdoPrManager implements PrManager {
       linesAdded: config.linesAdded,
       linesRemoved: config.linesRemoved,
       previewUrl: config.previewUrl,
-      screenshots: config.screenshots,
       taskSummary: config.taskSummary,
-      inlineImages: false,
+      inlineImages: false as const,
       seriesDescription: config.seriesDescription,
       seriesName: config.seriesName,
       securityFindings: config.securityFindings,
       narrative: narrativeResult.narrative,
-      narrativeFallback: narrativeResult.usedFallback
-        ? {
-            reason: narrativeResult.fallbackReason ?? 'unknown',
-            detail: narrativeResult.fallbackDetail,
-          }
-        : undefined,
+      narrativeFallback,
       budgetChars: 4000,
+    };
+
+    // ADO two-pass flow: create PR without screenshots first (PR ID is required for the
+    // attachments endpoint), then upload and patch the description with attachment URLs.
+    const hasRawScreenshots =
+      (config.rawScreenshots?.length ?? 0) > 0 && this.screenshotStore != null;
+
+    const description = buildPrBody({
+      ...bodyParams,
+      // Omit screenshots on initial creation when we'll be uploading them afterward.
+      screenshots: hasRawScreenshots ? [] : (config.screenshots ?? []),
     });
 
     this.logger.info(
@@ -243,6 +319,36 @@ export class AdoPrManager implements PrManager {
       { podId: config.podId, prUrl, prId: pr.pullRequestId },
       'ADO pull request created',
     );
+
+    if (hasRawScreenshots && config.rawScreenshots) {
+      const uploadedRefs = await this.uploadScreenshotAttachments(
+        pr.pullRequestId,
+        config.rawScreenshots,
+      );
+      if (uploadedRefs.length > 0) {
+        const patchedDescription = buildPrBody({
+          ...bodyParams,
+          screenshots: uploadedRefs,
+        });
+        try {
+          await this.adoFetch(`/pullrequests/${pr.pullRequestId}?api-version=7.1`, {
+            method: 'PATCH',
+            body: JSON.stringify({ description: patchedDescription }),
+          });
+          this.logger.info(
+            { podId: config.podId, count: uploadedRefs.length },
+            'ADO PR description patched with screenshot attachments',
+          );
+        } catch (patchErr) {
+          // Non-fatal — PR already created; screenshots just won't appear in the body.
+          this.logger.warn(
+            { err: patchErr, podId: config.podId },
+            'Failed to patch ADO PR description with screenshot attachments',
+          );
+        }
+      }
+    }
+
     return buildCreatePrResult(prUrl, titleResult, narrativeResult);
   }
 

@@ -10,6 +10,26 @@ struct SummaryTab: View {
     var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
 
     @State private var quality: PodQualitySignals? = nil
+    // Lightbox state for the proof-of-work card
+    @State private var lightboxRefs: [ScreenshotRef] = []
+    @State private var lightboxIndex: Int = 0
+    @State private var isLightboxPresented: Bool = false
+
+    /// Full combined set (smoke → ac → review) for lightbox arrow-key navigation.
+    /// The proof-of-work card shows only smoke thumbnails, but clicking one opens
+    /// the lightbox with the full set so reviewers can navigate all evidence.
+    private var fullScreenshotSet: [ScreenshotRef] {
+        let pageShots = pod.validationChecks?.proofOfWorkScreenshots ?? []
+        let acShots = pod.validationChecks?.acChecks?.compactMap { $0.screenshot } ?? []
+        let reviewShots = pod.validationChecks?.taskReviewScreenshots ?? []
+        return pageShots + acShots + reviewShots
+    }
+
+    private func openLightbox(_ index: Int) {
+        lightboxRefs = fullScreenshotSet
+        lightboxIndex = index
+        isLightboxPresented = true
+    }
 
     var body: some View {
         ScrollView {
@@ -49,6 +69,17 @@ struct SummaryTab: View {
         .task(id: pod.id) {
             await fetchQuality()
         }
+        .overlay {
+            if isLightboxPresented, !lightboxRefs.isEmpty {
+                ScreenshotLightbox(
+                    refs: lightboxRefs,
+                    currentIndex: $lightboxIndex,
+                    isPresented: $isLightboxPresented
+                )
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: isLightboxPresented)
     }
 
     // MARK: - Quality
@@ -341,7 +372,7 @@ struct SummaryTab: View {
 
     // MARK: - Proof of work
 
-    private func proofOfWorkCard(_ shots: [PageScreenshot]) -> some View {
+    private func proofOfWorkCard(_ shots: [ScreenshotRef]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "photo.on.rectangle.angled")
@@ -362,8 +393,8 @@ struct SummaryTab: View {
                 : [GridItem(.flexible()), GridItem(.flexible())]
 
             LazyVGrid(columns: cols, spacing: 8) {
-                ForEach(shots) { shot in
-                    screenshotGridCell(shot)
+                ForEach(Array(shots.enumerated()), id: \.element.id) { idx, shot in
+                    screenshotGridCell(shot, index: idx, allShots: shots)
                 }
             }
         }
@@ -373,29 +404,35 @@ struct SummaryTab: View {
     }
 
     @ViewBuilder
-    private func screenshotGridCell(_ shot: PageScreenshot) -> some View {
-        if let data = Data(base64Encoded: shot.base64),
-           let nsImage = NSImage(data: data) {
-            ZStack(alignment: .bottom) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 80, maxHeight: 200)
-                    .clipped()
-                Text(shot.path)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.black.opacity(0.55))
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+    private func screenshotGridCell(
+        _ shot: ScreenshotRef,
+        index: Int,
+        allShots: [ScreenshotRef]
+    ) -> some View {
+        ZStack(alignment: .bottom) {
+            ScreenshotThumbnail(
+                ref: shot,
+                allRefs: fullScreenshotSet,
+                onOpen: { openLightbox($0) },
+                maxHeight: 200,
+                fillMode: true
+            )
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 80, maxHeight: 200)
+            .clipped()
+
+            Text(shot.label)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.black.opacity(0.55))
         }
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 }
 

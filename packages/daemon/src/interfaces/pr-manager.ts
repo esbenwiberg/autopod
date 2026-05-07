@@ -1,4 +1,4 @@
-import type { Profile, ScanFinding, TaskSummary, ValidationResult } from '@autopod/shared';
+import type { Profile, ScanFinding, ScreenshotRef, TaskSummary, ValidationResult } from '@autopod/shared';
 
 export interface CreatePrConfig {
   /** Worktree path to run `gh` from (inherits git remote context) */
@@ -27,8 +27,14 @@ export interface CreatePrConfig {
   linesRemoved: number;
   /** Preview URL if available */
   previewUrl: string | null;
-  /** Screenshot references for PR body */
+  /** Screenshot references for PR body (GitHub: pre-built URLs; pass undefined for ADO) */
   screenshots?: Array<{ pagePath: string; imageUrl: string }>;
+  /**
+   * Raw on-disk screenshot refs for ADO attachment upload.
+   * When set, AdoPrManager uploads these after PR creation and embeds the
+   * returned attachment URLs in the PR body. Ignored by the GitHub PR manager.
+   */
+  rawScreenshots?: Array<{ pagePath: string; ref: ScreenshotRef }>;
   /** Agent-reported task summary (what was done + deviations from plan) */
   taskSummary?: TaskSummary;
   /** Series-level description (from context.md). When set, used instead of task for the PR title and "Why" section. */

@@ -5,6 +5,8 @@ import type {
   EscalationResponse,
   MemoryEntry,
   MemoryScope,
+  ScreenshotRef,
+  ScreenshotSource,
 } from '@autopod/shared';
 
 export interface PodBridge {
@@ -84,6 +86,17 @@ export interface PodBridge {
 
   /** Read a file from the daemon host filesystem as base64. Returns null if not found. */
   readHostScreenshot(path: string): Promise<string | null>;
+
+  /**
+   * Write screenshot bytes to the daemon's on-disk screenshot store.
+   * Returns the canonical ScreenshotRef for the stored file.
+   */
+  storeScreenshot(
+    podId: string,
+    source: ScreenshotSource,
+    filename: string,
+    bytes: Buffer,
+  ): Promise<ScreenshotRef>;
 
   /** Get the host-side screenshot directory for a pod, or null if host browser unavailable. */
   getHostScreenshotDir(podId: string): string | null;

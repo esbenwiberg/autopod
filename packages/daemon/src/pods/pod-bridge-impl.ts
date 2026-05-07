@@ -51,6 +51,7 @@ export interface SessionBridgeDependencies {
   logger: Logger;
   hostBrowserRunner?: HostBrowserRunner;
   worktreeManager?: WorktreeManager;
+  screenshotStore?: import('./screenshot-store.js').ScreenshotStore;
 }
 
 export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge {
@@ -69,6 +70,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     logger,
     hostBrowserRunner,
     worktreeManager,
+    screenshotStore,
   } = deps;
 
   return {
@@ -511,6 +513,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       } catch {
         return null;
       }
+    },
+
+    async storeScreenshot(podId, source, filename, bytes) {
+      if (!screenshotStore) {
+        throw new Error('Screenshot store not available — daemon not wired with screenshotStore');
+      }
+      return screenshotStore.write(podId, source, filename, bytes);
     },
 
     getHostScreenshotDir(podId: string): string | null {

@@ -56,7 +56,7 @@ function mockValidationResult(
           reasoning: 'The contact form is missing required fields',
           issues: overrides.issues ?? ['Missing email field', 'Submit button not wired up'],
           model: 'opus',
-          screenshots: ['/tmp/screenshots/contact.png'],
+          screenshots: [],
           diff: '+<form></form>',
         }
       : null,
