@@ -14,7 +14,7 @@ Specific changes:
 - **`ScreenshotThumbnail.swift`** — complete rewrite: `public struct ScreenshotThumbnail: View` taking `ref: ScreenshotRef?`; uses `URLSession` with `Authorization: Bearer <token>` header; loading/error/retry states; `fillMode: Bool` for fill vs fit layout.
 - **`ScreenshotLightbox.swift`** *(new)* — full-screen overlay with translucent backdrop, top bar (path + close), image area, bottom nav (prev/next arrows + counter); keyboard nav via `.onKeyPress(.leftArrow/.rightArrow)` + `.focusable()`; ESC to close via `.keyboardShortcut(.escape, modifiers: [])`.
 - **`ValidationTab.swift`** — lightbox state at tab level; all thumbnail call sites updated to pass `ref:` and `allRefs: screenshotSet`.
-- **`SummaryTab.swift`** — same lightbox wiring on proof-of-work card; `proofOfWorkCard` signature updated to `[ScreenshotRef]`; `screenshotGridCell` uses `fillMode: true`.
+- **`SummaryTab.swift`** — same lightbox wiring on proof-of-work card; `proofOfWorkCard` signature updated to `[ScreenshotRef]`; `screenshotGridCell` uses `fillMode: true`. The lightbox overlay now uses the full combined set (smoke → ac → review) via `fullScreenshotSet` + `openLightbox(_:)`, matching the ValidationTab pattern.
 - **`MockData.swift`** — updated to use `ScreenshotRef` with placeholder URLs.
 - **`PodMapperTests.swift`** — 4 new tests: decoder round-trip, absent fields, URL resolution, set ordering.
 

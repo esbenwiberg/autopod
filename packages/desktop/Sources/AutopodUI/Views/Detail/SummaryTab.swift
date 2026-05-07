@@ -11,8 +11,25 @@ struct SummaryTab: View {
 
     @State private var quality: PodQualitySignals? = nil
     // Lightbox state for the proof-of-work card
+    @State private var lightboxRefs: [ScreenshotRef] = []
     @State private var lightboxIndex: Int = 0
     @State private var isLightboxPresented: Bool = false
+
+    /// Full combined set (smoke → ac → review) for lightbox arrow-key navigation.
+    /// The proof-of-work card shows only smoke thumbnails, but clicking one opens
+    /// the lightbox with the full set so reviewers can navigate all evidence.
+    private var fullScreenshotSet: [ScreenshotRef] {
+        let pageShots = pod.validationChecks?.proofOfWorkScreenshots ?? []
+        let acShots = pod.validationChecks?.acChecks?.compactMap { $0.screenshot } ?? []
+        let reviewShots = pod.validationChecks?.taskReviewScreenshots ?? []
+        return pageShots + acShots + reviewShots
+    }
+
+    private func openLightbox(_ index: Int) {
+        lightboxRefs = fullScreenshotSet
+        lightboxIndex = index
+        isLightboxPresented = true
+    }
 
     var body: some View {
         ScrollView {
@@ -53,9 +70,9 @@ struct SummaryTab: View {
             await fetchQuality()
         }
         .overlay {
-            if isLightboxPresented, let shots = pod.validationChecks?.proofOfWorkScreenshots, !shots.isEmpty {
+            if isLightboxPresented, !lightboxRefs.isEmpty {
                 ScreenshotLightbox(
-                    refs: shots,
+                    refs: lightboxRefs,
                     currentIndex: $lightboxIndex,
                     isPresented: $isLightboxPresented
                 )
@@ -395,11 +412,8 @@ struct SummaryTab: View {
         ZStack(alignment: .bottom) {
             ScreenshotThumbnail(
                 ref: shot,
-                allRefs: allShots,
-                onOpen: { idx in
-                    lightboxIndex = idx
-                    isLightboxPresented = true
-                },
+                allRefs: fullScreenshotSet,
+                onOpen: { openLightbox($0) },
                 maxHeight: 200,
                 fillMode: true
             )
