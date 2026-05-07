@@ -305,6 +305,7 @@ export {
   PII_PATTERNS,
   INJECTION_PATTERNS,
   REDACT_FIELD_NAMES,
+  collectPiiPatternNames,
 } from './sanitize/index.js';
 
 export type {

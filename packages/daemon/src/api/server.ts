@@ -28,6 +28,7 @@ import type {
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
@@ -78,6 +79,7 @@ export interface ServerDependencies {
   memoryRepo?: MemoryRepository;
   pendingOverrideRepo?: PendingOverrideRepository;
   scheduledJobManager?: ScheduledJobManager;
+  safetyEventsRepo?: SafetyEventsRepository;
   issueWatcherRepo?: IssueWatcherRepository;
   screenshotStore?: ScreenshotStore;
   logLevel?: string;
@@ -233,6 +235,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   // Auth is enforced at the route level (pod-token, matches path podId).
   mcpProxyHandler(app, {
     getServersForPod: (podId) => deps.podManager.getInjectedMcpServers(podId),
+    safetyEventsRepo: deps.safetyEventsRepo,
     logger: app.log as unknown as import('pino').Logger,
   });
 

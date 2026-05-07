@@ -36,6 +36,7 @@ function computeEntryHash(
 }
 
 function rowToAuditEntry(row: Record<string, unknown>): ActionAuditEntry {
+  const rawCategories = row.pii_categories as string | null | undefined;
   return {
     id: row.id as number,
     podId: row.pod_id as string,
@@ -44,6 +45,7 @@ function rowToAuditEntry(row: Record<string, unknown>): ActionAuditEntry {
     responseSummary: (row.response_summary as string) ?? null,
     piiDetected: (row.pii_detected as number) === 1,
     quarantineScore: row.quarantine_score as number,
+    piiCategories: rawCategories != null ? (JSON.parse(rawCategories) as string[]) : null,
     createdAt: row.created_at as string,
     prevHash: (row.prev_hash as string) ?? null,
     entryHash: (row.entry_hash as string) ?? null,
@@ -76,11 +78,15 @@ export function createActionAuditRepository(db: Database.Database): ActionAuditR
         createdAt,
       );
 
+      // pii_categories is outside the hash payload (ADR-019) — store separately
+      const piiCategoriesJson =
+        entry.piiCategories != null ? JSON.stringify(entry.piiCategories) : null;
+
       db.prepare(
         `INSERT INTO action_audit
-           (pod_id, action_name, params, response_summary, pii_detected, quarantine_score, created_at, prev_hash, entry_hash)
+           (pod_id, action_name, params, response_summary, pii_detected, quarantine_score, pii_categories, created_at, prev_hash, entry_hash)
          VALUES
-           (@podId, @actionName, @params, @responseSummary, @piiDetected, @quarantineScore, @createdAt, @prevHash, @entryHash)`,
+           (@podId, @actionName, @params, @responseSummary, @piiDetected, @quarantineScore, @piiCategories, @createdAt, @prevHash, @entryHash)`,
       ).run({
         podId: entry.podId,
         actionName: entry.actionName,
@@ -88,6 +94,7 @@ export function createActionAuditRepository(db: Database.Database): ActionAuditR
         responseSummary: entry.responseSummary,
         piiDetected: entry.piiDetected ? 1 : 0,
         quarantineScore: entry.quarantineScore,
+        piiCategories: piiCategoriesJson,
         createdAt,
         prevHash,
         entryHash,

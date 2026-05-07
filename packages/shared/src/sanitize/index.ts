@@ -8,3 +8,4 @@ export {
 } from './processor.js';
 export { PII_PATTERNS, INJECTION_PATTERNS, REDACT_FIELD_NAMES } from './patterns.js';
 export type { PiiPattern, InjectionPattern } from './patterns.js';
+export { collectPiiPatternNames } from './collect-pii.js';

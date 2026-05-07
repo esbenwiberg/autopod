@@ -1,7 +1,8 @@
 import type { InjectedMcpServer } from '@autopod/shared';
-import { type ProcessContentConfig, processContent } from '@autopod/shared';
+import { type ProcessContentConfig, collectPiiPatternNames, processContent } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import { isPrivateUrl } from './ssrf-guard.js';
 
 export interface McpProxyConfig {
@@ -9,6 +10,7 @@ export interface McpProxyConfig {
   getServersForPod: (podId: string) => InjectedMcpServer[];
   /** Content processing config (PII + quarantine) */
   contentProcessing?: ProcessContentConfig;
+  safetyEventsRepo?: SafetyEventsRepository;
   logger: Logger;
 }
 
@@ -25,7 +27,7 @@ export interface McpProxyConfig {
  * The agent never sees the real MCP server URL or auth headers.
  */
 export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): void {
-  const { getServersForPod, contentProcessing, logger } = config;
+  const { getServersForPod, contentProcessing, safetyEventsRepo, logger } = config;
   const log = logger.child({ component: 'mcp-proxy' });
 
   // Proxy all methods (MCP uses POST for JSON-RPC, GET for SSE).
@@ -100,6 +102,33 @@ export function mcpProxyHandler(app: FastifyInstance, config: McpProxyConfig): v
 
             if (result.quarantined) {
               log.warn({ podId, serverName }, 'MCP proxy: response quarantined');
+            }
+
+            if (safetyEventsRepo) {
+              const payloadExcerpt = result.text.slice(0, 256);
+              // Injection rows (one per threat)
+              for (const threat of result.threats) {
+                safetyEventsRepo.insert({
+                  podId,
+                  source: 'mcp_proxy',
+                  kind: 'injection',
+                  patternName: threat.pattern,
+                  severity: threat.severity,
+                  payloadExcerpt,
+                });
+              }
+              // PII rows (one per matched pattern)
+              const piiPatternNames = collectPiiPatternNames(responseText);
+              for (const patternName of piiPatternNames) {
+                safetyEventsRepo.insert({
+                  podId,
+                  source: 'mcp_proxy',
+                  kind: 'pii',
+                  patternName,
+                  severity: null,
+                  payloadExcerpt,
+                });
+              }
             }
           }
 

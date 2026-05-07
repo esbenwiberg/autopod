@@ -1,4 +1,9 @@
-import type { PodQualityScore, QualityAnalyticsResponse, QualityTrend, RuntimeType } from '@autopod/shared';
+import type {
+  PodQualityScore,
+  QualityAnalyticsResponse,
+  QualityTrend,
+  RuntimeType,
+} from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 export interface QualityScoreFilters {
@@ -187,8 +192,16 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
 
       // Single pass: compute summary counts, sparkline buckets, histogram, and reasons.
       const BUCKETS = [
-        '0-9', '10-19', '20-29', '30-39', '40-49',
-        '50-59', '60-69', '70-79', '80-89', '90-100',
+        '0-9',
+        '10-19',
+        '20-29',
+        '30-39',
+        '40-49',
+        '50-59',
+        '60-69',
+        '70-79',
+        '80-89',
+        '90-100',
       ];
       let redCount = 0;
       let yellowCount = 0;
