@@ -149,7 +149,11 @@ describe('GET /pods/analytics/reliability', () => {
         type: 'claude' as const,
         spawn: vi.fn().mockReturnValue(
           (async function* () {
-            yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'done' };
+            yield {
+              type: 'complete' as const,
+              timestamp: new Date().toISOString(),
+              result: 'done',
+            };
           })(),
         ),
         resume: vi.fn(),
@@ -178,11 +182,7 @@ describe('GET /pods/analytics/reliability', () => {
     // biome-ignore lint/style/useConst: circular dependency break
     let podManager: ReturnType<typeof createPodManager>;
 
-    const podQueue = createPodQueue(
-      1,
-      async (podId) => podManager.processPod(podId),
-      logger,
-    );
+    const podQueue = createPodQueue(1, async (podId) => podManager.processPod(podId), logger);
 
     podManager = createPodManager({
       podRepo,
@@ -396,7 +396,11 @@ describe('GET /pods/analytics/quality', () => {
         type: 'claude' as const,
         spawn: vi.fn().mockReturnValue(
           (async function* () {
-            yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'done' };
+            yield {
+              type: 'complete' as const,
+              timestamp: new Date().toISOString(),
+              result: 'done',
+            };
           })(),
         ),
         resume: vi.fn(),
@@ -425,11 +429,7 @@ describe('GET /pods/analytics/quality', () => {
     // biome-ignore lint/style/useConst: circular dependency break
     let podManager: ReturnType<typeof createPodManager>;
 
-    const podQueue = createPodQueue(
-      1,
-      async (podId) => podManager.processPod(podId),
-      logger,
-    );
+    const podQueue = createPodQueue(1, async (podId) => podManager.processPod(podId), logger);
 
     podManager = createPodManager({
       podRepo,

@@ -1,4 +1,10 @@
-import type { Profile, ScanFinding, ScreenshotRef, TaskSummary, ValidationResult } from '@autopod/shared';
+import type {
+  Profile,
+  ScanFinding,
+  ScreenshotRef,
+  TaskSummary,
+  ValidationResult,
+} from '@autopod/shared';
 
 export interface CreatePrConfig {
   /** Worktree path to run `gh` from (inherits git remote context) */

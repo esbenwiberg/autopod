@@ -45,6 +45,8 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
+import { ScreenshotRetention } from './pods/screenshot-retention.js';
+import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { createProfileStore } from './profiles/index.js';
 import {
   ClaudeRuntime,
@@ -58,8 +60,6 @@ import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-sche
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
-import { ScreenshotRetention } from './pods/screenshot-retention.js';
-import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { GhPrManager, GitHubApiPrManager } from './worktrees/pr-manager.js';
@@ -362,12 +362,14 @@ const runtimeRegistry = createRuntimeRegistry([
 ]);
 const hostBrowserRunner = createHostBrowserRunner(logger);
 const screenshotStore = createScreenshotStore(resolveDataDir());
-const validationEngine = createLocalValidationEngine(containerManager, logger, hostBrowserRunner, screenshotStore);
-
-const retentionDays = Number.parseInt(
-  process.env.AUTOPOD_SCREENSHOT_RETENTION_DAYS ?? '30',
-  10,
+const validationEngine = createLocalValidationEngine(
+  containerManager,
+  logger,
+  hostBrowserRunner,
+  screenshotStore,
 );
+
+const retentionDays = Number.parseInt(process.env.AUTOPOD_SCREENSHOT_RETENTION_DAYS ?? '30', 10);
 if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
   throw new Error('AUTOPOD_SCREENSHOT_RETENTION_DAYS must be a positive integer');
 }
@@ -464,7 +466,14 @@ function prManagerFactory(
     }
     try {
       const { orgUrl, project, repoName } = parseAdoRepoUrl(profile.repoUrl);
-      return new AdoPrManager({ orgUrl, project, repoName, pat: profile.adoPat, logger, screenshotStore });
+      return new AdoPrManager({
+        orgUrl,
+        project,
+        repoName,
+        pat: profile.adoPat,
+        logger,
+        screenshotStore,
+      });
     } catch (err) {
       logger.warn(
         { err, profileName: profile.name },

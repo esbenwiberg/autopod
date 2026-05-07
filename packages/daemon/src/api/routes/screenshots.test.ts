@@ -1,14 +1,14 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import Fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { JwtPayload } from '@autopod/shared';
 import { AuthError } from '@autopod/shared';
+import Fastify from 'fastify';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AuthModule } from '../../interfaces/index.js';
-import { authPlugin } from '../plugins/auth.js';
 import { createScreenshotStore } from '../../pods/screenshot-store.js';
 import type { ScreenshotStore } from '../../pods/screenshot-store.js';
+import { authPlugin } from '../plugins/auth.js';
 import { screenshotRoutes } from './screenshots.js';
 
 const testUser: JwtPayload = {

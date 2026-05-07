@@ -127,7 +127,12 @@ describe('ValidationRepository', () => {
             path: '/',
             status: 'pass',
             screenshotPath: '/ss.png',
-            screenshot: { podId: 'sess-3', source: 'smoke', filename: '0-root.png', relativePath: 'screenshots/sess-3/smoke/0-root.png' },
+            screenshot: {
+              podId: 'sess-3',
+              source: 'smoke',
+              filename: '0-root.png',
+              relativePath: 'screenshots/sess-3/smoke/0-root.png',
+            },
             consoleErrors: [],
             assertions: [],
             loadTime: 100,

@@ -334,4 +334,12 @@ export {
 export * from './pricing/index.js';
 
 // Analytics response types
-export type { CostAnalyticsResponse, QualityAnalyticsResponse } from './types/analytics.js';
+export type {
+  CostAnalyticsResponse,
+  QualityAnalyticsResponse,
+  SafetyEventKind,
+  SafetyEventSource,
+  NetworkPolicyBucket,
+  SafetyAnalyticsResponse,
+  AuditChainVerifyResponse,
+} from './types/analytics.js';

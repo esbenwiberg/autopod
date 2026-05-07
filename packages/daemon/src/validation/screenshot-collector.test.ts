@@ -1,7 +1,11 @@
 import fsp from 'node:fs/promises';
 import type { PageResult, ScreenshotRef } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildAdoAttachmentRef, buildGitHubImageUrl, collectScreenshots } from './screenshot-collector.js';
+import {
+  buildAdoAttachmentRef,
+  buildGitHubImageUrl,
+  collectScreenshots,
+} from './screenshot-collector.js';
 
 vi.mock('node:fs/promises');
 const mockedFs = vi.mocked(fsp);
@@ -160,10 +164,14 @@ describe('buildGitHubImageUrl', () => {
 
 describe('buildAdoAttachmentRef', () => {
   it('returns { pagePath, imageUrl } with the given attachment URL — no GitHub URL baked in', () => {
-    const ref = buildAdoAttachmentRef('/about', 'https://dev.azure.com/myorg/proj/_git/repo/pullRequest/42/attachments/smoke-1-about.png');
+    const ref = buildAdoAttachmentRef(
+      '/about',
+      'https://dev.azure.com/myorg/proj/_git/repo/pullRequest/42/attachments/smoke-1-about.png',
+    );
     expect(ref).toEqual({
       pagePath: '/about',
-      imageUrl: 'https://dev.azure.com/myorg/proj/_git/repo/pullRequest/42/attachments/smoke-1-about.png',
+      imageUrl:
+        'https://dev.azure.com/myorg/proj/_git/repo/pullRequest/42/attachments/smoke-1-about.png',
     });
     // No URL field from @autopod/shared ScreenshotRef shape — just pagePath + imageUrl
     expect(Object.keys(ref)).toEqual(['pagePath', 'imageUrl']);

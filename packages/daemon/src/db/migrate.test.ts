@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from './migrate.js';
 
 const logger = pino({ level: 'silent' });
+const MIGRATIONS_DIR = new URL('../../src/db/migrations', import.meta.url).pathname;
 
 function hasColumn(db: Database.Database, table: string, column: string): boolean {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
@@ -93,6 +94,61 @@ ALTER TABLE does_not_exist ADD COLUMN foo TEXT;`,
   });
 });
 
+// ── Migrations 092-095 — Safety / Guardrails foundation ──────────────────────
+
+describe('runMigrations — migrations 092-095 (safety foundation)', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db, MIGRATIONS_DIR, logger);
+  });
+
+  it('creates safety_events table with expected columns', () => {
+    const colNames = db
+      .prepare('PRAGMA table_info(safety_events)')
+      .all()
+      .map((r) => (r as { name: string }).name);
+    expect(colNames).toContain('id');
+    expect(colNames).toContain('pod_id');
+    expect(colNames).toContain('source');
+    expect(colNames).toContain('kind');
+    expect(colNames).toContain('pattern_name');
+    expect(colNames).toContain('severity');
+    expect(colNames).toContain('payload_excerpt');
+    expect(colNames).toContain('created_at');
+    const count = (db.prepare('SELECT COUNT(*) as n FROM safety_events').get() as { n: number }).n;
+    expect(count).toBe(0);
+  });
+
+  it('adds pii_categories column to action_audit', () => {
+    expect(hasColumn(db, 'action_audit', 'pii_categories')).toBe(true);
+  });
+
+  it('adds network_policy_resolved column to pods', () => {
+    expect(hasColumn(db, 'pods', 'network_policy_resolved')).toBe(true);
+  });
+
+  it('creates audit_chain_verifications table and it is empty on a fresh DB', () => {
+    const colNames = db
+      .prepare('PRAGMA table_info(audit_chain_verifications)')
+      .all()
+      .map((r) => (r as { name: string }).name);
+    expect(colNames).toContain('id');
+    expect(colNames).toContain('ran_at');
+    expect(colNames).toContain('total_pods');
+    expect(colNames).toContain('total_entries');
+    expect(colNames).toContain('valid');
+    expect(colNames).toContain('first_mismatch_pod_id');
+    expect(colNames).toContain('first_mismatch_row_id');
+    expect(colNames).toContain('first_mismatch_reason');
+    const count = (
+      db.prepare('SELECT COUNT(*) as n FROM audit_chain_verifications').get() as { n: number }
+    ).n;
+    expect(count).toBe(0);
+  });
+});
+
 // ── Migration 091 — drop screenshot blobs ────────────────────────────────────
 
 /** The SQL for migration 091 — located in the real migrations directory. */
@@ -131,9 +187,7 @@ function buildLegacyDb(db: Database.Database): void {
       ],
     },
     acValidation: {
-      checks: [
-        { criterion: 'Has title', screenshot: 'ghiScreenshotBase64==', passed: true },
-      ],
+      checks: [{ criterion: 'Has title', screenshot: 'ghiScreenshotBase64==', passed: true }],
     },
     taskReview: {
       screenshots: ['img1base64==', 'img2base64=='],
@@ -141,7 +195,7 @@ function buildLegacyDb(db: Database.Database): void {
     },
   });
   db.prepare(
-    `INSERT INTO validations (id, pod_id, attempt, result, screenshots) VALUES (?, ?, ?, ?, ?)`,
+    'INSERT INTO validations (id, pod_id, attempt, result, screenshots) VALUES (?, ?, ?, ?, ?)',
   ).run('val-1', 'pod-1', 1, legacyResult, JSON.stringify(['screenshotBlob==']));
 }
 
@@ -207,7 +261,9 @@ describe('runMigrations — migration 091 (drop screenshot blobs)', () => {
     db2.close();
 
     // A snapshot file should exist in the backups dir
-    const backupFiles = fs.readdirSync(backupsDir).filter((f) => f.endsWith('-pre-screenshot-cutover.db'));
+    const backupFiles = fs
+      .readdirSync(backupsDir)
+      .filter((f) => f.endsWith('-pre-screenshot-cutover.db'));
     expect(backupFiles).toHaveLength(1);
   });
 
