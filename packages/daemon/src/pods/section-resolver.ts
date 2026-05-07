@@ -1,6 +1,7 @@
 import type { InjectedClaudeMdSection, ProcessContentConfig } from '@autopod/shared';
-import { processContent } from '@autopod/shared';
+import { collectPiiPatternNames, processContent } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 
 export interface ResolvedSection {
   heading: string;
@@ -11,12 +12,21 @@ export interface ResolvedSection {
 export interface ResolveSectionsOptions {
   /** Content processing config for sanitizing fetched content */
   contentProcessing?: ProcessContentConfig;
+  /** Safety events repository for writing per-pattern detection rows */
+  safetyEventsRepo?: SafetyEventsRepository;
+  /** Pod id to attribute safety events to */
+  podId?: string;
 }
+
+const DEFAULT_CONTENT_PROCESSING: ProcessContentConfig = {
+  sanitization: { preset: 'standard' },
+  quarantine: { enabled: true },
+};
 
 /**
  * Resolve CLAUDE.md sections — fetches dynamic content where configured.
  * Never throws. Failed fetches are logged and silently skipped (or fall back to static content).
- * Fetched content is processed through quarantine + PII sanitization if configured.
+ * Fetched content is always processed through quarantine + PII sanitization.
  */
 export async function resolveSections(
   sections: InjectedClaudeMdSection[],
@@ -69,18 +79,55 @@ async function resolveOne(
           'CLAUDE.md section fetch failed',
         );
       } else {
-        let text = await res.text();
-        // Sanitize fetched content — external sources are untrusted
-        if (options?.contentProcessing) {
-          const processed = processContent(text, options.contentProcessing);
-          text = processed.text;
-          if (processed.quarantined) {
+        const rawText = await res.text();
+        // Always sanitize fetched content — external sources are untrusted
+        const cfg = options?.contentProcessing ?? DEFAULT_CONTENT_PROCESSING;
+        const processed = processContent(rawText, cfg);
+        const text = processed.text;
+        if (processed.quarantined) {
+          logger.warn(
+            { heading: section.heading },
+            'Fetched CLAUDE.md section content quarantined',
+          );
+        }
+
+        // Write per-pattern safety_events rows (non-fatal)
+        if (options?.safetyEventsRepo && options.podId) {
+          const repo = options.safetyEventsRepo;
+          const podId = options.podId;
+          const excerpt = text.slice(0, 256) || null;
+          try {
+            for (const threat of processed.threats) {
+              repo.insert({
+                podId,
+                source: 'claude_md_section',
+                kind: 'injection',
+                patternName: threat.pattern,
+                severity: threat.severity,
+                payloadExcerpt: excerpt,
+              });
+            }
+            if (processed.sanitized && processed.threats.length === 0) {
+              // PII-only: collect patterns from raw pre-sanitize text
+              for (const name of collectPiiPatternNames(rawText)) {
+                repo.insert({
+                  podId,
+                  source: 'claude_md_section',
+                  kind: 'pii',
+                  patternName: name,
+                  severity: null,
+                  payloadExcerpt: excerpt,
+                });
+              }
+            }
+          } catch (err) {
             logger.warn(
-              { heading: section.heading },
-              'Fetched CLAUDE.md section content quarantined',
+              { err, heading: section.heading },
+              'Failed to write safety events for section',
             );
           }
         }
+
         const truncated = truncateToTokenBudget(text, section.maxTokens ?? 4000);
         parts.push(truncated);
       }

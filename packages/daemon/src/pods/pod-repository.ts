@@ -2,6 +2,7 @@ import type {
   AcDefinition,
   AgentMode,
   ExecutionTarget,
+  NetworkPolicyMode,
   OutputMode,
   OutputTarget,
   PhaseTokenUsage,
@@ -172,6 +173,7 @@ export interface PodUpdates {
   deployBaselineHashes?: Record<string, string> | null;
   acSelfReport?: Array<{ criterion: string; verified: boolean; notes?: string }> | null;
   phaseTokenUsage?: PhaseTokenUsage | null;
+  networkPolicyResolved?: NetworkPolicyMode | null;
 }
 
 export interface PodStats {
@@ -400,6 +402,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
           Record<'review' | 'plan_eval', { inputTokens: number; outputTokens: number }>
         >)
       : null,
+    networkPolicyResolved: (row.network_policy_resolved as NetworkPolicyMode) ?? null,
   };
 }
 
@@ -783,6 +786,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('phase_token_usage = @phaseTokenUsage');
         params.phaseTokenUsage =
           changes.phaseTokenUsage !== null ? JSON.stringify(changes.phaseTokenUsage) : null;
+      }
+      if (changes.networkPolicyResolved !== undefined) {
+        setClauses.push('network_policy_resolved = @networkPolicyResolved');
+        params.networkPolicyResolved = changes.networkPolicyResolved ?? null;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so

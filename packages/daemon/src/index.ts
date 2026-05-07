@@ -527,6 +527,7 @@ podManager = createPodManager({
   repoScanner,
   scanRepo,
   screenshotStore,
+  safetyEventsRepo,
   logger,
 });
 

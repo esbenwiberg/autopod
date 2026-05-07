@@ -2,7 +2,7 @@ import type { AcDefinition } from './ac.js';
 import type { OutputMode } from './actions.js';
 import type { EscalationRequest } from './escalation.js';
 import type { PodOptions } from './pod-options.js';
-import type { ExecutionTarget, PimGroupConfig, Profile } from './profile.js';
+import type { ExecutionTarget, NetworkPolicyMode, PimGroupConfig, Profile } from './profile.js';
 import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
 import type { ValidationFinding, ValidationOverride, ValidationResult } from './validation.js';
@@ -329,6 +329,8 @@ export interface Pod {
    * null until any harness AI call or agent run completes.
    */
   phaseTokenUsage: PhaseTokenUsage | null;
+  /** Effective network policy mode snapshotted at provisioning (ADR-020). NULL for pre-migration pods. */
+  networkPolicyResolved: NetworkPolicyMode | null;
 }
 
 export interface CreatePodRequest {

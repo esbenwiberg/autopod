@@ -609,6 +609,8 @@ export interface PodManagerDependencies {
   scanRepo?: import('../security/index.js').ScanRepository;
   /** On-disk screenshot store. Smoke screenshots are written here after validation. */
   screenshotStore?: import('./screenshot-store.js').ScreenshotStore;
+  /** Safety events repository for writing per-pattern detection rows. */
+  safetyEventsRepo?: import('../safety/safety-events-repository.js').SafetyEventsRepository;
   logger: Logger;
 }
 
@@ -838,6 +840,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     repoScanner,
     scanRepo,
     screenshotStore,
+    safetyEventsRepo,
   } = deps;
 
   /**
@@ -2972,6 +2975,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Snapshot the resolved profile at pod start time for auditability
         podRepo.update(podId, { profileSnapshot: profile });
 
+        // Snapshot the resolved network policy once at first provisioning (ADR-020).
+        // Guard prevents overwriting on recovery/resume — the original policy is the snapshot.
+        if (!pod.networkPolicyResolved) {
+          const resolvedNetworkPolicy = profile.networkPolicy?.enabled
+            ? (profile.networkPolicy.mode ?? 'restricted')
+            : 'allow-all';
+          podRepo.update(podId, { networkPolicyResolved: resolvedNetworkPolicy });
+        }
+
         // Worktree is optional — artifact-mode profiles may have no repoUrl.
         let worktreePath: string | null = null;
         let bareRepoPath: string | null = null;
@@ -3620,7 +3632,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let resolvedSkillNames: string[] = [];
         if (mergedSkills.length > 0) {
           emitStatus('Resolving skills…');
-          const resolvedSkills = await resolveSkills(mergedSkills, logger);
+          const resolvedSkills = await resolveSkills(mergedSkills, logger, podId, safetyEventsRepo);
           const skillsDir = `${CONTAINER_HOME_DIR}/.claude/skills`;
           for (const skill of resolvedSkills) {
             await containerManager.writeFile(
@@ -4043,7 +4055,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (mergedSections.some((s) => s.fetch)) {
           emitStatus('Fetching dynamic CLAUDE.md sections…');
         }
-        const resolvedSections = await resolveSections(mergedSections, logger);
+        const resolvedSections = await resolveSections(mergedSections, logger, {
+          podId,
+          safetyEventsRepo,
+        });
 
         // Generate system instructions and deliver based on runtime
         const mcpUrl = `${mcpBaseUrl}/mcp/${podId}`;
