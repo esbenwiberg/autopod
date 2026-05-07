@@ -15,6 +15,11 @@ public struct AnalyticsRightPaneView: View {
     public let loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
     public let loadQuality: ((Int) async throws -> QualityAnalyticsResponse)?
     public let onSelectPod: ((String) -> Void)?
+    /// Quality-specific pod selection callback. When provided, used instead of
+    /// `onSelectPod` for the Quality drill so callers can apply Quality-only
+    /// side-effects (e.g. setting a focused detail tab) without affecting
+    /// Cost / Reliability row clicks.
+    public let onQualitySelectPod: ((String) -> Void)?
 
     public init(
         card: AnalyticsCardKind?,
@@ -23,7 +28,8 @@ public struct AnalyticsRightPaneView: View {
         loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
         loadQuality: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
-        onSelectPod: ((String) -> Void)? = nil
+        onSelectPod: ((String) -> Void)? = nil,
+        onQualitySelectPod: ((String) -> Void)? = nil
     ) {
         self.card = card
         self.pods = pods
@@ -32,6 +38,7 @@ public struct AnalyticsRightPaneView: View {
         self.loadReliability = loadReliability
         self.loadQuality = loadQuality
         self.onSelectPod = onSelectPod
+        self.onQualitySelectPod = onQualitySelectPod
     }
 
     public var body: some View {
@@ -40,7 +47,7 @@ public struct AnalyticsRightPaneView: View {
             CostDrillView(loadCost: loadCost, onSelectPod: onSelectPod)
         case .quality:
             if let loadQuality {
-                QualityDrillView(load: loadQuality, onSelectPod: onSelectPod)
+                QualityDrillView(load: loadQuality, onSelectPod: onQualitySelectPod ?? onSelectPod)
             } else {
                 VStack(spacing: 8) {
                     Spacer()

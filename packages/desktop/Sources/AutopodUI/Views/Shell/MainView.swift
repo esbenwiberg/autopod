@@ -367,6 +367,12 @@ public struct MainView: View {
                         selectedAnalyticsCard = result.card
                         sidebarSelection = result.sidebar
                         selectedSessionId = result.session
+                    },
+                    onQualitySelectPod: { sessionId in
+                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                        selectedAnalyticsCard = result.card
+                        sidebarSelection = result.sidebar
+                        selectedSessionId = result.session
                         requestedDetailTab = .summary
                     }
                 )

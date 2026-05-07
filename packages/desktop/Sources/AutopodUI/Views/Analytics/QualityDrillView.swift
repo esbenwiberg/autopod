@@ -86,20 +86,26 @@ struct QualityDrillView: View {
             .padding(24)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .task { await fetchData() }
+        .task(id: days) { await fetchData() }
     }
 
     // MARK: - Header
 
     private var headerRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "speedometer")
-                .foregroundStyle(.secondary)
-            Text("Quality Analytics")
-                .font(.title3.weight(.semibold))
-            Spacer()
-            if isLoading { ProgressView().controlSize(.small) }
-            daysPicker
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "speedometer")
+                    .foregroundStyle(.secondary)
+                Text("Quality Analytics")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                if isLoading { ProgressView().controlSize(.small) }
+            }
+            HStack(spacing: 8) {
+                bandChips
+                Spacer()
+                daysPicker
+            }
         }
     }
 
@@ -114,7 +120,6 @@ struct QualityDrillView: View {
         .pickerStyle(.menu)
         .labelsHidden()
         .frame(width: 70)
-        .onChange(of: days) { _, _ in Task { await fetchData() } }
     }
 
     // MARK: - Band chips
@@ -201,7 +206,6 @@ struct QualityDrillView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text("Quality Signals")
                 .font(.subheadline.weight(.semibold))
-            bandChips
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
                 reasonTile(label: "Low read/edit", count: reasons.lowReadEditRatio, total: total)
                 reasonTile(label: "Edits w/o read", count: reasons.editsWithoutPriorRead, total: total)
