@@ -248,6 +248,20 @@ export function podRoutes(
     return aggregateCost({ podRepo }, { days });
   });
 
+  // GET /pods/analytics/quality — trailing-window quality composite analytics
+  app.get('/pods/analytics/quality', async (request, reply) => {
+    if (!qualityScoreRepo) {
+      reply.status(503);
+      return { error: 'Quality analytics unavailable — repository not wired' };
+    }
+    const days = parseDays(request.query as Record<string, unknown>);
+    if (days === null || days > 365) {
+      reply.status(400);
+      return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
+    }
+    return qualityScoreRepo.getQualityAnalytics(days);
+  });
+
   // GET /pods/analytics/reliability — trailing-window reliability funnel + stage failure analytics
   app.get('/pods/analytics/reliability', async (request, reply) => {
     if (!db) {

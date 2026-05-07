@@ -1,3 +1,33 @@
+import type { PodQualityScore } from './pod.js';
+
+export interface QualityAnalyticsResponse {
+  /** High-level totals over the trailing window. */
+  summary: {
+    totalPodsScored: number;
+    avgScore: number;
+    redCount: number; // score < 60
+    yellowCount: number; // 60..79
+    greenCount: number; // 80..100
+    deltaVsPrior: { value: number; direction: 'up' | 'down' | 'flat' };
+  };
+  /** Length always equals `days` from the query. */
+  sparkline: Array<{ day: string; avgScore: number; podCount: number }>;
+  /** Fixed 10 buckets: 0-9, 10-19, ..., 90-100. Empty buckets have count 0. */
+  distribution: Array<{ bucket: string; count: number }>;
+  /** Counts of pods that triggered each persisted signal. */
+  reasons: {
+    lowReadEditRatio: number;
+    editsWithoutPriorRead: number;
+    userInterrupts: number;
+    validationFailed: number;
+    prFixAttempts: number;
+    editChurn: number;
+    tells: number;
+  };
+  /** Full list of scores in the window — drill table renders from this. */
+  scores: PodQualityScore[];
+}
+
 export interface CostAnalyticsResponse {
   /** Total effective cost over the trailing window. */
   total: number;

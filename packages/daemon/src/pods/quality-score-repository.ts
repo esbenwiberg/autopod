@@ -1,4 +1,4 @@
-import type { PodQualityScore, QualityTrend, RuntimeType } from '@autopod/shared';
+import type { PodQualityScore, QualityAnalyticsResponse, QualityTrend, RuntimeType } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 export interface QualityScoreFilters {
@@ -16,6 +16,7 @@ export interface QualityScoreRepository {
   get(podId: string): PodQualityScore | null;
   list(filters?: QualityScoreFilters): PodQualityScore[];
   getTrends(days?: number): QualityTrend[];
+  getQualityAnalytics(days: number): QualityAnalyticsResponse;
 }
 
 function rowToScore(row: Record<string, unknown>): PodQualityScore {
@@ -170,6 +171,109 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
         )
         .all({ days }) as Record<string, unknown>[];
       return rows.map(rowToTrend);
+    },
+
+    getQualityAnalytics(days: number): QualityAnalyticsResponse {
+      // Fetch all scores in the trailing window.
+      const scoreRows = db
+        .prepare(
+          `SELECT * FROM pod_quality_scores
+           WHERE completed_at >= datetime('now', '-' || @days || ' days')
+           ORDER BY completed_at DESC`,
+        )
+        .all({ days }) as Record<string, unknown>[];
+      const scores = scoreRows.map(rowToScore);
+      const total = scores.length;
+
+      // Single pass: compute summary counts, sparkline buckets, histogram, and reasons.
+      const BUCKETS = [
+        '0-9', '10-19', '20-29', '30-39', '40-49',
+        '50-59', '60-69', '70-79', '80-89', '90-100',
+      ];
+      let redCount = 0;
+      let yellowCount = 0;
+      let greenCount = 0;
+      let scoreSum = 0;
+      const dayBuckets = new Map<string, { sum: number; count: number }>();
+      const distCounts = new Array<number>(10).fill(0);
+      const reasons = {
+        lowReadEditRatio: 0,
+        editsWithoutPriorRead: 0,
+        userInterrupts: 0,
+        validationFailed: 0,
+        prFixAttempts: 0,
+        editChurn: 0,
+        tells: 0,
+      };
+      for (const s of scores) {
+        scoreSum += s.score;
+        if (s.score < 60) redCount++;
+        else if (s.score < 80) yellowCount++;
+        else greenCount++;
+
+        const day = s.completedAt.slice(0, 10);
+        const b = dayBuckets.get(day) ?? { sum: 0, count: 0 };
+        b.sum += s.score;
+        b.count++;
+        dayBuckets.set(day, b);
+
+        distCounts[Math.min(Math.floor(s.score / 10), 9)]++;
+
+        if (s.readEditRatio < 1 && s.editCount > 0) reasons.lowReadEditRatio++;
+        if (s.editsWithoutPriorRead > 0) reasons.editsWithoutPriorRead++;
+        if (s.userInterrupts > 0) reasons.userInterrupts++;
+        if (s.validationPassed === false) reasons.validationFailed++;
+        if (s.prFixAttempts > 0) reasons.prFixAttempts++;
+        if (s.editChurnCount > 0) reasons.editChurn++;
+        if (s.tellsCount > 0) reasons.tells++;
+      }
+      const avgScore = total > 0 ? scoreSum / total : 0;
+
+      // deltaVsPrior — the immediately preceding window of the same length.
+      const priorAgg = db
+        .prepare(
+          `SELECT AVG(score) AS avgScore, COUNT(*) AS cnt
+           FROM pod_quality_scores
+           WHERE completed_at >= datetime('now', '-' || @priorDays || ' days')
+             AND completed_at <  datetime('now', '-' || @days    || ' days')`,
+        )
+        .get({ priorDays: days * 2, days }) as { avgScore: number | null; cnt: number };
+
+      let deltaValue = 0;
+      let deltaDirection: 'up' | 'down' | 'flat' = 'flat';
+      if (priorAgg.cnt > 0 && priorAgg.avgScore !== null) {
+        deltaValue = avgScore - priorAgg.avgScore;
+        deltaDirection = deltaValue > 0 ? 'up' : deltaValue < 0 ? 'down' : 'flat';
+      }
+
+      // Sparkline — one entry per day in the window; fill empty days with zeros.
+      const nowMs = Date.now();
+      const allDays = Array.from({ length: days }, (_, i) =>
+        new Date(nowMs - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10),
+      );
+      const sparkline = allDays.map((day) => {
+        const b = dayBuckets.get(day);
+        return b && b.count > 0
+          ? { day, avgScore: b.sum / b.count, podCount: b.count }
+          : { day, avgScore: 0, podCount: 0 };
+      });
+
+      const distribution = BUCKETS.map((bucket, i) => ({ bucket, count: distCounts[i] ?? 0 }));
+
+      return {
+        summary: {
+          totalPodsScored: total,
+          avgScore,
+          redCount,
+          yellowCount,
+          greenCount,
+          deltaVsPrior: { value: deltaValue, direction: deltaDirection },
+        },
+        sparkline,
+        distribution,
+        reasons,
+        scores,
+      };
     },
   };
 }
