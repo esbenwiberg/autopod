@@ -625,6 +625,7 @@ const issueWatcherService = createIssueWatcherService({
   podManager,
   eventBus,
   issueWatcherRepo,
+  safetyEventsRepo,
   logger,
   pollIntervalMs: ISSUE_WATCHER_POLL_INTERVAL,
 });
