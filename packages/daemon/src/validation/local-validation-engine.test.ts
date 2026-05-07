@@ -1078,6 +1078,35 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.smoke.health.status).toBe('fail');
     expect(result.smoke.health.url).toBe('http://127.0.0.1:9999/');
   });
+
+  it('reports Pages as skip (not pass) when Health fails with smokePages configured', async () => {
+    // Regression: `pages` is an empty array when health doesn't pass, and
+    // `[].every(...)` is vacuously true — which previously made pagesStatus
+    // = 'pass' and surfaced a bogus "All pages passed" while Health was red.
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const completed: Array<{ phase: string; status: string }> = [];
+    const callbacks: ValidationPhaseCallbacks = {
+      onPhaseCompleted: (phase, status) => completed.push({ phase, status }),
+    };
+
+    const result = await engine.validate(
+      baseConfig({
+        hasWebUi: true,
+        buildCommand: 'npm run build',
+        smokePages: [{ path: '/' }, { path: '/dashboard' }],
+      }),
+      undefined,
+      undefined,
+      callbacks,
+    );
+
+    expect(result.smoke.health.status).toBe('fail');
+    expect(result.smoke.pages).toEqual([]);
+    const pagesEvent = completed.find((c) => c.phase === 'pages');
+    expect(pagesEvent?.status).toBe('skip');
+  });
 });
 
 describe('validate() — tier-1 gate', () => {

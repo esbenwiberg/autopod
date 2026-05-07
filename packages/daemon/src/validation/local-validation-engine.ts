@@ -260,8 +260,14 @@ export function createLocalValidationEngine(
             healthResult.status === 'pass' && config.smokePages.length > 0
               ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
               : [];
+          // Health must actually pass for Pages to mean anything. When health is
+          // 'fail' the app never came up, so `pages` is the empty array — and
+          // `[].every(...)` is vacuously true, which previously surfaced a
+          // bogus "All pages passed" while the failure was attributed to
+          // Health. Treat any non-pass health as 'skip' to keep Pages honest;
+          // the upstream Health failure already trips the tier-1 gate.
           pagesStatus =
-            healthResult.status === 'skip' || config.smokePages.length === 0
+            healthResult.status !== 'pass' || config.smokePages.length === 0
               ? 'skip'
               : pages.every((p) => p.status === 'pass')
                 ? 'pass'
