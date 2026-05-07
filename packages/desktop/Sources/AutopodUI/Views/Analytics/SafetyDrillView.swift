@@ -232,9 +232,9 @@ struct SafetyDrillView: View {
     private func flatInjectionRows() -> [InjectionRow] {
         guard let r = response else { return [] }
         return r.byPod.flatMap { pod in
-            pod.topInjections.map { inj in
+            pod.topInjections.enumerated().map { offset, inj in
                 InjectionRow(
-                    id: "\(pod.podId)|\(inj.createdAt)|\(inj.patternName)",
+                    id: "\(pod.podId)|\(offset)|\(inj.createdAt)|\(inj.patternName)",
                     createdAt: inj.createdAt,
                     patternName: inj.patternName,
                     severity: inj.severity,

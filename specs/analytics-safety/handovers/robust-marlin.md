@@ -42,10 +42,14 @@ Eight Swift files changed or created to surface the Safety analytics card and fi
 
 ## Deviations from brief
 
-One intentional deviation:
+Two intentional deviations:
 
 - **Injection table: Source column dropped**
   The brief specifies `When / Source / Pattern / Severity / Pod`. However, `SafetyInjectionEntry` in the TS contract (`topInjections` inside `byPod`) does not include a `source` field — only `patternName`, `severity`, `payloadExcerpt`, and `createdAt`. Populating Source from `r.bySource.first` (global aggregation) would show misleading data. The column was dropped; the table renders `When / Pattern / Severity / Pod`. If Brief 05 can add `source` to `topInjections` in a future iteration, the Swift type and table column can be added back with a one-line change.
+
+- **Phase 0 sidebar sub-row: not flipped (precondition unmet)**
+  The brief instructs to flip the disabled flag on a Safety sub-row in the sidebar, citing `specs/analytics-shell/design.md`. That design defines an `AnalyticsSection` enum and replaces `SidebarItem.analytics` with `SidebarItem.analyticsSection(AnalyticsSection)` rendering nested rows with `.disabled(!section.isShipped)`. **That refactor was never implemented in this codebase**: there is no `AnalyticsSection.swift`, no `analyticsSection` case on `SidebarItem`, and `SidebarView.swift` currently renders only a single flat `.analytics` row (no Safety sub-row exists, disabled or otherwise). `rg 'AnalyticsSection|analyticsSection|isShipped' packages/desktop/Sources/` returns zero matches.
+  Implementing the Phase 0 nesting from scratch would: introduce a new enum, change the `SidebarItem` shape (a `Hashable` used as a binding throughout `MainView`), update every exhaustive switch on `SidebarItem`, and add label/icon/isShipped wiring — well beyond Brief 06's remit and outside its declared `touches` block. No flag was flipped because no flag exists; the prerequisite Phase 0 work belongs to a separate brief in the analytics-shell spec. The single flat `.analytics` row already routes into the AnalyticsView Overview, where the Safety card is now visible — so the user-facing functionality of "navigate to safety" is reachable via the existing analytics entry point.
 
 ## Files owned — do not modify without good reason
 
