@@ -8204,6 +8204,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         { podId, reason: trimmedReason },
         'Pod force-completed by operator (admin override — push/PR/merge skipped)',
       );
+
+      // Series children that were waiting on this pod must be triggered just
+      // like a normal completion — otherwise the entire downstream series
+      // stalls in `queued` forever and the operator has to manually `kick`
+      // each dependent. The whole point of force-complete is to unstick a
+      // series, so silently failing to advance it is a footgun.
+      const completedPod = podRepo.getOrThrow(podId);
+      maybeTriggerDependents(completedPod);
     },
 
     async kickPod(podId: string, reason?: string): Promise<{ action: 'requeued' | 'failed' }> {

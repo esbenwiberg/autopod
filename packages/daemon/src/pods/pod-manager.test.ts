@@ -3738,6 +3738,33 @@ describe('PodManager', () => {
         PodNotFoundError,
       );
     });
+
+    it('triggers queued series dependents — admin override must advance the series', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Parent' },
+        'user-1',
+      );
+      const child = manager.createSession(
+        { profileName: 'test-profile', task: 'Child', dependsOnPodIds: [parent.id] },
+        'user-1',
+      );
+      ctx.podRepo.update(parent.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/parent',
+        containerId: 'container-parent',
+        startedAt: new Date().toISOString(),
+      });
+      ctx.podRepo.update(parent.id, { status: 'running' });
+      ctx.podRepo.update(parent.id, { status: 'failed' });
+
+      ctx.enqueuedSessions.length = 0;
+      await manager.forceComplete(parent.id, 'unstick the series');
+
+      expect(ctx.enqueuedSessions).toContain(child.id);
+    });
   });
 
   describe('processPod — missing profile is caught (no orphaned queued pods)', () => {
