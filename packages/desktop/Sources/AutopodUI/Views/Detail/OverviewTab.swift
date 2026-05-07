@@ -22,6 +22,12 @@ struct OverviewTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // Worktree-compromised banner — lives inside the ScrollView so its
+                // multi-line text can't propagate a min-height up to the window.
+                if pod.worktreeCompromised {
+                    WorktreeCompromisedBanner()
+                }
+
                 // Escalation card (if pending)
                 if pod.status == .awaitingInput, let question = pod.escalationQuestion {
                     if pod.escalationType == "action_approval" {

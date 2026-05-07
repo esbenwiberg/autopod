@@ -105,16 +105,6 @@ public struct DetailPanelView: View {
             // Pod header
             detailHeader
 
-            // Worktree-compromised banner sits outside the header so its
-            // multi-line text can't deform the header HStack's layout — the
-            // failed-pod action row is already wide and the combination used
-            // to clip the header to zero height in narrow detail columns.
-            if pod.worktreeCompromised {
-                worktreeCompromisedBanner
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
-            }
-
             // Tab bar
             tabBar
 
@@ -173,7 +163,10 @@ public struct DetailPanelView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Hard floor on the panel's intrinsic height so transient content
+        // (banners, expanded headers) can't propagate a larger min upwards
+        // through NavigationSplitView and grow the whole window.
+        .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { selectedTab = Self.defaultTab(for: pod) }
         .onChange(of: pod.id) { _, _ in selectedTab = Self.defaultTab(for: pod) }
@@ -283,27 +276,6 @@ public struct DetailPanelView: View {
         }
     }
 
-    private var worktreeCompromisedBanner: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Worktree out of sync with container")
-                    .font(.caption.weight(.semibold))
-                Text("The auto-commit deletion guard blocked a phantom mass-delete. The agent's real work may still live in the container — don't retry the PR; recover manually first.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(8)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
-        )
-    }
 
     @ViewBuilder
     private var headerActions: some View {
@@ -1069,6 +1041,35 @@ public struct DetailPanelView: View {
     // MARK: - Placeholder tabs
 
 
+}
+
+// MARK: - Worktree-compromised banner
+
+/// Warning banner shown when a pod's worktree has fallen out of sync with its
+/// container after the auto-commit deletion guard tripped. Lives inside the
+/// Overview tab's ScrollView so its multi-line text can't propagate a vertical
+/// minimum upwards through NavigationSplitView and grow the window.
+struct WorktreeCompromisedBanner: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Worktree out of sync with container")
+                    .font(.caption.weight(.semibold))
+                Text("The auto-commit deletion guard blocked a phantom mass-delete. The agent's real work may still live in the container — don't retry the PR; recover manually first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        )
+    }
 }
 
 // MARK: - Tab enum

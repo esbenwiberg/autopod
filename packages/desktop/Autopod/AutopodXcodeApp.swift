@@ -54,6 +54,10 @@ struct AutopodXcodeApp: App {
     }
     .windowStyle(.titleBar)
     .defaultSize(width: 1200, height: 700)
+    // Window's min size tracks the content's current min size — lets the user
+    // shrink the window back down if a transient view (e.g. a warning banner)
+    // briefly raised the content's intrinsic minimum.
+    .windowResizability(.contentMinSize)
     .commands {
       TextEditingCommands()
     }
