@@ -4,10 +4,11 @@ import type {
   ActionRequest,
   ActionResponse,
 } from '@autopod/shared';
-import { processContentDeep } from '@autopod/shared';
+import { collectPiiPatternNames, processContentDeep } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { PodRepository } from '../pods/pod-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { ActionRegistry } from './action-registry.js';
 import type { ActionAuditRepository } from './audit-repository.js';
 import { createGenericHttpHandler } from './generic-http-handler.js';
@@ -29,6 +30,7 @@ export interface ActionEngine {
 export interface ActionEngineDependencies {
   registry: ActionRegistry;
   auditRepo: ActionAuditRepository;
+  safetyEventsRepo?: SafetyEventsRepository;
   logger: Logger;
   getSecret: (ref: string) => string | undefined;
   /**
@@ -44,7 +46,16 @@ export interface ActionEngineDependencies {
 }
 
 export function createActionEngine(deps: ActionEngineDependencies): ActionEngine {
-  const { registry, auditRepo, logger, getSecret, ssrfGuard, podRepo, profileStore } = deps;
+  const {
+    registry,
+    auditRepo,
+    safetyEventsRepo,
+    logger,
+    getSecret,
+    ssrfGuard,
+    podRepo,
+    profileStore,
+  } = deps;
   const log = logger.child({ component: 'action-engine' });
 
   // Create handler instances
@@ -197,6 +208,42 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
 
       const threatScore = threats.length > 0 ? Math.max(...threats.map((t) => t.severity)) : 0;
 
+      // Derive PII pattern names from the raw response (before sanitization).
+      const rawText = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
+      const piiCategories = sanitized ? collectPiiPatternNames(rawText) : null;
+
+      // Post-sanitize text for payload_excerpt (first 256 chars)
+      const processedText =
+        typeof processedData === 'string' ? processedData : JSON.stringify(processedData);
+      const payloadExcerpt = processedText.slice(0, 256);
+
+      // Write injection safety_events rows (one per threat)
+      if (safetyEventsRepo) {
+        for (const threat of threats) {
+          safetyEventsRepo.insert({
+            podId,
+            source: 'action_response',
+            kind: 'injection',
+            patternName: threat.pattern,
+            severity: threat.severity,
+            payloadExcerpt,
+          });
+        }
+        // Write PII safety_events rows (one per matched pattern)
+        if (piiCategories && piiCategories.length > 0) {
+          for (const patternName of piiCategories) {
+            safetyEventsRepo.insert({
+              podId,
+              source: 'action_response',
+              kind: 'pii',
+              patternName,
+              severity: null,
+              payloadExcerpt,
+            });
+          }
+        }
+      }
+
       // 7. Audit log
       auditRepo.insert({
         podId,
@@ -205,6 +252,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
         responseSummary: summarizeResponse(processedData),
         piiDetected: sanitized,
         quarantineScore: threatScore,
+        piiCategories: piiCategories ?? null,
       });
 
       log.info({ podId, actionName, sanitized, quarantined, threatScore }, 'Action executed');

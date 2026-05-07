@@ -31,6 +31,7 @@ function setupDb(): InstanceType<typeof Database> {
       action_name TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}',
       response_summary TEXT DEFAULT NULL, pii_detected INTEGER NOT NULL DEFAULT 0,
       quarantine_score REAL NOT NULL DEFAULT 0.0,
+      pii_categories TEXT DEFAULT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       prev_hash TEXT DEFAULT NULL,
       entry_hash TEXT DEFAULT NULL
@@ -150,6 +151,24 @@ describe('ActionAuditRepository', () => {
     expect(repo.listBySession('nonexistent')).toEqual([]);
   });
 
+  it('pii_categories round-trip: array stored and returned correctly', () => {
+    repo.insert(makeEntry({ piiCategories: ['api-key', 'email'] }));
+    const [row] = repo.listBySession(POD_ID);
+    expect(row?.piiCategories).toEqual(['api-key', 'email']);
+  });
+
+  it('pii_categories round-trip: null stored and returned as null', () => {
+    repo.insert(makeEntry({ piiCategories: null }));
+    const [row] = repo.listBySession(POD_ID);
+    expect(row?.piiCategories).toBeNull();
+  });
+
+  it('pii_categories round-trip: undefined (not provided) stored and returned as null', () => {
+    repo.insert(makeEntry()); // no piiCategories field
+    const [row] = repo.listBySession(POD_ID);
+    expect(row?.piiCategories).toBeNull();
+  });
+
   it('multiple pods do not leak across queries', () => {
     const otherSessionId = 'sess-002';
     db.exec(
@@ -237,6 +256,60 @@ describe('ActionAuditRepository — hash chain', () => {
     // detects any tampering done directly against the database.
     expect(typeof (repo as Record<string, unknown>).update).toBe('undefined');
     expect(typeof (repo as Record<string, unknown>).delete).toBe('undefined');
+  });
+
+  // ─── ADR-019 hash-stability gate ────────────────────────────────────────
+  // pii_categories must NOT be included in the hash payload. If it were, any
+  // write of pii_categories would invalidate the entire chain — breaking
+  // existing rows already stored without the column.
+
+  it('entry_hash is identical regardless of piiCategories value (ADR-019)', () => {
+    // Insert two entries that differ ONLY in piiCategories
+    db.exec(
+      `INSERT INTO pods (id, profile_name, task) VALUES ('sess-hash-a', '${PROFILE_NAME}', 'hash-test-a')`,
+    );
+    db.exec(
+      `INSERT INTO pods (id, profile_name, task) VALUES ('sess-hash-b', '${PROFILE_NAME}', 'hash-test-b')`,
+    );
+
+    const repoA = createActionAuditRepository(
+      (() => {
+        const d = setupDb();
+        d.exec(
+          `INSERT INTO pods (id, profile_name, task) VALUES ('sess-hash-null', '${PROFILE_NAME}', 'h')`,
+        );
+        return d;
+      })(),
+    );
+    const repoB = createActionAuditRepository(
+      (() => {
+        const d = setupDb();
+        d.exec(
+          `INSERT INTO pods (id, profile_name, task) VALUES ('sess-hash-null', '${PROFILE_NAME}', 'h')`,
+        );
+        return d;
+      })(),
+    );
+
+    const baseEntry = {
+      podId: 'sess-hash-null',
+      actionName: 'deploy',
+      params: { env: 'staging' },
+      responseSummary: 'done',
+      piiDetected: false,
+      quarantineScore: 0.0,
+    };
+
+    repoA.insert({ ...baseEntry, piiCategories: null });
+    repoB.insert({ ...baseEntry, piiCategories: ['api-key', 'email'] });
+
+    const [rowA] = repoA.listBySession('sess-hash-null');
+    const [rowB] = repoB.listBySession('sess-hash-null');
+
+    // The entry hashes must be identical — piiCategories is NOT in the hash payload
+    expect(rowA?.entryHash).toBeTruthy();
+    expect(rowB?.entryHash).toBeTruthy();
+    expect(rowA?.entryHash).toBe(rowB?.entryHash);
   });
 
   it('hash chains are independent across pods', () => {

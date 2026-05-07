@@ -1,9 +1,23 @@
 import type { ActionDefinition, ActionPolicy } from '@autopod/shared';
 import pino from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import { type ActionEngine, createActionEngine } from './action-engine.js';
 import type { ActionRegistry } from './action-registry.js';
 import type { ActionAuditRepository } from './audit-repository.js';
+
+// ─── Hoisted mocks (shared with vi.mock factories) ──────────────────────────
+// vi.hoisted runs before module loading so these refs are stable when vi.mock
+// factories execute. The http handler mock becomes configurable per-test.
+const { mockHttpExecute, mockProcessContentDeep, mockCollectPiiPatternNames } = vi.hoisted(() => ({
+  mockHttpExecute: vi
+    .fn()
+    .mockRejectedValue(new Error('HTTP handler unavailable in test environment')),
+  mockProcessContentDeep: vi
+    .fn()
+    .mockReturnValue({ result: {}, sanitized: false, quarantined: false, threats: [] }),
+  mockCollectPiiPatternNames: vi.fn().mockReturnValue([]),
+}));
 
 // Prevent real network calls — handlers throw immediately so tests stay fast
 vi.mock('./handlers/github-handler.js', () => ({
@@ -21,13 +35,22 @@ vi.mock('./handlers/azure-logs-handler.js', () => ({
     execute: vi.fn().mockRejectedValue(new Error('Azure Logs API unavailable in test environment')),
   }),
 }));
+// Generic http handler uses the hoisted mockHttpExecute so safety tests can configure it
 vi.mock('./generic-http-handler.js', () => ({
-  createGenericHttpHandler: () => ({
-    execute: vi.fn().mockRejectedValue(new Error('HTTP handler unavailable in test environment')),
-  }),
+  createGenericHttpHandler: () => ({ execute: mockHttpExecute }),
 }));
 
-// ─── Test helpers ───────────────────────────────────────────────
+// Mock @autopod/shared to control processContentDeep and collectPiiPatternNames
+vi.mock('@autopod/shared', async (importOriginal) => {
+  const actual = (await importOriginal()) as typeof import('@autopod/shared');
+  return {
+    ...actual,
+    processContentDeep: mockProcessContentDeep,
+    collectPiiPatternNames: mockCollectPiiPatternNames,
+  };
+});
+
+// ─── Test helpers ────────────────────────────────────────────────
 
 const testAction: ActionDefinition = {
   name: 'read_issue',
@@ -62,6 +85,20 @@ function createMockAuditRepo(): ActionAuditRepository {
     insert: vi.fn(),
     listBySession: vi.fn(() => []),
     countBySession: vi.fn(() => 0),
+    verifyAuditChain: vi.fn(() => ({ valid: true, rowCount: 0 })),
+  };
+}
+
+function createMockSafetyRepo(): SafetyEventsRepository {
+  return {
+    insert: vi.fn(() => 1),
+    attachPodId: vi.fn(),
+    countByKindInWindow: vi.fn(() => ({ pii: 0, injection: 0 })),
+    countByPatternInWindow: vi.fn(() => []),
+    countBySourceInWindow: vi.fn(() => []),
+    countByPodInWindow: vi.fn(() => []),
+    topInjectionsForPod: vi.fn(() => []),
+    sparkline: vi.fn(() => []),
   };
 }
 
@@ -506,5 +543,205 @@ describe('ActionEngine', () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain('must be one of');
+  });
+});
+
+// ─── Safety Events ───────────────────────────────────────────────────────────
+// Test that action-engine correctly writes safety_events rows and pii_categories
+// on the success path. Uses the hoisted mockHttpExecute + processContentDeep mocks.
+
+const httpFetchAction: ActionDefinition = {
+  name: 'fetch_data',
+  description: 'Fetch some data via HTTP',
+  group: 'http-tools',
+  handler: 'http',
+  params: {
+    url: { type: 'string', required: true, description: 'URL to fetch' },
+  },
+  response: { fields: [] },
+};
+
+const httpPolicy: ActionPolicy = {
+  enabledGroups: ['http-tools'],
+  sanitization: { preset: 'standard' },
+  quarantine: { enabled: true, threshold: 0.3, blockThreshold: 0.9, onBlock: 'skip' },
+};
+
+describe('ActionEngine — safety events', () => {
+  let auditRepo: ReturnType<typeof createMockAuditRepo>;
+  let safetyRepo: ReturnType<typeof createMockSafetyRepo>;
+  let engine: ActionEngine;
+
+  beforeEach(() => {
+    auditRepo = createMockAuditRepo();
+    safetyRepo = createMockSafetyRepo();
+    // Configure http handler to succeed and return test data
+    mockHttpExecute.mockResolvedValue({ body: 'response text' });
+    engine = createActionEngine({
+      registry: createMockRegistry([httpFetchAction]),
+      auditRepo,
+      safetyEventsRepo: safetyRepo,
+      logger: pino({ level: 'silent' }),
+      getSecret: () => undefined,
+    });
+  });
+
+  afterEach(() => {
+    // Reset http handler to failing so existing tests are unaffected
+    mockHttpExecute.mockRejectedValue(new Error('HTTP handler unavailable in test environment'));
+    mockProcessContentDeep.mockReturnValue({
+      result: {},
+      sanitized: false,
+      quarantined: false,
+      threats: [],
+    });
+    mockCollectPiiPatternNames.mockReturnValue([]);
+  });
+
+  it('PII-only path: writes pii safety_events rows + sets pii_categories on audit', async () => {
+    mockProcessContentDeep.mockReturnValue({
+      result: { body: '[EMAIL_REDACTED]' },
+      sanitized: true,
+      quarantined: false,
+      threats: [],
+    });
+    mockCollectPiiPatternNames.mockReturnValue(['email', 'api-key']);
+
+    const result = await engine.execute(
+      { podId: 'sess-1', actionName: 'fetch_data', params: { url: 'https://example.com' } },
+      httpPolicy,
+    );
+
+    expect(result.success).toBe(true);
+
+    // Two safety_events rows (one per PII pattern), kind='pii', severity=null
+    const insertCalls = (safetyRepo.insert as ReturnType<typeof vi.fn>).mock.calls;
+    expect(insertCalls).toHaveLength(2);
+    for (const [entry] of insertCalls) {
+      expect(entry.source).toBe('action_response');
+      expect(entry.kind).toBe('pii');
+      expect(entry.severity).toBeNull();
+      expect(entry.podId).toBe('sess-1');
+    }
+    const patternNames = insertCalls.map(([e]) => e.patternName as string);
+    expect(patternNames).toContain('email');
+    expect(patternNames).toContain('api-key');
+
+    // Audit row carries pii_categories
+    const auditCall = (auditRepo.insert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(auditCall?.piiCategories).toEqual(['email', 'api-key']);
+    expect(auditCall?.piiDetected).toBe(true);
+  });
+
+  it('injection-only path: writes injection safety_events rows', async () => {
+    mockProcessContentDeep.mockReturnValue({
+      result: { body: '[QUARANTINED]' },
+      sanitized: false,
+      quarantined: true,
+      threats: [
+        { pattern: 'direct-instruction', severity: 0.8, description: 'test', match: 'ignore all' },
+        { pattern: 'role-manipulation', severity: 0.7, description: 'test', match: 'you are now' },
+      ],
+    });
+    mockCollectPiiPatternNames.mockReturnValue([]);
+
+    await engine.execute(
+      { podId: 'sess-1', actionName: 'fetch_data', params: { url: 'https://example.com' } },
+      httpPolicy,
+    );
+
+    const insertCalls = (safetyRepo.insert as ReturnType<typeof vi.fn>).mock.calls;
+    expect(insertCalls).toHaveLength(2);
+
+    const patterns = insertCalls.map(([e]) => ({
+      kind: e.kind as string,
+      pattern: e.patternName as string,
+      severity: e.severity as number,
+    }));
+    expect(patterns).toContainEqual(
+      expect.objectContaining({ kind: 'injection', pattern: 'direct-instruction', severity: 0.8 }),
+    );
+    expect(patterns).toContainEqual(
+      expect.objectContaining({ kind: 'injection', pattern: 'role-manipulation', severity: 0.7 }),
+    );
+
+    // audit: pii_categories is null (sanitized=false)
+    const auditCall = (auditRepo.insert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(auditCall?.piiCategories).toBeNull();
+  });
+
+  it('mixed path: both PII and injection rows written, audit has pii_categories', async () => {
+    mockProcessContentDeep.mockReturnValue({
+      result: { body: '[EMAIL_REDACTED] [QUARANTINED]' },
+      sanitized: true,
+      quarantined: true,
+      threats: [
+        { pattern: 'direct-instruction', severity: 0.8, description: 'test', match: 'ignore' },
+      ],
+    });
+    mockCollectPiiPatternNames.mockReturnValue(['email']);
+
+    await engine.execute(
+      { podId: 'sess-1', actionName: 'fetch_data', params: { url: 'https://example.com' } },
+      httpPolicy,
+    );
+
+    const insertCalls = (safetyRepo.insert as ReturnType<typeof vi.fn>).mock.calls;
+    // 1 injection row + 1 PII row
+    expect(insertCalls).toHaveLength(2);
+
+    const kinds = insertCalls.map(([e]) => e.kind as string);
+    expect(kinds).toContain('injection');
+    expect(kinds).toContain('pii');
+
+    const auditCall = (auditRepo.insert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(auditCall?.piiCategories).toEqual(['email']);
+  });
+
+  it('quarantine score still set on audit regardless of PII work', async () => {
+    mockProcessContentDeep.mockReturnValue({
+      result: {},
+      sanitized: false,
+      quarantined: true,
+      threats: [{ pattern: 'token-boundary', severity: 0.9, description: 'test', match: 'x' }],
+    });
+    mockCollectPiiPatternNames.mockReturnValue([]);
+
+    await engine.execute(
+      { podId: 'sess-1', actionName: 'fetch_data', params: { url: 'https://example.com' } },
+      httpPolicy,
+    );
+
+    const auditCall = (auditRepo.insert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(auditCall?.quarantineScore).toBe(0.9);
+  });
+
+  it('no safety events written when no PII and no threats', async () => {
+    mockProcessContentDeep.mockReturnValue({
+      result: { body: 'clean response' },
+      sanitized: false,
+      quarantined: false,
+      threats: [],
+    });
+    mockCollectPiiPatternNames.mockReturnValue([]);
+
+    await engine.execute(
+      { podId: 'sess-1', actionName: 'fetch_data', params: { url: 'https://example.com' } },
+      httpPolicy,
+    );
+
+    expect(safetyRepo.insert).not.toHaveBeenCalled();
   });
 });

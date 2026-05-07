@@ -3,12 +3,14 @@ import {
   type Pod,
   type Profile,
   type SystemEvent,
+  collectPiiPatternNames,
   processContent,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
 import type { ProfileStore } from '../profiles/profile-store.js';
+import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
 import { createIssueClient } from './issue-client.js';
 import type { IssueWatcherRepository } from './issue-watcher-repository.js';
@@ -26,6 +28,7 @@ export interface IssueWatcherServiceDependencies {
   podManager: PodManager;
   eventBus: EventBus;
   issueWatcherRepo: IssueWatcherRepository;
+  safetyEventsRepo?: SafetyEventsRepository;
   logger: Logger;
   pollIntervalMs?: number;
   /** Override for testing — inject a mock client factory */
@@ -40,6 +43,7 @@ export function createIssueWatcherService(
     podManager,
     eventBus,
     issueWatcherRepo,
+    safetyEventsRepo,
     logger: parentLogger,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     issueClientFactory = createIssueClient,
@@ -165,6 +169,49 @@ export function createIssueWatcherService(
       );
     }
 
+    // Write safety_events rows for all detections. Insert BEFORE createSession so
+    // we have row ids to backfill with attachPodId once the pod id is known.
+    const safetyRowIds: number[] = [];
+    if (safetyEventsRepo) {
+      const sanitizedAll = [
+        titleResult.text,
+        bodyResult.text,
+        ...(acResults?.map((r) => r.text) ?? []),
+      ].join('\n');
+      const payloadExcerpt = sanitizedAll.slice(0, 256);
+
+      for (const threat of allThreats) {
+        safetyRowIds.push(
+          safetyEventsRepo.insert({
+            podId: null,
+            source: 'issue_body',
+            kind: 'injection',
+            patternName: threat.pattern,
+            severity: threat.severity,
+            payloadExcerpt,
+          }),
+        );
+      }
+
+      const originalAll = [
+        candidate.title,
+        candidate.body,
+        ...(candidate.acceptanceCriteria ?? []),
+      ].join('\n');
+      for (const patternName of collectPiiPatternNames(originalAll)) {
+        safetyRowIds.push(
+          safetyEventsRepo.insert({
+            podId: null,
+            source: 'issue_body',
+            kind: 'pii',
+            patternName,
+            severity: null,
+            payloadExcerpt,
+          }),
+        );
+      }
+    }
+
     const task = `${titleResult.text}\n\n${bodyResult.text}`;
     const request: CreatePodRequest = {
       profileName: target.profileName,
@@ -196,6 +243,12 @@ export function createIssueWatcherService(
         // best-effort
       }
       return;
+    }
+
+    // Backfill pod_id on safety rows now that the pod exists.
+    // If createSession threw above, rows remain pod_id=NULL (aggregated under __pre_creation__).
+    if (safetyRowIds.length > 0 && safetyEventsRepo) {
+      safetyEventsRepo.attachPodId(safetyRowIds, pod.id);
     }
 
     // Track the issue

@@ -28,6 +28,7 @@ import type {
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
@@ -40,7 +41,6 @@ import { actionRoutes } from './routes/actions.js';
 import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
-import { screenshotRoutes } from './routes/screenshots.js';
 import { historyRoutes } from './routes/history.js';
 import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
@@ -48,6 +48,7 @@ import { memoryRoutes } from './routes/memory.js';
 import { podRoutes } from './routes/pods.js';
 import { profileRoutes } from './routes/profiles.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
+import { screenshotRoutes } from './routes/screenshots.js';
 import { seriesRoutes } from './routes/series.js';
 import { skillRoutes } from './routes/skills.js';
 import { terminalRoutes } from './routes/terminal.js';
@@ -78,6 +79,7 @@ export interface ServerDependencies {
   memoryRepo?: MemoryRepository;
   pendingOverrideRepo?: PendingOverrideRepository;
   scheduledJobManager?: ScheduledJobManager;
+  safetyEventsRepo?: SafetyEventsRepository;
   issueWatcherRepo?: IssueWatcherRepository;
   screenshotStore?: ScreenshotStore;
   logLevel?: string;
@@ -142,6 +144,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.qualityScoreRepo,
     deps.validationRepo,
     deps.db,
+    deps.safetyEventsRepo,
   );
   if (deps.worktreeManager) {
     seriesRoutes(app, deps.podManager, deps.profileStore, deps.worktreeManager);
@@ -233,6 +236,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   // Auth is enforced at the route level (pod-token, matches path podId).
   mcpProxyHandler(app, {
     getServersForPod: (podId) => deps.podManager.getInjectedMcpServers(podId),
+    safetyEventsRepo: deps.safetyEventsRepo,
     logger: app.log as unknown as import('pino').Logger,
   });
 

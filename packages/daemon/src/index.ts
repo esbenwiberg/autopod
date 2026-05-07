@@ -45,6 +45,8 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
+import { ScreenshotRetention } from './pods/screenshot-retention.js';
+import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { createProfileStore } from './profiles/index.js';
 import {
   ClaudeRuntime,
@@ -52,14 +54,13 @@ import {
   CopilotRuntime,
   createRuntimeRegistry,
 } from './runtimes/index.js';
+import { createSafetyEventsRepository } from './safety/safety-events-repository.js';
 import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
-import { ScreenshotRetention } from './pods/screenshot-retention.js';
-import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { GhPrManager, GitHubApiPrManager } from './worktrees/pr-manager.js';
@@ -144,6 +145,7 @@ backupManager.start();
 
 const actionAuditRepo = createActionAuditRepository(db);
 const actionRegistry = createActionRegistry(logger);
+const safetyEventsRepo = createSafetyEventsRepository(db);
 
 // Credentials encryption key (generated on first run, persisted at ~/.autopod/secrets.key)
 const secretsKeyPath = path.join(os.homedir(), '.autopod', 'secrets.key');
@@ -362,12 +364,14 @@ const runtimeRegistry = createRuntimeRegistry([
 ]);
 const hostBrowserRunner = createHostBrowserRunner(logger);
 const screenshotStore = createScreenshotStore(resolveDataDir());
-const validationEngine = createLocalValidationEngine(containerManager, logger, hostBrowserRunner, screenshotStore);
-
-const retentionDays = Number.parseInt(
-  process.env.AUTOPOD_SCREENSHOT_RETENTION_DAYS ?? '30',
-  10,
+const validationEngine = createLocalValidationEngine(
+  containerManager,
+  logger,
+  hostBrowserRunner,
+  screenshotStore,
 );
+
+const retentionDays = Number.parseInt(process.env.AUTOPOD_SCREENSHOT_RETENTION_DAYS ?? '30', 10);
 if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
   throw new Error('AUTOPOD_SCREENSHOT_RETENTION_DAYS must be a positive integer');
 }
@@ -464,7 +468,14 @@ function prManagerFactory(
     }
     try {
       const { orgUrl, project, repoName } = parseAdoRepoUrl(profile.repoUrl);
-      return new AdoPrManager({ orgUrl, project, repoName, pat: profile.adoPat, logger, screenshotStore });
+      return new AdoPrManager({
+        orgUrl,
+        project,
+        repoName,
+        pat: profile.adoPat,
+        logger,
+        screenshotStore,
+      });
     } catch (err) {
       logger.warn(
         { err, profileName: profile.name },
@@ -516,6 +527,7 @@ podManager = createPodManager({
   repoScanner,
   scanRepo,
   screenshotStore,
+  safetyEventsRepo,
   logger,
 });
 
@@ -523,6 +535,7 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
   return createActionEngine({
     registry: actionRegistry,
     auditRepo: actionAuditRepo,
+    safetyEventsRepo,
     logger,
     podRepo,
     profileStore,
@@ -612,6 +625,7 @@ const issueWatcherService = createIssueWatcherService({
   podManager,
   eventBus,
   issueWatcherRepo,
+  safetyEventsRepo,
   logger,
   pollIntervalMs: ISSUE_WATCHER_POLL_INTERVAL,
 });
@@ -642,6 +656,7 @@ const app = await createServer({
   memoryRepo,
   pendingOverrideRepo,
   scheduledJobManager,
+  safetyEventsRepo,
   issueWatcherRepo,
   screenshotStore,
   logLevel: LOG_LEVEL,

@@ -1607,6 +1607,74 @@ describe('PodManager', () => {
       expect(registryFiles).toHaveLength(0);
     });
 
+    describe('network_policy_resolved snapshot', () => {
+      it('writes allow-all when profile has no network policy', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Normal task', skipValidation: true },
+          'user-1',
+        );
+
+        await manager.processPod(pod.id);
+
+        const after = manager.getSession(pod.id);
+        expect(after.networkPolicyResolved).toBe('allow-all');
+      });
+
+      it('writes restricted when profile resolves network policy to restricted', async () => {
+        const ctx = createTestContext();
+
+        // Patch profileStore to return a profile with network policy enabled
+        const originalGet = vi.mocked(ctx.profileStore.get).getMockImplementation();
+        if (!originalGet) throw new Error('profileStore.get has no mock implementation');
+        vi.mocked(ctx.profileStore.get).mockImplementation((name: string) => ({
+          ...originalGet(name),
+          networkPolicy: { enabled: true, mode: 'restricted' as const, allowedHosts: [] },
+        }));
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Restricted task', skipValidation: true },
+          'user-1',
+        );
+
+        await manager.processPod(pod.id);
+
+        const after = manager.getSession(pod.id);
+        expect(after.networkPolicyResolved).toBe('restricted');
+      });
+
+      it('does not overwrite network_policy_resolved on recovery/resume', async () => {
+        const ctx = createTestContext();
+
+        // Patch profile to have a different policy so we can detect overwriting
+        const originalGet = vi.mocked(ctx.profileStore.get).getMockImplementation();
+        if (!originalGet) throw new Error('profileStore.get has no mock implementation');
+        vi.mocked(ctx.profileStore.get).mockImplementation((name: string) => ({
+          ...originalGet(name),
+          networkPolicy: { enabled: true, mode: 'restricted' as const, allowedHosts: [] },
+        }));
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Recovery task', skipValidation: true },
+          'user-1',
+        );
+
+        // Simulate a pod that was already provisioned (column already set to deny-all from
+        // original provisioning) now being resumed with a different live policy
+        ctx.podRepo.update(pod.id, { networkPolicyResolved: 'deny-all' });
+
+        await manager.processPod(pod.id);
+
+        // Should NOT be overwritten — deny-all from original provisioning is preserved
+        const after = manager.getSession(pod.id);
+        expect(after.networkPolicyResolved).toBe('deny-all');
+      });
+    });
+
     describe('recovery mode', () => {
       const recoveryWorktree = '/tmp/worktree/existing';
       const fakeBareRepo = '/tmp/bare/repo.git';

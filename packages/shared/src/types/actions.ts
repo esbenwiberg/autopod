@@ -138,6 +138,9 @@ export interface ActionAuditEntry {
   responseSummary: string | null;
   piiDetected: boolean;
   quarantineScore: number;
+  /** PII pattern names found in the action response (JSON-stored). Null on error paths or
+   *  pre-migration rows. Deliberately excluded from the hash payload (ADR-019). */
+  piiCategories?: string[] | null;
   createdAt: string;
   /** SHA-256 of the preceding entry's entryHash (null for the first entry per pod). */
   prevHash: string | null;

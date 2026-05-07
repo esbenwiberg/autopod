@@ -1,5 +1,5 @@
-import type { FastifyInstance } from 'fastify';
 import type { ScreenshotSource } from '@autopod/shared';
+import type { FastifyInstance } from 'fastify';
 import type { ScreenshotStore } from '../../pods/screenshot-store.js';
 
 const VALID_SOURCES: ReadonlySet<ScreenshotSource> = new Set<ScreenshotSource>([
@@ -38,7 +38,10 @@ export function screenshotRoutes(app: FastifyInstance, screenshotStore: Screensh
 
     if (filename.includes('..') || filename.includes('/') || !SAFE_FILENAME_RE.test(filename)) {
       reply.status(400);
-      return { error: 'filename must match ^[A-Za-z0-9._-]+\\.png$ and must not contain path separators or ..' };
+      return {
+        error:
+          'filename must match ^[A-Za-z0-9._-]+\\.png$ and must not contain path separators or ..',
+      };
     }
 
     // source is narrowed to ScreenshotSource by the guard above

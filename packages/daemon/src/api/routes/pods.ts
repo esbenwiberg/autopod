@@ -3,6 +3,7 @@ import {
   type PodStatus,
   type ScreenshotRef,
   type ValidationResult,
+  collectPiiPatternNames,
   createPodRequestSchema,
   processContent,
   sendMessageSchema,
@@ -19,6 +20,7 @@ import type { QualityScoreRepository } from '../../pods/quality-score-repository
 import { computeQualitySignals } from '../../pods/quality-signals.js';
 import { computeReliabilityAnalytics } from '../../pods/reliability-aggregator.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
+import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
 
 /**
  * Wire shape for screenshot references sent to API consumers (desktop, CLI).
@@ -96,6 +98,7 @@ export function podRoutes(
   qualityScoreRepo?: QualityScoreRepository,
   validationRepo?: ValidationRepository,
   db?: Database.Database,
+  safetyEventsRepo?: SafetyEventsRepository,
 ): void {
   // POST /pods — create a new pod
   app.post('/pods', async (request, reply) => {
@@ -120,10 +123,52 @@ export function podRoutes(
       quarantine: { enabled: true },
     };
     const sanitized = { ...body };
-    if (body.task) sanitized.task = processContent(body.task, sanitizeOpts).text;
-    if (body.seriesName) sanitized.seriesName = processContent(body.seriesName, sanitizeOpts).text;
-    if (body.seriesDescription)
-      sanitized.seriesDescription = processContent(body.seriesDescription, sanitizeOpts).text;
+    const taskResult = body.task ? processContent(body.task, sanitizeOpts) : null;
+    const seriesNameResult = body.seriesName ? processContent(body.seriesName, sanitizeOpts) : null;
+    const seriesDescResult = body.seriesDescription
+      ? processContent(body.seriesDescription, sanitizeOpts)
+      : null;
+    if (taskResult) sanitized.task = taskResult.text;
+    if (seriesNameResult) sanitized.seriesName = seriesNameResult.text;
+    if (seriesDescResult) sanitized.seriesDescription = seriesDescResult.text;
+
+    // Write safety_events rows for any detections (pod_id stays NULL — no pod yet).
+    if (safetyEventsRepo) {
+      const sanitizedAll = [taskResult?.text, seriesNameResult?.text, seriesDescResult?.text]
+        .filter(Boolean)
+        .join('\n');
+      const payloadExcerpt = sanitizedAll.slice(0, 256);
+
+      const allThreats = [
+        ...(taskResult?.threats ?? []),
+        ...(seriesNameResult?.threats ?? []),
+        ...(seriesDescResult?.threats ?? []),
+      ];
+      for (const threat of allThreats) {
+        safetyEventsRepo.insert({
+          podId: null,
+          source: 'pod_input',
+          kind: 'injection',
+          patternName: threat.pattern,
+          severity: threat.severity,
+          payloadExcerpt,
+        });
+      }
+
+      const originalAll = [body.task, body.seriesName, body.seriesDescription]
+        .filter(Boolean)
+        .join('\n');
+      for (const patternName of collectPiiPatternNames(originalAll)) {
+        safetyEventsRepo.insert({
+          podId: null,
+          source: 'pod_input',
+          kind: 'pii',
+          patternName,
+          severity: null,
+          payloadExcerpt,
+        });
+      }
+    }
 
     try {
       const pod = podManager.createSession(sanitized, request.user.oid, {

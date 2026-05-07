@@ -283,6 +283,19 @@ public actor DaemonAPI {
     try await request("GET", "/pods/analytics/quality", query: ["days": "\(days)"])
   }
 
+  /// GET /pods/analytics/safety — trailing-window guardrail-fire totals with
+  /// PII-by-pattern, quarantine histogram, injection table, audit-chain status,
+  /// and network-policy distribution.
+  public func getSafetyAnalytics(days: Int = 30) async throws -> SafetyAnalyticsResponse {
+    try await request("GET", "/pods/analytics/safety", query: ["days": "\(days)"])
+  }
+
+  /// POST /audit-chain/verify — runs a fleet-wide audit-chain integrity check.
+  /// Records the result in `audit_chain_verifications` and returns a summary.
+  public func verifyAuditChain() async throws -> AuditChainVerifyResponse {
+    try await request("POST", "/audit-chain/verify")
+  }
+
   public func getSessionDiff(_ id: String) async throws -> DiffApiResponse {
     try await request("GET", "/pods/\(id)/diff")
   }
