@@ -97,6 +97,7 @@ import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import { reconcileLocalSessions } from './local-reconciler.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
 import {
@@ -1102,6 +1103,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Stuck-running watchdog interval handle (single global timer). */
   let stuckPodWatchdog: ReturnType<typeof setInterval> | null = null;
+  /** Unsubscribe fn for the host.resumed wake-recovery listener. */
+  let unsubscribeWakeRecovery: (() => void) | null = null;
 
   /**
    * Returns the pod whose branch/baseBranch/prUrl a fix pod should inherit.
@@ -4456,7 +4459,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } else if (isRecovery) {
           // Non-Claude runtime or no claudeSessionId — fresh spawn with recovery context
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
-          const recoveryTask = await buildRecoveryTask(pod, worktreePath!);
+          let recoveryTask = await buildRecoveryTask(pod, worktreePath!);
+          // For non-Claude runtimes recovering after host wake, append a postscript so the
+          // agent checks git history before redoing work already on disk.
+          if (pod.runtime !== 'claude' && pod.lastRecoveryTrigger === 'wake') {
+            recoveryTask +=
+              '\n\nNote: this run was interrupted by a host sleep and restarted. Some' +
+              ' work may already be on disk — check `git log` and `git diff main`' +
+              ' before continuing.';
+          }
           events = runtime.spawn({
             podId,
             task: recoveryTask,
@@ -6337,8 +6348,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       const s1 = transition(pod, 'validating');
-      const attempt = (fromTerminal ? 0 : s1.validationAttempts) + 1;
-      podRepo.update(podId, { validationAttempts: attempt });
+
+      // Wake-recovery: don't burn a validation attempt for the involuntary restart.
+      // The flag is one-shot — clear it so subsequent attempts in the same run increment normally.
+      const isWakeRecovery = s1.lastRecoveryTrigger === 'wake';
+      const attempt = isWakeRecovery
+        ? s1.validationAttempts
+        : (fromTerminal ? 0 : s1.validationAttempts) + 1;
+      podRepo.update(podId, {
+        ...(isWakeRecovery ? { lastRecoveryTrigger: null } : { validationAttempts: attempt }),
+      });
 
       eventBus.emit({
         type: 'pod.validation_started',
@@ -8292,8 +8311,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? Number(process.env.AUTOPOD_STUCK_RUNNING_THRESHOLD_MS)
           : 30 * 60 * 1_000);
 
+      const WAKE_GRACE_MS = 60_000;
+      let lastWakeAt: number | null = null;
+
       const tick = async (): Promise<void> => {
         try {
+          const sinceWakeMs = lastWakeAt !== null ? Date.now() - lastWakeAt : null;
+          if (sinceWakeMs !== null && sinceWakeMs < WAKE_GRACE_MS) {
+            logger.debug({ sinceWakeMs }, 'Watchdog: skipping tick during wake grace window');
+            return;
+          }
           const running = podRepo.list({ status: 'running' as PodStatus });
           const now = Date.now();
           for (const pod of running) {
@@ -8354,12 +8381,65 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         void tick();
       }, intervalMs);
       logger.info({ intervalMs, thresholdMs }, 'Stuck-pod watchdog started');
+
+      // Wake-recovery: subscribe to host.resumed, reconcile local pods, then re-publish
+      // a richer event (with reconciledPodIds) for the desktop banner.
+      // De-dupe by source timestamp so the re-published event doesn't trigger a second
+      // reconcile (even when 0 pods are recovered and reconciledPodIds:[] is ambiguous).
+      // Bounded at 256 entries — one per wake event — resets on overflow.
+      const processedWakeTimestamps = new Set<string>();
+      unsubscribeWakeRecovery = eventBus.subscribe((event) => {
+        if (event.type !== 'host.resumed') return;
+        // Update before the dedupe check so every host.resumed (including the
+        // re-published completed event) refreshes the grace window.
+        lastWakeAt = Date.now();
+        if (processedWakeTimestamps.has(event.timestamp)) return;
+        if (processedWakeTimestamps.size >= 256) processedWakeTimestamps.clear();
+        processedWakeTimestamps.add(event.timestamp);
+
+        const { sleptMs, detector, timestamp } = event;
+        logger.info({ sleptMs, detector }, 'Host wake detected — reconciling local sessions');
+
+        void (async () => {
+          try {
+            const result = await reconcileLocalSessions({
+              podRepo,
+              eventBus,
+              containerManager: containerManagerFactory.get('local'),
+              enqueueSession,
+              validationRepo,
+              logger,
+              trigger: 'wake',
+            });
+            logger.info(
+              { recovered: result.recovered, killed: result.killed, sleptMs },
+              'Wake reconcile complete',
+            );
+            // Re-publish with reconciledPodIds populated so the desktop banner shows counts.
+            // Use the original timestamp so the processedWakeTimestamps guard suppresses the
+            // subscriber from firing again (handles the 0-recovered edge case).
+            eventBus.emit({
+              type: 'host.resumed',
+              timestamp,
+              sleptMs,
+              detector,
+              reconciledPodIds: result.recovered,
+            });
+          } catch (err) {
+            logger.error({ err, sleptMs }, 'Wake reconcile failed');
+          }
+        })();
+      });
     },
 
     stopStuckPodWatchdog(): void {
       if (stuckPodWatchdog) {
         clearInterval(stuckPodWatchdog);
         stuckPodWatchdog = null;
+      }
+      if (unsubscribeWakeRecovery) {
+        unsubscribeWakeRecovery();
+        unsubscribeWakeRecovery = null;
       }
     },
 

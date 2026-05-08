@@ -6,6 +6,8 @@ import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
 
+export type ReconcileTrigger = 'restart' | 'wake';
+
 export interface LocalReconcilerDependencies {
   podRepo: PodRepository;
   eventBus: EventBus;
@@ -13,6 +15,8 @@ export interface LocalReconcilerDependencies {
   enqueueSession: (podId: string) => void;
   validationRepo: ValidationRepository;
   logger: Logger;
+  /** What caused this reconcile pass. Defaults to 'restart' for backwards compat. */
+  trigger?: ReconcileTrigger;
 }
 
 export interface ReconcileResult {
@@ -179,6 +183,7 @@ async function recoverSession(
   result: ReconcileResult,
 ): Promise<void> {
   const { podRepo, eventBus, containerManager, enqueueSession, logger } = deps;
+  const trigger: ReconcileTrigger = deps.trigger ?? 'restart';
 
   // If the pod was mid-validation when the daemon crashed and validation had already
   // passed (result persisted in DB) + the PR was already created, recover directly to
@@ -210,36 +215,40 @@ async function recoverSession(
   // forever — burning cycles on every dev-mode reload. After the cap, transition
   // to `failed` so the human can decide what to do (Rework / Fix Manually / Delete).
   // A user-driven force-rework resets this counter (see pod-manager.triggerValidation).
+  // Wake-recovery skips the cap entirely — the pod was interrupted by a host sleep,
+  // not by a repeating crash, so penalising it would incorrectly mark healthy pods failed.
   const MAX_RECOVERIES = 3;
-  const nextRecoveryCount = (pod.recoveryCount ?? 0) + 1;
-  if (nextRecoveryCount > MAX_RECOVERIES) {
-    logger.warn(
-      {
-        podId: pod.id,
-        recoveryCount: pod.recoveryCount,
-        maxRecoveries: MAX_RECOVERIES,
-        previousStatus: pod.status,
-      },
-      'Pod exceeded recovery cap — marking failed instead of re-queueing',
-    );
-    if (pod.containerId) {
-      try {
-        await containerManager.kill(pod.containerId);
-      } catch {
-        // Container already gone — expected after a crash/restart
+  if (trigger !== 'wake') {
+    const nextRecoveryCount = (pod.recoveryCount ?? 0) + 1;
+    if (nextRecoveryCount > MAX_RECOVERIES) {
+      logger.warn(
+        {
+          podId: pod.id,
+          recoveryCount: pod.recoveryCount,
+          maxRecoveries: MAX_RECOVERIES,
+          previousStatus: pod.status,
+        },
+        'Pod exceeded recovery cap — marking failed instead of re-queueing',
+      );
+      if (pod.containerId) {
+        try {
+          await containerManager.kill(pod.containerId);
+        } catch {
+          // Container already gone — expected after a crash/restart
+        }
       }
+      const previousStatus = pod.status;
+      podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: null,
+        completedAt: new Date().toISOString(),
+      });
+      emitStatusChanged(pod.id, previousStatus, 'failed', eventBus);
+      result.killed.push(pod.id);
+      return;
     }
-    const previousStatus = pod.status;
-    podRepo.update(pod.id, {
-      status: 'failed',
-      containerId: null,
-      completedAt: new Date().toISOString(),
-    });
-    emitStatusChanged(pod.id, previousStatus, 'failed', eventBus);
-    result.killed.push(pod.id);
-    return;
+    podRepo.update(pod.id, { recoveryCount: nextRecoveryCount });
   }
-  podRepo.update(pod.id, { recoveryCount: nextRecoveryCount });
 
   // Kill the old container (best-effort — it may already be gone after daemon restart)
   if (pod.containerId) {
@@ -262,13 +271,14 @@ async function recoverSession(
     containerId: null,
     recoveryWorktreePath: pod.worktreePath,
     validationAttempts: 0,
+    lastRecoveryTrigger: trigger,
   });
 
   emitStatusChanged(pod.id, previousStatus, 'queued', eventBus);
   enqueueSession(pod.id);
 
   logger.info(
-    { podId: pod.id, worktreePath: pod.worktreePath, previousStatus },
+    { podId: pod.id, worktreePath: pod.worktreePath, previousStatus, trigger },
     'Pod recovered — re-queued with surviving worktree',
   );
   result.recovered.push(pod.id);

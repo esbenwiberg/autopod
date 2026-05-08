@@ -778,6 +778,12 @@ podManager.rehydrateDependentSessions();
 // concurrency slot frees up. Threshold via AUTOPOD_STUCK_RUNNING_THRESHOLD_MS.
 podManager.startStuckPodWatchdog();
 
+// Sleep detector: publishes host.resumed events when the daemon's event loop
+// resumes after a long process suspension (laptop sleep). Drives wake-recovery
+// in pod-manager (brief 02). Threshold via AUTOPOD_SLEEP_DETECT_THRESHOLD_MS.
+const { startSleepDetector } = await import('./pods/sleep-detector.js');
+const stopSleepDetector = startSleepDetector(eventBus, logger);
+
 // Graceful shutdown
 async function shutdown(signal: string) {
   logger.info({ signal }, 'Shutting down...');
@@ -797,8 +803,9 @@ async function shutdown(signal: string) {
   // Stop perf-mark cleaner
   clearInterval(perfClearTimer);
 
-  // Stop the stuck-pod watchdog
+  // Stop the stuck-pod watchdog and sleep detector
   podManager.stopStuckPodWatchdog();
+  stopSleepDetector();
 
   // Drain pod queue
   await podQueue.drain();
