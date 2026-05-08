@@ -4422,9 +4422,9 @@ describe('wake recovery — host.resumed subscription', () => {
     const manager = createPodManager(ctx.deps);
     manager.startStuckPodWatchdog();
 
-    const hostResumedCount: number[] = [];
+    const hostResumedEvents: unknown[] = [];
     ctx.eventBus.subscribe((e) => {
-      if (e.type === 'host.resumed') hostResumedCount.push(1);
+      if (e.type === 'host.resumed') hostResumedEvents.push(e);
     });
 
     const ts = '2026-01-01T01:00:00.000Z';
@@ -4446,13 +4446,10 @@ describe('wake recovery — host.resumed subscription', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    // Should only reconcile once: initial + one completed re-publish = 2 events
-    // (The second raw emit is swallowed by the dedup but still observed as received on bus)
-    // Total events on bus: 2 raw + 1 completed = 3 at most, but reconcile ran exactly once
-    // We verify by checking the final reconciledPodIds event appears exactly once
-    const completedEvents = hostResumedCount;
-    // At least initial 2 raw + 1 re-publish — assert reconcile didn't spiral
-    expect(completedEvents.length).toBeLessThanOrEqual(4);
+    // Exactly 3 events on the bus: 2 raw emits + 1 completed re-publish from a single
+    // reconcile run. If dedup were broken, the second raw emit would trigger a second
+    // reconcile and we'd see 4 events; if dedup also failed on re-publishes we'd spiral.
+    expect(hostResumedEvents.length).toBe(3);
 
     manager.stopStuckPodWatchdog();
   });
