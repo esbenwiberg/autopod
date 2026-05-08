@@ -423,6 +423,37 @@ describe('macOS adjunct — threshold guard', () => {
   });
 });
 
+describe('startMacOsAdjunct — native module fallback to pmset', () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('falls through to startPmsetAdjunct when node-mac-power-monitor cannot be imported', async () => {
+    // node-mac-power-monitor is intentionally NOT a dependency of this
+    // workspace (it's an optional native module). The dynamic import inside
+    // startMacOsAdjunct fails on every platform here; the `.catch(() => null)`
+    // collapses that to a null `mod` and the function falls through to
+    // `startPmsetAdjunct`. We prove the fallback fired by asserting that
+    // spawn('pmset', ...) was called — only startPmsetAdjunct does that.
+    const proc = makeFakePmsetProc();
+    spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
+
+    const stop = await _internals.startMacOsAdjunct(logger, () => Date.now(), vi.fn());
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledWith(
+      'pmset',
+      ['-g', 'log'],
+      expect.objectContaining({ stdio: ['ignore', 'pipe', 'ignore'] }),
+    );
+
+    stop();
+  });
+});
+
 describe('darwin failure cascade', () => {
   beforeEach(() => {
     spawnMock.mockReset();
