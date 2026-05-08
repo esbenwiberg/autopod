@@ -458,4 +458,180 @@ describe('withIdleLivenessProbe', () => {
       }
     }).rejects.toThrow(/probe.*containerManager/);
   });
+
+  // ---------------------------------------------------------------------------
+  // wakeSignal tests
+  // ---------------------------------------------------------------------------
+
+  it('wakeSignal: resets idle timer and probe does not fire within idle window after wake', async () => {
+    // Sequence: emit event at 0ms, wake fires at 30ms, probe must NOT fire
+    // at 40ms (which would be 40ms after the event but only 10ms after wake).
+    const probe: LivenessProbe = vi.fn(async () => false);
+
+    // wakeSignal factory: each call returns a promise; we resolve it by calling
+    // triggerWake().
+    let triggerWake!: () => void;
+    const wakeSignal = () =>
+      new Promise<void>((resolve) => {
+        triggerWake = resolve;
+      });
+
+    let release!: () => void;
+    const released = new Promise<void>((r) => {
+      release = r;
+    });
+
+    const source = (async function* () {
+      yield makeEvent({ type: 'status', message: 'a' } as AgentEvent);
+      // Hang — gives the idle timer time to arm, then we fire wake before it expires.
+      await released;
+    })();
+
+    const stdout = new PassThrough();
+    const events: AgentEvent[] = [];
+
+    const consume = (async () => {
+      for await (const e of withIdleLivenessProbe(source, {
+        streams: [stdout],
+        runtimeName: 'test',
+        podId: 'idle-wake-1',
+        logger,
+        // Idle window is 60ms. We'll fire wake at ~20ms, then release the source
+        // at ~40ms — well before the idle timer would expire again.
+        idleTimeoutMs: 60,
+        probe,
+        wakeSignal,
+      })) {
+        events.push(e);
+      }
+    })();
+
+    // Let the iterator start and arm the race.
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Fire wake — this resets the idle timer. pendingNext stays alive.
+    triggerWake();
+
+    // Release the source shortly after; the next event resolves pendingNext.
+    await new Promise((r) => setTimeout(r, 10));
+    release();
+
+    await consume;
+
+    // Probe must not have fired — wake reset the idle timer before it expired.
+    expect(probe).not.toHaveBeenCalled();
+    expect(events.map((e) => e.type)).toEqual(['status']);
+    expect(stdout.writableEnded).toBe(false);
+  });
+
+  it('wakeSignal: 11min silence with no wake fires probe (regression guard)', async () => {
+    // Without a wake signal, silence beyond the idle window triggers the probe.
+    // This test uses a wakeSignal that never resolves, confirming the normal
+    // idle path still fires.
+    const probe: LivenessProbe = vi.fn(async () => false);
+    const wakeSignal = () => new Promise<void>(() => {}); // never resolves
+
+    let release!: () => void;
+    const released = new Promise<void>((r) => {
+      release = r;
+    });
+
+    const source = (async function* () {
+      yield makeEvent({ type: 'status', message: 'go' } as AgentEvent);
+      await released;
+    })();
+
+    const stdout = new PassThrough();
+    const events: AgentEvent[] = [];
+
+    for await (const e of withIdleLivenessProbe(source, {
+      streams: [stdout],
+      runtimeName: 'test',
+      podId: 'idle-wake-2',
+      logger,
+      idleTimeoutMs: 30,
+      probe,
+      wakeSignal,
+    })) {
+      events.push(e);
+    }
+
+    // Probe fired and returned false → fatal error emitted.
+    expect(probe).toHaveBeenCalled();
+    const fatal = events.find((e) => e.type === 'error');
+    expect(fatal).toBeDefined();
+    expect((fatal as { fatal: boolean }).fatal).toBe(true);
+
+    release();
+  });
+
+  it('wakeSignal: wake fires after idle elapsed but before probe resolves — iterator continues', async () => {
+    // This tests the documented race: idle fires, probe is in-flight, then wake
+    // arrives. The probe-in-flight completes (its race with probeTimeoutMs
+    // resolves first); we honour that result. The wake signal effectively becomes
+    // a no-op for that iteration because the idle branch already won the race.
+    // On the NEXT iteration the wake will have reset the outer idle timer — but
+    // since the probe returned false here, the stream closes with a fatal error.
+    // This is the documented "reasonable behaviour": the probe result governs.
+    let resolveProbe!: (alive: boolean) => void;
+    const probe: LivenessProbe = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveProbe = resolve;
+        }),
+    );
+
+    let triggerWake!: () => void;
+    const wakeSignal = () =>
+      new Promise<void>((resolve) => {
+        triggerWake = resolve;
+      });
+
+    let release!: () => void;
+    const released = new Promise<void>((r) => {
+      release = r;
+    });
+
+    const source = (async function* () {
+      yield makeEvent({ type: 'status', message: 'start' } as AgentEvent);
+      await released;
+    })();
+
+    const stdout = new PassThrough();
+    const events: AgentEvent[] = [];
+
+    const consume = (async () => {
+      for await (const e of withIdleLivenessProbe(source, {
+        streams: [stdout],
+        runtimeName: 'test',
+        podId: 'idle-wake-3',
+        logger,
+        idleTimeoutMs: 30,
+        probe,
+        wakeSignal,
+      })) {
+        events.push(e);
+      }
+    })();
+
+    // Wait for idle to elapse and probe to start.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(probe).toHaveBeenCalledTimes(1);
+
+    // Fire wake while probe is in-flight.
+    triggerWake();
+
+    // Resolve probe as dead.
+    resolveProbe(false);
+
+    await consume;
+
+    // Probe returned false → fatal error emitted, streams closed.
+    const fatal = events.find((e) => e.type === 'error');
+    expect(fatal).toBeDefined();
+    expect((fatal as { fatal: boolean }).fatal).toBe(true);
+    expect(stdout.writableEnded).toBe(true);
+
+    release();
+  });
 });

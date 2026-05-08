@@ -8311,8 +8311,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? Number(process.env.AUTOPOD_STUCK_RUNNING_THRESHOLD_MS)
           : 30 * 60 * 1_000);
 
+      const WAKE_GRACE_MS = 60_000;
+      let lastWakeAt: number | null = null;
+
       const tick = async (): Promise<void> => {
         try {
+          const sinceWakeMs = lastWakeAt !== null ? Date.now() - lastWakeAt : null;
+          if (sinceWakeMs !== null && sinceWakeMs < WAKE_GRACE_MS) {
+            logger.debug({ sinceWakeMs }, 'Watchdog: skipping tick during wake grace window');
+            return;
+          }
           const running = podRepo.list({ status: 'running' as PodStatus });
           const now = Date.now();
           for (const pod of running) {
@@ -8382,6 +8390,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const processedWakeTimestamps = new Set<string>();
       unsubscribeWakeRecovery = eventBus.subscribe((event) => {
         if (event.type !== 'host.resumed') return;
+        // Update before the dedupe check so every host.resumed (including the
+        // re-published completed event) refreshes the grace window.
+        lastWakeAt = Date.now();
         if (processedWakeTimestamps.has(event.timestamp)) return;
         if (processedWakeTimestamps.size >= 256) processedWakeTimestamps.clear();
         processedWakeTimestamps.add(event.timestamp);

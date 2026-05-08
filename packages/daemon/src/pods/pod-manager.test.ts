@@ -4123,6 +4123,222 @@ describe('PodManager', () => {
         vi.useRealTimers();
       }
     });
+
+    // -------------------------------------------------------------------------
+    // Wake grace window tests
+    //
+    // Design note: pods are created AFTER emitting host.resumed so the
+    // wake-recovery reconciler (which runs async on host.resumed) doesn't see
+    // them and interfere with the pod state under test. The reconciler kills
+    // pods whose worktrees don't exist on disk; by creating them after the
+    // event we test the watchdog grace window in isolation.
+    // -------------------------------------------------------------------------
+
+    it('normal tick (no wake): 4h stale pod transitions to failed', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'stale' },
+          'user-1',
+        );
+        const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/wt',
+          containerId: 'c1',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
+
+        manager.startStuckPodWatchdog({ intervalMs: 50, thresholdMs: 30 * 60 * 1000 });
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(manager.getSession(pod.id).status).toBe('failed');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('wake grace: tick 5 s after host.resumed skips a stale pod', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'stale' },
+          'user-1',
+        );
+        const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/wt',
+          containerId: 'c2',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
+        // Mark as 'aci' so the wake-recovery reconciler (which only processes
+        // 'local' pods) doesn't touch this pod and interfere with the status.
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+
+        manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
+
+        // Emit host.resumed at T=0 — sets lastWakeAt; reconciler skips 'aci' pod.
+        ctx.eventBus.emit({
+          type: 'host.resumed',
+          timestamp: new Date().toISOString(),
+          sleptMs: 300_000,
+          detector: 'tick-gap',
+          reconciledPodIds: [],
+        });
+
+        // Advance 5 s (within the 60 s grace window); watchdog tick must skip.
+        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        // Pod must still be running — watchdog skipped during grace window.
+        expect(manager.getSession(pod.id).status).toBe('running');
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('wake grace expires: tick 65 s after host.resumed fails the stale pod', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'stale' },
+          'user-1',
+        );
+        // lastAgentEventAt is 4 h ago; startedAt also stale so the watchdog's
+        // max(primary) reference is still old even after 65 s of fake-time advance.
+        const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/wt',
+          containerId: 'c3',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+
+        manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
+
+        // Emit wake at T=0 — reconciler skips 'aci' pod.
+        ctx.eventBus.emit({
+          type: 'host.resumed',
+          timestamp: new Date().toISOString(),
+          sleptMs: 300_000,
+          detector: 'tick-gap',
+          reconciledPodIds: [],
+        });
+
+        // Advance 65 s — beyond the 60 s grace window, so the next tick is normal.
+        await vi.advanceTimersByTimeAsync(65_000);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(manager.getSession(pod.id).status).toBe('failed');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('wake grace: multiple wake events each refresh the window', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'stale' },
+          'user-1',
+        );
+        const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/wt',
+          containerId: 'c4',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+
+        manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
+
+        // First wake at T=0.
+        ctx.eventBus.emit({
+          type: 'host.resumed',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          sleptMs: 300_000,
+          detector: 'tick-gap',
+          reconciledPodIds: [],
+        });
+
+        // Second wake at T=50s (within first grace window but before it expires).
+        await vi.advanceTimersByTimeAsync(50_000);
+        ctx.eventBus.emit({
+          type: 'host.resumed',
+          timestamp: '2026-01-01T00:01:00.000Z',
+          sleptMs: 10_000,
+          detector: 'tick-gap',
+          reconciledPodIds: [],
+        });
+
+        // Advance another 55 s (T=105 s total, 55 s after second wake).
+        // The second wake refreshed the window → 55 s < 60 s → still in grace.
+        await vi.advanceTimersByTimeAsync(55_000);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        // Pod must still be running — second wake kept the grace window alive.
+        expect(manager.getSession(pod.id).status).toBe('running');
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('wake grace: no wake events ever — existing watchdog behaviour unchanged', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'stale' },
+          'user-1',
+        );
+        const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/wt',
+          containerId: 'c5',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
+
+        // No host.resumed emitted. Watchdog should behave exactly as before.
+        manager.startStuckPodWatchdog({ intervalMs: 50, thresholdMs: 30 * 60 * 1000 });
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(manager.getSession(pod.id).status).toBe('failed');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('phaseTokenUsage per-attempt bucket writes', () => {

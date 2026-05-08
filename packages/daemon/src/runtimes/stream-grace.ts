@@ -238,6 +238,18 @@ export interface IdleLivenessProbeOptions {
   probe?: LivenessProbe;
   containerManager?: ContainerManager;
   containerId?: string;
+  /**
+   * Optional factory called each loop iteration to obtain a promise that
+   * resolves when the host wakes from sleep. When the promise resolves, the
+   * idle timer is reset (treated as activity) so the probe does not fire
+   * against a container that is about to be reconciled by the wake-recovery
+   * path. A fresh promise is requested each iteration so it re-arms after
+   * every wake event.
+   *
+   * If omitted the probe behaves exactly as before (no-op for callers that
+   * predate this option).
+   */
+  wakeSignal?: () => Promise<void>;
 }
 
 /**
@@ -273,14 +285,29 @@ export async function* withIdleLivenessProbe(
         timer.unref?.();
       });
 
-      type RaceResult = { kind: 'next'; result: IteratorResult<AgentEvent> } | { kind: 'idle' };
+      // Fresh promise each iteration — re-arms after every wake without caching a stale one.
+      type RaceResult =
+        | { kind: 'next'; result: IteratorResult<AgentEvent> }
+        | { kind: 'idle' }
+        | { kind: 'wake' };
 
-      const winner = await Promise.race<RaceResult>([
+      const raceEntries: Promise<RaceResult>[] = [
         pendingNext.then((result) => ({ kind: 'next' as const, result })),
         idle.then(() => ({ kind: 'idle' as const })),
-      ]);
+      ];
+      if (options.wakeSignal) {
+        raceEntries.push(options.wakeSignal().then(() => ({ kind: 'wake' as const })));
+      }
+
+      const winner = await Promise.race<RaceResult>(raceEntries);
 
       if (timer) clearTimeout(timer);
+
+      if (winner.kind === 'wake') {
+        // Host resumed from sleep. Reset the idle timer by looping back.
+        // pendingNext stays alive — we must not call iterator.next() twice.
+        continue;
+      }
 
       if (winner.kind === 'next') {
         pendingNext = null;
