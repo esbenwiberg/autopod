@@ -184,6 +184,7 @@ export type {
   IssueWatcherErrorEvent,
   PodPreflightOverlapEvent,
   PreflightConflict,
+  HostResumedEvent,
 } from './types/events.js';
 
 export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js';

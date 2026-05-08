@@ -45,7 +45,8 @@ export type SystemEvent =
   | IssueWatcherCompletedEvent
   | IssueWatcherErrorEvent
   | PodWorktreeCompromisedEvent
-  | PodPreflightOverlapEvent;
+  | PodPreflightOverlapEvent
+  | HostResumedEvent;
 
 export interface PodCreatedEvent {
   type: 'pod.created';
@@ -221,6 +222,17 @@ export interface PodWorktreeCompromisedEvent {
   podId: string;
   deletionCount: number;
   threshold: number;
+}
+
+export interface HostResumedEvent {
+  type: 'host.resumed';
+  timestamp: string;
+  /** Wall-clock milliseconds the process was suspended. */
+  sleptMs: number;
+  /** Which detector first observed the wake. */
+  detector: 'tick-gap' | 'pmset' | 'native';
+  /** Pod IDs reconciled after this wake; empty at initial emit, populated by pod-manager (brief 02). */
+  reconciledPodIds: string[];
 }
 
 /**
