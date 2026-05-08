@@ -405,8 +405,8 @@ describe('macOS adjunct — threshold guard', () => {
     const stop = _internals.startPmsetAdjunct(logger, () => lastTickAt, guarded);
 
     // Push a sleep+wake pair with a 1 s gap — well below the 180 s threshold.
-    // Use a future year so the historical-event filter (wakeAt < startedAt) lets
-    // them through; otherwise pmset entries dated before "now" are dropped.
+    // Use a future year so the historical-event filter (wakeAt < lastSeenAt) lets
+    // them through; otherwise pmset entries dated before the adjunct start are dropped.
     proc.stdout.push('2099-01-01 12:00:00 +0000 Sleep due to lid close\n');
     proc.stdout.push('2099-01-01 12:00:01 +0000 Wake from Normal Sleep\n');
     await new Promise((r) => setImmediate(r));
@@ -486,37 +486,89 @@ describe('macOS adjunct — historical entries from pmset dump', () => {
   });
 });
 
-describe('macOS adjunct — pmset child exit', () => {
+describe('macOS adjunct — pmset close schedules respawn', () => {
   beforeEach(() => {
     spawnMock.mockReset();
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
-  it("logs a warning the first time pmset's child process exits (no silent deafness)", () => {
+  it('close does NOT warn — pmset exit is normal in periodic-poll mode', () => {
     const proc = makeFakePmsetProc();
     spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
     const { logger: capturing, warn } = makeWarnCapturingLogger();
 
     const stop = _internals.startPmsetAdjunct(capturing, () => Date.now(), vi.fn());
     proc.emit('close');
-    proc.emit('close'); // second close must not double-warn
 
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
     stop();
   });
 
-  it('shares the warned flag with error events — close after error does not double-warn', () => {
+  it('error event warns once; subsequent close does not double-warn', () => {
     const proc = makeFakePmsetProc();
     spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
     const { logger: capturing, warn } = makeWarnCapturingLogger();
 
     const stop = _internals.startPmsetAdjunct(capturing, () => Date.now(), vi.fn());
     proc.emit('error', new Error('boom'));
+    // close fires after error in Node — warn flag is per-proc so this is fine
     proc.emit('close');
 
     expect(warn).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('respawns pmset 30 s after close — verifies live-poll not one-shot', async () => {
+    vi.useFakeTimers();
+    const proc1 = makeFakePmsetProc();
+    const proc2 = makeFakePmsetProc();
+    spawnMock
+      .mockReturnValueOnce(proc1 as unknown as ReturnType<typeof childSpawn>)
+      .mockReturnValueOnce(proc2 as unknown as ReturnType<typeof childSpawn>);
+
+    const stop = _internals.startPmsetAdjunct(logger, () => Date.now(), vi.fn());
+
+    // Initial spawn happened synchronously
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    // Close proc1 — schedules respawn
+    proc1.emit('close');
+    expect(spawnMock).toHaveBeenCalledTimes(1); // no immediate second spawn
+
+    // After 30 s the respawn fires
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+
+    stop();
+  });
+
+  it('respawn detects a wake that postdates the previous run — future entries are not filtered', async () => {
+    vi.useFakeTimers();
+    const proc1 = makeFakePmsetProc();
+    const proc2 = makeFakePmsetProc();
+    spawnMock
+      .mockReturnValueOnce(proc1 as unknown as ReturnType<typeof childSpawn>)
+      .mockReturnValueOnce(proc2 as unknown as ReturnType<typeof childSpawn>);
+
+    const onWake = vi.fn();
+    const stop = _internals.startPmsetAdjunct(logger, () => Date.now(), onWake);
+
+    // First run: no relevant entries — proc1 closes, schedules respawn
+    proc1.emit('close');
+    await vi.advanceTimersByTimeAsync(30_000); // proc2 spawned
+
+    // proc2 (respawn) sees a sleep+wake that happened after proc1 started.
+    // Use year 2099 so the timestamps are safely in the future (past lastSeenAt).
+    // Readable.push() fires 'data' synchronously in flowing mode — no yield needed.
+    proc2.stdout.push('2099-06-01 01:00:00 +0000 Sleep due to lid close\n');
+    proc2.stdout.push('2099-06-01 02:00:00 +0000 Wake from Normal Sleep\n');
+
+    expect(onWake).toHaveBeenCalledTimes(1);
+    expect(onWake).toHaveBeenCalledWith(60 * 60 * 1000, 'pmset');
+
     stop();
   });
 });

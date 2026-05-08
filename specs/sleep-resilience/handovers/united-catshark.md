@@ -6,7 +6,7 @@ Added a host-sleep detector at `packages/daemon/src/pods/sleep-detector.ts` that
 
 Two layered detection mechanisms:
 1. **Tick-gap heuristic** (primary, cross-platform): a `setInterval` at 30 s records `lastTickAt`; if the gap between ticks exceeds the threshold (default 180 s, env `AUTOPOD_SLEEP_DETECT_THRESHOLD_MS`), it publishes.
-2. **macOS adjunct** (best-effort): tries `node-mac-power-monitor` (dynamic import, catches failure), then falls back to `pmset -g log` tail. The adjunct reads `lastTickAt` via a getter so it only fires when the threshold is also crossed — tick-gap remains the source of truth.
+2. **macOS adjunct** (best-effort): tries `node-mac-power-monitor` (dynamic import, catches failure), then falls back to a **periodic-respawn pmset poller** — `pmset -g log` is spawned, its output is parsed, then it is respawned every 30 s. Because pmset dumps historical entries on each run, a `lastSeenAt` cursor advances to each run's start time so only new wake events are processed. The adjunct reads `lastTickAt` via a getter so it only fires when the threshold is also crossed — tick-gap remains the source of truth.
 
 Dedupe: 5 s cooldown after publish. Disable: `AUTOPOD_DISABLE_SLEEP_DETECT=1`.
 
@@ -48,7 +48,9 @@ Brief 02 must subscribe to `host.resumed` on the eventBus and, after reconciliat
 
 4. **`setInterval` is `unref()`-ed** — won't prevent clean shutdown.
 
-5. **pmset buffer is capped at 100 KB** — long-lived pmset process can't cause unbounded string growth.
+5. **pmset buffer is capped at 100 KB per run** — each pmset spawn gets its own buffer; the buffer is local to the `run()` closure so there is no cross-run accumulation.
+
+9. **pmset is periodic-respawn, not a streaming tail.** `pmset -g log` exits immediately after dumping its log. The adjunct respawns it every 30 s (same cadence as the tick-gap interval). On each respawn, only wake entries with a timestamp >= the previous run's start are processed. Brief 02's reconcile latency on macOS without `node-mac-power-monitor` is ~30 s (same as tick-gap), not "near-instant".
 
 6. **macOS adjunct starts asynchronously** — the stop function returned from `startSleepDetector` handles the race between teardown and adjunct startup via the `stopped` flag. Brief 02/03 should NOT depend on the adjunct being ready synchronously.
 

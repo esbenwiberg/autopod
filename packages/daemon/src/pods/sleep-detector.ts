@@ -6,6 +6,10 @@ import type { EventBus } from './event-bus.js';
 const TICK_INTERVAL_MS = 30_000;
 const DEDUPE_WINDOW_MS = 5_000;
 const PMSET_BUF_LIMIT = 100_000;
+const PMSET_RESPAWN_INTERVAL_MS = 30_000;
+// Compiled once; avoids per-line regex construction inside the tight data loop.
+const PMSET_TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-])(\d{2})(\d{2})/;
+const PMSET_ADJUNCT_FAILED_MSG = 'macOS pmset adjunct failed — tick-gap heuristic only';
 
 function readThresholdMs(): number {
   const env = Number(process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS);
@@ -57,13 +61,17 @@ export function startSleepDetector(eventBus: EventBus, logger: Logger): () => vo
       (sleptMs, detector) => {
         if (sleptMs > thresholdMs) tryPublish(sleptMs, detector);
       },
-    ).then((stop) => {
-      if (stopped) {
-        stop(); // adjunct started after stop() was already called — tear it down immediately
-      } else {
-        stopMacOs = stop;
-      }
-    });
+    )
+      .then((stop) => {
+        if (stopped) {
+          stop(); // adjunct started after stop() was already called — tear it down immediately
+        } else {
+          stopMacOs = stop;
+        }
+      })
+      .catch((err: unknown) => {
+        logger.warn({ err }, 'macOS adjunct failed to initialise — tick-gap heuristic only');
+      });
   }
 
   return () => {
@@ -107,7 +115,7 @@ const SLEEP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4} Sleep/;
 // canonicalise to `2024-01-01T12:00:00+00:00` before handing it to Date so the
 // pmset adjunct keeps its precision advantage instead of falling back to tick-gap.
 function parsePmsetTimestamp(line: string): number {
-  const match = line.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-])(\d{2})(\d{2})/);
+  const match = line.match(PMSET_TIMESTAMP_RE);
   if (!match) return Number.NaN;
   const [, date, time, sign, hh, mm] = match;
   return new Date(`${date}T${time}${sign}${hh}:${mm}`).getTime();
@@ -118,76 +126,83 @@ function startPmsetAdjunct(
   getLastTickAt: () => number,
   onWake: WakeCallback,
 ): () => void {
-  let lastSleepAt: number | null = null;
-  let warned = false;
-  // `pmset -g log` is a one-shot dump of the historical power log, not a live
-  // tail. Recording the start moment lets us drop any wake entries that
-  // pre-date the daemon — without this, a Mac that slept since boot would
-  // emit one spurious host.resumed event on every restart.
-  const startedAt = Date.now();
-
+  // `pmset -g log` exits after dumping its output — it is not a streaming
+  // command. We respawn it every 30 s so new sleep+wake pairs are detected.
+  // `lastSeenAt` advances to the start of each run so that the next run only
+  // processes wake events that postdate the previous run.
+  let lastSeenAt = Date.now();
+  let stopped = false;
   let proc: ReturnType<typeof spawn> | null = null;
-  try {
-    proc = spawn('pmset', ['-g', 'log'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let respawnTimer: ReturnType<typeof setTimeout> | null = null;
 
-    proc.on('error', (err) => {
-      if (!warned) {
-        warned = true;
-        logger.warn({ err }, 'macOS pmset adjunct failed — tick-gap heuristic only');
-      }
-    });
+  function scheduleRespawn(): void {
+    if (stopped) return;
+    respawnTimer = setTimeout(run, PMSET_RESPAWN_INTERVAL_MS);
+  }
 
-    // pmset always exits after the dump finishes. Surface that once so it's
-    // visible the adjunct is no longer detecting wakes; tick-gap remains the
-    // source of truth.
-    proc.on('close', () => {
-      if (!warned) {
-        warned = true;
-        logger.warn(
-          'macOS pmset child exited (one-shot log) — sleep adjunct now idle, tick-gap remains source of truth',
-        );
-      }
-    });
+  function run(): void {
+    if (stopped) return;
+    respawnTimer = null;
 
+    const thisRunStart = Date.now();
+    const filterBefore = lastSeenAt;
+    let lastSleepAt: number | null = null;
     let buf = '';
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      buf += chunk.toString();
-      if (buf.length > PMSET_BUF_LIMIT) {
-        buf = '';
-        return;
-      }
-      const lines = buf.split('\n');
-      buf = lines.pop() ?? '';
-      for (const line of lines) {
-        if (SLEEP_PATTERN.test(line)) {
-          lastSleepAt = parsePmsetTimestamp(line);
-        } else if (WAKE_PATTERN.test(line)) {
-          const wakeAt = parsePmsetTimestamp(line);
-          // Skip historical wake entries from pmset's startup dump — only
-          // wakes that happened after this adjunct started count.
-          if (Number.isFinite(wakeAt) && wakeAt < startedAt) {
-            lastSleepAt = null;
-            continue;
-          }
-          const sleptMs =
-            lastSleepAt !== null && Number.isFinite(lastSleepAt) && Number.isFinite(wakeAt)
-              ? wakeAt - lastSleepAt
-              : Date.now() - getLastTickAt();
-          lastSleepAt = null;
-          onWake(sleptMs, 'pmset');
-        }
-      }
-    });
+    let procWarned = false;
 
-    logger.debug('macOS power monitor: parsing pmset log (one-shot snapshot, not a live tail)');
-  } catch (err) {
-    if (!warned) {
-      warned = true;
-      logger.warn({ err }, 'macOS pmset adjunct failed — tick-gap heuristic only');
+    try {
+      proc = spawn('pmset', ['-g', 'log'], { stdio: ['ignore', 'pipe', 'ignore'] });
+
+      proc.on('error', (err) => {
+        if (!procWarned) {
+          procWarned = true;
+          logger.warn({ err }, PMSET_ADJUNCT_FAILED_MSG);
+        }
+        proc = null;
+      });
+
+      proc.on('close', () => {
+        proc = null;
+        lastSeenAt = thisRunStart;
+        scheduleRespawn();
+      });
+
+      proc.stdout?.on('data', (chunk: Buffer) => {
+        buf += chunk.toString();
+        if (buf.length > PMSET_BUF_LIMIT) {
+          buf = '';
+          return;
+        }
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          if (SLEEP_PATTERN.test(line)) {
+            const t = parsePmsetTimestamp(line);
+            if (Number.isFinite(t)) lastSleepAt = t;
+          } else if (WAKE_PATTERN.test(line)) {
+            const wakeAt = parsePmsetTimestamp(line);
+            if (!Number.isFinite(wakeAt) || wakeAt < filterBefore) continue;
+            const sleptMs =
+              lastSleepAt !== null
+                ? wakeAt - lastSleepAt
+                : Date.now() - getLastTickAt();
+            lastSleepAt = null;
+            onWake(sleptMs, 'pmset');
+          }
+        }
+      });
+
+      logger.debug('macOS power monitor: polling pmset log (respawns every 30 s)');
+    } catch (err) {
+      logger.warn({ err }, PMSET_ADJUNCT_FAILED_MSG);
     }
   }
 
+  run();
+
   return () => {
+    stopped = true;
+    clearTimeout(respawnTimer);
     proc?.kill();
     proc = null;
   };
