@@ -244,7 +244,10 @@ describe('SafetyEventsRepository', () => {
 
     // Days should be in ascending order
     for (let i = 1; i < result.length; i++) {
-      expect(result[i]!.day >= result[i - 1]!.day).toBe(true);
+      const cur = result[i];
+      const prev = result[i - 1];
+      if (!cur || !prev) throw new Error('sparkline entry missing');
+      expect(cur.day >= prev.day).toBe(true);
     }
 
     // Total count across sparkline should be 1

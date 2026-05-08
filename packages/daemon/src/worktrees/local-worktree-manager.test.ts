@@ -644,11 +644,7 @@ describe('LocalWorktreeManager', () => {
     }
 
     it('restores the working tree when every change is an unstaged deletion', async () => {
-      mockStatusPorcelain([
-        ' D README.md',
-        ' D src/index.ts',
-        ' D docs/decisions/ADR-001-foo.md',
-      ]);
+      mockStatusPorcelain([' D README.md', ' D src/index.ts', ' D docs/decisions/ADR-001-foo.md']);
 
       const result = await manager.restoreFromHead('/tmp/worktree/sess');
 

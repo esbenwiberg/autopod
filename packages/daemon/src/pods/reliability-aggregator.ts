@@ -90,7 +90,13 @@ const BANDS: FunnelBand[] = [
   'complete',
 ];
 
-const BAND_INDEX = new Map<string, number>(BANDS.map((b, i) => [b, i]));
+const BAND_INDEX: Record<FunnelBand, number> = Object.fromEntries(
+  BANDS.map((b, i) => [b, i] as const),
+) as Record<FunnelBand, number>;
+
+function isFunnelBand(s: string): s is FunnelBand {
+  return s in BAND_INDEX;
+}
 
 const STAGES: ValidationStage[] = [
   'build',
@@ -102,6 +108,19 @@ const STAGES: ValidationStage[] = [
   'acValidation',
   'taskReview',
 ];
+
+function emptyStageSets(): Record<ValidationStage, Set<string>> {
+  return Object.fromEntries(STAGES.map((s) => [s, new Set<string>()])) as Record<
+    ValidationStage,
+    Set<string>
+  >;
+}
+
+function emptyProfileStageMap(): Record<ValidationStage, StageAccum> {
+  return Object.fromEntries(
+    STAGES.map((s) => [s, { ran: new Set<string>(), failed: new Set<string>() }]),
+  ) as Record<ValidationStage, StageAccum>;
+}
 
 // ── Internal types ────────────────────────────────────────────────────────────
 
@@ -257,42 +276,52 @@ export function computeReliabilityAnalytics(
     .all({ days }) as Array<{ podId: string; newStatus: string | null }>;
 
   // Deduplicated set of happy-path bands reached per pod.
-  const podBands = new Map<string, Set<string>>();
+  const podBands = new Map<string, Set<FunnelBand>>();
   for (const row of eventRows) {
-    if (!row.newStatus || !BAND_INDEX.has(row.newStatus)) continue;
-    if (!podBands.has(row.podId)) podBands.set(row.podId, new Set());
-    podBands.get(row.podId)!.add(row.newStatus);
+    if (!row.newStatus || !isFunnelBand(row.newStatus)) continue;
+    let bandSet = podBands.get(row.podId);
+    if (!bandSet) {
+      bandSet = new Set();
+      podBands.set(row.podId, bandSet);
+    }
+    bandSet.add(row.newStatus);
   }
 
-  const bandCounts = new Map<FunnelBand, number>(BANDS.map((b) => [b, 0]));
+  const bandCounts: Record<FunnelBand, number> = Object.fromEntries(
+    BANDS.map((b) => [b, 0]),
+  ) as Record<FunnelBand, number>;
   const dropMap = new Map<string, DropGroup>();
 
   for (const pod of cohort) {
-    const bands = podBands.get(pod.id);
+    const bandSet = podBands.get(pod.id);
     // Pre-event-bus pods with no status-change events: excluded from funnel drops.
-    if (!bands || bands.size === 0) continue;
+    if (!bandSet || bandSet.size === 0) continue;
 
-    for (const b of bands) {
-      bandCounts.set(b as FunnelBand, (bandCounts.get(b as FunnelBand) ?? 0) + 1);
-    }
-
-    // Last band reached = highest-indexed band in the pod's event set.
+    // Track the last band reached as we iterate, so we don't need a second lookup.
+    let lastBand: FunnelBand | null = null;
     let maxIdx = -1;
-    for (const b of bands) {
-      const idx = BAND_INDEX.get(b)!;
-      if (idx > maxIdx) maxIdx = idx;
+    for (const b of bandSet) {
+      bandCounts[b] += 1;
+      const idx = BAND_INDEX[b];
+      if (idx > maxIdx) {
+        maxIdx = idx;
+        lastBand = b;
+      }
     }
-    const lastBand = BANDS[maxIdx]!;
 
-    if (pod.status === 'complete') continue;
+    if (pod.status === 'complete' || lastBand === null) continue;
 
     const finalStatus = pod.status as FinalStatus;
     const key = `${lastBand}|${finalStatus}`;
-    if (!dropMap.has(key)) dropMap.set(key, { from: lastBand, to: finalStatus, pods: [] });
-    dropMap.get(key)!.pods.push(pod);
+    let group = dropMap.get(key);
+    if (!group) {
+      group = { from: lastBand, to: finalStatus, pods: [] };
+      dropMap.set(key, group);
+    }
+    group.pods.push(pod);
   }
 
-  const bands = BANDS.map((band) => ({ band, count: bandCounts.get(band) ?? 0 }));
+  const bands = BANDS.map((band) => ({ band, count: bandCounts[band] }));
 
   const drops = [...dropMap.values()].map((group) => {
     const sorted = [...group.pods].sort((a, b) => b.completedAt.localeCompare(a.completedAt));
@@ -324,55 +353,57 @@ export function computeReliabilityAnalytics(
   for (const row of validationRows) {
     try {
       const parsed = JSON.parse(row.result) as StoredValidationResult;
-      if (!podValidations.has(row.podId)) podValidations.set(row.podId, []);
-      podValidations.get(row.podId)!.push(parsed);
+      let list = podValidations.get(row.podId);
+      if (!list) {
+        list = [];
+        podValidations.set(row.podId, list);
+      }
+      list.push(parsed);
     } catch {
       // skip malformed validation JSON
     }
   }
 
-  const stageRan = new Map<ValidationStage, Set<string>>(STAGES.map((s) => [s, new Set()]));
-  const stageFailed = new Map<ValidationStage, Set<string>>(STAGES.map((s) => [s, new Set()]));
-  const profileData = new Map<string, Map<ValidationStage, StageAccum>>();
+  const stageRan = emptyStageSets();
+  const stageFailed = emptyStageSets();
+  const profileData = new Map<string, Record<ValidationStage, StageAccum>>();
 
   for (const pod of cohort) {
     const profile = pod.profileName;
-    if (!profileData.has(profile)) {
-      profileData.set(
-        profile,
-        new Map(STAGES.map((s) => [s, { ran: new Set(), failed: new Set() }])),
-      );
+    let pMap = profileData.get(profile);
+    if (!pMap) {
+      pMap = emptyProfileStageMap();
+      profileData.set(profile, pMap);
     }
-    const pMap = profileData.get(profile)!;
 
     for (const vr of podValidations.get(pod.id) ?? []) {
       // build — reads from result.smoke.build (not a top-level field)
       if (vr.smoke?.build !== undefined) {
-        stageRan.get('build')!.add(pod.id);
-        pMap.get('build')!.ran.add(pod.id);
+        stageRan.build.add(pod.id);
+        pMap.build.ran.add(pod.id);
         if (vr.smoke.build.status === 'fail') {
-          stageFailed.get('build')!.add(pod.id);
-          pMap.get('build')!.failed.add(pod.id);
+          stageFailed.build.add(pod.id);
+          pMap.build.failed.add(pod.id);
         }
       }
 
       // health — reads from result.smoke.health (not a top-level field)
       if (vr.smoke?.health !== undefined) {
-        stageRan.get('health')!.add(pod.id);
-        pMap.get('health')!.ran.add(pod.id);
+        stageRan.health.add(pod.id);
+        pMap.health.ran.add(pod.id);
         if (vr.smoke.health.status === 'fail') {
-          stageFailed.get('health')!.add(pod.id);
-          pMap.get('health')!.failed.add(pod.id);
+          stageFailed.health.add(pod.id);
+          pMap.health.failed.add(pod.id);
         }
       }
 
       // smoke — failed when any page in result.smoke.pages has status 'fail'
       if (vr.smoke?.pages !== undefined) {
-        stageRan.get('smoke')!.add(pod.id);
-        pMap.get('smoke')!.ran.add(pod.id);
+        stageRan.smoke.add(pod.id);
+        pMap.smoke.ran.add(pod.id);
         if (vr.smoke.pages.some((pg) => pg.status === 'fail')) {
-          stageFailed.get('smoke')!.add(pod.id);
-          pMap.get('smoke')!.failed.add(pod.id);
+          stageFailed.smoke.add(pod.id);
+          pMap.smoke.failed.add(pod.id);
         }
       }
 
@@ -380,38 +411,38 @@ export function computeReliabilityAnalytics(
       for (const stage of ['test', 'lint', 'sast'] as const) {
         const sr = vr[stage];
         if (sr !== undefined && sr !== null) {
-          stageRan.get(stage)!.add(pod.id);
-          pMap.get(stage)!.ran.add(pod.id);
+          stageRan[stage].add(pod.id);
+          pMap[stage].ran.add(pod.id);
           if (sr.status === 'fail') {
-            stageFailed.get(stage)!.add(pod.id);
-            pMap.get(stage)!.failed.add(pod.id);
+            stageFailed[stage].add(pod.id);
+            pMap[stage].failed.add(pod.id);
           }
         }
       }
 
       if (vr.acValidation !== undefined && vr.acValidation !== null) {
-        stageRan.get('acValidation')!.add(pod.id);
-        pMap.get('acValidation')!.ran.add(pod.id);
+        stageRan.acValidation.add(pod.id);
+        pMap.acValidation.ran.add(pod.id);
         if (vr.acValidation.status === 'fail') {
-          stageFailed.get('acValidation')!.add(pod.id);
-          pMap.get('acValidation')!.failed.add(pod.id);
+          stageFailed.acValidation.add(pod.id);
+          pMap.acValidation.failed.add(pod.id);
         }
       }
 
       if (vr.taskReview !== undefined && vr.taskReview !== null) {
-        stageRan.get('taskReview')!.add(pod.id);
-        pMap.get('taskReview')!.ran.add(pod.id);
+        stageRan.taskReview.add(pod.id);
+        pMap.taskReview.ran.add(pod.id);
         if (vr.taskReview.status === 'fail') {
-          stageFailed.get('taskReview')!.add(pod.id);
-          pMap.get('taskReview')!.failed.add(pod.id);
+          stageFailed.taskReview.add(pod.id);
+          pMap.taskReview.failed.add(pod.id);
         }
       }
     }
   }
 
   const stageFailures = STAGES.map((stage) => {
-    const podsRan = stageRan.get(stage)!.size;
-    const podsFailed = stageFailed.get(stage)!.size;
+    const podsRan = stageRan[stage].size;
+    const podsFailed = stageFailed[stage].size;
     return {
       stage,
       podsRan,
@@ -424,8 +455,8 @@ export function computeReliabilityAnalytics(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([profile, stageMap]) => ({
       profile,
-      stages: STAGES.filter((s) => stageMap.get(s)!.ran.size > 0).map((s) => {
-        const { ran, failed } = stageMap.get(s)!;
+      stages: STAGES.filter((s) => stageMap[s].ran.size > 0).map((s) => {
+        const { ran, failed } = stageMap[s];
         const podsRan = ran.size;
         const podsFailed = failed.size;
         return {
@@ -458,9 +489,11 @@ function findTopFailureStage(
 ): ValidationStage | '' {
   const withFailures = stageFailures.filter((s) => s.podsFailed > 0);
   if (withFailures.length === 0) return '';
-  return withFailures.sort((a, b) => {
+  const sorted = withFailures.sort((a, b) => {
     if (b.failureRate !== a.failureRate) return b.failureRate - a.failureRate;
     if (b.podsFailed !== a.podsFailed) return b.podsFailed - a.podsFailed;
     return a.stage.localeCompare(b.stage);
-  })[0]!.stage;
+  });
+  const top = sorted[0];
+  return top ? top.stage : '';
 }

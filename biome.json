@@ -40,6 +40,7 @@
       "**/.pnpm-store/**",
       "**/pnpm-lock.yaml",
       "**/.autopod-data/**",
+      "**/.agentry/**",
       "packages/desktop/.build/**",
       "packages/desktop/build/**",
       "tmp/**"

@@ -3,6 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { computeReliabilityAnalytics } from './reliability-aggregator.js';
 
+function need<T>(v: T | null | undefined, label = 'value'): T {
+  if (v === null || v === undefined) throw new Error(`expected ${label} to be defined`);
+  return v;
+}
+
 // ── Pod insertion helper ──────────────────────────────────────────────────────
 
 interface InsertPodOpts {
@@ -123,7 +128,7 @@ function insertAllBandEvents(db: Database.Database, podId: string): void {
   // Insert a 'queued' event first so the band is counted
   insertStatusEvent(db, podId, '', 'queued');
   for (const [prev, next] of transitions) {
-    insertStatusEvent(db, podId, prev!, next!);
+    insertStatusEvent(db, podId, need(prev), need(next));
   }
 }
 
@@ -185,7 +190,7 @@ describe('computeReliabilityAnalytics', () => {
 
     expect(result.firstPassRate).toBe(0);
     // Pod still counted in each band it reached
-    expect(result.funnel.bands.find((b) => b.band === 'complete')!.count).toBe(1);
+    expect(need(result.funnel.bands.find((b) => b.band === 'complete')).count).toBe(1);
     expect(result.summary.avgReworkCount).toBe(2);
   });
 
@@ -200,12 +205,12 @@ describe('computeReliabilityAnalytics', () => {
     const result = computeReliabilityAnalytics(db, 30);
 
     expect(result.funnel.drops).toHaveLength(1);
-    const drop = result.funnel.drops[0]!;
+    const drop = need(result.funnel.drops[0]);
     expect(drop.from).toBe('running');
     expect(drop.to).toBe('killed');
     expect(drop.count).toBe(1);
     expect(drop.topPods).toHaveLength(1);
-    expect(drop.topPods[0]!.podId).toBe(podId);
+    expect(need(drop.topPods[0]).podId).toBe(podId);
     expect(drop.overflow).toBe(0);
   });
 
@@ -221,8 +226,9 @@ describe('computeReliabilityAnalytics', () => {
     const result = computeReliabilityAnalytics(db, 30);
 
     expect(result.funnel.drops).toHaveLength(1);
-    expect(result.funnel.drops[0]!.from).toBe('validating');
-    expect(result.funnel.drops[0]!.to).toBe('failed');
+    const drop = need(result.funnel.drops[0]);
+    expect(drop.from).toBe('validating');
+    expect(drop.to).toBe('failed');
   });
 
   // ── Stage failure on smoke ──────────────────────────────────────────────────
@@ -253,7 +259,7 @@ describe('computeReliabilityAnalytics', () => {
 
     const result = computeReliabilityAnalytics(db, 30);
 
-    const smokeEntry = result.stageFailures.find((s) => s.stage === 'smoke')!;
+    const smokeEntry = need(result.stageFailures.find((s) => s.stage === 'smoke'));
     expect(smokeEntry.podsFailed).toBeGreaterThanOrEqual(1);
     expect(result.summary.topFailureStage).toBe('smoke');
   });
@@ -285,7 +291,7 @@ describe('computeReliabilityAnalytics', () => {
 
     const result = computeReliabilityAnalytics(db, 30);
 
-    const testEntry = result.stageFailures.find((s) => s.stage === 'test')!;
+    const testEntry = need(result.stageFailures.find((s) => s.stage === 'test'));
     expect(testEntry.podsFailed).toBe(1);
     expect(testEntry.podsRan).toBe(1);
   });
@@ -306,7 +312,7 @@ describe('computeReliabilityAnalytics', () => {
 
     const result = computeReliabilityAnalytics(db, 30);
 
-    const profileEntry = result.profileHeatmap.find((p) => p.profile === 'test-profile')!;
+    const profileEntry = need(result.profileHeatmap.find((p) => p.profile === 'test-profile'));
     expect(profileEntry).toBeDefined();
     expect(profileEntry.stages.some((s) => s.stage === 'sast')).toBe(false);
   });
@@ -327,15 +333,14 @@ describe('computeReliabilityAnalytics', () => {
 
     const result = computeReliabilityAnalytics(db, 30);
 
-    const drop = result.funnel.drops.find((d) => d.from === 'running' && d.to === 'failed')!;
-    expect(drop).toBeDefined();
+    const drop = need(result.funnel.drops.find((d) => d.from === 'running' && d.to === 'failed'));
     expect(drop.count).toBe(12);
     expect(drop.topPods).toHaveLength(10);
     expect(drop.overflow).toBe(2);
 
     // Verify ordering: DESC by completedAt (most recent first)
     for (let i = 0; i < drop.topPods.length - 1; i++) {
-      expect(drop.topPods[i]!.completedAt >= drop.topPods[i + 1]!.completedAt).toBe(true);
+      expect(need(drop.topPods[i]).completedAt >= need(drop.topPods[i + 1]).completedAt).toBe(true);
     }
   });
 
@@ -355,11 +360,11 @@ describe('computeReliabilityAnalytics', () => {
 
     // Days should be in ascending order
     for (let i = 0; i < days.length - 1; i++) {
-      expect(days[i]!.day < days[i + 1]!.day).toBe(true);
+      expect(need(days[i]).day < need(days[i + 1]).day).toBe(true);
     }
     // Last entry should be today (the sparkline window ends at today, inclusive)
     const today = new Date().toISOString().slice(0, 10);
-    expect(days[days.length - 1]!.day).toBe(today);
+    expect(need(days[days.length - 1]).day).toBe(today);
   });
 
   // ── Delta direction thresholds ──────────────────────────────────────────────
@@ -441,10 +446,10 @@ describe('computeReliabilityAnalytics', () => {
 
     const result = computeReliabilityAnalytics(db, 30);
 
-    const buildEntry = result.stageFailures.find((s) => s.stage === 'build')!;
+    const buildEntry = need(result.stageFailures.find((s) => s.stage === 'build'));
     expect(buildEntry.podsFailed).toBe(1);
 
-    const smokeEntry = result.stageFailures.find((s) => s.stage === 'smoke')!;
+    const smokeEntry = need(result.stageFailures.find((s) => s.stage === 'smoke'));
     expect(smokeEntry.podsFailed).toBe(0); // no page failures
   });
 
@@ -463,7 +468,7 @@ describe('computeReliabilityAnalytics', () => {
 
     const result = computeReliabilityAnalytics(db, 30);
 
-    const entry = result.profileHeatmap[0]!;
+    const entry = need(result.profileHeatmap[0]);
     const stageNames = entry.stages.map((s) => s.stage);
     const canonical = [
       'build',

@@ -1,10 +1,13 @@
 import {
   type CostAnalyticsResponse,
   MODEL_PRICING,
+  type Pod,
   computeCost,
   effectiveCostUsd,
 } from '@autopod/shared';
 import type { PodRepository } from './pod-repository.js';
+
+type CompletedPod = Pod & { completedAt: string };
 
 export interface CostAggregationDeps {
   podRepo: PodRepository;
@@ -65,15 +68,15 @@ export function aggregateCost(
   const allPods = deps.podRepo.list();
 
   const relevant = allPods.filter(
-    (pod) =>
+    (pod): pod is CompletedPod =>
       TERMINAL_STATUSES.has(pod.status) &&
       pod.options.agentMode !== 'interactive' &&
       pod.completedAt !== null &&
       pod.completedAt >= priorStartIso,
   );
 
-  const currentPods = relevant.filter((pod) => pod.completedAt! >= windowStartIso);
-  const priorPods = relevant.filter((pod) => pod.completedAt! < windowStartIso);
+  const currentPods = relevant.filter((pod) => pod.completedAt >= windowStartIso);
+  const priorPods = relevant.filter((pod) => pod.completedAt < windowStartIso);
 
   const sparkline = Array.from({ length: days }, (_, i) => ({
     day: new Date(windowStartMs + i * 86_400_000).toISOString().slice(0, 10),
@@ -109,10 +112,11 @@ export function aggregateCost(
       wastePodCount += 1;
     }
 
-    const completedMs = new Date(pod.completedAt!).getTime();
+    const completedMs = new Date(pod.completedAt).getTime();
     const dayOffset = Math.floor((completedMs - windowStartMs) / 86_400_000);
-    if (dayOffset >= 0 && dayOffset < days) {
-      sparkline[dayOffset]!.costUsd += cost;
+    const bucket = sparkline[dayOffset];
+    if (bucket) {
+      bucket.costUsd += cost;
     }
 
     let phaseCostSum = 0;
@@ -184,7 +188,7 @@ export function aggregateCost(
   const byProfileModel = [...profileModelMap.values()].sort((a, b) => b.costUsd - a.costUsd);
 
   const top10 = currentPods
-    .map((pod) => ({ pod, cost: costById.get(pod.id)! }))
+    .map((pod) => ({ pod, cost: costById.get(pod.id) ?? 0 }))
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 10)
     .map(({ pod, cost }) => ({
@@ -193,7 +197,7 @@ export function aggregateCost(
       model: pod.model ?? null,
       finalStatus: pod.status as 'complete' | 'killed' | 'failed' | 'rejected',
       costUsd: cost,
-      completedAt: pod.completedAt!,
+      completedAt: pod.completedAt,
     }));
 
   return {

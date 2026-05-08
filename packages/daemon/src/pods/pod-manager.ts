@@ -6858,9 +6858,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 : [];
             // Raw refs for ADO: page.screenshot is set by collectScreenshots above.
             const rawScreenshots = isAdoPod
-              ? result.smoke.pages
-                  .filter((p) => p.screenshot != null)
-                  .map((p) => ({ pagePath: p.path, ref: p.screenshot! }))
+              ? result.smoke.pages.flatMap((p) =>
+                  p.screenshot != null ? [{ pagePath: p.path, ref: p.screenshot }] : [],
+                )
               : undefined;
 
             if (!prUrl) {
@@ -8502,11 +8502,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // container's overlayfs.
       if (pod.containerId) {
         const cm = containerManagerFactory.get(pod.executionTarget);
-        const recovered = await recoverWorktreeFromContainer(
-          pod.containerId,
-          pod.worktreePath,
-          cm,
-        );
+        const recovered = await recoverWorktreeFromContainer(pod.containerId, pod.worktreePath, cm);
         if (recovered) {
           try {
             const profileForRecovery = profileStore.get(pod.profileName);

@@ -242,8 +242,8 @@ describe('aggregateCost', () => {
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
     const legacy = result.byPhase.find((p) => p.phase === 'agent_legacy');
     // effectiveCostUsd = 10.0 (costUsd > 0), phaseCost = 5+2 = 7.0, gap = 3.0
-    expect(legacy).toBeDefined();
-    expect(legacy!.costUsd).toBeCloseTo(3.0);
+    if (!legacy) throw new Error('expected agent_legacy phase');
+    expect(legacy.costUsd).toBeCloseTo(3.0);
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -298,8 +298,9 @@ describe('aggregateCost', () => {
     const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
     expect(result.top10).toHaveLength(10);
     // Should be sorted descending by cost
-    expect(result.top10[0]!.costUsd).toBe(15);
-    expect(result.top10[9]!.costUsd).toBe(6);
+    const [first, , , , , , , , , tenth] = result.top10;
+    expect(first?.costUsd).toBe(15);
+    expect(tenth?.costUsd).toBe(6);
   });
 
   // ──────────────────────────────────────────────────────────────────────────

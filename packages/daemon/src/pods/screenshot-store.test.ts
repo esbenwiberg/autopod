@@ -179,7 +179,9 @@ describe('ScreenshotStore', () => {
     }
 
     // The file should be one of the two buffers (no torn writes)
-    const bytes = await store.read(refs[0]!);
+    const firstRef = refs[0];
+    if (!firstRef) throw new Error('expected at least one ref');
+    const bytes = await store.read(firstRef);
     const isA = bytes.equals(bufA);
     const isB = bytes.equals(bufB);
     expect(isA || isB).toBe(true);
