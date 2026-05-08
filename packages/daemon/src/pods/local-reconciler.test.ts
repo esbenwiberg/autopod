@@ -916,3 +916,193 @@ describe('reconcileLocalSessions', () => {
     expect(pod.status).toBe('killed');
   });
 });
+
+describe('reconcileLocalSessions — trigger param', () => {
+  it('wake trigger bypasses MAX_RECOVERIES cap and does not increment recoveryCount', async () => {
+    const { deps, podRepo, enqueuedSessions } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'wake-capped',
+      profileName: 'test-profile',
+      task: 'Task',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/wake-capped',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('wake-capped', {
+      containerId: 'ctr-wake',
+      worktreePath: '/tmp/worktree/wake-capped',
+      recoveryCount: 5,
+    });
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    const result = await reconcileLocalSessions({ ...deps, trigger: 'wake' });
+
+    expect(result.recovered).toContain('wake-capped');
+    expect(result.killed).not.toContain('wake-capped');
+
+    const pod = podRepo.getOrThrow('wake-capped');
+    expect(pod.status).toBe('queued');
+    // recoveryCount must NOT be incremented on wake
+    expect(pod.recoveryCount).toBe(5);
+    expect(enqueuedSessions).toContain('wake-capped');
+  });
+
+  it('wake trigger stamps lastRecoveryTrigger = wake before re-enqueue', async () => {
+    const { deps, podRepo } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'wake-stamp',
+      profileName: 'test-profile',
+      task: 'Task',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/wake-stamp',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('wake-stamp', {
+      containerId: 'ctr-stamp',
+      worktreePath: '/tmp/worktree/wake-stamp',
+    });
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    await reconcileLocalSessions({ ...deps, trigger: 'wake' });
+
+    const pod = podRepo.getOrThrow('wake-stamp');
+    expect(pod.lastRecoveryTrigger).toBe('wake');
+  });
+
+  it('restart trigger (default) enforces cap, increments recoveryCount, stamps lastRecoveryTrigger = restart', async () => {
+    const { deps, podRepo, enqueuedSessions } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'restart-counted',
+      profileName: 'test-profile',
+      task: 'Task',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/restart-counted',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('restart-counted', {
+      containerId: 'ctr-restart',
+      worktreePath: '/tmp/worktree/restart-counted',
+      recoveryCount: 1,
+    });
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    // No trigger passed → defaults to 'restart'
+    const result = await reconcileLocalSessions(deps);
+
+    expect(result.recovered).toContain('restart-counted');
+    const pod = podRepo.getOrThrow('restart-counted');
+    expect(pod.recoveryCount).toBe(2);
+    expect(pod.lastRecoveryTrigger).toBe('restart');
+    expect(enqueuedSessions).toContain('restart-counted');
+  });
+
+  it('restart trigger with recoveryCount at cap marks pod failed', async () => {
+    const { deps, podRepo, enqueuedSessions } = createReconcilerDeps();
+
+    podRepo.insert({
+      id: 'restart-capped',
+      profileName: 'test-profile',
+      task: 'Task',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/restart-capped',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+    podRepo.update('restart-capped', {
+      containerId: 'ctr-rcap',
+      worktreePath: '/tmp/worktree/restart-capped',
+      recoveryCount: 3,
+    });
+
+    mockedAccess.mockResolvedValue(undefined);
+
+    const result = await reconcileLocalSessions(deps);
+
+    expect(result.killed).toContain('restart-capped');
+    const pod = podRepo.getOrThrow('restart-capped');
+    expect(pod.status).toBe('failed');
+    expect(enqueuedSessions).not.toContain('restart-capped');
+  });
+
+  it('migration 096: last_recovery_trigger column exists and accepts NULL, wake, restart', async () => {
+    const { deps, podRepo } = createReconcilerDeps();
+
+    // Insert a fresh pod — column should default to null
+    podRepo.insert({
+      id: 'col-test',
+      profileName: 'test-profile',
+      task: 'Task',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/col-test',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      acceptanceCriteria: null,
+      outputMode: 'pr',
+      baseBranch: null,
+      acFrom: null,
+    });
+
+    let pod = podRepo.getOrThrow('col-test');
+    expect(pod.lastRecoveryTrigger).toBeNull();
+
+    podRepo.update('col-test', { lastRecoveryTrigger: 'wake' });
+    pod = podRepo.getOrThrow('col-test');
+    expect(pod.lastRecoveryTrigger).toBe('wake');
+
+    podRepo.update('col-test', { lastRecoveryTrigger: 'restart' });
+    pod = podRepo.getOrThrow('col-test');
+    expect(pod.lastRecoveryTrigger).toBe('restart');
+
+    podRepo.update('col-test', { lastRecoveryTrigger: null });
+    pod = podRepo.getOrThrow('col-test');
+    expect(pod.lastRecoveryTrigger).toBeNull();
+
+    // Verify the deps param was accepted (no TS error — this is a compile-time check)
+    expect(deps).toBeDefined();
+  });
+});

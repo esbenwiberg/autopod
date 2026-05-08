@@ -331,6 +331,14 @@ export interface Pod {
   phaseTokenUsage: PhaseTokenUsage | null;
   /** Effective network policy mode snapshotted at provisioning (ADR-020). NULL for pre-migration pods. */
   networkPolicyResolved: NetworkPolicyMode | null;
+  /**
+   * One-shot flag set by the reconciler when it re-queues a pod after host wake or
+   * daemon restart. `processPod()` reads this at the validation entry point to decide
+   * whether to penalise the pod (wake-recovery: no increment; restart-recovery:
+   * increment as normal). Cleared to `null` after the first validation entry so
+   * subsequent attempts inside the same recovered run behave normally.
+   */
+  lastRecoveryTrigger: 'wake' | 'restart' | null;
 }
 
 export interface CreatePodRequest {

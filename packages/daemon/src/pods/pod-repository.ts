@@ -174,6 +174,7 @@ export interface PodUpdates {
   acSelfReport?: Array<{ criterion: string; verified: boolean; notes?: string }> | null;
   phaseTokenUsage?: PhaseTokenUsage | null;
   networkPolicyResolved?: NetworkPolicyMode | null;
+  lastRecoveryTrigger?: 'wake' | 'restart' | null;
 }
 
 export interface PodStats {
@@ -403,6 +404,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
         >)
       : null,
     networkPolicyResolved: (row.network_policy_resolved as NetworkPolicyMode) ?? null,
+    lastRecoveryTrigger: (row.last_recovery_trigger as 'wake' | 'restart' | null) ?? null,
   };
 }
 
@@ -790,6 +792,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.networkPolicyResolved !== undefined) {
         setClauses.push('network_policy_resolved = @networkPolicyResolved');
         params.networkPolicyResolved = changes.networkPolicyResolved ?? null;
+      }
+      if (changes.lastRecoveryTrigger !== undefined) {
+        setClauses.push('last_recovery_trigger = @lastRecoveryTrigger');
+        params.lastRecoveryTrigger = changes.lastRecoveryTrigger ?? null;
       }
       if (changes.options !== undefined) {
         // Keep legacy output_mode synced with the new orthogonal columns so
