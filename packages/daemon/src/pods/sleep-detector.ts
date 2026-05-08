@@ -98,14 +98,13 @@ async function startMacOsAdjunct(
   return startPmsetAdjunct(logger, getLastTickAt, onWake);
 }
 
-const WAKE_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4} Wake/;
-const SLEEP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4} Sleep/;
+// Matches Sleep and Wake lines, capturing timestamp parts and event type in one pass.
+// pmset format: `2024-01-01 12:00:00 +0000 Sleep/Wake ...` — NOT ISO 8601. V8's
+// Date(string) is not guaranteed to parse `+0000` (no colon) across Node versions;
+// we canonicalise to `2024-01-01T12:00:00+00:00` in parsePmsetTimestamp.
+const PMSET_EVENT_PATTERN =
+  /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-])(\d{2})(\d{2}) (Sleep|Wake)/;
 
-// pmset emits timestamps like `2024-01-01 12:00:00 +0000`. That is NOT ISO 8601
-// (space between date and time, no colon in the offset) and V8's `Date(string)` is
-// not guaranteed to parse it across Node versions / locales — silent NaN. We
-// canonicalise to `2024-01-01T12:00:00+00:00` before handing it to Date so the
-// pmset adjunct keeps its precision advantage instead of falling back to tick-gap.
 function parsePmsetTimestamp(line: string): number {
   const match = line.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-])(\d{2})(\d{2})/);
   if (!match) return Number.NaN;
@@ -142,13 +141,16 @@ function startPmsetAdjunct(
       const lines = buf.split('\n');
       buf = lines.pop() ?? '';
       for (const line of lines) {
-        if (SLEEP_PATTERN.test(line)) {
-          lastSleepAt = parsePmsetTimestamp(line);
-        } else if (WAKE_PATTERN.test(line)) {
-          const wakeAt = parsePmsetTimestamp(line);
+        const m = PMSET_EVENT_PATTERN.exec(line);
+        if (!m) continue;
+        const [, date, time, sign, hh, mm, eventType] = m;
+        const ts = new Date(`${date}T${time}${sign}${hh}:${mm}`).getTime();
+        if (eventType === 'Sleep') {
+          lastSleepAt = ts;
+        } else {
           const sleptMs =
-            lastSleepAt !== null && Number.isFinite(lastSleepAt) && Number.isFinite(wakeAt)
-              ? wakeAt - lastSleepAt
+            lastSleepAt !== null && Number.isFinite(lastSleepAt) && Number.isFinite(ts)
+              ? ts - lastSleepAt
               : Date.now() - getLastTickAt();
           lastSleepAt = null;
           onWake(sleptMs, 'pmset');
