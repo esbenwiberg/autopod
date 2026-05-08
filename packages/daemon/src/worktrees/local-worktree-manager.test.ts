@@ -714,6 +714,136 @@ describe('LocalWorktreeManager', () => {
       expect(result.restoredCount).toBe(1);
       expect(result.reason).toContain('1 deleted file from HEAD');
     });
+
+    /**
+     * Mock `git status --porcelain=v1 -z` so the first invocation returns
+     * `firstRecords`, every subsequent invocation returns `restRecords`.
+     * Used to exercise the .gitignore pre-restore path: the worktree state
+     * changes between the first status pass and the second one.
+     */
+    function mockStatusSequence(firstRecords: string[], restRecords: string[]) {
+      const firstStdout = firstRecords.map((r) => `${r}\0`).join('');
+      const restStdout = restRecords.map((r) => `${r}\0`).join('');
+      let statusCalls = 0;
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('status --porcelain=v1 -z')) {
+            const stdout = statusCalls === 0 ? firstStdout : restStdout;
+            statusCalls += 1;
+            cb(null, { stdout, stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+    }
+
+    it('pre-restores deleted .gitignore files so wiped ignore rules do not poison the blocker check', async () => {
+      // Simulates the laptop-sleep-killed-sync-back failure mode: the working
+      // tree was wiped, including .gitignore, so previously-ignored build
+      // artifacts (Client/.env, node_modules, obj/, bin/) flip from "ignored"
+      // to "??" and look like real new untracked work.
+      mockStatusSequence(
+        [
+          ' D .gitignore',
+          ' D src/index.ts',
+          ' D README.md',
+          '?? Client/.env',
+          '?? Client/node_modules/',
+          '?? Domain/bin/',
+          '?? Domain/obj/',
+        ],
+        // After .gitignore is restored from the index, the previously-poisoned
+        // ?? entries become ignored and drop out — only the real deletions remain.
+        [' D src/index.ts', ' D README.md'],
+      );
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(true);
+      // 2 deletions remain after the gitignore-targeted pre-restore.
+      expect(result.restoredCount).toBe(2);
+
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      // Pre-restore: .gitignore restored from index before the second status pass.
+      expect(calls).toContain('checkout -- .gitignore');
+      // Final restore: catches the remaining HEAD-tracked deletions.
+      expect(calls).toContain('checkout -- .');
+    });
+
+    it('returns success without the final checkout when restoring .gitignore alone leaves a clean tree', async () => {
+      // Edge case: the only deletion HEAD-tracked was .gitignore, and every
+      // other dirty entry was a previously-ignored artifact unmasked by it.
+      mockStatusSequence(
+        [' D .gitignore', '?? node_modules/', '?? .env', '?? dist/'],
+        [], // tree clean after gitignore returns
+      );
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(true);
+      expect(result.restoredCount).toBe(1);
+      expect(result.reason).toMatch(/\.gitignore/);
+
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      expect(calls).toContain('checkout -- .gitignore');
+      // No remaining deletions, so the broad final checkout must NOT run.
+      expect(calls).not.toContain('checkout -- .');
+    });
+
+    it('still refuses if blockers remain after the .gitignore pre-restore (real untracked work present)', async () => {
+      // The agent genuinely created a new file that is not in .gitignore — even
+      // after the ignore rules come back, it remains untracked and is real work.
+      mockStatusSequence(
+        [' D .gitignore', '?? legitimate-new-file.ts', '?? node_modules/'],
+        [' D .gitignore', '?? legitimate-new-file.ts'],
+      );
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(false);
+      expect(result.reason).toMatch(/Refusing to restore/);
+      expect(result.reason).toContain('legitimate-new-file.ts');
+      // Sample reflects the post-pre-restore state, not the noisy original.
+      expect(result.reason).not.toContain('node_modules');
+
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      // Pre-restore was attempted; final broad checkout must NOT run on refusal.
+      expect(calls).toContain('checkout -- .gitignore');
+      expect(calls).not.toContain('checkout -- .');
+    });
+
+    it('skips the .gitignore pre-restore when there are no blockers to begin with', async () => {
+      // `.gitignore` is among the deletions but nothing else is dirty — the
+      // standard restore handles it. No need to do an extra checkout pass.
+      mockStatusPorcelain([' D .gitignore', ' D src/index.ts']);
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(true);
+      expect(result.restoredCount).toBe(2);
+
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      // Targeted pre-restore must NOT fire — would be redundant work.
+      expect(calls).not.toContain('checkout -- .gitignore');
+      expect(calls).toContain('checkout -- .');
+    });
+
+    it('matches subdirectory .gitignore files, not just the repo-root one', async () => {
+      mockStatusSequence(
+        [' D packages/foo/.gitignore', '?? packages/foo/dist/'],
+        [], // both fixed by restoring the nested .gitignore
+      );
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(true);
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      expect(calls).toContain('checkout -- packages/foo/.gitignore');
+    });
   });
 
   describe('mergeBranch deletion guard', () => {

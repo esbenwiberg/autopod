@@ -202,6 +202,34 @@ function sanitizeGitError(err: unknown): unknown {
   return err;
 }
 
+/**
+ * Run `git status --porcelain=v1 -z` and return the raw NUL-separated records.
+ * Each record is `XY path` — first 2 chars are status, char 3 is space, rest is path.
+ * Renames/copies use `XY orig\0new` but those statuses are blockers anyway.
+ */
+async function collectPorcelainRecords(worktreePath: string): Promise<string[]> {
+  const { stdout } = await git(['status', '--porcelain=v1', '-z'], { cwd: worktreePath });
+  return stdout.split('\0').filter((r) => r.length > 0);
+}
+
+function categorizePorcelainRecords(records: string[]): {
+  deletions: string[];
+  blockers: string[];
+} {
+  const deletions: string[] = [];
+  const blockers: string[] = [];
+  for (const rec of records) {
+    const xy = rec.slice(0, 2);
+    const pathPart = rec.slice(3);
+    if (xy === ' D') {
+      deletions.push(pathPart);
+    } else {
+      blockers.push(`${xy} ${pathPart}`);
+    }
+  }
+  return { deletions, blockers };
+}
+
 export interface LocalWorktreeManagerConfig {
   cacheDir?: string;
   worktreeDir?: string;
@@ -806,9 +834,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     //   ' D' → unstaged deletion of a HEAD-tracked file (the one case we recover).
     //   '??' → untracked.
     //   Anything else (' M', 'M ', 'A ', 'R ', 'U?', etc.) means real work might be present.
-    const { stdout } = await git(['status', '--porcelain=v1', '-z'], { cwd: worktreePath });
-    // -z uses NUL as record separator. Split + drop trailing empty.
-    const records = stdout.split('\0').filter((r) => r.length > 0);
+    let records = await collectPorcelainRecords(worktreePath);
 
     if (records.length === 0) {
       // Clean tree means the worktree already matches HEAD — semantically
@@ -823,17 +849,47 @@ export class LocalWorktreeManager implements WorktreeManager {
       };
     }
 
-    const deletions: string[] = [];
-    const blockers: string[] = [];
-    for (const rec of records) {
-      // Format: "XY path" — first 2 chars are status, char 3 is space, rest is path.
-      // Renames/copies use "XY orig\0new" but our filter doesn't allow R/C anyway.
-      const xy = rec.slice(0, 2);
-      const pathPart = rec.slice(3);
-      if (xy === ' D') {
-        deletions.push(pathPart);
-      } else {
-        blockers.push(`${xy} ${pathPart}`);
+    let { deletions, blockers } = categorizePorcelainRecords(records);
+
+    // If `.gitignore` itself was wiped along with the rest of the working tree
+    // (typical: laptop sleep killed sync-back mid-rm), the porcelain check is
+    // poisoned. Without `.gitignore` in the working tree, every previously-
+    // ignored path (build artifacts, node_modules, .env) flips from "ignored"
+    // to `??` and looks like new untracked work — refuse fires for files that
+    // would normally not even be visible to git. Restore deleted ignore files
+    // from the index first, then re-evaluate. Targeted to ignore files only so
+    // we don't silently mask other deletions before the blocker check.
+    const deletedIgnoreFiles = deletions.filter(
+      (p) => p === '.gitignore' || p.endsWith('/.gitignore'),
+    );
+    if (deletedIgnoreFiles.length > 0 && blockers.length > 0) {
+      try {
+        await git(['checkout', '--', ...deletedIgnoreFiles], { cwd: worktreePath });
+        records = await collectPorcelainRecords(worktreePath);
+        ({ deletions, blockers } = categorizePorcelainRecords(records));
+        if (records.length === 0) {
+          // Restoring just the ignore files left the tree clean — every other
+          // entry was an ignored-but-temporarily-untracked artifact.
+          this.logger.info(
+            { worktreePath, restoredCount: deletedIgnoreFiles.length },
+            'Restored deleted .gitignore files from HEAD; remaining tree was already clean once ignores reapplied',
+          );
+          return {
+            restored: true,
+            reason: `Restored ${deletedIgnoreFiles.length} deleted .gitignore file${
+              deletedIgnoreFiles.length === 1 ? '' : 's'
+            } from HEAD`,
+            restoredCount: deletedIgnoreFiles.length,
+          };
+        }
+      } catch (err) {
+        // Pre-restore is best-effort. If it fails we fall through to the
+        // original blocker check — the worst case is the same refusal we'd
+        // have hit anyway, never a silent restore over real work.
+        this.logger.warn(
+          { err, worktreePath, deletedIgnoreFiles },
+          'Failed to pre-restore .gitignore files during recovery — blocker check may still be poisoned',
+        );
       }
     }
 
