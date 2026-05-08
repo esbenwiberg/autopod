@@ -7875,8 +7875,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           400,
         );
       }
-      // Clear stale fixPodId so the next poll can spawn freely
-      podRepo.update(podId, { maxPrFixAttempts: newMax, fixPodId: null });
+      // Clear stale fixPodId so the next poll can spawn freely.
+      // Skip the clear when `reuseFixPod` is enabled — that path INTENTIONALLY
+      // wants to find the previous (terminal-state) fix pod and re-enqueue it
+      // instead of spawning a new child, preserving the one-fix-pod-per-PR
+      // invariant the user sees in the UI.
+      const profile = profileStore.get(pod.profileName);
+      const updates: PodUpdates = { maxPrFixAttempts: newMax };
+      if (profile.reuseFixPod !== true) {
+        updates.fixPodId = null;
+      }
+      podRepo.update(podId, updates);
       // failed → merge_pending re-enters the polling loop
       transition(pod, 'merge_pending', {
         mergeBlockReason: 'Awaiting merge — PR fix attempts extended',

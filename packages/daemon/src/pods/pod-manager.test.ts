@@ -3123,6 +3123,146 @@ describe('PodManager', () => {
       const fixPodsForParent = ctx.podRepo.list({}).filter((p) => p.linkedPodId === parent.id);
       expect(fixPodsForParent.length).toBeGreaterThanOrEqual(2);
     });
+
+    it('extendPrAttempts preserves fixPodId when reuseFixPod=true so the next poll can re-enqueue', async () => {
+      const ctx = createTestContext();
+      ctx.db.prepare(`UPDATE profiles SET reuse_fix_pod = 1 WHERE name = 'test-profile'`).run();
+
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        merged: false,
+        open: true,
+        blockReason: 'CHANGES_REQUESTED',
+        ciFailures: [],
+        reviewComments: [{ body: 'fix this', path: null }],
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Original work' },
+        'user-1',
+      );
+
+      // Drive parent into a complete state with a PR so we can spawn fix pods.
+      ctx.podRepo.update(parent.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/wt',
+        containerId: 'c',
+        startedAt: new Date().toISOString(),
+      });
+      for (const status of [
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(parent.id, { status });
+      }
+      ctx.podRepo.update(parent.id, { prUrl: 'https://github.com/org/repo/pull/42' });
+
+      // Spawn a real fix pod so the FK constraint on parent.fixPodId is satisfied.
+      await manager.spawnFixSession(parent.id, 'round 1');
+      const fixPod = ctx.podRepo.list({}).find((p) => p.linkedPodId === parent.id);
+      expect(fixPod).toBeDefined();
+      const fixPodId = fixPod?.id ?? '';
+      // Drive the fix pod to terminal complete so it's a valid reuse candidate.
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(fixPodId, { status });
+      }
+
+      // Drive the parent into failed-due-to-exhausted-attempts.
+      ctx.podRepo.update(parent.id, { status: 'merge_pending' });
+      ctx.podRepo.update(parent.id, {
+        status: 'failed',
+        prFixAttempts: 3,
+        maxPrFixAttempts: 3,
+        mergeBlockReason: 'Max PR fix attempts (3) exhausted',
+      });
+
+      await manager.extendPrAttempts(parent.id, 3);
+
+      const refreshed = ctx.podRepo.getOrThrow(parent.id);
+      expect(refreshed.maxPrFixAttempts).toBe(6);
+      expect(refreshed.status).toBe('merge_pending');
+      // The reuse path needs the previous fix pod's id to find and re-enqueue
+      // it instead of spawning a new child — extending attempts must NOT clear it.
+      expect(refreshed.fixPodId).toBe(fixPodId);
+    });
+
+    it('extendPrAttempts clears fixPodId when reuseFixPod=false (default behavior)', async () => {
+      const ctx = createTestContext();
+      ctx.db.prepare(`UPDATE profiles SET reuse_fix_pod = 0 WHERE name = 'test-profile'`).run();
+
+      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        merged: false,
+        open: true,
+        blockReason: 'CHANGES_REQUESTED',
+        ciFailures: [],
+        reviewComments: [{ body: 'fix this', path: null }],
+      });
+
+      const manager = createPodManager(ctx.deps);
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Original work' },
+        'user-1',
+      );
+
+      ctx.podRepo.update(parent.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/wt',
+        containerId: 'c',
+        startedAt: new Date().toISOString(),
+      });
+      for (const status of [
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(parent.id, { status });
+      }
+      ctx.podRepo.update(parent.id, { prUrl: 'https://github.com/org/repo/pull/42' });
+
+      await manager.spawnFixSession(parent.id, 'round 1');
+      const fixPod = ctx.podRepo.list({}).find((p) => p.linkedPodId === parent.id);
+      const fixPodId = fixPod?.id ?? '';
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'complete',
+      ] as const) {
+        ctx.podRepo.update(fixPodId, { status });
+      }
+
+      ctx.podRepo.update(parent.id, { status: 'merge_pending' });
+      ctx.podRepo.update(parent.id, {
+        status: 'failed',
+        prFixAttempts: 3,
+        maxPrFixAttempts: 3,
+        mergeBlockReason: 'Max PR fix attempts (3) exhausted',
+      });
+
+      await manager.extendPrAttempts(parent.id, 3);
+
+      const refreshed = ctx.podRepo.getOrThrow(parent.id);
+      expect(refreshed.maxPrFixAttempts).toBe(6);
+      expect(refreshed.fixPodId).toBeNull();
+    });
   });
 
   describe('spawnFixSession — userMessage delivery under cooldown', () => {
