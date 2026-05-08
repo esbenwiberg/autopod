@@ -1976,8 +1976,12 @@ export async function executeCmdChecks(
     'no output',
   ];
 
-  function expectNoOutput(passHint: string | undefined, failHint: string | undefined): boolean {
-    const hay = `${passHint ?? ''} ${failHint ?? ''}`.toLowerCase();
+  function expectNoOutput(passHint: string | undefined): boolean {
+    // Only the PASS hint determines polarity. The fail hint commonly says
+    // "no match" / "not found" / "empty" to describe what failure looks
+    // like for a positive grep AC — scanning it would invert the polarity
+    // of every normal positive AC and mark them failed on real matches.
+    const hay = (passHint ?? '').toLowerCase();
     return NEGATIVE_HINTS.some((h) => hay.includes(h));
   }
 
@@ -1992,7 +1996,7 @@ export async function executeCmdChecks(
         const stdoutTrimmed = exec.stdout.trim();
         const stdoutPreview = exec.stdout.slice(0, 800);
         const stderrPreview = exec.stderr.slice(0, 400);
-        const negative = expectNoOutput(ac.pass, ac.fail);
+        const negative = expectNoOutput(ac.pass);
         const passed = negative ? exec.exitCode !== 0 || stdoutTrimmed === '' : exec.exitCode === 0;
         const reasoning = passed
           ? `Command exited ${exec.exitCode}${stdoutTrimmed ? ` with output: ${stdoutPreview}` : ' (no output)'}`

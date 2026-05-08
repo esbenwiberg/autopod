@@ -432,6 +432,43 @@ describe('executeCmdChecks', () => {
     expect(result[0]?.reasoning).toContain('packages/daemon/src/old.ts');
   });
 
+  it('does not flip polarity when only the fail-hint mentions "no match" (positive grep AC)', async () => {
+    // Regression: a positive grep AC ("file should contain X") naturally
+    // describes its failure mode as "no match" / "not found" / "empty".
+    // The engine must not interpret negative hints in the FAIL string as
+    // a request to invert polarity — only the PASS string decides that.
+    const cm = makeContainerManager(() => ({
+      stdout: 'Client/src/context/network/http/QueryProvider/queryKeys.ts\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion:
+          "grep -l 'RESOURCE_PLANNER_TOP_ROW' Client/src/context/network/http/QueryProvider/queryKeys.ts",
+        validationType: 'cmd',
+        reason: 'declared in brief',
+        pass: 'query key registered (file path printed)',
+        fail: 'no match — query key was not registered',
+      },
+    ]);
+    expect(result[0]?.passed).toBe(true);
+  });
+
+  it('does not flip polarity when fail-hint says "not found" (positive file-existence AC)', async () => {
+    const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 0 }));
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: 'test -f Client/src/.../TopTotalRow.tsx',
+        validationType: 'cmd',
+        reason: 'declared in brief',
+        pass: 'file exists',
+        fail: 'file not found',
+      },
+    ]);
+    expect(result[0]?.passed).toBe(true);
+  });
+
   it('returns failed results when the container is missing', async () => {
     const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 0 }));
     const config = { ...configWith(), containerId: undefined as unknown as string };
