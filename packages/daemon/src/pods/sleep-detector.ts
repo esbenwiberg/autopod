@@ -120,6 +120,11 @@ function startPmsetAdjunct(
 ): () => void {
   let lastSleepAt: number | null = null;
   let warned = false;
+  // `pmset -g log` is a one-shot dump of the historical power log, not a live
+  // tail. Recording the start moment lets us drop any wake entries that
+  // pre-date the daemon — without this, a Mac that slept since boot would
+  // emit one spurious host.resumed event on every restart.
+  const startedAt = Date.now();
 
   let proc: ReturnType<typeof spawn> | null = null;
   try {
@@ -129,6 +134,18 @@ function startPmsetAdjunct(
       if (!warned) {
         warned = true;
         logger.warn({ err }, 'macOS pmset adjunct failed — tick-gap heuristic only');
+      }
+    });
+
+    // pmset always exits after the dump finishes. Surface that once so it's
+    // visible the adjunct is no longer detecting wakes; tick-gap remains the
+    // source of truth.
+    proc.on('close', () => {
+      if (!warned) {
+        warned = true;
+        logger.warn(
+          'macOS pmset child exited (one-shot log) — sleep adjunct now idle, tick-gap remains source of truth',
+        );
       }
     });
 
@@ -146,6 +163,12 @@ function startPmsetAdjunct(
           lastSleepAt = parsePmsetTimestamp(line);
         } else if (WAKE_PATTERN.test(line)) {
           const wakeAt = parsePmsetTimestamp(line);
+          // Skip historical wake entries from pmset's startup dump — only
+          // wakes that happened after this adjunct started count.
+          if (Number.isFinite(wakeAt) && wakeAt < startedAt) {
+            lastSleepAt = null;
+            continue;
+          }
           const sleptMs =
             lastSleepAt !== null && Number.isFinite(lastSleepAt) && Number.isFinite(wakeAt)
               ? wakeAt - lastSleepAt
@@ -156,7 +179,7 @@ function startPmsetAdjunct(
       }
     });
 
-    logger.debug('macOS power monitor: using pmset log tail');
+    logger.debug('macOS power monitor: parsing pmset log (one-shot snapshot, not a live tail)');
   } catch (err) {
     if (!warned) {
       warned = true;

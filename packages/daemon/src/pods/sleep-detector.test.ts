@@ -405,15 +405,17 @@ describe('macOS adjunct — threshold guard', () => {
     const stop = _internals.startPmsetAdjunct(logger, () => lastTickAt, guarded);
 
     // Push a sleep+wake pair with a 1 s gap — well below the 180 s threshold.
-    proc.stdout.push('2024-01-01 12:00:00 +0000 Sleep due to lid close\n');
-    proc.stdout.push('2024-01-01 12:00:01 +0000 Wake from Normal Sleep\n');
+    // Use a future year so the historical-event filter (wakeAt < startedAt) lets
+    // them through; otherwise pmset entries dated before "now" are dropped.
+    proc.stdout.push('2099-01-01 12:00:00 +0000 Sleep due to lid close\n');
+    proc.stdout.push('2099-01-01 12:00:01 +0000 Wake from Normal Sleep\n');
     await new Promise((r) => setImmediate(r));
 
     expect(tryPublish).not.toHaveBeenCalled();
 
     // Now push a sleep+wake with a 10 min gap — must publish.
-    proc.stdout.push('2024-01-01 13:00:00 +0000 Sleep due to lid close\n');
-    proc.stdout.push('2024-01-01 13:10:00 +0000 Wake from Normal Sleep\n');
+    proc.stdout.push('2099-01-01 13:00:00 +0000 Sleep due to lid close\n');
+    proc.stdout.push('2099-01-01 13:10:00 +0000 Wake from Normal Sleep\n');
     await new Promise((r) => setImmediate(r));
 
     expect(tryPublish).toHaveBeenCalledTimes(1);
@@ -450,6 +452,71 @@ describe('startMacOsAdjunct — native module fallback to pmset', () => {
       expect.objectContaining({ stdio: ['ignore', 'pipe', 'ignore'] }),
     );
 
+    stop();
+  });
+});
+
+describe('macOS adjunct — historical entries from pmset dump', () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('drops wake entries dated before the adjunct started — no spurious event on daemon restart', async () => {
+    // pmset -g log dumps the entire historical log on startup. If the Mac has
+    // slept since boot, the dump will contain a sleep+wake pair that crosses
+    // the threshold but is purely historical. The adjunct must filter these
+    // by start-time so the reconciler doesn't fire on every daemon restart.
+    const proc = makeFakePmsetProc();
+    spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
+    const tryPublish = vi.fn();
+
+    const stop = _internals.startPmsetAdjunct(logger, () => Date.now(), tryPublish);
+
+    // Sleep 2020-01-01 12:00, Wake 2020-01-01 14:00 — 2-hour gap, well above
+    // the threshold, but both predate the daemon start and must be ignored.
+    proc.stdout.push('2020-01-01 12:00:00 +0000 Sleep due to lid close\n');
+    proc.stdout.push('2020-01-01 14:00:00 +0000 Wake from Normal Sleep\n');
+    await new Promise((r) => setImmediate(r));
+
+    expect(tryPublish).not.toHaveBeenCalled();
+    stop();
+  });
+});
+
+describe('macOS adjunct — pmset child exit', () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("logs a warning the first time pmset's child process exits (no silent deafness)", () => {
+    const proc = makeFakePmsetProc();
+    spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
+    const { logger: capturing, warn } = makeWarnCapturingLogger();
+
+    const stop = _internals.startPmsetAdjunct(capturing, () => Date.now(), vi.fn());
+    proc.emit('close');
+    proc.emit('close'); // second close must not double-warn
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('shares the warned flag with error events — close after error does not double-warn', () => {
+    const proc = makeFakePmsetProc();
+    spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
+    const { logger: capturing, warn } = makeWarnCapturingLogger();
+
+    const stop = _internals.startPmsetAdjunct(capturing, () => Date.now(), vi.fn());
+    proc.emit('error', new Error('boom'));
+    proc.emit('close');
+
+    expect(warn).toHaveBeenCalledTimes(1);
     stop();
   });
 });
