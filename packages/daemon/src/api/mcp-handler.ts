@@ -83,6 +83,14 @@ export function mcpHandler(
       // Tell Fastify we're handling the response manually via reply.raw
       // so it doesn't try to send its own response after the transport writes.
       reply.hijack();
+      // Long-blocking tools (ask_human, ask_ai, report_blocker, request_credential,
+      // execute_action) can wait up to humanResponseTimeout (default 1h) before
+      // resolving. Disable Node's per-request socket idle timeout so the HTTP
+      // connection isn't killed mid-wait — otherwise the agent's MCP client sees
+      // "transport dropped mid-call" and the daemon resolves an orphaned promise
+      // that writes to a closed socket.
+      request.raw.setTimeout(0);
+      reply.raw.setTimeout?.(0);
       await transport.handleRequest(request.raw, reply.raw, request.body);
     } catch (err) {
       logger.error({ err, podId }, 'MCP handleRequest error');
