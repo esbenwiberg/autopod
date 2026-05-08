@@ -18,6 +18,7 @@ public final class EventStream {
 
   public private(set) var connectionState: String = "Disconnected"
   public private(set) var recentEvents: [AgentEvent] = []
+  public private(set) var lastHostResume: HostResumedInfo?
 
   /// Per-pod event buffers (keyed by pod ID)
   public private(set) var sessionEvents: [String: [AgentEvent]] = [:]
@@ -75,6 +76,10 @@ public final class EventStream {
     Task {
       await socket.connect()
     }
+  }
+
+  public func clearHostResume() {
+    lastHostResume = nil
   }
 
   public func disconnect() {
@@ -230,6 +235,9 @@ public final class EventStream {
     case .scheduledJobFired(let jobId, _, let podId):
       Task { await scheduledJobStore?.refreshJob(jobId) }
       Task { await podStore.refreshSession(podId) }
+
+    case .hostResumed(let info):
+      lastHostResume = info
     }
   }
 

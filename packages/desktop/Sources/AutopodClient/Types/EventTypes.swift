@@ -59,6 +59,11 @@ public struct RawSystemEvent: Codable, Sendable {
   public let jobId: String?
   public let jobName: String?
   public let lastRunAt: String?
+
+  // host.resumed
+  public let sleptMs: Int?
+  public let detector: String?
+  public let reconciledPodIds: [String]?
 }
 
 // MARK: - ValidationPhase
@@ -115,6 +120,14 @@ public struct ValidationPhaseResult: Sendable {
   }
 }
 
+// MARK: - HostResumedInfo
+
+public struct HostResumedInfo: Sendable, Equatable {
+  public let sleptMs: Int
+  public let detector: String
+  public let reconciledPodIds: [String]
+}
+
 // MARK: - Typed event enum (parsed from RawSystemEvent)
 
 public enum SystemEvent: Sendable {
@@ -132,6 +145,7 @@ public enum SystemEvent: Sendable {
   case validationOverrideQueued(podId: String, override: ValidationOverrideEntry)
   case scheduledJobCatchupRequested(jobId: String, jobName: String, lastRunAt: String?)
   case scheduledJobFired(jobId: String, jobName: String, podId: String)
+  case hostResumed(HostResumedInfo)
 
   public var eventId: Int? { nil }  // Set externally from _eventId
 
@@ -204,6 +218,15 @@ public enum SystemEvent: Sendable {
         jobName: raw.jobName ?? jobId,
         podId: podId
       )
+
+    case "host.resumed":
+      guard let sleptMs = raw.sleptMs, let detector = raw.detector,
+            let reconciledPodIds = raw.reconciledPodIds else { return nil }
+      return .hostResumed(HostResumedInfo(
+        sleptMs: sleptMs,
+        detector: detector,
+        reconciledPodIds: reconciledPodIds
+      ))
 
     default:
       return nil

@@ -163,6 +163,14 @@ public struct AppRootView: View {
       },
       onLoadMemories: { await memoryStore.loadMemories() }
     )
+    .overlay(alignment: .top) {
+      if let info = eventStream?.lastHostResume {
+        HostResumeBanner(info: info) {
+          eventStream?.clearHostResume()
+        }
+        .padding(.top, 8)
+      }
+    }
     .environment(\.daemonAuthToken, connectionManager.activeToken ?? "")
     .environment(\.daemonBaseURL, connectionManager.api?.baseURL)
     .task(id: podStore.selectedSessionId) {
