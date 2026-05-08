@@ -101,10 +101,16 @@ async function startMacOsAdjunct(
 const WAKE_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4} Wake/;
 const SLEEP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4} Sleep/;
 
+// pmset emits timestamps like `2024-01-01 12:00:00 +0000`. That is NOT ISO 8601
+// (space between date and time, no colon in the offset) and V8's `Date(string)` is
+// not guaranteed to parse it across Node versions / locales — silent NaN. We
+// canonicalise to `2024-01-01T12:00:00+00:00` before handing it to Date so the
+// pmset adjunct keeps its precision advantage instead of falling back to tick-gap.
 function parsePmsetTimestamp(line: string): number {
-  const match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4})/);
-  if (!match?.[1]) return Number.NaN;
-  return new Date(match[1]).getTime();
+  const match = line.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-])(\d{2})(\d{2})/);
+  if (!match) return Number.NaN;
+  const [, date, time, sign, hh, mm] = match;
+  return new Date(`${date}T${time}${sign}${hh}:${mm}`).getTime();
 }
 
 function startPmsetAdjunct(
@@ -163,3 +169,9 @@ function startPmsetAdjunct(
     proc = null;
   };
 }
+
+export const _internals = {
+  startMacOsAdjunct,
+  startPmsetAdjunct,
+  parsePmsetTimestamp,
+};

@@ -1,8 +1,21 @@
+import { spawn as childSpawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostResumedEvent, SystemEvent } from '@autopod/shared';
 import pino from 'pino';
 import type { EventBus } from './event-bus.js';
-import { startSleepDetector } from './sleep-detector.js';
+import { _internals, startSleepDetector } from './sleep-detector.js';
+
+// Mock spawn so the macOS adjunct's pmset child-process can be driven in tests.
+// Existing linux-platform tests never reach this code path, so the mock is a
+// no-op for them.
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return { ...actual, spawn: vi.fn() };
+});
+
+const spawnMock = vi.mocked(childSpawn);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -309,5 +322,139 @@ describe('cleanup', () => {
       stop();
       stop();
     }).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pmset timestamp parser
+// ---------------------------------------------------------------------------
+
+describe('parsePmsetTimestamp', () => {
+  it('parses a UTC pmset timestamp into a stable epoch value', () => {
+    // pmset emits `2024-01-01 12:00:00 +0000`. The parser must normalise it to
+    // ISO 8601 internally so V8's Date constructor parses it deterministically
+    // across Node versions / locales.
+    const t = _internals.parsePmsetTimestamp('2024-01-01 12:00:00 +0000 Wake from Normal Sleep');
+    expect(t).toBe(Date.UTC(2024, 0, 1, 12, 0, 0));
+  });
+
+  it('parses a non-UTC offset', () => {
+    const t = _internals.parsePmsetTimestamp('2024-06-15 09:30:45 -0700 Wake from Normal Sleep');
+    // 09:30:45 -07:00 == 16:30:45 UTC
+    expect(t).toBe(Date.UTC(2024, 5, 15, 16, 30, 45));
+  });
+
+  it('returns NaN for unrecognised lines', () => {
+    expect(_internals.parsePmsetTimestamp('garbage')).toBeNaN();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// macOS adjunct — pmset path
+//
+// We can't directly trigger the platform === 'darwin' branch inside
+// startSleepDetector from a linux test runner, but we CAN exercise the adjunct
+// itself via _internals.startPmsetAdjunct with a mocked spawn. That covers:
+//
+//  1. The threshold-guard wrapper that startSleepDetector wraps around
+//     onWake — we mirror it in the test and verify a sub-threshold pmset
+//     wake does NOT trigger publish.
+//  2. The fallback cascade — when spawn throws, the warn logger fires
+//     exactly once and tick-gap remains the source of truth.
+// ---------------------------------------------------------------------------
+
+interface FakePmsetProc extends EventEmitter {
+  stdout: Readable;
+  kill: () => void;
+}
+
+function makeFakePmsetProc(): FakePmsetProc {
+  const proc = new EventEmitter() as FakePmsetProc;
+  proc.stdout = new Readable({ read() {} });
+  proc.kill = vi.fn();
+  return proc;
+}
+
+function makeWarnCapturingLogger(): { logger: typeof logger; warn: ReturnType<typeof vi.fn> } {
+  const warn = vi.fn();
+  const captured = { ...logger, warn, debug: vi.fn(), info: vi.fn(), error: vi.fn() };
+  return { logger: captured as unknown as typeof logger, warn };
+}
+
+describe('macOS adjunct — threshold guard', () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('macOS adjunct fires below threshold → not published (tick-gap is source of truth)', async () => {
+    const proc = makeFakePmsetProc();
+    spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
+
+    const lastTickAt = Date.now();
+    const tryPublish = vi.fn();
+    const thresholdMs = 180_000;
+    // Mirror the threshold guard from startSleepDetector exactly: only forward to
+    // tryPublish when sleptMs > thresholdMs.
+    const guarded = (sleptMs: number, detector: HostResumedEvent['detector']) => {
+      if (sleptMs > thresholdMs) tryPublish(sleptMs, detector);
+    };
+
+    const stop = _internals.startPmsetAdjunct(logger, () => lastTickAt, guarded);
+
+    // Push a sleep+wake pair with a 1 s gap — well below the 180 s threshold.
+    proc.stdout.push('2024-01-01 12:00:00 +0000 Sleep due to lid close\n');
+    proc.stdout.push('2024-01-01 12:00:01 +0000 Wake from Normal Sleep\n');
+    await new Promise((r) => setImmediate(r));
+
+    expect(tryPublish).not.toHaveBeenCalled();
+
+    // Now push a sleep+wake with a 10 min gap — must publish.
+    proc.stdout.push('2024-01-01 13:00:00 +0000 Sleep due to lid close\n');
+    proc.stdout.push('2024-01-01 13:10:00 +0000 Wake from Normal Sleep\n');
+    await new Promise((r) => setImmediate(r));
+
+    expect(tryPublish).toHaveBeenCalledTimes(1);
+    expect(tryPublish).toHaveBeenCalledWith(10 * 60 * 1000, 'pmset');
+
+    stop();
+  });
+});
+
+describe('darwin failure cascade', () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('pmset spawn throws → warn logged exactly once, no events emitted', () => {
+    spawnMock.mockImplementation(() => {
+      throw new Error('ENOENT: pmset not found');
+    });
+    const { logger: capturing, warn } = makeWarnCapturingLogger();
+    const tryPublish = vi.fn();
+
+    const stop = _internals.startPmsetAdjunct(capturing, () => Date.now(), tryPublish);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(tryPublish).not.toHaveBeenCalled();
+    expect(() => stop()).not.toThrow();
+  });
+
+  it('pmset child errors out → warn logged exactly once even across multiple error events', () => {
+    const proc = makeFakePmsetProc();
+    spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
+    const { logger: capturing, warn } = makeWarnCapturingLogger();
+
+    const stop = _internals.startPmsetAdjunct(capturing, () => Date.now(), vi.fn());
+    proc.emit('error', new Error('first error'));
+    proc.emit('error', new Error('second error'));
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    stop();
   });
 });

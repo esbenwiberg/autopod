@@ -51,3 +51,7 @@ Brief 02 must subscribe to `host.resumed` on the eventBus and, after reconciliat
 5. **pmset buffer is capped at 100 KB** — long-lived pmset process can't cause unbounded string growth.
 
 6. **macOS adjunct starts asynchronously** — the stop function returned from `startSleepDetector` handles the race between teardown and adjunct startup via the `stopped` flag. Brief 02/03 should NOT depend on the adjunct being ready synchronously.
+
+7. **pmset timestamp must be ISO 8601 normalised before passing to `Date`.** The string pmset emits (`2024-01-01 12:00:00 +0000`) is not parsed deterministically by V8's `Date(string)` — it returned NaN on some Node versions. `parsePmsetTimestamp` rewrites it to `2024-01-01T12:00:00+00:00` before construction. If you change that function, keep this normalisation.
+
+8. **`_internals` export is for tests only.** `sleep-detector.ts` exports `_internals = { startMacOsAdjunct, startPmsetAdjunct, parsePmsetTimestamp }` so the macOS-only paths can be exercised from a Linux test runner. Brief 02/03 should not consume `_internals` — it is intentionally unstable.
