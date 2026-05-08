@@ -4365,24 +4365,6 @@ describe('PodManager', () => {
 // ---------------------------------------------------------------------------
 
 describe('wake recovery — host.resumed subscription', () => {
-  function setupExecFileMockLocal() {
-    mockedExecFile.mockImplementation((...args: unknown[]) => {
-      const gitArgs = args[1] as string[];
-      const callback = args[args.length - 1] as (
-        err: Error | null,
-        result: { stdout: string; stderr: string },
-      ) => void;
-      if (gitArgs[0] === 'rev-parse' && gitArgs[1] === '--git-common-dir') {
-        callback(null, { stdout: '/tmp/bare/repo.git', stderr: '' });
-      } else if (gitArgs[0] === 'log') {
-        callback(null, { stdout: 'abc1234 Previous work', stderr: '' });
-      } else {
-        callback(null, { stdout: '', stderr: '' });
-      }
-      return undefined as never;
-    });
-  }
-
   it('emits a completed host.resumed event with reconciledPodIds after reconcile', async () => {
     const ctx = createTestContext();
     const manager = createPodManager(ctx.deps);
