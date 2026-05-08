@@ -21,3 +21,7 @@
 | `ADR-015` | ADR-015: Model pricing as bundled JSON in @autopod/shared | Accepted | Cost analytics need a per-model price catalog so pods that don't carry a |
 | `ADR-016` | ADR-016: Per-attempt phase token taxonomy | Accepted | `pods.phase_token_usage` (migration `089`) was introduced as a |
 | `ADR-017` | ADR-017: Proof-of-work screenshots on disk with retention | Accepted (partially supersedes ADR-010's screenshot carve-out) | Validation screenshots — Playwright smoke pages, `validate_in_browser` |
+| `ADR-018` | ADR-018: `safety_events` covers fleet-wide detection, not just issue-watcher | Accepted | Phase 4 of the analytics dashboard plan |
+| `ADR-019` | ADR-019: `action_audit.pii_categories` lives outside the hash-chain payload | Accepted | `action_audit` carries an HMAC-style hash chain, introduced in |
+| `ADR-020` | ADR-020: Snapshot resolved network policy on `pods` row at provisioning | Accepted | Phase 4's Safety drill includes a "network-policy distribution" |
+| `ADR-021` | ADR-021: Sleep-recovery via reconcile-on-wake | Accepted | The autopod daemon runs on a developer's macOS laptop. When the laptop |
