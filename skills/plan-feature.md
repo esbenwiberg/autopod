@@ -150,7 +150,16 @@ justification) before writing.
 14. **Acceptance criteria** — Per brief, only when a real automated check
     validates the behaviour. The validation pipeline runs `buildCommand`
     and the test suite automatically — **never list build/test/lint as
-    ACs**. Three firing types exist:
+    ACs**.
+
+    **Core principle: an AC validates the OUTCOME, not the wiring.** Run
+    the test "would this AC still pass if the user can't see or use the
+    feature?" If yes, it's the wrong AC. File-exists / grep checks confirm
+    code was written; they do not confirm the feature works. They
+    corroborate; they never substitute for a behavioural check on a
+    user-visible outcome.
+
+    Three firing types exist:
     - `api` — HTTP probe against the running container (single request
       or short create-then-read chain). Don't use against endpoints
       requiring a role the test harness can't impersonate (`[Authorize]`
@@ -164,14 +173,49 @@ justification) before writing.
       patterns are banned and force-classified to `none`. NOT for
       behavioural claims — those go to `api` / `web`.
 
+    **Hard rule — user-visible outcomes require a `web` AC.** If the
+    brief modifies any user-facing surface (component, page, route,
+    visible string, layout) AND the profile has a web UI, at least one
+    AC must be `type: web` that asserts the observable from the success
+    signal. Structural `cmd` checks corroborate; they are never the only
+    validation. A frontend brief whose ACs are all `cmd` is broken by
+    definition — the user could ship a broken feature and every AC would
+    still pass.
+
+    **Type discipline — match the AC type to the verb in the outcome:**
+    - "visible" / "renders" / "user sees" / "screen shows" → `type: web`
+    - "endpoint returns" / "responds with" / "stores X" → `type: api`
+      (or `web` for end-to-end)
+    - "symbol removed" / "file exists" / "flag flipped" / "ref deleted"
+      → `type: cmd`
+
+    A `cmd` AC linked to a "visible" outcome is structural theatre — the
+    feature can be broken with every AC green. Fix the AC type, or
+    re-frame the outcome to match what you can actually validate.
+
     **Decompose fuzzy claims before writing ACs.** "X migrated to Y" /
-    "X works with Y" / "X integrates with Y" should expand into 2–5
-    concrete checks, each pinned to a single observable. If a brief has
-    one fuzzy bullet, the interview isn't done. Example: "auth migrated
-    to new middleware" → (a) `cmd: test -f Application/Auth/NewMw.cs`,
-    (b) `cmd: ! grep -r OldMw Api/`, (c) `api: GET /api/protected
-    without token → 401`, (d) `api: with valid token → 200`,
+    "X works with Y" / "X integrates with Y" / "Wire X into Y" should
+    expand into 2–5 concrete checks, each pinned to a single observable.
+    If a brief has one fuzzy bullet, the interview isn't done.
+
+    Example (backend): "auth migrated to new middleware" →
+    (a) `cmd: test -f Application/Auth/NewMw.cs`,
+    (b) `cmd: ! grep -r OldMw Api/`,
+    (c) `api: GET /api/protected without token → 401`,
+    (d) `api: with valid token → 200`,
     (e) `cmd: grep '"auth": "migrated"' inventory.json`.
+
+    Example (UI wiring): "wire total row into Resource Planner frontend" →
+    (a) `web: navigate /resource-planner — total row visible below header
+        with one cell per period column`,
+    (b) `web: change the period filter — total row updates without full
+        page reload`,
+    (c) `cmd: grep -l 'RESOURCE_PLANNER_TOP_ROW' Client/src/.../queryKeys.ts`
+        (corroborates query key wired),
+    (d) `cmd: test -f Client/src/.../TopTotalRow.tsx` (corroborates new
+        component exists).
+    The `web` ACs validate the outcome; the `cmd` ACs corroborate the
+    wiring. Reverse the proportions and the brief is broken.
 
     `type: none` exists but is a no-op — auto-passed and excluded from
     gating. Use it only when the diff reviewer is the only possible
@@ -261,12 +305,32 @@ For every brief you're about to write, confirm you can name:
   Test expectations + the diff reviewer for anchoring.
 - The dependency graph, without guessing
 
-Verify the **outcome → AC link**: cite which brief's AC validates the
-success signal in `purpose.md`. If you can't, the loop is not done.
+Verify the **outcome → AC link with type discipline**:
+- "visible" / "renders" / "user sees" → linked AC must be `type: web`
+- "endpoint returns" / "responds" / "stores" → `type: api` (or `web`)
+- "symbol removed" / "file exists" / "flag flipped" → `type: cmd`
 
-**Show the checklist back to the user** with a clear "ready to write — green
-light?" prompt. Do NOT start writing until the user confirms. This is the
-only batched "question" allowed — it's a summary, not new interrogation.
+Cite which brief's AC validates the success signal in `purpose.md`. If
+the AC type doesn't match the outcome verb, the loop is not done — fix
+the AC type, or re-frame the outcome to match what you can actually
+validate. A `cmd` AC linked to a "visible" outcome is theatre.
+
+**Show the checklist back to the user**, including for every brief:
+- Title + one-line task description
+- Every proposed AC verbatim (`type` + `test` + `pass`), grouped into
+  "validates outcome" vs. "corroborates wiring"
+- Which AC(s) tie back to the success signal in `purpose.md`
+
+Then ask: "ready to write — green light? Specifically: do these ACs
+actually validate the success signal, or are they just confirming the
+wiring exists?" Do NOT start writing until the user confirms. This is
+the only batched "question" allowed — it's a summary, not new
+interrogation.
+
+If the user pushes back on any AC, treat that as a re-opened dimension
+and keep interviewing — do not negotiate the AC away. The ACs are the
+contract between the planner and the validation engine; getting them
+wrong means a green pipeline on a broken feature.
 
 If the user spots a gap, keep interviewing. Do not negotiate your way to
 writing early.
@@ -320,8 +384,14 @@ two reasonable behaviours.
 
 ## Success signal
 How we'll know it worked. Must be observable (a metric, a log line, a
-screenshot, a passing test). At least one brief AC must directly validate
-this — that linkage is part of the exit checklist.
+screenshot, a user action succeeding). State the observable only —
+**do not pre-bake the validation method.** "Total row visible in
+Resource Planner with correct per-period totals" is right; "validated
+by file existing, query key wired, unit tests" is wrong (that's already
+the AC's job, and it traps the planner into structural-only ACs that
+pass on a broken feature). The AC owns the validation method; the
+success signal owns the observable. At least one brief AC must validate
+this with a matching type — see exit-checklist type discipline.
 
 ## Non-goals
 - Explicit fence item 1
@@ -647,6 +717,20 @@ loop was not done.
   assumptions).
 - Mixing "what to build" with "how to build it" in the brief body.
 - Forgetting to tie the success signal to a specific brief AC.
+- **Pre-baking the validation method into the success signal** ("validated
+  by: file existing, query key wired, unit tests"). The success signal
+  states the observable; the AC owns the validation. Pre-baking commits
+  the planner to whatever method appears in the clause — usually
+  structural-only — and traps every downstream brief into theatre ACs.
+- **All-`cmd` ACs on a brief that touches user-visible UI in a web-capable
+  profile.** Forbidden by the hard rule in dimension #14. At least one
+  `web` AC must observe the user-visible outcome; `cmd` checks
+  corroborate the wiring but never replace the behavioural check. If
+  every AC would still pass on a broken feature, the AC list is wrong.
+- **Type mismatch between outcome verb and AC type** — a "visible"
+  outcome linked to a `cmd` file-existence AC, an "endpoint returns"
+  outcome linked only to a grep. The AC type must match what the outcome
+  describes; if it doesn't, fix the AC or re-frame the outcome.
 
 ### Red-flag examples (what "not enough questions" looks like)
 
@@ -659,6 +743,18 @@ loop was not done.
 Rule of thumb: if you can summarize the feature in one sentence *after*
 the interview and it sounds identical to the user's original prompt, you
 didn't interview — you transcribed.
+
+### Red-flag examples (AC theatre)
+
+| Brief | Bad ACs (theatre) | Good ACs (validate the outcome) |
+|-------|-------------------|--------------------------------|
+| "Wire total row into Resource Planner frontend" (success signal: row visible with correct totals) | 3× `cmd`: `test -f TopTotalRow.tsx`, `grep RESOURCE_PLANNER_TOP_ROW queryKeys.ts`, `grep getResourcePlannerTotalRow ResourcePlannerGrid.tsx` — every check passes if the file exists and is imported, even when the user sees nothing. | 1–2× `web`: navigate to the page, assert the total row renders below the header with one cell per period and matches expected totals. Optional `cmd` to corroborate query-key wiring. |
+| "Add status badge to user list" (success signal: badge visible in row) | `cmd: test -f StatusBadge.tsx` + `cmd: grep StatusBadge UserList.tsx` | `web: navigate /users, each row contains a `[data-testid=status-badge]` element with text matching the user's status` |
+| "Migrate auth to new middleware" (success signal: protected routes still gated) | only `cmd: test -f NewMw.cs` | `cmd: ! grep -r OldMw Api/` + `api: GET /api/protected without token → 401` + `api: with valid token → 200` (cmd alone proves the file moved, not that auth still works) |
+
+Rule of thumb for ACs: imagine the agent shipped a broken feature. Would
+every AC still pass? If yes, the AC list is theatre — rewrite it before
+showing the green-light prompt.
 
 ---
 
