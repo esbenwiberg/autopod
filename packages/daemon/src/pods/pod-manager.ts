@@ -1929,15 +1929,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // Sync files back, excluding .git so the host gitlink is never overwritten.
-      await cm.execInContainer(
+      // `set -e` aborts on rm failure (so we never end up with an emptied destination
+      // and no replacement). Piping the second find into xargs (instead of `find -exec
+      // cp \;`) propagates per-file cp failures as a non-zero exit — find-exec swallows
+      // them and returns 0 even if every cp died, which previously left the host
+      // worktree as `.git`-only and tripped the deletion guard with thousands of
+      // phantom deletions.
+      const syncResult = await cm.execInContainer(
         containerId,
         [
           'sh',
           '-c',
-          "find /mnt/worktree -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} + ; find /workspace -mindepth 1 -maxdepth 1 ! -name '.git' -exec cp -a {} /mnt/worktree/ \\;",
+          "set -e; find /mnt/worktree -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +; find /workspace -mindepth 1 -maxdepth 1 ! -name '.git' -print0 | xargs -0 -r -I{} cp -a {} /mnt/worktree/",
         ],
         { timeout: 120_000 },
       );
+      if (syncResult.exitCode !== 0) {
+        throw new Error(
+          `Workspace sync-back command failed (exit ${syncResult.exitCode}): ${syncResult.stderr.trim() || syncResult.stdout.trim()}`,
+        );
+      }
     } catch (err) {
       // Fall back to the Docker archive API on any exec failure — getArchive() works on both
       // running and stopped (but not yet removed) containers. Previously only 409
@@ -2481,6 +2492,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validateTransition(pod.id, pod.status, to);
     const previousStatus = pod.status;
     const updates: PodUpdates = { status: to, ...extraUpdates };
+    // Successful completion implicitly resolves any prior worktree-compromised
+    // warning — the pod finished, branch was pushed, no recovery needed. Don't
+    // clear on failed/killed/rejected; those are real bad-state terminals where
+    // the banner is still actionable.
+    if (to === 'complete' && pod.worktreeCompromised && updates.worktreeCompromised === undefined) {
+      updates.worktreeCompromised = false;
+    }
     podRepo.update(pod.id, updates);
     eventBus.emit({
       type: 'pod.status_changed',
@@ -3091,8 +3109,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const isRecovery = !!pod.recoveryWorktreePath;
         const isRework = isRecovery && !!pod.reworkReason;
 
+        // Fresh provisioning gets a fresh worktree, so any prior deletion-guard
+        // trip is moot. (Recovery reuses the existing worktree — leave the flag
+        // intact; recoverWorktree() owns clearing it on that path.)
+        const provisioningUpdates: Partial<PodUpdates> = {
+          startedAt: new Date().toISOString(),
+        };
+        if (!isRecovery && pod.worktreeCompromised) {
+          provisioningUpdates.worktreeCompromised = false;
+        }
+
         // Transition to provisioning
-        pod = transition(pod, 'provisioning', { startedAt: new Date().toISOString() });
+        pod = transition(pod, 'provisioning', provisioningUpdates);
 
         // Snapshot the resolved profile at pod start time for auditability
         podRepo.update(podId, { profileSnapshot: profile });
