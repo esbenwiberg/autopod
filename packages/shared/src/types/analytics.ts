@@ -146,6 +146,74 @@ export interface SafetyAnalyticsResponse {
   };
 }
 
+// ── Throughput analytics ─────────────────────────────────────────────────────
+
+/** The four states pods spend meaningful time in. The other 12 PodStatus
+ *  values are transitional and excluded by design. */
+export type LoadBearingStatus =
+  | 'queued'
+  | 'running'
+  | 'validating'
+  | 'awaiting_input';
+
+export interface ThroughputCohortPod {
+  podId: string;
+  profile: string;
+  status: 'complete' | 'killed' | 'failed';
+  /** ISO UTC. Desktop buckets in the user's local timezone. */
+  completedAt: string;
+}
+
+export interface QueueDepthBucket {
+  /** ISO UTC hour boundary (e.g. '2026-05-09T14:00:00Z'). One entry per hour in the window. */
+  hour: string;
+  /** Max queue depth observed during this hour. */
+  max: number;
+  /** Mean queue depth during this hour (60 minute-boundary samples). */
+  mean: number;
+}
+
+export interface TimeInStatusBox {
+  status: LoadBearingStatus;
+  /** Seconds. p25/p50/p75 form the box, p90 is the whisker, max is the outlier marker.
+   *  All zero when sampleCount === 0. */
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  max: number;
+  sampleCount: number;
+}
+
+export interface ThroughputAnalyticsResponse {
+  /** High-level totals over the trailing window. Cohort = terminal:
+   *  output_mode != 'workspace' AND status IN ('complete','killed','failed')
+   *  AND completed_at IN window. */
+  summary: {
+    /** Mean pods-per-day across the window. = |cohort| / days. Returns 0 when cohort is empty. */
+    podsPerDay: number;
+    /** One entry per day in window (length === days). Days with zero terminal pods emit count=0. */
+    podsPerDaySparkline: Array<{ day: string; count: number }>;
+    /** Signed difference in mean pods/day vs the immediately-prior window of the same length. */
+    podsPerDayDelta: { value: number; direction: 'up' | 'down' | 'flat' };
+    /** Mean time-to-merge in seconds, restricted to status='complete' pods. 0 when none. */
+    mttmSeconds: number;
+    /** Live point-in-time count: pods with status IN ('queued','provisioning'). Window-independent. */
+    backlog: number;
+  };
+
+  /** Per-pod entries from the terminal cohort. Capped at 5 000 most-recent entries. */
+  cohort: ThroughputCohortPod[];
+  cohortTruncated: boolean;
+
+  /** Hourly queue-depth time-series. Cohort = queue-intersect. Length = days * 24. */
+  queueDepth: QueueDepthBucket[];
+
+  /** Box-plot stats per load-bearing state. Always 4 entries in order
+   *  [queued, running, validating, awaiting_input]. */
+  timeInStatus: TimeInStatusBox[];
+}
+
 export interface AuditChainVerifyResponse {
   /** True when every pod's chain verifies. */
   valid: boolean;
