@@ -142,10 +142,13 @@ export function computeEscalationsAnalytics(
   }));
 
   // ── Prior-window delta ──────────────────────────────────────────────────────
+  // COUNT(DISTINCT p.id) is required: the LEFT JOIN to escalations duplicates
+  // pod rows by escalation count, so plain COUNT(*) would over-count cohortSize
+  // for any pod with >1 escalation.
   const prior = db
     .prepare(
       `SELECT
-         COUNT(*) AS cohortSize,
+         COUNT(DISTINCT p.id) AS cohortSize,
          COUNT(DISTINCT CASE WHEN e.type IN ${HUMAN_ATTENTION_SQL} THEN e.pod_id END) AS humanAttentionPodCount
        FROM pods p
        LEFT JOIN escalations e ON e.pod_id = p.id

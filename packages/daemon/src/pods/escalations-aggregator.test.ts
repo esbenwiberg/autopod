@@ -538,6 +538,36 @@ describe('computeEscalationsAnalytics', () => {
     expect(result.summary.selfRecoveryRateDelta.direction).toBe('up');
   });
 
+  it('prior-window delta does not inflate cohortSize for pods with multiple escalations', () => {
+    // Prior window (31–60 days ago): 1 pod with 5 ask_human escalations.
+    // A naive COUNT(*) over a LEFT JOIN would report cohortSize=5, escalated=1
+    // → priorRate (5-1)/5 = 0.8 and a misleading delta. Correct behaviour:
+    // cohortSize=1, escalated=1 → priorRate=0, current rate=1.0, delta=+1.0.
+    const priorPodId = insertPod(db, {
+      id: 'prior-multi',
+      completedAt: daysAgo(40),
+      createdAt: daysAgo(45),
+    });
+    for (let i = 0; i < 5; i++) {
+      insertEscalation(db, {
+        podId: priorPodId,
+        type: 'ask_human',
+        createdAt: daysAgo(40),
+      });
+    }
+
+    // Current window: 1 clean pod (no escalations) → rate 1.0.
+    insertPod(db, {
+      id: 'curr-clean',
+      completedAt: daysAgo(5),
+      createdAt: daysAgo(6),
+    });
+
+    const result = computeEscalationsAnalytics(db, 30);
+    expect(result.summary.selfRecoveryRateDelta.value).toBeCloseTo(1.0, 5);
+    expect(result.summary.selfRecoveryRateDelta.direction).toBe('up');
+  });
+
   it('prior-window delta is flat when prior cohort is empty', () => {
     // Only current window has pods
     insertPod(db, { completedAt: daysAgo(5) });
