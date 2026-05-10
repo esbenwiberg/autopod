@@ -344,4 +344,9 @@ export type {
   NetworkPolicyBucket,
   SafetyAnalyticsResponse,
   AuditChainVerifyResponse,
+  LoadBearingStatus,
+  ThroughputCohortPod,
+  QueueDepthBucket,
+  TimeInStatusBox,
+  ThroughputAnalyticsResponse,
 } from './types/analytics.js';

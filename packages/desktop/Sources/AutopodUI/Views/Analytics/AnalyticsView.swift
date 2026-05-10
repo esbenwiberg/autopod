@@ -19,6 +19,8 @@ public struct AnalyticsView: View {
     public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
     /// Fetches safety analytics from the daemon for the Safety card (sparkline, delta, sub-line).
     public var loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)?
+    /// Fetches throughput analytics from the daemon for the Throughput card.
+    public var loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
@@ -31,6 +33,8 @@ public struct AnalyticsView: View {
     @State private var qualityLoadError: String?
     @State private var safetyData: SafetyAnalyticsResponse?
     @State private var safetyLoadError: String?
+    @State private var throughputData: ThroughputAnalyticsResponse?
+    @State private var throughputLoadError: String?
 
     public init(
         pods: [Pod],
@@ -39,6 +43,7 @@ public struct AnalyticsView: View {
         loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
         loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
+        loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
         selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
@@ -47,6 +52,7 @@ public struct AnalyticsView: View {
         self.loadReliability = loadReliability
         self.loadQualityAnalytics = loadQualityAnalytics
         self.loadSafetyAnalytics = loadSafetyAnalytics
+        self.loadThroughputAnalytics = loadThroughputAnalytics
         self._selectedCard = selectedCard
     }
 
@@ -127,6 +133,37 @@ public struct AnalyticsView: View {
         return "\(piiCount) PII \u{00B7} \(quarantineCount) quar \u{00B7} \(injectionCount) inj"
     }
 
+    private var throughputCardValue: String {
+        guard let t = throughputData else { return "—" }
+        if t.summary.podsPerDay == 0 { return "0" }
+        return String(format: "%.1f", t.summary.podsPerDay)
+    }
+
+    private var throughputCardSparkline: [Double]? {
+        guard let t = throughputData, !t.cohort.isEmpty else { return nil }
+        return t.summary.podsPerDaySparkline.map { Double($0.count) }
+    }
+
+    private var throughputCardDelta: AnalyticsCardDelta? {
+        guard let t = throughputData, !t.cohort.isEmpty else { return nil }
+        return AnalyticsCardDelta(
+            value: String(format: "%+.1f /day", t.summary.podsPerDayDelta.value),
+            direction: AnalyticsCardDelta.Direction(t.summary.podsPerDayDelta.direction)
+        )
+    }
+
+    private var throughputCardSubline: String? {
+        guard let t = throughputData else { return nil }
+        let mttmPart = formatMttmSeconds(t.summary.mttmSeconds)
+        let backlogPart = t.summary.backlog > 0 ? "\(t.summary.backlog) in queue" : nil
+        switch (mttmPart, backlogPart) {
+        case let (m?, b?): return "MTTM \(m) \u{00B7} \(b)"
+        case let (m?, nil): return "MTTM \(m)"
+        case let (nil, b?): return b
+        case (nil, nil): return nil
+        }
+    }
+
     // MARK: - Body
 
     public var body: some View {
@@ -189,6 +226,15 @@ public struct AnalyticsView: View {
                         isSelected: selectedCard == .safety,
                         onClick: { selectedCard = selectedCard == .safety ? nil : .safety }
                     )
+                    AnalyticsCard(
+                        title: "Throughput",
+                        value: throughputCardValue,
+                        sparkline: throughputCardSparkline,
+                        delta: throughputCardDelta,
+                        subline: throughputCardSubline,
+                        isSelected: selectedCard == .throughput,
+                        onClick: { selectedCard = selectedCard == .throughput ? nil : .throughput }
+                    )
                 }
             }
             .padding(24)
@@ -246,11 +292,22 @@ public struct AnalyticsView: View {
                     }
                 }
             }
+            let throughputTask = Task {
+                if let loadThroughputAnalytics {
+                    do {
+                        throughputData = try await loadThroughputAnalytics(30)
+                        throughputLoadError = nil
+                    } catch {
+                        throughputLoadError = error.localizedDescription
+                    }
+                }
+            }
             await scoreTask.value
             await costTask.value
             await reliabilityTask.value
             await qualityTask.value
             await safetyTask.value
+            await throughputTask.value
         }
     }
 }
@@ -368,6 +425,30 @@ extension AnalyticsCardDelta.Direction {
         case .down: self = .down
         case .flat: self = .flat
         }
+    }
+
+    init(_ direction: ThroughputDelta.Direction) {
+        switch direction {
+        case .up:   self = .up
+        case .down: self = .down
+        case .flat: self = .flat
+        }
+    }
+}
+
+// MARK: - MTTM formatter (shared by AnalyticsView and ThroughputDrillView)
+
+/// Formats a seconds value as "Xh Ym", "Ym", or "Ns". Returns nil for 0.
+func formatMttmSeconds(_ seconds: Double) -> String? {
+    guard seconds > 0 else { return nil }
+    if seconds >= 3600 {
+        let h = Int(seconds) / 3600
+        let m = (Int(seconds) % 3600) / 60
+        return "\(h)h \(m)m"
+    } else if seconds >= 60 {
+        return "\(Int(seconds) / 60)m"
+    } else {
+        return "\(Int(seconds))s"
     }
 }
 
