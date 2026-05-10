@@ -56,8 +56,31 @@ import Testing
 
 @Test func filterPodsReturnsEmptyForAnalytics() {
     let pods: [Pod] = []
-    let result = MainView.filterPods(pods, for: .analytics)
-    #expect(result.isEmpty)
+    for section in AnalyticsSection.allCases {
+        let result = MainView.filterPods(pods, for: .analyticsSection(section))
+        #expect(result.isEmpty)
+    }
+}
+
+// MARK: - AnalyticsSection contract
+
+@Test func overviewIsShipped() {
+    #expect(AnalyticsSection.overview.isShipped)
+}
+
+@Test func unshippedSectionsAreThroughputAndModels() {
+    let unshipped = AnalyticsSection.allCases.filter { !$0.isShipped }
+    #expect(Set(unshipped) == [.throughput, .models])
+}
+
+@Test func sectionPreselectedCardMapping() {
+    #expect(AnalyticsSection.overview.preselectedCard == nil)
+    #expect(AnalyticsSection.cost.preselectedCard == .cost)
+    #expect(AnalyticsSection.reliability.preselectedCard == .reliability)
+    #expect(AnalyticsSection.quality.preselectedCard == .quality)
+    #expect(AnalyticsSection.safety.preselectedCard == .safety)
+    #expect(AnalyticsSection.throughput.preselectedCard == nil)
+    #expect(AnalyticsSection.models.preselectedCard == nil)
 }
 
 // MARK: - onSelectPod handler

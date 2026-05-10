@@ -242,7 +242,7 @@ public struct MainView: View {
         case .workspaces:            pods.filter { $0.isWorkspace }
         case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:                   pods
-        case .analytics:             []
+        case .analyticsSection:      []
         case .history:               []
         case .memory:                []
         case .scheduledJobs:         []
@@ -279,7 +279,7 @@ public struct MainView: View {
                 onShowSettings: onShowSettings
             )
         } content: {
-            if sidebarSelection == .analytics {
+            if case .analyticsSection = sidebarSelection {
                 AnalyticsView(
                     pods: pods,
                     loadScores: loadQualityScores,
@@ -368,7 +368,7 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if sidebarSelection == .analytics {
+            if case .analyticsSection = sidebarSelection {
                 AnalyticsRightPaneView(
                     card: selectedAnalyticsCard,
                     pods: pods,
@@ -523,6 +523,11 @@ public struct MainView: View {
         }
         .onChange(of: selectedSessionId) { _, newId in
             onSelectSession?(newId)
+        }
+        .onChange(of: sidebarSelection) { _, newSelection in
+            if case .analyticsSection(let section) = newSelection {
+                selectedAnalyticsCard = section.preselectedCard
+            }
         }
         .overlay {
             if showCommandPalette {

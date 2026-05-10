@@ -113,6 +113,11 @@ public enum NetworkPolicyBucket: String, Decodable, CaseIterable, Sendable {
 public struct SafetyNetworkPolicyCount: Decodable, Equatable, Sendable {
     public let bucket: NetworkPolicyBucket
     public let count: Int
+
+    public init(bucket: NetworkPolicyBucket, count: Int) {
+        self.bucket = bucket
+        self.count = count
+    }
 }
 
 // MARK: - Audit chain
