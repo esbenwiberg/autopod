@@ -1,0 +1,104 @@
+import type {
+  AcValidationResult,
+  PageResult,
+  Pod,
+  ScreenshotRef,
+  SystemEvent,
+  TaskReviewResult,
+  ValidationResult,
+} from '@autopod/shared';
+
+export interface ScreenshotRefDto {
+  url: string;
+  source: 'smoke' | 'ac' | 'review';
+  path: string;
+}
+
+export function toScreenshotRefDto(ref: ScreenshotRef, contextPath: string): ScreenshotRefDto {
+  return {
+    url: `/pods/${ref.podId}/screenshots/${ref.source}/${ref.filename}`,
+    source: ref.source,
+    path: contextPath,
+  };
+}
+
+function serializePages(pages: PageResult[]): unknown[] {
+  return pages.map((page) => {
+    if (!page.screenshot) return page;
+    const { screenshot, ...rest } = page;
+    return { ...rest, screenshot: toScreenshotRefDto(screenshot, page.path) };
+  });
+}
+
+function serializeAcValidation(ac: AcValidationResult): unknown {
+  return {
+    ...ac,
+    results: ac.results.map((check) => {
+      if (!check.screenshot) return check;
+      const { screenshot, ...rest } = check;
+      return { ...rest, screenshot: toScreenshotRefDto(screenshot, check.criterion) };
+    }),
+  };
+}
+
+function serializeTaskReview(review: TaskReviewResult): unknown {
+  return {
+    ...review,
+    screenshots: review.screenshots.map((ref, i) => toScreenshotRefDto(ref, String(i))),
+  };
+}
+
+/**
+ * Transform a stored ValidationResult, replacing all ScreenshotRef fields with
+ * ScreenshotRefDto shapes suitable for the API wire format. Returns a new
+ * object — does not mutate the input.
+ */
+export function serializeValidationResult(result: ValidationResult): unknown {
+  return {
+    ...result,
+    smoke: { ...result.smoke, pages: serializePages(result.smoke.pages) },
+    acValidation: result.acValidation
+      ? serializeAcValidation(result.acValidation)
+      : result.acValidation,
+    taskReview: result.taskReview ? serializeTaskReview(result.taskReview) : result.taskReview,
+  };
+}
+
+/**
+ * Wire-shape a Pod for desktop/CLI consumption. Currently this only rewrites
+ * `lastValidationResult` — the rest of the Pod has no internal-only paths.
+ */
+export function serializePodForWire(pod: Pod): unknown {
+  if (!pod.lastValidationResult) return pod;
+  return { ...pod, lastValidationResult: serializeValidationResult(pod.lastValidationResult) };
+}
+
+/**
+ * Convert a SystemEvent to its wire-format equivalent. Validation events carry
+ * ValidationResult / AcValidationResult / TaskReviewResult / PageResult[] which
+ * all embed ScreenshotRef internally; everything else passes through unchanged.
+ */
+export function serializeSystemEventForWire(event: SystemEvent): SystemEvent {
+  switch (event.type) {
+    case 'pod.validation_completed':
+      return {
+        ...event,
+        result: serializeValidationResult(event.result) as ValidationResult,
+      };
+    case 'pod.validation_phase_completed': {
+      const next = { ...event };
+      if (event.pageResults) {
+        next.pageResults = serializePages(event.pageResults) as PageResult[];
+      }
+      if (event.acResult) {
+        next.acResult = serializeAcValidation(event.acResult) as AcValidationResult;
+      }
+      if (event.reviewResult) {
+        next.reviewResult = serializeTaskReview(event.reviewResult) as TaskReviewResult;
+      }
+      return next;
+    }
+    default:
+      return event;
+  }
+}

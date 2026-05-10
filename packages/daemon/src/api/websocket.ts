@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../interfaces/index.js';
 import type { EventBus, EventRepository } from '../pods/index.js';
+import { serializeSystemEventForWire } from './wire-serializers.js';
 
 // Replay is paged so a long-disconnected client can't block the daemon's event
 // loop. Each page yields back to the loop via setImmediate; the hard cap stops
@@ -40,7 +41,8 @@ export async function replayEvents(
     if (page.length === 0) break;
     for (const stored of page) {
       if (socket.readyState !== socket.OPEN) return;
-      socket.send(JSON.stringify({ ...stored.payload, _eventId: stored.id }));
+      const wire = serializeSystemEventForWire(stored.payload);
+      socket.send(JSON.stringify({ ...wire, _eventId: stored.id }));
     }
     const last = page[page.length - 1];
     if (!last) break;
@@ -118,7 +120,7 @@ export function websocketHandler(
 
     function sendEvent(event: SystemEvent) {
       if (socket.readyState === socket.OPEN) {
-        socket.send(JSON.stringify(event));
+        socket.send(JSON.stringify(serializeSystemEventForWire(event)));
       }
     }
 
