@@ -284,19 +284,32 @@ unknown?"
 
 ### Exit test — the show-back
 
-Before writing any output, produce a checklist covering all 15 dimensions
-above. For each:
+The show-back is what the user actually reads before greenlighting. A
+markdown wall in the terminal invites skim-and-skip; an HTML interface
+invites click-and-engage. Render it as HTML.
+
+Process:
+
+1. Assess coverage internally (every dimension + every brief).
+2. Render a single self-contained HTML file the user opens in a browser.
+3. Print one line to the terminal pointing at the file.
+4. Wait for `green light` in the terminal before writing any spec output.
+
+#### 1. Coverage assessment (internal)
+
+Walk all 15 dimensions and classify each:
 
 - ✅ Answered by the user (quote their answer, cite which question)
 - 📂 Answered by the codebase (cite the file(s) and what they told you)
+- 📋 Answered by a fact or ADR (cite `fact-NNN` or `ADR-NNN`)
 - ⚠️ Explicitly marked N/A with a one-line justification (e.g.
   "UX flows: N/A — feature is internal API only, no user-facing surface")
 
 For every brief you're about to write, confirm you can name:
 
 - The exact files it touches (the `touches` list)
-- The files it must NOT touch (the `does_not_touch` list — both lists are
-  advisory; reviewer adjudicates deviations)
+- The files it must NOT touch (the `does_not_touch` list — both lists
+  are advisory; reviewer adjudicates deviations)
 - The interfaces it must respect (cite the contract section in design.md)
 - The ACs it must satisfy — every AC must be `type: api` or `type: web`
   and actually fire in the validation engine. Build + tests run
@@ -315,25 +328,145 @@ the AC type doesn't match the outcome verb, the loop is not done — fix
 the AC type, or re-frame the outcome to match what you can actually
 validate. A `cmd` AC linked to a "visible" outcome is theatre.
 
-**Show the checklist back to the user**, including for every brief:
-- Title + one-line task description
-- Every proposed AC verbatim (`type` + `test` + `pass`), grouped into
-  "validates outcome" vs. "corroborates wiring"
-- Which AC(s) tie back to the success signal in `purpose.md`
+#### 2. Render the show-back as HTML
 
-Then ask: "ready to write — green light? Specifically: do these ACs
-actually validate the success signal, or are they just confirming the
-wiring exists?" Do NOT start writing until the user confirms. This is
-the only batched "question" allowed — it's a summary, not new
-interrogation.
+Write a single self-contained HTML file to:
 
-If the user pushes back on any AC, treat that as a re-opened dimension
-and keep interviewing — do not negotiate the AC away. The ACs are the
-contract between the planner and the validation engine; getting them
-wrong means a green pipeline on a broken feature.
+```
+.autopod/review/exit-checklist.html
+```
 
-If the user spots a gap, keep interviewing. Do not negotiate your way to
-writing early.
+Create the `.autopod/review/` directory if it doesn't exist. The path
+is gitignored — this is a transient review surface, not a deliverable.
+Overwrite the file on every regeneration.
+
+A reference implementation lives at
+`.autopod/review/SAMPLE-proof-of-work-screenshots.html`. Read it before
+generating; match its layout, color semantics, and interaction model.
+Do not copy it byte-for-byte — re-derive from the spec under review —
+but the structural shape should be recognisably the same.
+
+**Self-contained constraints (non-negotiable):**
+
+- One file. Inline `<style>` and `<script>`. No CDN, no external fonts,
+  no external images, no `<link rel="stylesheet">`.
+- System font stack only:
+  `-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif`.
+  Monospace via `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`.
+- Dark theme. Reasonable contrast. No light-mode toggle — keep it small.
+- Must render correctly when opened directly via `file://` with no
+  network connection.
+
+**Layout:** header bar across the top, then a two-column body. Brief
+grid on the left (≈70%), sticky attention rail on the right (≈360px).
+Collapse to single column under ~1040px viewport.
+
+**Header:**
+
+- Title: `Plan preview — <feature-name>`.
+- Summary line: brief count, gate count (note any parallel groups),
+  ADR-introduced count, the one-line outcome from `purpose.md`.
+- Filter buttons: `Show only briefs with issues`, `Expand all`,
+  `Collapse all`.
+
+**Brief grid (left column):**
+
+- Group briefs by gate. A *gate* is a set of briefs at the same
+  dependency depth that may run concurrently. Render each gate as a
+  panel with a label like `Gate 2 · parallel · 3 briefs depend on 01`.
+  Within a parallel gate, place sibling briefs side by side. Render an
+  `↓` arrow between gates to show sequential dependency.
+- Each brief is a `<details>` element (HTML's native collapsible) with
+  a colored left-border halo:
+  - **green** — clean: no open question, no theatre risk.
+  - **amber** — has at least one open question or AC theatre risk.
+  - **red** — has an unresolved blocking issue.
+- Brief summary (always visible): name, file count, AC-count breakdown
+  (e.g. "3 api · 1 cmd"), `depends_on` chip, halo count badge.
+- Brief expanded body, in this order:
+  - Task — one paragraph (verbatim or paraphrased from the brief's
+    `## Task` section).
+  - Touches — file list; mark new files with a "new" badge.
+  - Acceptance criteria — **grouped** into:
+    - *Validates outcome* (api/web ACs that fire on the user-visible
+      outcome named by the success signal).
+    - *Corroborates wiring* (cmd ACs that catch structural regressions).
+    - *AC theatre risk* (any AC whose type mismatches its outcome verb,
+      or whose pass condition would still hold on a broken feature).
+  - Success-signal link — explicit
+    `success signal #N ←→ AC #M (type)` line with a ✓ or ⚠ verdict on
+    type-match.
+  - Broken-feature mirror — one-sentence answer to "would all ACs still
+    pass on a broken feature?" with ✓ or ⚠.
+  - Per-brief issues (if any) — each rendered as an inline callout with
+    a label, body, and 2–3 inline action proposals
+    (e.g. `▸ split as proposed`, `▸ keep`, `▸ counter-propose`).
+    Action proposals are read-only hints, not interactive — they tell
+    the user what they can reply in the terminal.
+
+**Side rail (right column, sticky):**
+
+Order top-down by attention priority:
+
+- `Cross-cutting issues (N)` — issues that aren't bound to a single
+  brief: success-signal-not-linked, parallel-touch conflicts on shared
+  files, deferred user answers, unverified precedents. Each issue has
+  a heading, a paragraph of context, and 2–3 inline action proposals.
+  Below the listed issues, a one-line `…plus N issues across M briefs`
+  with a button that activates the `Show only briefs with issues`
+  filter.
+- `ADRs introduced (N)` — each ADR rendered as a `<details>` with the
+  ID and Accepted/Proposed status in the summary. Body sections:
+  Decision, Consequences (split into Easier `+` / Harder `−` /
+  Committed-to `⚙`), Alternatives rejected. Source path at the bottom.
+  Auto-expand the first ADR; collapse the rest.
+- `ADRs reused (N)` — short list, ID + title only. Empty-state
+  ("No prior ADRs constrain this spec.") is fine.
+- `Coverage` — counts by status (covered / amber / red), ADR counts,
+  brief counts (clean / open question / red). One-line source summary
+  at the bottom (e.g. "11 dims by codebase scan, 3 by user answer, 1
+  by precedent").
+
+**Color semantics** — use consistently for borders, badges, bullets,
+and section headings:
+
+- green: dimension covered, AC validates outcome, ADR consequence
+  "easier"
+- blue: api ACs, links, action proposals
+- amber: open question, AC corroborates wiring, deferred answer
+- red: unresolved/blocking, AC theatre risk, ADR consequence "harder"
+- accent (purple/violet): ADRs, accepted decisions
+
+**Interactivity** — vanilla JS, no framework, ~30 lines:
+
+- `Expand all` / `Collapse all` toggle `open` on every
+  `details.brief, details.adr`.
+- `Show only briefs with issues` toggles a `.hidden` class on briefs
+  without a halo and auto-expands the visible ones. Button label
+  swaps between `Show only briefs with issues` and `Show all briefs`.
+
+#### 3. Print the path and ask for greenlight
+
+After writing the file, print exactly one short message to the terminal:
+
+```
+✅ Show-back rendered: .autopod/review/exit-checklist.html
+
+Open it in a browser, work through every halo and rail item, then
+reply "green light" in this terminal when ready to write the spec.
+```
+
+Do NOT print the markdown checklist alongside it. The HTML is the
+review surface; printing the markdown defeats the point. Do NOT start
+writing the spec until the user replies `green light` (or an
+equivalent affirmation).
+
+If the user pushes back on any AC or spots a gap, treat that as a
+re-opened dimension and keep interviewing — do not negotiate the AC
+away. The ACs are the contract between the planner and the validation
+engine; getting them wrong means a green pipeline on a broken feature.
+After re-interviewing, regenerate the HTML show-back at the same path
+(overwrite). Each iteration should produce fewer halos.
 
 ---
 
@@ -685,6 +818,19 @@ loop was not done.
 - Silently deciding when the user defers — always propose-and-confirm.
 - Producing one oversized spec when the scope is genuinely two specs.
 - Skipping the "ready to write — green light?" confirmation.
+- Skipping the HTML show-back. The markdown-in-terminal alternative is
+  what causes plans to be rubber-stamped — that's the exact failure
+  mode the HTML render exists to prevent.
+- Printing the markdown checklist alongside the HTML path. The HTML is
+  the review surface; printing the markdown back into the terminal
+  invites skim-and-skip and defeats the point.
+- Linking external CSS / fonts / scripts in the show-back HTML. The
+  artifact must work offline, opened directly via `file://`. No CDN,
+  no Google Fonts, no Tailwind play-CDN, no Alpine via unpkg.
+- Committing `.autopod/review/exit-checklist.html` to the repo. The
+  directory is gitignored; it's a transient review artifact, not a
+  deliverable. (The `SAMPLE-*.html` reference file is the only
+  exception.)
 - ACs that require human judgment ("looks good", "feels right").
 - Wrapping build / test / lint commands as ACs (`pnpm build`,
   `dotnet test`, `tsc`, `biome`, `cargo build`, `make`) —
