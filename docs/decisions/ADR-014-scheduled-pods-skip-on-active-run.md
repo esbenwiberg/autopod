@@ -1,4 +1,4 @@
-# ADR 003: Skip New Fire If Previous Run Is Still Active
+# ADR-014: Skip New Fire If Previous Run Is Still Active
 
 ## Context
 

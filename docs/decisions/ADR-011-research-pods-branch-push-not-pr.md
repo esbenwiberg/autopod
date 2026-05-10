@@ -1,4 +1,4 @@
-# ADR 003: Branch push (not PR) for repo artifact delivery
+# ADR-011: Branch push (not PR) for repo artifact delivery
 
 ## Context
 

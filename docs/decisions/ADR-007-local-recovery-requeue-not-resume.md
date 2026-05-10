@@ -1,4 +1,4 @@
-# ADR 001: Re-queue Recovery Instead of Dedicated Resume Path
+# ADR-007: Re-queue Recovery Instead of Dedicated Resume Path
 
 ## Context
 

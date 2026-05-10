@@ -7,21 +7,27 @@ inside Docker (or ACI) containers, manages their lifecycle, runs validation, and
 
 ```
 src/
-├── pods/        # Core pod orchestration (state machine, manager, repositories)
-├── api/             # Fastify server, routes, plugins, WebSocket, MCP proxy
-├── containers/      # Docker + ACI container managers, network isolation
-├── runtimes/        # Claude / Codex / Copilot stream parsers
-├── validation/      # Multi-phase validation engine (build, health, smoke, AI review)
-├── profiles/        # Profile store, inheritance resolution, Zod validation
-├── actions/         # Action engine, registry, audit trail
-├── db/              # SQLite connection, migration runner, .sql files
-├── images/          # Dockerfile generator, ACR client, image warming
-├── worktrees/       # Git worktree ops, GitHub/ADO PR management
-├── providers/       # Multi-provider auth (Anthropic, MAX, Foundry)
-├── notifications/   # MS Teams webhook adapter + rate limiter
-├── interfaces/      # Dependency-injection abstractions (ContainerManager, Runtime, etc.)
-├── crypto/          # HMAC pod tokens, AES-256 credential encryption
-└── test-utils/      # createTestDb(), mock infrastructure factories
+├── pods/             # Core pod orchestration (state machine, manager, repositories)
+├── api/              # Fastify server, routes, plugins, WebSocket, MCP proxy
+├── containers/       # Docker + ACI container managers, network isolation
+├── runtimes/         # Claude / Codex / Copilot stream parsers
+├── validation/       # Multi-phase validation engine (build, health, smoke, AI review)
+├── profiles/         # Profile store, inheritance resolution, Zod validation
+├── actions/          # Action engine, registry, audit trail
+├── db/               # SQLite connection, migration runner, .sql files
+├── images/           # Dockerfile generator, ACR client, image warming
+├── worktrees/        # Git worktree ops, GitHub/ADO PR management
+├── providers/        # Multi-provider auth (Anthropic, MAX, Foundry)
+├── notifications/    # MS Teams webhook adapter + rate limiter
+├── interfaces/       # Dependency-injection abstractions (ContainerManager, Runtime, etc.)
+├── crypto/           # HMAC pod tokens, AES-256 credential encryption
+├── safety/           # Fleet-wide safety event detection + storage
+├── scheduled-jobs/   # DB-driven scheduler for recurring pods
+├── security/         # Per-pod security scans (secrets, deps)
+├── issue-watcher/    # GitHub/ADO issue triage agents
+├── history/          # Pod history queries + retention
+├── util/             # Cross-subsystem helpers
+└── test-utils/       # createTestDb(), mock infrastructure factories
 ```
 
 ## The Pod Lifecycle
@@ -54,7 +60,7 @@ calls `validateTransition` first.
 
 ## processPod() — The Orchestration Loop
 
-`src/pods/pod-manager.ts` (~1750 lines). The main phases when a pod is dequeued:
+`src/pods/pod-manager.ts` is the largest module in the daemon. The main phases when a pod is dequeued:
 
 1. **Provisioning** — create/reuse git worktree, spawn container, write credential files
 2. **Skill resolution** — fetch custom slash-command content (local file or GitHub); failures are non-fatal and skipped
@@ -92,11 +98,10 @@ the next run.
 
 ## Adding a New Pod State
 
-1. Add the value to `PodStatus` in `packages/shared/src/types/pod.ts`
-2. Add allowed transitions to `VALID_STATUS_TRANSITIONS` in `packages/shared/src/constants.ts`
-3. Update `canX()` helpers in `state-machine.ts` if the state has behavioural meaning
-4. Add a DB migration if the status needs to be persisted in a new column (rare — status is a text column)
-5. Handle the new state in `pod-manager.ts:processPod()`
+The full checklist (5 layers + verification) lives in the `/add-pod-state` skill —
+run it whenever you're adding a `PodStatus` value. Skipping a layer typically means
+the state is unreachable (transition table miss) or pods land in it and idle
+(`processPod()` miss).
 
 ## Database
 
@@ -109,21 +114,23 @@ the next run.
 ### Migrations (`src/db/migrate.ts` + `src/db/migrations/*.sql`)
 
 Migrations run automatically on startup (or when `createTestDb()` is called in tests).
-Files are applied in filename order — always name new files with the next sequential prefix.
+Files are applied in filename order — always name new files with the next sequential
+prefix. Browse the dir for the canonical list; key reference points:
 
-| File | Adds |
-|------|------|
-| `001_initial.sql` | `profiles`, `pods`, `escalations`, `events` |
-| `002_...sql` | MCP servers, CLAUDE.md sections |
-| `003_...sql` | `execution_target` column (docker/aci) |
-| `004_...sql` | `network_policy` column |
-| `005_...sql` | Validation result tables |
-| `006_...sql` | `plan`/`progress` tracking, `claude_session_id` (resume), `nudge_messages` |
-| `007_...sql` | `action_policy`, `output_mode`, `action_audit` table |
-| `008_...sql` | `model_provider`, `provider_credentials` |
-| `009–021` | Test commands, ADO PR, skills, private registries, heartbeat, token usage, commit tracking, timeouts |
+- `001_initial.sql` — original `profiles`, `pods`, `escalations`, `events`
+- 002–021 — early waves: injection, execution_target, network_policy, validation,
+  progress/resume, action policy + audit, model providers, ADO PR, skills, private
+  registries, heartbeat, token usage, commit tracking
+- 022–097 — recent waves: safety events (ADR-018), audit chain (ADR-019),
+  network-policy snapshot (ADR-020), sleep recovery (ADR-021), AC self-report,
+  phase token usage (ADR-016), screenshot retention (ADR-017), watchdog/kick,
+  preflight conflict policy
 
-**To add a migration**: create `0NN_description.sql` in `src/db/migrations/`. Never modify existing files.
+**To add a migration**: create `0NN_description.sql` in `src/db/migrations/`. Never
+modify existing files. Never reuse a prefix — the runner uses the prefix as the
+schema version, and a duplicate is silently skipped. (A `PreToolUse` hook now
+blocks colliding prefixes locally; cross-branch collisions still need manual
+rebase.)
 
 ## Container Management
 

@@ -1,4 +1,4 @@
-# ADR 001: Reuse existing 'artifact' OutputMode
+# ADR-009: Reuse existing 'artifact' OutputMode
 
 ## Context
 

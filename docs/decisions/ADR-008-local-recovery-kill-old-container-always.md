@@ -1,4 +1,4 @@
-# ADR 002: Always Kill Old Container, Spawn Fresh
+# ADR-008: Always Kill Old Container, Spawn Fresh
 
 ## Context
 

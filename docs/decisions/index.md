@@ -10,14 +10,14 @@
 | `ADR-004` | ADR 004: Azure daemon hosted on a small Burstable VM | — | The daemon must be optionally hostable in Azure, cheaply, for a single user. |
 | `ADR-005` | ADR 005: Targets never auto-reroute — queue when offline | — | If a profile's placement target (e.g. `runner:laptop-ewi`) is offline when a |
 | `ADR-006` | ADR 006: Explicit `runner_offline` session state with reconciliation | — | A laptop runner will disconnect mid-session for predictable reasons (sleep, |
-| `ADR-007` | ADR 001: Re-queue Recovery Instead of Dedicated Resume Path | — | On daemon restart, orphaned local sessions need to be recovered. Two approaches: |
-| `ADR-008` | ADR 002: Always Kill Old Container, Spawn Fresh | — | After daemon restart, an orphaned session's Docker container might still be |
-| `ADR-009` | ADR 001: Reuse existing 'artifact' OutputMode | — | `OutputMode = 'pr' \| 'artifact' \| 'workspace'` in `packages/shared/src/types/actions.ts:97`. |
-| `ADR-010` | ADR 002: Store artifacts on filesystem, not SQLite | — | On completion, `/workspace/` contents need to be accessible for the files API and desktop. |
-| `ADR-011` | ADR 003: Branch push (not PR) for repo artifact delivery | — | Regular sessions push a branch and create a PR through the full validation pipeline |
-| `ADR-012` | ADR 001: DB-Driven Polling Scheduler | — | We need to fire sessions on a recurring schedule. The daemon runs locally on a |
-| `ADR-013` | ADR 002: One Catch-Up Prompt Per Job (Not Per Missed Fire) | — | When the daemon starts after a period of downtime, some scheduled jobs will have |
-| `ADR-014` | ADR 003: Skip New Fire If Previous Run Is Still Active | — | A scheduled job fires at T+0, spawning a session. That session is still running |
+| `ADR-007` | ADR-007: Re-queue Recovery Instead of Dedicated Resume Path | — | On daemon restart, orphaned local sessions need to be recovered. Two approaches: |
+| `ADR-008` | ADR-008: Always Kill Old Container, Spawn Fresh | — | After daemon restart, an orphaned session's Docker container might still be |
+| `ADR-009` | ADR-009: Reuse existing 'artifact' OutputMode | — | `OutputMode = 'pr' \| 'artifact' \| 'workspace'` in `packages/shared/src/types/actions.ts:97`. |
+| `ADR-010` | ADR-010: Store artifacts on filesystem, not SQLite | — | On completion, `/workspace/` contents need to be accessible for the files API and desktop. |
+| `ADR-011` | ADR-011: Branch push (not PR) for repo artifact delivery | — | Regular sessions push a branch and create a PR through the full validation pipeline |
+| `ADR-012` | ADR-012: DB-Driven Polling Scheduler | — | We need to fire sessions on a recurring schedule. The daemon runs locally on a |
+| `ADR-013` | ADR-013: One Catch-Up Prompt Per Job (Not Per Missed Fire) | — | When the daemon starts after a period of downtime, some scheduled jobs will have |
+| `ADR-014` | ADR-014: Skip New Fire If Previous Run Is Still Active | — | A scheduled job fires at T+0, spawning a session. That session is still running |
 | `ADR-015` | ADR-015: Model pricing as bundled JSON in @autopod/shared | Accepted | Cost analytics need a per-model price catalog so pods that don't carry a |
 | `ADR-016` | ADR-016: Per-attempt phase token taxonomy | Accepted | `pods.phase_token_usage` (migration `089`) was introduced as a |
 | `ADR-017` | ADR-017: Proof-of-work screenshots on disk with retention | Accepted (partially supersedes ADR-010's screenshot carve-out) | Validation screenshots — Playwright smoke pages, `validate_in_browser` |

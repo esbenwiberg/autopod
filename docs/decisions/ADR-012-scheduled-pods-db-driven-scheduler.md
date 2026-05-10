@@ -1,4 +1,4 @@
-# ADR 001: DB-Driven Polling Scheduler
+# ADR-012: DB-Driven Polling Scheduler
 
 ## Context
 

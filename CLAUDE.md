@@ -51,17 +51,10 @@ daemon ← validator, escalation-mcp
 
 Zero-dependency package providing the type backbone for the entire system.
 
-**Types** (`src/types/`):
-- `pod.ts` — `PodStatus`, `Pod`, `CreatePodRequest`, workspace pod types
-- `profile.ts` — `Profile`, `StackTemplate`, `ExecutionTarget` (docker/aci), `NetworkPolicy`, `PrivateRegistry`
-- `runtime.ts` — `RuntimeType` (claude/codex/copilot), `AgentEvent` union types for streaming
-- `actions.ts` — Action definitions (`ActionDefinition`, `AuditEntry`) and audit trail types
-- `escalation.ts` — `EscalationRequest` union: `ask_human`, `ask_ai`, `report_blocker`, `report_plan`, `report_progress`
-- `validation.ts` — `SmokeResult`, `BuildResult`, `TaskReviewResult`
-- `events.ts` — `SystemEvent` union types for WebSocket streaming
-- `injection.ts` — Skill + MCP server injection types for container bootstrap
-- `auth.ts` — Auth token and JWT payload types
-- `model-provider.ts` — Credential shapes for Anthropic, Max, Foundry
+Types live in `src/types/` — one file per concern (pod, profile, runtime, actions,
+escalation, validation, events, injection, auth, model-provider, ac, analytics,
+history, issue-watcher, memory, notification, pod-options, scheduled-job,
+security-scan, session, sidecar, task-summary). Browse the dir; this list rots fast.
 
 **Key exports**:
 - `src/errors.ts` — `AutopodError`, `AuthError`, `PodNotFoundError`, etc.
@@ -70,19 +63,17 @@ Zero-dependency package providing the type backbone for the entire system.
 
 ### @autopod/daemon
 
-The backend server (~176 TS/SQL files). All heavy lifting lives here.
+The backend server. All heavy lifting lives here. See `packages/daemon/CLAUDE.md`
+for the per-subsystem deep dive — what follows is just the entry-point map.
 
-**Pod Management** (`src/pods/`):
-- `pod-manager.ts` — Central orchestrator, `processPod()` loop (~2000 lines)
-- `state-machine.ts` — `validateTransition()`, enforces allowed state transitions
-- `pod-repository.ts` — SQLite-backed CRUD for pods
-- `event-bus.ts` — Event publish/subscribe for WebSocket streaming
-- `escalation-repository.ts` — Tracks in-flight and resolved escalations
-- `validation-repository.ts` — Stores smoke/build/review results
-- `system-instructions-generator.ts` — Builds container CLAUDE.md with injected sections + skill docs
-- `skill-resolver.ts` — Resolves skill content from local files or GitHub repos
-- `registry-injector.ts` — Generates `.npmrc` / `NuGet.config` for private ADO feeds
-- `section-resolver.ts` — Resolves daemon-injected CLAUDE.md sections
+**Pod Management** (`src/pods/`) — large dir, ~30 modules; key entry points:
+- `pod-manager.ts` — `processPod()` orchestration loop (the main module)
+- `state-machine.ts` — `validateTransition()` + `canX()` helpers
+- `pod-repository.ts` — pod CRUD; **never** set `pod.status` directly, go through `updateStatus()`
+- `event-bus.ts` — publish/subscribe consumed by the WebSocket layer
+- `system-instructions-generator.ts` — builds the container's CLAUDE.md
+- `skill-resolver.ts` — resolves skill content (local file or GitHub)
+- `registry-injector.ts` — generates `.npmrc` / `NuGet.config` for private feeds
 
 **Container Management** (`src/containers/`):
 - `docker-container-manager.ts` — Dockerode wrapper: spawn, kill, exec, file I/O, log streaming
@@ -103,21 +94,19 @@ The backend server (~176 TS/SQL files). All heavy lifting lives here.
 
 **API & Routes** (`src/api/`):
 - `server.ts` — Fastify app factory (registers plugins + routes)
-- `routes/pods.ts` — Create, list, get, update pods
-- `routes/profiles.ts` — Profile CRUD
-- `routes/health.ts` — `GET /health`, `GET /version`
-- `routes/diff.ts` — Git diff retrieval
-- `routes/terminal.ts` — WebSocket terminal access
+- `routes/` — one file per resource: pods, profiles, health, diff, terminal,
+  actions, files, history, issue-watcher, memory, memory-workspace,
+  scheduled-jobs, screenshots, series, skills
 - `mcp-handler.ts` — MCP server bridge for escalation tool calls
 - `websocket.ts` — WebSocket event streaming to CLI/desktop
 - `plugins/` — auth, cors, rate-limit, request-logger middleware
 
 **Database** (`src/db/`):
 - `connection.ts` — SQLite connection (better-sqlite3)
-- `migrate.ts` — Migration runner (applies all pending `.sql` files in order)
-- `migrations/` — 35+ migration files (`001_initial.sql` through progressive additions for injection, execution_target, network_policy, actions, model_provider, workspace_pod, token_usage, commit_tracking, etc.)
+- `migrate.ts` — migration runner (applies pending `.sql` files in filename order)
+- `migrations/` — sequenced `NNN_*.sql` files; latest prefix is in the high 090s
 
-**CRITICAL — migration numbering**: The runner uses the numeric prefix as the schema version. **Two files sharing the same prefix is a silent bug** — the runner applies the first one alphabetically and skips the second forever (same version number). Always check the highest existing prefix before creating a new migration: `ls packages/daemon/src/db/migrations/ | tail -5`. Never reuse a number.
+**CRITICAL — migration numbering**: The runner uses the numeric prefix as the schema version. **Two files sharing the same prefix is a silent bug** — the runner applies the first one alphabetically and skips the second forever (same version number). A local `PreToolUse` hook (`.claude/hooks/migration-prefix-check.sh`) blocks Write/Edit on a colliding prefix; the cross-branch case still needs CI/manual rebase resolution. Check the highest existing prefix before creating one: `ls packages/daemon/src/db/migrations/ | tail -5`. Never reuse a number.
 
 **Profiles** (`src/profiles/`):
 - `profile-store.ts` — Profile CRUD with credential encryption
@@ -153,12 +142,17 @@ The backend server (~176 TS/SQL files). All heavy lifting lives here.
 Commander-based CLI.
 
 **Commands** (`src/commands/`):
-- `auth.ts` — Login/logout via MSAL (Azure AD)
-- `pod.ts` — Create, list, inspect, kill pods
-- `profile.ts` — Profile CRUD
-- `daemon.ts` — Health check + version
-- `workspace.ts` — Workspace pod operations
-- `validate.ts` — Trigger smoke test validation
+- `auth.ts` — login/logout via MSAL (Azure AD)
+- `pod.ts` — create, list, inspect, kill pods (also `ap run`)
+- `profile.ts` — profile CRUD
+- `daemon.ts` — health check + version
+- `workspace.ts` — workspace pod operations
+- `validate.ts` — trigger smoke test validation
+- `history.ts` — pod history queries
+- `research.ts` — research-pod workflows
+- `schedule.ts` — scheduled-job CRUD
+- `series.ts` — multi-pod series (consumed by `/plan-feature`)
+- `watch.ts` — live event tail
 
 **Auth** (`src/auth/`):
 - `msal-client.ts` — Azure AD MSAL integration
@@ -174,14 +168,27 @@ Commander-based CLI.
 MCP server injected into agent containers. Provides tools for agents to interact with the control plane.
 
 **Tools exposed** (`src/tools/`):
-- `ask_human` — Escalate to human reviewer (blocks until response)
-- `ask_ai` — Consult another AI model
-- `report_blocker` — Report a blocking issue
-- `report_plan` — Report implementation plan before starting
-- `report_progress` — Report phase transition
-- `validate_in_browser` — Browser-based Playwright validation
-- `execute_action` — Execute control-plane actions (Azure, ADO, GitHub, HTTP)
-- `check_messages` — Poll for pending human messages
+
+*Escalation*
+- `ask_human` — escalate to human reviewer (blocks until response)
+- `ask_ai` — consult another AI model
+- `report_blocker` — report a blocking issue
+- `report_plan` — report implementation plan before starting
+- `report_progress` — report phase transition
+- `report_task_summary` — final summary on completion
+- `check_messages` — poll for pending human messages
+- `request_credential` — JIT-vended credentials for an external service
+
+*Validation*
+- `validate_in_browser` — browser-based Playwright validation
+- `validate_locally` — local validation (build / test / lint)
+- `pre_submit_review` — pre-merge AI review of the agent's diff
+
+*Memory*
+- `memory_list`, `memory_read`, `memory_search`, `memory_suggest` — pod-scoped notes
+
+*Actions*
+- `execute_action` — control-plane actions (Azure, ADO, GitHub, HTTP)
 
 **Key files**:
 - `src/server.ts` — `createEscalationMcpServer()` factory
@@ -319,21 +326,13 @@ In dev mode (`NODE_ENV !== 'production'`), auth is stubbed to accept all tokens.
 - **PII sanitization** — `shared/src/sanitize/` strips PII + prompt injection patterns from agent output before storage
 - **Git PAT stripping** — bare repos mounted into containers have PATs stripped from remote URLs
 
-## Adding New Profile Fields — Checklist
+## Adding New Profile Fields
 
-When adding a new field to `Profile` in `packages/shared/src/types/profile.ts`, every layer must be updated. Work through this list completely before considering the task done:
-
-1. **shared** — add field to `Profile` type; export any new types from `src/index.ts`
-2. **daemon migration** — `ALTER TABLE profiles ADD COLUMN ...` in a new `packages/daemon/src/db/migrations/0NN_*.sql` (never reuse a prefix)
-3. **daemon profile-store** — `rowToProfile`, INSERT, and UPDATE in `packages/daemon/src/profiles/profile-store.ts`
-4. **daemon profile-validator** — add validation rules in `packages/daemon/src/profiles/profile-validator.ts`
-5. **desktop API layer** — add field + any new struct to `packages/desktop/Sources/AutopodClient/Types/ProfileResponse.swift`; decode in `init(from decoder:)`
-6. **desktop UI model** — add field to `Profile.swift` in `packages/desktop/Sources/AutopodUI/Models/Profile.swift`; update `init()`
-7. **desktop mapper** — map response → UI model and UI model → patch dict in `packages/desktop/Sources/AutopodDesktop/Mapping/ProfileMapper.swift`
-8. **desktop field catalog** — add entry to `ProfileOverrideCatalog.all` in `ProfileFieldCatalog.swift` so derived profiles can override the field
-9. **desktop override card** — add a `case "fieldKey":` branch in `overrideCard(for:)` in `ProfileEditorView.swift` and implement the card renderer; without this derived-profile editors show a "no editor available" placeholder
-10. **desktop editor UI** — add controls in the relevant `ProfileEditorView` section (base profile editor)
-11. **CLI** — if the field is user-facing, expose it in `packages/cli/src/commands/profile.ts`
+Adding a field to `Profile` touches ~11 layers (shared types, daemon migration,
+profile-store, validator, 6 desktop layers, CLI). The checklist + verification
+steps live in the `/add-profile-field` skill — run it whenever you're touching
+`packages/shared/src/types/profile.ts`. Skipping a layer is the #1 way to ship
+a profile field that the daemon validates but the desktop can't render.
 
 ## Code Style
 

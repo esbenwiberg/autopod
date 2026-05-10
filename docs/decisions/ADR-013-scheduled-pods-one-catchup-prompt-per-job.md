@@ -1,4 +1,4 @@
-# ADR 002: One Catch-Up Prompt Per Job (Not Per Missed Fire)
+# ADR-013: One Catch-Up Prompt Per Job (Not Per Missed Fire)
 
 ## Context
 

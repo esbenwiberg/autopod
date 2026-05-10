@@ -1,4 +1,4 @@
-# ADR 002: Store artifacts on filesystem, not SQLite
+# ADR-010: Store artifacts on filesystem, not SQLite
 
 ## Context
 
