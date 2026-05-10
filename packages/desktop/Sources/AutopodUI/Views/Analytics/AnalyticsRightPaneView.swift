@@ -15,6 +15,7 @@ public struct AnalyticsRightPaneView: View {
     public let loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
     public let loadQuality: ((Int) async throws -> QualityAnalyticsResponse)?
     public let loadSafety: ((Int) async throws -> SafetyAnalyticsResponse)?
+    public let loadThroughput: ((Int) async throws -> ThroughputAnalyticsResponse)?
     public let verifyAuditChain: (() async throws -> AuditChainVerifyResponse)?
     public let onSelectPod: ((String) -> Void)?
     /// Quality-specific pod selection callback. When provided, used instead of
@@ -23,6 +24,7 @@ public struct AnalyticsRightPaneView: View {
     /// Cost / Reliability row clicks.
     public let onQualitySelectPod: ((String) -> Void)?
     public let onSafetySelectPod: ((String) -> Void)?
+    public let onThroughputSelectPod: ((String) -> Void)?
 
     public init(
         card: AnalyticsCardKind?,
@@ -32,10 +34,12 @@ public struct AnalyticsRightPaneView: View {
         loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
         loadQuality: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         loadSafety: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
+        loadThroughput: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
         verifyAuditChain: (() async throws -> AuditChainVerifyResponse)? = nil,
         onSelectPod: ((String) -> Void)? = nil,
         onQualitySelectPod: ((String) -> Void)? = nil,
-        onSafetySelectPod: ((String) -> Void)? = nil
+        onSafetySelectPod: ((String) -> Void)? = nil,
+        onThroughputSelectPod: ((String) -> Void)? = nil
     ) {
         self.card = card
         self.pods = pods
@@ -44,10 +48,12 @@ public struct AnalyticsRightPaneView: View {
         self.loadReliability = loadReliability
         self.loadQuality = loadQuality
         self.loadSafety = loadSafety
+        self.loadThroughput = loadThroughput
         self.verifyAuditChain = verifyAuditChain
         self.onSelectPod = onSelectPod
         self.onQualitySelectPod = onQualitySelectPod
         self.onSafetySelectPod = onSafetySelectPod
+        self.onThroughputSelectPod = onThroughputSelectPod
     }
 
     public var body: some View {
@@ -78,6 +84,11 @@ public struct AnalyticsRightPaneView: View {
                 load: loadSafety,
                 verifyAuditChain: verifyAuditChain,
                 onSelectPod: onSafetySelectPod ?? onSelectPod
+            )
+        case .throughput:
+            ThroughputDrillView(
+                load: loadThroughput,
+                onSelectPod: onThroughputSelectPod ?? onSelectPod
             )
         case .none:
             VStack(spacing: 8) {

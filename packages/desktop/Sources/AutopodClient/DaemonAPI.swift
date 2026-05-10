@@ -290,6 +290,12 @@ public actor DaemonAPI {
     try await request("GET", "/pods/analytics/safety", query: ["days": "\(days)"])
   }
 
+  /// GET /pods/analytics/throughput — trailing-window throughput summary, per-pod
+  /// cohort, hourly queue-depth time-series, and time-in-status box-plot stats.
+  public func getThroughputAnalytics(days: Int = 30) async throws -> ThroughputAnalyticsResponse {
+    try await request("GET", "/pods/analytics/throughput", query: ["days": "\(days)"])
+  }
+
   /// POST /audit-chain/verify — runs a fleet-wide audit-chain integrity check.
   /// Records the result in `audit_chain_verifications` and returns a summary.
   public func verifyAuditChain() async throws -> AuditChainVerifyResponse {
