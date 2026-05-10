@@ -399,10 +399,13 @@ Collapse to single column under ~1040px viewport.
   - Broken-feature mirror — one-sentence answer to "would all ACs still
     pass on a broken feature?" with ✓ or ⚠.
   - Per-brief issues (if any) — each rendered as an inline callout with
-    a label, body, and 2–3 inline action proposals
-    (e.g. `▸ split as proposed`, `▸ keep`, `▸ counter-propose`).
-    Action proposals are read-only hints, not interactive — they tell
-    the user what they can reply in the terminal.
+    a label, body, and 2–3 selectable resolution choices
+    (e.g. `split as proposed`, `keep`, `counter-propose`). Choices are
+    rendered as pill-shaped buttons (NOT link-styled) and behave like a
+    radio group: clicking one selects it and de-selects the others for
+    that issue. The selected pill is filled with the accent color;
+    unselected pills are outlined and muted. Selection state feeds the
+    reply composer (see Interactivity).
 
 **Side rail (right column, sticky):**
 
@@ -411,10 +414,11 @@ Order top-down by attention priority:
 - `Cross-cutting issues (N)` — issues that aren't bound to a single
   brief: success-signal-not-linked, parallel-touch conflicts on shared
   files, deferred user answers, unverified precedents. Each issue has
-  a heading, a paragraph of context, and 2–3 inline action proposals.
-  Below the listed issues, a one-line `…plus N issues across M briefs`
-  with a button that activates the `Show only briefs with issues`
-  filter.
+  a heading, a paragraph of context, and 2–3 selectable resolution
+  choices using the same pill / radio-group treatment as per-brief
+  issues (see above). Below the listed issues, a one-line
+  `…plus N issues across M briefs` with a button that activates the
+  `Show only briefs with issues` filter.
 - `ADRs introduced (N)` — each ADR rendered as a `<details>` with the
   ID and Accepted/Proposed status in the summary. Body sections:
   Decision, Consequences (split into Easier `+` / Harder `−` /
@@ -432,18 +436,56 @@ and section headings:
 
 - green: dimension covered, AC validates outcome, ADR consequence
   "easier"
-- blue: api ACs, links, action proposals
+- blue: api ACs, selected resolution pills (filled), reply-composer accent
 - amber: open question, AC corroborates wiring, deferred answer
 - red: unresolved/blocking, AC theatre risk, ADR consequence "harder"
 - accent (purple/violet): ADRs, accepted decisions
 
-**Interactivity** — vanilla JS, no framework, ~30 lines:
+Resolution pills must NOT be styled as hyperlinks (no `<a>` underline,
+no dashed border that mimics a link). Use a true button affordance:
+rounded rectangle, subtle border in the unselected state, filled with
+the blue accent when selected.
+
+**Interactivity** — vanilla JS, no framework, ~80 lines:
 
 - `Expand all` / `Collapse all` toggle `open` on every
   `details.brief, details.adr`.
 - `Show only briefs with issues` toggles a `.hidden` class on briefs
   without a halo and auto-expands the visible ones. Button label
   swaps between `Show only briefs with issues` and `Show all briefs`.
+- **Resolution pill selection** — clicking a pill toggles a
+  `.selected` class on the clicked pill and removes it from the other
+  pills inside the same `.actions` container (radio-group semantics
+  per issue). State lives in DOM only; no persistence.
+- **Reply composer** — a sticky bar pinned to the bottom-right
+  showing `Selected: N / M issues  [Copy reply]`. `M` is the total
+  count of issues (per-brief + cross-cutting); `N` updates live as
+  pills are selected. The button is disabled while `N == 0`.
+  Clicking `Copy reply` assembles a structured reply from the
+  selections and writes it to the clipboard via
+  `navigator.clipboard.writeText(...)`. Show a brief inline toast
+  (`Copied — paste into your terminal`) on success; fall back to a
+  visible `<textarea>` with the text pre-selected if the clipboard
+  API is unavailable (some `file://` browsers refuse it).
+
+**Reply template** — the assembled clipboard text MUST follow this
+exact shape so the planner can parse it deterministically:
+
+```
+Resolutions for plan preview:
+
+- <issue-label>: <selected-pill-text>
+- <issue-label>: <selected-pill-text>
+...
+
+Unresolved (no selection): <issue-label>, <issue-label>
+```
+
+Omit the `Unresolved` line entirely when every issue has a selection.
+Issue labels match the heading rendered in the callout — no
+abbreviation, no reformatting. The user can edit the text after
+pasting; the structure exists to make the common case (accept all
+defaults) one keystroke.
 
 #### 3. Print the path and ask for greenlight
 
@@ -452,8 +494,10 @@ After writing the file, print exactly one short message to the terminal:
 ```
 ✅ Show-back rendered: .autopod/review/exit-checklist.html
 
-Open it in a browser, work through every halo and rail item, then
-reply "green light" in this terminal when ready to write the spec.
+Open it in a browser, work through every halo and rail item. For each
+open issue, click one of the resolution pills. When you're done, hit
+"Copy reply" in the bottom-right and paste it back here — or just
+reply "green light" if you have no resolutions to send.
 ```
 
 Do NOT print the markdown checklist alongside it. The HTML is the
