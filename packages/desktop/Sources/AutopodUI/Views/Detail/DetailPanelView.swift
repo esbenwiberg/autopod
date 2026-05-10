@@ -27,6 +27,7 @@ public struct DetailPanelView: View {
     public var onTerminalDisconnect: (() -> Void)?
     public var onRefreshDiff: (() -> Void)?
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
+    public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
     public var isLoadingLogs: Bool
@@ -53,6 +54,7 @@ public struct DetailPanelView: View {
         onTerminalDisconnect: (() -> Void)? = nil,
         onRefreshDiff: (() -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
+        loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
         isLoadingLogs: Bool = false,
@@ -75,6 +77,7 @@ public struct DetailPanelView: View {
         self.onTerminalDisconnect = onTerminalDisconnect
         self.onRefreshDiff = onRefreshDiff
         self.loadFiles = loadFiles
+        self.loadArtifacts = loadArtifacts
         self.loadContent = loadContent
         self.loadQuality = loadQuality
         self.isLoadingLogs = isLoadingLogs
@@ -90,6 +93,7 @@ public struct DetailPanelView: View {
 
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
     private var isMarkdownAvailable: Bool { pod.hasWorktree || pod.pod.output == .artifact }
+    private var isArtifactsAvailable: Bool { pod.hasWorktree || pod.pod.output == .artifact }
     @State private var showPromoteMenu: Bool = false
 
     /// Artifact payload beats everything; for series pods the graph is the landing view;
@@ -127,6 +131,7 @@ public struct DetailPanelView: View {
                 case .summary:    SummaryTab(pod: pod, loadQuality: loadQuality)
                 case .terminal:   EmptyView()
                 case .markdown:   MarkdownTab(pod: pod, loadFiles: loadFiles, loadContent: loadContent)
+                case .artifacts:  ArtifactsTab(pod: pod, loadArtifacts: loadArtifacts, loadContent: loadContent)
                 case .series:
                     SeriesPipelineView(
                         pods: seriesPods,
@@ -1029,6 +1034,7 @@ public struct DetailPanelView: View {
         DetailTab.allCases.filter { tab in
             switch tab {
             case .series: return pod.seriesId != nil
+            case .artifacts: return isArtifactsAvailable
             default: return true
             }
         }
@@ -1108,7 +1114,7 @@ struct WorktreeCompromisedBanner: View {
 // MARK: - Tab enum
 
 public enum DetailTab: CaseIterable {
-    case overview, logs, diff, terminal, markdown, validation, summary, series
+    case overview, logs, diff, terminal, markdown, artifacts, validation, summary, series
 
     var label: String {
         switch self {
@@ -1117,6 +1123,7 @@ public enum DetailTab: CaseIterable {
         case .diff:        "Diff"
         case .terminal:    "Terminal"
         case .markdown:    "Markdown"
+        case .artifacts:   "Artifacts"
         case .validation:  "Validation"
         case .summary:     "Summary"
         case .series:      "Series"
@@ -1130,6 +1137,7 @@ public enum DetailTab: CaseIterable {
         case .diff:        "doc.text.magnifyingglass"
         case .terminal:    "terminal"
         case .markdown:    "doc.richtext"
+        case .artifacts:   "doc.on.doc"
         case .validation:  "checkmark.seal"
         case .summary:     "doc.text.below.ecg"
         case .series:      "rectangle.3.group.fill"

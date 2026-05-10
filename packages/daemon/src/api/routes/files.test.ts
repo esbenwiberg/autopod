@@ -177,6 +177,7 @@ describe('filesRoutes — container-first lookup', () => {
   let app: ReturnType<typeof Fastify>;
   let execMock: ReturnType<typeof vi.fn>;
   let readMock: ReturnType<typeof vi.fn>;
+  let readBinaryMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     tmp = await mkdtemp(path.join(tmpdir(), 'autopod-files-'));
@@ -185,11 +186,13 @@ describe('filesRoutes — container-first lookup', () => {
 
     execMock = vi.fn();
     readMock = vi.fn();
+    readBinaryMock = vi.fn();
 
     const cm: Partial<ContainerManager> = {
       execInContainer: (_id: string, command: string[], _opts?: ExecOptions): Promise<ExecResult> =>
         execMock(command),
       readFile: (id: string, p: string): Promise<string> => readMock(id, p),
+      readFileBinary: (id: string, p: string): Promise<Buffer> => readBinaryMock(id, p),
     };
 
     app = Fastify();
@@ -263,11 +266,33 @@ describe('filesRoutes — container-first lookup', () => {
     expect(readMock).toHaveBeenCalledWith('c1', '/workspace/docs/foo.md');
   });
 
+  it('returns binary content from the container as base64', async () => {
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stderr: '',
+      stdout: 'regular file\t8\n',
+    });
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic
+    readBinaryMock.mockResolvedValue(bytes);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/abc/files/content',
+      query: { path: 'shot.png' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { content: string; encoding?: string };
+    expect(body.encoding).toBe('base64');
+    expect(Buffer.from(body.content, 'base64').equals(bytes)).toBe(true);
+    expect(readMock).not.toHaveBeenCalled();
+    expect(readBinaryMock).toHaveBeenCalledWith('c1', '/workspace/shot.png');
+  });
+
   it('returns 413 for files in the container that exceed the size cap', async () => {
     execMock.mockResolvedValue({
       exitCode: 0,
       stderr: '',
-      stdout: `regular file\t${1024 * 1024 * 5}\n`,
+      stdout: `regular file\t${1024 * 1024 * 6}\n`,
     });
 
     const res = await app.inject({

@@ -18,10 +18,15 @@ interface ContentResponse {
   path: string;
   content: string;
   size: number;
+  /** "base64" when `content` is base64-encoded bytes (binary types like png/pdf).
+   *  Absent for utf-8 text. */
+  encoding?: 'base64';
 }
 
 const DEFAULT_EXTENSIONS = ['md'];
-const MAX_FILE_BYTES = 1024 * 1024;
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
+/** Extensions returned as base64-encoded bytes — utf-8 decoding would corrupt them. */
+const BINARY_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'pdf', 'webp', 'ico']);
 const MAX_LIST_FILES = 2000;
 const CONTAINER_WORKDIR = '/workspace';
 const SKIP_DIRS = [
@@ -104,9 +109,11 @@ export function filesRoutes(
       return { error: 'path escapes the pod root' };
     }
 
+    const isBinary = isBinaryPath(relPath);
+
     if (containerManagerFactory && pod.containerId) {
       const cm = containerManagerFactory.get(pod.executionTarget);
-      const fromContainer = await tryReadFromContainer(cm, pod.containerId, relPath);
+      const fromContainer = await tryReadFromContainer(cm, pod.containerId, relPath, isBinary);
       if (fromContainer === 'too-large') {
         reply.status(413);
         return { error: `file exceeds ${MAX_FILE_BYTES} bytes` };
@@ -147,6 +154,16 @@ export function filesRoutes(
       return { error: `file exceeds ${MAX_FILE_BYTES} bytes` };
     }
 
+    if (isBinary) {
+      const buf = await readFile(resolved);
+      return {
+        path: path.relative(root, resolved),
+        content: buf.toString('base64'),
+        size: stats.size,
+        encoding: 'base64',
+      } satisfies ContentResponse;
+    }
+
     const content = await readFile(resolved, 'utf8');
     return {
       path: path.relative(root, resolved),
@@ -154,6 +171,11 @@ export function filesRoutes(
       size: stats.size,
     } satisfies ContentResponse;
   });
+}
+
+function isBinaryPath(relPath: string): boolean {
+  const ext = path.extname(relPath).slice(1).toLowerCase();
+  return BINARY_EXTENSIONS.has(ext);
 }
 
 function parseExtensions(ext: string | undefined): Set<string> {
@@ -271,6 +293,7 @@ async function tryReadFromContainer(
   cm: ContainerManager,
   containerId: string,
   relPath: string,
+  isBinary: boolean,
 ): Promise<ContentResponse | 'too-large' | null> {
   const fullPath = `${CONTAINER_WORKDIR}/${relPath}`;
 
@@ -295,6 +318,16 @@ async function tryReadFromContainer(
   const size = Number(sizeStr);
   if (!Number.isFinite(size)) return null;
   if (size > MAX_FILE_BYTES) return 'too-large';
+
+  if (isBinary) {
+    let buf: Buffer;
+    try {
+      buf = await cm.readFileBinary(containerId, fullPath);
+    } catch {
+      return null;
+    }
+    return { path: relPath, content: buf.toString('base64'), size, encoding: 'base64' };
+  }
 
   let content: string;
   try {

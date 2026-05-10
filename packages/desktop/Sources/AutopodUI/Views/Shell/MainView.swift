@@ -38,6 +38,7 @@ public struct MainView: View {
     public var onRefreshDiff: ((String) -> Void)?
     public var onShowSettings: (() -> Void)?
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
+    public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
@@ -101,6 +102,7 @@ public struct MainView: View {
         onRefreshDiff: ((String) -> Void)? = nil,
         onShowSettings: (() -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
+        loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
@@ -155,6 +157,7 @@ public struct MainView: View {
         self.onRefreshDiff = onRefreshDiff
         self.onShowSettings = onShowSettings
         self.loadFiles = loadFiles
+        self.loadArtifacts = loadArtifacts
         self.loadContent = loadContent
         self.loadQuality = loadQuality
         self.loadQualityScores = loadQualityScores
@@ -454,6 +457,7 @@ public struct MainView: View {
                     onTerminalDisconnect: onTerminalDisconnect,
                     onRefreshDiff: { onRefreshDiff?(pod.id) },
                     loadFiles: loadFiles,
+                    loadArtifacts: loadArtifacts,
                     loadContent: loadContent,
                     loadQuality: loadQuality,
                     isLoadingLogs: isLoadingLogs,

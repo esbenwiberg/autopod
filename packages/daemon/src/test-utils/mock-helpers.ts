@@ -137,6 +137,7 @@ export function createMockContainerManager(): ContainerManager {
     refreshFirewall: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
     readFile: vi.fn(async () => ''),
+    readFileBinary: vi.fn(async () => Buffer.alloc(0)),
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),

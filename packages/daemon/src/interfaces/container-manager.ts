@@ -60,6 +60,10 @@ export interface ContainerManager {
   start(containerId: string): Promise<void>;
   writeFile(containerId: string, path: string, content: string | Buffer): Promise<void>;
   readFile(containerId: string, path: string): Promise<string>;
+  /** Read raw bytes from a container path. Same semantics as `readFile` but
+   *  returns the file as a Buffer — required for binary files (PNG, PDF, etc.)
+   *  that would be corrupted by utf-8 decoding. */
+  readFileBinary(containerId: string, path: string): Promise<Buffer>;
   /**
    * Extract a directory from a container (works on stopped containers) to a host path.
    * Clears the host directory contents first (skipping any entries in `excludes`),

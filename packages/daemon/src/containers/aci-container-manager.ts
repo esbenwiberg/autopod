@@ -197,7 +197,13 @@ export class AciContainerManager implements ContainerManager {
   }
 
   async readFile(containerId: string, filePath: string): Promise<string> {
-    // ACI doesn't have a file archive API — read via exec + base64 to avoid encoding issues
+    const buf = await this.readFileBinary(containerId, filePath);
+    return buf.toString('utf-8');
+  }
+
+  async readFileBinary(containerId: string, filePath: string): Promise<Buffer> {
+    // ACI doesn't have a file archive API — read via exec + base64 to avoid
+    // mangling binary data through the exec stream's text channel.
     const result = await this.execInContainer(containerId, [
       'sh',
       '-c',
@@ -206,7 +212,7 @@ export class AciContainerManager implements ContainerManager {
     if (result.exitCode !== 0) {
       throw new Error(`Failed to read file ${filePath} from ACI container: ${result.stderr}`);
     }
-    return Buffer.from(result.stdout.trim(), 'base64').toString('utf-8');
+    return Buffer.from(result.stdout.trim(), 'base64');
   }
 
   async extractDirectoryFromContainer(

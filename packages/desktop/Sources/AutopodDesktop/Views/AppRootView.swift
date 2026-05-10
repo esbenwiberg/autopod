@@ -121,6 +121,12 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.listSessionFiles(id)
       },
+      loadArtifacts: { [connectionManager] (id: String) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.listSessionFiles(
+          id, ext: "html,md,svg,json,txt,log,csv,png,jpg,jpeg,gif,webp,pdf"
+        )
+      },
       loadContent: { [connectionManager] (id: String, path: String) in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.getSessionFileContent(id, path: path)

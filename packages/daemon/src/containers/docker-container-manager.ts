@@ -367,11 +367,16 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async readFile(containerId: string, filePath: string): Promise<string> {
+    const buf = await this.readFileBinary(containerId, filePath);
+    return buf.toString('utf-8');
+  }
+
+  async readFileBinary(containerId: string, filePath: string): Promise<Buffer> {
     const container = this.docker.getContainer(containerId);
 
     // getArchive returns a tar stream of the file/directory at the given path
     const archiveStream = await boundedDockerCall(container.getArchive({ path: filePath }), {
-      label: 'container.getArchive (readFile)',
+      label: 'container.getArchive (readFileBinary)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.getArchive,
       logger: this.logger,
       containerId,
@@ -381,14 +386,14 @@ export class DockerContainerManager implements ContainerManager {
     const extract = tar.extract();
     const chunks: Buffer[] = [];
 
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<Buffer>((resolve, reject) => {
       extract.on('entry', (_header, stream, next) => {
         stream.on('data', (chunk: Buffer) => chunks.push(chunk));
         stream.on('end', next);
         stream.on('error', reject);
       });
       extract.on('finish', () => {
-        resolve(Buffer.concat(chunks).toString('utf-8'));
+        resolve(Buffer.concat(chunks));
       });
       extract.on('error', reject);
 
