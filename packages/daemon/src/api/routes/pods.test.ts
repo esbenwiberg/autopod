@@ -1038,3 +1038,232 @@ describe('GET /pods/analytics/throughput', () => {
     expect(body.queueDepth).toHaveLength(2160);
   });
 });
+
+// ── GET /pods/analytics/escalations ───────────────────────────────────────────
+
+describe('GET /pods/analytics/escalations', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    podSeq = 0;
+    db = createTestDb();
+
+    const profileStore = createProfileStore(db);
+    const podRepo = createPodRepository(db);
+    const eventRepo = createEventRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    const nudgeRepo = createNudgeRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const authModule = createMockAuthModule();
+
+    const worktreeManager = {
+      create: vi.fn(),
+      cleanup: vi.fn(),
+      getDiffStats: vi.fn(),
+      getDiff: vi.fn(),
+      mergeBranch: vi.fn(),
+      commitFiles: vi.fn(),
+      pushBranch: vi.fn(),
+      getCommitLog: vi.fn(),
+    };
+
+    const runtimeRegistry = {
+      get: vi.fn().mockReturnValue({
+        type: 'claude' as const,
+        spawn: vi.fn().mockReturnValue(
+          (async function* () {
+            yield {
+              type: 'complete' as const,
+              timestamp: new Date().toISOString(),
+              result: 'done',
+            };
+          })(),
+        ),
+        resume: vi.fn(),
+        abort: vi.fn(),
+        suspend: vi.fn(),
+      }),
+    };
+
+    const validationEngine = {
+      validate: vi.fn().mockResolvedValue({
+        podId: 'x',
+        attempt: 0,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'pass',
+          build: { status: 'pass', output: '', duration: 100 },
+          health: { status: 'pass', url: 'http://localhost/', responseCode: 200, duration: 50 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'pass',
+        duration: 200,
+      }),
+    };
+
+    // biome-ignore lint/style/useConst: circular dependency break
+    let podManager: ReturnType<typeof createPodManager>;
+
+    const podQueue = createPodQueue(1, async (podId) => podManager.processPod(podId), logger);
+
+    podManager = createPodManager({
+      podRepo,
+      escalationRepo,
+      nudgeRepo,
+      profileStore,
+      eventBus,
+      containerManagerFactory: {
+        get: vi.fn(() => ({
+          spawn: vi.fn().mockResolvedValue('c-1'),
+          kill: vi.fn(),
+          stop: vi.fn(),
+          start: vi.fn(),
+          refreshFirewall: vi.fn(),
+          writeFile: vi.fn(),
+          readFile: vi.fn(),
+          getStatus: vi.fn().mockResolvedValue('running' as const),
+          execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+          execStreaming: vi.fn(),
+        })),
+      },
+      worktreeManager,
+      runtimeRegistry,
+      validationEngine,
+      enqueueSession: (id) => podQueue.enqueue(id),
+      mcpBaseUrl: 'http://localhost:3100',
+      daemonConfig: { mcpServers: [], claudeMdSections: [] },
+      logger,
+    });
+
+    const podBridge = {
+      createEscalation: vi.fn(),
+      resolveEscalation: vi.fn(),
+      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getMaxAiCalls: vi.fn().mockReturnValue(5),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
+      getReviewerModel: vi.fn().mockReturnValue('sonnet'),
+      callReviewerModel: vi.fn().mockResolvedValue('ok'),
+      incrementEscalationCount: vi.fn(),
+      reportPlan: vi.fn(),
+      reportProgress: vi.fn(),
+      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      executeAction: vi.fn(),
+      getAvailableActions: vi.fn().mockReturnValue([]),
+      writeFileInContainer: vi.fn(),
+      execInContainer: vi.fn(),
+    };
+
+    app = await createServer({
+      authModule,
+      podManager,
+      profileStore,
+      eventBus,
+      eventRepo,
+      podBridge,
+      pendingRequestsByPod: new Map(),
+      db,
+      logLevel: 'silent',
+      prettyLog: false,
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: '/profiles',
+      headers: authHeaders,
+      payload: {
+        name: 'test-profile',
+        repoUrl: 'https://github.com/org/repo',
+        buildCommand: 'npm run build',
+        startCommand: 'node server.js --port $PORT',
+      },
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('default days=30: returns 200 with correct top-level shape', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/escalations',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    expect(typeof body.summary.selfRecoveryRate).toBe('number');
+    expect(typeof body.summary.cohortSize).toBe('number');
+    expect(typeof body.summary.humanAttentionPodCount).toBe('number');
+    expect(typeof body.summary.humanAttentionCount).toBe('number');
+    expect(typeof body.summary.askAiCount).toBe('number');
+    expect(Array.isArray(body.summary.dailyHumanCountSparkline)).toBe(true);
+    expect(body.summary.dailyHumanCountSparkline).toHaveLength(30);
+    expect(body.summary.selfRecoveryRateDelta).toHaveProperty('direction');
+    expect(Array.isArray(body.askHumanTtr.buckets)).toBe(true);
+    expect(body.askHumanTtr.buckets).toHaveLength(8);
+    expect(typeof body.askHumanTtr.resolvedCount).toBe('number');
+    expect(typeof body.askHumanTtr.openCount).toBe('number');
+    expect(typeof body.askHumanTtr.maxSeconds).toBe('number');
+    expect(Array.isArray(body.perProfile)).toBe(true);
+    expect(Array.isArray(body.blockerPatterns)).toBe(true);
+    expect(body.blockerPatterns.length).toBeLessThanOrEqual(10);
+  });
+
+  it('days=0 returns 400 with invalid_days code', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/escalations?days=0',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('invalid_days');
+  });
+
+  it('days=-5 returns 400 with invalid_days code', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/escalations?days=-5',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('invalid_days');
+  });
+
+  it('days=400 returns 400 with invalid_days code', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/escalations?days=400',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('invalid_days');
+  });
+
+  it('days=abc returns 400 with invalid_days code', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/escalations?days=abc',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('invalid_days');
+  });
+
+  it('days=90 returns 200 with sparkline length 90 and askHumanTtr.buckets length 8', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/escalations?days=90',
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.summary.dailyHumanCountSparkline).toHaveLength(90);
+    expect(body.askHumanTtr.buckets).toHaveLength(8);
+  });
+});

@@ -226,3 +226,74 @@ export interface AuditChainVerifyResponse {
   /** ISO timestamp written into audit_chain_verifications. */
   ranAt: string;
 }
+
+// ── Escalations analytics ─────────────────────────────────────────────────────
+
+/** Escalation types that require a human to look at and respond.
+ *  ask_ai (agent-consults-another-AI) and request_credential (JIT vending)
+ *  are explicitly excluded — they are autonomous-recovery signal, not stuck-ness. */
+export type HumanAttentionKind =
+  | 'ask_human'
+  | 'report_blocker'
+  | 'validation_override'
+  | 'action_approval';
+
+export interface EscalationsSummary {
+  /** Fraction in [0, 1]. Returns 1.0 when cohortSize === 0. */
+  selfRecoveryRate: number;
+  /** Size of the terminal cohort over the trailing window. */
+  cohortSize: number;
+  /** Distinct pod count in the terminal cohort with ≥1 human-attention escalation. */
+  humanAttentionPodCount: number;
+  /** Total human-attention escalation rows whose pod is in the terminal cohort. */
+  humanAttentionCount: number;
+  /** Total ask_ai escalation rows whose pod is in the terminal cohort. */
+  askAiCount: number;
+  /** One entry per day in window (length === days). count = human-attention rows that day. */
+  dailyHumanCountSparkline: Array<{ day: string; count: number }>;
+  /** Signed absolute-fraction delta vs the prior window of the same length.
+   *  delta.value = 0.05 means rate improved by 5pp. 'up' is good (more autonomy). */
+  selfRecoveryRateDelta: { value: number; direction: 'up' | 'down' | 'flat' };
+}
+
+export interface AskHumanTtrBucket {
+  /** One of 8 fixed labels: '<1m','1–5m','5–15m','15m–1h','1–4h','4–12h','12–24h','>24h'. */
+  label: string;
+  count: number;
+}
+
+export interface AskHumanTtr {
+  /** Always 8 entries in the fixed label order. All-zero when no resolved rows. */
+  buckets: AskHumanTtrBucket[];
+  /** Sum of buckets[].count. */
+  resolvedCount: number;
+  /** Point-in-time count of unresolved ask_human rows created in window. Not in histogram. */
+  openCount: number;
+  /** Max (resolved_at − created_at) seconds across resolved cohort. 0 when empty. */
+  maxSeconds: number;
+}
+
+export interface PerProfileEscalation {
+  profile: string;
+  podCount: number;
+  escalatedCount: number;
+  /** = escalatedCount / podCount. In [0, 1]. */
+  rate: number;
+}
+
+export interface BlockerPattern {
+  /** Verbatim trimmed description from report_blocker payload. */
+  description: string;
+  count: number;
+  /** Up to 10 distinct pod IDs, most-recent-first. */
+  podIds: string[];
+}
+
+export interface EscalationsAnalyticsResponse {
+  summary: EscalationsSummary;
+  askHumanTtr: AskHumanTtr;
+  /** Sorted by rate DESC, ties by podCount DESC. */
+  perProfile: PerProfileEscalation[];
+  /** Top 10 by count DESC, ties by description ASC. Length <= 10. */
+  blockerPatterns: BlockerPattern[];
+}
