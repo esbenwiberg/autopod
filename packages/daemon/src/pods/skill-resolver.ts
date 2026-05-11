@@ -4,32 +4,63 @@ import { type InjectedSkill, collectPiiPatternNames, processContent } from '@aut
 import type { Logger } from 'pino';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 
-/** Directory scanned for builtin (daemon-bundled) skills. Override via SKILLS_DIR env var. */
-export const BUILTIN_SKILLS_DIR = process.env.SKILLS_DIR ?? path.resolve(process.cwd(), 'skills');
+/** Directory scanned for builtin (daemon-bundled) skills. Override via SKILLS_DIR env var.
+ *  Defaults to the repo-root .claude/skills directory (resolved relative to this file so it
+ *  works from both source and compiled dist layouts: 4 dirs up from src/pods/ or dist/pods/). */
+const _dir = path.dirname(new URL(import.meta.url).pathname);
+export const BUILTIN_SKILLS_DIR =
+  process.env.SKILLS_DIR ?? path.resolve(_dir, '../../../..', '.claude/skills');
 
 export interface BuiltinSkillMeta {
   name: string;
   description: string | null;
 }
 
+/** Resolve the content file path for a builtin skill.
+ *  Supports two layouts: flat `name.md` and subdirectory `name/SKILL.md`. */
+export async function resolveBuiltinSkillPath(name: string): Promise<string> {
+  const flat = path.join(BUILTIN_SKILLS_DIR, `${name}.md`);
+  try {
+    await fs.access(flat);
+    return flat;
+  } catch {
+    return path.join(BUILTIN_SKILLS_DIR, name, 'SKILL.md');
+  }
+}
+
 /**
- * List all .md files in the builtin skills directory and extract their frontmatter name/description.
+ * List all builtin skills in the skills directory.
+ * Supports flat `name.md` files and subdirectory `name/SKILL.md` layouts.
  * Returns an empty array if the directory doesn't exist.
  */
 export async function listBuiltinSkills(): Promise<BuiltinSkillMeta[]> {
-  let entries: string[];
+  let dirents: Awaited<ReturnType<typeof fs.readdir>>;
   try {
-    const dirents = await fs.readdir(BUILTIN_SKILLS_DIR);
-    entries = dirents.filter((f) => f.endsWith('.md'));
+    dirents = await fs.readdir(BUILTIN_SKILLS_DIR, { withFileTypes: true });
   } catch {
     return [];
   }
 
-  const results = await Promise.all(
-    entries.map(async (file): Promise<BuiltinSkillMeta> => {
-      const name = file.replace(/\.md$/, '');
+  const candidates: Array<{ name: string; file: string }> = [];
+
+  for (const d of dirents) {
+    if (d.isFile() && d.name.endsWith('.md')) {
+      candidates.push({ name: d.name.replace(/\.md$/, ''), file: path.join(BUILTIN_SKILLS_DIR, d.name) });
+    } else if (d.isDirectory()) {
+      const skillFile = path.join(BUILTIN_SKILLS_DIR, d.name, 'SKILL.md');
       try {
-        const content = await fs.readFile(path.join(BUILTIN_SKILLS_DIR, file), 'utf-8');
+        await fs.access(skillFile);
+        candidates.push({ name: d.name, file: skillFile });
+      } catch {
+        // no SKILL.md in this subdir — skip
+      }
+    }
+  }
+
+  const results = await Promise.all(
+    candidates.map(async ({ name, file }): Promise<BuiltinSkillMeta> => {
+      try {
+        const content = await fs.readFile(file, 'utf-8');
         const description = extractFrontmatterField(content, 'description');
         return { name, description };
       } catch {
@@ -145,7 +176,7 @@ async function resolveOne(
       case 'builtin':
         return await resolveLocal(
           skill,
-          path.join(BUILTIN_SKILLS_DIR, `${skill.name}.md`),
+          await resolveBuiltinSkillPath(skill.name),
           logger,
           podId,
           safetyEventsRepo,
