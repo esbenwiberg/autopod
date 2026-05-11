@@ -493,6 +493,7 @@ public struct Pod: Identifiable, Sendable {
     public var task: String
     public var model: String
     public var startedAt: Date
+    public var runningAt: Date?
     public var updatedAt: Date
 
     /// Base branch this pod was forked from (workspace handoff)
@@ -661,12 +662,13 @@ public struct Pod: Identifiable, Sendable {
         worktreeCompromised: Bool = false,
         skipValidation: Bool = false,
         preSubmitReview: PreSubmitReviewSnapshot? = nil,
-        fixIteration: Int = 0
+        fixIteration: Int = 0,
+        runningAt: Date? = nil
     ) {
         self.id = id; self.status = status; self.pod = pod
         self.hasWorktree = hasWorktree
         self.branch = branch; self.profileName = profileName; self.task = task
-        self.model = model; self.startedAt = startedAt; self.updatedAt = updatedAt
+        self.model = model; self.startedAt = startedAt; self.runningAt = runningAt; self.updatedAt = updatedAt
         self.baseBranch = baseBranch
         self.acFrom = acFrom; self.acceptanceCriteria = acceptanceCriteria
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion

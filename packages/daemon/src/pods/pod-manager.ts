@@ -3775,6 +3775,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           containerId,
           worktreePath,
           previewUrl,
+          runningAt: new Date().toISOString(),
         });
 
         // Resolve and write skills for all pod types (including workspace)

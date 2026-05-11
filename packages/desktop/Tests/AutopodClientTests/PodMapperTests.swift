@@ -25,6 +25,7 @@ import AutopodUI
     "skipValidation": false,
     "createdAt": "2026-04-01T09:00:00Z",
     "startedAt": "2026-04-01T09:00:05Z",
+    "runningAt": "2026-04-01T09:00:35Z",
     "completedAt": null,
     "updatedAt": "2026-04-01T09:05:00Z",
     "userId": "user-1",
@@ -69,6 +70,115 @@ import AutopodUI
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
   #expect(pod.isWorkspace == false)
+
+  #expect(pod.runningAt == PodMapper.parseDate("2026-04-01T09:00:35Z"))
+}
+
+@Test func mapsNullRunningAt() throws {
+  let json = """
+  {
+    "id": "pod-null-rat",
+    "profileName": "my-app",
+    "task": "test",
+    "status": "running",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/x",
+    "containerId": null,
+    "worktreePath": null,
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:05Z",
+    "runningAt": null,
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:00:10Z",
+    "userId": "user-1",
+    "filesChanged": 0,
+    "linesAdded": 0,
+    "linesRemoved": 0,
+    "previewUrl": null,
+    "prUrl": null,
+    "plan": null,
+    "progress": null,
+    "acceptanceCriteria": null,
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "baseBranch": null,
+    "acFrom": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "commitCount": 0,
+    "lastCommitAt": null
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+
+  #expect(pod.runningAt == nil)
+}
+
+@Test func mapsMissingRunningAt() throws {
+  let json = """
+  {
+    "id": "pod-missing-rat",
+    "profileName": "my-app",
+    "task": "test",
+    "status": "running",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/x",
+    "containerId": null,
+    "worktreePath": null,
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:05Z",
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:00:10Z",
+    "userId": "user-1",
+    "filesChanged": 0,
+    "linesAdded": 0,
+    "linesRemoved": 0,
+    "previewUrl": null,
+    "prUrl": null,
+    "plan": null,
+    "progress": null,
+    "acceptanceCriteria": null,
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "baseBranch": null,
+    "acFrom": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "commitCount": 0,
+    "lastCommitAt": null
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+
+  #expect(pod.runningAt == nil)
 }
 
 @Test func mapsAwaitingInputWithEscalation() throws {

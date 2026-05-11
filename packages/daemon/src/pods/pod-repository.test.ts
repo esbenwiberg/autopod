@@ -93,6 +93,7 @@ describe('PodRepository', () => {
       expect(pod.pendingEscalation).toBeNull();
       expect(pod.escalationCount).toBe(0);
       expect(pod.startedAt).toBeNull();
+      expect(pod.runningAt).toBeNull();
       expect(pod.completedAt).toBeNull();
       expect(pod.filesChanged).toBe(0);
       expect(pod.linesAdded).toBe(0);
@@ -419,6 +420,21 @@ describe('PodRepository', () => {
       const child = repo.getOrThrow('legacy-child');
       expect(child.dependsOnPodIds).toEqual(['parent']);
       expect(repo.getPodsDependingOn('parent').map((p) => p.id)).toContain('legacy-child');
+    });
+
+    it('sets runningAt on initial running transition', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', { runningAt: '2026-04-01T09:00:35.000Z' });
+      const pod = repo.getOrThrow('sess-001');
+      expect(pod.runningAt).toBe('2026-04-01T09:00:35.000Z');
+    });
+
+    it('does not overwrite runningAt on subsequent update', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', { runningAt: '2026-04-01T09:00:35.000Z' });
+      repo.update('sess-001', { status: 'running' });
+      const pod = repo.getOrThrow('sess-001');
+      expect(pod.runningAt).toBe('2026-04-01T09:00:35.000Z');
     });
 
     it('delete removes the deleted pod from every fan-in array', () => {

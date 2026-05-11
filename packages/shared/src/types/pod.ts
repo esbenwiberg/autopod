@@ -83,6 +83,7 @@ export interface Pod {
   skipValidation: boolean;
   createdAt: string;
   startedAt: string | null;
+  runningAt: string | null;
   completedAt: string | null;
   updatedAt: string;
   userId: string;
