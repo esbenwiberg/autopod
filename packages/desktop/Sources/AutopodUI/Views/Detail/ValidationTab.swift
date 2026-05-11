@@ -685,10 +685,18 @@ public struct ValidationTab: View {
               .foregroundStyle(Color.secondary)
               .padding(.top, 1)
           }
-          Text(criterion.test)
-            .font(.callout.weight(.medium))
-            .foregroundStyle(firing ? .primary : .secondary)
-            .fixedSize(horizontal: false, vertical: true)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(criterion.outcome)
+              .font(.callout.weight(.medium))
+              .foregroundStyle(firing ? .primary : .secondary)
+              .fixedSize(horizontal: false, vertical: true)
+            if let hint = criterion.hint, !hint.isEmpty {
+              Text(hint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
           Spacer(minLength: 4)
           HStack(spacing: 4) {
             if !firing { decorativeAcBadge() }
@@ -998,7 +1006,7 @@ public struct ValidationTab: View {
         ForEach(Array(criteria.enumerated()), id: \.offset) { idx, criterion in
           let result: AcCheckDetail? = {
             guard let acChecks else { return nil }
-            return acChecks.first(where: { $0.criterion == criterion.test })
+            return acChecks.first(where: { $0.criterion == criterion.outcome })
                 ?? (idx < acChecks.count ? acChecks[idx] : nil)
           }()
           acCriterionCard(criterion: criterion, result: result, index: idx)
@@ -1015,7 +1023,7 @@ public struct ValidationTab: View {
     if let v = result?.validationType {
       return v == "api" || v == "web-ui" || v == "cmd"
     }
-    if isCommandLikeAcText(criterion.test) { return false }
+    if criterion.type == .cmd, isCommandLikeAcText(criterion.outcome) { return false }
     return criterion.type == .api || criterion.type == .web || criterion.type == .cmd
   }
 
@@ -1024,27 +1032,22 @@ public struct ValidationTab: View {
       let (idx, c) = pair
       let result: AcCheckDetail? = {
         guard let checks else { return nil }
-        return checks.first(where: { $0.criterion == c.test })
+        return checks.first(where: { $0.criterion == c.outcome })
             ?? (idx < checks.count ? checks[idx] : nil)
       }()
       return acc + (acIsFiring(c, result) ? 1 : 0)
     }
   }
 
-  /// Mirrors `COMMAND_LIKE_AC_PATTERNS` in
-  /// `packages/daemon/src/validation/local-validation-engine.ts` so the desktop
-  /// can pre-classify shell-command ACs as decorative before the engine runs.
+  /// Mirrors the tightened slash-command regex in
+  /// `packages/daemon/src/validation/local-validation-engine.ts` (ADR-024) so
+  /// the desktop can pre-classify shell-command-only ACs as decorative before
+  /// the engine runs. Only fires for single-token `/<lowercase>` outcomes —
+  /// declared web ACs with `/pr-dashboard ...` prose are trusted.
   private func isCommandLikeAcText(_ text: String) -> Bool {
     let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
     if t.isEmpty { return false }
-    let lower = t.lowercased()
-    if lower.hasPrefix("run `") || lower.hasPrefix("execute `") { return true }
-    if t.hasPrefix("`") && t.hasSuffix("`") && !t.dropFirst().dropLast().contains("`") { return true }
-    let prefixes = ["dotnet ", "npm ", "npx ", "pnpm ", "yarn ", "cargo ", "make "]
-    if prefixes.contains(where: { lower.hasPrefix($0) }) { return true }
-    if t.hasPrefix("./") && t.count > 2 { return true }
-    if t.hasPrefix("/"), t.count > 1, let c = t.dropFirst().first, c.isLetter { return true }
-    return false
+    return t.range(of: #"^/[a-z][a-z0-9-]*\s*$"#, options: .regularExpression) != nil
   }
 
   private func acTypeBadge(_ type: AcDefinition.AcType) -> some View {

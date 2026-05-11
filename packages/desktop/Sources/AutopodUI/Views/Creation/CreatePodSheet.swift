@@ -503,7 +503,7 @@ public struct CreateSessionSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(isInteractive ? "Create Workspace" : "Create Pod") {
                     Task {
-                        let ac = criteria.filter { !$0.test.trimmingCharacters(in: .whitespaces).isEmpty }
+                        let ac = criteria.filter { !$0.outcome.trimmingCharacters(in: .whitespaces).isEmpty }
                         let model = modelText.trimmingCharacters(in: .whitespacesAndNewlines)
                         let pim = pimGroups.filter { !$0.groupId.isEmpty }
                         let pod = PodConfigRequest(
@@ -556,8 +556,8 @@ public struct CreateSessionSheet: View {
                 .frame(width: 90)
                 .controlSize(.small)
 
-                // Test / description
-                TextField(c.type == .none ? "Describe the criterion" : c.type == .api ? "curl / endpoint to probe" : "page path or selector to check", text: binding.test)
+                // Outcome — always shown
+                TextField("What should be true after this lands?", text: binding.outcome)
                     .textFieldStyle(.plain)
                     .font(.callout)
 
@@ -574,16 +574,35 @@ public struct CreateSessionSheet: View {
             }
             if c.type != .none {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark").foregroundStyle(.green).font(.system(size: 9))
-                    TextField("Pass condition", text: binding.pass)
-                        .textFieldStyle(.plain)
-                        .font(.caption)
+                    Image(systemName: "link").foregroundStyle(.secondary).font(.system(size: 9))
+                    TextField(
+                        hintPlaceholder(for: c.type),
+                        text: Binding(
+                            get: { binding.wrappedValue.hint ?? "" },
+                            set: { binding.wrappedValue.hint = $0.isEmpty ? nil : $0 }
+                        )
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.caption)
                 }
+            }
+            if c.type == .cmd {
                 HStack(spacing: 6) {
-                    Image(systemName: "xmark").foregroundStyle(.red).font(.system(size: 9))
-                    TextField("Fail condition", text: binding.fail)
-                        .textFieldStyle(.plain)
-                        .font(.caption)
+                    Image(systemName: "arrow.triangle.branch").foregroundStyle(.secondary).font(.system(size: 9))
+                    Picker(
+                        "Polarity",
+                        selection: Binding(
+                            get: { binding.wrappedValue.polarity ?? .exitZero },
+                            set: { binding.wrappedValue.polarity = $0 }
+                        )
+                    ) {
+                        Text("Exit code 0").tag(AcDefinition.AcPolarity.exitZero)
+                        Text("Expect output").tag(AcDefinition.AcPolarity.expectOutput)
+                        Text("Expect no output").tag(AcDefinition.AcPolarity.expectNoOutput)
+                    }
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .pickerStyle(.menu)
                 }
             }
         }
@@ -591,6 +610,15 @@ public struct CreateSessionSheet: View {
         .padding(.vertical, 6)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func hintPlaceholder(for type: AcDefinition.AcType) -> String {
+        switch type {
+        case .web:  "Page path or selector — e.g. /pr-dashboard"
+        case .api:  "Endpoint — e.g. GET /api/pods"
+        case .cmd:  "Shell command — e.g. grep foo bar.ts"
+        case .none: ""
+        }
     }
 
     /// Parse a newline-separated list, stripping common prefixes (`- `, `1. `, `a) `, etc.).

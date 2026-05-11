@@ -745,10 +745,19 @@ parallel.
 title: "Add events API endpoints"
 depends_on: [01-types]
 acceptance_criteria:
-  - { type: api, test: "POST /api/v2/events with valid body", pass: "201 with body.id (uuid)", fail: "non-201 or missing id" }
-  - { type: api, test: "GET /api/v2/events?since=now", pass: "200 with body.events array", fail: "non-200 or missing field" }
-  - { type: web, test: "navigate /events and click first row", pass: "detail panel renders with event title", fail: "no panel or no title" }
-  - { type: cmd, test: "rg -l 'OldEventEmitter' packages/daemon/src", pass: "no matches", fail: "any match means a caller still uses the deleted symbol" }
+  - type: api
+    outcome: POST /api/v2/events with a valid body returns 201 with body.id (uuid)
+    hint: POST /api/v2/events
+  - type: api
+    outcome: GET /api/v2/events?since=now returns 200 with body.events array
+    hint: GET /api/v2/events?since=now
+  - type: web
+    outcome: navigating /events and clicking the first row shows a detail panel with the event title
+    hint: /events
+  - type: cmd
+    outcome: no caller still uses the deleted OldEventEmitter symbol
+    hint: rg -l 'OldEventEmitter' packages/daemon/src
+    polarity: expect-no-output
 touches:
   - packages/daemon/src/pods/events-repository.ts
   - packages/daemon/src/db/migrations/    # directory shorthand — anything under here

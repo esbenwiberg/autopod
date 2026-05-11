@@ -46,7 +46,7 @@ import Testing
     "prUrl": null,
     "plan": { "summary": "Add OAuth flow", "steps": ["Setup routes", "Add middleware"] },
     "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
-    "acceptanceCriteria": [{"type":"none","test":"Users can sign in with Google","pass":"signed in","fail":"not signed in"}],
+    "acceptanceCriteria": [{"type":"none","outcome":"Users can sign in with Google"}],
     "claudeSessionId": null,
     "outputMode": "pr",
     "baseBranch": null,
@@ -66,7 +66,7 @@ import Testing
   #expect(pod.status == "running")
   #expect(pod.plan?.steps.count == 2)
   #expect(pod.progress?.currentPhase == 3)
-  #expect(pod.acceptanceCriteria?.first?.test == "Users can sign in with Google")
+  #expect(pod.acceptanceCriteria?.first?.outcome == "Users can sign in with Google")
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
 }

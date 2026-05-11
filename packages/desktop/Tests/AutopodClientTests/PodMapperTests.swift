@@ -35,7 +35,7 @@ import AutopodUI
     "prUrl": null,
     "plan": { "summary": "Add OAuth flow", "steps": ["Setup", "Implement"] },
     "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
-    "acceptanceCriteria": [{"type":"none","test":"Users can sign in","pass":"signed in","fail":"not signed in"}],
+    "acceptanceCriteria": [{"type":"none","outcome":"Users can sign in"}],
     "claudeSessionId": null,
     "outputMode": "pr",
     "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
@@ -65,7 +65,7 @@ import AutopodUI
   #expect(pod.phase?.current == 3)
   #expect(pod.phase?.total == 5)
   #expect(pod.containerUrl?.absoluteString == "http://localhost:3001")
-  #expect(pod.acceptanceCriteria?.first?.test == "Users can sign in")
+  #expect(pod.acceptanceCriteria?.first?.outcome == "Users can sign in")
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
   #expect(pod.isWorkspace == false)

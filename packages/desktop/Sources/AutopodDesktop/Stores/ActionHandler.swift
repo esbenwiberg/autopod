@@ -344,7 +344,7 @@ public final class ActionHandler {
       profileName: profileName,
       task: task,
       model: model?.isEmpty == true ? nil : model,
-      acceptanceCriteria: acceptanceCriteria?.filter { !$0.test.isEmpty },
+      acceptanceCriteria: acceptanceCriteria?.filter { !$0.outcome.isEmpty },
       pod: pod,
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       branchPrefix: branchPrefix?.isEmpty == true ? nil : branchPrefix,
@@ -613,7 +613,7 @@ public final class ActionHandler {
     let req = CreateSessionRequest(
       profileName: profileName,
       task: task,
-      acceptanceCriteria: acceptanceCriteria?.filter { !$0.test.isEmpty },
+      acceptanceCriteria: acceptanceCriteria?.filter { !$0.outcome.isEmpty },
       pod: PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       dependsOnPodIds: dependsOnPodIds,

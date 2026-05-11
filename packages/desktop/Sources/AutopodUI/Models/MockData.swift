@@ -148,9 +148,9 @@ public enum MockData: Sendable {
         baseBranch: "plan/auth-redesign",
         acFrom: "specs/auth-ac.md",
         acceptanceCriteria: [
-            AcDefinition(test: "Users can sign in with Google OAuth"),
-            AcDefinition(test: "OAuth tokens are stored encrypted at rest"),
-            AcDefinition(test: "Existing pod middleware is preserved"),
+            AcDefinition(outcome: "Users can sign in with Google OAuth"),
+            AcDefinition(outcome: "OAuth tokens are stored encrypted at rest"),
+            AcDefinition(outcome: "Existing pod middleware is preserved"),
         ],
         diffStats: DiffStats(added: 56, removed: 8, files: 6),
         phase: PhaseProgress(current: 5, total: 10, description: "Implementing OAuth callback"),
