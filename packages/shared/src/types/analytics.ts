@@ -297,3 +297,115 @@ export interface EscalationsAnalyticsResponse {
   /** Top 10 by count DESC, ties by description ASC. Length <= 10. */
   blockerPatterns: BlockerPattern[];
 }
+
+// ── Models analytics ──────────────────────────────────────────────────────────
+
+/** The 8 validation stages tracked in the failure-stage matrix.
+ *  Mirrors the ValidationStage union in reliability-aggregator.ts — keep in sync. */
+export type ValidationStage =
+  | 'build'
+  | 'health'
+  | 'smoke'
+  | 'test'
+  | 'lint'
+  | 'sast'
+  | 'acValidation'
+  | 'taskReview';
+
+/** Stage failure cell. Mirrors reliability-aggregator's profileHeatmap stage entry. */
+export interface FailureStageCell {
+  stage: ValidationStage;
+  /** Distinct pods that ran this stage at least once over the trailing window. */
+  podsRan: number;
+  /** Distinct pods whose most-recent run of this stage failed. */
+  podsFailed: number;
+  /** = podsFailed / podsRan when podsRan > 0; else 0. In [0, 1]. */
+  failureRate: number;
+}
+
+export interface FailureStageRow {
+  /** Canonical model key (post-MODEL_CANONICAL coalescing). May be '<unknown>'. */
+  model: string;
+  /** Always 8 entries in the fixed STAGES order. Empty cohort emits all zeros. */
+  stages: FailureStageCell[];
+}
+
+export interface PerModelAggregate {
+  /** Canonical model key. For the unknown bucket: literal '<unknown>'. */
+  model: string;
+  podCount: number;
+  completeCount: number;
+  killedCount: number;
+  failedCount: number;
+  /** = completeCount / podCount. In [0, 1]. */
+  successRate: number;
+  /** SUM(effectiveCostUsd) including killed/failed pods. Null when model === '<unknown>'. */
+  totalCostUsd: number | null;
+  /** totalCostUsd / completeCount. Null when completeCount === 0 or model === '<unknown>'. */
+  dollarPerPr: number | null;
+  scoredCount: number;
+  /** Mean pod_quality_scores.score. Null when scoredCount === 0. In [0, 100]. */
+  avgQuality: number | null;
+  /** Mean seconds from created_at to completed_at for complete pods. Null when completeCount === 0. */
+  meanTtmSeconds: number | null;
+  /** Distinct cohort pods with ≥1 human-attention escalation. */
+  escalatedCount: number;
+  /** = escalatedCount / podCount. In [0, 1]. */
+  escalationRate: number;
+  /** Sum of effectiveCostUsd for status='complete' pods only. Null when model === '<unknown>'. */
+  completeCostUsd: number | null;
+}
+
+export interface PerRuntimeAggregate {
+  runtime: string;
+  podCount: number;
+  completeCount: number;
+  killedCount: number;
+  failedCount: number;
+  successRate: number;
+  /** SUM(effectiveCostUsd) including unknown-model pods. */
+  totalCostUsd: number;
+  dollarPerPr: number | null;
+  scoredCount: number;
+  avgQuality: number | null;
+  meanTtmSeconds: number | null;
+  escalatedCount: number;
+  escalationRate: number;
+}
+
+export interface UnknownModelSample {
+  /** Verbatim pods.model string that didn't resolve. */
+  rawModel: string;
+  podCount: number;
+}
+
+export interface ModelsSummary {
+  /** Cheapest-$/PR canonical model name (completeCount >= 5, not '<unknown>'). Null if none. */
+  cheapestDollarPerPrModel: string | null;
+  /** dollarPerPr value for cheapestDollarPerPrModel. Null when cheapestDollarPerPrModel is null. */
+  cheapestDollarPerPr: number | null;
+  /** Canonical model with the highest avgQuality (scoredCount >= 5, not '<unknown>'). Null if none. */
+  bestQualityModel: string | null;
+  bestQuality: number | null;
+  /** Canonical model with the highest podCount (no MIN_COHORT gate). May be '<unknown>'. Null if empty. */
+  mostUsedModel: string | null;
+  mostUsedPodCount: number | null;
+  cohortSize: number;
+  /** Daily pod count for mostUsedModel. Length === days. Zero-padded. */
+  mostUsedDailySparkline: Array<{ day: string; count: number }>;
+  /** Signed absolute-USD delta vs the prior window (e.g. -0.42 = $0.42 cheaper).
+   *  Desktop formats as %+$.2f/PR. 'down' = cheaper = good. */
+  cheapestDollarPerPrDelta: { value: number; direction: 'up' | 'down' | 'flat' };
+}
+
+export interface ModelsAnalyticsResponse {
+  summary: ModelsSummary;
+  /** Sorted by podCount DESC, ties by model ASC. */
+  byModel: PerModelAggregate[];
+  /** Always 3 entries: claude / codex / copilot (in that order). */
+  byRuntime: PerRuntimeAggregate[];
+  /** One row per canonical model appearing in byModel (same sort order). */
+  failureStageMatrix: FailureStageRow[];
+  /** Up to 10 raw model strings that didn't resolve. Sorted by podCount DESC, rawModel ASC. */
+  unknownModels: UnknownModelSample[];
+}

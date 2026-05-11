@@ -356,4 +356,12 @@ export type {
   PerProfileEscalation,
   BlockerPattern,
   EscalationsAnalyticsResponse,
+  ValidationStage,
+  FailureStageCell,
+  FailureStageRow,
+  PerModelAggregate,
+  PerRuntimeAggregate,
+  UnknownModelSample,
+  ModelsSummary,
+  ModelsAnalyticsResponse,
 } from './types/analytics.js';
