@@ -14,6 +14,34 @@ import {
 const MCP_CONFIG_PATH = '/home/autopod/.autopod/mcp-config.json';
 
 /**
+ * Substring Claude CLI emits to stderr when `--resume <id>` finds no matching
+ * conversation history on disk. Surfaces as e.g.
+ *   "No conversation found with session ID: 07d2bb1d-…"
+ * We detect this so pod-manager can fall back to a fresh spawn instead of
+ * letting the agent process exit silently with no work done.
+ */
+const RESUME_SESSION_NOT_FOUND_MARKER = 'No conversation found with session ID';
+
+/**
+ * Thrown from `resume()` when Claude CLI reports the persisted session ID does
+ * not exist in the container's local history (typically because the container
+ * was respawned without a persistent `~/.claude/projects/` mount). Pod-manager
+ * catches this and retries with a fresh spawn carrying recovery context.
+ */
+export class ResumeSessionNotFoundError extends Error {
+  readonly podId: string;
+  readonly claudeSessionId: string | undefined;
+  constructor(podId: string, claudeSessionId: string | undefined) {
+    super(
+      `Claude --resume failed: no conversation found for session ${claudeSessionId ?? '<unknown>'}`,
+    );
+    this.name = 'ResumeSessionNotFoundError';
+    this.podId = podId;
+    this.claudeSessionId = claudeSessionId;
+  }
+}
+
+/**
  * Claude CLI runtime adapter.
  *
  * Runs `claude` CLI inside a Docker container via `containerManager.execStreaming()`
@@ -180,9 +208,16 @@ export class ClaudeRuntime implements Runtime {
     this.handles.set(podId, handle);
 
     const stderrEvents: AgentEvent[] = [];
+    // Tracks whether Claude's stderr signalled an unknown-session failure.
+    // If set, we throw `ResumeSessionNotFoundError` after the stream drains so
+    // pod-manager can fall back to a fresh spawn with recovery context.
+    const resumeFailure = { sessionNotFound: false };
     handle.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8').trim();
       if (!text) return;
+      if (text.includes(RESUME_SESSION_NOT_FOUND_MARKER)) {
+        resumeFailure.sessionNotFound = true;
+      }
       this.logger.warn(
         { component: 'claude-runtime', podId, stderr: text.slice(0, 500) },
         'claude stderr',
@@ -210,6 +245,15 @@ export class ClaudeRuntime implements Runtime {
         yield event;
       }
       for (const e of stderrEvents.splice(0)) yield e;
+      if (resumeFailure.sessionNotFound) {
+        // Claude printed "No conversation found with session ID: …" and exited.
+        // Drop the stale ID from the in-memory map so any retry (or follow-up
+        // resume call before pod-manager clears the DB) doesn't reuse it, then
+        // throw so pod-manager's recovery branch falls through to a fresh
+        // spawn instead of silently completing with no work done.
+        claudeSessionIds.delete(podId);
+        throw new ResumeSessionNotFoundError(podId, claudeSessionId);
+      }
     })();
 
     try {

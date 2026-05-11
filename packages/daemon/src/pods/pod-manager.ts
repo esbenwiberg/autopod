@@ -79,7 +79,8 @@ import {
   buildProviderEnv,
   persistRefreshedCredentials,
 } from '../providers/index.js';
-import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
+import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
+import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
@@ -3461,6 +3462,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ...sidecarEnv,
         };
 
+        // Per-pod Claude conversation-history directory. Bind-mounted at
+        // `~/.claude/projects/` inside the container so `--resume <session_id>`
+        // works across container respawns (sleep/wake, crash recovery). Only
+        // wired for Claude — codex/copilot respawn fresh without state.
+        let claudeStateDir: string | null = null;
+        if (pod.runtime === 'claude') {
+          try {
+            claudeStateDir = await ensureClaudeStateDir(podId);
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to create Claude state dir — resume across container respawns will fail',
+            );
+          }
+        }
+
         let containerId: string;
         try {
           containerId = await containerManager.spawn({
@@ -3471,6 +3488,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             volumes: [
               ...(worktreePath ? [{ host: worktreePath, container: '/mnt/worktree' }] : []),
               ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
+              ...(claudeStateDir
+                ? [{ host: claudeStateDir, container: `${CONTAINER_HOME_DIR}/.claude/projects` }]
+                : []),
             ],
             networkName,
             firewallScript,
@@ -4465,24 +4485,49 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods (recovery requires a prior run with a worktree)
           const continuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
+          // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
+          const safeWorktreePath = worktreePath!;
 
-          try {
-            events = runtime.resume(podId, continuationPrompt, containerId, secretEnv);
-          } catch (err) {
-            logger.warn({ err, podId }, 'Claude --resume failed, falling back to fresh spawn');
-            // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
-            const recoveryTask = await buildRecoveryTask(pod, worktreePath!);
-            events = runtime.spawn({
-              podId,
-              task: recoveryTask,
-              model: pod.model,
-              workDir: '/workspace',
-              containerId,
-              customInstructions: copilotInstructions,
-              env: secretEnv,
-              mcpServers,
-            });
-          }
+          // The resume call returns the iterator synchronously — the failure
+          // (Claude printing "No conversation found with session ID" and exiting)
+          // surfaces mid-iteration as a thrown ResumeSessionNotFoundError. Wrap
+          // in a generator so we can catch the throw, clear the stale session
+          // ID, and fall through to a fresh spawn in the same container without
+          // dying silently. (The container is still alive after Claude's exit.)
+          const podRepoRef = podRepo;
+          const runtimeRef = runtime;
+          const containerIdRef = containerId;
+          const podModel = pod.model;
+          const podRef = pod;
+          const mcpServersRef = mcpServers;
+          const customInstructionsRef = copilotInstructions;
+          const secretEnvRef = secretEnv;
+          const loggerRef = logger;
+          events = (async function* resumeWithFallback() {
+            try {
+              yield* runtimeRef.resume(podId, continuationPrompt, containerIdRef, secretEnvRef);
+            } catch (err) {
+              if (!(err instanceof ResumeSessionNotFoundError)) throw err;
+              loggerRef.warn(
+                { podId, claudeSessionId: err.claudeSessionId },
+                'Claude --resume found no conversation on disk — falling back to fresh spawn',
+              );
+              // Clear the stale ID so any future recovery on this pod doesn't
+              // loop trying to resume the same nonexistent conversation.
+              podRepoRef.update(podId, { claudeSessionId: null });
+              const recoveryTask = await buildRecoveryTask(podRef, safeWorktreePath);
+              yield* runtimeRef.spawn({
+                podId,
+                task: recoveryTask,
+                model: podModel,
+                workDir: '/workspace',
+                containerId: containerIdRef,
+                customInstructions: customInstructionsRef,
+                env: secretEnvRef,
+                mcpServers: mcpServersRef,
+              });
+            }
+          })();
         } else if (isRecovery) {
           // Non-Claude runtime or no claudeSessionId — fresh spawn with recovery context
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
@@ -5842,6 +5887,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             logger.warn({ err, podId }, 'Failed to cleanup worktree');
           }
           podRepo.update(podId, { worktreePath: null });
+        }
+
+        // Cleanup per-pod Claude conversation-history dir on the host. Best
+        // effort — if it lingers it just wastes a few KB of disk per pod.
+        if (pod.runtime === 'claude') {
+          await cleanupClaudeState(podId).catch((err) => {
+            logger.warn({ err, podId }, 'Failed to cleanup Claude state dir');
+          });
         }
       };
 
@@ -7524,6 +7577,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to cleanup worktree during delete');
           }
+        }
+        if (pod.runtime === 'claude') {
+          await cleanupClaudeState(podId).catch((err) => {
+            logger.warn({ err, podId }, 'Failed to cleanup Claude state dir during delete');
+          });
         }
       };
 

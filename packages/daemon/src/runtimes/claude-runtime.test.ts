@@ -3,7 +3,7 @@ import type { AgentErrorEvent, AgentEvent, SpawnConfig } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
-import { ClaudeRuntime } from './claude-runtime.js';
+import { ClaudeRuntime, ResumeSessionNotFoundError } from './claude-runtime.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -702,6 +702,66 @@ describe('ClaudeRuntime', () => {
           'track-resume',
         ),
       ).toBe(false);
+    });
+
+    it('throws ResumeSessionNotFoundError when Claude reports the session is missing', async () => {
+      // Regression: a fresh container has no `~/.claude/projects/<id>.jsonl`,
+      // so `--resume <id>` prints "No conversation found with session ID: …"
+      // to stderr and exits. Without this throw, pod-manager's fallback to a
+      // fresh spawn never engages and the agent dies silently with no work done.
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      runtime.setClaudeSessionId('sess-missing', 'stale-session-uuid');
+
+      setTimeout(() => {
+        handle.stderr.write('No conversation found with session ID: stale-session-uuid\n');
+        handle.finish(1);
+      }, 10);
+
+      let caught: unknown;
+      try {
+        for await (const _ of runtime.resume('sess-missing', 'msg', 'c1')) {
+          /* consume */
+        }
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(ResumeSessionNotFoundError);
+      expect((caught as ResumeSessionNotFoundError).claudeSessionId).toBe('stale-session-uuid');
+      // The stale ID is dropped from the in-memory map so any retry doesn't reuse it.
+      expect(
+        (runtime as unknown as { claudeSessionIds: Map<string, string> }).claudeSessionIds.has(
+          'sess-missing',
+        ),
+      ).toBe(false);
+    });
+
+    it('does NOT throw when stderr contains unrelated warnings', async () => {
+      // Make sure we don't false-positive on benign stderr output.
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      runtime.setClaudeSessionId('sess-ok', 'good-session-uuid');
+
+      setTimeout(() => {
+        handle.stderr.write('Warning: something noisy but harmless\n');
+        handle.finish(0);
+      }, 10);
+
+      let caught: unknown;
+      try {
+        for await (const _ of runtime.resume('sess-ok', 'msg', 'c1')) {
+          /* consume */
+        }
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeUndefined();
     });
   });
 

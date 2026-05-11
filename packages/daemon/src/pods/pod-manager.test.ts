@@ -28,6 +28,7 @@ import type {
   WorktreeManager,
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
+import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -1901,13 +1902,18 @@ describe('PodManager', () => {
         expect(updated.reworkReason).toBeNull();
       });
 
-      it('falls back to fresh spawn when Claude resume throws', async () => {
+      it('falls back to fresh spawn when Claude resume reports session-not-found mid-stream', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
 
-        // Make resume throw
-        runtime.resume = vi.fn(() => {
-          throw new Error('Resume failed: pod expired');
+        // Realistic failure mode: Claude prints "No conversation found …" to
+        // stderr, the runtime's stream wrapper throws ResumeSessionNotFoundError
+        // mid-iteration. Pod-manager catches that specific error and falls
+        // through to a fresh spawn with recovery context.
+        runtime.resume = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          throw new ResumeSessionNotFoundError('test-pod', 'claude-ses-expired');
+          // biome-ignore lint/correctness/noUnreachable: required for AsyncGenerator return type
+          yield {} as AgentEvent;
         });
 
         const ctx = createTestContext();
@@ -1936,9 +1942,49 @@ describe('PodManager', () => {
         const spawnCall = vi.mocked(runtime.spawn).mock.calls[0];
         expect(spawnCall?.[0]?.task).toContain('RECOVERY CONTEXT');
 
-        // Pod should still complete (not crash)
+        // Stale claudeSessionId should be cleared so future recoveries don't
+        // loop trying to resume the same nonexistent conversation.
         const updated = manager.getSession(pod.id);
+        expect(updated.claudeSessionId).toBeNull();
+
+        // Pod should still complete (not crash)
         expect(updated.status).toBe('validated');
+      });
+
+      it('does NOT fall back when resume fails with a non-session-not-found error', async () => {
+        const runtime = createMockRuntime();
+        (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+
+        // Container died / network blew up / etc. — re-spawning in the same
+        // (possibly broken) container is not the right answer. The error must
+        // propagate so the pod fails properly.
+        runtime.resume = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          throw new Error('Container is no longer running');
+          // biome-ignore lint/correctness/noUnreachable: required for AsyncGenerator return type
+          yield {} as AgentEvent;
+        });
+
+        const ctx = createTestContext();
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+
+        setupExecFileMock();
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
+          'user-1',
+        );
+
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          claudeSessionId: 'claude-ses-valid',
+        });
+
+        await manager.processPod(pod.id);
+
+        // Spawn must NOT have been called — non-session-not-found errors propagate.
+        expect(runtime.resume).toHaveBeenCalled();
+        expect(runtime.spawn).not.toHaveBeenCalled();
       });
 
       it('falls back to fresh worktree when bare-repo worktree metadata is missing', async () => {
