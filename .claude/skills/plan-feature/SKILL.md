@@ -137,9 +137,20 @@ justification) before writing.
 10. **Cross-pod contracts** — Types, interfaces, API shapes, DB columns that
     cross brief boundaries. Owner per contract.
     → `design.md` → Contracts
-11. **UX flows** *(only when feature is user-facing)* — Entrypoint → states
-    (loading / empty / error) → exits. Component list if a new screen.
-    → `design.md` → UX flows
+11. **UX flows + wireframes** *(only when feature is user-facing)* — Entrypoint →
+    states (loading / empty / error) → exits. Component list if a new screen.
+
+    **Wireframe gate:** When the feature introduces a new screen OR significantly
+    rearranges an existing surface (new panels, changed column structure, new
+    persistent UI elements), produce an ASCII wireframe as part of clearing this
+    dimension. **Show-and-ask, not ask-then-produce** — draw the wireframe inline,
+    then ask "Does this match your vision?" Iterate until the user explicitly signs
+    off. The approved wireframe is a blocking gate: the show-back cannot be
+    greenlit until it carries an approved wireframe for every affected screen.
+    A feature that modifies a user-visible layout without an approved wireframe is
+    red in the coverage assessment — not amber, not N/A.
+
+    → `design.md` → UX flows (approved wireframe inline under each affected flow)
 12. **Reference reading** — Existing ADRs, CLAUDE.md sections, READMEs, and
     code patterns the executor should consult. Capture what you read during
     the scan, not at write time.
@@ -318,6 +329,11 @@ For every brief you're about to write, confirm you can name:
   Test expectations + the diff reviewer for anchoring.
 - The dependency graph, without guessing
 
+For web-facing features, confirm that every new or significantly rearranged
+screen has an approved wireframe from the interview loop. No wireframe = red.
+A wireframe produced at write-time (not during the loop) = red. A wireframe
+that the user hasn't explicitly signed off on = amber.
+
 Verify the **outcome → AC link with type discipline**:
 - "visible" / "renders" / "user sees" → linked AC must be `type: web`
 - "endpoint returns" / "responds" / "stores" → `type: api` (or `web`)
@@ -432,6 +448,18 @@ Collapse to single column under ~1040px viewport.
 **Side rail (right column, sticky):**
 
 Order top-down by attention priority:
+
+- `Wireframes (N)` *(only when at least one screen is new or rearranged)* —
+  One `<details>` per affected screen. Summary line: screen name + approval
+  status chip (Approved / Needs revision / Pending). Body: the ASCII wireframe
+  in a `<pre>` block with `font-family: ui-monospace` and a light border.
+  Below the wireframe, two resolution pills (radio-group semantics):
+  `Approved as-is` and `Needs revision`. Default state: neither selected
+  (Pending). When `Needs revision` is selected, a small inline textarea
+  appears for the user to note what to change — its value is included in
+  the reply composer output. A feature whose any wireframe is Pending or
+  Needs revision must surface as a cross-cutting issue blocking greenlight.
+  Auto-expand the first wireframe `<details>`; collapse the rest.
 
 - `Cross-cutting issues (N)` — issues that aren't bound to a single
   brief: success-signal-not-linked, parallel-touch conflicts on shared
@@ -680,7 +708,24 @@ export interface PodEvent {
 
 ## UX flows    ← OMIT when feature has no user-facing surface
 Entrypoint → states → exits. Loading / empty / error states. Component list
-if a new screen. Not mockups. One short flow per surface.
+if a new screen. One short flow per surface.
+
+For each new screen or significantly rearranged surface, include the ASCII
+wireframe approved during the planning loop. Example:
+
+```
+┌──────────────────────────────────────────┐
+│  Nav bar                                 │
+├────────────┬─────────────────────────────┤
+│  Sidebar   │  Panel title                │
+│  item 1    │  ┌──────────────────────┐  │
+│  item 2 ●  │  │  Content area        │  │
+│            │  └──────────────────────┘  │
+└────────────┴─────────────────────────────┘
+```
+
+The wireframe here is the approved contract for layout; the flow prose
+above it is the state/transition contract. Both are required for new screens.
 
 ## Reference reading
 Pointers into existing docs and code patterns the executor should consult
@@ -967,6 +1012,18 @@ loop was not done.
   rows. The whole point of the panel is "show me the file I can open
   to verify." A title without a path is a citation the user can't
   follow.
+- Skipping the wireframe for a new screen or significantly rearranged surface.
+  The user cannot greenlight layout they haven't seen. The wireframe is a
+  blocking gate, not a nice-to-have.
+- Producing the wireframe at write-time instead of during the interview loop.
+  The wireframe IS a question — it surfaces layout assumptions the user must
+  validate before greenlight. A wireframe the user never saw is not approved.
+- Asking "what should it look like?" instead of drawing it and asking "does
+  this match?" The user can't sign off on a question; they can only sign off
+  on a proposal. Show-and-ask, not ask-then-produce.
+- Putting wireframes only in briefs. Wireframes belong in design.md → UX flows
+  (auto-injected into every pod's context). A brief-local wireframe is invisible
+  to parallel pods touching the same surface.
 - ACs that require human judgment ("looks good", "feels right").
 - Wrapping build / test / lint commands as ACs (`pnpm build`,
   `dotnet test`, `tsc`, `biome`, `cargo build`, `make`) —
