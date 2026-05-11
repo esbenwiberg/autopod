@@ -17,6 +17,10 @@ import type { PodRepository } from '../../pods/pod-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeEscalationsAnalytics } from '../../pods/escalations-aggregator.js';
 import { computeModelsAnalytics } from '../../pods/models-aggregator.js';
+import {
+  computeSafetyAnalytics,
+  runAndPersistAuditChainVerification,
+} from '../../pods/safety-aggregator.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
 import { computeReliabilityAnalytics } from '../../pods/reliability-aggregator.js';
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
@@ -284,6 +288,30 @@ export function podRoutes(
       return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
     }
     return computeEscalationsAnalytics(db, days);
+  });
+
+  // GET /pods/analytics/safety — trailing-window guardrail-fire totals, quarantine histogram,
+  // injection table, audit-chain status, network-policy distribution
+  app.get('/pods/analytics/safety', async (request, reply) => {
+    if (!db || !safetyEventsRepo) {
+      reply.status(503);
+      return { error: 'Safety analytics unavailable — db or safety repo not wired' };
+    }
+    const days = parseDays(request.query as Record<string, unknown>);
+    if (days === null || days > 365) {
+      reply.status(400);
+      return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
+    }
+    return computeSafetyAnalytics(db, safetyEventsRepo, days);
+  });
+
+  // POST /audit-chain/verify — runs a fleet-wide audit-chain integrity check and persists result
+  app.post('/audit-chain/verify', async (_request, reply) => {
+    if (!db) {
+      reply.status(503);
+      return { error: 'Audit chain verification unavailable — db not wired' };
+    }
+    return runAndPersistAuditChainVerification(db);
   });
 
   // GET /pods/analytics/models — per-model leaderboard, failure-stage matrix, fleet aggregates
