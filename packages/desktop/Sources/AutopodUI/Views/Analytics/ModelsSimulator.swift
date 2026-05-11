@@ -15,7 +15,7 @@ extension PerModelAggregate {
 // MARK: - Output
 
 /// Fleet-wide aggregates produced by the what-if simulator after a modelled redirect.
-public struct SimulatedFleet: Equatable {
+public struct SimulatedFleet: Equatable, Sendable {
     public let dollarPerPr: Double?
     public let avgQuality: Double?
     public let successRate: Double

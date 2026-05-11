@@ -151,6 +151,26 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.getQualityAnalytics(days: days)
       },
+      loadSafetyAnalytics: { [connectionManager] (days: Int) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getSafetyAnalytics(days: days)
+      },
+      loadThroughputAnalytics: { [connectionManager] (days: Int) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getThroughputAnalytics(days: days)
+      },
+      loadEscalationsAnalytics: { [connectionManager] (days: Int) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getEscalationsAnalytics(days: days)
+      },
+      loadModelsAnalytics: { [connectionManager] (days: Int) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getModelsAnalytics(days: days)
+      },
+      verifyAuditChain: { [connectionManager] in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.verifyAuditChain()
+      },
       qualityScores: podStore.qualityScores,
       onRunCatchup: { job in Task { try? await scheduledJobStore.runCatchup(job.id) } },
       onSkipCatchup: { job in Task { try? await scheduledJobStore.skipCatchup(job.id) } },

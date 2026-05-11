@@ -102,10 +102,7 @@ public struct SidebarView: View {
                 }
 
                 Section("Analytics") {
-                    ForEach(AnalyticsSection.allCases, id: \.self) { section in
-                        sidebarRow(.analyticsSection(section), icon: section.icon, color: .secondary, badge: 0)
-                            .disabled(!section.isShipped)
-                    }
+                    sidebarRow(.analytics, icon: "chart.bar.fill", color: .secondary, badge: 0)
                 }
 
                 Section("Profiles") {
@@ -242,7 +239,7 @@ public enum SidebarItem: Hashable {
     case seriesAll
     case completed
     case all
-    case analyticsSection(AnalyticsSection)
+    case analytics
     case history
     case memory
     case profile(String)
@@ -262,7 +259,7 @@ public enum SidebarItem: Hashable {
         case .seriesAll: "Series"
         case .completed: "Completed"
         case .all: "All Pods"
-        case .analyticsSection(let section): section.label
+        case .analytics: "Analytics"
         case .history: "History"
         case .memory: "Memory"
         case .profile(let name): name

@@ -558,7 +558,7 @@ private struct ModelsComparisonSectionView: View {
     private func axisChart(
         title: String,
         keyPath: KeyPath<LeaderboardRow, Double>,
-        format: (Double) -> String
+        format: @escaping (Double) -> String
     ) -> some View {
         axisChart(
             title: title,
@@ -571,7 +571,7 @@ private struct ModelsComparisonSectionView: View {
     private func axisChart(
         title: String,
         keyPath: KeyPath<LeaderboardRow, Double?>,
-        format: (Double) -> String
+        format: @escaping (Double) -> String
     ) -> some View {
         axisChart(
             title: title,
@@ -583,7 +583,7 @@ private struct ModelsComparisonSectionView: View {
     private func axisChart(
         title: String,
         items: [(LeaderboardRow, Int, Double)],
-        format: (Double) -> String
+        format: @escaping (Double) -> String
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -743,14 +743,14 @@ private struct ModelsFailureMatrixSectionView: View {
                     Text("\(cell.podsFailed)/\(cell.podsRan)")
                         .font(.system(size: 9))
                 }
-                .frame(width: 44, minHeight: 32)
+                .frame(width: 44, height: 32)
                 .background(stageCellBackground(failureRate: cell.failureRate))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
                 Text("—")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
-                    .frame(width: 44, minHeight: 32)
+                    .frame(width: 44, height: 32)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
