@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_PRICING, computeCost, effectiveCostUsd } from './index.js';
+import { MODEL_PRICING, canonicalModelKey, computeCost, effectiveCostUsd } from './index.js';
 
 describe('MODEL_PRICING', () => {
   it('contains full claude model IDs', () => {
@@ -70,5 +70,39 @@ describe('effectiveCostUsd', () => {
         outputTokens: 1_000_000,
       }),
     ).toBe(0);
+  });
+});
+
+describe('canonicalModelKey', () => {
+  it('resolves short alias opus → claude-opus-4-7', () => {
+    expect(canonicalModelKey('opus')).toBe('claude-opus-4-7');
+  });
+
+  it('resolves short alias sonnet → claude-sonnet-4-6', () => {
+    expect(canonicalModelKey('sonnet')).toBe('claude-sonnet-4-6');
+  });
+
+  it('resolves short alias haiku → claude-haiku-4-5', () => {
+    expect(canonicalModelKey('haiku')).toBe('claude-haiku-4-5');
+  });
+
+  it('returns full canonical ID when already canonical', () => {
+    expect(canonicalModelKey('claude-opus-4-7')).toBe('claude-opus-4-7');
+  });
+
+  it('returns null for unknown model string', () => {
+    expect(canonicalModelKey('mystery')).toBeNull();
+  });
+
+  it('returns null for null input', () => {
+    expect(canonicalModelKey(null)).toBeNull();
+  });
+
+  it('returns null for undefined input', () => {
+    expect(canonicalModelKey(undefined)).toBeNull();
+  });
+
+  it('returns null for empty string', () => {
+    expect(canonicalModelKey('')).toBeNull();
   });
 });

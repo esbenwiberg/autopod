@@ -17,6 +17,7 @@ public struct AnalyticsRightPaneView: View {
     public let loadSafety: ((Int) async throws -> SafetyAnalyticsResponse)?
     public let loadThroughput: ((Int) async throws -> ThroughputAnalyticsResponse)?
     public let loadEscalations: ((Int) async throws -> EscalationsAnalyticsResponse)?
+    public let loadModels: ((Int) async throws -> ModelsAnalyticsResponse)?
     public let verifyAuditChain: (() async throws -> AuditChainVerifyResponse)?
     public let onSelectPod: ((String) -> Void)?
     /// Quality-specific pod selection callback. When provided, used instead of
@@ -38,6 +39,7 @@ public struct AnalyticsRightPaneView: View {
         loadSafety: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         loadThroughput: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
         loadEscalations: ((Int) async throws -> EscalationsAnalyticsResponse)? = nil,
+        loadModels: ((Int) async throws -> ModelsAnalyticsResponse)? = nil,
         verifyAuditChain: (() async throws -> AuditChainVerifyResponse)? = nil,
         onSelectPod: ((String) -> Void)? = nil,
         onQualitySelectPod: ((String) -> Void)? = nil,
@@ -54,6 +56,7 @@ public struct AnalyticsRightPaneView: View {
         self.loadSafety = loadSafety
         self.loadThroughput = loadThroughput
         self.loadEscalations = loadEscalations
+        self.loadModels = loadModels
         self.verifyAuditChain = verifyAuditChain
         self.onSelectPod = onSelectPod
         self.onQualitySelectPod = onQualitySelectPod
@@ -101,6 +104,8 @@ public struct AnalyticsRightPaneView: View {
                 load: loadEscalations,
                 onSelectPod: onEscalationsSelectPod ?? onSelectPod
             )
+        case .models:
+            ModelsDrillView(load: loadModels)
         case .none:
             VStack(spacing: 8) {
                 Spacer()

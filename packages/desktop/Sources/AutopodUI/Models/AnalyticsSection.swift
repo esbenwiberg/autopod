@@ -15,8 +15,8 @@ public enum AnalyticsSection: String, CaseIterable, Hashable, Sendable {
 
     public var isShipped: Bool {
         switch self {
-        case .overview, .cost, .reliability, .quality, .safety: true
-        case .throughput, .models: false
+        case .overview, .cost, .reliability, .quality, .safety, .models: true
+        case .throughput: false
         }
     }
 
@@ -49,11 +49,12 @@ public enum AnalyticsSection: String, CaseIterable, Hashable, Sendable {
     /// (their rows are non-clickable anyway).
     public var preselectedCard: AnalyticsCardKind? {
         switch self {
-        case .overview, .throughput, .models: nil
+        case .overview, .throughput: nil
         case .cost: .cost
         case .reliability: .reliability
         case .quality: .quality
         case .safety: .safety
+        case .models: .models
         }
     }
 }

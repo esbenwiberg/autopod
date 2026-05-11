@@ -68,9 +68,9 @@ import Testing
     #expect(AnalyticsSection.overview.isShipped)
 }
 
-@Test func unshippedSectionsAreThroughputAndModels() {
+@Test func unshippedSectionsIsOnlyThroughput() {
     let unshipped = AnalyticsSection.allCases.filter { !$0.isShipped }
-    #expect(Set(unshipped) == [.throughput, .models])
+    #expect(Set(unshipped) == [.throughput])
 }
 
 @Test func sectionPreselectedCardMapping() {
@@ -80,7 +80,7 @@ import Testing
     #expect(AnalyticsSection.quality.preselectedCard == .quality)
     #expect(AnalyticsSection.safety.preselectedCard == .safety)
     #expect(AnalyticsSection.throughput.preselectedCard == nil)
-    #expect(AnalyticsSection.models.preselectedCard == nil)
+    #expect(AnalyticsSection.models.preselectedCard == .models)
 }
 
 // MARK: - onSelectPod handler
