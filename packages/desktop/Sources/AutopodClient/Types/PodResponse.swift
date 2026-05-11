@@ -71,6 +71,7 @@ public struct SessionResponse: Codable, Sendable {
   public let skipValidation: Bool
   public let createdAt: String
   public let startedAt: String?
+  public let runningAt: String?
   public let completedAt: String?
   public let updatedAt: String
   public let userId: String
@@ -145,7 +146,7 @@ public struct SessionResponse: Codable, Sendable {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
     case lastValidationResult, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
-    case createdAt, startedAt, completedAt, updatedAt, userId
+    case createdAt, startedAt, runningAt, completedAt, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, prUrl
     case mergeBlockReason, plan, progress, acceptanceCriteria, claudeSessionId
     case outputMode

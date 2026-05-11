@@ -33,7 +33,7 @@ public struct ArtifactsTab: View {
   @State private var showAllFiles = false
 
   private var filteredFiles: [SessionFileEntry] {
-    let pivot = pod.startedAt.timeIntervalSince1970 * 1000
+    let pivot = (pod.runningAt ?? pod.startedAt).timeIntervalSince1970 * 1000
     let filtered = showAllFiles ? files : files.filter { $0.modified >= pivot }
     return filtered.sorted { $0.modified > $1.modified }
   }
@@ -77,7 +77,7 @@ public struct ArtifactsTab: View {
           .font(.caption)
       }
       .toggleStyle(.checkbox)
-      .help("Disable the modified-since-pod-started filter")
+      .help("Disable the modified-since-agent-started filter")
       Button {
         Task { await refresh() }
       } label: {

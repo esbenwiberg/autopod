@@ -262,6 +262,7 @@ public enum PodMapper {
     let dependsOnPodIds: [String] = response.dependsOnPodIds
       ?? (response.dependsOnPodId.map { [$0] } ?? [])
     let dependencyStartedAt: Date? = response.dependencyStartedAt.map { parseDate($0) }
+    let runningAt: Date? = response.runningAt.map { parseDate($0) }
 
     var result = Pod(
       id: response.id,
@@ -306,7 +307,8 @@ public enum PodMapper {
       artifactsPath: response.artifactsPath,
       requireSidecars: response.requireSidecars ?? [],
       sidecarContainerIds: response.sidecarContainerIds ?? [:],
-      testRunBranches: response.testRunBranches ?? []
+      testRunBranches: response.testRunBranches ?? [],
+      runningAt: runningAt
     )
     result.worktreeCompromised = response.worktreeCompromised ?? false
     result.skipValidation = response.skipValidation
