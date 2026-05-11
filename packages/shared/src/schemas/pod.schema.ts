@@ -13,7 +13,7 @@ export const acDefinitionSchema = z.object({
 export const createPodRequestSchema = z
   .object({
     profileName: z.string().min(1).max(64),
-    task: z.string().max(10_000),
+    task: z.string().max(50_000),
     model: z.string().min(1).max(32).optional(),
     runtime: z.enum(['claude', 'codex']).optional(),
     executionTarget: z.enum(['local', 'aci']).optional(),
