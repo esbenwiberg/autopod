@@ -37,7 +37,11 @@ interface ClaudeToolUseResult {
 interface ClaudeStreamEvent {
   type: string;
   subtype?: string;
-  pod_id?: string;
+  // Claude CLI's stream-json wire format — `session_id`, not `pod_id`. The
+  // sessions→pods rename (#87) blanket-replaced this and broke --resume
+  // capture: every recovery fell back to a fresh spawn because the parsed
+  // event always had `pod_id: undefined`.
+  session_id?: string;
   message?: ClaudeStreamMessage;
   tool_use_result?: ClaudeToolUseResult;
   result?: string;
@@ -89,7 +93,7 @@ export class ClaudeStreamParser {
    * Map a Claude stream-json event to an AgentEvent.
    *
    * Event mapping:
-   * - system (subtype init)    → AgentStatusEvent (captures pod_id)
+   * - system (subtype init)    → AgentStatusEvent (captures session_id)
    * - assistant (text content) → AgentStatusEvent
    * - assistant (tool_use)     → AgentFileChangeEvent or AgentToolUseEvent
    * - tool_result              → AgentToolUseEvent with output
@@ -105,7 +109,7 @@ export class ClaudeStreamParser {
           return {
             type: 'status',
             timestamp: ts,
-            message: `Claude pod initialized${event.pod_id ? ` (${event.pod_id})` : ''}`,
+            message: `Claude pod initialized${event.session_id ? ` (${event.session_id})` : ''}`,
           };
         }
         return null;

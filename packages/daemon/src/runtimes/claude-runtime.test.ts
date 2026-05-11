@@ -514,7 +514,13 @@ describe('ClaudeRuntime', () => {
       expect(stderrEvent).toBeDefined();
     });
 
-    it('extracts and stores Claude pod ID from init event', async () => {
+    it('extracts and stores Claude CLI session_id from init event for --resume', async () => {
+      // Regression test for the sessions→pods rename bug: the fixture must
+      // mirror Claude CLI's actual wire format (`session_id`), not autopod's
+      // internal naming. If a future refactor renames this field back to
+      // `pod_id`, capture breaks silently and every sleep recovery falls
+      // back to a fresh spawn — burning tokens replaying work that was
+      // already done.
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -523,7 +529,7 @@ describe('ClaudeRuntime', () => {
         emitLine(handle.stdout as PassThrough, {
           type: 'system',
           subtype: 'init',
-          pod_id: 'claude-sess-abc123',
+          session_id: 'claude-sess-abc123',
         });
         handle.finish(0);
       }, 10);

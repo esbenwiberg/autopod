@@ -23,7 +23,7 @@ export class ClaudeRuntime implements Runtime {
   readonly type = 'claude' as const;
 
   private handles = new Map<string, StreamingExecResult>();
-  /** Maps autopod podId → Claude CLI pod_id for resume support. */
+  /** Maps autopod podId → Claude CLI session_id (the `--resume` arg). */
   private claudeSessionIds = new Map<string, string>();
   /** Maps autopod podId → MCP servers so resume() can re-write the config into the new container. */
   private mcpServersBySession = new Map<string, SpawnConfig['mcpServers']>();

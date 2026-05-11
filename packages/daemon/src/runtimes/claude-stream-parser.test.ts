@@ -9,16 +9,31 @@ function fakeLogger() {
 }
 
 describe('ClaudeStreamParser.mapEvent', () => {
-  it('maps system init to Claude pod initialized status', () => {
+  it('maps system init to Claude pod initialized status, capturing the wire-format session_id', () => {
+    // Wire format from `claude --output-format stream-json` uses `session_id`.
+    // The sessions→pods rename (#87) accidentally renamed this to `pod_id` —
+    // which Claude CLI never emits — silently breaking --resume on recovery.
     const event = {
       type: 'system',
       subtype: 'init',
-      pod_id: 'abc-123',
+      session_id: 'abc-123',
     };
     const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'status',
       message: 'Claude pod initialized (abc-123)',
+    });
+  });
+
+  it('does not capture a session id when the event lacks session_id', () => {
+    // If Claude CLI ever omits the field, the message must still parse but
+    // contain no parenthesised id (the regex in claude-runtime + pod-manager
+    // skips capture in that case).
+    const event = { type: 'system', subtype: 'init' };
+    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
+    expect(result).toMatchObject({
+      type: 'status',
+      message: 'Claude pod initialized',
     });
   });
 
