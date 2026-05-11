@@ -296,6 +296,12 @@ public actor DaemonAPI {
     try await request("GET", "/pods/analytics/throughput", query: ["days": "\(days)"])
   }
 
+  /// GET /pods/analytics/escalations — trailing-window self-recovery rate, ask_human TTR
+  /// histogram, per-profile escalation rates, and top-10 blocker patterns.
+  public func getEscalationsAnalytics(days: Int = 30) async throws -> EscalationsAnalyticsResponse {
+    try await request("GET", "/pods/analytics/escalations", query: ["days": "\(days)"])
+  }
+
   /// POST /audit-chain/verify — runs a fleet-wide audit-chain integrity check.
   /// Records the result in `audit_chain_verifications` and returns a summary.
   public func verifyAuditChain() async throws -> AuditChainVerifyResponse {
