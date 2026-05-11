@@ -302,6 +302,12 @@ public actor DaemonAPI {
     try await request("GET", "/pods/analytics/escalations", query: ["days": "\(days)"])
   }
 
+  /// GET /pods/analytics/models — trailing-window per-model leaderboard, per-runtime aggregates,
+  /// failure-stage matrix, and unknown-model samples.
+  public func getModelsAnalytics(days: Int = 30) async throws -> ModelsAnalyticsResponse {
+    try await request("GET", "/pods/analytics/models", query: ["days": "\(days)"])
+  }
+
   /// POST /audit-chain/verify — runs a fleet-wide audit-chain integrity check.
   /// Records the result in `audit_chain_verifications` and returns a summary.
   public func verifyAuditChain() async throws -> AuditChainVerifyResponse {

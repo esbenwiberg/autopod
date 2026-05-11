@@ -23,6 +23,8 @@ public struct AnalyticsView: View {
     public var loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)?
     /// Fetches escalations analytics from the daemon for the Escalations card.
     public var loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)?
+    /// Fetches models analytics from the daemon for the Models card.
+    public var loadModelsAnalytics: ((Int) async throws -> ModelsAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
@@ -38,6 +40,7 @@ public struct AnalyticsView: View {
     @State private var throughputData: ThroughputAnalyticsResponse?
     @State private var throughputLoadError: String?
     @State private var escalationsData: EscalationsAnalyticsResponse?
+    @State private var modelsData: ModelsAnalyticsResponse?
 
     public init(
         pods: [Pod],
@@ -48,6 +51,7 @@ public struct AnalyticsView: View {
         loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
         loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)? = nil,
+        loadModelsAnalytics: ((Int) async throws -> ModelsAnalyticsResponse)? = nil,
         selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
@@ -58,6 +62,7 @@ public struct AnalyticsView: View {
         self.loadSafetyAnalytics = loadSafetyAnalytics
         self.loadThroughputAnalytics = loadThroughputAnalytics
         self.loadEscalationsAnalytics = loadEscalationsAnalytics
+        self.loadModelsAnalytics = loadModelsAnalytics
         self._selectedCard = selectedCard
     }
 
@@ -197,6 +202,53 @@ public struct AnalyticsView: View {
         return "\(n) human \u{00B7} \(m) ai"
     }
 
+    private var modelsCardValue: String {
+        modelsData.map { $0.summary.cheapestDollarPerPrModel ?? "—" } ?? "—"
+    }
+
+    private var modelsCardSparkline: [Double]? {
+        guard let m = modelsData, m.summary.cohortSize > 0 else { return nil }
+        return m.summary.mostUsedDailySparkline.map { Double($0.count) }
+    }
+
+    private var modelsCardDelta: AnalyticsCardDelta? {
+        guard let m = modelsData, m.summary.cheapestDollarPerPrModel != nil else { return nil }
+        let delta = m.summary.cheapestDollarPerPrDelta
+        let formatted: String
+        if delta.value >= 0 {
+            formatted = String(format: "+$%.2f/PR", delta.value)
+        } else {
+            formatted = String(format: "-$%.2f/PR", abs(delta.value))
+        }
+        return AnalyticsCardDelta(
+            value: formatted,
+            direction: AnalyticsCardDelta.Direction(delta.direction)
+        )
+    }
+
+    private var modelsCardSubline: String? {
+        guard let m = modelsData, m.summary.cohortSize > 0 else { return nil }
+        var lines: [String] = []
+
+        // Line 1: "$X.XX/PR" and/or "best: <model>", joined by " · "
+        var line1Parts: [String] = []
+        if let dpr = m.summary.cheapestDollarPerPr {
+            line1Parts.append("$\(String(format: "%.2f", dpr))/PR")
+        }
+        if let best = m.summary.bestQualityModel {
+            line1Parts.append("best: \(best)")
+        }
+        let line1 = line1Parts.joined(separator: " \u{00B7} ")
+        if !line1.isEmpty { lines.append(line1) }
+
+        // Line 2: most used model (suppressed only when mostUsedModel is nil)
+        if let mostUsed = m.summary.mostUsedModel {
+            lines.append("most used: \(mostUsed) (\(m.summary.mostUsedPodCount ?? 0) pods)")
+        }
+
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
     // MARK: - Body
 
     public var body: some View {
@@ -277,6 +329,15 @@ public struct AnalyticsView: View {
                         isSelected: selectedCard == .escalations,
                         onClick: { selectedCard = selectedCard == .escalations ? nil : .escalations }
                     )
+                    AnalyticsCard(
+                        title: "Models",
+                        value: modelsCardValue,
+                        sparkline: modelsCardSparkline,
+                        delta: modelsCardDelta,
+                        subline: modelsCardSubline,
+                        isSelected: selectedCard == .models,
+                        onClick: { selectedCard = selectedCard == .models ? nil : .models }
+                    )
                 }
             }
             .padding(24)
@@ -349,6 +410,11 @@ public struct AnalyticsView: View {
                     escalationsData = try? await loadEscalationsAnalytics(30)
                 }
             }
+            let modelsTask = Task {
+                if let loadModelsAnalytics {
+                    modelsData = try? await loadModelsAnalytics(30)
+                }
+            }
             await scoreTask.value
             await costTask.value
             await reliabilityTask.value
@@ -356,6 +422,7 @@ public struct AnalyticsView: View {
             await safetyTask.value
             await throughputTask.value
             await escalationsTask.value
+            await modelsTask.value
         }
     }
 }
@@ -484,6 +551,14 @@ extension AnalyticsCardDelta.Direction {
     }
 
     init(_ direction: EscalationsRateDelta.Direction) {
+        switch direction {
+        case .up:   self = .up
+        case .down: self = .down
+        case .flat: self = .flat
+        }
+    }
+
+    init(_ direction: ModelsDollarDelta.Direction) {
         switch direction {
         case .up:   self = .up
         case .down: self = .down
