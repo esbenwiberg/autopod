@@ -374,8 +374,13 @@ Collapse to single column under ~1040px viewport.
 - Group briefs by gate. A *gate* is a set of briefs at the same
   dependency depth that may run concurrently. Render each gate as a
   panel with a label like `Gate 2 · parallel · 3 briefs depend on 01`.
-  Within a parallel gate, place sibling briefs side by side. Render an
-  `↓` arrow between gates to show sequential dependency.
+  **Stack briefs vertically inside a gate — never render parallel
+  siblings as side-by-side columns.** Brief bodies are dense (Task
+  paragraph, Touches with full paths, AC groups, Full draft markdown)
+  and column layouts force line-wrap-per-word; the `<pre>` for the
+  draft markdown is unreadable below ~600px. The `parallel` signal
+  lives in the gate label, not in the column layout. Render an `↓`
+  arrow between gates to show sequential dependency.
 - Each brief is a `<details>` element (HTML's native collapsible) with
   a colored left-border halo:
   - **green** — clean: no open question, no theatre risk.
@@ -495,16 +500,31 @@ the blue accent when selected.
   `.selected` class on the clicked pill and removes it from the other
   pills inside the same `.actions` container (radio-group semantics
   per issue). State lives in DOM only; no persistence.
-- **Reply composer** — a sticky bar pinned to the bottom-right
-  showing `Selected: N / M issues  [Copy reply]`. `M` is the total
-  count of issues (per-brief + cross-cutting); `N` updates live as
-  pills are selected. The button is disabled while `N == 0`.
+- **Reply composer** — lives **inside the side rail as its last
+  panel**, NOT as a `position: fixed` floating overlay. The rail is
+  already `position: sticky; top: 24px; max-height: calc(100vh -
+  48px); overflow: auto;` so the composer at the rail's bottom stays
+  visible as the user scrolls and never floats over the brief grid or
+  the Coverage list. Use `position: sticky; bottom: 0` on the
+  composer's outer element so it stays anchored to the rail's visible
+  bottom even when the rail's internal content scrolls past it.
+  Render as a `<details>` element with the title strip
+  (`Reply composer · N/M selected`) as the `<summary>` and the
+  textarea + actions as the body. Default `open` state: closed when
+  `N == 0`, opens automatically when the first pill is selected.
+  This is the "collapse-when-empty" behavior — a reviewer scanning
+  the plan never has the composer's full body eating rail space until
+  they actually start resolving an issue. `M` is the total count of
+  issues (per-brief + cross-cutting); `N` updates live as pills are
+  selected. The `Copy reply` button is disabled while `N == 0` (the
+  user can still type `green light` in the terminal directly).
   Clicking `Copy reply` assembles a structured reply from the
   selections and writes it to the clipboard via
   `navigator.clipboard.writeText(...)`. Show a brief inline toast
-  (`Copied — paste into your terminal`) on success; fall back to a
-  visible `<textarea>` with the text pre-selected if the clipboard
-  API is unavailable (some `file://` browsers refuse it).
+  (`Copied — paste into your terminal`) on success; fall back to
+  making the `<textarea>` selected and instructing the user to
+  `cmd+c` if the clipboard API is unavailable (some `file://`
+  browsers refuse it).
 
 **Reply template** — the assembled clipboard text MUST follow this
 exact shape so the planner can parse it deterministically:
@@ -909,6 +929,17 @@ loop was not done.
 - Linking external CSS / fonts / scripts in the show-back HTML. The
   artifact must work offline, opened directly via `file://`. No CDN,
   no Google Fonts, no Tailwind play-CDN, no Alpine via unpkg.
+- Rendering parallel-gate briefs as side-by-side columns
+  (`grid-template-columns: 1fr 1fr 1fr`). Brief bodies are too dense
+  to read in ~30%-width columns — Task paragraphs wrap every two
+  words, Touches paths overflow, and the `<pre>` for the Full draft
+  markdown is unreadable. Stack vertically inside the gate panel; the
+  gate label already carries the `parallel` signal.
+- Rendering the reply composer as a `position: fixed; bottom; right`
+  floating overlay. It will sit on top of the lower half of the side
+  rail (typically the Coverage panel) and obscure content the user
+  needs to read. Live it inside the rail as the last panel, sticky to
+  the rail's bottom, collapsed when zero pills are selected.
 - Committing `.autopod/review/exit-checklist.html` to the repo. The
   directory is gitignored; it's a transient review artifact, not a
   deliverable. (The `SAMPLE-*.html` reference file is the only
