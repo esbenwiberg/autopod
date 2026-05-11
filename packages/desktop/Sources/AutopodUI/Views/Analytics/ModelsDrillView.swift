@@ -502,8 +502,7 @@ private struct ModelsFailureMatrixSectionView: View {
                         .font(.system(size: 9))
                 }
                 .frame(width: 44, minHeight: 32)
-                // Mirror ReliabilityDrillView's colour ramp: linear interpolation, capped at 1.0.
-                .background(Color.red.opacity(min(cell.failureRate * 1.2, 1.0)))
+                .background(stageCellBackground(failureRate: cell.failureRate))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
                 Text("—")
@@ -515,6 +514,14 @@ private struct ModelsFailureMatrixSectionView: View {
             }
         }
     }
+}
+
+/// Linear interpolation neutral→red across [0, 1]. Peak opacity 0.85 at failureRate == 1.0
+/// keeps fully-failing cells visually distinct from cells near-but-below 1.0 (the brief warns
+/// against saturating earlier — a single failing pod must not look identical to a uniformly
+/// failing model).
+private func stageCellBackground(failureRate: Double) -> Color {
+    Color.red.opacity(failureRate * 0.85)
 }
 
 // MARK: - ValidationStage short label for column headers
