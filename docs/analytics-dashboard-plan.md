@@ -13,9 +13,9 @@ A living plan for the macOS desktop analytics rebuild. Each phase below is sized
 | 4 | Safety / Guardrails | [`specs/analytics-safety/`](../specs/analytics-safety/) | Spec'd |
 | 5a | Throughput card + drill (heatmap, queue depth, time-in-status) | [`specs/analytics-throughput/`](../specs/analytics-throughput/) | Spec'd |
 | 5b | Escalations card + drill (TTR histogram, per-profile, blocker patterns) | [`specs/analytics-escalations/`](../specs/analytics-escalations/) | Spec'd |
-| 6 | Models leaderboard + what-if | — | Pending |
+| 6 | Models leaderboard + what-if | [`specs/analytics-models/`](../specs/analytics-models/) | Spec'd |
 
-ADRs introduced so far: [ADR-015](decisions/ADR-015-model-pricing-bundled-json.md) (bundled JSON pricing), [ADR-016](decisions/ADR-016-phase-token-per-attempt-taxonomy.md) (per-attempt phase token taxonomy), [ADR-018](decisions/ADR-018-safety-events-fleet-wide-scope.md) (`safety_events` fleet-wide scope), [ADR-019](decisions/ADR-019-pii-categories-outside-hash-chain.md) (`pii_categories` outside the audit-chain hash payload), [ADR-020](decisions/ADR-020-network-policy-resolved-snapshot.md) (snapshot resolved network policy on `pods`).
+ADRs introduced so far: [ADR-015](decisions/ADR-015-model-pricing-bundled-json.md) (bundled JSON pricing), [ADR-016](decisions/ADR-016-phase-token-per-attempt-taxonomy.md) (per-attempt phase token taxonomy), [ADR-018](decisions/ADR-018-safety-events-fleet-wide-scope.md) (`safety_events` fleet-wide scope), [ADR-019](decisions/ADR-019-pii-categories-outside-hash-chain.md) (`pii_categories` outside the audit-chain hash payload), [ADR-020](decisions/ADR-020-network-policy-resolved-snapshot.md) (snapshot resolved network policy on `pods`), [ADR-022](decisions/ADR-022-model-canonical-alias-map.md) (`MODEL_CANONICAL` alias map for analytics rollups), [ADR-023](decisions/ADR-023-simulator-client-side-naive-projection.md) (client-side what-if simulator with naïve projection).
 
 ## Vision
 
