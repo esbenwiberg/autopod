@@ -24,7 +24,7 @@ export async function evaluatePlanAgainstAc(
   const reviewerModel = profile.reviewerModel || profile.defaultModel || 'claude-sonnet-4-5';
 
   const acList = acceptanceCriteria
-    .map((ac, i) => `${i + 1}. [${ac.type}] Test: ${ac.test} / Pass: ${ac.pass} / Fail: ${ac.fail}`)
+    .map((ac, i) => `${i + 1}. [${ac.type}] ${ac.outcome}${ac.hint ? ` (hint: ${ac.hint})` : ''}`)
     .join('\n');
 
   const stepsText = steps.map((s, i) => `${i + 1}. ${s}`).join('\n');

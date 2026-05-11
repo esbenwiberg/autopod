@@ -25,3 +25,6 @@
 | `ADR-019` | ADR-019: `action_audit.pii_categories` lives outside the hash-chain payload | Accepted | `action_audit` carries an HMAC-style hash chain, introduced in |
 | `ADR-020` | ADR-020: Snapshot resolved network policy on `pods` row at provisioning | Accepted | Phase 4's Safety drill includes a "network-policy distribution" |
 | `ADR-021` | ADR-021: Sleep-recovery via reconcile-on-wake | Accepted | The autopod daemon runs on a developer's macOS laptop. When the laptop |
+| `ADR-022` | ADR-022: `MODEL_CANONICAL` alias map for analytics rollups | Accepted | Analytics phase 6 (`specs/analytics-models/`) introduces |
+| `ADR-023` | ADR-023: Client-side what-if simulator with naïve weighted-average projection | Accepted | Analytics phase 6 (`specs/analytics-models/`) includes a |
+| `ADR-024` | ADR-024: AC schema v2 — outcome + optional hint, drop pass/fail in favour of polarity enum | Accepted | The `AcDefinition` shape in `@autopod/shared` was |

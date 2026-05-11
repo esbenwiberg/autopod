@@ -8,7 +8,7 @@ describe('parseBriefFrontmatter', () => {
     expect(body).toBe('Just a body');
   });
 
-  it('tolerates invalid YAML escape sequences like \\| in double-quoted strings', () => {
+  it('throws BriefParseError when AC uses legacy "test" key', () => {
     const content = `---
 acceptance_criteria:
   - type: cmd
@@ -17,9 +17,7 @@ acceptance_criteria:
     fail: no match
 ---
 Body`;
-    const { frontmatter } = parseBriefFrontmatter(content);
-    expect(frontmatter.acceptance_criteria).toHaveLength(1);
-    expect(frontmatter.acceptance_criteria?.[0]?.pass).toBe('match found');
+    expect(() => parseBriefFrontmatter(content)).toThrow('AC field "test" is not allowed');
   });
 
   it('parses YAML frontmatter and trims body', () => {
@@ -30,13 +28,13 @@ Body`;
     expect(body).toBe('Body text');
   });
 
-  it('parses structured acceptance_criteria from frontmatter', () => {
+  it('parses structured acceptance_criteria with v2 shape from frontmatter', () => {
     const content =
-      '---\nacceptance_criteria:\n  - type: api\n    test: GET /health\n    pass: 200 ok\n    fail: non-200\n---\nBody\n';
+      '---\nacceptance_criteria:\n  - type: api\n    outcome: GET /health returns 200\n    hint: GET /api/health\n---\nBody\n';
     const { frontmatter } = parseBriefFrontmatter(content);
     expect(frontmatter.acceptance_criteria).toHaveLength(1);
     expect(frontmatter.acceptance_criteria?.[0]?.type).toBe('api');
-    expect(frontmatter.acceptance_criteria?.[0]?.test).toBe('GET /health');
+    expect(frontmatter.acceptance_criteria?.[0]?.outcome).toBe('GET /health returns 200');
   });
 });
 
@@ -123,22 +121,20 @@ describe('parseBriefs', () => {
     expect(briefs[0]?.acceptanceCriteria).toBeUndefined();
   });
 
-  it('passes through YAML frontmatter acceptance_criteria as structured AcDefinition[]', () => {
+  it('passes through YAML frontmatter acceptance_criteria as structured AcDefinition[] (v2 shape)', () => {
     const content = `---
 acceptance_criteria:
   - type: api
-    test: GET /health
-    pass: 200 ok
-    fail: non-200
+    outcome: GET /health returns 200
+    hint: GET /api/health
   - type: none
-    test: npx pnpm build
-    pass: exit 0
-    fail: any error
+    outcome: build exits cleanly
 ---
 Build the thing`;
     const briefs = parseBriefs([{ filename: '01-task.md', content }]);
     expect(briefs[0]?.acceptanceCriteria).toHaveLength(2);
     expect(briefs[0]?.acceptanceCriteria?.[0]?.type).toBe('api');
+    expect(briefs[0]?.acceptanceCriteria?.[0]?.outcome).toBe('GET /health returns 200');
     expect(briefs[0]?.acceptanceCriteria?.[1]?.type).toBe('none');
   });
 
@@ -162,21 +158,18 @@ Small`;
     expect(briefs[0]?.acceptanceCriteria).toHaveLength(3);
     expect(briefs[0]?.acceptanceCriteria?.[0]).toEqual({
       type: 'none',
-      test: 'Types exported from shared',
-      pass: 'criterion satisfied',
-      fail: 'criterion not satisfied',
+      outcome: 'Types exported from shared',
     });
-    expect(briefs[0]?.acceptanceCriteria?.[1]?.test).toBe('Unit tests pass');
-    expect(briefs[0]?.acceptanceCriteria?.[2]?.test).toBe('No TS errors');
+    expect(briefs[0]?.acceptanceCriteria?.[1]?.outcome).toBe('Unit tests pass');
+    expect(briefs[0]?.acceptanceCriteria?.[2]?.outcome).toBe('No TS errors');
   });
 
   it('YAML acceptance_criteria takes priority over markdown section', () => {
     const content = `---
 acceptance_criteria:
   - type: web
-    test: navigate to /dashboard
-    pass: page renders
-    fail: blank screen
+    outcome: /dashboard renders with nav
+    hint: /dashboard
 ---
 
 ## Acceptance Criteria
@@ -187,6 +180,7 @@ acceptance_criteria:
     const briefs = parseBriefs([{ filename: '01-task.md', content }]);
     expect(briefs[0]?.acceptanceCriteria).toHaveLength(1);
     expect(briefs[0]?.acceptanceCriteria?.[0]?.type).toBe('web');
+    expect(briefs[0]?.acceptanceCriteria?.[0]?.outcome).toBe('/dashboard renders with nav');
   });
 
   it('extracts require_sidecars from frontmatter (snake_case)', () => {
@@ -280,7 +274,7 @@ Files: 4 modified/created | Complexity: low`;
     const briefs = parseBriefs([{ filename: '01-protocol-contracts.md', content }]);
     expect(briefs[0]?.acceptanceCriteria).toHaveLength(5);
     expect(briefs[0]?.acceptanceCriteria?.every((ac) => ac.type === 'none')).toBe(true);
-    expect(briefs[0]?.acceptanceCriteria?.[0]?.test).toContain('RunnerIdentity');
-    expect(briefs[0]?.acceptanceCriteria?.[4]?.test).toContain('No new runtime dependencies');
+    expect(briefs[0]?.acceptanceCriteria?.[0]?.outcome).toContain('RunnerIdentity');
+    expect(briefs[0]?.acceptanceCriteria?.[4]?.outcome).toContain('No new runtime dependencies');
   });
 });

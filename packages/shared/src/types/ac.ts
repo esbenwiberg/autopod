@@ -1,11 +1,16 @@
 export type AcType = 'none' | 'api' | 'web' | 'cmd';
+export type AcPolarity = 'expect-output' | 'expect-no-output' | 'exit-zero';
 
-export interface AcDefinition {
-  type: AcType;
-  /** Specific action to perform: "run `npx pnpm build`", "GET /pods/series/:id", "navigate to /pods" */
-  test: string;
-  /** Observable success condition: "exit code 0", "200 with pods array", "badge renders" */
-  pass: string;
-  /** Observable failure condition: "any TS errors", "non-200", "no badge visible" */
-  fail: string;
+/** Base fields shared by all AC types. */
+interface AcBase {
+  /** User-visible criterion description. Required, ≤200 chars. */
+  outcome: string;
+  /** Technical pointer consumed by the LLM and executors (URL, selector, endpoint, or shell command). ≤500 chars. */
+  hint?: string;
 }
+
+export type AcDefinition =
+  | (AcBase & { type: 'none' })
+  | (AcBase & { type: 'api' })
+  | (AcBase & { type: 'web' })
+  | (AcBase & { type: 'cmd'; polarity?: AcPolarity });

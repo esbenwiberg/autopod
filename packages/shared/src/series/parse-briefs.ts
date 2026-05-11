@@ -1,4 +1,5 @@
 import { parseDocument as parseYamlDocument } from 'yaml';
+import { BriefParseError } from '../errors.js';
 import { parseAcList } from '../parse-ac-list.js';
 import type { AcDefinition } from '../types/ac.js';
 
@@ -73,17 +74,45 @@ export function parseBriefFrontmatter(content: string): {
 } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: content.trim() };
+  const yamlText = match[1] ?? '';
   let frontmatter: BriefFrontmatter;
   try {
     // parseDocument collects errors without throwing — brief authors commonly use \| in grep
     // commands inside double-quoted YAML strings which strict parse rejects. Best-effort is fine.
-    frontmatter = (parseYamlDocument(match[1] ?? '').toJS() ?? {}) as BriefFrontmatter;
+    frontmatter = (parseYamlDocument(yamlText).toJS() ?? {}) as BriefFrontmatter;
   } catch (err) {
     throw new Error(
       `YAML frontmatter parse error: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+  if (frontmatter.acceptance_criteria) {
+    validateAcItems(frontmatter.acceptance_criteria, yamlText);
+  }
   return { frontmatter, body: (match[2] ?? '').trim() };
+}
+
+const LEGACY_AC_KEYS = ['test', 'pass', 'fail'] as const;
+
+/**
+ * Validate that no AC item uses legacy v1 keys (test/pass/fail).
+ * Throws BriefParseError with the offending field name and best-effort line number.
+ */
+function validateAcItems(acs: AcDefinition[], yamlText: string): void {
+  const lines = yamlText.split('\n');
+  for (const ac of acs) {
+    const obj = ac as unknown as Record<string, unknown>;
+    for (const key of LEGACY_AC_KEYS) {
+      if (key in obj) {
+        // Find the line number of the offending key in the YAML block (1-based).
+        const lineIndex = lines.findIndex((l) => new RegExp(`^\\s+${key}\\s*:`).test(l));
+        const line = lineIndex >= 0 ? lineIndex + 1 : undefined;
+        throw new BriefParseError(
+          `AC field "${key}" is not allowed in v2 schema — use "outcome" (was "test") or "hint" and remove "pass"/"fail". Found in acceptance_criteria item.`,
+          line,
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -194,11 +223,9 @@ export function parseBriefs(
     if (!acceptanceCriteria) {
       const mdSection = extractMarkdownAcSection(body);
       if (mdSection) {
-        acceptanceCriteria = parseAcList(mdSection).map((test) => ({
+        acceptanceCriteria = parseAcList(mdSection).map((outcome) => ({
           type: 'none' as const,
-          test,
-          pass: 'criterion satisfied',
-          fail: 'criterion not satisfied',
+          outcome,
         }));
       }
     }

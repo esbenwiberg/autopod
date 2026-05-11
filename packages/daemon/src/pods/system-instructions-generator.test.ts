@@ -347,15 +347,12 @@ describe('generateSystemInstructions', () => {
         acceptanceCriteria: [
           {
             type: 'web',
-            test: 'Settings page has a dark mode toggle',
-            pass: 'toggle visible',
-            fail: 'no toggle',
+            outcome: 'Settings page has a dark mode toggle',
+            hint: '/settings',
           },
           {
             type: 'none',
-            test: 'Toggle persists after refresh',
-            pass: 'value retained',
-            fail: 'value lost',
+            outcome: 'Toggle persists after refresh',
           },
         ],
       }),
@@ -399,7 +396,7 @@ describe('generateSystemInstructions', () => {
       makeProfile(),
       makeSession({
         acceptanceCriteria: [
-          { type: 'none', test: 'Page loads without errors', pass: 'exit 0', fail: 'any error' },
+          { type: 'none', outcome: 'Page loads without errors' },
         ],
       }),
       'http://localhost:8080/mcp/x',

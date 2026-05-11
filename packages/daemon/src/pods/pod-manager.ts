@@ -3228,11 +3228,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const criteria = await readAcFile(worktreePath, pod.acFrom);
           // File-sourced criteria are plain lines — wrap each as a minimal
           // AcDefinition so the validation engine can treat them uniformly.
-          const wrapped = criteria.map((test) => ({
+          const wrapped = criteria.map((outcome) => ({
             type: 'none' as const,
-            test,
-            pass: 'criterion satisfied',
-            fail: 'criterion not satisfied',
+            outcome,
           }));
           podRepo.update(podId, { acceptanceCriteria: wrapped });
           pod = podRepo.getOrThrow(podId);

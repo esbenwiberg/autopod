@@ -436,4 +436,43 @@ describe('PodRepository', () => {
       expect(child.dependsOnPodIds).toEqual(['parent-b']);
     });
   });
+
+  describe('parseAcceptanceCriteria (legacy shape detection)', () => {
+    function writeRawAc(podId: string, raw: string): void {
+      repo.insert({ ...validSession, id: podId });
+      db.prepare('UPDATE pods SET acceptance_criteria = ? WHERE id = ?').run(raw, podId);
+    }
+
+    it('throws when a row carries a legacy "test" field', () => {
+      writeRawAc('legacy-test', JSON.stringify([{ type: 'cmd', test: 'foo', pass: 'p', fail: 'f' }]));
+      expect(() => repo.getOrThrow('legacy-test')).toThrow(/field "test"/);
+    });
+
+    it('throws when a row carries a legacy "pass" field', () => {
+      writeRawAc('legacy-pass', JSON.stringify([{ type: 'cmd', outcome: 'foo', pass: 'p' }]));
+      expect(() => repo.getOrThrow('legacy-pass')).toThrow(/field "pass"/);
+    });
+
+    it('throws when a row carries a legacy "fail" field', () => {
+      writeRawAc('legacy-fail', JSON.stringify([{ type: 'cmd', outcome: 'foo', fail: 'f' }]));
+      expect(() => repo.getOrThrow('legacy-fail')).toThrow(/field "fail"/);
+    });
+
+    it('throws when "outcome" is missing', () => {
+      writeRawAc('no-outcome', JSON.stringify([{ type: 'web' }]));
+      expect(() => repo.getOrThrow('no-outcome')).toThrow(/outcome.*missing or empty/);
+    });
+
+    it('returns null for malformed JSON', () => {
+      writeRawAc('bad-json', '{not-json');
+      const pod = repo.getOrThrow('bad-json');
+      expect(pod.acceptanceCriteria).toBeNull();
+    });
+
+    it('parses valid v2 rows', () => {
+      writeRawAc('valid', JSON.stringify([{ type: 'web', outcome: '/x renders', hint: '/x' }]));
+      const pod = repo.getOrThrow('valid');
+      expect(pod.acceptanceCriteria).toEqual([{ type: 'web', outcome: '/x renders', hint: '/x' }]);
+    });
+  });
 });

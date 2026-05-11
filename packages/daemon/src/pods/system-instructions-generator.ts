@@ -337,9 +337,9 @@ export function generateSystemInstructions(
             : ac.type === 'cmd'
               ? 'cmd'
               : 'code';
-      lines.push(`- [${typeLabel}] ${ac.test}`);
-      lines.push(`  - Pass: ${ac.pass}`);
-      lines.push(`  - Fail: ${ac.fail}`);
+      lines.push(`- [${typeLabel}] ${ac.outcome}`);
+      if (ac.hint) lines.push(`  - Hint: ${ac.hint}`);
+      if (ac.type === 'cmd' && ac.polarity) lines.push(`  - Polarity: ${ac.polarity}`);
     }
     lines.push('<!-- END USER ACCEPTANCE CRITERIA -->');
     lines.push('');

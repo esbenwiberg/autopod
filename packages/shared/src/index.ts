@@ -228,6 +228,7 @@ export {
   ValidationError,
   EscalationNotFoundError,
   RuntimeError,
+  BriefParseError,
 } from './errors.js';
 
 // Constants (runtime values)

@@ -84,3 +84,13 @@ export class RuntimeError extends AutopodError {
     this.name = 'RuntimeError';
   }
 }
+
+export class BriefParseError extends AutopodError {
+  constructor(
+    message: string,
+    public readonly line?: number,
+  ) {
+    super(message, 'BRIEF_PARSE_ERROR', 400);
+    this.name = 'BriefParseError';
+  }
+}

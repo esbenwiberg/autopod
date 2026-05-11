@@ -28,8 +28,8 @@ import {
 } from './local-validation-engine.js';
 
 /** Build a minimal AcDefinition for tests — shorthand for the string-only fixtures. */
-function ac(test: string, type: AcDefinition['type'] = 'none'): AcDefinition {
-  return { type, test, pass: 'criterion satisfied', fail: 'criterion not satisfied' };
+function ac(outcome: string, type: AcDefinition['type'] = 'none'): AcDefinition {
+  return { type, outcome };
 }
 
 describe('stripMarkdownFences', () => {
@@ -210,19 +210,13 @@ describe('parseClassificationJson', () => {
     expect(missing.every((r) => r.validationType === 'none')).toBe(true);
   });
 
-  it('enriches results with author-declared pass/fail hints', () => {
+  it('classifies a single AC from the LLM result', () => {
     const input = JSON.stringify([
       { criterion: acApiEndpoint, validationType: 'api', reason: 'endpoint' },
     ]);
-    const hinted: AcDefinition = {
-      type: 'api',
-      test: acApiEndpoint,
-      pass: 'body contains id',
-      fail: '500 error',
-    };
-    const result = parseClassificationJson(input, [hinted]);
-    expect(result?.at(0)?.pass).toBe('body contains id');
-    expect(result?.at(0)?.fail).toBe('500 error');
+    const result = parseClassificationJson(input, [ac(acApiEndpoint, 'api')]);
+    expect(result?.at(0)?.validationType).toBe('api');
+    expect(result?.at(0)?.criterion).toBe(acApiEndpoint);
   });
 
   it('returns null for garbage input', () => {
@@ -269,9 +263,9 @@ describe('classifyAcTypes', () => {
 
   it('skips the LLM when every AC has a brief-declared type', async () => {
     const acs: AcDefinition[] = [
-      { type: 'none', test: 'Types exported', pass: 'exports present', fail: 'missing' },
-      { type: 'api', test: 'POST /jobs returns 201', pass: '201 status', fail: 'non-201' },
-      { type: 'web', test: 'Settings has toggle', pass: 'toggle visible', fail: 'missing' },
+      { type: 'none', outcome: 'Types exported' },
+      { type: 'api', outcome: 'POST /jobs returns 201', hint: 'POST /api/jobs' },
+      { type: 'web', outcome: 'Settings has toggle', hint: '/settings' },
     ];
     // If the LLM were invoked, this would spawn a `claude` subprocess and hang or fail;
     // resolving synchronously proves the short-circuit path ran.
@@ -280,8 +274,6 @@ describe('classifyAcTypes', () => {
     expect(result?.[0]).toMatchObject({
       criterion: 'Types exported',
       validationType: 'none',
-      pass: 'exports present',
-      fail: 'missing',
     });
     expect(result?.[1]?.validationType).toBe('api');
     // Brief `type: web` maps to engine `web-ui`.
@@ -292,8 +284,8 @@ describe('classifyAcTypes', () => {
 
   it('downgrades web-ui to none when hasWebUi is false', async () => {
     const acs: AcDefinition[] = [
-      { type: 'web', test: 'Settings has toggle', pass: '...', fail: '...' },
-      { type: 'api', test: 'POST /jobs returns 201', pass: '...', fail: '...' },
+      { type: 'web', outcome: 'Settings has toggle', hint: '/settings' },
+      { type: 'api', outcome: 'POST /jobs returns 201', hint: 'POST /api/jobs' },
     ];
     const result = await classifyAcTypes(configWith(acs, false));
     expect(result?.[0]?.validationType).toBe('none');
@@ -309,24 +301,23 @@ describe('classifyAcTypes', () => {
     const acs: AcDefinition[] = [
       {
         type: 'cmd',
-        test: "rg -l 'OldEventEmitter' packages/daemon/src",
-        pass: 'no matches',
-        fail: 'any match',
+        outcome: "rg -l 'OldEventEmitter' packages/daemon/src returns no matches",
+        hint: "rg -l 'OldEventEmitter' packages/daemon/src",
+        polarity: 'expect-no-output',
       },
     ];
     const result = await classifyAcTypes(configWith(acs));
     expect(result).toHaveLength(1);
     expect(result?.[0]?.validationType).toBe('cmd');
-    expect(result?.[0]?.pass).toBe('no matches');
   });
 
   it('demotes banned build/test/lint commands to none even when declared cmd', async () => {
     // The banlist runs before declared-type evaluation, so anything matching
     // COMMAND_LIKE_AC_PATTERNS lands as 'none' regardless of authorial intent.
     const acs: AcDefinition[] = [
-      { type: 'cmd', test: 'pnpm build', pass: 'exit 0', fail: 'non-0' },
-      { type: 'cmd', test: 'dotnet test ./Tests', pass: 'all green', fail: 'any red' },
-      { type: 'cmd', test: 'npx tsc --noEmit', pass: '0 errors', fail: 'any error' },
+      { type: 'cmd', outcome: 'pnpm build', hint: 'pnpm build' },
+      { type: 'cmd', outcome: 'dotnet test ./Tests', hint: 'dotnet test ./Tests' },
+      { type: 'cmd', outcome: 'npx tsc --noEmit', hint: 'npx tsc --noEmit' },
     ];
     const result = await classifyAcTypes(configWith(acs));
     expect(result).toHaveLength(3);
@@ -657,14 +648,14 @@ describe('deduplicateAcsByBaseText', () => {
     ];
     const { deduped } = deduplicateAcsByBaseText(acs);
     expect(deduped).toHaveLength(3);
-    expect(deduped.map((d) => d.test)).toEqual(acs.map((a) => a.test));
+    expect(deduped.map((d) => d.outcome)).toEqual(acs.map((a) => a.outcome));
   });
 
   it('deduplicates exact duplicates', () => {
     const acs = [ac('POST /jobs returns 201'), ac('POST /jobs returns 201')];
     const { deduped } = deduplicateAcsByBaseText(acs);
     expect(deduped).toHaveLength(1);
-    expect(deduped[0]?.test).toBe('POST /jobs returns 201');
+    expect(deduped[0]?.outcome).toBe('POST /jobs returns 201');
   });
 
   it('deduplicates when one AC is the other plus a parenthetical suffix', () => {
@@ -674,7 +665,7 @@ describe('deduplicateAcsByBaseText', () => {
     const { deduped } = deduplicateAcsByBaseText([ac(short), ac(long)]);
     expect(deduped).toHaveLength(1);
     // Keeps the longer (more informative) form
-    expect(deduped[0]?.test).toBe(long);
+    expect(deduped[0]?.outcome).toBe(long);
   });
 
   it('deduplicates and keeps longest when long form comes first', () => {
@@ -683,7 +674,7 @@ describe('deduplicateAcsByBaseText', () => {
       'ConsecutiveFailureCount increments by 1 on each failure (ConsecutiveFailureCount is a persisted job field verifiable via GET /api/schedule/jobs/{id} after induced failures.)';
     const { deduped } = deduplicateAcsByBaseText([ac(long), ac(short)]);
     expect(deduped).toHaveLength(1);
-    expect(deduped[0]?.test).toBe(long);
+    expect(deduped[0]?.outcome).toBe(long);
   });
 
   it('expandResult maps canonical result back to all original criteria', () => {
@@ -735,10 +726,10 @@ describe('deduplicateAcsByBaseText', () => {
     const long = 'POST /jobs returns 201 (verifiable via a POST request)';
     const { deduped } = deduplicateAcsByBaseText([ac(unique), ac(short), ac(long)]);
     expect(deduped).toHaveLength(2);
-    const tests = deduped.map((d) => d.test);
-    expect(tests).toContain(unique);
-    expect(tests).toContain(long);
-    expect(tests).not.toContain(short);
+    const outcomes = deduped.map((d) => d.outcome);
+    expect(outcomes).toContain(unique);
+    expect(outcomes).toContain(long);
+    expect(outcomes).not.toContain(short);
   });
 });
 

@@ -229,22 +229,34 @@ function parseDependsOnPodIds(rawArray: unknown, rawSingle: unknown): string[] {
 
 function parseAcceptanceCriteria(raw: unknown): AcDefinition[] | null {
   if (!raw) return null;
+  let parsed: unknown[];
   try {
-    const parsed = JSON.parse(raw as string) as unknown[];
-    return parsed.map((item) => {
-      if (typeof item === 'string') {
-        return {
-          type: 'none' as const,
-          test: item,
-          pass: 'criterion satisfied',
-          fail: 'criterion not satisfied',
-        };
-      }
-      return item as AcDefinition;
-    });
+    parsed = JSON.parse(raw as string) as unknown[];
   } catch {
     return null;
   }
+  if (!Array.isArray(parsed)) return null;
+  return parsed.map((item) => {
+    if (typeof item !== 'object' || item === null) {
+      throw new Error(
+        `Legacy acceptance_criteria shape detected: item is not an object. Run the wrap-up SQL to clear legacy rows.`,
+      );
+    }
+    const obj = item as Record<string, unknown>;
+    for (const legacyKey of ['test', 'pass', 'fail'] as const) {
+      if (legacyKey in obj) {
+        throw new Error(
+          `Legacy acceptance_criteria shape detected: field "${legacyKey}" found. Run the wrap-up SQL to clear legacy rows.`,
+        );
+      }
+    }
+    if (typeof obj['outcome'] !== 'string' || obj['outcome'].length === 0) {
+      throw new Error(
+        `Invalid acceptance_criteria item: "outcome" is missing or empty. Run the wrap-up SQL to clear legacy rows.`,
+      );
+    }
+    return item as AcDefinition;
+  });
 }
 
 /**

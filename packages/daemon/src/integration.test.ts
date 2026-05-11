@@ -1204,12 +1204,11 @@ describe('Integration', () => {
               task: 'Task with ACs',
               dependsOn: [],
               acceptanceCriteria: [
-                { type: 'none', test: 'npx pnpm build', pass: 'exit 0', fail: 'any error' },
+                { type: 'none', outcome: 'npx pnpm build exits cleanly' },
                 {
                   type: 'api',
-                  test: 'GET /health',
-                  pass: '200 ok',
-                  fail: 'non-200',
+                  outcome: 'GET /health returns 200',
+                  hint: 'GET /api/health',
                 },
               ],
             },
