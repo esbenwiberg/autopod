@@ -332,7 +332,6 @@ export class ClaudeRuntime implements Runtime {
   private buildSpawnArgs(config: SpawnConfig): string[] {
     const args = [
       '-p',
-      config.task,
       '--model',
       this.resolveModelId(config.model),
       '--output-format',
@@ -358,6 +357,11 @@ export class ClaudeRuntime implements Runtime {
       args.push('--mcp-config', MCP_CONFIG_PATH);
     }
 
+    // '--' signals end-of-options to Commander so the task string is always
+    // treated as a positional prompt, even when it starts with '---' (e.g. YAML
+    // front-matter in brief files).
+    args.push('--', config.task);
+
     return args;
   }
 
@@ -368,7 +372,6 @@ export class ClaudeRuntime implements Runtime {
   ): string[] {
     const args = [
       '-p',
-      message,
       '--output-format',
       'stream-json',
       '--verbose',
@@ -393,6 +396,10 @@ export class ClaudeRuntime implements Runtime {
     if (claudeSessionId) {
       args.push('--resume', claudeSessionId);
     }
+
+    // '--' signals end-of-options so the message is always treated as a positional
+    // prompt, even when it starts with dashes (e.g. YAML front-matter).
+    args.push('--', message);
 
     return args;
   }
