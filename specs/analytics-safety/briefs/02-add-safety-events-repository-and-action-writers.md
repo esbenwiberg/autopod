@@ -1,10 +1,19 @@
 ---
 title: "Add safety_events repository + action-engine + mcp-proxy writers"
-depends_on: [01-add-safety-migrations-and-types]
+depends_on: [ 01-add-safety-migrations-and-types ]
 acceptance_criteria:
-  - { type: cmd, test: "test -f packages/daemon/src/safety/safety-events-repository.ts", pass: "exit 0", fail: "missing repository module" }
-  - { type: cmd, test: "rg -l 'pii_categories' packages/daemon/src/actions/audit-repository.ts", pass: "≥1 match", fail: "audit-repository did not learn the new column" }
-  - { type: cmd, test: "rg -l 'safety_events|safetyEventsRepo' packages/daemon/src/actions/action-engine.ts packages/daemon/src/api/mcp-proxy-handler.ts", pass: "≥2 matches (one per file)", fail: "action-engine or mcp-proxy did not adopt the writer" }
+  - type: cmd
+    outcome: test -f packages/daemon/src/safety/safety-events-repository.ts → exit 0
+    hint: test -f packages/daemon/src/safety/safety-events-repository.ts
+    polarity: exit-zero
+  - type: cmd
+    outcome: rg -l 'pii_categories' packages/daemon/src/actions/audit-repository.ts → ≥1 match
+    hint: rg -l 'pii_categories' packages/daemon/src/actions/audit-repository.ts
+    polarity: expect-output
+  - type: cmd
+    outcome: rg -l 'safety_events|safetyEventsRepo' packages/daemon/src/actions/action-engine.ts packages/daemon/src/api/mcp-proxy-handler.ts → ≥2 matches (one per file)
+    hint: rg -l 'safety_events|safetyEventsRepo' packages/daemon/src/actions/action-engine.ts packages/daemon/src/api/mcp-proxy-handler.ts
+    polarity: expect-output
 touches:
   - packages/daemon/src/safety/safety-events-repository.ts
   - packages/daemon/src/safety/safety-events-repository.test.ts

@@ -1,8 +1,11 @@
 ---
 title: "Instrument issue-watcher + POST /pods free-text detections"
-depends_on: [01-add-safety-migrations-and-types, 02-add-safety-events-repository-and-action-writers]
+depends_on: [ 01-add-safety-migrations-and-types, 02-add-safety-events-repository-and-action-writers ]
 acceptance_criteria:
-  - { type: cmd, test: "rg -l 'safetyEventsRepo|safety_events' packages/daemon/src/issue-watcher/issue-watcher-service.ts packages/daemon/src/api/routes/pods.ts", pass: "≥2 matches (one per file)", fail: "ingestion sites not instrumented" }
+  - type: cmd
+    outcome: rg -l 'safetyEventsRepo|safety_events' packages/daemon/src/issue-watcher/issue-watcher-service.ts packages/daemon/src/api/routes/pods.ts → ≥2 matches (one per file)
+    hint: rg -l 'safetyEventsRepo|safety_events' packages/daemon/src/issue-watcher/issue-watcher-service.ts packages/daemon/src/api/routes/pods.ts
+    polarity: expect-output
 touches:
   - packages/daemon/src/issue-watcher/issue-watcher-service.ts
   - packages/daemon/src/issue-watcher/issue-watcher-service.test.ts

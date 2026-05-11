@@ -1,12 +1,22 @@
 ---
 title: "Add GET /pods/analytics/cost endpoint with composite aggregation"
-depends_on: [02-instrument-per-attempt-phase-tokens]
+depends_on: [ 02-instrument-per-attempt-phase-tokens ]
 acceptance_criteria:
-  - { type: api, test: "GET /pods/analytics/cost (no params)", pass: "200 with body.total (number), body.sparkline (array length 30), body.byPhase (array), body.byProfileModel (array), body.top10 (array length <= 10), body.waste.total (number), body.waste.podCount (integer), body.deltaVsPrior.value (number), body.deltaVsPrior.direction in ['up','down','flat']", fail: "non-200 or any required field missing/wrong type" }
-  - { type: api, test: "GET /pods/analytics/cost?days=7", pass: "200 with body.sparkline length === 7", fail: "wrong sparkline length" }
-  - { type: api, test: "GET /pods/analytics/cost?days=0", pass: "400 with body.error and body.code === 'invalid_days'", fail: "any 2xx or missing error fields" }
-  - { type: api, test: "GET /pods/analytics/cost?days=-5", pass: "400 with body.error", fail: "any 2xx" }
-  - { type: api, test: "GET /pods/analytics/cost?days=abc", pass: "400 with body.error", fail: "any 2xx" }
+  - type: api
+    outcome: GET /pods/analytics/cost (no params) → 200 with body.total (number), body.sparkline (array length 30), body.byPhase (array), body.byProfileModel (array), body.top10 (array length <= 10), body.waste.total (number), body.waste.podCount (integer), body.deltaVsPrior.value (number), body.deltaVsPrior.direction in ['up','down','flat']
+    hint: GET /pods/analytics/cost (no params)
+  - type: api
+    outcome: GET /pods/analytics/cost?days=7 → 200 with body.sparkline length === 7
+    hint: GET /pods/analytics/cost?days=7
+  - type: api
+    outcome: GET /pods/analytics/cost?days=0 → 400 with body.error and body.code === 'invalid_days'
+    hint: GET /pods/analytics/cost?days=0
+  - type: api
+    outcome: GET /pods/analytics/cost?days=-5 → 400 with body.error
+    hint: GET /pods/analytics/cost?days=-5
+  - type: api
+    outcome: GET /pods/analytics/cost?days=abc → 400 with body.error
+    hint: GET /pods/analytics/cost?days=abc
 touches:
   - packages/shared/src/types/analytics.ts
   - packages/shared/src/index.ts

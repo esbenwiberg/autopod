@@ -1,11 +1,21 @@
 ---
 title: "Expose screenshots over the daemon HTTP API"
-depends_on: [01-add-screenshot-store]
+depends_on: [ 01-add-screenshot-store ]
 acceptance_criteria:
-  - { type: cmd, test: "test -f packages/daemon/src/api/routes/screenshots.ts", pass: "exit 0", fail: "the new screenshot route file is missing" }
-  - { type: cmd, test: "! grep -nE 'screenshotBase64|\\\"screenshot\\\":\\\\s*\\\"data:image' packages/daemon/src/api/routes/pods.ts", pass: "exit 0 — the pods route no longer emits base64 screenshot fields", fail: "JSON serialisation still leaks base64" }
-  - { type: api, test: "GET /pods/:podId/screenshots/smoke/<filename>.png against a pod whose screenshot was just written by the store", pass: "200 with content-type image/png and the body byte-length > 0", fail: "non-200, wrong content-type, or empty body" }
-  - { type: api, test: "GET /pods/:podId/validations against a pod with screenshots", pass: "200 with body whose validation-history entries carry `screenshot` / `screenshots` fields shaped { url, source, path } (no base64 strings anywhere)", fail: "any base64 string in the response or missing url field" }
+  - type: cmd
+    outcome: test -f packages/daemon/src/api/routes/screenshots.ts → exit 0
+    hint: test -f packages/daemon/src/api/routes/screenshots.ts
+    polarity: exit-zero
+  - type: cmd
+    outcome: "! grep -nE 'screenshotBase64|\\\"screenshot\\\":\\\\s*\\\"data:image' packages/daemon/src/api/routes/pods.ts → exit 0 — the pods route no longer emits base64 screenshot fields"
+    hint: "! grep -nE 'screenshotBase64|\\\"screenshot\\\":\\\\s*\\\"data:image' packages/daemon/src/api/routes/pods.ts"
+    polarity: exit-zero
+  - type: api
+    outcome: GET /pods/:podId/screenshots/smoke/<filename>.png against a pod whose screenshot was just written by the store → 200 with content-type image/png and the body byte-length > 0
+    hint: GET /pods/:podId/screenshots/smoke/<filename>.png against a pod whose screenshot was just written by the store
+  - type: api
+    outcome: GET /pods/:podId/validations against a pod with screenshots → 200 with body whose validation-history entries carry `screenshot` / `screenshots` fields shaped { url, source, path } (no base64 strings anywhere)
+    hint: GET /pods/:podId/validations against a pod with screenshots
 touches:
   - packages/daemon/src/api/routes/screenshots.ts
   - packages/daemon/src/api/routes/screenshots.test.ts

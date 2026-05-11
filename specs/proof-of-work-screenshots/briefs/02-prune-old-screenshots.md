@@ -1,10 +1,19 @@
 ---
 title: "Sweep terminal-pod screenshots past retention"
-depends_on: [01-add-screenshot-store]
+depends_on: [ 01-add-screenshot-store ]
 acceptance_criteria:
-  - { type: cmd, test: "test -f packages/daemon/src/pods/screenshot-retention.ts", pass: "exit 0", fail: "the retention sweeper module is missing" }
-  - { type: cmd, test: "grep -nE 'AUTOPOD_SCREENSHOT_RETENTION_DAYS' packages/daemon/src/index.ts", pass: "exit 0 — the env var is read on boot", fail: "the daemon doesn't honour the retention env var" }
-  - { type: cmd, test: "grep -nE 'screenshotRetention|ScreenshotRetention' packages/daemon/src/index.ts", pass: "exit 0 — the sweeper is wired into the boot path", fail: "the sweeper isn't started on boot" }
+  - type: cmd
+    outcome: test -f packages/daemon/src/pods/screenshot-retention.ts → exit 0
+    hint: test -f packages/daemon/src/pods/screenshot-retention.ts
+    polarity: exit-zero
+  - type: cmd
+    outcome: grep -nE 'AUTOPOD_SCREENSHOT_RETENTION_DAYS' packages/daemon/src/index.ts → exit 0 — the env var is read on boot
+    hint: grep -nE 'AUTOPOD_SCREENSHOT_RETENTION_DAYS' packages/daemon/src/index.ts
+    polarity: exit-zero
+  - type: cmd
+    outcome: grep -nE 'screenshotRetention|ScreenshotRetention' packages/daemon/src/index.ts → exit 0 — the sweeper is wired into the boot path
+    hint: grep -nE 'screenshotRetention|ScreenshotRetention' packages/daemon/src/index.ts
+    polarity: exit-zero
 touches:
   - packages/daemon/src/pods/screenshot-retention.ts
   - packages/daemon/src/pods/screenshot-retention.test.ts

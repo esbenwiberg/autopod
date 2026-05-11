@@ -1,11 +1,19 @@
 ---
 title: "Add /pods/analytics/safety + POST /audit-chain/verify endpoints"
-depends_on: [01-add-safety-migrations-and-types, 04-instrument-ingestion-detections]
+depends_on: [ 01-add-safety-migrations-and-types, 04-instrument-ingestion-detections ]
 acceptance_criteria:
-  - { type: api, test: "GET /pods/analytics/safety?days=30", pass: "200 with body.summary, body.byPattern, body.bySource, body.quarantineHistogram, body.byPod, body.networkPolicy, body.auditChain present", fail: "non-200, missing top-level field, summary.byKind missing pii/injection, or quarantineHistogram length != 10" }
-  - { type: api, test: "GET /pods/analytics/safety (no query)", pass: "200 (defaults to days=30) with same shape", fail: "non-200 or missing fields" }
-  - { type: api, test: "GET /pods/analytics/safety?days=0", pass: "400 with code:'invalid_days'", fail: "non-400 or wrong error code" }
-  - { type: api, test: "POST /audit-chain/verify", pass: "200 with body.valid:bool, body.totalPods:number, body.totalEntries:number, body.ranAt present", fail: "non-200 or missing fields" }
+  - type: api
+    outcome: GET /pods/analytics/safety?days=30 → 200 with body.summary, body.byPattern, body.bySource, body.quarantineHistogram, body.byPod, body.networkPolicy, body.auditChain present
+    hint: GET /pods/analytics/safety?days=30
+  - type: api
+    outcome: GET /pods/analytics/safety (no query) → 200 (defaults to days=30) with same shape
+    hint: GET /pods/analytics/safety (no query)
+  - type: api
+    outcome: GET /pods/analytics/safety?days=0 → 400 with code:'invalid_days'
+    hint: GET /pods/analytics/safety?days=0
+  - type: api
+    outcome: POST /audit-chain/verify → 200 with body.valid:bool, body.totalPods:number, body.totalEntries:number, body.ranAt present
+    hint: POST /audit-chain/verify
 touches:
   - packages/daemon/src/api/routes/pods.ts
   - packages/daemon/src/api/routes/pods.test.ts

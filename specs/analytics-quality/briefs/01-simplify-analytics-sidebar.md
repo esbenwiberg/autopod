@@ -1,8 +1,14 @@
 ---
 title: "Simplify Analytics sidebar to a single row"
 acceptance_criteria:
-  - { type: cmd, test: "! grep -rn 'ships in Phase' packages/desktop/Sources", pass: "no matches", fail: "any match means the stale phase placeholder text still ships in the desktop binary" }
-  - { type: cmd, test: "! grep -rn 'AnalyticsSection\\.cost\\|AnalyticsSection\\.reliability\\|AnalyticsSection\\.quality\\|AnalyticsSection\\.safety\\|AnalyticsSection\\.throughput\\|AnalyticsSection\\.models' packages/desktop/Sources packages/desktop/Tests", pass: "no matches", fail: "any sub-row enum case is still referenced; the simplification is incomplete" }
+  - type: cmd
+    outcome: "! grep -rn 'ships in Phase' packages/desktop/Sources → no matches"
+    hint: "! grep -rn 'ships in Phase' packages/desktop/Sources"
+    polarity: expect-no-output
+  - type: cmd
+    outcome: "! grep -rn 'AnalyticsSection\\.cost\\|AnalyticsSection\\.reliability\\|AnalyticsSection\\.quality\\|AnalyticsSection\\.safety\\|AnalyticsSection\\.throughput\\|AnalyticsSection\\.models' packages/desktop/Sources packages/desktop/Tests → no matches"
+    hint: "! grep -rn 'AnalyticsSection\\.cost\\|AnalyticsSection\\.reliability\\|AnalyticsSection\\.quality\\|AnalyticsSection\\.safety\\|AnalyticsSection\\.throughput\\|AnalyticsSection\\.models' packages/desktop/Sources packages/desktop/Tests"
+    polarity: expect-no-output
 touches:
   - packages/desktop/Sources/AutopodUI/Models/AnalyticsSection.swift
   - packages/desktop/Sources/AutopodUI/Views/Shell/SidebarView.swift

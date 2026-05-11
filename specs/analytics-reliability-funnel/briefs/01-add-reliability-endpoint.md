@@ -2,9 +2,15 @@
 title: "Add reliability analytics endpoint"
 depends_on: []
 acceptance_criteria:
-  - { type: api, test: "GET /pods/analytics/reliability?days=30", pass: "200 with body.funnel.bands.length === 8 and body.firstPassRate is a number between 0 and 1", fail: "non-200 or wrong band count or firstPassRate out of [0,1]" }
-  - { type: api, test: "GET /pods/analytics/reliability?days=30 (with seeded multi-stage failure pod)", pass: "body.stageFailures contains an entry with podsFailed >= 1 and body.summary.topFailureStage is non-empty", fail: "stageFailures empty or topFailureStage empty when seeded data has a failure" }
-  - { type: api, test: "GET /pods/analytics/reliability?days=30 (with seeded killed pod that died at 'running' band)", pass: "body.funnel.drops contains an entry with from='running' and to='killed' and count >= 1", fail: "drops empty or seeded drop missing" }
+  - type: api
+    outcome: GET /pods/analytics/reliability?days=30 → 200 with body.funnel.bands.length === 8 and body.firstPassRate is a number between 0 and 1
+    hint: GET /pods/analytics/reliability?days=30
+  - type: api
+    outcome: GET /pods/analytics/reliability?days=30 (with seeded multi-stage failure pod) → body.stageFailures contains an entry with podsFailed >= 1 and body.summary.topFailureStage is non-empty
+    hint: GET /pods/analytics/reliability?days=30 (with seeded multi-stage failure pod)
+  - type: api
+    outcome: GET /pods/analytics/reliability?days=30 (with seeded killed pod that died at 'running' band) → body.funnel.drops contains an entry with from='running' and to='killed' and count >= 1
+    hint: GET /pods/analytics/reliability?days=30 (with seeded killed pod that died at 'running' band)
 touches:
   - packages/daemon/src/api/routes/pods.ts
   - packages/daemon/src/analytics/reliability-aggregator.ts

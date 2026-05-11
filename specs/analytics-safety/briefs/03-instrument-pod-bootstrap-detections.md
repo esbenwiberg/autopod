@@ -1,9 +1,15 @@
 ---
 title: "Instrument pod-bootstrap detections + network_policy_resolved"
-depends_on: [01-add-safety-migrations-and-types, 02-add-safety-events-repository-and-action-writers]
+depends_on: [ 01-add-safety-migrations-and-types, 02-add-safety-events-repository-and-action-writers ]
 acceptance_criteria:
-  - { type: cmd, test: "rg -l 'safetyEventsRepo|safety_events' packages/daemon/src/pods/section-resolver.ts packages/daemon/src/pods/skill-resolver.ts", pass: "≥2 matches (one per file)", fail: "section/skill resolver not instrumented" }
-  - { type: cmd, test: "rg -l 'network_policy_resolved|networkPolicyResolved' packages/daemon/src/pods/pod-manager.ts", pass: "≥1 match", fail: "pod-manager not writing the snapshot column" }
+  - type: cmd
+    outcome: rg -l 'safetyEventsRepo|safety_events' packages/daemon/src/pods/section-resolver.ts packages/daemon/src/pods/skill-resolver.ts → ≥2 matches (one per file)
+    hint: rg -l 'safetyEventsRepo|safety_events' packages/daemon/src/pods/section-resolver.ts packages/daemon/src/pods/skill-resolver.ts
+    polarity: expect-output
+  - type: cmd
+    outcome: rg -l 'network_policy_resolved|networkPolicyResolved' packages/daemon/src/pods/pod-manager.ts → ≥1 match
+    hint: rg -l 'network_policy_resolved|networkPolicyResolved' packages/daemon/src/pods/pod-manager.ts
+    polarity: expect-output
 touches:
   - packages/daemon/src/pods/section-resolver.ts
   - packages/daemon/src/pods/section-resolver.test.ts

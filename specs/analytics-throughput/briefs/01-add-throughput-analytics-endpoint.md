@@ -1,9 +1,15 @@
 ---
 title: "Add throughput analytics endpoint"
 acceptance_criteria:
-  - { type: api, test: "GET /pods/analytics/throughput?days=30", pass: "200 with body.summary.podsPerDay (number), body.summary.podsPerDaySparkline (array, length 30), body.summary.podsPerDayDelta, body.summary.mttmSeconds (number), body.summary.backlog (number), body.cohort (array), body.cohortTruncated (boolean), body.queueDepth (array), body.timeInStatus (array, length 4)", fail: "non-200 OR any required key missing OR sparkline length != 30 OR timeInStatus length != 4" }
-  - { type: api, test: "GET /pods/analytics/throughput?days=0", pass: "400 with body.code = 'invalid_days'", fail: "non-400 or wrong code" }
-  - { type: api, test: "GET /pods/analytics/throughput?days=400", pass: "400 with body.code = 'invalid_days'", fail: "non-400 or wrong code" }
+  - type: api
+    outcome: GET /pods/analytics/throughput?days=30 → 200 with body.summary.podsPerDay (number), body.summary.podsPerDaySparkline (array, length 30), body.summary.podsPerDayDelta, body.summary.mttmSeconds (number), body.summary.backlog (number), body.cohort (array), body.cohortTruncated (boolean), body.queueDepth (array), body.timeInStatus (array, length 4)
+    hint: GET /pods/analytics/throughput?days=30
+  - type: api
+    outcome: GET /pods/analytics/throughput?days=0 → 400 with body.code = 'invalid_days'
+    hint: GET /pods/analytics/throughput?days=0
+  - type: api
+    outcome: GET /pods/analytics/throughput?days=400 → 400 with body.code = 'invalid_days'
+    hint: GET /pods/analytics/throughput?days=400
 touches:
   - packages/daemon/src/pods/throughput-aggregator.ts
   - packages/daemon/src/pods/throughput-aggregator.test.ts

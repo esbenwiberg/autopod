@@ -1,9 +1,15 @@
 ---
 title: "Add escalations analytics endpoint"
 acceptance_criteria:
-  - { type: api, test: "GET /pods/analytics/escalations?days=30", pass: "200 with body.summary.selfRecoveryRate (number), body.summary.cohortSize (number), body.summary.humanAttentionPodCount (number), body.summary.humanAttentionCount (number), body.summary.askAiCount (number), body.summary.dailyHumanCountSparkline (array, length 30), body.summary.selfRecoveryRateDelta, body.askHumanTtr.buckets (array, length 8), body.askHumanTtr.resolvedCount (number), body.askHumanTtr.openCount (number), body.askHumanTtr.maxSeconds (number), body.perProfile (array), body.blockerPatterns (array, length <= 10)", fail: "non-200 OR any required key missing OR sparkline length != 30 OR askHumanTtr.buckets length != 8 OR blockerPatterns length > 10" }
-  - { type: api, test: "GET /pods/analytics/escalations?days=0", pass: "400 with body.code = 'invalid_days'", fail: "non-400 or wrong code" }
-  - { type: api, test: "GET /pods/analytics/escalations?days=400", pass: "400 with body.code = 'invalid_days'", fail: "non-400 or wrong code" }
+  - type: api
+    outcome: GET /pods/analytics/escalations?days=30 → 200 with body.summary.selfRecoveryRate (number), body.summary.cohortSize (number), body.summary.humanAttentionPodCount (number), body.summary.humanAttentionCount (number), body.summary.askAiCount (number), body.summary.dailyHumanCountSparkline (array, length 30), body.summary.selfRecoveryRateDelta, body.askHumanTtr.buckets (array, length 8), body.askHumanTtr.resolvedCount (number), body.askHumanTtr.openCount (number), body.askHumanTtr.maxSeconds (number), body.perProfile (array), body.blockerPatterns (array, length <= 10)
+    hint: GET /pods/analytics/escalations?days=30
+  - type: api
+    outcome: GET /pods/analytics/escalations?days=0 → 400 with body.code = 'invalid_days'
+    hint: GET /pods/analytics/escalations?days=0
+  - type: api
+    outcome: GET /pods/analytics/escalations?days=400 → 400 with body.code = 'invalid_days'
+    hint: GET /pods/analytics/escalations?days=400
 touches:
   - packages/daemon/src/pods/escalations-aggregator.ts
   - packages/daemon/src/pods/escalations-aggregator.test.ts

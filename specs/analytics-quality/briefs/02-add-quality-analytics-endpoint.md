@@ -1,10 +1,18 @@
 ---
 title: "Add /pods/analytics/quality composite endpoint"
 acceptance_criteria:
-  - { type: api, test: "GET /pods/analytics/quality?days=30", pass: "200 with body.summary.totalPodsScored numeric, body.sparkline array, body.distribution length 10, body.reasons object with all 7 fields, body.scores array", fail: "non-200, missing top-level field, distribution length != 10, or reasons missing any of: lowReadEditRatio, editsWithoutPriorRead, userInterrupts, validationFailed, prFixAttempts, editChurn, tells" }
-  - { type: api, test: "GET /pods/analytics/quality (no query)", pass: "200 (defaults to days=30) with same shape", fail: "non-200 or missing fields" }
-  - { type: api, test: "GET /pods/analytics/quality?days=0", pass: "400 with error message about days >= 1", fail: "non-400 or missing error envelope" }
-  - { type: api, test: "GET /pods/analytics/quality?days=400", pass: "400 with error message about days <= 365", fail: "non-400 or missing error envelope" }
+  - type: api
+    outcome: GET /pods/analytics/quality?days=30 → 200 with body.summary.totalPodsScored numeric, body.sparkline array, body.distribution length 10, body.reasons object with all 7 fields, body.scores array
+    hint: GET /pods/analytics/quality?days=30
+  - type: api
+    outcome: GET /pods/analytics/quality (no query) → 200 (defaults to days=30) with same shape
+    hint: GET /pods/analytics/quality (no query)
+  - type: api
+    outcome: GET /pods/analytics/quality?days=0 → 400 with error message about days >= 1
+    hint: GET /pods/analytics/quality?days=0
+  - type: api
+    outcome: GET /pods/analytics/quality?days=400 → 400 with error message about days <= 365
+    hint: GET /pods/analytics/quality?days=400
 touches:
   - packages/daemon/src/api/routes/pods.ts
   - packages/daemon/src/api/routes/pods.test.ts

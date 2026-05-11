@@ -2,9 +2,18 @@
 title: "Add disk screenshot store + cutover migration"
 depends_on: []
 acceptance_criteria:
-  - { type: cmd, test: "test -f packages/daemon/src/pods/screenshot-store.ts", pass: "exit 0", fail: "the store module wasn't created" }
-  - { type: cmd, test: "! grep -nE 'screenshotBase64|screenshots\\\\b' packages/daemon/src/pods/validation-repository.ts", pass: "exit 0 — no base64 / no `screenshots` column writes remain", fail: "the repository still writes the legacy base64 path" }
-  - { type: cmd, test: "test -f packages/daemon/src/db/migrations/091_drop_screenshot_blobs.sql", pass: "exit 0", fail: "the cutover migration is missing" }
+  - type: cmd
+    outcome: test -f packages/daemon/src/pods/screenshot-store.ts → exit 0
+    hint: test -f packages/daemon/src/pods/screenshot-store.ts
+    polarity: exit-zero
+  - type: cmd
+    outcome: "! grep -nE 'screenshotBase64|screenshots\\\\b' packages/daemon/src/pods/validation-repository.ts → exit 0 — no base64 / no `screenshots` column writes remain"
+    hint: "! grep -nE 'screenshotBase64|screenshots\\\\b' packages/daemon/src/pods/validation-repository.ts"
+    polarity: exit-zero
+  - type: cmd
+    outcome: test -f packages/daemon/src/db/migrations/091_drop_screenshot_blobs.sql → exit 0
+    hint: test -f packages/daemon/src/db/migrations/091_drop_screenshot_blobs.sql
+    polarity: exit-zero
 touches:
   - packages/daemon/src/pods/screenshot-store.ts
   - packages/daemon/src/pods/screenshot-store.test.ts

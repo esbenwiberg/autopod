@@ -1,9 +1,15 @@
 ---
 title: "Attach screenshots to ADO PRs (fix dead links)"
-depends_on: [01-add-screenshot-store]
+depends_on: [ 01-add-screenshot-store ]
 acceptance_criteria:
-  - { type: cmd, test: "! grep -nE 'buildGitHubImageUrl' packages/daemon/src/worktrees/ado-pr-manager.ts", pass: "exit 0 — ADO PR manager no longer constructs GitHub URLs", fail: "ADO is still building GitHub URLs (the dead-link bug)" }
-  - { type: cmd, test: "grep -nE 'buildAdoAttachmentRef|adoAttachmentUrl|/_apis/git/repositories/.*/pullRequests/.*/attachments' packages/daemon/src/validation/screenshot-collector.ts packages/daemon/src/worktrees/ado-pr-manager.ts", pass: "exit 0 — at least one of the files contains the ADO attachment plumbing", fail: "no provider-aware ADO URL builder is wired in" }
+  - type: cmd
+    outcome: "! grep -nE 'buildGitHubImageUrl' packages/daemon/src/worktrees/ado-pr-manager.ts → exit 0 — ADO PR manager no longer constructs GitHub URLs"
+    hint: "! grep -nE 'buildGitHubImageUrl' packages/daemon/src/worktrees/ado-pr-manager.ts"
+    polarity: exit-zero
+  - type: cmd
+    outcome: grep -nE 'buildAdoAttachmentRef|adoAttachmentUrl|/_apis/git/repositories/.*/pullRequests/.*/attachments' packages/daemon/src/validation/screenshot-collector.ts packages/daemon/src/worktrees/ado-pr-manager.ts → exit 0 — at least one of the files contains the ADO attachment plumbing
+    hint: grep -nE 'buildAdoAttachmentRef|adoAttachmentUrl|/_apis/git/repositories/.*/pullRequests/.*/attachments' packages/daemon/src/validation/screenshot-collector.ts packages/daemon/src/worktrees/ado-pr-manager.ts
+    polarity: exit-zero
 touches:
   - packages/daemon/src/worktrees/ado-pr-manager.ts
   - packages/daemon/src/worktrees/ado-pr-manager.test.ts
