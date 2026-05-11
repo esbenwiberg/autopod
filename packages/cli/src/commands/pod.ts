@@ -1,5 +1,6 @@
 import type { AgentActivityEvent, Pod, PodStatus, SystemEvent } from '@autopod/shared';
 import chalk from 'chalk';
+import { existsSync, readFileSync } from 'node:fs';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { formatDurationFromDates, formatStatus } from '../output/colors.js';
@@ -577,6 +578,80 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--json', 'Output as JSON')
     .action(statusAction);
   podGroup.command('kill <id>').description('Kill a running pod').action(killAction);
+
+  // ap pod create
+  podGroup
+    .command('create <profile> [task]')
+    .description('Create a new pod (task inline or via --file)')
+    .option('-f, --file <path>', 'read task from a file (mutually exclusive with inline task arg)')
+    .option('-m, --model <model>', 'AI model to use')
+    .option('-r, --runtime <runtime>', 'runtime (claude | codex)')
+    .option('-b, --branch <branch>', 'target branch name')
+    .option('--branch-prefix <prefix>', 'override branch prefix (e.g. hotfix/)')
+    .option('--base-branch <branch>', 'branch from a specific base')
+    .option('--ac-from <path>', 'load acceptance criteria from a file in the repo')
+    .option('--skip-validation', 'skip validation phase')
+    .option(
+      '-s, --sidecar <name>',
+      'companion sidecar (repeatable)',
+      collectRepeatable,
+      [] as string[],
+    )
+    .action(
+      async (
+        profile: string,
+        task: string | undefined,
+        opts: {
+          file?: string;
+          model?: string;
+          runtime?: string;
+          branch?: string;
+          branchPrefix?: string;
+          baseBranch?: string;
+          acFrom?: string;
+          skipValidation?: boolean;
+          sidecar: string[];
+        },
+      ) => {
+        if (opts.file && task) {
+          podGroup.error('provide either [task] or --file, not both');
+        }
+
+        let resolvedTask: string;
+        if (opts.file) {
+          if (!existsSync(opts.file)) podGroup.error(`file not found: ${opts.file}`);
+          resolvedTask = readFileSync(opts.file, 'utf8').trim();
+          if (!resolvedTask) podGroup.error('file is empty');
+        } else if (task) {
+          resolvedTask = task;
+        } else {
+          podGroup.error('task is required — pass it inline or via --file <path>');
+          return;
+        }
+
+        const client = getClient();
+        const pod = await withSpinner('Starting pod...', () =>
+          client.createSession({
+            profileName: profile,
+            task: resolvedTask,
+            model: opts.model,
+            runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            branch: opts.branch,
+            branchPrefix: opts.branchPrefix,
+            baseBranch: opts.baseBranch,
+            acFrom: opts.acFrom,
+            skipValidation: opts.skipValidation,
+            requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
+          }),
+        );
+
+        console.log(chalk.green(`Pod ${chalk.bold(pod.id)} created.`));
+        console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
+        console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
+        console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
+        console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
+      },
+    );
 }
 
 function formatTimestamp(ts: string): string {
