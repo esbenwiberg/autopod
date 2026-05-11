@@ -349,4 +349,11 @@ export type {
   QueueDepthBucket,
   TimeInStatusBox,
   ThroughputAnalyticsResponse,
+  HumanAttentionKind,
+  EscalationsSummary,
+  AskHumanTtrBucket,
+  AskHumanTtr,
+  PerProfileEscalation,
+  BlockerPattern,
+  EscalationsAnalyticsResponse,
 } from './types/analytics.js';

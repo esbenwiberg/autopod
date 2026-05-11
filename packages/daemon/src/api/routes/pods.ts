@@ -15,6 +15,7 @@ import type { PodManager } from '../../pods/index.js';
 import type { PendingOverrideRepository } from '../../pods/pending-override-repository.js';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
+import { computeEscalationsAnalytics } from '../../pods/escalations-aggregator.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
 import { computeReliabilityAnalytics } from '../../pods/reliability-aggregator.js';
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
@@ -268,6 +269,20 @@ export function podRoutes(
       return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
     }
     return computeThroughputAnalytics(db, days);
+  });
+
+  // GET /pods/analytics/escalations — escalations composite analytics
+  app.get('/pods/analytics/escalations', async (request, reply) => {
+    if (!db) {
+      reply.status(503);
+      return { error: 'Escalations analytics unavailable — db not wired' };
+    }
+    const days = parseDays(request.query as Record<string, unknown>);
+    if (days === null || days > 365) {
+      reply.status(400);
+      return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
+    }
+    return computeEscalationsAnalytics(db, days);
   });
 
   // GET /pods/scores — persisted quality-score leaderboard / history

@@ -21,6 +21,8 @@ public struct AnalyticsView: View {
     public var loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)?
     /// Fetches throughput analytics from the daemon for the Throughput card.
     public var loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)?
+    /// Fetches escalations analytics from the daemon for the Escalations card.
+    public var loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
@@ -35,6 +37,7 @@ public struct AnalyticsView: View {
     @State private var safetyLoadError: String?
     @State private var throughputData: ThroughputAnalyticsResponse?
     @State private var throughputLoadError: String?
+    @State private var escalationsData: EscalationsAnalyticsResponse?
 
     public init(
         pods: [Pod],
@@ -44,6 +47,7 @@ public struct AnalyticsView: View {
         loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
+        loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)? = nil,
         selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
@@ -53,6 +57,7 @@ public struct AnalyticsView: View {
         self.loadQualityAnalytics = loadQualityAnalytics
         self.loadSafetyAnalytics = loadSafetyAnalytics
         self.loadThroughputAnalytics = loadThroughputAnalytics
+        self.loadEscalationsAnalytics = loadEscalationsAnalytics
         self._selectedCard = selectedCard
     }
 
@@ -164,6 +169,34 @@ public struct AnalyticsView: View {
         }
     }
 
+    private var escalationsCardValue: String {
+        guard let e = escalationsData else { return "—" }
+        if e.summary.cohortSize == 0 { return "—" }
+        return "\(Int(round(e.summary.selfRecoveryRate * 100)))%"
+    }
+
+    private var escalationsCardSparkline: [Double]? {
+        guard let e = escalationsData, e.summary.cohortSize > 0 else { return nil }
+        return e.summary.dailyHumanCountSparkline.map { Double($0.count) }
+    }
+
+    private var escalationsCardDelta: AnalyticsCardDelta? {
+        guard let e = escalationsData, e.summary.cohortSize > 0 else { return nil }
+        let delta = e.summary.selfRecoveryRateDelta
+        return AnalyticsCardDelta(
+            value: String(format: "%+.0fpp", delta.value * 100),
+            direction: AnalyticsCardDelta.Direction(delta.direction)
+        )
+    }
+
+    private var escalationsCardSubline: String? {
+        guard let e = escalationsData else { return nil }
+        let n = e.summary.humanAttentionCount
+        let m = e.summary.askAiCount
+        guard n > 0 || m > 0 else { return nil }
+        return "\(n) human \u{00B7} \(m) ai"
+    }
+
     // MARK: - Body
 
     public var body: some View {
@@ -235,6 +268,15 @@ public struct AnalyticsView: View {
                         isSelected: selectedCard == .throughput,
                         onClick: { selectedCard = selectedCard == .throughput ? nil : .throughput }
                     )
+                    AnalyticsCard(
+                        title: "Escalations",
+                        value: escalationsCardValue,
+                        sparkline: escalationsCardSparkline,
+                        delta: escalationsCardDelta,
+                        subline: escalationsCardSubline,
+                        isSelected: selectedCard == .escalations,
+                        onClick: { selectedCard = selectedCard == .escalations ? nil : .escalations }
+                    )
                 }
             }
             .padding(24)
@@ -302,12 +344,18 @@ public struct AnalyticsView: View {
                     }
                 }
             }
+            let escalationsTask = Task {
+                if let loadEscalationsAnalytics {
+                    escalationsData = try? await loadEscalationsAnalytics(30)
+                }
+            }
             await scoreTask.value
             await costTask.value
             await reliabilityTask.value
             await qualityTask.value
             await safetyTask.value
             await throughputTask.value
+            await escalationsTask.value
         }
     }
 }
@@ -428,6 +476,14 @@ extension AnalyticsCardDelta.Direction {
     }
 
     init(_ direction: ThroughputDelta.Direction) {
+        switch direction {
+        case .up:   self = .up
+        case .down: self = .down
+        case .flat: self = .flat
+        }
+    }
+
+    init(_ direction: EscalationsRateDelta.Direction) {
         switch direction {
         case .up:   self = .up
         case .down: self = .down

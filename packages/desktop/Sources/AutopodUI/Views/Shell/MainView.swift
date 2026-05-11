@@ -47,6 +47,7 @@ public struct MainView: View {
     public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
     public var loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)?
     public var loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)?
+    public var loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)?
     public var verifyAuditChain: (() async throws -> AuditChainVerifyResponse)?
     /// Per-pod persisted quality scores keyed by pod id. Used to render the
     /// score pill on completed pod cards. Empty when scores haven't loaded yet.
@@ -111,6 +112,7 @@ public struct MainView: View {
         loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
+        loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)? = nil,
         verifyAuditChain: (() async throws -> AuditChainVerifyResponse)? = nil,
         qualityScores: [String: PodQualityScore] = [:],
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
@@ -166,6 +168,7 @@ public struct MainView: View {
         self.loadQualityAnalytics = loadQualityAnalytics
         self.loadSafetyAnalytics = loadSafetyAnalytics
         self.loadThroughputAnalytics = loadThroughputAnalytics
+        self.loadEscalationsAnalytics = loadEscalationsAnalytics
         self.verifyAuditChain = verifyAuditChain
         self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
@@ -288,6 +291,7 @@ public struct MainView: View {
                     loadQualityAnalytics: loadQualityAnalytics,
                     loadSafetyAnalytics: loadSafetyAnalytics,
                     loadThroughputAnalytics: loadThroughputAnalytics,
+                    loadEscalationsAnalytics: loadEscalationsAnalytics,
                     selectedCard: $selectedAnalyticsCard
                 )
                 .frame(minWidth: 600)
@@ -378,6 +382,7 @@ public struct MainView: View {
                     loadQuality: loadQualityAnalytics,
                     loadSafety: loadSafetyAnalytics,
                     loadThroughput: loadThroughputAnalytics,
+                    loadEscalations: loadEscalationsAnalytics,
                     verifyAuditChain: verifyAuditChain,
                     onSelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)
@@ -400,6 +405,13 @@ public struct MainView: View {
                         requestedDetailTab = .summary
                     },
                     onThroughputSelectPod: { sessionId in
+                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                        selectedAnalyticsCard = result.card
+                        sidebarSelection = result.sidebar
+                        selectedSessionId = result.session
+                        requestedDetailTab = .summary
+                    },
+                    onEscalationsSelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)
                         selectedAnalyticsCard = result.card
                         sidebarSelection = result.sidebar
