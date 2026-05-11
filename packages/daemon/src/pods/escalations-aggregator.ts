@@ -68,30 +68,6 @@ function bucketTtrSeconds(secs: number): number {
   return TTR_BOUNDARIES.length; // '>24h' bucket
 }
 
-// ── Empty-cohort fast path ────────────────────────────────────────────────────
-
-function emptyResponse(days: number): EscalationsAnalyticsResponse {
-  return {
-    summary: {
-      selfRecoveryRate: 1.0,
-      cohortSize: 0,
-      humanAttentionPodCount: 0,
-      humanAttentionCount: 0,
-      askAiCount: 0,
-      dailyHumanCountSparkline: sparklineDays(days).map((day) => ({ day, count: 0 })),
-      selfRecoveryRateDelta: { value: 0, direction: 'flat' },
-    },
-    askHumanTtr: {
-      buckets: TTR_BUCKET_LABELS.map((label) => ({ label, count: 0 })),
-      resolvedCount: 0,
-      openCount: 0,
-      maxSeconds: 0,
-    },
-    perProfile: [],
-    blockerPatterns: [],
-  };
-}
-
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function computeEscalationsAnalytics(
@@ -278,12 +254,13 @@ export function computeEscalationsAnalytics(
     .all({ days }) as Array<{ description: string; count: number }>;
 
   const podIdsForPatternStmt = db.prepare(
-    `SELECT DISTINCT pod_id AS podId
+    `SELECT pod_id AS podId
      FROM escalations
      WHERE type = 'report_blocker'
        AND trim(json_extract(payload, '$.description')) = @description
        AND created_at >= datetime('now', '-' || @days || ' days')
-     ORDER BY created_at DESC
+     GROUP BY pod_id
+     ORDER BY MAX(created_at) DESC
      LIMIT 10`,
   );
 

@@ -61,6 +61,17 @@ Key invariants the Swift Codable mirror must handle:
 - `packages/daemon/src/api/routes/pods.ts` (escalations route section)
 - `packages/shared/src/types/analytics.ts` (escalations types section)
 
+## Post-validation fixes (attempt 1)
+
+Two medium issues flagged by the task reviewer were resolved:
+1. **Dead `emptyResponse` function** — removed. It was defined but never called from
+   `computeEscalationsAnalytics`; all SQL queries already run unconditionally and handle
+   empty cohorts inline (`cohortSize === 0 → rate 1.0`, etc.).
+2. **Non-portable `SELECT DISTINCT pod_id ... ORDER BY created_at DESC`** — the
+   `podIdsForPatternStmt` query now uses `GROUP BY pod_id ORDER BY MAX(created_at) DESC`
+   which is standard-SQL compliant and removes the implicit dependency on SQLite's
+   sort-before-dedup execution model.
+
 ## Discovered constraints / landmines
 
 - **`terminalCohortWhere()` is local to each aggregator** — each aggregator
