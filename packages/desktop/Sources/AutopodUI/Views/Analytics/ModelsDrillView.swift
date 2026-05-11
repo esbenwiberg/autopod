@@ -38,9 +38,9 @@ struct ModelsDrillView: View {
                     comparisonSection
                     Divider()
                     failureMatrixSection
+                    Divider()
+                    simulatorSection
                 }
-
-                // MARK: What-if simulator (Brief 03)
             }
             .padding(24)
         }
@@ -143,6 +143,22 @@ struct ModelsDrillView: View {
         )
     }
 
+    // MARK: - Section 4: What-if simulator
+
+    private var simulatorSection: some View {
+        // Use .id() keyed on the eligible model names so @State inside WhatIfSimulatorSection
+        // resets to defaults when the data changes (days picker → refetch → new eligible set).
+        WhatIfSimulatorSection(byModel: response?.byModel ?? [])
+            .id(simulatorEligibleKey)
+    }
+
+    private var simulatorEligibleKey: String {
+        (response?.byModel ?? [])
+            .filter(\.isSimulatorEligible)
+            .map(\.model)
+            .joined(separator: ",")
+    }
+
     // MARK: - Fetch
 
     private func fetchData() async {
@@ -155,6 +171,232 @@ struct ModelsDrillView: View {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Section 4: What-if simulator view
+
+private struct WhatIfSimulatorSection: View {
+    let byModel: [PerModelAggregate]
+
+    // Source dropdown: most-used first so the operator sees their workhorse model at the top.
+    private var eligibleByUsage: [PerModelAggregate] {
+        byModel.filter(\.isSimulatorEligible).sorted { $0.podCount > $1.podCount }
+    }
+
+    // Target dropdown: cheapest first so the default is the cost-saving candidate.
+    private var eligibleByPrice: [PerModelAggregate] {
+        byModel.filter(\.isSimulatorEligible)
+            .sorted { ($0.dollarPerPr ?? .greatestFiniteMagnitude) < ($1.dollarPerPr ?? .greatestFiniteMagnitude) }
+    }
+
+    @State private var sourceModelName: String = ""
+    @State private var targetModelName: String = ""
+    @State private var redirectPct: Int = 0
+
+    // Fall back to first/second eligible row before onAppear fires.
+    private var source: PerModelAggregate? {
+        eligibleByUsage.first { $0.model == sourceModelName } ?? eligibleByUsage.first
+    }
+    private var target: PerModelAggregate? {
+        eligibleByUsage.first { $0.model == targetModelName }
+            ?? eligibleByUsage.first { $0.model != (source?.model ?? "") }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("What-If Simulator")
+                .font(.headline)
+
+            let eligible = eligibleByUsage
+            if eligible.count < 2 {
+                Text("Need ≥2 models with priced cohort pods to simulate.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                caveatsView
+                controlsView
+                if let src = source, let tgt = target, src.model != tgt.model {
+                    projectionTableView(source: src, target: tgt)
+                }
+            }
+        }
+        .onAppear { initDefaults() }
+    }
+
+    // MARK: Caveat banner — copy is verbatim from ADR-023 (do not soften without updating the ADR).
+
+    private var caveatsView: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Naïve projection — assumes target model performs identically to its past terminal-cohort pods. Validate before committing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    // MARK: Controls
+
+    private var controlsView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Redirect from")
+                    .frame(width: 110, alignment: .leading)
+                Picker("Source", selection: $sourceModelName) {
+                    ForEach(eligibleByUsage, id: \.model) { row in
+                        Text(row.model).tag(row.model)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .onChange(of: sourceModelName) { _, newSource in
+                    // Source-Target invariant: auto-advance target when it matches new source.
+                    if targetModelName == newSource {
+                        targetModelName = eligibleByUsage.first { $0.model != newSource }?.model ?? targetModelName
+                    }
+                }
+            }
+
+            HStack {
+                Text("Redirect to")
+                    .frame(width: 110, alignment: .leading)
+                Picker("Target", selection: $targetModelName) {
+                    ForEach(eligibleByPrice, id: \.model) { row in
+                        Text(row.model).tag(row.model)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+
+            HStack {
+                Text("Redirect")
+                    .frame(width: 110, alignment: .leading)
+                Slider(
+                    value: Binding(get: { Double(redirectPct) }, set: { redirectPct = Int($0) }),
+                    in: 0...100,
+                    step: 1
+                )
+                Text("\(redirectPct)%")
+                    .monospacedDigit()
+                    .frame(width: 36, alignment: .trailing)
+            }
+        }
+    }
+
+    // MARK: Projection table
+
+    private func projectionTableView(source: PerModelAggregate, target: PerModelAggregate) -> some View {
+        let fraction = Double(redirectPct) / 100.0
+        let eligible = eligibleByUsage
+        let current = projectFleet(byModel: eligible, source: source, target: target, redirectFraction: 0)
+        let projected = projectFleet(byModel: eligible, source: source, target: target, redirectFraction: fraction)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            tableHeader
+            Divider()
+            tableRow("$/PR",
+                     current: current.dollarPerPr.map { String(format: "$%.2f", $0) } ?? "—",
+                     projected: projected.dollarPerPr.map { String(format: "$%.2f", $0) } ?? "—",
+                     delta: dollarDelta(current.dollarPerPr, projected.dollarPerPr))
+            Divider()
+            tableRow("Avg quality",
+                     current: current.avgQuality.map { "\(Int(round($0)))" } ?? "—",
+                     projected: projected.avgQuality.map { "\(Int(round($0)))" } ?? "—",
+                     delta: intDelta(current.avgQuality, projected.avgQuality))
+            Divider()
+            tableRow("Success rate",
+                     current: pctStr(current.successRate),
+                     projected: pctStr(projected.successRate),
+                     delta: ppDelta(current.successRate, projected.successRate))
+            Divider()
+            tableRow("Mean TTM",
+                     current: current.meanTtmSeconds.flatMap { formatMttmSeconds($0) } ?? "—",
+                     projected: projected.meanTtmSeconds.flatMap { formatMttmSeconds($0) } ?? "—",
+                     delta: ttmDelta(current.meanTtmSeconds, projected.meanTtmSeconds))
+            Divider()
+            tableRow("Escalation rate",
+                     current: pctStr(current.escalationRate),
+                     projected: pctStr(projected.escalationRate),
+                     delta: ppDelta(current.escalationRate, projected.escalationRate))
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var tableHeader: some View {
+        HStack(spacing: 0) {
+            Text("Axis").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Current").frame(width: 80, alignment: .trailing)
+            Text("Projected").frame(width: 80, alignment: .trailing)
+            Text("Delta").frame(width: 72, alignment: .trailing)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    private func tableRow(_ axis: String, current: String, projected: String, delta: String) -> some View {
+        HStack(spacing: 0) {
+            Text(axis).frame(maxWidth: .infinity, alignment: .leading)
+            Text(current).monospacedDigit().frame(width: 80, alignment: .trailing)
+            Text(projected).monospacedDigit().frame(width: 80, alignment: .trailing)
+            Text(delta).monospacedDigit().foregroundStyle(.secondary).frame(width: 72, alignment: .trailing)
+        }
+        .font(.body)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    // MARK: Delta formatters
+    // Delta is neutral — no red/green colouring because the goodness of a sign varies per axis.
+
+    private func dollarDelta(_ c: Double?, _ p: Double?) -> String {
+        guard let c, let p else { return "—" }
+        return String(format: "%+.2f/PR", p - c)
+    }
+
+    private func intDelta(_ c: Double?, _ p: Double?) -> String {
+        guard let c, let p else { return "—" }
+        let d = Int(round(p)) - Int(round(c))
+        return d >= 0 ? "+\(d)" : "\(d)"
+    }
+
+    private func ppDelta(_ c: Double, _ p: Double) -> String {
+        let d = Int(round(p * 100)) - Int(round(c * 100))
+        return d >= 0 ? "+\(d)pp" : "\(d)pp"
+    }
+
+    private func ttmDelta(_ c: Double?, _ p: Double?) -> String {
+        guard let c, let p else { return "—" }
+        let secs = p - c
+        if abs(secs) < 60 { return String(format: "%+.0fs", secs) }
+        let mins = Int(secs / 60)
+        return mins >= 0 ? "+\(mins)m" : "\(mins)m"
+    }
+
+    private func pctStr(_ v: Double) -> String { "\(Int(round(v * 100)))%" }
+
+    // MARK: State init
+
+    private func initDefaults() {
+        let byUsage = eligibleByUsage
+        let byPrice = eligibleByPrice
+        guard byUsage.count >= 2 else { return }
+
+        let defaultSource = byUsage[0].model
+        sourceModelName = defaultSource
+
+        // Default target: cheapest eligible; auto-advance past source if needed.
+        targetModelName = byPrice.first { $0.model != defaultSource }?.model ?? byUsage[1].model
+        redirectPct = 0
     }
 }
 
