@@ -27,7 +27,8 @@ by the existing `pods` and `escalations` tables. No schema changes.
 - `packages/shared/src/index.ts` — re-exported the seven new types.
 - `packages/daemon/src/api/routes/pods.ts` — registered the route,
   mirroring the Reliability/Throughput pattern. Days validation: 1–365,
-  default 30.
+  default 30. Error message matches other analytics routes:
+  `"days must be a positive integer <= 365"`.
 - `packages/daemon/src/api/routes/pods.test.ts` — added 6 route
   integration tests (shape assertion, days validation, boundary check).
 

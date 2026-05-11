@@ -346,7 +346,7 @@ export function podRoutes(
     const days = parseDays(request.query as Record<string, unknown>);
     if (days === null || days > 365) {
       reply.status(400);
-      return { error: 'days must be a positive integer', code: 'invalid_days' };
+      return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
     }
     return computeEscalationsAnalytics(db, days);
   });
