@@ -71,12 +71,13 @@ export class ClaudeRuntime implements Runtime {
     this.mcpServersBySession.set(config.podId, config.mcpServers);
 
     const args = this.buildSpawnArgs(config);
+    const safeArgs = args.map((a, i) => (i === args.length - 1 ? `<task: ${a.length} bytes>` : a));
 
     this.logger.info({
       component: 'claude-runtime',
       podId: config.podId,
       containerId: config.containerId,
-      args,
+      args: safeArgs,
       msg: 'Spawning claude in container',
     });
 

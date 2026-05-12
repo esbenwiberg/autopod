@@ -497,6 +497,7 @@ export class DockerContainerManager implements ContainerManager {
     options?: ExecOptions,
   ): Promise<ExecResult> {
     const container = this.docker.getContainer(containerId);
+    const safeCommand = command.map((a) => (a.length > 1024 ? `<arg: ${a.length} bytes>` : a));
 
     const envList = options?.env
       ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
@@ -537,13 +538,13 @@ export class DockerContainerManager implements ContainerManager {
       exitCode = inspection.ExitCode ?? 1;
     } catch (err: unknown) {
       if (err instanceof DockerCallTimeoutError) {
-        this.logger.warn({ containerId, command }, 'exec.inspect timed out — assuming exit code 1');
+        this.logger.warn({ containerId, command: safeCommand }, 'exec.inspect timed out — assuming exit code 1');
       } else {
         throw err;
       }
     }
 
-    this.logger.debug({ containerId, command, exitCode }, 'Exec completed');
+    this.logger.debug({ containerId, command: safeCommand, exitCode }, 'Exec completed');
     return { stdout, stderr, exitCode };
   }
 
@@ -553,6 +554,7 @@ export class DockerContainerManager implements ContainerManager {
     options?: ExecOptions,
   ): Promise<StreamingExecResult> {
     const container = this.docker.getContainer(containerId);
+    const safeCommand = command.map((a) => (a.length > 1024 ? `<arg: ${a.length} bytes>` : a));
 
     const envList = options?.env
       ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
@@ -642,7 +644,7 @@ export class DockerContainerManager implements ContainerManager {
       stderrStream.destroy();
     };
 
-    this.logger.info({ containerId, command }, 'Streaming exec started');
+    this.logger.info({ containerId, command: safeCommand }, 'Streaming exec started');
 
     return { stdout: stdoutStream, stderr: stderrStream, exitCode, kill };
   }

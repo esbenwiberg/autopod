@@ -575,6 +575,46 @@ describe('ClaudeRuntime', () => {
       ).toBe(false);
     });
 
+    it('redacts large task in spawn log but passes full task to execStreaming', async () => {
+      const bigStr = 'X'.repeat(50_000);
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      setTimeout(() => {
+        handle.finish(0);
+      }, 10);
+
+      for await (const _ of runtime.spawn({
+        podId: 'redact-spawn',
+        task: bigStr,
+        model: 'opus',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        /* consume */
+      }
+
+      const spawnCall = infoSpy.mock.calls.find(
+        (c) =>
+          typeof c[0] === 'object' &&
+          c[0] !== null &&
+          (c[0] as Record<string, unknown>).msg === 'Spawning claude in container',
+      );
+      expect(spawnCall).toBeDefined();
+      const logObj = spawnCall![0] as Record<string, unknown>;
+      const loggedArgs = logObj.args as string[];
+      expect(loggedArgs.at(-1)).toMatch(/^<task: 50000 bytes>$/);
+      expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
+
+      // Real args passed to execStreaming must still contain the full task
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      expect(execArgs.at(-1)).toBe(bigStr);
+    });
+
     it('terminates within grace window when stdout never closes after result event', async () => {
       // Simulate the wedged-container case: agent emits its final result event
       // (which the parser maps to a `complete` AgentEvent) but stdout never
@@ -646,6 +686,33 @@ describe('ClaudeRuntime', () => {
   // ---------------------------------------------------------------------------
 
   describe('resume', () => {
+    it('resume log has no args field (defensive snapshot)', async () => {
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      runtime.setClaudeSessionId('resume-snapshot', 'sess-xyz');
+
+      setTimeout(() => {
+        handle.finish(0);
+      }, 10);
+
+      for await (const _ of runtime.resume('resume-snapshot', 'Do something', 'container-123', {})) {
+        /* consume */
+      }
+
+      const resumeLog = infoSpy.mock.calls.find(
+        (c) =>
+          typeof c[0] === 'object' &&
+          c[0] !== null &&
+          (c[0] as Record<string, unknown>).msg === 'Resuming claude pod in container',
+      );
+      expect(resumeLog).toBeDefined();
+      expect(resumeLog![0] as Record<string, unknown>).not.toHaveProperty('args');
+    });
+
     it('calls execStreaming with --resume when a claude pod ID is known', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
