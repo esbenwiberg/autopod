@@ -173,7 +173,12 @@ struct OverviewTab: View {
                 }
             }
 
-            if running && !reachable {
+            if let fetchError = poller.lastFetchError {
+                Label("Status check failed: \(fetchError)", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.yellow)
+                    .lineLimit(2)
+            } else if running && !reachable {
                 Label("Server unreachable, supervisor respawning", systemImage: "arrow.triangle.2.circlepath")
                     .font(.caption)
                     .foregroundStyle(.orange)

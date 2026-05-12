@@ -8,6 +8,9 @@ import Foundation
 @MainActor
 final class PreviewPoller {
     private(set) var status: PreviewStatus? = nil
+    /// Last fetch error message, if any. Non-nil signals that `status` is stale
+    /// (or absent) and the UI should surface uncertainty rather than trust it.
+    private(set) var lastFetchError: String? = nil
     private(set) var isPolling: Bool = false
     private var pollTask: Task<Void, Never>?
 
@@ -18,7 +21,14 @@ final class PreviewPoller {
         pollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                do { self.status = try await load(podId) } catch {}
+                do {
+                    self.status = try await load(podId)
+                    self.lastFetchError = nil
+                } catch {
+                    // Preserve the last known status to avoid flicker on transient
+                    // failures, but surface the error so the card can warn the user.
+                    self.lastFetchError = error.localizedDescription
+                }
                 guard !Task.isCancelled else { return }
                 try? await Task.sleep(for: .seconds(5))
             }

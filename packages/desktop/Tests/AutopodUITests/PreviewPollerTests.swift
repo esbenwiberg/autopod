@@ -92,6 +92,60 @@ import AutopodClient
     poller.stop()
 }
 
+/// On fetch error, `lastFetchError` is populated; stale status (if any) is preserved
+/// rather than silently cleared. This prevents the UI from showing confident
+/// "Running"/"Stopped" state when the daemon is unreachable.
+@MainActor
+@Test func pollerCapturesFetchError() async throws {
+    struct LoadError: LocalizedError {
+        var errorDescription: String? { "network down" }
+    }
+    let poller = PreviewPoller()
+
+    poller.start(podId: "test-pod") { _ in
+        throw LoadError()
+    }
+
+    try await Task.sleep(for: .milliseconds(200))
+
+    #expect(poller.lastFetchError != nil)
+    #expect(poller.lastFetchError == "network down")
+    #expect(poller.status == nil)
+    #expect(poller.isPolling == true)
+
+    poller.stop()
+}
+
+/// A successful fetch after a prior error clears `lastFetchError`.
+@MainActor
+@Test func pollerClearsErrorOnSuccess() async throws {
+    struct LoadError: Error {}
+    var shouldFail = true
+    let poller = PreviewPoller()
+    let success = PreviewStatus(
+        running: true, reachable: true, restartCount: 0, lastError: nil,
+        previewUrl: "http://127.0.0.1:1234"
+    )
+
+    poller.start(podId: "test-pod") { _ in
+        if shouldFail { throw LoadError() }
+        return success
+    }
+
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(poller.lastFetchError != nil)
+
+    // Flip the source and restart — start() triggers an immediate fetch.
+    shouldFail = false
+    poller.start(podId: "test-pod") { _ in success }
+    try await Task.sleep(for: .milliseconds(150))
+
+    #expect(poller.lastFetchError == nil)
+    #expect(poller.status?.running == true)
+
+    poller.stop()
+}
+
 /// `start()` called twice restarts cleanly — no duplicate poll tasks.
 @MainActor
 @Test func pollerRestartIsClean() async throws {
