@@ -131,81 +131,147 @@ Reasoning:
 
 ### 2. HAProxy config generator (`haproxy-config.ts`)
 
+**Config validated against HAProxy 2.8.16 on Ubuntu 24.04** (same major as
+Debian bookworm-backports / trixie ships). All five test cases below passed:
+allowed-exact returns upstream response; allowed-wildcard returns upstream
+response; denied SNI gets TCP reset during ClientHello inspection;
+case-mismatched SNI is normalized via `,lower`; no-SNI / IP-literal connection
+is rejected.
+
 ```ts
 export function generateHaproxyConfig(allowedHosts: string[]): string {
   const exact = allowedHosts.filter((h) => !h.startsWith('*.'));
   const wildcard = allowedHosts.filter((h) => h.startsWith('*.')).map((h) => h.slice(1)); // *.foo.com → .foo.com
 
-  // Build ACLs. -m str for exact, -m end for suffix.
-  // Hosts sorted for deterministic output (stable diffs in CI).
-  const exactAcls = [...exact].sort().map((h) => `  acl allowed_sni req.ssl_sni -m str ${h}`);
-  const wildcardAcls = [...wildcard].sort().map((s) => `  acl allowed_sni req.ssl_sni -m end ${s}`);
+  // -m str for exact, -m end for suffix. Hosts sorted for deterministic output.
+  const exactAcls = [...exact].sort().map((h) => `  acl allowed_sni var(sess.sni) -m str ${h}`);
+  const wildcardAcls = [...wildcard].sort().map((s) => `  acl allowed_sni var(sess.sni) -m end ${s}`);
 
   return `
 global
-  log stdout format raw daemon
-  maxconn 4096
-  user haproxy
-  group haproxy
+  log 127.0.0.1:5514 local0
+  maxconn 1024
 
 defaults
   mode tcp
   log global
-  option tcplog
+  option dontlognull
   timeout connect 5s
   timeout client 30s
   timeout server 30s
 
-resolvers default
+resolvers system
   parse-resolv-conf
-  resolve_retries 3
+  hold valid 10s
+  hold nx 3s
+  resolve_retries 2
   timeout resolve 1s
   timeout retry 1s
-  hold valid 10s
 
 frontend tls-in
   bind 127.0.0.1:8443
   tcp-request inspect-delay 5s
   tcp-request content reject if !{ req.ssl_hello_type 1 }
+
+  # Capture SNI into a session variable so log-format can reference it
+  # (req.ssl_sni is not available at log-format time directly).
+  tcp-request content set-var(sess.sni) req.ssl_sni,lower
+
 ${exactAcls.join('\n')}
 ${wildcardAcls.join('\n')}
-  # Log the SNI on every deny — daemon parses these lines
-  tcp-request content reject if !allowed_sni log-format "HAPROXY-DENY sni=%[req.ssl_sni] src=%ci"
+
+  log-format "sni=%[var(sess.sni)] src=%ci action=%[var(sess.action)]"
+
+  tcp-request content set-var(sess.action) str(DENY) if !allowed_sni
+  tcp-request content reject if !allowed_sni
+  tcp-request content set-var(sess.action) str(ALLOW)
+
+  # Resolve SNI → IP and rewrite the destination. No MITM; backend just
+  # opens a fresh TCP to the resolved IP:443 and splices the client's
+  # unmodified TLS bytes through.
+  tcp-request content do-resolve(sess.dst_ip,system,ipv4) var(sess.sni)
+  tcp-request content reject if { var(sess.dst_ip) -m ip 0.0.0.0 }
+  tcp-request content set-dst var(sess.dst_ip)
+  tcp-request content set-dst-port int(443)
+
   default_backend tls-passthrough
 
 backend tls-passthrough
-  server upstream 0.0.0.0:443 init-addr none resolvers default
-  # SNI value chosen by client; we splice unmodified TLS through
+  server upstream 0.0.0.0:443
 `.trimStart();
 }
 ```
 
-Notes:
-- HAProxy 2.4+ supports per-rule `log-format` on rejects (the syntax exists on
-  every Debian-shipped HAProxy from bookworm forward — Debian bookworm ships
-  2.6, trixie 2.8+). Verify on the actual base image during PR validation.
-- The `tls-passthrough` backend uses `req.ssl_sni` as the upstream host name —
-  no MITM; HAProxy just splices TCP through to `<sni>:443` using the
-  container's resolver.
-- Wildcard `*.foo.com` becomes suffix match `.foo.com`, mirroring dnsmasq's
-  current `/foo.com/` semantics.
+Key correctness notes from validation:
+- **`set-var(sess.sni) req.ssl_sni,lower`** is required because `req.ssl_sni`
+  is only valid in tcp-request content context, not at log-format eval time.
+  HAProxy errors at config parse with "needs 'request buffer' which is not
+  available here" if you reference `req.ssl_sni` directly in `log-format`.
+- **`do-resolve` + `set-dst`** is the working SNI-passthrough pattern. The
+  previously-sketched `server upstream 0.0.0.0:443 resolvers default` does
+  not route to the SNI host on its own.
+- **`,lower` converter** is mandatory — ClientHello SNI is wire-case and
+  curl/openssl normalize to lower, but other clients (rare TLS libraries)
+  can send mixed case.
+- **The `0.0.0.0` guard** after `do-resolve` catches NXDOMAIN — HAProxy's
+  `do-resolve` returns `0.0.0.0` on resolution failure rather than failing
+  the session, which would otherwise connect to the local 0.0.0.0:443.
+- **Log destination `127.0.0.1:5514`** assumes a syslog UDP listener on the
+  loopback. Inside the pod container, the firewall script starts a tiny
+  receiver (or the entrypoint pipes to a named FIFO that the daemon's
+  container-log stream reads) — see §3 below.
+- **`user haproxy / group haproxy`** are NOT set in the global section
+  because the firewall script runs HAProxy as root for the `bind 127.0.0.1`
+  capability — `user`/`group` cause `setuid` to a user that may not exist
+  before `haproxy` package configures it. Use `-u haproxy -g haproxy` CLI
+  flags after confirming the postinst created the user, OR drop privileges
+  via container `USER` directive. **Verify during implementation**.
 
 ### 3. Deny parser (`haproxy-deny-parser.ts`)
 
-```ts
-const DENY_RE = /HAPROXY-DENY sni=(\S+) src=(\S+)/;
+Validated log line format (from the live test):
 
-export function parseHaproxyDenyLine(line: string): { sni: string; src: string } | null {
-  const m = line.match(DENY_RE);
+```
+<134>May 12 20:47:25 haproxy[8595]: sni=evil.example.com src=127.0.0.1 action=DENY
+<134>May 12 20:47:25 haproxy[8595]: sni=api.anthropic.com src=127.0.0.1 action=ALLOW
+```
+
+The `<134>` is the syslog facility/severity prefix (local0.info). Parser
+keys on `action=DENY`:
+
+```ts
+const HAPROXY_LINE_RE = /sni=(\S+) src=(\S+) action=(\w+)/;
+
+export function parseHaproxyLogLine(
+  line: string,
+): { sni: string; src: string; action: 'ALLOW' | 'DENY' } | null {
+  const m = line.match(HAPROXY_LINE_RE);
   if (!m) return null;
-  return { sni: m[1] ?? '', src: m[2] ?? '' };
+  const action = m[3];
+  if (action !== 'ALLOW' && action !== 'DENY') return null;
+  return { sni: m[1] ?? '', src: m[2] ?? '', action };
 }
 ```
 
-The pod log pump in `docker-container-manager.ts` already reads container
-stdout/stderr — feed each line through the parser and emit a `firewall.denied`
-event when it matches. Empty SNI (`-`) still gets surfaced — it means the
-agent connected to an IP literal or non-TLS traffic on 443.
+Only emit a `firewall.denied` event when `action === 'DENY'`. ALLOW lines
+are dropped (already too noisy to be useful on the event bus; available in
+raw container logs for forensics).
+
+**Log transport inside the pod container**: HAProxy can't write directly to
+stdout in daemon mode (closed during fork). Two viable options, pick one:
+
+1. **UDP loopback receiver** (matches the validation harness). A 5-line shell
+   loop in the firewall script: `while true; do nc -lu -p 5514 -w 0; done` or
+   `socat -u UDP-RECV:5514 STDOUT`. Output goes to the entrypoint's stdout,
+   which Docker captures into the container log stream the daemon already
+   tails. **Adds an `socat` or `netcat-openbsd` apt-get dependency.**
+2. **Named FIFO**: `mkfifo /tmp/haproxy.log`, configure HAProxy with
+   `log /tmp/haproxy.log local0`, then `tail -F /tmp/haproxy.log &` in the
+   entrypoint. **No extra apt package** (`mkfifo` and `tail` are in coreutils).
+
+**Recommend option 2** — one fewer package, no UDP port consumption, simpler
+to reason about. Validated UNIX socket logging worked too (after switching to
+SOCK_DGRAM) but FIFO is even simpler.
 
 ### 4. Event surface — dual-emit
 
