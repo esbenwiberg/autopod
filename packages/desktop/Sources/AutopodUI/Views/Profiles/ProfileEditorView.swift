@@ -1809,27 +1809,6 @@ public struct ProfileEditorView: View {
             }
         }
 
-        fieldRow("Fix-Pod Cooldown", help: "Minimum delay between PR-fix-pod spawns on the same parent pod. Defaults to 600s (10 min); 0 disables the cooldown so iterations can run back-to-back.") {
-            HStack(spacing: 4) {
-                Stepper("\(profile.fixPodCooldownSec ?? 600)s", value: Binding(
-                    get: { profile.fixPodCooldownSec ?? 600 },
-                    set: { profile.fixPodCooldownSec = $0 }
-                ), in: 0...3600, step: 30)
-                .frame(width: 140)
-                if profile.fixPodCooldownSec != nil {
-                    Button("Reset") { profile.fixPodCooldownSec = nil }
-                        .buttonStyle(.borderless)
-                        .font(.caption)
-                }
-            }
-        }
-
-        Toggle(isOn: $profile.reuseFixPod) {
-            HStack(spacing: 4) {
-                Text("Reuse Fix Pod")
-                HelpBadge(text: "When on, the daemon recycles a single fix pod entity per parent PR across all rounds of CI / review feedback. Surfaces as one pod with an iteration counter rather than a chain of separate fix pods.")
-            }
-        }
     }
 
     // MARK: - Credentials
@@ -2690,18 +2669,6 @@ public struct ProfileEditorView: View {
                 ),
                 parent: editorPayload?.parent?.mergePollIntervalSec,
                 placeholder: "60")
-        case "fixPodCooldownSec":
-            nullableIntCard(field,
-                value: Binding(
-                    get: { profile.fixPodCooldownSec },
-                    set: { profile.fixPodCooldownSec = $0 }
-                ),
-                parent: editorPayload?.parent?.fixPodCooldownSec,
-                placeholder: "600")
-        case "reuseFixPod":
-            boolCard(field, value: $profile.reuseFixPod,
-                     parent: editorPayload?.parent?.reuseFixPod)
-
         // MARK: Credentials
         case "githubPat":
             patCard(field,

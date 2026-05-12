@@ -136,9 +136,9 @@ public struct SessionResponse: Codable, Sendable {
   /// Surfaced in the pod detail view so reviewers can see what the critic
   /// flagged before the daemon's full validation runs.
   public let preSubmitReview: PreSubmitReviewSnapshotResponse?
-  /// Iteration counter for fix pods running under `profile.reuseFixPod = true`.
-  /// 0 for non-fix pods or the first round; increments each time the same fix
-  /// pod entity is re-enqueued for a new round of CI / review feedback.
+  /// Iteration counter for the canonical fix pod. 0 for non-fix pods or the
+  /// first round; increments each time the fix pod is re-enqueued for a new
+  /// round of CI / review feedback.
   public let fixIteration: Int?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is

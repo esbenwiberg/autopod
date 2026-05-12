@@ -565,9 +565,9 @@ public struct Pod: Identifiable, Sendable {
     /// before the daemon's full validation runs.
     public var preSubmitReview: PreSubmitReviewSnapshot?
 
-    /// Iteration counter for fix pods running under `profile.reuseFixPod = true`.
-    /// 0 for non-fix pods or the first round; increments each time the same fix
-    /// pod entity is re-enqueued for a new round of CI / review feedback.
+    /// Iteration counter for the canonical fix pod. 0 for non-fix pods or the
+    /// first round; increments each time the fix pod is re-enqueued for a new
+    /// round of CI / review feedback.
     public var fixIteration: Int
 
     // MARK: - Series (pod dependency DAG)
