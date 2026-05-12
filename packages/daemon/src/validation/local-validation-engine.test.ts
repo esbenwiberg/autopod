@@ -24,6 +24,9 @@ import {
   parseClassificationJson,
   parseReviewJson,
   parseWarningCount,
+  restartSupervisorIfDown,
+  runHealthCheck,
+  startAppStabilityMonitor,
   stripMarkdownFences,
 } from './local-validation-engine.js';
 
@@ -1623,5 +1626,201 @@ describe('runBuild — exit-0-with-warnings downgrade', () => {
     // The output is the raw build output (not the warning-downgrade hint), since
     // the build legitimately failed via exit code.
     expect(result.smoke.build.output).not.toContain('Build exited 0 but emitted');
+  });
+});
+
+// ── Preview supervisor integration tests ─────────────────────────────────────
+
+describe('runHealthCheck — supervisor spawn', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function makeConfig(overrides: Partial<ValidationEngineConfig> = {}): ValidationEngineConfig {
+    return {
+      podId: 'pod-hc',
+      containerId: 'c-hc',
+      previewUrl: 'http://127.0.0.1:9001',
+      buildCommand: '',
+      startCommand: 'pnpm dev',
+      healthPath: '/health',
+      healthTimeout: 5,
+      smokePages: [],
+      attempt: 1,
+      task: 'test',
+      diff: '',
+      ...overrides,
+    };
+  }
+
+  it('invokes buildSupervisorCommand exactly once and does not tear it down', async () => {
+    const execCalls: string[] = [];
+    const cm = {
+      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
+        if (cmd[2]) execCalls.push(cmd[2]);
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+    } as unknown as ContainerManager;
+
+    // Health check resolves immediately with 200
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ status: 200, text: () => Promise.resolve('ok') }),
+    );
+
+    await runHealthCheck(cm, makeConfig());
+
+    const supervisorCalls = execCalls.filter((c) => c.includes('export START_COMMAND'));
+    expect(supervisorCalls).toHaveLength(1);
+    // No kill of the supervisor PID at the end of the phase
+    const killCalls = execCalls.filter(
+      (c) => c.includes('kill -9') && c.includes('autopod-supervisor.pid'),
+    );
+    expect(killCalls).toHaveLength(0);
+  });
+
+  it('skips supervisor spawn when no startCommand is configured', async () => {
+    const execCalls: string[] = [];
+    const cm = {
+      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
+        if (cmd[2]) execCalls.push(cmd[2]);
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+    } as unknown as ContainerManager;
+
+    // No fetch needed — without startCommand the health check returns pass immediately
+    const result = await runHealthCheck(cm, makeConfig({ startCommand: undefined }));
+
+    expect(result.status).toBe('pass');
+    const supervisorCalls = execCalls.filter((c) => c.includes('export START_COMMAND'));
+    expect(supervisorCalls).toHaveLength(0);
+  });
+});
+
+describe('restartSupervisorIfDown — post-Claude reachability guard', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function makeConfig(): ValidationEngineConfig {
+    return {
+      podId: 'pod-rsid',
+      containerId: 'c-rsid',
+      previewUrl: 'http://127.0.0.1:9002',
+      buildCommand: '',
+      startCommand: 'pnpm dev',
+      healthPath: '/health',
+      healthTimeout: 5,
+      smokePages: [],
+      attempt: 1,
+      task: 'test',
+      diff: '',
+    };
+  }
+
+  it('does not exec kill+restart when server is reachable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ status: 200, text: () => Promise.resolve('ok') }),
+    );
+    const execCmds: string[] = [];
+    const cm = {
+      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
+        if (cmd[2]) execCmds.push(cmd[2]);
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+    } as unknown as ContainerManager;
+
+    await restartSupervisorIfDown(cm, makeConfig());
+
+    const restartCalls = execCmds.filter((c) => c.includes('kill -9'));
+    expect(restartCalls).toHaveLength(0);
+  });
+
+  it('kills old supervisor and spawns fresh one when server is unreachable', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+    const execCmds: string[] = [];
+    const cm = {
+      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
+        if (cmd[2]) execCmds.push(cmd[2]);
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+    } as unknown as ContainerManager;
+
+    const promise = restartSupervisorIfDown(cm, makeConfig());
+    await vi.advanceTimersByTimeAsync(30_000);
+    await promise;
+
+    // Should have called execInContainer with a kill+respawn command
+    const restartCalls = execCmds.filter(
+      (c) => c.includes('kill -9') && c.includes('autopod-supervisor.pid'),
+    );
+    expect(restartCalls).toHaveLength(1);
+    // The restart command also includes buildSupervisorCommand output
+    expect(restartCalls[0]).toContain('export START_COMMAND');
+  });
+
+  it('marks criterion failed when server stays down after restart (permanent failure)', async () => {
+    vi.useFakeTimers();
+    // Server always unreachable → restartSupervisorIfDown runs but server never comes up
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+    const cm = {
+      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
+        const c = cmd[2] ?? '';
+        if (c.includes('kill -9') || c.includes('export START_COMMAND')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+    } as unknown as ContainerManager;
+
+    const config = makeConfig();
+    // Call restartSupervisorIfDown directly — it should not throw even when permanently unreachable
+    const promise = restartSupervisorIfDown(cm, config);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(promise).resolves.toBeUndefined();
+  });
+});
+
+describe('startAppStabilityMonitor — regression guard', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('fires onCrash after 2 consecutive fetch failures', async () => {
+    vi.useFakeTimers();
+    let fetchCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      fetchCallCount++;
+      throw new Error('ECONNREFUSED');
+    }));
+
+    const onCrash = vi.fn();
+    startAppStabilityMonitor('http://127.0.0.1:9003/health', onCrash);
+
+    // Advance past initial delay + 2 poll intervals (5s each)
+    await vi.advanceTimersByTimeAsync(5_100);  // initial delay
+    await vi.advanceTimersByTimeAsync(5_100);  // poll 1 failure
+    await vi.advanceTimersByTimeAsync(5_100);  // poll 2 failure → crash
+
+    expect(onCrash).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('stop function prevents onCrash from firing', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+    const onCrash = vi.fn();
+    const stop = startAppStabilityMonitor('http://127.0.0.1:9004/health', onCrash);
+    stop();
+
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(onCrash).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

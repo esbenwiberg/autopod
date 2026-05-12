@@ -502,7 +502,8 @@ async function pollUntilReachable(
  * If the app becomes unreachable (2 consecutive failures), fires `onCrash` once.
  * Returns a stop function — call it when validation finishes.
  */
-function startAppStabilityMonitor(url: string, onCrash: () => void): () => void {
+/** @internal Exported for testing. */
+export function startAppStabilityMonitor(url: string, onCrash: () => void): () => void {
   let stopped = false;
   let consecutiveFailures = 0;
   const POLL_INTERVAL_MS = 5_000;
@@ -870,7 +871,8 @@ async function runSast(
 
 // ── Health check phase ──────────────────────────────────────────────────────
 
-async function runHealthCheck(
+/** @internal Exported for testing. */
+export async function runHealthCheck(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,
@@ -2059,8 +2061,10 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
  * The pre-generation probe (below) only covers startup jitter; this covers the
  * generation window. Retry budget = 1: one restart attempt, then proceed
  * regardless so legitimate failures are not hidden by infinite retries.
+ *
+ * @internal Exported for testing.
  */
-async function restartSupervisorIfDown(
+export async function restartSupervisorIfDown(
   cm: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,

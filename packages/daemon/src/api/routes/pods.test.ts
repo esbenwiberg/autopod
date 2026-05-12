@@ -1488,3 +1488,222 @@ describe('GET /pods/analytics/models', () => {
     expect(body.byRuntime).toHaveLength(3);
   });
 });
+
+// ── GET /pods/:podId/preview/status ───────────────────────────────────────────
+
+describe('GET /pods/:podId/preview/status', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+  let mockPreviewStatus: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    podSeq = 0;
+    db = createTestDb();
+
+    const profileStore = createProfileStore(db);
+    const podRepo = createPodRepository(db);
+    const eventRepo = createEventRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    const nudgeRepo = createNudgeRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const authModule = createMockAuthModule();
+
+    mockPreviewStatus = vi.fn().mockResolvedValue({
+      running: true,
+      reachable: true,
+      restartCount: 0,
+      lastError: null,
+      previewUrl: 'http://127.0.0.1:15000',
+    });
+
+    const worktreeManager = {
+      create: vi.fn(),
+      cleanup: vi.fn(),
+      getDiffStats: vi.fn(),
+      getDiff: vi.fn(),
+      mergeBranch: vi.fn(),
+      commitFiles: vi.fn(),
+      pushBranch: vi.fn(),
+      getCommitLog: vi.fn(),
+    };
+
+    const runtimeRegistry = {
+      get: vi.fn().mockReturnValue({
+        type: 'claude' as const,
+        spawn: vi.fn().mockReturnValue(
+          (async function* () {
+            yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'done' };
+          })(),
+        ),
+        resume: vi.fn(),
+        abort: vi.fn(),
+        suspend: vi.fn(),
+      }),
+    };
+
+    const validationEngine = {
+      validate: vi.fn().mockResolvedValue({
+        podId: 'x',
+        attempt: 0,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'pass',
+          build: { status: 'pass', output: '', duration: 100 },
+          health: { status: 'pass', url: 'http://localhost/', responseCode: 200, duration: 50 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'pass',
+        duration: 200,
+      }),
+    };
+
+    // biome-ignore lint/style/useConst: circular dependency break
+    let podManager: ReturnType<typeof createPodManager>;
+
+    const podQueue = createPodQueue(1, async (podId) => podManager.processPod(podId), logger);
+
+    podManager = createPodManager({
+      podRepo,
+      escalationRepo,
+      nudgeRepo,
+      profileStore,
+      eventBus,
+      containerManagerFactory: {
+        get: vi.fn(() => ({
+          spawn: vi.fn().mockResolvedValue('c-1'),
+          kill: vi.fn(),
+          stop: vi.fn(),
+          start: vi.fn(),
+          refreshFirewall: vi.fn(),
+          writeFile: vi.fn(),
+          readFile: vi.fn(),
+          getStatus: vi.fn().mockResolvedValue('running' as const),
+          execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+          execStreaming: vi.fn(),
+        })),
+      },
+      worktreeManager,
+      runtimeRegistry,
+      validationEngine,
+      enqueueSession: (id) => podQueue.enqueue(id),
+      mcpBaseUrl: 'http://localhost:3100',
+      daemonConfig: { mcpServers: [], claudeMdSections: [] },
+      logger,
+    });
+
+    // Replace previewStatus with mock so tests control return values
+    podManager.previewStatus = mockPreviewStatus;
+
+    const podBridge = {
+      createEscalation: vi.fn(),
+      resolveEscalation: vi.fn(),
+      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getMaxAiCalls: vi.fn().mockReturnValue(5),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
+      getReviewerModel: vi.fn().mockReturnValue('sonnet'),
+      callReviewerModel: vi.fn().mockResolvedValue('ok'),
+      incrementEscalationCount: vi.fn(),
+      reportPlan: vi.fn(),
+      reportProgress: vi.fn(),
+      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      executeAction: vi.fn(),
+      getAvailableActions: vi.fn().mockReturnValue([]),
+      writeFileInContainer: vi.fn(),
+      execInContainer: vi.fn(),
+    };
+
+    app = await createServer({
+      authModule,
+      podManager,
+      profileStore,
+      eventBus,
+      eventRepo,
+      podBridge,
+      pendingRequestsByPod: new Map(),
+      db,
+      logLevel: 'silent',
+      prettyLog: false,
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('returns running=true, reachable=true for a healthy supervised pod', async () => {
+    mockPreviewStatus.mockResolvedValue({
+      running: true,
+      reachable: true,
+      restartCount: 0,
+      lastError: null,
+      previewUrl: 'http://127.0.0.1:15000',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/pod-abc/preview/status',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.running).toBe(true);
+    expect(body.reachable).toBe(true);
+    expect(body.restartCount).toBe(0);
+    expect(body.lastError).toBeNull();
+    expect(body.previewUrl).toBe('http://127.0.0.1:15000');
+    expect(mockPreviewStatus).toHaveBeenCalledWith('pod-abc');
+  });
+
+  it('returns running=false, reachable=false with status 200 for a stopped container', async () => {
+    mockPreviewStatus.mockResolvedValue({
+      running: false,
+      reachable: false,
+      restartCount: 0,
+      lastError: null,
+      previewUrl: null,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/pod-stopped/preview/status',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.running).toBe(false);
+    expect(body.reachable).toBe(false);
+  });
+
+  it('returns 200 (not 500) even when previewStatus resolves to a stopped state', async () => {
+    mockPreviewStatus.mockResolvedValue({
+      running: false,
+      reachable: false,
+      restartCount: 3,
+      lastError: 'Process exited with code 1',
+      previewUrl: 'http://127.0.0.1:15000',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/pod-crashed/preview/status',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().lastError).toBe('Process exited with code 1');
+  });
+
+  it('enforces pod-token auth — 401 when no Authorization header is provided', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/pod-abc/preview/status',
+    });
+
+    expect(res.statusCode).toBe(401);
+  });
+});
