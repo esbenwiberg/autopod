@@ -122,6 +122,7 @@ import {
   isTerminalState,
   validateTransition,
 } from './state-machine.js';
+import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
 import {
@@ -705,6 +706,13 @@ export interface PodManager {
   deleteSession(podId: string): Promise<void>;
   startPreview(podId: string): Promise<{ previewUrl: string }>;
   stopPreview(podId: string): Promise<void>;
+  previewStatus(podId: string): Promise<{
+    running: boolean;
+    reachable: boolean;
+    restartCount: number;
+    lastError: string | null;
+    previewUrl: string | null;
+  }>;
   getSession(podId: string): Pod;
   listSessions(filters?: {
     profileName?: string;
@@ -5720,6 +5728,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async rejectSession(podId: string, reason?: string): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
+
+      const rejectableStates = ['validated', 'failed', 'review_required'] as const;
+      if (!(rejectableStates as readonly string[]).includes(pod.status)) {
+        throw new AutopodError(
+          `Cannot reject pod ${podId} in status ${pod.status}`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
       const previousStatus = pod.status as 'validated' | 'failed' | 'review_required';
 
       emitActivityStatus(
@@ -7617,12 +7635,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const status = await cm.getStatus(pod.containerId);
 
-      if (status === 'running') {
-        // Already running — idempotent, just reset the auto-stop timer
-        schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
-        return { previewUrl: pod.previewUrl };
-      }
-
       if (status === 'unknown') {
         throw new AutopodError(
           `Container for pod ${podId} has been removed — cannot start preview`,
@@ -7631,18 +7643,67 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
+      const profile = profileStore.get(pod.profileName);
+
+      if (status === 'running') {
+        // Container is running. Check if the supervisor is already alive — if so
+        // return immediately without re-spawning (idempotent against a second
+        // startPreview call while validation is running the supervisor).
+        if (profile.startCommand) {
+          const supervisorAlive = await (async () => {
+            try {
+              const pidResult = await cm.execInContainer(
+                pod.containerId,
+                ['sh', '-c', 'cat /tmp/autopod-supervisor.pid 2>/dev/null'],
+                {},
+              );
+              const pid = pidResult.stdout.trim();
+              if (!pid) return false;
+              const liveness = await cm.execInContainer(
+                pod.containerId,
+                ['sh', '-c', `kill -0 ${pid} 2>/dev/null && echo 1 || echo 0`],
+                {},
+              );
+              return liveness.stdout.trim() === '1';
+            } catch {
+              return false;
+            }
+          })();
+
+          if (supervisorAlive) {
+            schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
+            logger.info({ podId }, 'Supervisor already running — reusing existing preview');
+            return { previewUrl: pod.previewUrl };
+          }
+
+          // Supervisor is dead — (re)spawn it
+          cm.execInContainer(
+            pod.containerId,
+            ['sh', '-c', buildSupervisorCommand(profile.startCommand)],
+            { cwd: '/workspace' },
+          ).catch((err) => {
+            logger.warn({ err, podId }, 'Preview supervisor start errored');
+          });
+        }
+
+        schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
+        logger.info({ podId, previewUrl: pod.previewUrl }, 'Preview started');
+        return { previewUrl: pod.previewUrl };
+      }
+
       // Container is stopped — start it
       await cm.start(pod.containerId);
 
-      // Re-run the start command and wait for health check
-      const profile = profileStore.get(pod.profileName);
+      // Re-run the start command under the supervisor and wait for health check
       if (profile.startCommand) {
-        cm.execInContainer(pod.containerId, ['sh', '-c', `${profile.startCommand} &`], {
-          cwd: '/workspace',
-        }).catch((err) => {
+        cm.execInContainer(
+          pod.containerId,
+          ['sh', '-c', buildSupervisorCommand(profile.startCommand)],
+          { cwd: '/workspace' },
+        ).catch((err) => {
           logger.warn(
             { err, podId },
-            'Preview start command errored (may be expected for long-running processes)',
+            'Preview supervisor start command errored (may be expected for long-running processes)',
           );
         });
 
@@ -7691,6 +7752,88 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const cm = containerManagerFactory.get(pod.executionTarget);
       await cm.stop(pod.containerId);
       logger.info({ podId }, 'Preview stopped');
+    },
+
+    async previewStatus(podId: string): Promise<{
+      running: boolean;
+      reachable: boolean;
+      restartCount: number;
+      lastError: string | null;
+      previewUrl: string | null;
+    }> {
+      const pod = podRepo.getOrThrow(podId);
+      const safeDefaults = {
+        running: false,
+        reachable: false,
+        restartCount: 0,
+        lastError: null,
+        previewUrl: pod.previewUrl,
+      };
+
+      if (!pod.containerId || !pod.previewUrl) return safeDefaults;
+
+      const cm = containerManagerFactory.get(pod.executionTarget);
+
+      // If the container is not running, the supervisor is definitely not alive.
+      try {
+        const containerStatus = await cm.getStatus(pod.containerId);
+        if (containerStatus !== 'running') return safeDefaults;
+      } catch {
+        return safeDefaults;
+      }
+
+      // Exec four parallel reads inside the container + HTTP probe from the host.
+      const [pidResult, restartCountResult, logTailResult, httpProbeResult] = await Promise.all([
+        cm
+          .execInContainer(
+            pod.containerId,
+            ['sh', '-c', 'cat /tmp/autopod-supervisor.pid 2>/dev/null'],
+            {},
+          )
+          .catch(() => null),
+        cm
+          .execInContainer(
+            pod.containerId,
+            ['sh', '-c', 'cat /tmp/autopod-restart-count 2>/dev/null'],
+            {},
+          )
+          .catch(() => null),
+        cm
+          .execInContainer(
+            pod.containerId,
+            ['sh', '-c', 'tail -c 200 /tmp/autopod-start.log 2>/dev/null'],
+            {},
+          )
+          .catch(() => null),
+        fetch(pod.previewUrl, { signal: AbortSignal.timeout(3_000) })
+          .then((r) => r.status)
+          .catch(() => null),
+      ]);
+
+      // Check PID liveness: if we got a PID string, verify the process is still alive.
+      const rawPid = pidResult?.stdout?.trim() ?? null;
+      let alivePid: string | null = null;
+      if (rawPid) {
+        try {
+          const check = await cm.execInContainer(
+            pod.containerId,
+            ['sh', '-c', `kill -0 ${rawPid} 2>/dev/null && echo 1 || echo 0`],
+            {},
+          );
+          alivePid = check.stdout.trim() === '1' ? rawPid : null;
+        } catch {
+          alivePid = null;
+        }
+      }
+
+      const status = parseStatus({
+        pid: alivePid,
+        restartCount: restartCountResult?.stdout ?? null,
+        startLogTail: logTailResult?.stdout ?? null,
+        reachableHttp: typeof httpProbeResult === 'number' ? httpProbeResult : null,
+      });
+
+      return { ...status, previewUrl: pod.previewUrl };
     },
 
     getSession(podId: string): Pod {

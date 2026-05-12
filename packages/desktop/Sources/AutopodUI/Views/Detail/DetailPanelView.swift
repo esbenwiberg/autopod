@@ -30,6 +30,7 @@ public struct DetailPanelView: View {
     public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
+    public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
     public var onReloadLogs: (() -> Void)?
@@ -57,6 +58,7 @@ public struct DetailPanelView: View {
         loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
+        loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
         onReloadLogs: (() -> Void)? = nil,
@@ -80,6 +82,7 @@ public struct DetailPanelView: View {
         self.loadArtifacts = loadArtifacts
         self.loadContent = loadContent
         self.loadQuality = loadQuality
+        self.loadPreviewStatus = loadPreviewStatus
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
         self.onReloadLogs = onReloadLogs
@@ -118,7 +121,7 @@ public struct DetailPanelView: View {
             // SwiftTerm NSView (and its scrollback buffer) isn't destroyed.
             ZStack {
                 switch selectedTab {
-                case .overview:   OverviewTab(pod: pod, events: events, actions: actions, loadQuality: loadQuality)
+                case .overview:   OverviewTab(pod: pod, events: events, actions: actions, loadQuality: loadQuality, loadPreviewStatus: loadPreviewStatus)
                 case .logs:       LogStreamView(
                     events: events,
                     sessionBranch: pod.branch,

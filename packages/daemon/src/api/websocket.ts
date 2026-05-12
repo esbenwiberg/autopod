@@ -48,7 +48,7 @@ export async function replayEvents(
     if (!last) break;
     cursor = last.id;
     totalSent += page.length;
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 
   if (socket.readyState !== socket.OPEN) return;

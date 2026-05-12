@@ -680,6 +680,16 @@ export function podRoutes(
     return { ok: true };
   });
 
+  // GET /pods/:podId/preview/status — poll supervisor + reachability (pod-token auth)
+  app.get(
+    '/pods/:podId/preview/status',
+    { config: { auth: 'pod-token' } },
+    async (request) => {
+      const { podId } = request.params as { podId: string };
+      return podManager.previewStatus(podId);
+    },
+  );
+
   // DELETE /pods/:podId — delete a terminal pod
   app.delete('/pods/:podId', async (request, reply) => {
     const { podId } = request.params as { podId: string };

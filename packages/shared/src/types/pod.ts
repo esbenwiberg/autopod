@@ -104,6 +104,11 @@ export interface Pod {
   linesAdded: number;
   linesRemoved: number;
   previewUrl: string | null;
+  /**
+   * Whether this pod's profile has a web UI (derived from profile.hasWebUi at
+   * provisioning). Controls visibility of the preview card in the desktop.
+   */
+  hasWebUi: boolean;
   prUrl: string | null;
   mergeBlockReason: string | null;
   plan: { summary: string; steps: string[] } | null;

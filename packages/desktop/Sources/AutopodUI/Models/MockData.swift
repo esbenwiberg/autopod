@@ -10,6 +10,30 @@ public enum MockData: Sendable {
         queued, provisioning, merging, complete, killed,
     ]
 
+    // MARK: - Web UI preview fixtures
+
+    /// Running pod whose profile has a web UI — preview card visible, "Running" state.
+    public static let runningWithWebUi = Pod(
+        status: .running, branch: "feat/webapp", profileName: "webapp", model: "claude-opus",
+        startedAt: .minutesAgo(8),
+        hasWebUi: true
+    )
+
+    /// Running pod whose dev server is restarting — preview card shows "Restarting" (amber).
+    public static let restartingWithWebUi = Pod(
+        status: .running, branch: "feat/webapp", profileName: "webapp", model: "claude-opus",
+        startedAt: .minutesAgo(10),
+        hasWebUi: true
+    )
+
+    /// Validated pod whose dev server has stopped — preview card shows "Stopped" (muted).
+    public static let stoppedWithWebUi = Pod(
+        status: .validated, branch: "feat/webapp", profileName: "webapp", model: "claude-opus",
+        startedAt: .minutesAgo(20),
+        diffStats: DiffStats(added: 58, removed: 12, files: 6),
+        hasWebUi: true
+    )
+
     public static let awaitingInput = Pod(
         status: .awaitingInput, branch: "feat/oauth", profileName: "my-app", model: "claude-opus",
         startedAt: .minutesAgo(5),
