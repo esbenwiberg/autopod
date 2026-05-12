@@ -14,10 +14,14 @@ struct OverviewTab: View {
     /// Optional closure for fetching session-quality signals. When nil
     /// (previews, tests without daemon), the Quality column shows an empty state.
     var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
+    /// Optional closure for fetching preview server status. When nil, the
+    /// Preview card is static (shows last cached status or nil). Polled every 5 s.
+    var loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil
 
     @State private var replyText = ""
     @State private var infrastructureExpanded = false
     @State private var quality: PodQualitySignals? = nil
+    @State private var poller = PreviewPoller()
 
     var body: some View {
         ScrollView {
@@ -49,6 +53,11 @@ struct OverviewTab: View {
 
                 // Profile metadata row
                 profileMetadataRow
+
+                // Preview card (web UI pods only)
+                if pod.hasWebUi {
+                    previewCard
+                }
 
                 // Artifacts (interactive-artifact pods only land here after complete)
                 if let artifactsPath = pod.artifactsPath, !artifactsPath.isEmpty {
@@ -95,6 +104,20 @@ struct OverviewTab: View {
         .task(id: pod.id) {
             await fetchQuality()
         }
+        .onAppear {
+            startPollingIfNeeded()
+        }
+        .onDisappear {
+            poller.stop()
+        }
+        .onChange(of: pod.status) { _, newStatus in
+            poller.stopIfTerminal(status: newStatus)
+            if !newStatus.isTerminal { startPollingIfNeeded() }
+        }
+        .onChange(of: pod.id) { _, _ in
+            poller.stop()
+            startPollingIfNeeded()
+        }
     }
 
     // MARK: - Quality
@@ -106,6 +129,102 @@ struct OverviewTab: View {
         } catch {
             quality = nil
         }
+    }
+
+    // MARK: - Preview polling
+
+    private var shouldPollPreview: Bool {
+        guard pod.hasWebUi, loadPreviewStatus != nil else { return false }
+        switch pod.status {
+        case .running, .validating, .validated, .awaitingInput, .paused: return true
+        default: return false
+        }
+    }
+
+    private func startPollingIfNeeded() {
+        guard shouldPollPreview, let load = loadPreviewStatus else { return }
+        poller.start(podId: pod.id, load: load)
+    }
+
+    // MARK: - Preview card
+
+    private var previewCard: some View {
+        let running = poller.status?.running ?? false
+        let reachable = poller.status?.reachable ?? false
+        let restartCount = poller.status?.restartCount ?? 0
+        let urlString = poller.status?.previewUrl
+
+        let accentColor: Color = running && reachable ? .green
+            : running && !reachable ? .orange
+            : Color(nsColor: .separatorColor)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "play.rectangle.fill")
+                    .foregroundStyle(running && reachable ? .green : running ? .orange : .secondary)
+                    .font(.system(size: 12))
+                Text("Preview")
+                    .font(.system(.subheadline).weight(.semibold))
+                Spacer()
+                if restartCount > 0 || (running && !reachable) {
+                    Text("restarts: \(restartCount)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if running && !reachable {
+                Label("Server unreachable, supervisor respawning", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if !running {
+                Text("No preview active")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let urlString {
+                HStack(spacing: 6) {
+                    Text(urlString)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(urlString, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Copy to clipboard")
+                }
+            }
+
+            Button {
+                Task { await actions.openLiveApp(pod.id) }
+            } label: {
+                Label("Open live app", systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+            .controlSize(.small)
+        }
+        .padding(14)
+        .background(
+            running && reachable ? Color.green.opacity(0.05) :
+            running && !reachable ? Color.orange.opacity(0.05) :
+            Color(nsColor: .controlBackgroundColor)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(accentColor.opacity(0.2), lineWidth: 1)
+        )
     }
 
     // MARK: - Escalation
@@ -940,5 +1059,43 @@ struct OverviewTab: View {
 
 #Preview("Overview — worker with ACs") {
     OverviewTab(pod: MockData.workerFromWorkspace, events: MockEvents.running)
+        .frame(width: 550, height: 600)
+}
+
+#Preview("Overview — running with web UI (Running state)") {
+    OverviewTab(
+        pod: MockData.runningWithWebUi,
+        events: MockEvents.running,
+        loadPreviewStatus: { _ in
+            PreviewStatus(running: true, reachable: true, restartCount: 0, lastError: nil, previewUrl: "http://127.0.0.1:17668")
+        }
+    )
+    .frame(width: 550, height: 650)
+}
+
+#Preview("Overview — restarting web UI (Restarting state, amber)") {
+    OverviewTab(
+        pod: MockData.restartingWithWebUi,
+        events: MockEvents.running,
+        loadPreviewStatus: { _ in
+            PreviewStatus(running: true, reachable: false, restartCount: 2, lastError: nil, previewUrl: "http://127.0.0.1:17668")
+        }
+    )
+    .frame(width: 550, height: 650)
+}
+
+#Preview("Overview — stopped web UI (Stopped state, muted)") {
+    OverviewTab(
+        pod: MockData.stoppedWithWebUi,
+        events: MockEvents.running,
+        loadPreviewStatus: { _ in
+            PreviewStatus(running: false, reachable: false, restartCount: 0, lastError: nil, previewUrl: nil)
+        }
+    )
+    .frame(width: 550, height: 650)
+}
+
+#Preview("Overview — running, no web UI (card hidden)") {
+    OverviewTab(pod: MockData.running, events: MockEvents.running)
         .frame(width: 550, height: 600)
 }

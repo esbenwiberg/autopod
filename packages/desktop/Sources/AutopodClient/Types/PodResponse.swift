@@ -79,6 +79,7 @@ public struct SessionResponse: Codable, Sendable {
   public let linesAdded: Int
   public let linesRemoved: Int
   public let previewUrl: String?
+  public let hasWebUi: Bool?
   public let prUrl: String?
   public let mergeBlockReason: String?
   public let plan: PlanResponse?
@@ -147,7 +148,7 @@ public struct SessionResponse: Codable, Sendable {
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
     case lastValidationResult, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, updatedAt, userId
-    case filesChanged, linesAdded, linesRemoved, previewUrl, prUrl
+    case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
     case mergeBlockReason, plan, progress, acceptanceCriteria, claudeSessionId
     case outputMode
     case pod = "options"

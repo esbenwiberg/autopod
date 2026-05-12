@@ -148,6 +148,10 @@ public actor DaemonAPI {
     return res.previewUrl
   }
 
+  public func previewStatus(podId: String) async throws -> PreviewStatus {
+    try await request("GET", "/pods/\(podId)/preview/status")
+  }
+
   public func revalidateSession(_ id: String) async throws -> RevalidateResponse {
     try await request("POST", "/pods/\(id)/revalidate")
   }
@@ -751,6 +755,14 @@ public struct KickResponse: Codable, Sendable {
 
 struct PreviewResponse: Codable {
   let previewUrl: String
+}
+
+public struct PreviewStatus: Decodable, Sendable {
+  public let running: Bool
+  public let reachable: Bool
+  public let restartCount: Int
+  public let lastError: String?
+  public let previewUrl: String?
 }
 
 struct HistoryWorkspaceBody: Codable {

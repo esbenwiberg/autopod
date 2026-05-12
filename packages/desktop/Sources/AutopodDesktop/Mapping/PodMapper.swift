@@ -257,6 +257,7 @@ public enum PodMapper {
 
     let prUrl: URL? = response.prUrl.flatMap { URL(string: $0) }
     let containerUrl: URL? = response.previewUrl.flatMap { URL(string: $0) }
+    let hasWebUi: Bool = response.hasWebUi ?? false
     let latestActivity: String? = response.mergeBlockReason ?? response.plan?.summary
     let profileSnapshotMapped: Profile? = response.profileSnapshot.map { ProfileMapper.map($0) }
     let dependsOnPodIds: [String] = response.dependsOnPodIds
@@ -285,6 +286,7 @@ public enum PodMapper {
       validationChecks: validationChecks,
       prUrl: prUrl,
       containerUrl: containerUrl,
+      hasWebUi: hasWebUi,
       plan: plan,
       phase: phase,
       latestActivity: latestActivity,

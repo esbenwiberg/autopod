@@ -512,6 +512,8 @@ public struct Pod: Identifiable, Sendable {
     public var validationProgress: ValidationProgress?
     public var prUrl: URL?
     public var containerUrl: URL?
+    /// Whether this pod's profile has a web UI (gates the Preview card in OverviewTab).
+    public var hasWebUi: Bool
     public var plan: SessionPlan?
     public var phase: PhaseProgress?
     public var latestActivity: String?
@@ -635,6 +637,7 @@ public struct Pod: Identifiable, Sendable {
         validationProgress: ValidationProgress? = nil,
         prUrl: URL? = nil,
         containerUrl: URL? = nil,
+        hasWebUi: Bool = false,
         plan: SessionPlan? = nil,
         phase: PhaseProgress? = nil,
         latestActivity: String? = nil,
@@ -674,7 +677,7 @@ public struct Pod: Identifiable, Sendable {
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
         self.escalationOptions = escalationOptions; self.escalationType = escalationType
         self.validationChecks = validationChecks; self.validationProgress = validationProgress; self.prUrl = prUrl
-        self.containerUrl = containerUrl; self.plan = plan; self.phase = phase
+        self.containerUrl = containerUrl; self.hasWebUi = hasWebUi; self.plan = plan; self.phase = phase
         self.latestActivity = latestActivity; self.errorSummary = errorSummary
         self.attempts = attempts; self.queuePosition = queuePosition
         self.inputTokens = inputTokens; self.outputTokens = outputTokens
