@@ -75,7 +75,6 @@ struct SpawnFixSheet: View {
     private func submit() async {
         isLoading = true
         let response = await onSpawn(message)
-        isLoading = false
 
         guard let response else {
             // network error already surfaced via ActionHandler.lastError
@@ -91,6 +90,7 @@ struct SpawnFixSheet: View {
         } else if response.reason == "parent_terminal" {
             errorText = "This pod is in a terminal state and cannot accept fix requests."
             showError = true
+            isLoading = false
         } else {
             isPresented = false
         }
