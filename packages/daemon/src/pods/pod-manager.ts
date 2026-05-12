@@ -5728,6 +5728,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async rejectSession(podId: string, reason?: string): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
+
+      const rejectableStates = ['validated', 'failed', 'review_required'] as const;
+      if (!(rejectableStates as readonly string[]).includes(pod.status)) {
+        throw new AutopodError(
+          `Cannot reject pod ${podId} in status ${pod.status}`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
       const previousStatus = pod.status as 'validated' | 'failed' | 'review_required';
 
       emitActivityStatus(

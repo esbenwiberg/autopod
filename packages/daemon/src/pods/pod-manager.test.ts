@@ -1311,8 +1311,8 @@ describe('PodManager', () => {
         'user-1',
       );
 
-      // queued -> running is not a valid transition
-      await expect(manager.rejectSession(pod.id)).rejects.toThrow(InvalidStateTransitionError);
+      // queued is not a rejectable state — explicit guard fires before any transition
+      await expect(manager.rejectSession(pod.id)).rejects.toThrow(AutopodError);
     });
   });
 
