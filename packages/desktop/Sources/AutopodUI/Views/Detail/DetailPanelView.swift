@@ -296,6 +296,28 @@ public struct DetailPanelView: View {
     @ViewBuilder
     private var headerActions: some View {
         HStack(spacing: 6) {
+            // Recover Worktree — surfaced whenever the worktree is compromised,
+            // regardless of pod status. Every other action path (Create PR,
+            // Resume, Rework, Restart) is disabled while the flag is set, so
+            // without this the operator has no in-app way out. The daemon
+            // endpoint validates that worktreeCompromised is true, so showing
+            // the button is safe even if the flag has been cleared elsewhere.
+            if pod.worktreeCompromised && pod.hasWorktree {
+                Button {
+                    Task {
+                        if let result = await actions.recoverWorktree(pod.id) {
+                            recoverWorktreeResult = result.message
+                            recoverWorktreeSuccess = result.recovered
+                        }
+                    }
+                } label: {
+                    Label("Recover Worktree", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.orange)
+                .help("Repopulate the host worktree from the live container or, if the container is gone, restore deleted files from the agent's last commit on the bare repo. Clears the compromised flag on success.")
+            }
             switch pod.status {
             case .queued:
                 // Kick — re-enqueues a stuck queued pod (e.g. orphaned by a missing
@@ -535,26 +557,6 @@ public struct DetailPanelView: View {
                 .tint(.red)
 
             case .failed:
-                // When the worktree is compromised, offer recovery as the
-                // primary action — every other path (Resume, Rework, Create
-                // PR, etc.) is disabled until the flag clears, so without
-                // this the operator has no in-app way out.
-                if pod.worktreeCompromised && pod.hasWorktree {
-                    Button {
-                        Task {
-                            if let result = await actions.recoverWorktree(pod.id) {
-                                recoverWorktreeResult = result.message
-                                recoverWorktreeSuccess = result.recovered
-                            }
-                        }
-                    } label: {
-                        Label("Recover Worktree", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(.orange)
-                    .help("Repopulate the host worktree from the live container or, if the container is gone, restore deleted files from the agent's last commit on the bare repo. Clears the compromised flag on success.")
-                }
                 if pod.isWorkspace {
                     // Restart — workspace pods have no agent, so the "Resume" /
                     // "Rework" distinction doesn't apply. The same /validate
@@ -709,7 +711,7 @@ public struct DetailPanelView: View {
                             .tint(.blue)
                             .disabled(pod.worktreeCompromised)
                             .help(pod.worktreeCompromised
-                                ? "Worktree sync failed — retrying would commit phantom deletions. Recover manually first."
+                                ? "Worktree sync failed — retrying would commit phantom deletions. Use the Recover Worktree button first."
                                 : "PR creation failed — retry creating a pull request for this pod's branch")
                         }
                     }
@@ -1096,7 +1098,7 @@ struct WorktreeCompromisedBanner: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Worktree out of sync with container")
                     .font(.caption.weight(.semibold))
-                Text("The auto-commit deletion guard blocked a phantom mass-delete. The agent's real work may still live in the container — don't retry the PR; recover manually first.")
+                Text("The auto-commit deletion guard blocked a phantom mass-delete. The agent's real work may still live in the container — don't retry the PR; use the Recover Worktree button in the header first.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

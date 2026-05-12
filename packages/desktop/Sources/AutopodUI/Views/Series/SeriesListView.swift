@@ -26,6 +26,7 @@ public struct SeriesListView: View {
 
     @State private var showCompleted = false
     @State private var expandedIds = Set<String>()
+    @State private var seededIds = Set<String>()
     @State private var showDeleteConfirmation: String?
 
     private let terminalStatuses: Set<PodStatus> = [.complete, .killed, .failed]
@@ -87,6 +88,17 @@ public struct SeriesListView: View {
                     }
                     .padding(16)
                 }
+            }
+        }
+        .onAppear { seedExpansion() }
+        .onChange(of: groups.map(\.id)) { _, _ in seedExpansion() }
+    }
+
+    private func seedExpansion() {
+        for group in groups where !seededIds.contains(group.id) {
+            seededIds.insert(group.id)
+            if group.isActive {
+                expandedIds.insert(group.id)
             }
         }
     }

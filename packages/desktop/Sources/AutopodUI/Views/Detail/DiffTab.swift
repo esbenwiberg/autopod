@@ -138,6 +138,21 @@ public struct DiffTab: View {
   private var totalAdded: Int { (parsedFiles ?? []).reduce(0) { $0 + $1.linesAdded } }
   private var totalRemoved: Int { (parsedFiles ?? []).reduce(0) { $0 + $1.linesRemoved } }
 
+  private var emptyStateSubline: String? {
+    switch pod.status {
+    case .provisioning:
+      "Container is starting…"
+    case .running, .awaitingInput, .paused:
+      "Agent hasn't modified any files yet"
+    case .validating, .merging, .mergePending, .handoff, .killing:
+      "Refreshing diff…"
+    case .complete, .failed, .killed:
+      "No changes recorded for this pod"
+    default:
+      nil
+    }
+  }
+
   public var body: some View {
     Group {
       if isParsing || (diffString != nil && parsedFiles == nil) {
@@ -156,8 +171,8 @@ public struct DiffTab: View {
           Text("No diff available")
             .font(.subheadline)
             .foregroundStyle(.secondary)
-          if pod.status.isActive {
-            Text("Diff will be available after validation")
+          if let subline = emptyStateSubline {
+            Text(subline)
               .font(.caption)
               .foregroundStyle(.tertiary)
           }
@@ -245,6 +260,16 @@ public struct DiffTab: View {
       }.value
       parsedFiles = result
       isParsing = false
+    }
+    .task(id: pod.status) {
+      // Auto-refresh while the tab is visible and the pod is still doing work.
+      // SwiftUI cancels this task when the tab unmounts or pod.status changes.
+      guard pod.status.isActive, let onRefresh else { return }
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(5))
+        if Task.isCancelled { break }
+        onRefresh()
+      }
     }
   }
 
