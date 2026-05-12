@@ -669,3 +669,74 @@ import AutopodUI
   #expect(combined[2].label == "AC1")
   #expect(combined[3].label == "0")
 }
+
+// MARK: - hasWebUi mapping tests (brief 02)
+
+private let minimalSessionJson = """
+{
+  "id": "web-ui-pod",
+  "profileName": "webapp",
+  "task": "Build UI",
+  "status": "running",
+  "model": "opus",
+  "runtime": "claude",
+  "executionTarget": "local",
+  "branch": "feat/x",
+  "containerId": null,
+  "worktreePath": null,
+  "validationAttempts": 0,
+  "maxValidationAttempts": 3,
+  "lastValidationResult": null,
+  "pendingEscalation": null,
+  "escalationCount": 0,
+  "skipValidation": false,
+  "createdAt": "2026-04-01T09:00:00Z",
+  "startedAt": "2026-04-01T09:00:00Z",
+  "completedAt": null,
+  "updatedAt": "2026-04-01T09:00:10Z",
+  "userId": "user-1",
+  "filesChanged": 0,
+  "linesAdded": 0,
+  "linesRemoved": 0,
+  "previewUrl": "http://localhost:3001",
+  "prUrl": null,
+  "plan": null,
+  "progress": null,
+  "acceptanceCriteria": null,
+  "claudeSessionId": null,
+  "outputMode": "pr",
+  "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+  "baseBranch": null,
+  "acFrom": null,
+  "recoveryWorktreePath": null,
+  "lastHeartbeatAt": null,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "costUsd": 0,
+  "commitCount": 0,
+  "lastCommitAt": null
+"""
+
+/// `hasWebUi: true` in the JSON → `pod.hasWebUi == true`.
+@Test func mapsHasWebUiTrue() throws {
+  let json = (minimalSessionJson + ", \"hasWebUi\": true }").data(using: .utf8)!
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+  #expect(pod.hasWebUi == true)
+}
+
+/// `hasWebUi: false` in the JSON → `pod.hasWebUi == false`.
+@Test func mapsHasWebUiFalse() throws {
+  let json = (minimalSessionJson + ", \"hasWebUi\": false }").data(using: .utf8)!
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+  #expect(pod.hasWebUi == false)
+}
+
+/// `hasWebUi` absent from the JSON → defaults to `false` (defensive back-compat).
+@Test func mapsHasWebUiMissingDefaultsFalse() throws {
+  let json = (minimalSessionJson + " }").data(using: .utf8)!
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+  #expect(pod.hasWebUi == false)
+}
