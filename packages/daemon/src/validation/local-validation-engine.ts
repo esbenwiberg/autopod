@@ -18,6 +18,7 @@ import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.j
 
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
+import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -890,20 +891,22 @@ async function runHealthCheck(
 
   log?.info({ startCommand: config.startCommand, url, timeoutMs }, 'starting app for health check');
 
-  // Start the app in the background, redirecting output to a log file so we can
-  // retrieve it for diagnostics if the health check fails.
+  // Start the app under the supervisor (never-give-up restarter) so crashes
+  // during the health-poll window and later during AC generation are recovered
+  // automatically. The supervisor writes to /tmp/autopod-start.log (same path
+  // the old fire-and-forget used), so all existing log-tailing code is unaffected.
   const startLogPath = '/tmp/autopod-start.log';
   const startCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
   containerManager
     .execInContainer(
       config.containerId,
-      ['sh', '-c', `${config.startCommand} > ${startLogPath} 2>&1 &`],
+      ['sh', '-c', buildSupervisorCommand(config.startCommand)],
       { cwd: startCwd },
     )
     .catch((err) => {
       log?.warn(
         { err },
-        'background start command errored (may be expected for long-running processes)',
+        'supervisor start command errored (may be expected for long-running processes)',
       );
     });
 
@@ -2049,6 +2052,38 @@ Respond ONLY with the script code. No markdown fences, no explanation.`;
 }
 
 /** Executor LLM generates and runs a Playwright script from instructions. */
+/**
+ * Post-Claude reachability guard.
+ *
+ * Claude script generation takes 10-60s during which the dev server may crash.
+ * The pre-generation probe (below) only covers startup jitter; this covers the
+ * generation window. Retry budget = 1: one restart attempt, then proceed
+ * regardless so legitimate failures are not hidden by infinite retries.
+ */
+async function restartSupervisorIfDown(
+  cm: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<void> {
+  if (!config.startCommand) return;
+  const reachable = await pollUntilReachable(config.previewUrl, { attempts: 2, intervalMs: 1_000 });
+  if (reachable) return;
+
+  log?.warn({ podId: config.podId }, 'Server unreachable after script generation — restarting supervisor');
+
+  const startCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
+  const kickCmd =
+    `kill -9 $(cat /tmp/autopod-supervisor.pid 2>/dev/null) 2>/dev/null; ` +
+    buildSupervisorCommand(config.startCommand);
+
+  await cm
+    .execInContainer(config.containerId, ['sh', '-c', kickCmd], { cwd: startCwd })
+    .catch((err) => log?.warn({ err }, 'Supervisor restart errored'));
+
+  // Give the server time to come back up (up to ~10s)
+  await pollUntilReachable(config.previewUrl, { attempts: 5, intervalMs: 2_000 });
+}
+
 async function executeAcChecks(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
@@ -2097,6 +2132,8 @@ async function executeAcChecks(
   try {
     if (useHost) {
       const hostScript = await generateScript('host');
+      // Post-Claude reachability guard (second check — first is above before generateScript)
+      await restartSupervisorIfDown(containerManager, config, log);
       const hostResult = await executeAcOnHost(
         hostBrowserRunner,
         config,
@@ -2110,6 +2147,8 @@ async function executeAcChecks(
       // Host Playwright produced no markers — fall back to container with a freshly generated script
       log?.warn({ podId: config.podId }, 'Host AC checks failed — falling back to container');
       const containerScript = await generateScript('container');
+      // Post-Claude reachability guard for the container fallback path
+      await restartSupervisorIfDown(containerManager, config, log);
       return await executeAcInContainer(
         containerManager,
         config,
@@ -2122,6 +2161,8 @@ async function executeAcChecks(
     }
 
     const containerScript = await generateScript('container');
+    // Post-Claude reachability guard
+    await restartSupervisorIfDown(containerManager, config, log);
     return await executeAcInContainer(
       containerManager,
       config,

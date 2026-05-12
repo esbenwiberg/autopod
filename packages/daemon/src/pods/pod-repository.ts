@@ -280,6 +280,17 @@ function readPodFromRow(row: Record<string, unknown>): PodOptions {
 
 /** Map a SQLite row (snake_case) to a Pod (camelCase). */
 function rowToSession(row: Record<string, unknown>): Pod {
+  // Parse profile_snapshot once so we can derive hasWebUi without a second JSON.parse.
+  const profileSnapshotData: Profile | null = row.profile_snapshot
+    ? (() => {
+        try {
+          return JSON.parse(row.profile_snapshot as string) as Profile;
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+
   return {
     id: row.id as string,
     profileName: row.profile_name as string,
@@ -321,6 +332,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     linesAdded: row.lines_added as number,
     linesRemoved: row.lines_removed as number,
     previewUrl: (row.preview_url as string) ?? null,
+    hasWebUi: profileSnapshotData ? (profileSnapshotData.hasWebUi ?? true) : true,
     prUrl: (row.pr_url as string) ?? null,
     mergeBlockReason: (row.merge_block_reason as string) ?? null,
     plan: row.plan ? JSON.parse(row.plan as string) : null,
@@ -351,9 +363,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
       ? JSON.parse(row.validation_overrides as string)
       : null,
     pimGroups: row.pim_groups ? (JSON.parse(row.pim_groups as string) as PimGroupConfig[]) : null,
-    profileSnapshot: row.profile_snapshot
-      ? (JSON.parse(row.profile_snapshot as string) as Profile)
-      : null,
+    profileSnapshot: profileSnapshotData,
     prFixAttempts: (row.pr_fix_attempts as number) ?? 0,
     maxPrFixAttempts: (row.max_pr_fix_attempts as number) ?? DEFAULT_MAX_PR_FIX_ATTEMPTS,
     fixIteration: (row.fix_iteration as number) ?? 0,
