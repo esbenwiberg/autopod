@@ -151,11 +151,6 @@ export function rowToProfile(
     sastTimeout: nullableNum(row.sast_timeout),
     mergePollIntervalSec: nullableNum(row.merge_poll_interval_sec),
     preflightConflictPolicy: nullableStr(row.preflight_conflict_policy) as 'warn' | 'block' | null,
-    fixPodCooldownSec: nullableNum(row.fix_pod_cooldown_sec),
-    reuseFixPod:
-      row.reuse_fix_pod === null || row.reuse_fix_pod === undefined
-        ? null
-        : (row.reuse_fix_pod as number) === 1,
     prProvider: nullableStr(row.pr_provider) as Profile['prProvider'],
     adoPat: decryptPat(row.ado_pat),
     githubPat: decryptPat(row.github_pat),
@@ -310,7 +305,7 @@ export function createProfileStore(
           private_registries, registry_pat, branch_prefix, container_memory_gb,
           build_timeout, test_timeout, build_env,
           lint_command, lint_timeout, sast_command, sast_timeout,
-          merge_poll_interval_sec, fix_pod_cooldown_sec, reuse_fix_pod,
+          merge_poll_interval_sec,
           preflight_conflict_policy,
           token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
           has_web_ui,
@@ -331,7 +326,7 @@ export function createProfileStore(
           @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout, @buildEnv,
           @lintCommand, @lintTimeout, @sastCommand, @sastTimeout,
-          @mergePollIntervalSec, @fixPodCooldownSec, @reuseFixPod,
+          @mergePollIntervalSec,
           @preflightConflictPolicy,
           @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
           @hasWebUi,
@@ -382,13 +377,6 @@ export function createProfileStore(
         sastTimeout: parsed.sastTimeout ?? null,
         mergePollIntervalSec: parsed.mergePollIntervalSec ?? null,
         preflightConflictPolicy: parsed.preflightConflictPolicy ?? null,
-        fixPodCooldownSec: parsed.fixPodCooldownSec ?? null,
-        reuseFixPod:
-          parsed.reuseFixPod === null || parsed.reuseFixPod === undefined
-            ? null
-            : parsed.reuseFixPod
-              ? 1
-              : 0,
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
         githubPat: encryptPat(parsed.githubPat),
@@ -705,17 +693,6 @@ export function createProfileStore(
       if (parsed.preflightConflictPolicy !== undefined) {
         setClauses.push('preflight_conflict_policy = @preflightConflictPolicy');
         fieldMap.preflightConflictPolicy = parsed.preflightConflictPolicy ?? null;
-      }
-      if (parsed.fixPodCooldownSec !== undefined) {
-        setClauses.push('fix_pod_cooldown_sec = @fixPodCooldownSec');
-        fieldMap.fixPodCooldownSec = parsed.fixPodCooldownSec ?? null;
-      }
-      if (parsed.reuseFixPod !== undefined) {
-        setClauses.push('reuse_fix_pod = @reuseFixPod');
-        // Preserve null so derived profiles can clear the override and fall
-        // back to the parent value. `null ? 1 : 0` would coerce to 0 (false)
-        // and silently re-override the field on every save.
-        fieldMap.reuseFixPod = parsed.reuseFixPod === null ? null : parsed.reuseFixPod ? 1 : 0;
       }
       if (parsed.tokenBudget !== undefined) {
         setClauses.push('token_budget = @tokenBudget');
