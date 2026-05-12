@@ -178,9 +178,9 @@ public actor DaemonAPI {
     )
   }
 
-  public func spawnFixSession(_ id: String, userMessage: String? = nil) async throws {
-    let body = try userMessage.map { try encode(SpawnFixBody(userMessage: $0)) }
-    let _: OkResponse = try await request("POST", "/pods/\(id)/spawn-fix", body: body)
+  public func spawnFixSession(_ id: String, userMessage: String? = nil) async throws -> SpawnFixResponse {
+    let body = try encode(SpawnFixBody(message: userMessage ?? ""))
+    return try await request("POST", "/pods/\(id)/spawn-fix", body: body)
   }
 
   public func retryCreatePr(_ id: String) async throws {
@@ -714,7 +714,17 @@ struct ExtendAttemptsBody: Codable {
 }
 
 struct SpawnFixBody: Codable {
-  let userMessage: String
+  let message: String
+}
+
+/// Response from POST /pods/:id/spawn-fix (brief 03 contract).
+public struct SpawnFixResponse: Codable, Sendable {
+  public let ok: Bool
+  public let queued: Bool?
+  public let queueLength: Int?
+  public let fixPodId: String?
+  /// Set when ok == false. Value is "parent_terminal" when the parent pod is in a terminal state.
+  public let reason: String?
 }
 
 struct ForceCompleteBody: Codable {

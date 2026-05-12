@@ -219,6 +219,17 @@ public struct SessionCardFinal: View {
                 if pod.seriesId != nil {
                     seriesChip
                 }
+                if pod.fixIteration > 0 {
+                    fixIterationChip
+                }
+                if pod.queueLength > 0 {
+                    QueueChip(count: pod.queueLength) {
+                        showQueuePopover.toggle()
+                    }
+                    .popover(isPresented: $showQueuePopover, arrowEdge: .top) {
+                        FixQueuePopover(messages: pod.recentQueueMessages)
+                    }
+                }
                 Spacer()
                 if let score = qualityScore, pod.isTerminal {
                     qualityPill(score)
@@ -251,6 +262,16 @@ public struct SessionCardFinal: View {
         .background(Color.accentColor.opacity(0.12))
         .foregroundStyle(Color.accentColor)
         .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private var fixIterationChip: some View {
+        Text("Fix \(pod.fixIteration)")
+            .font(.system(.caption2).weight(.medium))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Color.indigo.opacity(0.12))
+            .foregroundStyle(Color.indigo)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private var modeBadge: some View {
@@ -874,6 +895,7 @@ public struct SessionCardFinal: View {
         }
     }
 
+    @State private var showQueuePopover = false
     @State private var replyInputText = ""
     @State private var showOptionsPicker = false
     @State private var showNudgeInput = false
@@ -1076,6 +1098,31 @@ public struct SessionCardFinal: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+// MARK: - Queue chip
+
+/// Small capsule chip showing pending fix-feedback queue depth with a chevron to open the popover.
+struct QueueChip: View {
+    let count: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text("Queue \(count)")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .medium))
+            }
+            .font(.system(.caption2).weight(.medium))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+        .background(Color.orange.opacity(0.12))
+        .foregroundStyle(Color.orange)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 

@@ -570,6 +570,14 @@ public struct Pod: Identifiable, Sendable {
     /// round of CI / review feedback.
     public var fixIteration: Int
 
+    /// Number of messages queued for the next fix-pod iteration. Non-zero only on
+    /// parent pods that have pending feedback. Driven by the daemon's
+    /// `pending_fix_feedback` table (brief 02 serialises this).
+    public var queueLength: Int
+
+    /// Up to 10 most-recent queued messages for the popover. Empty when queueLength is 0.
+    public var recentQueueMessages: [PodQueueMessage]
+
     // MARK: - Series (pod dependency DAG)
 
     /// Series this pod belongs to, or nil for standalone pods.
@@ -666,6 +674,8 @@ public struct Pod: Identifiable, Sendable {
         skipValidation: Bool = false,
         preSubmitReview: PreSubmitReviewSnapshot? = nil,
         fixIteration: Int = 0,
+        queueLength: Int = 0,
+        recentQueueMessages: [PodQueueMessage] = [],
         runningAt: Date? = nil
     ) {
         self.id = id; self.status = status; self.pod = pod
@@ -697,6 +707,8 @@ public struct Pod: Identifiable, Sendable {
         self.skipValidation = skipValidation
         self.preSubmitReview = preSubmitReview
         self.fixIteration = fixIteration
+        self.queueLength = queueLength
+        self.recentQueueMessages = recentQueueMessages
     }
 
     /// Back-compat init that takes a legacy `OutputMode` and derives a `PodConfig`.
@@ -762,6 +774,21 @@ public struct Pod: Identifiable, Sendable {
             dependsOnPodIds: dependsOnPodIds,
             dependencyStartedAt: dependencyStartedAt
         )
+    }
+}
+
+/// A single queued feedback message waiting for the next fix-pod iteration.
+/// Populated from the daemon's `pending_fix_feedback` table via `recentQueueMessages`
+/// on the pod payload.
+public struct PodQueueMessage: Sendable, Identifiable {
+    public let id: String
+    public let message: String
+    public let createdAt: Date
+
+    public init(id: String, message: String, createdAt: Date) {
+        self.id = id
+        self.message = message
+        self.createdAt = createdAt
     }
 }
 

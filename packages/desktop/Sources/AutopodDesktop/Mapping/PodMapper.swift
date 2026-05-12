@@ -316,6 +316,14 @@ public enum PodMapper {
     result.skipValidation = response.skipValidation
     result.preSubmitReview = mapPreSubmitReview(response.preSubmitReview)
     result.fixIteration = response.fixIteration ?? 0
+    result.queueLength = response.queueLength ?? 0
+    result.recentQueueMessages = (response.recentQueueMessages ?? []).map { msg in
+      PodQueueMessage(
+        id: msg.id,
+        message: msg.message,
+        createdAt: Date(timeIntervalSince1970: Double(msg.createdAt) / 1000)
+      )
+    }
     return result
   }
 

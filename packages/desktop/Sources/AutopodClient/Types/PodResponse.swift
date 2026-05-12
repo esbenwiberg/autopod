@@ -140,6 +140,12 @@ public struct SessionResponse: Codable, Sendable {
   /// first round; increments each time the fix pod is re-enqueued for a new
   /// round of CI / review feedback.
   public let fixIteration: Int?
+  /// Number of messages currently in the fix-feedback queue for this parent pod.
+  /// Zero for non-parent pods or when no feedback is queued.
+  public let queueLength: Int?
+  /// Up to 10 most-recent queued feedback messages for the popover.
+  /// Absent from pre-brief-02 daemon responses; decode defensively.
+  public let recentQueueMessages: [QueueMessageResponse]?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
@@ -164,7 +170,18 @@ public struct SessionResponse: Codable, Sendable {
     case referenceRepos
     case preSubmitReview
     case fixIteration
+    case queueLength
+    case recentQueueMessages
   }
+}
+
+/// Wire type for a single queued feedback message (mirrors `FixFeedback` from
+/// the daemon's `FixFeedbackRepository`).
+public struct QueueMessageResponse: Codable, Sendable {
+  public let id: String
+  public let message: String
+  /// Millisecond epoch timestamp.
+  public let createdAt: Int64
 }
 
 public struct PreSubmitReviewSnapshotResponse: Codable, Sendable {
