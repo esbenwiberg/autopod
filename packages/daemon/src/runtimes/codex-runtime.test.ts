@@ -118,6 +118,47 @@ describe('CodexRuntime', () => {
       );
     });
 
+    it('redacts large task in spawn log but passes full task to execStreaming', async () => {
+      const bigStr = 'X'.repeat(50_000);
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
+
+      setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 10);
+
+      for await (const _ of runtime.spawn({
+        podId: 'redact-spawn',
+        task: bigStr,
+        model: 'o3-mini',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        /* consume */
+      }
+
+      const spawnCall = infoSpy.mock.calls.find(
+        (c) =>
+          typeof c[0] === 'object' &&
+          c[0] !== null &&
+          (c[0] as Record<string, unknown>).msg === 'Spawning codex in container',
+      );
+      expect(spawnCall).toBeDefined();
+      const logObj = spawnCall![0] as Record<string, unknown>;
+      const loggedArgs = logObj.args as string[];
+      expect(loggedArgs[1]).toMatch(/^<task: 50000 bytes>$/);
+      expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
+
+      // Real args to execStreaming still contain the full task
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      expect(execArgs).toContain(bigStr);
+    });
+
     it('yields error event on non-zero exit code', async () => {
       const handle = createMockHandle({ exitCode: 1 });
       const cm = createMockContainerManager(handle);
@@ -233,6 +274,40 @@ describe('CodexRuntime', () => {
   });
 
   describe('resume', () => {
+    it('redacts large message in resume log args', async () => {
+      const bigStr = 'X'.repeat(50_000);
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm);
+
+      setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 10);
+
+      for await (const _ of runtime.resume('sess-redact', bigStr, 'container-123')) {
+        /* consume */
+      }
+
+      const resumeCall = infoSpy.mock.calls.find(
+        (c) =>
+          typeof c[0] === 'object' &&
+          c[0] !== null &&
+          (c[0] as Record<string, unknown>).msg === 'Resuming codex with follow-up message in container',
+      );
+      expect(resumeCall).toBeDefined();
+      const logObj = resumeCall![0] as Record<string, unknown>;
+      const loggedArgs = logObj.args as string[];
+      expect(loggedArgs[1]).toMatch(/^<task: 50000 bytes>$/);
+      expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
+
+      // Real args to execStreaming still contain the full message
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      expect(execArgs).toContain(bigStr);
+    });
+
     it('calls execStreaming with message as task in full-auto mode', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);

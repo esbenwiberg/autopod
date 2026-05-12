@@ -28,12 +28,13 @@ export class CodexRuntime implements Runtime {
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
     const args = this.buildSpawnArgs(config);
+    const safeSpawnArgs = args.map((a, i) => (i === 1 ? `<task: ${a.length} bytes>` : a));
 
     this.logger.info({
       component: 'codex-runtime',
       podId: config.podId,
       containerId: config.containerId,
-      args,
+      args: safeSpawnArgs,
       msg: 'Spawning codex in container',
     });
 
@@ -100,11 +101,13 @@ export class CodexRuntime implements Runtime {
     // Codex CLI doesn't have native pod resumption.
     // We pass the message as a follow-up task in full-auto mode.
     const args = ['exec', message, '--full-auto', '--json'];
+    const safeResumeArgs = args.map((a, i) => (i === 1 ? `<task: ${a.length} bytes>` : a));
 
     this.logger.info({
       component: 'codex-runtime',
       podId,
       containerId,
+      args: safeResumeArgs,
       msg: 'Resuming codex with follow-up message in container',
     });
 

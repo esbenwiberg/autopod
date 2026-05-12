@@ -55,11 +55,13 @@ export class CopilotRuntime implements Runtime {
     const copilotModel = config.env.COPILOT_MODEL ?? null;
     if (copilotModel) this.lastModels.set(config.podId, copilotModel);
 
+    const safeArgs = args.map((a, i) => (i === 1 ? `<task: ${a.length} bytes>` : a));
+
     this.logger.info({
       component: 'copilot-runtime',
       podId: config.podId,
       containerId: config.containerId,
-      args,
+      args: safeArgs,
       msg: 'Spawning copilot in container',
     });
 

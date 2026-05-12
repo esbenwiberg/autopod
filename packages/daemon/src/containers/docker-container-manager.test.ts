@@ -75,6 +75,7 @@ describe('DockerContainerManager', () => {
   let manager: DockerContainerManager;
 
   beforeEach(() => {
+    vi.restoreAllMocks();
     container = createMockContainer();
     docker = createMockDocker(container);
     manager = new DockerContainerManager({ docker, logger });
@@ -657,6 +658,30 @@ describe('DockerContainerManager', () => {
       const result = await manager.execInContainer('abc123', ['cmd']);
       expect(result.exitCode).toBe(1);
     });
+
+    it('redacts long args in Exec completed debug log', async () => {
+      const bigStr = 'X'.repeat(50_000);
+      const debugSpy = vi.spyOn(logger, 'debug');
+
+      const muxStream = createMockMuxStream();
+      const mockExec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+      };
+      container.exec.mockResolvedValue(mockExec);
+
+      const cmd = ['/run/autopod/agent-shim.sh', 'claude', '--flag', bigStr];
+      await manager.execInContainer('abc123', cmd);
+
+      const logCall = debugSpy.mock.calls.find((c) => c[1] === 'Exec completed');
+      expect(logCall).toBeDefined();
+      const logObj = logCall![0] as Record<string, unknown>;
+      const loggedCommand = logObj.command as string[];
+      expect(loggedCommand[3]).toBe('<arg: 50000 bytes>');
+      expect(loggedCommand[0]).toBe('/run/autopod/agent-shim.sh');
+      expect(loggedCommand[1]).toBe('claude');
+      expect(loggedCommand[2]).toBe('--flag');
+    });
   });
 
   // ─── execStreaming() ────────────────────────────────────
@@ -701,6 +726,53 @@ describe('DockerContainerManager', () => {
           Env: expect.arrayContaining(['FOO=bar', 'API_KEY=secret']),
         }),
       );
+
+      muxStream.end();
+    });
+
+    it('redacts long args in Streaming exec started log', async () => {
+      const bigStr = 'X'.repeat(50_000);
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      const muxStream = new PassThrough();
+      const mockExec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+      };
+      container.exec.mockResolvedValue(mockExec);
+
+      const cmd = ['/run/autopod/agent-shim.sh', 'claude', '--flag', bigStr];
+      await manager.execStreaming('abc123', cmd);
+
+      const logCall = infoSpy.mock.calls.find((c) => c[1] === 'Streaming exec started');
+      expect(logCall).toBeDefined();
+      const logObj = logCall![0] as Record<string, unknown>;
+      const loggedCommand = logObj.command as string[];
+      expect(loggedCommand[3]).toBe('<arg: 50000 bytes>');
+      expect(loggedCommand[0]).toBe('/run/autopod/agent-shim.sh');
+      expect(loggedCommand[1]).toBe('claude');
+      expect(loggedCommand[2]).toBe('--flag');
+
+      muxStream.end();
+    });
+
+    it('does not redact args at or under 1024 chars in Streaming exec started log', async () => {
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      const muxStream = new PassThrough();
+      const mockExec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+      };
+      container.exec.mockResolvedValue(mockExec);
+
+      const cmd = ['/run/autopod/agent-shim.sh', 'claude', '--flag', 'short-value'];
+      await manager.execStreaming('abc123', cmd);
+
+      const logCall = infoSpy.mock.calls.find((c) => c[1] === 'Streaming exec started');
+      expect(logCall).toBeDefined();
+      const logObj = logCall![0] as Record<string, unknown>;
+      expect(logObj.command).toEqual(cmd);
 
       muxStream.end();
     });
@@ -870,6 +942,32 @@ describe('DockerContainerManager', () => {
       const result = await manager.execInContainer('abc123', ['true']);
       expect(result.exitCode).toBe(1);
       expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('redacts long args in exec.inspect timed out warn log', async () => {
+      const bigStr = 'X'.repeat(50_000);
+      const warnSpy = vi.spyOn(logger, 'warn');
+
+      const muxStream = new PassThrough();
+      muxStream.resume();
+      process.nextTick(() => muxStream.end());
+      const exec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockReturnValue(new Promise(() => {})), // never resolves → timeout
+      };
+      container.exec.mockResolvedValue(exec);
+
+      const cmd = ['/run/autopod/agent-shim.sh', 'claude', '--flag', bigStr];
+      await manager.execInContainer('abc123', cmd);
+
+      const logCall = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === 'string' && c[1].includes('exec.inspect timed out'),
+      );
+      expect(logCall).toBeDefined();
+      const logObj = logCall![0] as Record<string, unknown>;
+      const loggedCommand = logObj.command as string[];
+      expect(loggedCommand[3]).toBe('<arg: 50000 bytes>');
+      expect(loggedCommand[0]).toBe('/run/autopod/agent-shim.sh');
     });
   });
 });

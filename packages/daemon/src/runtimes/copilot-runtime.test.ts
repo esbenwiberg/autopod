@@ -110,6 +110,47 @@ describe('CopilotRuntime', () => {
       expect(completeEvent).toBeDefined();
     });
 
+    it('redacts large task in spawn log but passes full task to execStreaming', async () => {
+      // Resume re-spawns via spawn(), so a single fix in spawn() covers both paths.
+      const bigStr = 'X'.repeat(50_000);
+      const infoSpy = vi.spyOn(logger, 'info');
+
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CopilotRuntime(logger, cm);
+
+      setTimeout(() => {
+        (handle as { finish?: (code?: number) => void }).finish?.(0);
+      }, 10);
+
+      for await (const _ of runtime.spawn({
+        podId: 'redact-spawn',
+        task: bigStr,
+        model: 'sonnet',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        /* consume */
+      }
+
+      const spawnCall = infoSpy.mock.calls.find(
+        (c) =>
+          typeof c[0] === 'object' &&
+          c[0] !== null &&
+          (c[0] as Record<string, unknown>).msg === 'Spawning copilot in container',
+      );
+      expect(spawnCall).toBeDefined();
+      const logObj = spawnCall![0] as Record<string, unknown>;
+      const loggedArgs = logObj.args as string[];
+      expect(loggedArgs[1]).toMatch(/^<task: 50000 bytes>$/);
+      expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
+
+      // Real args to execStreaming still contain the full task
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      expect(execArgs).toContain(bigStr);
+    });
+
     it('sets COPILOT_HOME in env', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
