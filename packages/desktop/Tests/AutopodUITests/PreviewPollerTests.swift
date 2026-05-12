@@ -3,12 +3,46 @@ import Testing
 import AutopodClient
 
 // MARK: - PreviewPoller unit tests (brief 02)
+//
+// Synchronization rationale: all tests use `waitUntil` (yield-bounded polling on
+// observable state) rather than wall-clock `Task.sleep`. `Task.yield()` always
+// makes progress regardless of load on the runner, so 10 000 yields is a hard
+// upper bound that fails the test deterministically if the poll task is
+// genuinely stuck — never a flaky timeout because CI was busy for 200 ms.
+
+private struct WaitTimeoutError: Error, CustomStringConvertible {
+    let yields: Int
+    var description: String { "waitUntil timed out after \(yields) yields" }
+}
+
+/// Yield to the runloop until `condition` is true. Bounded by `maxYields` so
+/// a stuck condition fails the test rather than hanging.
+@MainActor
+private func waitUntil(
+    _ condition: @MainActor () -> Bool,
+    maxYields: Int = 10_000
+) async throws {
+    for _ in 0..<maxYields {
+        if condition() { return }
+        await Task.yield()
+    }
+    throw WaitTimeoutError(yields: maxYields)
+}
+
+/// Tiny @MainActor-isolated counter so closures and tests can share a count
+/// without captured-var concurrency warnings. Avoids actor-hop overhead in
+/// closures already pinned to the main actor.
+@MainActor
+private final class CallCounter {
+    private(set) var count: Int = 0
+    func tick() { count += 1 }
+}
 
 /// Verifies that `PreviewPoller.start()` fetches immediately and `stop()` tears
 /// down the poll task so no further fetches occur.
 @MainActor
 @Test func pollerFetchesOnStart() async throws {
-    var fetchCount = 0
+    let counter = CallCounter()
     let expected = PreviewStatus(
         running: true, reachable: true, restartCount: 0, lastError: nil,
         previewUrl: "http://127.0.0.1:17668"
@@ -16,14 +50,13 @@ import AutopodClient
     let poller = PreviewPoller()
 
     poller.start(podId: "test-pod") { _ in
-        fetchCount += 1
+        counter.tick()
         return expected
     }
 
-    // Give the initial in-task fetch time to run.
-    try await Task.sleep(for: .milliseconds(200))
+    try await waitUntil { poller.status != nil }
 
-    #expect(fetchCount >= 1)
+    #expect(counter.count >= 1)
     #expect(poller.status?.running == true)
     #expect(poller.status?.reachable == true)
     #expect(poller.status?.previewUrl == "http://127.0.0.1:17668")
@@ -33,29 +66,28 @@ import AutopodClient
     #expect(poller.isPolling == false)
 }
 
-/// Verifies `stop()` cancels the poll task — no more fetches after stop.
+/// Verifies `stop()` cancels the poll task — `isPolling` flips synchronously
+/// and the cancelled task is no longer driving fetches.
 @MainActor
 @Test func pollerStopsOnStop() async throws {
-    var fetchCount = 0
+    let counter = CallCounter()
     let poller = PreviewPoller()
 
     poller.start(podId: "test-pod") { _ in
-        fetchCount += 1
+        counter.tick()
         return PreviewStatus(running: true, reachable: true, restartCount: 0, lastError: nil, previewUrl: nil)
     }
 
-    try await Task.sleep(for: .milliseconds(100))
+    try await waitUntil { poller.status != nil }
+    let countAfterFirstFetch = counter.count
+
     poller.stop()
-    let countAfterStop = fetchCount
-
-    // Wait longer than the 5s sleep — if not cancelled, fetchCount would increment.
-    // We only wait 200ms here to keep tests fast; the real guarantee is that
-    // stop() cancels the Task so the sleep exits immediately.
-    try await Task.sleep(for: .milliseconds(200))
-
     #expect(poller.isPolling == false)
-    // No additional fetches should have happened after stop.
-    #expect(fetchCount == countAfterStop)
+
+    // After stop(), the poll task is cancelled. Yield to let it observe the
+    // cancellation and exit; verify no new fetches snuck in.
+    for _ in 0..<100 { await Task.yield() }
+    #expect(counter.count == countAfterFirstFetch)
 }
 
 /// `stopIfTerminal` with a terminal status stops polling within one tick.
@@ -67,7 +99,7 @@ import AutopodClient
         PreviewStatus(running: true, reachable: true, restartCount: 0, lastError: nil, previewUrl: nil)
     }
 
-    try await Task.sleep(for: .milliseconds(100))
+    try await waitUntil { poller.status != nil }
     #expect(poller.isPolling == true)
 
     poller.stopIfTerminal(status: .complete)
@@ -83,7 +115,7 @@ import AutopodClient
         PreviewStatus(running: true, reachable: true, restartCount: 0, lastError: nil, previewUrl: nil)
     }
 
-    try await Task.sleep(for: .milliseconds(100))
+    try await waitUntil { poller.status != nil }
     #expect(poller.isPolling == true)
 
     poller.stopIfTerminal(status: .running)
@@ -106,9 +138,8 @@ import AutopodClient
         throw LoadError()
     }
 
-    try await Task.sleep(for: .milliseconds(200))
+    try await waitUntil { poller.lastFetchError != nil }
 
-    #expect(poller.lastFetchError != nil)
     #expect(poller.lastFetchError == "network down")
     #expect(poller.status == nil)
     #expect(poller.isPolling == true)
@@ -120,28 +151,19 @@ import AutopodClient
 @MainActor
 @Test func pollerClearsErrorOnSuccess() async throws {
     struct LoadError: Error {}
-    var shouldFail = true
     let poller = PreviewPoller()
     let success = PreviewStatus(
         running: true, reachable: true, restartCount: 0, lastError: nil,
         previewUrl: "http://127.0.0.1:1234"
     )
 
-    poller.start(podId: "test-pod") { _ in
-        if shouldFail { throw LoadError() }
-        return success
-    }
+    poller.start(podId: "test-pod") { _ in throw LoadError() }
+    try await waitUntil { poller.lastFetchError != nil }
 
-    try await Task.sleep(for: .milliseconds(150))
-    #expect(poller.lastFetchError != nil)
-
-    // Flip the source and restart — start() triggers an immediate fetch.
-    shouldFail = false
+    // Restart with a successful loader; start() triggers an immediate fetch
+    // which clears lastFetchError on success.
     poller.start(podId: "test-pod") { _ in success }
-    try await Task.sleep(for: .milliseconds(150))
-
-    #expect(poller.lastFetchError == nil)
-    #expect(poller.status?.running == true)
+    try await waitUntil { poller.status?.running == true && poller.lastFetchError == nil }
 
     poller.stop()
 }
@@ -149,24 +171,24 @@ import AutopodClient
 /// `start()` called twice restarts cleanly — no duplicate poll tasks.
 @MainActor
 @Test func pollerRestartIsClean() async throws {
-    var fetchCount = 0
+    let counter = CallCounter()
     let poller = PreviewPoller()
 
     poller.start(podId: "pod-1") { _ in
-        fetchCount += 1
+        counter.tick()
         return PreviewStatus(running: false, reachable: false, restartCount: 0, lastError: nil, previewUrl: nil)
     }
-    try await Task.sleep(for: .milliseconds(50))
-    let afterFirst = fetchCount
+    try await waitUntil { poller.status != nil }
+    let afterFirst = counter.count
 
     poller.start(podId: "pod-2") { _ in
-        fetchCount += 1
+        counter.tick()
         return PreviewStatus(running: true, reachable: true, restartCount: 0, lastError: nil, previewUrl: nil)
     }
-    try await Task.sleep(for: .milliseconds(100))
+    // Restart's new fetch overwrites status with running: true.
+    try await waitUntil { poller.status?.running == true }
 
-    #expect(fetchCount > afterFirst)
-    #expect(poller.status?.running == true)
+    #expect(counter.count > afterFirst)
     #expect(poller.isPolling == true)
 
     poller.stop()
