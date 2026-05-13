@@ -92,10 +92,10 @@ queued → provisioning → running → validating → validated → approved �
                            │            │                                  ↓
                            │            └─→ failed (retry with feedback)  merge_pending
                            │                    │                              ↓
-                           │                    └─→ review_required    fix session spawned
-                           │                           ├─→ running      (CI fail / review comments)
-                           │                           └─→ running      up to N attempts, then failed
-                           │
+                           │                    └─→ review_required    fix pod spawned ←──────┐
+                           │                           ├─→ running      (CI fail / review      │
+                           │                           └─→ running       comments)             │
+                           │                                             up to maxPrFixAttempts ┘
                            ├─→ paused (operator paused via ap pause / p key)
                            │      │
                            │      └─→ running (resumed via ap tell / nudge)
@@ -104,6 +104,8 @@ queued → provisioning → running → validating → validated → approved �
 
 Any non-terminal state → killing → killed
 ```
+
+**Fix pods** are spawned automatically when a pod's PR is blocked — by CI failures, failing checks, or `CHANGES_REQUESTED` review comments. The fix pod receives the original task plus sanitized failure summaries and reviewer notes, and pushes to the same branch. The cycle repeats up to `maxPrFixAttempts` (default: 3).
 
 ### Validation Pipeline
 
@@ -124,7 +126,7 @@ Validation is a multi-phase pipeline with two loops — each phase must pass bef
 
 If any phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, AC failures, reviewer notes) and retries automatically. The AI reviewer receives tiered context: the diff, original task, and findings from prior attempts.
 
-Every validation attempt is stored with full results and screenshots. View the **validation report** (`GET /sessions/:id/report`) for a visual timeline of all attempts.
+Every validation attempt is stored with full results and **proof-of-work screenshots** — one per smoke page and per AC criterion. Screenshots are grouped by phase (smoke → ac → review) and accessible via `GET /pods/:id/screenshots`. View the **validation report** (`GET /sessions/:id/report`) for a visual timeline of all attempts.
 
 After validation, the container is **stopped** (not removed). Launch an on-demand **preview** to interact with the agent's work in a real browser before approving.
 
@@ -181,6 +183,12 @@ ap override <id> <finding-id> --guidance "Use our custom date helper instead"
 <tr><td>📜</td><td><b>History analysis workspace</b></td><td><code>ap history</code> creates a workspace pre-loaded with session history data for pattern analysis</td></tr>
 <tr><td>📌</td><td><b>Profile versioning</b></td><td>Every profile update auto-increments a version counter; sessions snapshot the exact profile used at creation</td></tr>
 <tr><td>☁️</td><td><b>Local or cloud containers</b></td><td>Run agent pods on local Docker or Azure Container Instances — swap with <code>executionTarget</code> on the profile</td></tr>
+<tr><td>📅</td><td><b>Scheduled jobs</b></td><td>Cron-triggered pods — recurring security audits, dependency checks, nightly regressions</td></tr>
+<tr><td>🔗</td><td><b>Series workflows</b></td><td>Multi-pod DAGs with dependency chains and three PR modes: single branch, stacked, or none</td></tr>
+<tr><td>🏷️</td><td><b>Issue watcher</b></td><td>Label a GitHub or ADO issue — autopod spawns a pod, posts progress comments, and updates labels automatically</td></tr>
+<tr><td>📊</td><td><b>Analytics dashboard</b></td><td>Fleet metrics: cost by phase/model, first-pass rate, throughput, safety events, quality scores</td></tr>
+<tr><td>🔧</td><td><b>Auto fix pods</b></td><td>On CI failure or review comments, the daemon spawns a fix pod with sanitized feedback — up to <code>maxPrFixAttempts</code></td></tr>
+<tr><td>📸</td><td><b>Proof-of-work screenshots</b></td><td>Every validation run captures Playwright screenshots per phase — smoke, AC, and review — stored with the session</td></tr>
 </table>
 
 ---
@@ -282,6 +290,10 @@ Available templates:
 | `dotnet10` | .NET 10 + Node.js 22 | Mixed stacks (dotnet + npm/pnpm/yarn) |
 | `dotnet10-go` | .NET 10 + Node.js 22 + Go 1.24 | Dagger-in-Go pipelines against .NET projects (Dagger CLI + SDK pre-cached) |
 | `python312` | Python 3.12 | pip/poetry |
+| `python-node` | Python 3.12 + Node.js 22 | Full-stack Python/JS |
+| `python-node-pg` | Python 3.12 + Node.js 22 + PostgreSQL | Full-stack with Postgres client |
+| `go124` | Go 1.24 | Go toolchain |
+| `go124-pw` | Go 1.24 + Playwright | Go with Chromium for browser validation |
 | `custom` | Bring your own | Custom Dockerfile |
 
 ### 7. Run your first session
@@ -441,6 +453,61 @@ ap memory reject <id>                       # Reject a suggestion
 ap memory delete <id>                       # Delete an approved memory
 ```
 
+### Series
+
+Series run multiple pods in dependency order — useful for breaking large features into a DAG of focused tasks.
+
+```bash
+ap series create <spec-folder>              # Create series from a briefs/ spec folder
+  --profile <name>                          # Profile for all pods (required)
+  --pr-mode single|stacked|none             # single: one shared branch+PR; stacked: one PR per pod; none: branches only
+  --base-branch <branch>                    # Override base branch
+  --series-name <name>                      # Override series name (default: derived from folder)
+
+ap series status <series-id>               # Status of all pods + cost rollup
+```
+
+**Brief frontmatter** (one `.md` file per pod in `briefs/`):
+
+```yaml
+---
+title: "Implement OAuth routes"
+task: |
+  Add /auth/login and /auth/callback endpoints per the spec in docs/oauth.md
+depends_on:
+  - "Schema migration"          # Fan-in: wait for this pod's PR to merge
+touches:
+  - "src/auth/"
+does_not_touch:
+  - "src/admin/"
+acceptance_criteria:
+  - type: "code_diff"
+    test: "OAuth routes render without JS errors"
+context_files:
+  - "docs/oauth-spec.md"        # Resolved relative to spec root
+---
+```
+
+Add `purpose.md` and `design.md` at the spec root for context injected into every pod's CLAUDE.md.
+
+### Scheduled Jobs
+
+Run pods on a cron schedule — nightly security audits, weekly dependency upgrades, recurring regressions.
+
+```bash
+ap schedule create <profile> <name> <cron> <task>
+  # Example: ap schedule create my-app "nightly-audit" "0 2 * * *" "Run security audit on main branch"
+
+ap schedule list [--json]                  # List all jobs with next-run ETA
+ap schedule show <id>                      # Job details (cron, next run, last run, task)
+ap schedule enable <id>                    # Re-enable a disabled job
+ap schedule disable <id>                   # Pause without deleting
+ap schedule run <id>                       # Trigger immediately (ignores schedule)
+ap schedule catchup                        # Interactive: review missed runs, run or skip each
+```
+
+When the daemon restarts mid-window, `catchupPending` is set on any missed job. Use `ap schedule catchup` to review and decide.
+
 ---
 
 ## Profile Deep Dive
@@ -559,32 +626,37 @@ At session startup, autopod generates `.npmrc` and/or `NuGet.config` files in th
 
 ### Network Policy
 
-Control egress traffic from agent containers with iptables firewall rules. Disabled by default.
+Control egress traffic from agent containers. Disabled by default.
 
 ```yaml
 networkPolicy:
   enabled: true
 
   # Mode controls the firewall behaviour:
-  #   restricted  — (default) only allowedHosts are reachable
+  #   restricted  — (default) only allowedHosts are reachable via SNI proxy
   #   deny-all    — block everything except loopback and DNS
   #   allow-all   — no outbound restrictions (useful for debug)
   mode: restricted
 
-  # Hosts to allow. Wildcards strip the prefix and resolve the parent domain —
-  # best-effort: works when all subdomains share the same IP block.
+  # Hosts to allow. Wildcards match on SNI suffix.
   allowedHosts:
     - "api.stripe.com"
-    - "*.my-company.com"      # resolves my-company.com
+    - "*.my-company.com"
 
   # Replace the built-in defaults (Anthropic, npm, GitHub, etc.) entirely.
   # Use this when you need a strict allowlist with no implicit hosts.
   replaceDefaults: false
 
-  # Shorthand: automatically add all common package manager hosts to the allowlist.
-  # Covers npm, yarn, pypi, crates.io, nuget (pkgs.dev.azure.com), golang, rubygems, debian apt, etc.
+  # Shorthand: automatically add all common package manager hosts.
+  # Covers npm, yarn, pypi, crates.io, nuget, golang, rubygems, debian apt, etc.
   allow_package_managers: true
 ```
+
+**How `restricted` mode works — HAProxy SNI proxy:**
+
+In `restricted` mode, iptables NAT redirects outbound port 443 to an HAProxy instance running on loopback inside the container. HAProxy reads the TLS ClientHello SNI field, checks it against the allowlist, then splices the raw TLS bytes through to the real host — no MITM, no certificate substitution. Denied connections are logged and counted as safety events. Port 80 follows the same pattern for HTTP. DNS (UDP/TCP 53) is always allowed in all modes.
+
+This means egress policy is enforced at the hostname level even for HTTPS, without breaking TLS.
 
 **Built-in default hosts** (always allowed unless `replaceDefaults: true`):
 
@@ -877,6 +949,48 @@ ap memory approve <id>             # Approve a suggestion from an agent
 ap memory reject <id>              # Reject
 ap memory delete <id>              # Remove an approved memory
 ```
+
+### Issue Watcher
+
+Enable the issue watcher on a profile to automatically spawn pods from labeled GitHub or ADO issues.
+
+```yaml
+issueWatcherEnabled: true
+issueWatcherLabelPrefix: "autopod"   # default
+```
+
+**Label routing:**
+
+| Label | Behavior |
+|-------|----------|
+| `autopod` | Spawn a pod using this profile |
+| `autopod:backend` | Route to the profile named `backend` (must share same repo) |
+| `autopod:artifact` | Force `outputMode: artifact` — produce a research artifact, not a PR |
+
+**Lifecycle:**
+
+1. Daemon polls issues every 60s for the trigger label
+2. Issue title + body + ACs are sanitized (PII stripped, prompt injection checked)
+3. Pod is spawned; trigger label swapped for `autopod:in-progress`
+4. Agent escalations post as comments on the issue
+5. On completion: label updated to `autopod:done` or `autopod:failed`, final comment posted
+
+---
+
+## Analytics
+
+The daemon exposes fleet metrics at `/pods/analytics/*`. All endpoints accept a `?days=N` query param (default 30, max 365).
+
+| Endpoint | What it returns |
+|----------|----------------|
+| `GET /pods/analytics/cost` | Total spend, daily sparkline, breakdown by phase and by profile+model, top 10 sessions by cost, waste (killed/failed) |
+| `GET /pods/analytics/reliability` | First-pass rate, daily sparkline, funnel counts, drop-off points, per-stage failure rates, profile heatmap |
+| `GET /pods/analytics/throughput` | Sessions per day, MTTM, queue depth by hour, time-in-status percentiles |
+| `GET /pods/analytics/safety` | PII + injection event counts, quarantine score histogram, network policy distribution, audit chain integrity |
+| `GET /pods/analytics/quality` | Composite quality score (0–100) per session, aggregated signals |
+| `GET /pods/analytics/escalations` | Escalation counts by type and by profile |
+
+The macOS desktop app surfaces these in a dedicated Analytics tab with sparklines and drill-downs.
 
 ---
 

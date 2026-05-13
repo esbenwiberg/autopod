@@ -250,6 +250,10 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
     case profileManagement
     case realTimeMonitoring
     case memoryStore
+    case seriesWorkflows
+    case scheduledJobs
+    case issueWatcher
+    case analyticsDashboard
 
     public var id: String { rawValue }
 
@@ -264,6 +268,10 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .profileManagement:    "Profile Management"
         case .realTimeMonitoring:   "Real-time Monitoring"
         case .memoryStore:          "Memory Stores"
+        case .seriesWorkflows:      "Series Workflows"
+        case .scheduledJobs:        "Scheduled Jobs"
+        case .issueWatcher:         "Issue Watcher"
+        case .analyticsDashboard:   "Analytics Dashboard"
         }
     }
 
@@ -278,6 +286,10 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .profileManagement:    "folder.badge.gearshape"
         case .realTimeMonitoring:   "waveform.path.ecg"
         case .memoryStore:          "brain"
+        case .seriesWorkflows:      "arrow.triangle.branch"
+        case .scheduledJobs:        "calendar.badge.clock"
+        case .issueWatcher:         "tag.fill"
+        case .analyticsDashboard:   "chart.bar.xaxis"
         }
     }
 
@@ -292,15 +304,19 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .profileManagement:    .indigo
         case .realTimeMonitoring:   .teal
         case .memoryStore:          .mint
+        case .seriesWorkflows:      .purple
+        case .scheduledJobs:        .blue
+        case .issueWatcher:         .green
+        case .analyticsDashboard:   .orange
         }
     }
 
     public var summary: String {
         switch self {
         case .sessionOrchestration:
-            "Full lifecycle management across 15 states — from task queuing through provisioning, agent execution, validation, human review, and merge. Automatic retries, review_required escalation, and state machine enforcement."
+            "Full lifecycle management across 15 states — from task queuing through provisioning, agent execution, validation, human review, and merge. Automatic retries, fix pods on CI failure, review_required escalation, and state machine enforcement."
         case .containerSecurity:
-            "Every pod runs in an isolated Docker container (or ACI) with per-container iptables firewall rules. Network policies support allow-all, deny-all, restricted, or package-manager shorthand."
+            "Every pod runs in an isolated Docker container (or ACI) with per-container iptables firewall rules and an HAProxy SNI proxy for HTTPS egress. Network policies support allow-all, deny-all, restricted, or package-manager shorthand."
         case .multiRuntime:
             "Pluggable runtime architecture supporting Anthropic Claude, OpenAI Codex, and GitHub Copilot. Each runtime streams structured agent events with dedicated parsers."
         case .actionControlPlane:
@@ -308,41 +324,57 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             "13+ MCP tools injected into agent containers enable structured escalation: ask a human, consult AI, report plans/progress/blockers, self-validate in browser, and manage persistent memories."
         case .validationPipeline:
-            "7-phase validation: build → test → health → Playwright smoke → AC validation → AI review → overall. Supports interrupt, per-finding overrides, review_required state, and tiered correction feedback."
+            "7-phase validation: build → test → health → Playwright smoke → AC validation → AI review → overall. Supports interrupt, per-finding overrides, proof-of-work screenshots, review_required state, and tiered correction feedback."
         case .profileManagement:
             "Profiles define stack templates, credentials, network policies, registries, skills, and MCP servers. Versioned, inheritable, snapshotted at pod creation. Supports local Docker or ACI execution."
         case .realTimeMonitoring:
             "WebSocket event streaming delivers 9 event types to desktop, CLI TUI, and menu bar. 30-day replay, PII-safe broadcast, and monotonic event IDs for gap-free delivery."
         case .memoryStore:
             "Agents suggest persistent knowledge scoped globally, per-profile, or per-pod. Humans approve. Approved memories are injected into future pods' CLAUDE.md automatically."
+        case .seriesWorkflows:
+            "Multi-pod DAG workflows with dependency chains. Briefs are YAML-frontmatter markdown files — specify depends_on, touches, and ACs. Three PR modes: single (shared branch), stacked (one PR per pod), or none."
+        case .scheduledJobs:
+            "Cron-triggered pods for recurring tasks — nightly security audits, weekly dependency upgrades, regression sweeps. DB-driven scheduler with catchup recovery and manual trigger support."
+        case .issueWatcher:
+            "Label a GitHub or ADO issue autopod and the daemon spawns a pod, posts progress comments back to the issue, and updates labels automatically through the pod lifecycle."
+        case .analyticsDashboard:
+            "Fleet metrics across 6 dimensions: cost by phase/model, first-pass reliability rate, throughput + MTTM, safety events + quarantine scores, quality composite scores, and escalation patterns."
         }
     }
 
     public var highlights: [String] {
         switch self {
-        case .sessionOrchestration: ["15 States", "Auto-Retry", "Token Tracking"]
-        case .containerSecurity:    ["iptables", "Local + ACI", "allow_pkg_mgrs"]
+        case .sessionOrchestration: ["15 States", "Fix Pods", "Token Tracking"]
+        case .containerSecurity:    ["HAProxy SNI", "iptables", "allow_pkg_mgrs"]
         case .multiRuntime:         ["Claude", "Codex", "Copilot"]
         case .actionControlPlane:   ["8 Groups", "PII Redact", "Audit"]
         case .escalationSystem:     ["13+ Tools", "Memory", "Browser Validate"]
-        case .validationPipeline:   ["7 Phases", "Interrupt", "Human Override"]
+        case .validationPipeline:   ["7 Phases", "Screenshots", "Human Override"]
         case .profileManagement:    ["Versioned", "Snapshotted", "Inheritance"]
         case .realTimeMonitoring:   ["9 Events", "30d Replay", "PII Safe"]
         case .memoryStore:          ["Global", "Profile", "Pod"]
+        case .seriesWorkflows:      ["DAG", "3 PR Modes", "Fan-in"]
+        case .scheduledJobs:        ["Cron", "Catchup", "Manual Trigger"]
+        case .issueWatcher:         ["GitHub", "ADO", "Auto-Label"]
+        case .analyticsDashboard:   ["Cost", "Reliability", "Safety"]
         }
     }
 
     public var subtitle: String {
         switch self {
-        case .sessionOrchestration: "15-state machine, retry logic, review_required, merge_pending, token/cost tracking"
-        case .containerSecurity:    "5-layer lockdown: network, capability, user, git isolation, content scanning + local/ACI targets"
+        case .sessionOrchestration: "15-state machine, fix pods on CI/review failures, review_required, merge_pending, token/cost tracking"
+        case .containerSecurity:    "HAProxy SNI proxy + iptables, seccomp, non-root, git isolation, content scanning + local/ACI targets"
         case .multiRuntime:         "Pluggable runtimes with streaming parsers and pod persistence"
         case .actionControlPlane:   "8 groups, 22 actions — gated with injection detection, PII redaction, and PIM support"
         case .escalationSystem:     "13+ MCP tools: human escalation, AI consultation, memory, browser self-validation"
-        case .validationPipeline:   "7-phase pipeline: build, test, health, smoke, AC, AI review, overall + interrupt + overrides"
-        case .profileManagement:    "Versioned + snapshotted profiles, 6 stacks, 4 providers, local/ACI, inheritance + injection"
+        case .validationPipeline:   "7-phase pipeline: build, test, health, smoke, AC, AI review, overall + interrupt + overrides + proof-of-work screenshots"
+        case .profileManagement:    "Versioned + snapshotted profiles, 11 stacks, 4 providers, local/ACI, inheritance + injection"
         case .realTimeMonitoring:   "9 event types, 30-day replay, PII-safe broadcast"
         case .memoryStore:          "3-scoped persistent knowledge: suggest → approve → inject into CLAUDE.md"
+        case .seriesWorkflows:      "YAML-frontmatter briefs, DAG dependency resolution, fan-in, 3 PR modes"
+        case .scheduledJobs:        "DB-driven cron scheduler, catchup on restart, manual trigger, enable/disable"
+        case .issueWatcher:         "Label-triggered pod spawning for GitHub + ADO, lifecycle comments, PII-safe quarantine"
+        case .analyticsDashboard:   "6 fleet dashboards: cost, reliability funnel, throughput, safety, quality, escalations"
         }
     }
 
@@ -368,6 +400,14 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             "WebSocket event streaming delivers 9 event types to all connected clients: pod.created, status_changed, agent_activity, validation_started, validation_completed, escalation_created, escalation_resolved, pod.completed, and memory.suggestion_created. Events are persisted for 30-day replay, PII-sanitized before broadcast, and delivered with monotonic event IDs for gap detection. Clients subscribe per-pod or globally, with 30-second heartbeat pings and automatic reconnection."
         case .memoryStore:
             "A three-scoped persistent knowledge store for AI pods. Agents call memory_suggest to propose a memory with a scope (global, profile, pod) and content. Humans review and approve or reject via the desktop or API. Approved memories are injected into each new pod's CLAUDE.md at provisioning time. The SHA-256 content hash deduplicates identical suggestions. Memory search supports keyword and semantic queries across the approved store."
+        case .seriesWorkflows:
+            "Multi-pod DAG workflows defined by YAML-frontmatter markdown briefs. Each brief specifies a title, task, depends_on references (fan-in), touches/does_not_touch scope guards, acceptance criteria, and context files. The daemon resolves the dependency graph topologically and spawns pods in order, sharing branch or PR state per the chosen PR mode. Series metadata (purpose.md, design.md) is injected into every pod's CLAUDE.md."
+        case .scheduledJobs:
+            "Cron-scheduled pods stored in the database with cron expressions, profile references, and task descriptions. The daemon evaluates nextRunAt on each scheduler tick and spawns pods when the window elapses. On restart, jobs with missed windows are flagged catchupPending — operators review and decide whether to run or skip each one. Jobs can also be triggered manually regardless of schedule."
+        case .issueWatcher:
+            "Daemon polls GitHub and ADO issues every 60 seconds on profiles with issueWatcherEnabled. When a trigger label is found, the issue title+body+ACs are sanitized (PII stripped, injection quarantine applied) and a pod is spawned. The trigger label is replaced with autopod:in-progress. Agent escalations are posted as issue comments. On pod completion, the label updates to autopod:done or autopod:failed and a summary comment is posted."
+        case .analyticsDashboard:
+            "Six fleet analytics dashboards, each queryable over a configurable time window (default 30 days, max 365). Cost tracks spend by phase (agent_initial, agent_rework, review, plan_eval) and by profile+model, with top-10 sessions and waste (killed/failed). Reliability tracks first-pass rate, funnel drop-offs by band, and per-stage failure rates. Throughput tracks pods/day, MTTM, and time-in-status percentiles. Safety tracks PII+injection events, quarantine score histogram, network policy distribution, and audit chain integrity. Quality tracks composite scores (0–100) per pod. Escalations track counts by type and profile."
         }
     }
 
@@ -391,6 +431,14 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             "When an agent is running autonomously, you need to know what it's doing right now — not after it finishes. Real-time streaming lets operators catch problems early, respond to escalations within the agent's timeout window, and maintain confidence in autonomous operations. Event replay with 30-day retention ensures no data loss on reconnection. PII sanitization on events prevents sensitive data from leaking to clients."
         case .memoryStore:
             "AI agents lose all context between pods. Every pod re-reads the same docs, re-learns the same conventions, repeats the same mistakes. Memory stores break this cycle: agents accumulate institutional knowledge, humans curate it, and the system injects it automatically. The suggest-then-approve model ensures no incorrect or sensitive knowledge enters the store without human sign-off."
+        case .seriesWorkflows:
+            "Large features can't always be done by one agent in one pod. Series lets you decompose work into focused pods with explicit scope guards (touches/does_not_touch), so agents don't collide or duplicate effort. DAG dependencies enforce ordering, fan-in waits for multiple parents, and three PR modes give you flexibility: ship everything on one branch, stack PRs so each merges before the next starts, or just push branches for manual review."
+        case .scheduledJobs:
+            "Some work is rhythmic: run the security audit every night, check for dependency vulnerabilities every week, sweep for regressions before the Monday sprint. Scheduled jobs encode that rhythm in the daemon itself — no external cron required, no pipelines to maintain. Catchup recovery means a daemon restart doesn't silently swallow a missed run."
+        case .issueWatcher:
+            "Issue trackers are where work is defined. The issue watcher closes the loop between 'here's what needs doing' and 'here's the code' — no copy-pasting task descriptions, no manual pod creation. Label routing means different teams can trigger different profiles from the same repo. Safety quarantine means adversarial issue content can't manipulate the agent."
+        case .analyticsDashboard:
+            "Autonomous agents generate invisible operational costs. Without analytics, you don't know which profiles drain the budget, which stages fail most, or whether quality is trending up or down. The six dashboards make fleet health visible: waste shows money spent on pods that never delivered; the reliability funnel shows where pods drop off; the safety dashboard exposes threat patterns before they become incidents."
         }
     }
 
@@ -414,6 +462,14 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             "The event bus persists events to eventRepository, applies processContentDeep() for PII sanitization, then broadcasts to subscribers. WebSocket connections authenticate via token query param, then send subscribe/unsubscribe/replay messages. Events include monotonic _eventId for ordered replay. Heartbeat pings every 30s detect stale connections. Desktop, CLI, and menu bar consume the same protocol — subscribe to pods on selection, receive AgentActivityEvents for live tool use display."
         case .memoryStore:
             "Agent calls memory_suggest MCP tool with scope + content → daemon creates a pending memory record with SHA-256 hash (deduplication). Human approves via PATCH /memory/:id → status transitions to approved. On provisioning, system-instructions-generator queries approved memories for the pod's scope (global, profile-matched, pod-matched) and injects them into CLAUDE.md as a 'Team Knowledge' section. memory_list/read/search tools let the agent query the store at runtime. REST: GET/POST/PATCH/DELETE /memory."
+        case .seriesWorkflows:
+            "POST /pods/series parses briefs (YAML frontmatter), resolves the dependency DAG topologically, and spawns pods in order. In single mode, non-root pods wait for their parent to complete then commit to the same branch — siblings serialized even when the DAG allows fan-out. In stacked mode, each pod has its own PR and waits for the parent PR to merge before starting. depends_on uses title matching → pod ID; missing titles error at parse time. context_files are resolved relative to the spec root and attached to the pod's CLAUDE.md."
+        case .scheduledJobs:
+            "Scheduler tick runs every minute; compares nextRunAt (stored per job) to now(). When a job fires, it spawns a pod with the stored profileName + task, then updates nextRunAt to the next cron window. On daemon startup, jobs where nextRunAt is in the past are marked catchupPending=true. The /scheduled-jobs/:id/catchup endpoint triggers the missed run immediately; the DELETE variant skips it. Manual trigger via POST /scheduled-jobs/:id/trigger fires regardless of schedule and does not update nextRunAt."
+        case .issueWatcher:
+            "Poll loop: every 60s, query each watched profile's issue provider for issues with the trigger label. For each new hit: sanitize title+body+ACs via processContent (quarantine + PII redact), check (provider, issueId, profile) uniqueness, spawn pod, swap label to <prefix>:in-progress, post 'pod started' comment. On pod status change events: update DB status, swap label to <prefix>:done or <prefix>:failed, post outcome comment. ask_human escalations post the question as an issue comment and await reply."
+        case .analyticsDashboard:
+            "All analytics queries operate on a terminal cohort: non-workspace pods with final status (complete, killed, failed) that completed within the requested window. Cost aggregation groups token usage by phase key (phase_type + attempt_index), joins to model pricing JSON for USD conversion. Reliability funnel counts pods that reached each band, computing drop-off between adjacent bands. Throughput buckets completion timestamps by day. Safety joins safety_events + action_audit tables for dual-source threat counts. Quality reads pre-computed quality_scores table. All endpoints return HTTP 400 for invalid days, HTTP 503 if data is unavailable."
         }
     }
 
@@ -439,11 +495,13 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "Network: autopod-net bridge with ICC disabled, iptables OUTPUT chain per container",
                 "allow-all: loopback + established/related, no DROP (trusted environments)",
                 "deny-all: DNS only (UDP/TCP 53), everything else DROPped",
-                "restricted: per-host allowlist resolved via getent ahosts, final DROP",
+                "restricted: HAProxy SNI proxy on loopback port 8443; iptables NAT redirects port 443 to it; HAProxy checks SNI against allowlist, splices TLS bytes through (no MITM)",
+                "HAProxy denial events streamed via syslog → socat receiver → safety event aggregator",
                 "allow_package_managers: boolean shorthand that adds 15 pkg manager hosts (npm, pypi, crates.io, nuget, golang, rubygems, debian, etc.)",
                 "Default allowlist: api.anthropic.com, api.openai.com, registry.npmjs.org, github.com, pkgs.dev.azure.com, etc.",
                 "Capability: only NET_ADMIN added (for iptables), no other Docker capabilities",
                 "User: non-root autopod:1000, /workspace working dir, restricted mounts",
+                "Seccomp: blocks unshare, setns, pivot_root, mount, umount2 and AF_ALG socket (crypto API) via custom seccomp-profile.json",
                 "Git: bare repos with PATs stripped, in-memory PAT cache on host, per-repo mutex",
                 "Shell injection defense: SAFE_HOST_REGEX validates all hostnames before iptables injection",
                 "Image prewarming: 7-day staleness, credentials stripped post-build, ACR push",
@@ -496,6 +554,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "Phase 5 — Acceptance Criteria: LLM evaluates each criterion against running app",
                 "Phase 6 — AI Task Review: reviewer model checks diff + original task + prior findings (tiered context)",
                 "Phase 7 — Overall: pass only if all required phases pass, strictly binary",
+                "Proof-of-work screenshots: every validation pass captures PNGs per smoke page and AC criterion, stored by phase (smoke → ac → review), accessible via GET /pods/:id/screenshots",
                 "Agent self-validation: validate_in_browser MCP tool during development",
                 "Retry loop: correction feedback + diff injected into agent, up to maxValidationAttempts (default 3)",
                 "review_required: entered when retries exhausted — extend-attempts, fix-manually, or reject",
@@ -546,15 +605,69 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "Desktop: MemoryManagementView for browsing + approving, suggestion cards in OverviewTab",
                 "SystemEvent: memory.suggestion_created delivered to all connected clients",
             ]
+        case .seriesWorkflows:
+            [
+                "Brief format: YAML frontmatter (title, task, depends_on, touches, does_not_touch, acceptance_criteria, context_files) in any .md file under briefs/",
+                "Spec folder: briefs/ required, purpose.md + design.md optional — injected into every pod's CLAUDE.md",
+                "DAG resolution: topological sort via Kahn's algorithm, fan-in via depends_on title references",
+                "PR mode single: all pods share one branch, siblings serialized; only final pod creates PR",
+                "PR mode stacked: each pod gets its own PR; non-root pods wait for parent PR to merge",
+                "PR mode none: pods push branches only, no PRs created",
+                "autoApprove: skip human gate between pods; disableAskHuman: route escalations to AI reviewer",
+                "Series preview: POST /pods/series/preview reads spec from daemon host; /preview-branch reads from git branch",
+                "Cost rollup: GET /pods/series/:id returns sum of all pod token usage and cost",
+                "DELETE /pods/series/:id kills all pods and cascade-deletes series metadata",
+            ]
+        case .scheduledJobs:
+            [
+                "Cron expression format: 5-field standard (minute hour day month weekday)",
+                "nextRunAt: computed from cron + current time on create/update, updated after each fire",
+                "Scheduler tick: evaluates all enabled jobs; spawns pod when nextRunAt ≤ now()",
+                "Spawned pod uses stored profileName + task — no runtime overrides",
+                "catchupPending: set on daemon startup for jobs where nextRunAt is in the past",
+                "POST /scheduled-jobs/:id/catchup — run missed job now (sets lastRunAt, updates nextRunAt)",
+                "DELETE /scheduled-jobs/:id/catchup — skip missed run (clears catchupPending, updates nextRunAt)",
+                "POST /scheduled-jobs/:id/trigger — fire immediately, does not affect nextRunAt",
+                "lastPodId: tracks the pod spawned by the most recent run for status inspection",
+                "Jobs can be disabled (enabled: false) without deletion; reenable via PUT or ap schedule enable",
+            ]
+        case .issueWatcher:
+            [
+                "Profiles opt in via issueWatcherEnabled: true; label prefix defaults to 'autopod'",
+                "Poll interval: 60s; iterates all enabled profiles, queries each issue provider",
+                "Label routing: bare label → this profile; 'autopod:name' → route to profile 'name' (same repo only)",
+                "Label suffix 'artifact' → force outputMode: artifact on spawned pod",
+                "Safety quarantine: title+body+ACs passed through processContent (PII redact + injection check) before storage",
+                "Duplicate guard: (provider, issueId, profile) uniqueness check before spawning",
+                "Pod spawn: task = sanitized issue title + body; ACs extracted from issue body markers",
+                "Label swap: trigger label removed, '<prefix>:in-progress' label added",
+                "Comment on start: 'autopod pod <id> started for this issue'",
+                "ask_human escalation: question posted as issue comment, awaits reply",
+                "Completion: label updated to '<prefix>:done' or '<prefix>:failed', summary comment posted",
+                "API: GET /issue-watcher (with ?profile=&status= filters), GET /issue-watcher/:id",
+            ]
+        case .analyticsDashboard:
+            [
+                "All endpoints: GET /pods/analytics/{cost|reliability|throughput|safety|quality|escalations}?days=N",
+                "Terminal cohort: non-workspace pods, final status (complete|killed|failed), completed in window",
+                "Cost: total USD, daily sparkline, deltaVsPrior, byPhase (agent_initial/rework/review/plan_eval), byProfileModel, top10, waste",
+                "Reliability: firstPassRate (0 rework), sparkline, funnel bands + drops with topPods, stageFailures table, profileHeatmap",
+                "Throughput: podsPerDay sparkline, MTTM (mean time to merge), queue depth by hour (max + mean), time-in-status percentiles (p25/p50/p75/p90/max)",
+                "Safety: PII + injection event counts by kind/pattern/source, quarantine histogram (10 buckets 0.0–1.0), network policy distribution, audit chain integrity",
+                "Quality: composite score 0–100 per pod (read:edit ratio, blind edits, stop phrases, validation pass, churn, fix attempts)",
+                "Escalations: total by type, by profile, daily sparkline",
+                "Error handling: HTTP 400 for invalid days param, HTTP 503 if data unavailable",
+                "Desktop: Analytics tab with sparklines, funnel diagrams, heatmaps, and drill-down views",
+            ]
         }
     }
 
     public var keyFiles: [String] {
         switch self {
         case .sessionOrchestration:
-            ["pod-manager.ts", "state-machine.ts", "pod-repository.ts", "event-bus.ts"]
+            ["pod-manager.ts", "state-machine.ts", "pod-repository.ts", "event-bus.ts", "pr-fix-task.ts"]
         case .containerSecurity:
-            ["docker-container-manager.ts", "docker-network-manager.ts", "aci-container-manager.ts", "processor.ts", "quarantine.ts", "patterns.ts"]
+            ["docker-network-manager.ts", "haproxy-config.ts", "haproxy-deny-stream.ts", "docker-container-manager.ts", "seccomp-profile.json"]
         case .multiRuntime:
             ["claude-runtime.ts", "codex-runtime.ts", "copilot-runtime.ts", "claude-stream-parser.ts", "env-builder.ts"]
         case .actionControlPlane:
@@ -562,13 +675,21 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             ["server.ts", "pod-bridge.ts", "pending-requests.ts", "validate-in-browser.ts", "ask-human.ts", "memory-suggest.ts"]
         case .validationPipeline:
-            ["local-validation-engine.ts", "playwright-script.ts", "parse-results.ts", "pending-override-repository.ts"]
+            ["local-validation-engine.ts", "playwright-script.ts", "parse-results.ts", "screenshot-store.ts", "pending-override-repository.ts"]
         case .profileManagement:
             ["profile-store.ts", "inheritance.ts", "skill-resolver.ts", "system-instructions-generator.ts", "registry-injector.ts", "credentials-cipher.ts"]
         case .realTimeMonitoring:
             ["event-bus.ts", "websocket.ts", "EventStream.swift", "useWebSocket.ts"]
         case .memoryStore:
             ["memory-repository.ts", "server.ts (memory MCP tools)", "system-instructions-generator.ts", "MemoryManagementView.swift", "MemoryStore.swift"]
+        case .seriesWorkflows:
+            ["series.ts (route)", "series.ts (CLI command)", "pod-manager.ts"]
+        case .scheduledJobs:
+            ["scheduled-jobs.ts (route)", "schedule.ts (CLI command)"]
+        case .issueWatcher:
+            ["issue-watcher.ts (route)"]
+        case .analyticsDashboard:
+            ["cost-aggregation.ts", "reliability-aggregator.ts", "throughput-aggregator.ts", "safety-aggregator.ts", "quality-score.ts", "escalations-aggregator.ts"]
         }
     }
 
@@ -583,6 +704,10 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .profileManagement:    [.containerSecurity, .multiRuntime, .memoryStore]
         case .realTimeMonitoring:   [.sessionOrchestration, .escalationSystem]
         case .memoryStore:          [.escalationSystem, .profileManagement]
+        case .seriesWorkflows:      [.sessionOrchestration, .profileManagement]
+        case .scheduledJobs:        [.sessionOrchestration, .profileManagement]
+        case .issueWatcher:         [.sessionOrchestration, .actionControlPlane]
+        case .analyticsDashboard:   [.validationPipeline, .sessionOrchestration, .containerSecurity]
         }
     }
 }

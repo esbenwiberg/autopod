@@ -52,7 +52,7 @@ public struct SalesPitchView: View {
             statCard(number: "15", label: "States in the\nsession lifecycle", color: .blue)
             statCard(number: "7", label: "Validation phases\nbefore merge", color: .green)
             statCard(number: "13+", label: "MCP tools for\nagent escalation", color: .cyan)
-            statCard(number: "5", label: "Security layers\nper container", color: .red)
+            statCard(number: "6", label: "Fleet analytics\ndashboards", color: .orange)
         }
     }
 
@@ -320,8 +320,8 @@ public struct SalesPitchView: View {
                 icon: "checkmark.shield.fill",
                 color: .green,
                 title: "Trust Nothing, Verify Everything",
-                body: "7-phase validation pipeline: build, test, health check, Playwright smoke, acceptance criteria, AI review — then human approval gates the merge. Interrupt in-flight validation, dismiss recurring false positives, or grant more attempts.",
-                tags: ["Playwright", "LLM Review", "Human Override", "Auto-Retry"]
+                body: "7-phase validation pipeline: build, test, health check, Playwright smoke, acceptance criteria, AI review — proof-of-work screenshots at every phase. Interrupt in-flight validation, dismiss recurring false positives, or grant more attempts.",
+                tags: ["Playwright", "Screenshots", "LLM Review", "Auto-Retry"]
             ),
             SellingPoint(
                 icon: "eye.fill",
@@ -348,8 +348,8 @@ public struct SalesPitchView: View {
                 icon: "bolt.shield.fill",
                 color: .purple,
                 title: "Defense in Depth",
-                body: "PII scanning on all output. Prompt injection detection with threat scoring. AES-256 credential encryption. Full audit trail on every action.",
-                tags: ["PII Scan", "Injection Detect", "AES-256", "Audit"]
+                body: "PII scanning on all output. Prompt injection detection with threat scoring. HAProxy SNI proxy for egress filtering. AES-256 credential encryption. Full audit trail on every action.",
+                tags: ["PII Scan", "HAProxy SNI", "AES-256", "Audit"]
             ),
             SellingPoint(
                 icon: "brain",
@@ -357,6 +357,13 @@ public struct SalesPitchView: View {
                 title: "Agents That Learn",
                 body: "Agents suggest persistent knowledge — team conventions, known gotchas, recurring patterns — scoped globally, per-profile, or per-pod. Humans approve. Approved memories are injected into future pods automatically.",
                 tags: ["Global Memory", "Profile Memory", "Pod"]
+            ),
+            SellingPoint(
+                icon: "chart.bar.xaxis",
+                color: .indigo,
+                title: "Fleet Visibility",
+                body: "Six analytics dashboards — cost by phase and model, first-pass reliability rate, throughput MTTM, safety events and quarantine scores, quality composites, escalation patterns. Know what your agents are doing.",
+                tags: ["Cost", "Reliability", "Safety", "Quality"]
             ),
         ]
     }
