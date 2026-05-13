@@ -742,7 +742,7 @@ public struct DetailPanelView: View {
                 message: $spawnFixMessage,
                 isPresented: $showSpawnFixSheet,
                 onSpawn: { message in
-                    Task { await actions.spawnFix(pod.id, message.isEmpty ? nil : message) }
+                    await actions.spawnFix(pod.id, message.isEmpty ? nil : message)
                 }
             )
         }

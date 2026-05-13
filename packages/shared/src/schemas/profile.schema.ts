@@ -291,21 +291,6 @@ const createProfileBaseSchema = z.object({
    * cycle is fast and trusted can lower this for snappier turnarounds.
    */
   mergePollIntervalSec: z.number().int().min(5).max(3600).nullable().optional().default(null),
-  /**
-   * Minimum interval between PR-fix-pod spawns on the same parent pod, in
-   * seconds. Null = use the daemon default (600s). 0 disables the cooldown.
-   */
-  fixPodCooldownSec: z.number().int().min(0).max(3600).nullable().optional().default(null),
-  /**
-   * Reuse a single fix pod across all rounds of CI / review feedback for the
-   * same parent PR. Defaults to false (today's behavior: one fresh fix pod
-   * per round).
-   */
-  // null = inherit from parent (or use built-in default of `false` on base
-  // profiles). Do NOT use `.default(false)` here — it materializes `false`
-  // for every PATCH that doesn't include the field, silently re-overriding
-  // the column on every save and clobbering inheritance.
-  reuseFixPod: z.boolean().nullable().optional(),
   prProvider: z.enum(['github', 'ado']).nullable().default('github'),
   adoPat: z.string().min(1).nullable().default(null),
   githubPat: z.string().min(1).nullable().default(null),

@@ -46,8 +46,6 @@ public enum ProfileMapper {
       sastCommand: response.sastCommand,
       sastTimeout: response.sastTimeout,
       mergePollIntervalSec: response.mergePollIntervalSec,
-      fixPodCooldownSec: response.fixPodCooldownSec,
-      reuseFixPod: response.reuseFixPod ?? false,
       healthPath: response.healthPath ?? "/",
       healthTimeout: response.healthTimeout ?? 120,
       buildTimeout: response.buildTimeout ?? 300,
@@ -270,9 +268,6 @@ public enum ProfileMapper {
     }
     if let v = profile.mergePollIntervalSec { d["mergePollIntervalSec"] = v }
     else { d["mergePollIntervalSec"] = NSNull() }
-    if let v = profile.fixPodCooldownSec { d["fixPodCooldownSec"] = v }
-    else { d["fixPodCooldownSec"] = NSNull() }
-    d["reuseFixPod"] = profile.reuseFixPod
     if let v = profile.containerMemoryGb { d["containerMemoryGb"] = v }
     if let v = profile.githubPat { d["githubPat"] = v }
     if let v = profile.adoPat { d["adoPat"] = v }

@@ -3,18 +3,25 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 
-/** Version prefix that triggers a pre-migration DB snapshot. */
-const CUTOVER_MIGRATION_VERSION = 91;
+/**
+ * Migration versions that require a pre-migration DB snapshot, mapped to a
+ * filename suffix for the backup.  Add a new entry here whenever a migration
+ * does a hard-to-reverse destructive change (column drop, table rename, etc.).
+ */
+const CUTOVER_MIGRATIONS: Record<number, string> = {
+  91: 'pre-screenshot-cutover',
+  99: 'pre-single-fix-pod',
+};
 
 /**
- * Copy the live SQLite DB to `backups/<timestamp>-pre-screenshot-cutover.db`
- * before applying migration 091.  The backup directory is the existing
+ * Copy the live SQLite DB to `backups/<timestamp>-<suffix>.db`
+ * before applying a cutover migration.  The backup directory is the existing
  * convention at `packages/daemon/backups/`.
  *
  * Skips the copy when `dbPath === ':memory:'` (in-memory test databases).
  * Throws (fail-closed) if the copy fails so the migration does not proceed.
  */
-function snapshotBeforeCutover(dbPath: string, logger: Logger): void {
+function snapshotBeforeCutover(dbPath: string, logger: Logger, suffix: string): void {
   if (dbPath === ':memory:') {
     logger.debug('Skipping pre-cutover snapshot for in-memory DB');
     return;
@@ -45,14 +52,14 @@ function snapshotBeforeCutover(dbPath: string, logger: Logger): void {
   }
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = path.join(backupsDir, `${ts}-pre-screenshot-cutover.db`);
+  const backupPath = path.join(backupsDir, `${ts}-${suffix}.db`);
 
-  logger.info({ dbPath, backupPath }, 'Copying DB before screenshot cutover migration');
+  logger.info({ dbPath, backupPath }, 'Copying DB before cutover migration');
   try {
     fs.copyFileSync(dbPath, backupPath);
-    logger.info({ backupPath }, 'Pre-cutover DB snapshot written');
+    logger.info({ backupPath, suffix }, 'Pre-cutover DB snapshot written');
   } catch (err) {
-    logger.error({ err, dbPath, backupPath }, 'Failed to snapshot DB before cutover migration');
+    logger.error({ err, dbPath, backupPath, suffix }, 'Failed to snapshot DB before cutover migration');
     throw err; // fail closed — do not apply migration
   }
 }
@@ -92,9 +99,11 @@ export function runMigrations(
     if (version > currentVersion) pendingVersions.add(version);
   }
 
-  // Snapshot before the cutover migration if it's pending
-  if (pendingVersions.has(CUTOVER_MIGRATION_VERSION)) {
-    snapshotBeforeCutover(dbPath, logger);
+  // Snapshot before any pending cutover migration that requires it
+  for (const [version, suffix] of Object.entries(CUTOVER_MIGRATIONS)) {
+    if (pendingVersions.has(Number(version))) {
+      snapshotBeforeCutover(dbPath, logger, suffix);
+    }
   }
 
   let applied = 0;

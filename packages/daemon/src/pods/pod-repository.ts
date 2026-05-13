@@ -98,10 +98,8 @@ export interface PodFilters {
 export interface PodUpdates {
   status?: PodStatus;
   /**
-   * Update the pod's task description. Only used by the long-lived fix-pod
-   * path (`profile.reuseFixPod = true`) — when the same fix pod is re-enqueued
-   * for a new round of CI / review feedback, its task is replaced with a
-   * fresh fix prompt covering the new failures.
+   * Update the pod's task description. Used by the single fix-pod path when
+   * the canonical fix pod is re-enqueued for a new iteration.
    */
   task?: string;
   containerId?: string | null;

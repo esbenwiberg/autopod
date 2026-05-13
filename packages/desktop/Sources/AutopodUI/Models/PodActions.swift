@@ -45,7 +45,8 @@ public struct PodActions: Sendable {
   public var forceApprove: @MainActor @Sendable (String, String?) async -> Void
   /// Manually force-spawn a fix pod for a merge_pending/complete pod. Optional message is forwarded
   /// to the fix pod as explicit reviewer instructions alongside auto-detected CI/review failures.
-  public var spawnFix: @MainActor @Sendable (String, String?) async -> Void
+  /// Returns `SpawnFixResponse` so callers can show queue-position feedback.
+  public var spawnFix: @MainActor @Sendable (String, String?) async -> SpawnFixResponse?
   /// Retry PR creation for a complete pod whose PR was never successfully created
   public var retryCreatePr: @MainActor @Sendable (String) async -> Void
   /// Token-free recovery for a `failed` pod — pushes + opens PR if validation already passed,
@@ -121,7 +122,7 @@ public struct PodActions: Sendable {
     setSkipValidation: @escaping @MainActor @Sendable (String, Bool) async -> Void = { _, _ in },
     addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
     forceApprove: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
-    spawnFix: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
+    spawnFix: @escaping @MainActor @Sendable (String, String?) async -> SpawnFixResponse? = { _, _ in nil },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     recoverWorktree: @escaping @MainActor @Sendable (String) async -> RecoverWorktreeResponse? = { _ in nil },

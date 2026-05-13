@@ -13,6 +13,8 @@ export type {
   QualitySignals,
   PodQualityScore,
   QualityTrend,
+  FixFeedback,
+  SpawnFixResponse,
 } from './types/pod.js';
 
 export type {

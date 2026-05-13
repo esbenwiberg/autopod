@@ -78,7 +78,7 @@ public final class ActionHandler {
         await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
       },
       forceApprove: { [weak self] id, reason in await self?.forceApprove(id, reason: reason) },
-      spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) },
+      spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) ?? nil },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       resume: { [weak self] id in await self?.resume(id) },
       recoverWorktree: { [weak self] id in await self?.recoverWorktree(id) ?? nil },
@@ -249,15 +249,18 @@ public final class ActionHandler {
     pendingAction = nil
   }
 
-  public func spawnFixSession(_ podId: String, userMessage: String? = nil) async {
+  @discardableResult
+  public func spawnFixSession(_ podId: String, userMessage: String? = nil) async -> SpawnFixResponse? {
     pendingAction = "spawn-fix-\(podId)"
+    defer { pendingAction = nil }
     do {
-      try await api.spawnFixSession(podId, userMessage: userMessage)
+      let response = try await api.spawnFixSession(podId, userMessage: userMessage)
       // Fix pod will appear via WebSocket pod.created event
+      return response
     } catch {
       lastError = error.localizedDescription
+      return nil
     }
-    pendingAction = nil
   }
 
   public func retryCreatePr(_ podId: String) async {

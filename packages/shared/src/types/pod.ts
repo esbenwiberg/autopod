@@ -345,6 +345,12 @@ export interface Pod {
    * subsequent attempts inside the same recovered run behave normally.
    */
   lastRecoveryTrigger: 'wake' | 'restart' | null;
+  /**
+   * Number of messages currently queued in `pending_fix_feedback` for this
+   * pod's next fix-pod iteration. 0 when no messages are queued. Only
+   * meaningful on parent pods (always 0 for fix pods themselves).
+   */
+  queueLength?: number;
 }
 
 export interface CreatePodRequest {
@@ -532,3 +538,20 @@ export interface QualityTrend {
   runtime: string;
   model: string | null;
 }
+
+/** One queued message awaiting injection into the next fix-pod iteration. */
+export interface FixFeedback {
+  id: string;
+  podId: string;
+  message: string;
+  createdAt: number;
+}
+
+/**
+ * Response shape for `POST /pods/:podId/spawn-fix`.
+ * `queued: false` only when this is the first message and the daemon spawned a
+ * brand-new fix pod synchronously (queue was empty, fix pod created inline).
+ */
+export type SpawnFixResponse =
+  | { ok: true; queued: boolean; queueLength: number; fixPodId: string | null }
+  | { ok: false; reason: 'parent_terminal' };

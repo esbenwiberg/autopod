@@ -343,25 +343,5 @@ describe('ProfileValidator', () => {
       expect(result.valid).toBe(false);
     });
 
-    it('accepts fixPodCooldownSec = 0 (no cooldown)', () => {
-      const result = validateProfile({ ...validInput, fixPodCooldownSec: 0 });
-      expect(result.valid).toBe(true);
-    });
-
-    it('accepts a sensible fixPodCooldownSec', () => {
-      const result = validateProfile({ ...validInput, fixPodCooldownSec: 120 });
-      expect(result.valid).toBe(true);
-    });
-
-    it('rejects negative fixPodCooldownSec', () => {
-      const result = validateProfile({ ...validInput, fixPodCooldownSec: -1 });
-      expect(result.valid).toBe(false);
-      expect(result.errors[0]).toContain('fixPodCooldownSec');
-    });
-
-    it('rejects fixPodCooldownSec above 1h', () => {
-      const result = validateProfile({ ...validInput, fixPodCooldownSec: 3601 });
-      expect(result.valid).toBe(false);
-    });
   });
 });

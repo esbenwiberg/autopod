@@ -164,7 +164,6 @@ describe('ProfileStore', () => {
       expect(raw.hasWebUi).toBeNull();
       expect(raw.issueWatcherEnabled).toBeNull();
       expect(raw.issueWatcherLabelPrefix).toBeNull();
-      expect(raw.reuseFixPod).toBeNull();
       expect(raw.trustedSource).toBeNull();
       // Object/array defaults likewise.
       expect(raw.escalation).toBeNull();
@@ -325,86 +324,30 @@ describe('ProfileStore', () => {
   });
 
   describe('loop tunables', () => {
-    it('round-trips mergePollIntervalSec and fixPodCooldownSec', () => {
-      store.create({ ...validInput, mergePollIntervalSec: 20, fixPodCooldownSec: 120 });
+    it('round-trips mergePollIntervalSec', () => {
+      store.create({ ...validInput, mergePollIntervalSec: 20 });
       const profile = store.get('my-app');
       expect(profile.mergePollIntervalSec).toBe(20);
-      expect(profile.fixPodCooldownSec).toBe(120);
     });
 
-    it('defaults to null when unset', () => {
+    it('defaults mergePollIntervalSec to null when unset', () => {
       store.create(validInput);
       const profile = store.get('my-app');
       expect(profile.mergePollIntervalSec).toBeNull();
-      expect(profile.fixPodCooldownSec).toBeNull();
     });
 
-    it('accepts fixPodCooldownSec=0 (no cooldown)', () => {
-      store.create({ ...validInput, fixPodCooldownSec: 0 });
-      expect(store.get('my-app').fixPodCooldownSec).toBe(0);
-    });
-
-    it('updates loop tunables via update()', () => {
+    it('updates mergePollIntervalSec via update()', () => {
       store.create(validInput);
-      store.update('my-app', { mergePollIntervalSec: 30, fixPodCooldownSec: 60 });
+      store.update('my-app', { mergePollIntervalSec: 30 });
       const profile = store.get('my-app');
       expect(profile.mergePollIntervalSec).toBe(30);
-      expect(profile.fixPodCooldownSec).toBe(60);
-    });
-  });
-
-  describe('reuseFixPod', () => {
-    it('round-trips an explicit true/false on the raw profile', () => {
-      store.create({ ...validInput, name: 'on-profile', reuseFixPod: true });
-      store.create({ ...validInput, name: 'off-profile', reuseFixPod: false });
-      expect(store.getRaw('on-profile').reuseFixPod).toBe(true);
-      expect(store.getRaw('off-profile').reuseFixPod).toBe(false);
-    });
-
-    it('stores null on a derived profile that omits the field', () => {
-      // Regression for the "override keeps coming back" bug: a derived profile
-      // that doesn't set reuseFixPod must stay null in the DB so inheritance
-      // can substitute the parent's value. The previous schema default
-      // (`false`) silently re-overrode the parent on every save.
-      store.create({ ...validInput, name: 'parent', reuseFixPod: true });
-      store.create({ name: 'child', extends: 'parent' });
-      expect(store.getRaw('child').reuseFixPod).toBeNull();
-      expect(store.get('child').reuseFixPod).toBe(true); // inherited
-    });
-
-    it('lets an explicit false on the child override a true parent', () => {
-      store.create({ ...validInput, name: 'parent', reuseFixPod: true });
-      store.create({ name: 'child', extends: 'parent', reuseFixPod: false });
-      expect(store.getRaw('child').reuseFixPod).toBe(false);
-      expect(store.get('child').reuseFixPod).toBe(false);
-    });
-
-    it('clears an override back to inherit when update() receives null', () => {
-      store.create({ ...validInput, name: 'parent', reuseFixPod: true });
-      store.create({ name: 'child', extends: 'parent', reuseFixPod: false });
-      // Operator clicks "x" on the override card → desktop sends { reuseFixPod: null }
-      store.update('child', { reuseFixPod: null });
-      expect(store.getRaw('child').reuseFixPod).toBeNull();
-      expect(store.get('child').reuseFixPod).toBe(true);
-    });
-
-    it('does not coerce missing reuseFixPod to false on unrelated update()', () => {
-      // The Zod schema used to default `reuseFixPod` to `false`, so PATCHing
-      // any other field would silently re-stamp the column. Verify a partial
-      // update leaves the inherited (null) state intact.
-      store.create({ ...validInput, name: 'parent', reuseFixPod: true });
-      store.create({ name: 'child', extends: 'parent' });
-      store.update('child', { customInstructions: 'tweak' });
-      expect(store.getRaw('child').reuseFixPod).toBeNull();
-      expect(store.get('child').reuseFixPod).toBe(true);
     });
   });
 
   describe('inheritance booleans (hasWebUi / issueWatcherEnabled / trustedSource)', () => {
-    // Same class of bug as reuseFixPod: the Zod schema used to default these
-    // booleans to concrete values, so any PATCH that omitted the field would
-    // silently re-stamp the column with the default and clobber inheritance.
-    // Removing `.default(...)` fixes the regression for all three.
+    // The Zod schema used to default these booleans to concrete values, so any
+    // PATCH that omitted the field would silently re-stamp the column with the
+    // default and clobber inheritance. Removing `.default(...)` fixes the regression.
 
     it('clears the override back to inherit when update() receives null', () => {
       store.create({ ...validInput, name: 'parent', hasWebUi: false, trustedSource: true });
