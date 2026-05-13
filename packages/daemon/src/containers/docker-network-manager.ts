@@ -6,6 +6,7 @@ import type {
 } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
+import { HAPROXY_LISTEN_PORT, HAPROXY_LOG_PORT, generateHaproxyConfig } from './haproxy-config.js';
 
 // Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
 // Blocks shell metacharacters even if an unsafe value somehow bypassed schema validation.
@@ -24,11 +25,6 @@ export function networkNameForPod(podId: string): string {
   return `autopod-${podId}`;
 }
 
-/** Docker's embedded DNS resolver address on custom bridge networks */
-const DOCKER_DNS = '127.0.0.11';
-/** Local dnsmasq listener — avoids conflict with Docker DNS */
-const DNSMASQ_LISTEN = '127.0.0.53';
-
 export const DEFAULT_ALLOWED_HOSTS = [
   'api.anthropic.com',
   'api.openai.com',
@@ -38,8 +34,7 @@ export const DEFAULT_ALLOWED_HOSTS = [
   'api.nuget.org',
   'globalcdn.nuget.org',
   'nupkg.nuget.org',
-  // Azure CDN wildcards — only effective in dnsmasq mode; covers ADO NuGet feed
-  // blob storage redirects and NuGet CDN endpoints with unpredictable subdomains
+  // Azure CDN wildcards — HAProxy SNI suffix match covers any subdomain
   '*.blob.core.windows.net',
   '*.vo.msecnd.net',
   // NOTE: github.com, objects.githubusercontent.com, and raw.githubusercontent.com are
@@ -238,10 +233,8 @@ export class DockerNetworkManager {
    * Compute the effective allowlist for a pod, merging defaults,
    * profile policy, daemon gateway, and MCP server hosts.
    *
-   * Wildcard entries (e.g. `*.blob.core.windows.net`) are preserved so that
-   * `generateFirewallScript()` can produce dnsmasq wildcard rules. In fallback
-   * CIDR mode, wildcards are stripped to the parent domain for best-effort
-   * DNS resolution.
+   * Wildcard entries (e.g. `*.blob.core.windows.net`) are preserved and
+   * turned into HAProxy SNI suffix-match ACLs by `generateHaproxyConfig`.
    */
   computeAllowlist(
     policy: NetworkPolicy,
@@ -320,18 +313,22 @@ export class DockerNetworkManager {
    *
    * - 'allow-all'  — flush rules, allow loopback + established; no DROP (open egress)
    * - 'deny-all'   — flush rules, allow loopback + established + DNS, REJECT everything else
-   * - 'restricted' — domain-based filtering via dnsmasq+ipset (preferred) or CIDR fallback
+   * - 'restricted' — HAProxy SNI allowlist for outbound HTTPS; port 80 dropped;
+   *                  sidecars + daemon gateway bypass HAProxy via direct ACCEPT
    *
-   * **dnsmasq+ipset mode** (when dnsmasq and ipset are installed):
-   *   - dnsmasq acts as a filtering DNS resolver, only forwarding allowed domains
-   *   - Resolved IPs are auto-added to an ipset via dnsmasq's `--ipset` flag
-   *   - iptables allows only IPs in the ipset — true domain-based filtering
-   *   - Wildcard support is native: `*.blob.core.windows.net` covers all subdomains
-   *
-   * **CIDR fallback** (when dnsmasq/ipset not available):
-   *   - Resolves hosts to IPs on the daemon side, expands to /24 CIDRs
-   *   - Wildcards stripped to parent domain for best-effort resolution
-   *   - Less reliable for CDN services with rotating IPs
+   * **restricted mode** (HAProxy SNI splice):
+   *   - HAProxy listens on `127.0.0.1:8443` inside the pod, accepts only
+   *     allowlisted SNI values from the TLS ClientHello, resolves the SNI to
+   *     an IP, and splices the unmodified TLS bytes through (no MITM).
+   *   - iptables NAT `REDIRECT`s outbound port 443 to HAProxy.
+   *   - Port 80 is dropped — agents that need plain HTTP must use `allow-all`.
+   *   - Sidecars + daemon gateway IPs are ACCEPTed unconditionally before
+   *     the REDIRECT, so they bypass HAProxy entirely.
+   *   - DNS uses Docker's default resolver (`127.0.0.11` on a custom bridge),
+   *     which forwards to the host. HAProxy is the sole allowlist.
+   *   - HAProxy denials are logged via UDP to a loopback receiver started
+   *     by this script; the daemon's container log pump parses them and
+   *     emits `pod.firewall_denied` events.
    *
    * The script is idempotent: safe to re-exec on a running container for live updates.
    */
@@ -341,25 +338,18 @@ export class DockerNetworkManager {
     daemonGatewayIp?: string,
     /**
      * Raw IPs (e.g. sidecar bridge IPs) that must be reachable regardless of
-     * the domain allowlist. These are added as explicit ACCEPT rules /
-     * pre-seeded into the ipset before the REJECT default kicks in, so the
-     * pod can always reach its companion sidecars even under `deny-all`.
+     * the domain allowlist. These are added as explicit ACCEPT rules so the
+     * pod can always reach its companion sidecars even under `deny-all`, and
+     * so traffic to sidecars under `restricted` bypasses HAProxy (sidecars
+     * speak arbitrary protocols, not just TLS-with-SNI).
      */
     extraAllowedIps: string[] = [],
-    /**
-     * DNS names (e.g. `['dagger']`) that must resolve from inside the pod.
-     * Iptables-level allowlisting of the IP is not enough on its own: the
-     * pod's DNS resolver is dnsmasq, which only forwards queries for
-     * allow-listed domains. Without adding the sidecar's name here, the pod's
-     * Dagger CLI sees `tcp://dagger:8080` and tries `getent ahostsv4 dagger`
-     * → NXDOMAIN → `dagger develop` hangs on DNS.
-     */
-    extraAllowedDnsNames: string[] = [],
   ): Promise<string> {
     const lines = ['#!/bin/sh', 'set -e', ''];
 
     lines.push('# Flush existing OUTPUT rules');
     lines.push('iptables -F OUTPUT 2>/dev/null || true');
+    lines.push('iptables -t nat -F OUTPUT 2>/dev/null || true');
     lines.push('');
     lines.push('# Allow loopback');
     lines.push('iptables -A OUTPUT -o lo -j ACCEPT');
@@ -415,345 +405,87 @@ export class DockerNetworkManager {
       return lines.join('\n');
     }
 
-    // restricted mode — try dnsmasq+ipset, fall back to CIDR-only
+    // --- restricted mode: HAProxy SNI allowlist ---
+    // Filter the allowlist defensively (in case schema validation was bypassed).
     const safeHosts = allowedHosts.filter((h) => SAFE_HOST_REGEX.test(h));
-    const ipHosts = safeHosts.filter((h) => /^\d+\.\d+\.\d+\.\d+$/.test(h));
-    const wildcardHosts = safeHosts.filter((h) => h.startsWith('*.'));
-    const exactHosts = safeHosts.filter(
-      (h) => !h.startsWith('*.') && !/^\d+\.\d+\.\d+\.\d+$/.test(h),
-    );
+    const haproxyConfig = generateHaproxyConfig({ allowedHosts: safeHosts });
 
-    // Resolve exact hosts to /24 CIDRs (used by both modes for pre-seeding)
-    const cidrs = new Set<string>();
-    for (const ip of ipHosts) {
-      cidrs.add(ip);
-    }
-    // Sidecar IPs are exact /32s — don't expand to /24 (would accidentally
-    // cover the whole bridge subnet and let one pod's sidecar be reached by
-    // another pod that somehow got onto the same subnet).
-    for (const ip of extraAllowedIps) {
-      cidrs.add(ip);
-    }
-    // host.docker.internal is injected into the container's /etc/hosts by Docker Desktop
-    // and is not resolvable from the macOS host — the startup shell script handles it via
-    // getent at container runtime, so skip it here to avoid a spurious WARN.
-    const CONTAINER_RUNTIME_HOSTS = new Set(['host.docker.internal']);
-    await Promise.all(
-      exactHosts
-        .filter((h) => !CONTAINER_RUNTIME_HOSTS.has(h))
-        .map(async (host) => {
-          try {
-            const { resolve4 } = await import('node:dns/promises');
-            const ips = await resolve4(host);
-            for (const ip of ips) {
-              cidrs.add(`${ip}/32`);
-            }
-          } catch {
-            this.logger.warn({ host }, 'Failed to resolve host for firewall allowlist');
-          }
-        }),
-    );
-
-    // Build dnsmasq domain entries: for each domain, generate server= and ipset= lines.
-    // dnsmasq treats /domain/ as a suffix match, so /blob.core.windows.net/ covers all subdomains.
-    const dnsmasqDomains: string[] = [];
-    for (const h of exactHosts) {
-      dnsmasqDomains.push(h);
-    }
-    for (const h of wildcardHosts) {
-      // *.blob.core.windows.net → blob.core.windows.net (dnsmasq suffix match)
-      dnsmasqDomains.push(h.slice(2));
-    }
-    // Sidecar DNS names must be resolvable from inside the pod. Without the
-    // dnsmasq `server=` line, the pod's CLI (e.g. `dagger`) can't resolve the
-    // sidecar hostname and fails before it even opens a TCP connection.
-    for (const name of extraAllowedDnsNames) {
-      if (SAFE_HOST_REGEX.test(name)) {
-        dnsmasqDomains.push(name);
-      }
-    }
-
-    // --- Probe dnsmasq+ipset+iptables-set integration ---
-    // The binaries can exist while the kernel lacks `xt_set` (e.g. Docker
-    // Desktop's LinuxKit VM). In that case `iptables -m set` fails at runtime
-    // with "Can't open socket to ipset" — the binary check alone isn't enough.
-    // Probe end-to-end: create a throwaway set, try a real `-m set` rule, then
-    // tear it down. Only if the probe succeeds do we commit to dnsmasq mode.
     lines.push('');
-    lines.push('# Probe dnsmasq + ipset + iptables-set integration end-to-end.');
-    lines.push('# Binaries can exist without the xt_set kernel module (Docker Desktop).');
-    lines.push('AUTOPOD_USE_DNSMASQ=0');
-    lines.push('if command -v dnsmasq >/dev/null 2>&1 && command -v ipset >/dev/null 2>&1; then');
-    lines.push('  if ipset create _autopod_probe hash:net 2>/dev/null; then');
+    lines.push('# DNS: use Docker default resolver (forwards to host). HAProxy is the allowlist.');
+    lines.push('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
+    lines.push('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
+    lines.push('');
+
+    lines.push('# Allow daemon gateway (MCP escalation endpoint) — bypasses HAProxy');
     lines.push(
-      '    if iptables -A OUTPUT -m set --match-set _autopod_probe dst -j ACCEPT 2>/dev/null; then',
+      "for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
     );
-    lines.push('      AUTOPOD_USE_DNSMASQ=1');
-    lines.push('    fi');
-    lines.push(
-      '    iptables -D OUTPUT -m set --match-set _autopod_probe dst -j ACCEPT 2>/dev/null || true',
-    );
-    lines.push('    ipset destroy _autopod_probe 2>/dev/null || true');
-    lines.push('  fi');
-    lines.push('fi');
-    lines.push('');
-
-    // Probe dnsmasq-only mode: dnsmasq available but ipset/xt_set unavailable (e.g. Docker
-    // Desktop LinuxKit VM). DNS-level filtering with dnsmasq handles wildcards correctly;
-    // iptables allows TCP 443/80 to all IPs (weaker IP control but works for CDN redirects).
-    lines.push('# Probe dnsmasq-only mode: dnsmasq present but ipset/xt_set unavailable.');
-    lines.push('AUTOPOD_USE_DNSMASQ_ONLY=0');
-    lines.push('if [ "$AUTOPOD_USE_DNSMASQ" = "0" ] && command -v dnsmasq >/dev/null 2>&1; then');
-    lines.push('  AUTOPOD_USE_DNSMASQ_ONLY=1');
-    lines.push('fi');
-    lines.push('');
-
-    // --- dnsmasq+ipset mode ---
-    lines.push('# Attempt dnsmasq+ipset mode (domain-based filtering)');
-    lines.push('if [ "$AUTOPOD_USE_DNSMASQ" = "1" ]; then');
-    lines.push('');
-    lines.push('  # Stop any running dnsmasq (SIGKILL via PID file, then killall as fallback)');
-    lines.push(
-      '  if [ -f /tmp/dnsmasq.pid ]; then kill -9 "$(cat /tmp/dnsmasq.pid)" 2>/dev/null; rm -f /tmp/dnsmasq.pid; fi',
-    );
-    lines.push('  killall -9 dnsmasq 2>/dev/null || true');
-    lines.push('  sleep 0.2  # let kernel release the listen socket');
-    lines.push('');
-    lines.push('  # Create ipset for allowed IPs');
-    lines.push('  ipset destroy allowed_ips 2>/dev/null || true');
-    lines.push('  ipset create allowed_ips hash:net');
-    lines.push('');
-
-    // Pre-seed ipset with daemon-resolved CIDRs
-    if (cidrs.size > 0) {
-      lines.push(`  # Pre-seed ipset with ${cidrs.size} daemon-resolved CIDRs`);
-      for (const cidr of cidrs) {
-        lines.push(`  ipset add allowed_ips "${cidr}" 2>/dev/null || true`);
-      }
-      lines.push('');
-    }
-
-    // host.docker.internal resolves from /etc/hosts (ExtraHosts), not DNS.
-    // dnsmasq has no-hosts so it can't resolve it, and Docker DNS doesn't know about it.
-    // Resolve it via getent inside the container and add the IP directly to the ipset.
-    lines.push('  # Ensure daemon gateway (host.docker.internal) is reachable for MCP');
-    lines.push(
-      "  for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
-    );
-    lines.push('    ipset add allowed_ips "$_gw_ip" 2>/dev/null || true');
-    lines.push('  done');
-    lines.push('');
-
-    // Resolve nobody's primary group at runtime — dnsmasq's compile-time default
-    // group varies by distro (`dip` on Debian, `nogroup` on some Ubuntu builds,
-    // `nobody` on Alpine) and the wrong choice causes dnsmasq to exit during
-    // privilege drop. Pinning `group=` to the actual primary group of the
-    // `nobody` user makes the config portable.
-    lines.push('  # Resolve nobody primary group (varies: nogroup on Debian, nobody on Alpine)');
-    lines.push('  NOBODY_GROUP=$(id -gn nobody 2>/dev/null || echo nobody)');
-    lines.push('');
-
-    // Write dnsmasq config (unquoted heredoc so $NOBODY_GROUP expands;
-    // SAFE_HOST_REGEX guarantees no other shell metachars in interpolated values).
-    lines.push('  # Write dnsmasq config');
-    lines.push('  cat > /tmp/dnsmasq-firewall.conf << DNSCONF');
-    lines.push('no-resolv');
-    lines.push('no-hosts');
-    lines.push(`listen-address=${DNSMASQ_LISTEN}`);
-    lines.push('bind-interfaces');
-    // dnsmasq drops privileges to the dnsmasq user if it exists, otherwise nobody.
-    // We need a known user for the iptables owner match.
-    lines.push('user=nobody');
-    lines.push('group=$NOBODY_GROUP');
-    lines.push('');
-    lines.push('# Allowed domains — forward to Docker DNS and populate ipset');
-    for (const domain of dnsmasqDomains) {
-      lines.push(`server=/${domain}/${DOCKER_DNS}`);
-      lines.push(`ipset=/${domain}/allowed_ips`);
+    lines.push('  iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+    lines.push('done');
+    if (daemonGatewayIp) {
+      lines.push(`iptables -A OUTPUT -d "${daemonGatewayIp}" -j ACCEPT 2>/dev/null || true`);
     }
     lines.push('');
-    lines.push('# Block everything else');
-    lines.push('address=/#/');
-    lines.push('DNSCONF');
-    lines.push('');
 
-    // Start dnsmasq
-    lines.push('  # Start dnsmasq');
-    lines.push('  dnsmasq --conf-file=/tmp/dnsmasq-firewall.conf --pid-file=/tmp/dnsmasq.pid');
-    lines.push('');
-
-    // Rewrite resolv.conf to use dnsmasq
-    lines.push('  # Point DNS to dnsmasq');
-    lines.push(`  echo "nameserver ${DNSMASQ_LISTEN}" > /etc/resolv.conf`);
-    lines.push('');
-
-    // iptables rules for dnsmasq mode
-    lines.push('  # DNS: only dnsmasq (nobody) can reach Docker DNS');
-    lines.push(
-      `  iptables -A OUTPUT -p udp --dport 53 -d ${DOCKER_DNS} -m owner --uid-owner nobody -j ACCEPT`,
-    );
-    lines.push(
-      `  iptables -A OUTPUT -p tcp --dport 53 -d ${DOCKER_DNS} -m owner --uid-owner nobody -j ACCEPT`,
-    );
-    lines.push('  # Block direct DNS to Docker resolver from other users');
-    lines.push(`  iptables -A OUTPUT -p udp --dport 53 -d ${DOCKER_DNS} -j REJECT`);
-    lines.push(`  iptables -A OUTPUT -p tcp --dport 53 -d ${DOCKER_DNS} -j REJECT`);
-    lines.push('  # Allow all users to reach dnsmasq (on loopback, already covered)');
-    lines.push('');
-    lines.push('  # Allow traffic to IPs in the ipset');
-    lines.push('  iptables -A OUTPUT -m set --match-set allowed_ips dst -j ACCEPT');
-    lines.push('');
-    lines.push('  # Reject everything else');
-    lines.push('  iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
-    lines.push('');
-    lines.push(
-      `  echo "Firewall: restricted mode (dnsmasq+ipset) — ${dnsmasqDomains.length} domains, ${cidrs.size} pre-seeded CIDRs"`,
-    );
-    lines.push('');
-
-    // --- dnsmasq-only mode (dnsmasq present, ipset/xt_set unavailable) ---
-    // Wildcards are handled natively by dnsmasq suffix matching. iptables allows
-    // TCP 443/80 to all destinations — DNS is the primary gate (non-allowed domains
-    // return NXDOMAIN). Less strict than ipset mode but fixes CDN wildcard subdomains
-    // that CIDR fallback cannot pre-resolve (e.g. *.blob.core.windows.net redirects).
-    lines.push('elif [ "$AUTOPOD_USE_DNSMASQ_ONLY" = "1" ]; then');
-    lines.push('');
-    lines.push('  echo "ipset/xt_set unavailable — dnsmasq DNS filtering + port 443/80 allowlist"');
-    lines.push('');
-    lines.push('  # Stop any running dnsmasq (SIGKILL via PID file, then killall as fallback)');
-    lines.push(
-      '  if [ -f /tmp/dnsmasq.pid ]; then kill -9 "$(cat /tmp/dnsmasq.pid)" 2>/dev/null; rm -f /tmp/dnsmasq.pid; fi',
-    );
-    lines.push('  killall -9 dnsmasq 2>/dev/null || true');
-    lines.push('  sleep 0.2  # let kernel release the listen socket');
-    lines.push('');
-
-    if (cidrs.size > 0) {
-      lines.push(`  # Pre-seed iptables with ${cidrs.size} daemon-resolved CIDRs`);
-      for (const cidr of cidrs) {
-        lines.push(`  iptables -A OUTPUT -d "${cidr}" -j ACCEPT`);
-      }
-      lines.push('');
-    }
-
-    lines.push('  # Ensure daemon gateway (host.docker.internal) is reachable for MCP');
-    lines.push(
-      "  for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
-    );
-    lines.push('    iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
-    lines.push('  done');
-    lines.push('');
-
-    lines.push('  # Resolve nobody primary group (varies: nogroup on Debian, nobody on Alpine)');
-    lines.push('  NOBODY_GROUP=$(id -gn nobody 2>/dev/null || echo nobody)');
-    lines.push('');
-
-    // Unquoted heredoc so $NOBODY_GROUP expands; SAFE_HOST_REGEX ensures no shell metachars.
-    lines.push('  # Write dnsmasq config (no ipset — DNS sinkhole only)');
-    lines.push('  cat > /tmp/dnsmasq-firewall.conf << DNSCONF');
-    lines.push('no-resolv');
-    lines.push('no-hosts');
-    lines.push(`listen-address=${DNSMASQ_LISTEN}`);
-    lines.push('bind-interfaces');
-    lines.push('user=nobody');
-    lines.push('group=$NOBODY_GROUP');
-    lines.push('');
-    lines.push('# Allowed domains — forward to Docker DNS (no ipset population)');
-    for (const domain of dnsmasqDomains) {
-      lines.push(`server=/${domain}/${DOCKER_DNS}`);
-    }
-    lines.push('');
-    lines.push('# Block everything else');
-    lines.push('address=/#/');
-    lines.push('DNSCONF');
-    lines.push('');
-
-    lines.push('  # Start dnsmasq');
-    lines.push('  dnsmasq --conf-file=/tmp/dnsmasq-firewall.conf --pid-file=/tmp/dnsmasq.pid');
-    lines.push('');
-
-    lines.push('  # Point DNS to dnsmasq');
-    lines.push(`  echo "nameserver ${DNSMASQ_LISTEN}" > /etc/resolv.conf`);
-    lines.push('');
-
-    lines.push('  # DNS: only dnsmasq (nobody) can reach Docker DNS');
-    lines.push(
-      `  iptables -A OUTPUT -p udp --dport 53 -d ${DOCKER_DNS} -m owner --uid-owner nobody -j ACCEPT`,
-    );
-    lines.push(
-      `  iptables -A OUTPUT -p tcp --dport 53 -d ${DOCKER_DNS} -m owner --uid-owner nobody -j ACCEPT`,
-    );
-    lines.push('  # Block direct DNS to Docker resolver from other users');
-    lines.push(`  iptables -A OUTPUT -p udp --dport 53 -d ${DOCKER_DNS} -j REJECT`);
-    lines.push(`  iptables -A OUTPUT -p tcp --dport 53 -d ${DOCKER_DNS} -j REJECT`);
-    lines.push('');
-    lines.push('  # Allow HTTPS and HTTP outbound (domain filtering handled at DNS level;');
-    lines.push('  # wildcard CDN subdomains resolve correctly through dnsmasq)');
-    lines.push('  iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT');
-    lines.push('  iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT');
-    lines.push('');
-    lines.push('  # Reject everything else');
-    lines.push('  iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
-    lines.push('');
-    lines.push(
-      `  echo "Firewall: restricted mode (dnsmasq DNS-only) — ${dnsmasqDomains.length} domains, port 443/80 open"`,
-    );
-    lines.push('');
-
-    // --- CIDR fallback mode ---
-    lines.push('else');
-    lines.push('');
-    lines.push(
-      '  echo "dnsmasq+ipset+iptables-set integration unavailable — falling back to CIDR mode"',
-    );
-    lines.push('');
-    lines.push('  # Allow DNS');
-    lines.push('  iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
-    lines.push('  iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
-    lines.push('');
-
-    lines.push(`  # ${cidrs.size} CIDRs resolved from allowed hosts (daemon-side DNS)`);
-    for (const cidr of cidrs) {
-      lines.push(`  iptables -A OUTPUT -d "${cidr}" -j ACCEPT`);
-    }
-
-    // Container-side resolution pass for CIDR fallback
-    const resolvableHosts = [...exactHosts, ...wildcardHosts.map((h) => h.slice(2))];
-    if (resolvableHosts.length > 0) {
-      lines.push('');
-      lines.push('  # Container-side DNS resolution (covers CDN PoP differences)');
-      lines.push('  container_resolve() {');
-      lines.push('    for host in "$@"; do');
+    if (extraAllowedIps.length > 0) {
       lines.push(
-        '      for ip in $(getent ahostsv4 "$host" 2>/dev/null | awk \'{print $1}\' | sort -u); do',
+        `# Allow sidecar IPs unconditionally (${extraAllowedIps.length}) — bypass HAProxy`,
       );
-      lines.push('        cidr="${ip}/32"');
-      lines.push('        iptables -C OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || \\');
-      lines.push('          iptables -I OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true');
-      lines.push('      done');
-      lines.push('    done');
-      lines.push('  }');
-      lines.push(`  container_resolve ${resolvableHosts.map((h) => `"${h}"`).join(' ')}`);
+      for (const ip of extraAllowedIps) {
+        lines.push(`iptables -A OUTPUT -d "${ip}" -j ACCEPT`);
+      }
+      lines.push('');
     }
 
+    // Write HAProxy config + start it before applying the REDIRECT, so the
+    // first request after this script runs doesn't race a not-yet-listening
+    // proxy. Run as the dedicated `haproxy:haproxy` user (Debian package
+    // postinst creates it). Different UID from the agent's `autopod` user
+    // means the agent cannot kill or reconfigure HAProxy.
+    lines.push('# Write HAProxy config');
+    lines.push('mkdir -p /etc/haproxy /var/run/haproxy');
+    lines.push("cat > /etc/haproxy/haproxy.cfg << 'HAPROXYCFG'");
+    lines.push(haproxyConfig);
+    lines.push('HAPROXYCFG');
     lines.push('');
+    lines.push('# Stop any previous HAProxy instance (live-refresh path)');
     lines.push(
-      '  # Reject everything else outbound (REJECT, not DROP — fast failure for debugging)',
+      '[ -f /var/run/haproxy/haproxy.pid ] && haproxy -f /etc/haproxy/haproxy.cfg -sf "$(cat /var/run/haproxy/haproxy.pid)" -D -p /var/run/haproxy/haproxy.pid 2>/dev/null || \\',
     );
-    lines.push('  iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
+    lines.push('  haproxy -f /etc/haproxy/haproxy.cfg -D -p /var/run/haproxy/haproxy.pid');
     lines.push('');
-    lines.push(`  echo "Firewall: restricted mode (CIDR fallback) — ${cidrs.size} CIDRs"`);
-    lines.push('');
-    lines.push('fi');
 
-    // IPv6: deny all outbound in restricted mode.
-    // Domain-based IPv6 filtering is not implemented (ipset is IPv4-only by default,
-    // and dnsmasq --ipset does not support IPv6 sets). Block all IPv6 egress to prevent
-    // bypass of the IPv4 allowlist via IPv6 dual-stack routes.
-    lines.push('');
+    // HAProxy logs to UDP ${HAPROXY_LOG_PORT} on loopback. A long-running
+    // `socat -u UDP-RECV` exec spawned by `DockerContainerManager.streamHaproxyDenials`
+    // owns that socket and feeds parsed lines to the daemon's event bus —
+    // we do NOT start it from this script because shell backgrounding under
+    // `docker exec` doesn't reliably survive the exec's exit.
+
+    // REDIRECT outbound 443 → HAProxy, drop 80, REJECT the rest.
+    lines.push('# Redirect outbound 443 → HAProxy SNI allowlist');
     lines.push(
-      '# IPv6: deny all outbound (domain-based IPv6 filtering not supported; fail closed)',
+      `iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d 127.0.0.0/8 -j REDIRECT --to-ports ${HAPROXY_LISTEN_PORT}`,
     );
+    lines.push('');
+    lines.push('# Drop port 80 entirely (HTTPS-only policy)');
+    lines.push('iptables -A OUTPUT -p tcp --dport 80 -j DROP');
+    lines.push('');
+    lines.push('# Allow HAProxy itself to reach upstream (it runs as haproxy uid)');
+    lines.push('iptables -A OUTPUT -m owner --uid-owner haproxy -j ACCEPT');
+    lines.push('');
+    lines.push('# Allow the REDIRECT-ed traffic to land on HAProxy (loopback already accepts).');
+    lines.push('# Reject everything else outbound.');
+    lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
+    lines.push('');
+
+    lines.push(
+      `echo "Firewall: restricted mode (HAProxy SNI) — ${safeHosts.length} allowed hosts"`,
+    );
+
+    // IPv6: deny all outbound. HAProxy listens on IPv4 only; allowing v6
+    // egress would create an obvious bypass of the v4 allowlist.
+    lines.push('');
+    lines.push('# IPv6: deny all outbound (HAProxy is v4-only; fail closed)');
     lines.push('ip6tables -F OUTPUT 2>/dev/null || true');
     lines.push('ip6tables -A OUTPUT -o lo -j ACCEPT');
     lines.push('ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT');
@@ -776,7 +508,6 @@ export class DockerNetworkManager {
     registries: PrivateRegistry[] = [],
     podId?: string,
     extraAllowedIps: string[] = [],
-    extraAllowedDnsNames: string[] = [],
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
@@ -794,7 +525,6 @@ export class DockerNetworkManager {
       policy.mode,
       daemonGatewayIp,
       extraAllowedIps,
-      extraAllowedDnsNames,
     );
 
     return {

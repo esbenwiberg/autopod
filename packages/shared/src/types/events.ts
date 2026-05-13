@@ -46,7 +46,8 @@ export type SystemEvent =
   | IssueWatcherErrorEvent
   | PodWorktreeCompromisedEvent
   | PodPreflightOverlapEvent
-  | HostResumedEvent;
+  | HostResumedEvent
+  | FirewallDeniedEvent;
 
 export interface PodCreatedEvent {
   type: 'pod.created';
@@ -264,4 +265,26 @@ export interface PodPreflightOverlapEvent {
   timestamp: string;
   podId: string;
   conflicts: PreflightConflict[];
+}
+
+/**
+ * Emitted when the in-pod HAProxy egress proxy rejects an outbound TLS
+ * connection because the ClientHello SNI is not on the restricted-mode
+ * allowlist. The daemon's container log pump parses HAProxy's syslog
+ * lines (see `containers/haproxy-deny-parser.ts`) and emits one of these
+ * per denied session, so operators see "agent tried to reach X" in real
+ * time in the CLI / desktop event stream rather than just a generic
+ * connection error on the agent side.
+ *
+ * `sni` is the literal value from the ClientHello — may be `-` if the
+ * client sent no SNI (rejected for that reason). `src` is the source
+ * IP HAProxy logged (typically `127.0.0.1` because the iptables REDIRECT
+ * hides the original source).
+ */
+export interface FirewallDeniedEvent {
+  type: 'pod.firewall_denied';
+  timestamp: string;
+  podId: string;
+  sni: string;
+  src: string;
 }
