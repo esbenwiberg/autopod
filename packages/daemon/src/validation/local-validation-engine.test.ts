@@ -300,7 +300,10 @@ describe('classifyAcTypes', () => {
     expect(result).toEqual([]);
   });
 
-  it('passes brief `type: cmd` through as engine `cmd`', async () => {
+  it('passes brief `type: cmd` through as engine `cmd` and propagates hint + polarity', async () => {
+    // Regression: classifyAcTypes was dropping `hint` and `polarity` when building
+    // ClassifiedAc, so executeCmdChecks fell back to running the `outcome` text as
+    // a shell command. Make sure both fields survive classification.
     const acs: AcDefinition[] = [
       {
         type: 'cmd',
@@ -312,6 +315,12 @@ describe('classifyAcTypes', () => {
     const result = await classifyAcTypes(configWith(acs));
     expect(result).toHaveLength(1);
     expect(result?.[0]?.validationType).toBe('cmd');
+    expect(result?.[0]?.command).toBe("rg -l 'OldEventEmitter' packages/daemon/src");
+    expect(result?.[0]?.polarity).toBe('expect-no-output');
+    // criterion stays the human description — it's what surfaces in UI / review prompts.
+    expect(result?.[0]?.criterion).toBe(
+      "rg -l 'OldEventEmitter' packages/daemon/src returns no matches",
+    );
   });
 
   it('demotes banned build/test/lint commands to none even when declared cmd', async () => {
@@ -357,15 +366,15 @@ describe('executeCmdChecks', () => {
     return { execInContainer } as unknown as ContainerManager;
   }
 
-  it('passes when an exit-0 command runs and pass-hint expects exit 0', async () => {
+  it('passes when an exit-zero command succeeds (default polarity)', async () => {
     const cm = makeContainerManager(() => ({ stdout: 'ok\n', stderr: '', exitCode: 0 }));
     const result = await executeCmdChecks(cm, configWith(), [
       {
-        criterion: 'test -f Application/Auth/NewMw.cs',
+        criterion: 'NewMw.cs is registered',
+        command: 'test -f Application/Auth/NewMw.cs',
+        polarity: 'exit-zero',
         validationType: 'cmd',
         reason: 'declared in brief',
-        pass: 'exit 0',
-        fail: 'non-zero',
       },
     ]);
     expect(result).toHaveLength(1);
@@ -373,7 +382,7 @@ describe('executeCmdChecks', () => {
     expect(result[0]?.validationType).toBe('cmd');
   });
 
-  it('fails when an exit-0 command was expected but the command fails', async () => {
+  it('fails when an exit-zero command exits non-zero', async () => {
     const cm = makeContainerManager(() => ({
       stdout: '',
       stderr: 'no such file',
@@ -381,33 +390,33 @@ describe('executeCmdChecks', () => {
     }));
     const result = await executeCmdChecks(cm, configWith(), [
       {
-        criterion: 'test -f Application/Auth/NewMw.cs',
+        criterion: 'NewMw.cs is registered',
+        command: 'test -f Application/Auth/NewMw.cs',
+        polarity: 'exit-zero',
         validationType: 'cmd',
         reason: 'declared in brief',
-        pass: 'exit 0',
-        fail: 'non-zero',
       },
     ]);
     expect(result[0]?.passed).toBe(false);
     expect(result[0]?.reasoning).toContain('no such file');
   });
 
-  it('treats grep-style "no match" pass-hint as pass when stdout is empty', async () => {
+  it('expect-no-output: passes when grep finds nothing', async () => {
     // rg returns exit 1 when there are no matches; that's the pass condition.
     const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 1 }));
     const result = await executeCmdChecks(cm, configWith(), [
       {
-        criterion: "rg -l 'OldEventEmitter' packages/daemon/src",
+        criterion: 'OldEventEmitter is removed from daemon source',
+        command: "rg -l 'OldEventEmitter' packages/daemon/src",
+        polarity: 'expect-no-output',
         validationType: 'cmd',
         reason: 'declared in brief',
-        pass: 'no matches',
-        fail: 'any match',
       },
     ]);
     expect(result[0]?.passed).toBe(true);
   });
 
-  it('fails the "no match" expectation when stdout shows a match', async () => {
+  it('expect-no-output: fails when grep emits a match', async () => {
     const cm = makeContainerManager(() => ({
       stdout: 'packages/daemon/src/old.ts\n',
       stderr: '',
@@ -415,22 +424,18 @@ describe('executeCmdChecks', () => {
     }));
     const result = await executeCmdChecks(cm, configWith(), [
       {
-        criterion: "rg -l 'OldEventEmitter' packages/daemon/src",
+        criterion: 'OldEventEmitter is removed from daemon source',
+        command: "rg -l 'OldEventEmitter' packages/daemon/src",
+        polarity: 'expect-no-output',
         validationType: 'cmd',
         reason: 'declared in brief',
-        pass: 'no matches',
-        fail: 'any match',
       },
     ]);
     expect(result[0]?.passed).toBe(false);
     expect(result[0]?.reasoning).toContain('packages/daemon/src/old.ts');
   });
 
-  it('does not flip polarity when only the fail-hint mentions "no match" (positive grep AC)', async () => {
-    // Regression: a positive grep AC ("file should contain X") naturally
-    // describes its failure mode as "no match" / "not found" / "empty".
-    // The engine must not interpret negative hints in the FAIL string as
-    // a request to invert polarity — only the PASS string decides that.
+  it('expect-output: passes when grep emits output (positive registration AC)', async () => {
     const cm = makeContainerManager(() => ({
       stdout: 'Client/src/context/network/http/QueryProvider/queryKeys.ts\n',
       stderr: '',
@@ -438,29 +443,89 @@ describe('executeCmdChecks', () => {
     }));
     const result = await executeCmdChecks(cm, configWith(), [
       {
-        criterion:
+        criterion: 'RESOURCE_PLANNER_TOP_ROW query key is registered',
+        command:
           "grep -l 'RESOURCE_PLANNER_TOP_ROW' Client/src/context/network/http/QueryProvider/queryKeys.ts",
+        polarity: 'expect-output',
         validationType: 'cmd',
         reason: 'declared in brief',
-        pass: 'query key registered (file path printed)',
-        fail: 'no match — query key was not registered',
       },
     ]);
     expect(result[0]?.passed).toBe(true);
   });
 
-  it('does not flip polarity when fail-hint says "not found" (positive file-existence AC)', async () => {
+  it('expect-output: fails when grep emits nothing even with exit 0', async () => {
+    // grep exits 1 when no match, but some commands exit 0 with empty stdout —
+    // either way, expect-output requires non-empty stdout.
     const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 0 }));
     const result = await executeCmdChecks(cm, configWith(), [
       {
-        criterion: 'test -f Client/src/.../TopTotalRow.tsx',
+        criterion: 'thing is registered',
+        command: 'grep -l THING file.ts',
+        polarity: 'expect-output',
         validationType: 'cmd',
         reason: 'declared in brief',
-        pass: 'file exists',
-        fail: 'file not found',
+      },
+    ]);
+    expect(result[0]?.passed).toBe(false);
+  });
+
+  it('defaults to exit-zero polarity when polarity is omitted', async () => {
+    const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 0 }));
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: 'file exists',
+        command: 'test -f Client/src/TopTotalRow.tsx',
+        validationType: 'cmd',
+        reason: 'declared in brief',
       },
     ]);
     expect(result[0]?.passed).toBe(true);
+  });
+
+  it('REGRESSION: executes ac.command, NOT ac.criterion (the human description)', async () => {
+    // The bug we're fixing: executeCmdChecks used to run `sh -c ac.criterion`
+    // where criterion was the outcome description like "LogStreamingHub is
+    // mapped in SignalRMiddlewareEx.cs". The shell would try to exec
+    // "LogStreamingHub" as a command, exit 127, and fail every cmd AC.
+    let executed: string | null = null;
+    const execInContainer = vi.fn(async (_id: string, cmd: string[]) => {
+      executed = cmd[2] ?? null;
+      return { stdout: 'match\n', stderr: '', exitCode: 0 };
+    });
+    const cm = { execInContainer } as unknown as ContainerManager;
+
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: 'LogStreamingHub is mapped in SignalRMiddlewareEx.cs',
+        command: "grep 'MapHub<LogStreamingHub>' Frameworks/PF.SignalR/SignalRMiddlewareEx.cs",
+        polarity: 'expect-output',
+        validationType: 'cmd',
+        reason: 'declared in brief',
+      },
+    ]);
+
+    expect(executed).toBe(
+      "grep 'MapHub<LogStreamingHub>' Frameworks/PF.SignalR/SignalRMiddlewareEx.cs",
+    );
+    expect(executed).not.toBe('LogStreamingHub is mapped in SignalRMiddlewareEx.cs');
+    expect(result[0]?.passed).toBe(true);
+  });
+
+  it('fails explicitly when command (hint) is missing — does NOT exec the criterion', async () => {
+    const execInContainer = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
+    const cm = { execInContainer } as unknown as ContainerManager;
+    const result = await executeCmdChecks(cm, configWith(), [
+      {
+        criterion: 'Some human-readable outcome',
+        // command intentionally omitted
+        validationType: 'cmd',
+        reason: 'declared in brief',
+      },
+    ]);
+    expect(execInContainer).not.toHaveBeenCalled();
+    expect(result[0]?.passed).toBe(false);
+    expect(result[0]?.reasoning).toMatch(/hint/i);
   });
 
   it('returns failed results when the container is missing', async () => {
@@ -468,11 +533,11 @@ describe('executeCmdChecks', () => {
     const config = { ...configWith(), containerId: undefined as unknown as string };
     const result = await executeCmdChecks(cm, config, [
       {
-        criterion: 'echo hi',
+        criterion: 'thing exists',
+        command: 'echo hi',
+        polarity: 'exit-zero',
         validationType: 'cmd',
         reason: 'declared in brief',
-        pass: 'exit 0',
-        fail: '',
       },
     ]);
     expect(result[0]?.passed).toBe(false);
@@ -486,11 +551,11 @@ describe('executeCmdChecks', () => {
     const cm = { execInContainer } as unknown as ContainerManager;
     const result = await executeCmdChecks(cm, configWith(), [
       {
-        criterion: 'echo hi',
+        criterion: 'thing exists',
+        command: 'echo hi',
+        polarity: 'exit-zero',
         validationType: 'cmd',
         reason: 'declared in brief',
-        pass: 'exit 0',
-        fail: '',
       },
     ]);
     expect(result[0]?.passed).toBe(false);

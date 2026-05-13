@@ -28,3 +28,4 @@
 | `ADR-022` | ADR-022: `MODEL_CANONICAL` alias map for analytics rollups | Accepted | Analytics phase 6 (`specs/analytics-models/`) introduces |
 | `ADR-023` | ADR-023: Client-side what-if simulator with naïve weighted-average projection | Accepted | Analytics phase 6 (`specs/analytics-models/`) includes a |
 | `ADR-024` | ADR-024: AC schema v2 — outcome + optional hint, drop pass/fail in favour of polarity enum | Accepted | The `AcDefinition` shape in `@autopod/shared` was |
+| `ADR-025` | ADR-025: Single fix pod per PR — recycled across all feedback rounds | Accepted | Fix pods today are spawned per actionable PR failure: each round of |

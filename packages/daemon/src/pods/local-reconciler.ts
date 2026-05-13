@@ -33,6 +33,13 @@ export interface ReconcileResult {
  * - Kills pods whose worktree is gone (unrecoverable)
  * - Finishes pods that were mid-kill
  * - Skips pods in `queued` (they'll be processed normally)
+ *
+ * **MUST run to completion BEFORE `rehydrateDependentSessions()` in startup.**
+ * Otherwise: rehydrate enqueues a series-dep pod, processPod synchronously
+ * transitions it queued→provisioning, then this reconciler iterates the
+ * `provisioning` status bucket and kills the pod for missing worktree —
+ * because processPod hasn't created the worktree yet. The caller in
+ * `index.ts` enforces the ordering by `await`-ing this function.
  */
 export async function reconcileLocalSessions(
   deps: LocalReconcilerDependencies,

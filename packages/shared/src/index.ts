@@ -1,5 +1,5 @@
 // Types
-export type { AcType, AcDefinition } from './types/ac.js';
+export type { AcType, AcDefinition, AcPolarity } from './types/ac.js';
 
 export type {
   PhaseTokenUsage,

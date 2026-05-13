@@ -528,31 +528,47 @@ the blue accent when selected.
   `.selected` class on the clicked pill and removes it from the other
   pills inside the same `.actions` container (radio-group semantics
   per issue). State lives in DOM only; no persistence.
-- **Reply composer** — lives **inside the side rail as its last
-  panel**, NOT as a `position: fixed` floating overlay. The rail is
-  already `position: sticky; top: 24px; max-height: calc(100vh -
-  48px); overflow: auto;` so the composer at the rail's bottom stays
-  visible as the user scrolls and never floats over the brief grid or
-  the Coverage list. Use `position: sticky; bottom: 0` on the
-  composer's outer element so it stays anchored to the rail's visible
-  bottom even when the rail's internal content scrolls past it.
-  Render as a `<details>` element with the title strip
-  (`Reply composer · N/M selected`) as the `<summary>` and the
-  textarea + actions as the body. Default `open` state: closed when
-  `N == 0`, opens automatically when the first pill is selected.
-  This is the "collapse-when-empty" behavior — a reviewer scanning
-  the plan never has the composer's full body eating rail space until
-  they actually start resolving an issue. `M` is the total count of
+- **Reply composer** — this is the load-bearing review surface. The
+  whole point of the rich show-back is that the reviewer's pill
+  selections survive into the reply. A static instruction panel
+  (`Type one of: green light / redo X / push back …`) is **not** a
+  reply composer — it has no DOM link to the pills, so every
+  resolution the reviewer just clicked gets dropped on the floor.
+  Treat it as a bug if your generated HTML reaches the user without
+  the markup below.
+
+  **MUST render** — the panel MUST be a `<details class="reply-composer"
+  data-composer="reply">` element containing all four:
+
+  1. A `<summary>` showing `Reply composer · N/M selected`, where `N`
+     and `M` are live-updated by the interactivity script.
+  2. A `<textarea class="reply-text">` whose value is rebuilt from
+     the selected pills every time selection changes, following the
+     Reply template below verbatim.
+  3. A `<button class="copy-reply">Copy reply</button>` that calls
+     `navigator.clipboard.writeText(textarea.value)` on click.
+  4. A `<div class="reply-toast" hidden>` for the success toast.
+
+  Lives **inside the side rail as its last panel**, NOT as a
+  `position: fixed` floating overlay. The rail is already
+  `position: sticky; top: 24px; max-height: calc(100vh - 48px);
+  overflow: auto;` so the composer at the rail's bottom stays
+  visible as the user scrolls and never floats over the brief grid
+  or the Coverage list. Use `position: sticky; bottom: 0` on the
+  composer's outer element so it stays anchored to the rail's
+  visible bottom even when the rail's internal content scrolls past
+  it. Default `open` state: closed when `N == 0`, opens
+  automatically when the first pill is selected. This is the
+  "collapse-when-empty" behavior — a reviewer scanning the plan
+  never has the composer's full body eating rail space until they
+  actually start resolving an issue. `M` is the total count of
   issues (per-brief + cross-cutting); `N` updates live as pills are
   selected. The `Copy reply` button is disabled while `N == 0` (the
-  user can still type `green light` in the terminal directly).
-  Clicking `Copy reply` assembles a structured reply from the
-  selections and writes it to the clipboard via
-  `navigator.clipboard.writeText(...)`. Show a brief inline toast
-  (`Copied — paste into your terminal`) on success; fall back to
-  making the `<textarea>` selected and instructing the user to
-  `cmd+c` if the clipboard API is unavailable (some `file://`
-  browsers refuse it).
+  user can still type `green light` in the terminal directly). Show
+  a brief inline toast (`Copied — paste into your terminal`) on
+  success; fall back to making the `<textarea>` selected and
+  instructing the user to `cmd+c` if the clipboard API is
+  unavailable (some `file://` browsers refuse it).
 
 **Reply template** — the assembled clipboard text MUST follow this
 exact shape so the planner can parse it deterministically:
@@ -572,6 +588,22 @@ Issue labels match the heading rendered in the callout — no
 abbreviation, no reformatting. The user can edit the text after
 pasting; the structure exists to make the common case (accept all
 defaults) one keystroke.
+
+**Self-check before declaring the show-back done.** After writing
+`.autopod/review/exit-checklist.html`, grep the file and verify all
+four markers are present. If any is missing, the show-back is
+broken — fix the markup and rewrite the file before printing the
+path:
+
+```bash
+grep -c 'class="reply-composer"' .autopod/review/exit-checklist.html  # must be ≥ 1
+grep -c 'class="reply-text"'     .autopod/review/exit-checklist.html  # must be ≥ 1
+grep -c 'class="copy-reply"'     .autopod/review/exit-checklist.html  # must be ≥ 1
+grep -c 'data-composer="reply"'  .autopod/review/exit-checklist.html  # must be ≥ 1
+```
+
+If any of those return `0`, you wrote a static instruction panel
+instead of the composer. Regenerate before continuing.
 
 #### 3. Print the path and ask for greenlight
 
@@ -994,6 +1026,18 @@ loop was not done.
   rail (typically the Coverage panel) and obscure content the user
   needs to read. Live it inside the rail as the last panel, sticky to
   the rail's bottom, collapsed when zero pills are selected.
+- Replacing the Reply composer with a static `Type one of:
+  green light / redo X / push back on …` text panel — the
+  "instruction-block fallback". It looks similar at a glance but has
+  no DOM link to the resolution pills above it, so every selection
+  the reviewer just clicked is silently discarded when they reply.
+  This is the same failure mode as printing the markdown checklist
+  back into the terminal: a review surface that doesn't carry the
+  reviewer's input forward is theatre. The required markup is
+  enumerated in the Reply composer section — `<details
+  class="reply-composer" data-composer="reply">` with a
+  `.reply-text` textarea and a `.copy-reply` button. Run the
+  self-check greps before printing the path.
 - Committing `.autopod/review/exit-checklist.html` to the repo. The
   directory is gitignored; it's a transient review artifact, not a
   deliverable. (The `SAMPLE-*.html` reference file is the only

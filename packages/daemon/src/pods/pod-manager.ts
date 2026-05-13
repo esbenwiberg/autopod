@@ -84,6 +84,7 @@ import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-sta
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
+import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { readAcFile } from './ac-file-parser.js';
@@ -1867,11 +1868,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     containerId: string,
     worktreePath: string,
     cm: ContainerManager,
+    podId: string,
   ): Promise<{ pushed: boolean }> {
     return withEngineStallRetry(
       containerId,
       cm,
-      () => syncWorkspaceBackOnce(containerId, worktreePath, cm),
+      () => syncWorkspaceBackOnce(containerId, worktreePath, cm, podId),
       'syncWorkspaceBack',
     );
   }
@@ -1880,6 +1882,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     containerId: string,
     worktreePath: string,
     cm: ContainerManager,
+    podId: string,
   ): Promise<{ pushed: boolean }> {
     let pushed = false;
     try {
@@ -1916,21 +1919,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Bare repo path from container does not match daemon-derived path — skipping in-container push',
           );
         } else {
-          const push = await cm.execInContainer(
-            containerId,
-            ['git', '-C', '/workspace', 'push', bareRepoPath, 'HEAD'],
-            { timeout: 30_000 },
+          // Push via per-pod staging ref then promote — a direct push to refs/heads/<branch>
+          // is refused by the bare's `receive.denyCurrentBranch` because the host worktree
+          // (a linked worktree of the bare) has that branch checked out.
+          const result = await pushCommitsToBareViaStagingRef(
+            async (args) => {
+              const r = await cm.execInContainer(
+                containerId,
+                ['git', '-C', '/workspace', ...args],
+                { timeout: 30_000 },
+              );
+              return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
+            },
+            bareRepoPath,
+            podId,
           );
-          if (push.exitCode === 0) {
+          if (result.pushed) {
             pushed = true;
           } else {
-            // Surface as pushed=false rather than throwing. A non-fast-forward rejection
-            // (e.g. from a stale /workspace/.git seam) won't be helped by the archive-API
-            // fallback below — it'd push the same git history. The caller uses pushed=false
+            // Surface as pushed=false rather than throwing. The caller uses pushed=false
             // to clamp auto-commit's deletion guard so a partially-synced worktree can't
             // get swept into a single bogus chore commit via `git add -A`.
             logger.warn(
-              { worktreePath, stderr: push.stderr.trim() },
+              { worktreePath, reason: result.reason },
               'Git push to bare during sync-back failed — agent commits not on host branch',
             );
           }
@@ -1987,8 +1998,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
           // so git can resolve baseline objects and push only the new ones.
           await cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir);
-          await execFileAsync('git', ['--git-dir', tmpGitDir, 'push', bareRepoPath, 'HEAD']);
-          pushed = true;
+          const result = await pushCommitsToBareViaStagingRef(
+            async (args) => {
+              try {
+                const r = await execFileAsync('git', ['--git-dir', tmpGitDir, ...args]);
+                return { stdout: r.stdout, stderr: r.stderr, exitCode: 0 };
+              } catch (err) {
+                const e = err as { stdout?: string; stderr?: string; code?: number };
+                return {
+                  stdout: e.stdout ?? '',
+                  stderr: e.stderr ?? (err as Error).message,
+                  exitCode: typeof e.code === 'number' ? e.code : 1,
+                };
+              }
+            },
+            bareRepoPath,
+            podId,
+          );
+          if (result.pushed) {
+            pushed = true;
+          } else {
+            logger.warn(
+              { worktreePath, reason: result.reason },
+              'Could not push commits from container during sync fallback — new commits may be lost',
+            );
+          }
         } catch (gitRecoveryErr) {
           logger.warn(
             { err: gitRecoveryErr, worktreePath },
@@ -2011,6 +2045,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     containerId: string,
     worktreePath: string,
     cm: ContainerManager,
+    podId: string,
   ): Promise<boolean> {
     try {
       const status = await cm.getStatus(containerId);
@@ -2043,14 +2078,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           expectedBareRepoPath = await deriveBareRepoPath(worktreePath);
         } catch {}
         if (expectedBareRepoPath && containerBareRepoPath === expectedBareRepoPath) {
-          const push = await cm.execInContainer(
-            containerId,
-            ['git', '-C', '/workspace', 'push', containerBareRepoPath, 'HEAD'],
-            { timeout: 30_000 },
+          const result = await pushCommitsToBareViaStagingRef(
+            async (args) => {
+              const r = await cm.execInContainer(
+                containerId,
+                ['git', '-C', '/workspace', ...args],
+                { timeout: 30_000 },
+              );
+              return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
+            },
+            containerBareRepoPath,
+            podId,
           );
-          if (push.exitCode !== 0) {
+          if (!result.pushed) {
             logger.warn(
-              { worktreePath, stderr: push.stderr },
+              { worktreePath, reason: result.reason },
               'Git push during worktree recovery failed — commits may not be fully visible on host',
             );
           }
@@ -2986,7 +3028,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.status === 'handoff' && pod.containerId && pod.worktreePath) {
           const cm = containerManagerFactory.get(pod.executionTarget);
           try {
-            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, pod.id);
           } catch (err) {
             logger.warn(
               { err, podId },
@@ -4909,7 +4951,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (pod.containerId && pod.worktreePath) {
         try {
           const cm = containerManagerFactory.get(pod.executionTarget);
-          const result = await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+          const result = await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, pod.id);
           agentCommitsPushed = result.pushed;
           if (!agentCommitsPushed) {
             logger.warn(
@@ -4951,6 +4993,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               pod.containerId,
               pod.worktreePath,
               cm,
+              pod.id,
             );
             if (recovered) {
               try {
@@ -6124,7 +6167,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
-            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
           } catch (err) {
             workspaceSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace before push');
@@ -6301,7 +6344,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (pod.containerId) {
         try {
           const cm = containerManagerFactory.get(pod.executionTarget);
-          await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+          await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
         } catch (err) {
           logger.warn({ err, podId }, 'syncWorkspaceBranch: sync-back failed — continuing');
         }
@@ -6498,7 +6541,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
-            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
           } catch (err) {
             validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace before validation');
@@ -6631,7 +6674,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
-            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm);
+            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
           } catch (err) {
             validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace after validation');
@@ -8702,7 +8745,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // container's overlayfs.
       if (pod.containerId) {
         const cm = containerManagerFactory.get(pod.executionTarget);
-        const recovered = await recoverWorktreeFromContainer(pod.containerId, pod.worktreePath, cm);
+        const recovered = await recoverWorktreeFromContainer(pod.containerId, pod.worktreePath, cm, pod.id);
         if (recovered) {
           try {
             const profileForRecovery = profileStore.get(pod.profileName);

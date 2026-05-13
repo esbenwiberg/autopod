@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import type {
   AcCheckResult,
   AcDefinition,
+  AcPolarity,
   AcType,
   AcValidationResult,
   DeviationsAssessment,
@@ -1124,6 +1125,15 @@ export interface ClassifiedAc {
   pass?: string;
   /** Author-declared fail condition from the brief frontmatter, if present. */
   fail?: string;
+  /**
+   * Shell command to execute for `cmd` ACs — sourced from `AcDefinition.hint`.
+   * Carrying this separately from `criterion` (the human-readable outcome text)
+   * prevents the executor from accidentally running the outcome description as
+   * a shell command (e.g. `sh -c "LogStreamingHub is mapped in …"`).
+   */
+  command?: string;
+  /** Polarity for `cmd` ACs — determines pass/fail interpretation of the command result. */
+  polarity?: AcPolarity;
 }
 
 /** Map brief-declared `AcType` to the engine's internal `AcValidationType`. */
@@ -1215,11 +1225,16 @@ export async function classifyAcTypes(
       // Respect `hasWebUi: false` — downgrade to 'none' rather than run a
       // browser phase against a project that has no frontend.
       if (validationType === 'web-ui' && !hasWebUi) validationType = 'none';
-      return {
+      const classified: ClassifiedAc = {
         criterion: ac.outcome,
         validationType,
         reason: 'declared in brief frontmatter',
       };
+      if (ac.type === 'cmd') {
+        classified.command = ac.hint;
+        classified.polarity = ac.polarity;
+      }
+      return classified;
     });
   } else {
     // Fallback: ask the LLM when types weren't declared (reserved for future
@@ -1955,41 +1970,50 @@ export async function executeCmdChecks(
     }));
   }
 
-  const NEGATIVE_HINTS = [
-    'no match',
-    'no matches',
-    '0 matches',
-    'zero matches',
-    'empty',
-    'not found',
-    'no output',
-  ];
-
-  function expectNoOutput(passHint: string | undefined): boolean {
-    // Only the PASS hint determines polarity. The fail hint commonly says
-    // "no match" / "not found" / "empty" to describe what failure looks
-    // like for a positive grep AC — scanning it would invert the polarity
-    // of every normal positive AC and mark them failed on real matches.
-    const hay = (passHint ?? '').toLowerCase();
-    return NEGATIVE_HINTS.some((h) => hay.includes(h));
-  }
-
   const results = await Promise.all(
     cmdAcs.map(async (ac) => {
+      // Guard against running the human-readable outcome as a shell command —
+      // that's the bug this whole change is fixing. If the brief omitted the
+      // hint, fail the check explicitly rather than exec'ing the description.
+      if (!ac.command || ac.command.trim() === '') {
+        log?.warn(
+          { criterion: ac.criterion },
+          'cmd AC missing hint — cannot execute, marking failed',
+        );
+        return {
+          criterion: ac.criterion,
+          passed: false,
+          validationType: 'cmd' as const,
+          reasoning:
+            'cmd AC has no hint (shell command) — author must add a `hint` field to the brief AC',
+        } satisfies AcCheckResult;
+      }
+
       try {
         const exec = await containerManager.execInContainer(
           containerId,
-          ['sh', '-c', ac.criterion],
+          ['sh', '-c', ac.command],
           { timeout: 30_000 },
         );
         const stdoutTrimmed = exec.stdout.trim();
         const stdoutPreview = exec.stdout.slice(0, 800);
         const stderrPreview = exec.stderr.slice(0, 400);
-        const negative = expectNoOutput(ac.pass);
-        const passed = negative ? exec.exitCode !== 0 || stdoutTrimmed === '' : exec.exitCode === 0;
+        const polarity: AcPolarity = ac.polarity ?? 'exit-zero';
+        let passed: boolean;
+        switch (polarity) {
+          case 'expect-output':
+            passed = exec.exitCode === 0 && stdoutTrimmed !== '';
+            break;
+          case 'expect-no-output':
+            passed = exec.exitCode !== 0 || stdoutTrimmed === '';
+            break;
+          default:
+            passed = exec.exitCode === 0;
+            break;
+        }
         const reasoning = passed
-          ? `Command exited ${exec.exitCode}${stdoutTrimmed ? ` with output: ${stdoutPreview}` : ' (no output)'}`
-          : `Command exited ${exec.exitCode}. stdout: ${stdoutPreview || '(empty)'} stderr: ${stderrPreview || '(empty)'}`;
+          ? `Command exited ${exec.exitCode} (polarity ${polarity})${stdoutTrimmed ? ` with output: ${stdoutPreview}` : ' (no output)'}`
+          : `Command exited ${exec.exitCode} (polarity ${polarity}). stdout: ${stdoutPreview || '(empty)'} stderr: ${stderrPreview || '(empty)'}`;
         return {
           criterion: ac.criterion,
           passed,

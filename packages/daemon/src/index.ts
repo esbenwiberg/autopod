@@ -100,9 +100,45 @@ const LOG_REDACT_PATHS = [
   'secret',
 ];
 
+// Hard cap on any single string field in a log record. Last-line-of-defense
+// against a runaway leak filling the terminal — a single pasted Lottie JSON
+// in a task description had been wrapping across the entire window. 16 KB is
+// generous enough to preserve diffs, stack traces, and validation output
+// (which already self-cap below this) while still bounding catastrophic
+// sizes. Targeted redactions in runtimes/containers remain the primary fix.
+const LOG_FIELD_MAX_BYTES = 16_384;
+
+function capLargeStrings(obj: unknown, depth = 0): unknown {
+  if (depth > 4) return obj;
+  if (typeof obj === 'string') {
+    return obj.length > LOG_FIELD_MAX_BYTES
+      ? `<truncated: ${obj.length} bytes, max ${LOG_FIELD_MAX_BYTES}>`
+      : obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((v) => capLargeStrings(v, depth + 1));
+  }
+  if (obj && typeof obj === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = capLargeStrings(v, depth + 1);
+    }
+    return out;
+  }
+  return obj;
+}
+
 const PINO_BASE_OPTIONS = {
   level: LOG_LEVEL,
   redact: { paths: LOG_REDACT_PATHS, censor: '[REDACTED]' },
+  hooks: {
+    logMethod(this: pino.Logger, args: Parameters<pino.LogFn>, method: pino.LogFn) {
+      if (args.length > 0 && typeof args[0] === 'object' && args[0] !== null) {
+        args[0] = capLargeStrings(args[0]) as object;
+      }
+      return method.apply(this, args);
+    },
+  },
 };
 
 // Logger — use pino-pretty as a direct stream (not a transport) to avoid worker-thread issues
@@ -720,28 +756,30 @@ if (aciContainerManager) {
   });
 }
 
-// Reconcile local pods (non-blocking — errors logged, not fatal)
-{
+// Reconcile local pods. Must complete BEFORE rehydrateDependentSessions runs:
+// rehydrate enqueues queued series-dep pods, processPod synchronously transitions
+// them queued→provisioning, and reconcile then iterates `provisioning` status
+// and kills any pod whose worktree doesn't exist yet — exactly the state a
+// freshly-enqueued pod is in for the first few milliseconds. Awaiting here
+// drains reconcile fully before rehydrate touches the queue.
+try {
   const { reconcileLocalSessions } = await import('./pods/local-reconciler.js');
-  reconcileLocalSessions({
+  const result = await reconcileLocalSessions({
     podRepo,
     eventBus,
     containerManager,
     enqueueSession: (id) => podQueue.enqueue(id),
     validationRepo,
     logger,
-  })
-    .then((result) => {
-      if (result.recovered.length > 0) {
-        logger.info({ recovered: result.recovered }, 'Local pods recovered');
-      }
-      if (result.killed.length > 0) {
-        logger.warn({ killed: result.killed }, 'Unrecoverable local pods killed');
-      }
-    })
-    .catch((err) => {
-      logger.error({ err }, 'Local pod reconciliation failed');
-    });
+  });
+  if (result.recovered.length > 0) {
+    logger.info({ recovered: result.recovered }, 'Local pods recovered');
+  }
+  if (result.killed.length > 0) {
+    logger.warn({ killed: result.killed }, 'Unrecoverable local pods killed');
+  }
+} catch (err) {
+  logger.error({ err }, 'Local pod reconciliation failed');
 }
 
 // Prune orphan pod networks and sidecars left behind by a previous crashed run.

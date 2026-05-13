@@ -271,7 +271,8 @@ export class AciContainerManager implements ContainerManager {
     // ACI exec returns a websocket URL for interactive pods.
     // For non-interactive exec, we use logs instead.
     // Fall back to capturing output via a wrapper approach.
-    this.logger.debug({ containerId, command }, 'ACI exec completed');
+    const safeCommand = command.map((a) => (a.length > 1024 ? `<arg: ${a.length} bytes>` : a));
+    this.logger.debug({ containerId, command: safeCommand }, 'ACI exec completed');
 
     // ACI's executeCommand is interactive/websocket-based — for simple exec,
     // we run via a log-capture pattern instead
@@ -395,7 +396,10 @@ export class AciContainerManager implements ContainerManager {
       stderrStream.destroy();
     };
 
-    this.logger.info({ containerId, command }, 'ACI streaming exec started');
+    const safeStreamingCommand = command.map((a) =>
+      a.length > 1024 ? `<arg: ${a.length} bytes>` : a,
+    );
+    this.logger.info({ containerId, command: safeStreamingCommand }, 'ACI streaming exec started');
 
     return {
       stdout: stdoutStream,
