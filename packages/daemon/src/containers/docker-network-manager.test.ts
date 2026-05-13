@@ -56,7 +56,7 @@ describe('DockerNetworkManager', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('globalcdn.nuget.org');
     });
 
-    it('includes wildcard CDN domains for dnsmasq mode', () => {
+    it('includes wildcard CDN domains for HAProxy SNI suffix match', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('*.blob.core.windows.net');
       expect(DEFAULT_ALLOWED_HOSTS).toContain('*.vo.msecnd.net');
     });
@@ -206,229 +206,119 @@ describe('DockerNetworkManager', () => {
       });
     });
 
-    describe('restricted mode — dnsmasq+ipset path', () => {
-      it('generates dnsmasq feature detection', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('command -v dnsmasq');
-        expect(script).toContain('command -v ipset');
+    describe('restricted mode — HAProxy SNI allowlist', () => {
+      it('writes an HAProxy config heredoc with the allowlist', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain("cat > /etc/haproxy/haproxy.cfg << 'HAPROXYCFG'");
+        expect(script).toContain('acl allowed_sni var(sess.sni) -m str api.anthropic.com');
+        expect(script).toContain('HAPROXYCFG');
       });
 
-      it('probes iptables-set integration end-to-end (xt_set kernel module)', async () => {
-        // Regression: binary check alone is insufficient — Docker Desktop's
-        // LinuxKit VM ships ipset + iptables but lacks `xt_set`, so
-        // `iptables -m set` fails at runtime with "Can't open socket to ipset".
-        // The probe creates a throwaway set, tries a real -m set rule, and
-        // gates dnsmasq mode on the result.
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('AUTOPOD_USE_DNSMASQ=0');
-        expect(script).toContain('ipset create _autopod_probe hash:net');
-        expect(script).toContain(
-          'iptables -A OUTPUT -m set --match-set _autopod_probe dst -j ACCEPT',
-        );
-        expect(script).toContain('AUTOPOD_USE_DNSMASQ=1');
-        // Cleanup must happen unconditionally so a partially-applied probe
-        // can't leave orphan rules in the chain.
-        expect(script).toContain(
-          'iptables -D OUTPUT -m set --match-set _autopod_probe dst -j ACCEPT 2>/dev/null || true',
-        );
-        expect(script).toContain('ipset destroy _autopod_probe 2>/dev/null || true');
-        // The dnsmasq branch is gated on the probe result, not on binary existence.
-        expect(script).toContain('if [ "$AUTOPOD_USE_DNSMASQ" = "1" ]; then');
-      });
-
-      it('creates ipset named allowed_ips', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('ipset create allowed_ips hash:net');
-      });
-
-      it('pre-seeds ipset with daemon-resolved CIDRs', async () => {
-        const script = await manager.generateFirewallScript(['10.0.0.1']);
-        expect(script).toContain('ipset add allowed_ips "10.0.0.1"');
-      });
-
-      it('resolves host.docker.internal and adds to ipset for MCP access', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('getent ahostsv4 host.docker.internal');
-        expect(script).toContain('ipset add allowed_ips "$_gw_ip"');
-      });
-
-      it('writes dnsmasq config with server and ipset entries', async () => {
-        const script = await manager.generateFirewallScript(['api.nuget.org']);
-        expect(script).toContain('server=/api.nuget.org/127.0.0.11');
-        expect(script).toContain('ipset=/api.nuget.org/allowed_ips');
-      });
-
-      it('converts wildcards to dnsmasq suffix match', async () => {
+      it('converts wildcards into HAProxy suffix-match ACLs', async () => {
         const script = await manager.generateFirewallScript(['*.blob.core.windows.net']);
-        // dnsmasq treats /domain/ as suffix match — *.blob.core.windows.net → blob.core.windows.net
-        expect(script).toContain('server=/blob.core.windows.net/127.0.0.11');
-        expect(script).toContain('ipset=/blob.core.windows.net/allowed_ips');
+        expect(script).toContain('acl allowed_sni var(sess.sni) -m end .blob.core.windows.net');
       });
 
-      it('blocks all other DNS with address=/#/', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('address=/#/');
+      it('REDIRECTs outbound port 443 to HAProxy', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain(
+          'iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d 127.0.0.0/8 -j REDIRECT --to-ports 8443',
+        );
       });
 
-      it('starts dnsmasq on 127.0.0.53', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('listen-address=127.0.0.53');
-        expect(script).toContain('dnsmasq --conf-file=/tmp/dnsmasq-firewall.conf');
+      it('DROPs outbound port 80 (HTTPS-only policy)', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain('iptables -A OUTPUT -p tcp --dport 80 -j DROP');
       });
 
-      it('rewrites resolv.conf to dnsmasq', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('nameserver 127.0.0.53');
-        expect(script).toContain('/etc/resolv.conf');
+      it('allows HAProxy itself to reach upstream via uid-owner match', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain('iptables -A OUTPUT -m owner --uid-owner haproxy -j ACCEPT');
       });
 
-      it('pins dnsmasq group to nobody primary group (avoids dip default)', async () => {
-        // Regression: dnsmasq's compile-time default group ("dip" on Debian) is
-        // not portable. Resolving nobody's primary group at runtime keeps the
-        // config working across Debian/Ubuntu/Alpine base images.
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('NOBODY_GROUP=$(id -gn nobody');
-        expect(script).toContain('group=$NOBODY_GROUP');
-        // Heredoc must be unquoted so $NOBODY_GROUP expands.
-        expect(script).toContain('cat > /tmp/dnsmasq-firewall.conf << DNSCONF');
-        expect(script).not.toContain("cat > /tmp/dnsmasq-firewall.conf << 'DNSCONF'");
+      it('starts HAProxy and reloads with -sf if a PID file is present', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain(
+          'haproxy -f /etc/haproxy/haproxy.cfg -D -p /var/run/haproxy/haproxy.pid',
+        );
+        expect(script).toContain('-sf "$(cat /var/run/haproxy/haproxy.pid)"');
       });
 
-      it('restricts Docker DNS access to dnsmasq user only', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        // Only nobody (dnsmasq user) can reach Docker DNS
-        expect(script).toContain('--dport 53 -d 127.0.0.11 -m owner --uid-owner nobody -j ACCEPT');
-        // Others are rejected
-        expect(script).toContain('--dport 53 -d 127.0.0.11 -j REJECT');
+      it('does not start the deny log receiver inline — that is owned by streamHaproxyDenials', async () => {
+        // Backgrounded socat under `docker exec` doesn't reliably survive the
+        // exec's exit. The daemon-side `streamHaproxyDenials` opens a separate
+        // long-running exec that owns the UDP receiver.
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).not.toContain('socat -u UDP-RECV');
       });
 
-      it('allows traffic via ipset match', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('-m set --match-set allowed_ips dst -j ACCEPT');
+      it('allows DNS using the container default resolver (no in-pod DNS filter)', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
+        // No more dnsmasq listener overriding /etc/resolv.conf
+        expect(script).not.toContain('listen-address=127.0.0.53');
+        expect(script).not.toContain('nameserver 127.0.0.53');
       });
 
-      it('has final REJECT rule', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
+      it('resolves host.docker.internal for daemon gateway access', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain('getent ahostsv4 host.docker.internal');
+        expect(script).toContain('iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+      });
+
+      it('includes explicit gateway IP when provided', async () => {
+        const script = await manager.generateFirewallScript(
+          ['api.anthropic.com'],
+          'restricted',
+          '172.18.0.1',
+        );
+        expect(script).toContain('iptables -A OUTPUT -d "172.18.0.1" -j ACCEPT');
+      });
+
+      it('ACCEPTs sidecar IPs unconditionally before the HAProxy redirect', async () => {
+        const script = await manager.generateFirewallScript(
+          ['api.anthropic.com'],
+          'restricted',
+          undefined,
+          ['172.19.0.5', '172.19.0.6'],
+        );
+        expect(script).toContain('iptables -A OUTPUT -d "172.19.0.5" -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -d "172.19.0.6" -j ACCEPT');
+        const sidecarIdx = script.indexOf('iptables -A OUTPUT -d "172.19.0.5"');
+        const redirectIdx = script.indexOf('REDIRECT --to-ports 8443');
+        expect(sidecarIdx).toBeLessThan(redirectIdx);
+      });
+
+      it('flushes both the filter and nat OUTPUT chains so the script is idempotent', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain('iptables -F OUTPUT 2>/dev/null || true');
+        expect(script).toContain('iptables -t nat -F OUTPUT 2>/dev/null || true');
+      });
+
+      it('has a final REJECT for anything not explicitly accepted or redirected', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
         expect(script).toContain(
           'iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable',
         );
       });
-    });
 
-    describe('restricted mode — dnsmasq DNS-only path (dnsmasq available, ipset/xt_set not)', () => {
-      it('probes for dnsmasq-only mode after ipset probe', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('AUTOPOD_USE_DNSMASQ_ONLY=0');
-        expect(script).toContain(
-          'if [ "$AUTOPOD_USE_DNSMASQ" = "0" ] && command -v dnsmasq >/dev/null 2>&1; then',
-        );
-        expect(script).toContain('AUTOPOD_USE_DNSMASQ_ONLY=1');
-      });
-
-      it('generates the elif branch for dnsmasq-only mode', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('elif [ "$AUTOPOD_USE_DNSMASQ_ONLY" = "1" ]; then');
-      });
-
-      it('writes dnsmasq config with server= lines but no ipset= lines', async () => {
-        const script = await manager.generateFirewallScript(['api.nuget.org']);
-        // In the elif block the server= line should appear (once for ipset mode, once for dns-only)
-        const serverCount = (script.match(/server=\/api\.nuget\.org\//g) || []).length;
-        expect(serverCount).toBe(2); // once per dnsmasq mode branch
-        // ipset= line must only appear in the ipset-mode block, not in the dns-only block
-        // Verify that the elif section does NOT add an extra ipset= line
-        // (The two blocks share dnsmasqDomains so each branch has server= lines; only ipset mode has ipset=)
-        const ipsetLineCount = (script.match(/ipset=\/api\.nuget\.org\//g) || []).length;
-        expect(ipsetLineCount).toBe(1); // only in dnsmasq+ipset mode
-      });
-
-      it('converts wildcards to dnsmasq suffix match in dnsmasq-only mode', async () => {
-        const script = await manager.generateFirewallScript(['*.blob.core.windows.net']);
-        // Both dnsmasq modes should have the suffix-matched server= entry
-        const serverCount = (script.match(/server=\/blob\.core\.windows\.net\//g) || []).length;
-        expect(serverCount).toBe(2);
-        // ipset= should only appear once (ipset mode only)
-        const ipsetCount = (script.match(/ipset=\/blob\.core\.windows\.net\//g) || []).length;
-        expect(ipsetCount).toBe(1);
-      });
-
-      it('allows TCP 443 and 80 outbound in dnsmasq-only mode', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT');
-        expect(script).toContain('iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT');
-      });
-
-      it('restricts Docker DNS to dnsmasq user in dnsmasq-only mode', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        // Same DNS restriction as ipset mode
-        const ownerCount = (
-          script.match(/--dport 53 -d 127\.0\.0\.11 -m owner --uid-owner nobody -j ACCEPT/g) || []
-        ).length;
-        expect(ownerCount).toBe(4); // UDP + TCP per each of the two dnsmasq branches
-      });
-
-      it('resolves daemon gateway in dnsmasq-only mode', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        // gateway resolution appears in both dnsmasq branches
-        const gatewayCount = (script.match(/getent ahostsv4 host\.docker\.internal/g) || []).length;
-        expect(gatewayCount).toBe(2);
-      });
-
-      it('has REJECT rule in dnsmasq-only mode', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        // Three branches now each end with REJECT (ipset, dns-only, CIDR)
-        const rejectCount = (script.match(/iptables -A OUTPUT -j REJECT/g) || []).length;
-        expect(rejectCount).toBeGreaterThanOrEqual(3);
-      });
-
-      it('prints correct echo for dnsmasq-only mode', async () => {
+      it('contains no dnsmasq / ipset / xt_set references', async () => {
         const script = await manager.generateFirewallScript([
-          'example.com',
+          'api.anthropic.com',
           '*.blob.core.windows.net',
         ]);
-        expect(script).toContain('restricted mode (dnsmasq DNS-only)');
-        expect(script).toContain('port 443/80 open');
-      });
-    });
-
-    describe('restricted mode — CIDR fallback path', () => {
-      it('includes fallback in else branch', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        expect(script).toContain('else');
-        expect(script).toContain('falling back to CIDR mode');
+        expect(script).not.toMatch(/\bdnsmasq\b/);
+        expect(script).not.toMatch(/\bipset\b/);
+        expect(script).not.toMatch(/xt_set/);
+        expect(script).not.toMatch(/--match-set/);
       });
 
-      it('fallback allows DNS broadly', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        // In the else branch, DNS is allowed to any resolver
-        expect(script).toMatch(/else[\s\S]*-p udp --dport 53 -j ACCEPT/);
+      it('drops unsafe hosts defensively before they reach the HAProxy config', async () => {
+        const script = await manager.generateFirewallScript(['api.anthropic.com', 'evil;rm -rf /']);
+        expect(script).toContain('acl allowed_sni var(sess.sni) -m str api.anthropic.com');
+        expect(script).not.toContain('evil;rm -rf /');
       });
-
-      it('fallback resolves wildcards by stripping prefix', async () => {
-        const script = await manager.generateFirewallScript(['*.blob.core.windows.net']);
-        // In container_resolve, wildcard stripped to parent domain
-        expect(script).toContain('"blob.core.windows.net"');
-      });
-
-      it('fallback has REJECT rule', async () => {
-        const script = await manager.generateFirewallScript(['example.com']);
-        // All three branches (dnsmasq+ipset, dnsmasq-only, CIDR) end with REJECT
-        const rejectCount = (script.match(/iptables -A OUTPUT -j REJECT/g) || []).length;
-        expect(rejectCount).toBeGreaterThanOrEqual(3); // one per branch
-      });
-    });
-
-    it('resolves real hostnames to /32 CIDRs for pre-seeding (fix 2.5)', async () => {
-      const script = await manager.generateFirewallScript(['api.nuget.org']);
-      // Exact /32 host routes — not the former /24 subnet expansion
-      expect(script).toContain('/32');
-      expect(script).not.toContain('.0/24');
-    });
-
-    it('gracefully skips unresolvable hostnames', async () => {
-      const script = await manager.generateFirewallScript(['this-host-does-not-exist.invalid']);
-      // Should still produce a valid script
-      expect(script).toContain('iptables -A OUTPUT -j REJECT');
     });
 
     describe('ip6tables rules (fix 2.2)', () => {
@@ -456,12 +346,12 @@ describe('DockerNetworkManager', () => {
         );
       });
 
-      it('restricted mode ip6tables rules appear after the fi closing the dnsmasq/CIDR if-else', async () => {
+      it('restricted mode ip6tables rules appear after the HAProxy setup', async () => {
         const script = await manager.generateFirewallScript(['example.com']);
-        const fiIdx = script.lastIndexOf('\nfi\n');
+        const haproxyIdx = script.indexOf('haproxy -f /etc/haproxy/haproxy.cfg');
         const ip6tablesIdx = script.indexOf('ip6tables -F OUTPUT');
-        expect(fiIdx).toBeGreaterThan(0);
-        expect(ip6tablesIdx).toBeGreaterThan(fiIdx);
+        expect(haproxyIdx).toBeGreaterThan(0);
+        expect(ip6tablesIdx).toBeGreaterThan(haproxyIdx);
       });
 
       it('allow-all mode does NOT include ip6tables rules', async () => {

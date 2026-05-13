@@ -54,6 +54,10 @@ import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isExpectedDockerError } from '../containers/docker-helpers.js';
 import { networkNameForPod } from '../containers/docker-network-manager.js';
+import {
+  type HaproxyDenyStreamHandle,
+  streamHaproxyDenials,
+} from '../containers/haproxy-deny-stream.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import {
   getAutoAttachedSidecars,
@@ -95,11 +99,12 @@ import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
+import { reconcileLocalSessions } from './local-reconciler.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
+import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
-import { reconcileLocalSessions } from './local-reconciler.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
 import {
@@ -123,7 +128,6 @@ import {
   isTerminalState,
   validateTransition,
 } from './state-machine.js';
-import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
 import {
@@ -556,7 +560,6 @@ export interface NetworkManager {
     registries?: PrivateRegistry[],
     podId?: string,
     extraAllowedIps?: string[],
-    extraAllowedDnsNames?: string[],
   ): Promise<{ networkName: string; firewallScript: string } | null>;
   getGatewayIp(podId?: string): Promise<string>;
   /** Remove the per-pod bridge — called from pod cleanup. Idempotent. */
@@ -868,6 +871,53 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    */
   const mergeQueue = new MergeQueue();
 
+  /** Per-pod HAProxy denial log receivers. Started after container spawn in
+   *  restricted mode; stopped from `cleanupContainer`. Map is the source of
+   *  truth — any cleanup path that goes through `cleanupContainer` reaps the
+   *  handle. */
+  const haproxyDenyHandles = new Map<string, HaproxyDenyStreamHandle>();
+
+  /** Best-effort: start the HAProxy deny log receiver for a restricted-mode
+   *  pod and wire each denied SNI to a `pod.firewall_denied` event. Failures
+   *  here must not block the pod — denial visibility is informational. */
+  async function startHaproxyDenyReceiver(pod: Pod, containerId: string): Promise<void> {
+    const cm = containerManagerFactory.get(pod.executionTarget);
+    try {
+      const handle = await streamHaproxyDenials(
+        cm,
+        containerId,
+        ({ sni, src }) => {
+          eventBus.emit({
+            type: 'pod.firewall_denied',
+            timestamp: new Date().toISOString(),
+            podId: pod.id,
+            sni,
+            src,
+          });
+        },
+        logger,
+      );
+      haproxyDenyHandles.set(pod.id, handle);
+    } catch (err) {
+      logger.warn(
+        { err, podId: pod.id, containerId },
+        'Failed to start HAProxy deny receiver — pod runs without denial visibility',
+      );
+    }
+  }
+
+  /** Stop the deny receiver for a pod, if one is registered. Idempotent. */
+  async function stopHaproxyDenyReceiver(podId: string): Promise<void> {
+    const handle = haproxyDenyHandles.get(podId);
+    if (!handle) return;
+    haproxyDenyHandles.delete(podId);
+    try {
+      await handle.stop();
+    } catch (err) {
+      logger.warn({ err, podId }, 'Failed to stop HAProxy deny receiver');
+    }
+  }
+
   /** Destroy the per-pod Docker bridge. Must be called AFTER the pod + all
    *  sidecars are killed, otherwise Docker refuses with "has active endpoints".
    *  No-ops when the network manager doesn't support teardown (tests / older
@@ -903,6 +953,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     mode: 'kill' | 'stop' = 'kill',
   ): Promise<void> {
     if (!pod.containerId) return;
+    // Stop denial receiver before killing/stopping the container so the
+    // long-running socat exec gets a clean shutdown signal.
+    await stopHaproxyDenyReceiver(pod.id);
     const cm = containerManagerFactory.get(pod.executionTarget);
     const op = mode === 'kill' ? cm.kill(pod.containerId) : cm.stop(pod.containerId);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -3466,7 +3519,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           daemonGatewayIp &&
           profile.networkPolicy?.enabled
         ) {
-          const sidecarDnsNames = sidecarSpecs.map(({ spec }) => spec.name);
           const finalConfig = await networkManager.buildNetworkConfig(
             profile.networkPolicy,
             initialMergedMcpServers,
@@ -3474,7 +3526,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             profile.privateRegistries,
             podId,
             sidecarIps,
-            sidecarDnsNames,
           );
           if (finalConfig) {
             firewallScript = finalConfig.firewallScript;
@@ -3557,6 +3608,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
           throw err;
+        }
+
+        // Restricted-mode pods run HAProxy as their egress allowlist; start
+        // the denial receiver so blocked SNIs surface as pod events. Best
+        // effort — failure here doesn't gate the pod.
+        if (profile.networkPolicy?.enabled && profile.networkPolicy.mode === 'restricted') {
+          await startHaproxyDenyReceiver(pod, containerId);
         }
 
         // Copy worktree content from bind mount to container's native filesystem.
@@ -8247,7 +8305,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           try {
             const gatewayIp = await networkManager.getGatewayIp(pod.id);
             const sidecarIps = await collectSidecarIps(pod);
-            const sidecarDnsNames = Object.keys(pod.sidecarContainerIds ?? {});
             const netConfig = await networkManager.buildNetworkConfig(
               profile.networkPolicy,
               mergedServers,
@@ -8255,7 +8312,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               profile.privateRegistries,
               pod.id,
               sidecarIps,
-              sidecarDnsNames,
             );
             if (!netConfig) return;
             // biome-ignore lint/style/noNonNullAssertion: runningSessions always have a containerId
@@ -8745,7 +8801,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // container's overlayfs.
       if (pod.containerId) {
         const cm = containerManagerFactory.get(pod.executionTarget);
-        const recovered = await recoverWorktreeFromContainer(pod.containerId, pod.worktreePath, cm, pod.id);
+        const recovered = await recoverWorktreeFromContainer(
+          pod.containerId,
+          pod.worktreePath,
+          cm,
+          pod.id,
+        );
         if (recovered) {
           try {
             const profileForRecovery = profileStore.get(pod.profileName);

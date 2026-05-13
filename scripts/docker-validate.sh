@@ -137,6 +137,19 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
+# ─── Egress firewall validation ──────────────────────────────
+# Validates the pod-side HAProxy SNI allowlist against a real base image.
+# Skipped automatically when Docker is unavailable (egress-validate.sh
+# exits 0 in that case).
+step "Validating pod egress firewall (HAProxy SNI)"
+if ./scripts/egress-validate.sh >/tmp/egress-validate.log 2>&1; then
+  ok "Egress firewall validation passed"
+else
+  fail "Egress firewall validation failed (see /tmp/egress-validate.log)"
+  tail -30 /tmp/egress-validate.log
+  ERRORS=$((ERRORS + 1))
+fi
+
 # ─── Summary ─────────────────────────────────────────────────
 echo ""
 if [ "$ERRORS" -eq 0 ]; then
