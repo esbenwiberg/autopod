@@ -73,6 +73,12 @@ export function generateHaproxyConfig(input: HaproxyConfigInput): string {
   return `global
   log 127.0.0.1:${HAPROXY_LOG_PORT} local0
   maxconn 1024
+  # Drop privileges to the haproxy user after binding. The firewall's
+  # \`--uid-owner haproxy\` ACCEPT rule is the only thing that lets HAProxy's
+  # spliced upstream connections past the final REJECT — without this the
+  # workers stay root and every upstream connect is refused.
+  user haproxy
+  group haproxy
 
 defaults
   mode tcp

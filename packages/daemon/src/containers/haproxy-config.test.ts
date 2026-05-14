@@ -74,6 +74,12 @@ describe('generateHaproxyConfig', () => {
     expect(cfg).toContain(`log 127.0.0.1:${HAPROXY_LOG_PORT} local0`);
   });
 
+  it('drops privileges to the haproxy user so the uid-owner firewall rule matches', () => {
+    const cfg = generateHaproxyConfig({ allowedHosts: ['api.anthropic.com'] });
+    expect(cfg).toContain('user haproxy');
+    expect(cfg).toContain('group haproxy');
+  });
+
   it('produces a config even with an empty allowlist (rejects everything)', () => {
     const cfg = generateHaproxyConfig({ allowedHosts: [] });
     expect(cfg).toContain('frontend tls-in');
