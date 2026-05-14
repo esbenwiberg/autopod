@@ -471,9 +471,16 @@ export class DockerNetworkManager {
     // `docker exec` doesn't reliably survive the exec's exit.
 
     // REDIRECT outbound 443 → HAProxy, drop 80, REJECT the rest.
-    lines.push('# Redirect outbound 443 → HAProxy SNI allowlist');
+    // The `! --uid-owner haproxy` exemption is load-bearing: HAProxy's own
+    // spliced upstream connections also target port 443, and without the
+    // exemption they get REDIRECT-ed straight back into HAProxy's own
+    // listener — an infinite loopback that surfaces as SSL_ERROR_SYSCALL /
+    // cert-verification failures in the agent. Owner-matched traffic skips
+    // the redirect and goes upstream directly (the filter-table uid-owner
+    // ACCEPT rule below then lets it past the final REJECT).
+    lines.push('# Redirect outbound 443 → HAProxy SNI allowlist (HAProxy itself exempt)');
     lines.push(
-      `iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d 127.0.0.0/8 -j REDIRECT --to-ports ${HAPROXY_LISTEN_PORT}`,
+      `iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d 127.0.0.0/8 -m owner ! --uid-owner haproxy -j REDIRECT --to-ports ${HAPROXY_LISTEN_PORT}`,
     );
     lines.push('');
     lines.push('# Drop port 80 entirely (HTTPS-only policy)');

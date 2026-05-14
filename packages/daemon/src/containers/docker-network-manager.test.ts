@@ -229,10 +229,13 @@ describe('DockerNetworkManager', () => {
         expect(script).toContain('acl allowed_sni var(sess.sni) -m end .blob.core.windows.net');
       });
 
-      it('REDIRECTs outbound port 443 to HAProxy', async () => {
+      it('REDIRECTs outbound port 443 to HAProxy, exempting HAProxy itself', async () => {
+        // HAProxy's spliced upstream connections also hit port 443 — without
+        // the `! --uid-owner haproxy` exemption they get redirected back into
+        // HAProxy's own listener (infinite loopback → SSL_ERROR_SYSCALL).
         const script = await manager.generateFirewallScript(['api.anthropic.com']);
         expect(script).toContain(
-          'iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d 127.0.0.0/8 -j REDIRECT --to-ports 8443',
+          'iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d 127.0.0.0/8 -m owner ! --uid-owner haproxy -j REDIRECT --to-ports 8443',
         );
       });
 
