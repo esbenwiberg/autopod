@@ -30,6 +30,11 @@ export {
   type NudgeMessage,
 } from './nudge-repository.js';
 export {
+  createFixFeedbackRepository,
+  type FixFeedbackRepository,
+  type FixFeedback,
+} from './fix-feedback-repository.js';
+export {
   createValidationRepository,
   type ValidationRepository,
   type StoredValidation,

@@ -320,6 +320,63 @@ describe('Pod Lifecycle E2E', () => {
     });
   });
 
+  describe('Fix-pod flow: merge_pending → spawn fix → drain queue → push → complete', () => {
+    it('drains queued feedback into the fix task and completes the fix pod without merging', async () => {
+      const ctx = createTestContext();
+      const prManager = createMockPrManager();
+      ctx.deps.prManagerFactory = () => prManager;
+      const manager = createPodManager(ctx.deps);
+
+      // Root pod: drive it to merge_pending with a PR + worktree.
+      const root = manager.createSession(
+        { profileName: 'test-profile', task: 'Add a settings page' },
+        'user-1',
+      );
+      for (const status of [
+        'provisioning',
+        'running',
+        'validating',
+        'validated',
+        'approved',
+        'merging',
+        'merge_pending',
+      ] as const) {
+        ctx.podRepo.update(root.id, { status });
+      }
+      ctx.podRepo.update(root.id, {
+        prUrl: 'https://github.com/org/repo/pull/42',
+        worktreePath: '/tmp/worktree/root',
+      });
+
+      // Two rounds of feedback queued before the fix pod even starts.
+      await manager.spawnFixSession(root.id, 'CI lint is failing on settings.tsx');
+      await manager.spawnFixSession(root.id, 'reviewer: rename `cfg` to `config`');
+
+      const fixPodId = manager.getSession(root.id).fixPodId;
+      expect(fixPodId).toBeTruthy();
+      if (!fixPodId) throw new Error('fix pod was not spawned');
+      expect(ctx.fixFeedbackRepo.count(root.id)).toBe(2);
+
+      // Process the fix pod — it drains the queue at the `running` transition,
+      // builds its task, validates, rebases + pushes, and completes.
+      await manager.processPod(fixPodId);
+
+      const fixPod = manager.getSession(fixPodId);
+      expect(fixPod.status).toBe('complete');
+      expect(fixPod.completedAt).not.toBeNull();
+      // Both queued messages were folded into the fix task.
+      expect(fixPod.task).toContain('CI lint is failing on settings.tsx');
+      expect(fixPod.task).toContain('rename `cfg` to `config`');
+      // The queue is drained exactly once — nothing left for a phantom re-run.
+      expect(ctx.fixFeedbackRepo.count(root.id)).toBe(0);
+
+      // The fix pod pushes its branch but NEVER merges — the parent's poller
+      // owns the actual PR merge.
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalled();
+      expect(prManager.mergePr).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Kill flow', () => {
     it('kills a running pod and cleans up resources', async () => {
       // Create a runtime that yields events slowly so we can kill mid-flight

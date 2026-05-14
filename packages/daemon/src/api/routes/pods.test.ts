@@ -19,6 +19,7 @@ import {
   createPodQueue,
   createPodRepository,
 } from '../../pods/index.js';
+import { createFixFeedbackRepository } from '../../pods/fix-feedback-repository.js';
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
 import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { createProfileStore } from '../../profiles/index.js';
@@ -131,6 +132,7 @@ describe('GET /pods/analytics/reliability', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -189,6 +191,7 @@ describe('GET /pods/analytics/reliability', () => {
       podRepo,
       escalationRepo,
       nudgeRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: {
@@ -378,6 +381,7 @@ describe('GET /pods/analytics/quality', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -436,6 +440,7 @@ describe('GET /pods/analytics/quality', () => {
       podRepo,
       escalationRepo,
       nudgeRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: {
@@ -616,6 +621,7 @@ describe('POST /pods safety_events instrumentation', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -674,6 +680,7 @@ describe('POST /pods safety_events instrumentation', () => {
       podRepo,
       escalationRepo,
       nudgeRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: {
@@ -825,6 +832,7 @@ describe('GET /pods/analytics/throughput', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -883,6 +891,7 @@ describe('GET /pods/analytics/throughput', () => {
       podRepo,
       escalationRepo,
       nudgeRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: {
@@ -1054,6 +1063,7 @@ describe('GET /pods/analytics/escalations', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -1112,6 +1122,7 @@ describe('GET /pods/analytics/escalations', () => {
       podRepo,
       escalationRepo,
       nudgeRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: {
@@ -1283,6 +1294,7 @@ describe('GET /pods/analytics/models', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -1340,6 +1352,7 @@ describe('GET /pods/analytics/models', () => {
       podRepo,
       escalationRepo,
       nudgeRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: {
@@ -1505,6 +1518,7 @@ describe('GET /pods/:podId/preview/status', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -1567,6 +1581,7 @@ describe('GET /pods/:podId/preview/status', () => {
       podRepo,
       escalationRepo,
       nudgeRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: {
@@ -1705,5 +1720,244 @@ describe('GET /pods/:podId/preview/status', () => {
     });
 
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('POST /pods/:podId/spawn-fix', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+  let enqueuedSessions: string[];
+
+  beforeEach(async () => {
+    podSeq = 0;
+    db = createTestDb();
+    enqueuedSessions = [];
+
+    const profileStore = createProfileStore(db);
+    const podRepo = createPodRepository(db);
+    const eventRepo = createEventRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const authModule = createMockAuthModule();
+
+    const worktreeManager = {
+      create: vi.fn(),
+      cleanup: vi.fn(),
+      getDiffStats: vi.fn(),
+      getDiff: vi.fn(),
+      mergeBranch: vi.fn(),
+      commitFiles: vi.fn(),
+      pushBranch: vi.fn(),
+      getCommitLog: vi.fn(),
+    };
+
+    const runtimeRegistry = {
+      get: vi.fn().mockReturnValue({
+        type: 'claude' as const,
+        spawn: vi.fn(),
+        resume: vi.fn(),
+        abort: vi.fn(),
+        suspend: vi.fn(),
+      }),
+    };
+
+    const validationEngine = { validate: vi.fn() };
+
+    const podManager = createPodManager({
+      podRepo,
+      escalationRepo,
+      nudgeRepo,
+      fixFeedbackRepo,
+      profileStore,
+      eventBus,
+      containerManagerFactory: {
+        get: vi.fn(() => ({
+          spawn: vi.fn(),
+          kill: vi.fn(),
+          stop: vi.fn(),
+          start: vi.fn(),
+          refreshFirewall: vi.fn(),
+          writeFile: vi.fn(),
+          readFile: vi.fn(),
+          getStatus: vi.fn().mockResolvedValue('running' as const),
+          execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+          execStreaming: vi.fn(),
+        })),
+      },
+      worktreeManager,
+      runtimeRegistry,
+      validationEngine,
+      // Recording enqueue — the fix pod never actually runs, so the
+      // fix-feedback queue stays deterministic across back-to-back requests.
+      enqueueSession: (id) => {
+        enqueuedSessions.push(id);
+      },
+      mcpBaseUrl: 'http://localhost:3100',
+      daemonConfig: { mcpServers: [], claudeMdSections: [] },
+      logger,
+    });
+
+    const podBridge = {
+      createEscalation: vi.fn(),
+      resolveEscalation: vi.fn(),
+      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getMaxAiCalls: vi.fn().mockReturnValue(5),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
+      getReviewerModel: vi.fn().mockReturnValue('sonnet'),
+      callReviewerModel: vi.fn().mockResolvedValue('ok'),
+      incrementEscalationCount: vi.fn(),
+      reportPlan: vi.fn(),
+      reportProgress: vi.fn(),
+      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      executeAction: vi.fn(),
+      getAvailableActions: vi.fn().mockReturnValue([]),
+      writeFileInContainer: vi.fn(),
+      execInContainer: vi.fn(),
+    };
+
+    app = await createServer({
+      authModule,
+      podManager,
+      profileStore,
+      eventBus,
+      eventRepo,
+      podBridge,
+      pendingRequestsByPod: new Map(),
+      db,
+      logLevel: 'silent',
+      prettyLog: false,
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: '/profiles',
+      headers: authHeaders,
+      payload: {
+        name: 'test-profile',
+        repoUrl: 'https://github.com/org/repo',
+        buildCommand: 'npm run build',
+        startCommand: 'node server.js --port $PORT',
+      },
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  /** Insert a pod and put it in `merge_pending` with a PR + worktree. */
+  function insertMergePendingPod(id?: string): string {
+    const podId = insertPod(db, { id, status: 'merge_pending' });
+    db.prepare('UPDATE pods SET pr_url = ?, worktree_path = ? WHERE id = ?').run(
+      'https://github.com/org/repo/pull/1',
+      '/tmp/wt/x',
+      podId,
+    );
+    return podId;
+  }
+
+  it('queues three back-to-back messages onto one canonical fix pod', async () => {
+    const podId = insertMergePendingPod();
+
+    const responses = [];
+    for (const message of ['fix lint', 'fix types', 'fix tests']) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/spawn-fix`,
+        headers: authHeaders,
+        payload: { message },
+      });
+      expect(res.statusCode).toBe(202);
+      responses.push(res.json());
+    }
+
+    expect(responses[0]).toMatchObject({ ok: true, queued: true, queueLength: 1 });
+    expect(responses[1]).toMatchObject({ ok: true, queued: true, queueLength: 2 });
+    expect(responses[2]).toMatchObject({ ok: true, queued: true, queueLength: 3 });
+
+    // Same canonical fix pod across all three calls.
+    const fixPodId = responses[0].fixPodId;
+    expect(typeof fixPodId).toBe('string');
+    expect(responses[1].fixPodId).toBe(fixPodId);
+    expect(responses[2].fixPodId).toBe(fixPodId);
+
+    // Exactly one fix pod row exists.
+    const fixPods = db.prepare('SELECT id FROM pods WHERE linked_pod_id = ?').all(podId);
+    expect(fixPods).toHaveLength(1);
+    expect((fixPods[0] as { id: string }).id).toBe(fixPodId);
+  });
+
+  it('returns 409 with parent_terminal for a terminal parent pod', async () => {
+    const podId = insertPod(db, { status: 'complete' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/spawn-fix`,
+      headers: authHeaders,
+      payload: { message: 'too late' },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ ok: false, reason: 'parent_terminal' });
+    // No fix pod spawned.
+    expect(db.prepare('SELECT id FROM pods WHERE linked_pod_id = ?').all(podId)).toHaveLength(0);
+  });
+
+  it('returns 400 for a missing message body', async () => {
+    const podId = insertMergePendingPod();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/spawn-fix`,
+      headers: authHeaders,
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for an empty message string', async () => {
+    const podId = insertMergePendingPod();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/spawn-fix`,
+      headers: authHeaders,
+      payload: { message: '' },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 404 for an unknown pod id', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pods/does-not-exist/spawn-fix',
+      headers: authHeaders,
+      payload: { message: 'fix it' },
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('spawns a fix pod and reports queue state for a single message', async () => {
+    const podId = insertMergePendingPod();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/spawn-fix`,
+      headers: authHeaders,
+      payload: { message: 'please rebase and fix the failing check' },
+    });
+
+    expect(res.statusCode).toBe(202);
+    const body = res.json();
+    expect(body).toMatchObject({ ok: true, queued: true, queueLength: 1 });
+    expect(body.fixPodId).toBeTruthy();
+    expect(enqueuedSessions).toContain(body.fixPodId);
   });
 });

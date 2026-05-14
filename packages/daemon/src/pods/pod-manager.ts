@@ -28,6 +28,7 @@ import type {
   Profile,
   RequestCredentialPayload,
   SastResult,
+  SpawnFixResponse,
   StdioInjectedMcpServer,
   TaskReviewResult,
   ValidationFinding,
@@ -98,6 +99,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import { formatFeedback } from './feedback-formatter.js';
+import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import { reconcileLocalSessions } from './local-reconciler.js';
 import type { NudgeRepository } from './nudge-repository.js';
@@ -324,6 +326,52 @@ export function buildPrFixTask(
 
   sections.push('After pushing your fixes, the PR will be re-evaluated automatically.');
   return sections.join('\n');
+}
+
+/**
+ * Concatenates a PR's actionable failures (CI check failures + CHANGES_REQUESTED
+ * review comments) into a single sanitized block, suitable for enqueueing into
+ * the fix-pod feedback queue. Reviewer/CI content is attacker-controlled, so it
+ * is run through the PI + PII pipeline before embedding.
+ *
+ * Exported for unit testing only.
+ */
+export function buildActionableFailureSummary(status: PrMergeStatus, profile: Profile): string {
+  const sanitizeExternal = (text: string): string =>
+    processContent(text, {
+      quarantine: profile.contentProcessing?.quarantine ?? { enabled: true },
+      sanitization: profile.contentProcessing?.sanitization ?? { preset: 'standard' },
+    }).text;
+
+  const sections: string[] = [];
+
+  if (status.ciFailures.length > 0) {
+    sections.push('## CI Check Failures\n');
+    for (const ci of status.ciFailures) {
+      sections.push(`### ${ci.name} (${ci.conclusion})`);
+      if (ci.detailsUrl) sections.push(`Details: ${ci.detailsUrl}`);
+      if (ci.annotations.length > 0) {
+        sections.push('Annotations:');
+        for (const ann of ci.annotations) {
+          sections.push(
+            `  - ${sanitizeExternal(ann.path)}: ${sanitizeExternal(ann.message)} [${ann.annotationLevel}]`,
+          );
+        }
+      }
+      sections.push('');
+    }
+  }
+
+  if (status.reviewComments.length > 0) {
+    sections.push('## Review Comments\n');
+    for (const rc of status.reviewComments) {
+      const prefix = rc.path ? `\`${sanitizeExternal(rc.path)}\`: ` : '';
+      sections.push(`${prefix}${sanitizeExternal(rc.body)}`);
+      sections.push('');
+    }
+  }
+
+  return sections.join('\n').trim();
 }
 
 /** Auto-stop preview containers after this duration (default 10 minutes). */
@@ -570,6 +618,8 @@ export interface PodManagerDependencies {
   podRepo: PodRepository;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
+  /** Queue of feedback messages drained into the next fix-pod iteration. */
+  fixFeedbackRepo: FixFeedbackRepository;
   validationRepo?: ValidationRepository;
   progressEventRepo?: ProgressEventRepository;
   profileStore: ProfileStore;
@@ -751,13 +801,23 @@ export interface PodManager {
   /** Install gh or az CLI into a running pod container without touching credentials. */
   installCliTool(podId: string, tool: 'gh' | 'az'): Promise<void>;
   /**
-   * Manually spawn a fix pod for a merge_pending or complete pod, bypassing the
-   * automatic detection guards. Clears any stale fixPodId first so the fix
-   * is created immediately rather than waiting for the next poll cycle.
-   * Bumps maxPrFixAttempts if the current cap would otherwise block spawn.
-   * Optional userMessage is prepended to the fix task as reviewer instructions.
+   * Manually queue a fix-feedback message for a `merge_pending` pod and ask
+   * `maybeSpawnFixSession` to spawn/recycle the canonical fix pod. The message
+   * is enqueued onto the parent's fix-feedback queue and built into the fix
+   * pod's task when it transitions to `running`. Bumps maxPrFixAttempts if the
+   * current cap would otherwise block the spawn. Throws 409 for terminal or
+   * fix-pod parents.
    */
   spawnFixSession(podId: string, userMessage?: string): Promise<void>;
+  /**
+   * Queue-driven fix-pod request used by the HTTP API. Enqueues `message` onto
+   * the parent's fix-feedback queue and asks `maybeSpawnFixSession` to
+   * spawn/recycle the canonical fix pod if needed. Returns the resulting queue
+   * state. A terminal parent yields `{ ok: false, reason: 'parent_terminal' }`
+   * rather than throwing; a missing parent throws `PodNotFoundError` (404) and
+   * a fix pod passed as parent throws `AutopodError` (409).
+   */
+  requestFixSession(podId: string, message: string): Promise<SpawnFixResponse>;
   /**
    * Retry PR creation for a complete pod whose PR was never successfully created.
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
@@ -835,6 +895,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo,
     escalationRepo,
     nudgeRepo,
+    fixFeedbackRepo,
     profileStore,
     eventBus,
     containerManagerFactory,
@@ -1131,7 +1192,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const mergePollers = new Map<string, ReturnType<typeof setInterval>>();
 
   const DEFAULT_MERGE_POLL_INTERVAL_MS = 60_000;
-  const DEFAULT_FIX_POD_COOLDOWN_MS = 10 * 60 * 1_000;
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const validationAbortControllers = new Map<string, AbortController>();
@@ -1228,16 +1288,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   };
 
   /**
-   * Spawns a new child fix pod on the same branch when the PR has actionable
-   * failures (CI check failures or CHANGES_REQUESTED review comments).
-   * Guards against double-spawning and enforces maxPrFixAttempts.
-   * Lifted to outer scope so both the merge poller and spawnFixSession can call it.
+   * A pod whose fix cycle is over: `complete`, `killed`, or `failed`. The
+   * global `isTerminalState` excludes `failed` (failed pods are resumable),
+   * but for fix-pod purposes a `failed` parent has no live merge poller to
+   * drive a fix into, and a `failed` fix pod is just as recyclable as a
+   * completed one. This is the single notion both cases share.
+   */
+  const isFixCycleTerminal = (status: PodStatus): boolean =>
+    isTerminalState(status) || status === 'failed';
+
+  /**
+   * Ensures the canonical fix pod for a parent PR is alive and queued.
+   *
+   * Queue-driven: callers MUST `fixFeedbackRepo.enqueue(parentId, message)`
+   * before calling this. The queued feedback is drained into the fix pod's
+   * task at the moment it transitions to `running` (see `processPod`), so this
+   * function never builds the task itself — it only decides whether to
+   * spawn/recycle a fix pod, or no-op because one is already alive (the
+   * running iteration recycles on completion and drains the queue then).
+   *
+   * One `pods` row per parent PR: a terminal fix pod is recycled via the legal
+   * `complete|failed|killed → queued` transition rather than spawning a new
+   * child. Lifted to outer scope so both the merge poller and `spawnFixSession`
+   * can call it.
    */
   const maybeSpawnFixSession = async (
     parentSessionId: string,
-    status: PrMergeStatus,
-    userMessage?: string,
-    bypassCooldown = false,
+    _status: PrMergeStatus,
   ): Promise<void> => {
     // Re-read from DB to avoid stale closure state across 60s intervals
     const parent = podRepo.getOrThrow(parentSessionId);
@@ -1249,34 +1326,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return;
     }
 
-    const profile = profileStore.get(parent.profileName);
+    // Guard: parent already terminal — nothing to fix. The API surfaces
+    // `parent_terminal` to the user; the poller simply has nothing to do.
+    if (isFixCycleTerminal(parent.status)) {
+      logger.debug(
+        { podId: parentSessionId, status: parent.status },
+        'Parent pod terminal — skipping fix-pod spawn',
+      );
+      return;
+    }
 
-    // Guard: a fix pod is already alive
-    let reuseFixPodCandidate: Pod | null = null;
+    // Guard: a fix pod is already alive. The queue already holds the new
+    // message; the running iteration drains it on completion-and-recycle.
+    let recycleCandidate: Pod | null = null;
     if (parent.fixPodId) {
       try {
         const fix = podRepo.getOrThrow(parent.fixPodId);
-        const fixIsLive =
-          fix.status !== 'complete' && fix.status !== 'killed' && fix.status !== 'failed';
-        if (fixIsLive) {
+        if (!isFixCycleTerminal(fix.status)) {
           logger.debug(
             { podId: parentSessionId, fixPodId: parent.fixPodId },
-            'Fix pod already active — skipping spawn',
+            'Fix pod already active — message queued for next iteration',
           );
           return;
         }
-        reuseFixPodCandidate = fix;
+        recycleCandidate = fix;
       } catch {
-        // Fix pod not found — treat as terminal, fall through
+        // Fix pod row gone — treat as no live fix pod, fall through to spawn.
       }
-      if (profile.reuseFixPod !== true) {
-        // Clear stale fixPodId and return — let the *next* poll cycle decide whether
-        // to spawn. This gives CI time to restart and re-run on the fix's new commits
-        // before we evaluate failures again (e.g. SonarCloud takes a full rebuild).
-        podRepo.update(parentSessionId, { fixPodId: null });
-        return;
-      }
-      // reuse path: keep fixPodId so we re-enqueue the same pod below.
     }
 
     // Guard: max retries exhausted
@@ -1292,56 +1368,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       stopMergePolling(parentSessionId);
       logger.warn(
         { podId: parentSessionId, attempts: parent.prFixAttempts },
-        'Merge polling: max fix attempts exhausted — pod failed',
+        'Fix-pod spawn: max fix attempts exhausted — pod failed',
       );
       return;
     }
 
-    // Guard: per-parent cooldown between fix-pod spawns. Defaults to 10 minutes
-    // to prevent a fast-failing CI from burning all fix attempts in a single
-    // burst; profiles can override (incl. 0 to disable). Manual user-triggered
-    // spawns bypass — the user is the explicit override, and skipping silently
-    // here would also drop their userMessage on the floor.
-    const cooldownMs =
-      profile.fixPodCooldownSec !== undefined && profile.fixPodCooldownSec !== null
-        ? profile.fixPodCooldownSec * 1_000
-        : DEFAULT_FIX_POD_COOLDOWN_MS;
-    if (!bypassCooldown && cooldownMs > 0 && parent.lastFixPodSpawnedAt) {
-      const elapsed = Date.now() - new Date(parent.lastFixPodSpawnedAt).getTime();
-      if (elapsed < cooldownMs) {
-        const remainingSec = Math.ceil((cooldownMs - elapsed) / 1_000);
-        logger.debug(
-          { podId: parentSessionId, remainingSec },
-          'Merge polling: fix-pod cooldown active — skipping spawn',
-        );
-        return;
-      }
-    }
-
+    const profile = profileStore.get(parent.profileName);
     const newAttempt = (parent.prFixAttempts ?? 0) + 1;
-    const fixTask = buildPrFixTask(parent, status, podRepo, profile, userMessage);
 
     // In a single-PR series, all pods share the root's branch but only the
     // PR-owning pod has prUrl set. The triggering pod's `branch` field can
-    // diverge from the PR's actual source branch (e.g. last pod was created
-    // with its own branch instead of inheriting), so resolve the PR owner
+    // diverge from the PR's actual source branch, so resolve the PR owner
     // and take branch/baseBranch/prUrl from it. Other prModes own their own
     // PR per pod, so the parent's fields are correct.
     const branchSource = resolveBranchSource(parent);
 
-    // Long-lived fix pod path: when `profile.reuseFixPod` is true and we
-    // have a terminal-state fix pod from a previous round, re-enqueue THAT
-    // pod with the new task instead of creating a new child. This keeps the
-    // "one fix pod per PR" invariant the user sees in the UI.
-    if (reuseFixPodCandidate && profile.reuseFixPod === true) {
-      const fixPodId = reuseFixPodCandidate.id;
-      const newIteration = (reuseFixPodCandidate.fixIteration ?? 0) + 1;
+    // Recycle the terminal fix pod via the legal `complete|failed|killed →
+    // queued` transition rather than creating a new child — keeps the "one fix
+    // pod per PR" invariant the UI shows. The task is intentionally NOT set
+    // here: it is built from the drained queue when the pod starts (see
+    // `processPod`), so it picks up every message queued between now and start.
+    if (recycleCandidate) {
+      const fixPodId = recycleCandidate.id;
+      const newIteration = (recycleCandidate.fixIteration ?? 0) + 1;
 
-      // Reset operational state so processPod re-provisions cleanly.
-      // status complete → queued is allowed by the state machine specifically
-      // for this path (see VALID_STATUS_TRANSITIONS in shared/constants.ts).
-      transition(reuseFixPodCandidate, 'queued', {
-        task: fixTask,
+      transition(recycleCandidate, 'queued', {
         containerId: null,
         worktreePath: null,
         validationAttempts: 0,
@@ -1354,15 +1405,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         claudeSessionId: null,
         preSubmitReview: null,
         // report_task_summary is locked-on-first-write in pod-bridge-impl,
-        // so the reused fix pod must drop the prior round's summary to let
+        // so the recycled fix pod must drop the prior round's summary to let
         // the new run record its own.
         taskSummary: null,
         fixIteration: newIteration,
+        branch: branchSource.branch,
+        baseBranch: branchSource.baseBranch ?? null,
+        prUrl: branchSource.prUrl ?? null,
       });
 
       podRepo.update(parentSessionId, {
         prFixAttempts: newAttempt,
-        lastFixPodSpawnedAt: new Date().toISOString(),
+        mergeBlockReason: `Fix attempt ${newAttempt}/${maxAttempts} in progress (pod ${fixPodId})`,
       });
 
       enqueueSession(fixPodId);
@@ -1372,11 +1426,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
       logger.info(
         { podId: parentSessionId, fixPodId, iteration: newIteration, attempt: newAttempt },
-        'Merge polling: re-enqueued long-lived fix pod for new failures',
+        'Fix-pod spawn: recycled fix pod for new failures',
       );
       return;
     }
 
+    // No fix pod row yet — create the canonical one for this parent PR. The
+    // task is a placeholder; the real task is built from the drained queue
+    // when the pod starts.
+    const placeholderTask = '[PR FIX] Awaiting queued feedback.';
     let fixId = '';
     for (let attempt = 0; attempt < 10; attempt++) {
       fixId = generatePodId();
@@ -1384,7 +1442,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         podRepo.insert({
           id: fixId,
           profileName: parent.profileName,
-          task: fixTask,
+          task: placeholderTask,
           status: 'queued',
           model: parent.model,
           runtime: parent.runtime,
@@ -1420,7 +1478,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       pod: {
         id: fixId,
         profileName: parent.profileName,
-        task: fixTask,
+        task: placeholderTask,
         status: 'queued',
         model: parent.model,
         runtime: parent.runtime,
@@ -1430,11 +1488,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       },
     });
 
-    // Record fix pod on parent (including cooldown timestamp)
     podRepo.update(parentSessionId, {
       prFixAttempts: newAttempt,
       fixPodId: fixId,
-      lastFixPodSpawnedAt: new Date().toISOString(),
       mergeBlockReason: `Fix attempt ${newAttempt}/${maxAttempts} in progress (pod ${fixId})`,
     });
 
@@ -1444,9 +1500,101 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     );
     logger.info(
       { podId: parentSessionId, fixPodId: fixId, attempt: newAttempt },
-      'Merge polling: spawned fix pod for actionable failures',
+      'Fix-pod spawn: spawned fix pod for actionable failures',
     );
   };
+
+  /**
+   * Completes a fix pod once its work has validated.
+   *
+   * A fix pod does NOT own the PR — its parent does, and the parent sits in
+   * `merge_pending` with a poller that owns the actual `prManager.mergePr`
+   * call. So the fix pod's job ends at "push the rebased branch to origin":
+   * it rebases onto the latest base inside the merge queue, force-pushes, and
+   * walks itself to `complete`. The parent's next poll picks up the freshly
+   * pushed commits and re-attempts the merge.
+   *
+   * Never calls `prManager.mergePr` — that would race the parent's poller.
+   */
+  async function completeFixPodAfterPush(fixPod: Pod): Promise<void> {
+    const podId = fixPod.id;
+    const profile = profileStore.get(fixPod.profileName);
+    const baseBranch = fixPod.baseBranch ?? profile.defaultBranch ?? 'main';
+    const branch = fixPod.branch ?? '';
+    const worktreePath = fixPod.worktreePath;
+
+    if (worktreePath && branch) {
+      try {
+        await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
+          emitActivityStatus(podId, `Rebasing onto origin/${baseBranch}…`);
+          const rebaseResult = await worktreeManager.rebaseOntoBase({
+            worktreePath,
+            baseBranch,
+            pat: selectGitPat(profile),
+          });
+
+          if (!rebaseResult.rebased) {
+            // Conflicts — leave the branch as-is and let the parent's poller
+            // surface the conflict via the PR merge gate. The fix pod still
+            // completes; a follow-up fix round resolves it.
+            logger.info(
+              { podId, baseBranch, conflicts: rebaseResult.conflicts },
+              'Fix-pod post-validation rebase produced conflicts — completing without force-push',
+            );
+            emitActivityStatus(
+              podId,
+              formatRebaseConflictReason(baseBranch, rebaseResult.conflicts),
+            );
+            return;
+          }
+
+          if (!rebaseResult.alreadyUpToDate) {
+            await worktreeManager.pushBranch(worktreePath, branch, { force: true });
+            emitActivityStatus(podId, 'Rebased fix branch pushed');
+          } else {
+            await worktreeManager.pushBranch(worktreePath, branch);
+            emitActivityStatus(podId, 'Fix branch pushed');
+          }
+        });
+      } catch (err) {
+        logger.warn({ err, podId }, 'Fix-pod post-validation push failed — completing anyway');
+        emitActivityStatus(podId, 'Fix branch push failed — pod still completing');
+      }
+    }
+
+    emitActivityStatus(podId, 'Fix pod complete — parent poller owns the merge');
+    await cleanupContainer(fixPod, 'fix-pod-pushed');
+    const approved = transition(fixPod, 'approved');
+    const merging = transition(approved, 'merging');
+    const completed = transition(merging, 'complete', {
+      completedAt: new Date().toISOString(),
+    });
+
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId,
+      finalStatus: 'complete',
+      summary: {
+        id: podId,
+        profileName: completed.profileName,
+        task: completed.task,
+        status: 'complete',
+        model: completed.model,
+        runtime: completed.runtime,
+        duration: completed.startedAt
+          ? Date.now() - new Date(completed.startedAt).getTime()
+          : null,
+        filesChanged: completed.filesChanged,
+        createdAt: completed.createdAt,
+      },
+    });
+
+    logger.info(
+      { podId, parentId: fixPod.linkedPodId },
+      'Fix pod completed after push — parent merge poller will re-attempt merge',
+    );
+  }
 
   /** Start polling PR merge status for a pod in merge_pending state. */
   function startMergePolling(podId: string): void {
@@ -1529,11 +1677,32 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           emitActivityStatus(podId, `Merge pending: ${status.blockReason}`);
         }
 
-        // Detect actionable failures and potentially spawn a fix pod
-        const hasActionableFailures =
-          status.ciFailures.length > 0 || status.reviewComments.length > 0;
-        if (hasActionableFailures) {
+        // Actionable failures → enqueue a sanitized summary, then ensure the
+        // canonical fix pod is alive to drain it. The queue carries the
+        // content so the drain at fix-pod start can build the task from a
+        // minimal status (see processPod).
+        if (status.ciFailures.length > 0 || status.reviewComments.length > 0) {
+          const summary = buildActionableFailureSummary(status, profile);
+          fixFeedbackRepo.enqueue(podId, summary);
           await maybeSpawnFixSession(podId, status);
+        } else {
+          // PR is clean — actively re-attempt the merge so the poller is not
+          // purely observational. The `status.merged` branch above handles the
+          // transition to `complete` on a subsequent tick once the merge lands.
+          const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
+          if (reviewOk && pod.worktreePath && pod.prUrl) {
+            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+            const worktreePath = pod.worktreePath;
+            const prUrl = pod.prUrl;
+            try {
+              await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
+                const result = await prManager.mergePr({ worktreePath, prUrl });
+                if (result.merged) emitActivityStatus(podId, 'PR merged by poller');
+              });
+            } catch (err) {
+              logger.debug({ err, podId }, 'Merge poller active merge attempt failed');
+            }
+          }
         }
 
         // Self-heal stale branch: if a sibling pod merged while we were waiting
@@ -3903,6 +4072,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           previewUrl,
           runningAt: new Date().toISOString(),
         });
+
+        // Fix pods: drain any queued reviewer/CI feedback into the task before
+        // the agent stream starts. `drain()` runs *after* the `running`
+        // transition is committed — a crash between `provisioning` and
+        // `running` leaves the queue intact for the next iteration to drain.
+        if (pod.linkedPodId) {
+          const queued = fixFeedbackRepo.drain(pod.linkedPodId);
+          if (queued.length > 0) {
+            const userMessage = queued.map((m) => m.message).join('\n\n---\n\n');
+            // The queued summaries already carry the CI/review content, so a
+            // minimal status is sufficient — buildPrFixTask folds `userMessage`
+            // into the task body.
+            const minimalStatus: PrMergeStatus = {
+              merged: false,
+              open: true,
+              blockReason: 'PR needs fixes',
+              ciFailures: [],
+              reviewComments: [],
+            };
+            const fixTask = buildPrFixTask(pod, minimalStatus, podRepo, profile, userMessage);
+            podRepo.update(pod.id, { task: fixTask });
+            pod = podRepo.getOrThrow(pod.id);
+          }
+        }
 
         // Resolve and write skills for all pod types (including workspace)
         const mergedSkills = mergeSkills(daemonConfig.skills ?? [], profile.skills ?? []);
@@ -7099,6 +7292,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const validatedPod = transition(s2, 'validated', { prUrl });
           maybeTriggerDependents(validatedPod);
 
+          // Fix pods don't own the PR — their parent does. Once a fix pod
+          // validates, it rebases + pushes its branch and completes; the
+          // parent's merge poller re-attempts the merge with the new commits.
+          // This must run before the autoApprove check below: a fix pod must
+          // never walk the normal approve/merge path.
+          if (validatedPod.linkedPodId) {
+            await completeFixPodAfterPush(validatedPod);
+            return;
+          }
+
           // Stop the container (not remove) so it can be restarted for preview
           if (s2.containerId) {
             try {
@@ -8376,11 +8579,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       emitActivityStatus(podId, `${tool} CLI installed.`);
     },
 
+    /**
+     * Thin wrapper over the queue-driven fix-pod model: validate the parent is
+     * eligible, enqueue the feedback message, and let `maybeSpawnFixSession`
+     * decide whether to spawn/recycle. The task itself is built from the
+     * drained queue when the fix pod transitions to `running`.
+     */
     async spawnFixSession(podId: string, userMessage?: string): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'merge_pending' && pod.status !== 'complete') {
+      // Fix pods are tied to a `merge_pending` parent whose poller owns the
+      // actual PR merge. A terminal parent (complete/failed/killed) has a
+      // stopped poller — there is nothing left to drive the merge, so spawning
+      // a fix pod for it would strand the fix pod's commits.
+      if (pod.status !== 'merge_pending') {
         throw new AutopodError(
-          `Cannot spawn fix pod for ${podId} in status ${pod.status} — only merge_pending or complete pods`,
+          `Cannot spawn fix pod for ${podId} in status ${pod.status} — only merge_pending pods`,
           'INVALID_STATE',
           409,
         );
@@ -8412,47 +8625,64 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      const profile = profileStore.get(pod.profileName);
+      const message = userMessage?.trim() || 'Manual fix pod spawn — address the PR feedback.';
+      fixFeedbackRepo.enqueue(podId, message);
 
-      // Clear any stale fixPodId so maybeSpawnFixSession won't wait a cycle.
-      // Skip the clear when `reuseFixPod` is enabled — that path INTENTIONALLY
-      // wants to find the previous fix pod (in a terminal state) and re-enqueue
-      // it instead of spawning a new child.
-      if (profile.reuseFixPod !== true) {
-        podRepo.update(podId, { fixPodId: null });
-      }
-
-      // Fetch current PR status to build a meaningful fix task. For single-mode
-      // siblings the PR lives on a different pod — resolve it so we fetch the
-      // real PR's status instead of skipping.
-      const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-      const prUrlForStatus = pod.prUrl ?? resolveBranchSource(pod).prUrl ?? null;
-      let status: PrMergeStatus = {
+      const status: PrMergeStatus = {
         merged: false,
         open: true,
         blockReason: pod.mergeBlockReason ?? 'PR needs fixes',
         ciFailures: [],
         reviewComments: [],
       };
-      if (prManager && prUrlForStatus) {
-        try {
-          status = await prManager.getPrStatus({
-            prUrl: prUrlForStatus,
-            worktreePath: pod.worktreePath ?? undefined,
-          });
-        } catch (err) {
-          logger.warn(
-            { err, podId },
-            'Manual spawn: failed to fetch PR status, using cached block reason',
-          );
-        }
-      }
-
-      await maybeSpawnFixSession(podId, status, userMessage, true);
+      await maybeSpawnFixSession(podId, status);
       logger.info(
         { podId, hasUserMessage: Boolean(userMessage) },
         'Manual fix pod spawn triggered',
       );
+    },
+
+    async requestFixSession(podId: string, message: string): Promise<SpawnFixResponse> {
+      // getOrThrow surfaces PodNotFoundError → 404 at the route layer.
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.linkedPodId) {
+        throw new AutopodError(
+          `Pod ${podId} is a fix pod — only root pods can spawn fixers`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      // A terminal parent has nothing left to fix — report it as a structured
+      // result, not an exception, so the API can return a clean 409 body.
+      if (isFixCycleTerminal(pod.status)) {
+        return { ok: false, reason: 'parent_terminal' };
+      }
+
+      fixFeedbackRepo.enqueue(podId, message);
+
+      const status: PrMergeStatus = {
+        merged: false,
+        open: true,
+        blockReason: pod.mergeBlockReason ?? 'PR needs fixes',
+        ciFailures: [],
+        reviewComments: [],
+      };
+      await maybeSpawnFixSession(podId, status);
+
+      const updated = podRepo.getOrThrow(podId);
+      // maybeSpawnFixSession fails the parent when the PR-fix attempt cap is
+      // exhausted. A now-terminal parent is reported the same way as one that
+      // was already terminal on entry — there is nothing left to fix.
+      if (isFixCycleTerminal(updated.status)) {
+        return { ok: false, reason: 'parent_terminal' };
+      }
+      const queueLength = fixFeedbackRepo.count(podId);
+      return {
+        ok: true,
+        queued: queueLength > 0,
+        queueLength,
+        fixPodId: updated.fixPodId ?? null,
+      };
     },
 
     async retryCreatePr(podId: string): Promise<void> {

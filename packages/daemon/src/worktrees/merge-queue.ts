@@ -15,4 +15,16 @@ export class MergeQueue extends KeyedPromiseQueue {
   static keyFor(repoUrl: string | null | undefined, baseBranch: string): string {
     return `${repoUrl ?? '<no-repo>'}::${baseBranch}`;
   }
+
+  /**
+   * Convenience wrapper: run `fn` inside the merge critical section for a
+   * given repo + base branch. Equivalent to `run(MergeQueue.keyFor(...), fn)`.
+   */
+  enqueueMerge<T>(
+    repoUrl: string | null | undefined,
+    baseBranch: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    return this.run(MergeQueue.keyFor(repoUrl, baseBranch), fn);
+  }
 }

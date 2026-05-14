@@ -54,21 +54,61 @@ describe('acDefinitionSchema', () => {
   it.each(['none', 'api', 'web', 'cmd'] as const)('accepts type=%s', (type) => {
     const parsed = acDefinitionSchema.parse({
       type,
-      test: "rg -l 'X' src/",
-      pass: 'no matches',
-      fail: 'any match',
+      outcome: 'The thing works',
+      hint: type === 'cmd' ? 'rg -l X src/' : undefined,
     });
     expect(parsed.type).toBe(type);
+    expect(parsed.outcome).toBe('The thing works');
   });
 
   it('rejects unknown ac types', () => {
     expect(() =>
       acDefinitionSchema.parse({
         type: 'shell',
-        test: 'echo hi',
-        pass: 'exit 0',
-        fail: 'non-zero',
+        outcome: 'should fail',
       }),
     ).toThrow();
+  });
+
+  it('requires outcome', () => {
+    expect(() =>
+      acDefinitionSchema.parse({
+        type: 'cmd',
+        hint: 'echo hi',
+      }),
+    ).toThrow();
+  });
+
+  it.each(['expect-output', 'expect-no-output', 'exit-zero'] as const)(
+    'accepts polarity=%s on cmd',
+    (polarity) => {
+      const parsed = acDefinitionSchema.parse({
+        type: 'cmd',
+        outcome: 'Command succeeds',
+        hint: 'echo hi',
+        polarity,
+      });
+      expect(parsed.type === 'cmd' && parsed.polarity).toBe(polarity);
+    },
+  );
+
+  it('rejects unknown polarity values (regression: pass-on-200 corruption)', () => {
+    expect(() =>
+      acDefinitionSchema.parse({
+        type: 'cmd',
+        outcome: 'API returns 200',
+        hint: 'curl -fsS http://x/health',
+        polarity: 'pass-on-200',
+      }),
+    ).toThrow();
+  });
+
+  it('strips polarity on non-cmd types (Zod default; matches TS type)', () => {
+    const parsed = acDefinitionSchema.parse({
+      type: 'web',
+      outcome: 'Page loads',
+      polarity: 'exit-zero',
+    } as unknown as Parameters<typeof acDefinitionSchema.parse>[0]);
+    expect(parsed).not.toHaveProperty('polarity');
   });
 });

@@ -29,6 +29,7 @@ import {
   createEscalationRepository,
   createEventBus,
   createEventRepository,
+  createFixFeedbackRepository,
   createPodManager,
   createPodQueue,
   createPodRepository,
@@ -125,6 +126,7 @@ describe('Extended Route Tests', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -213,6 +215,7 @@ describe('Extended Route Tests', () => {
       podRepo,
       escalationRepo,
       nudgeRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: { get: vi.fn(() => containerManager) },
@@ -770,6 +773,7 @@ describe('Extended Route Tests', () => {
       const sessionRepo2 = createPodRepository(db2);
       const eventRepo2 = createEventRepository(db2);
       const escalationRepo2 = createEscalationRepository(db2);
+      const fixFeedbackRepo2 = createFixFeedbackRepository(db2);
       const eventBus2 = createEventBus(eventRepo2, logger);
 
       // biome-ignore lint/style/useConst: assigned after sq2 to break circular dependency
@@ -778,6 +782,7 @@ describe('Extended Route Tests', () => {
       sm2 = createPodManager({
         podRepo: sessionRepo2,
         escalationRepo: escalationRepo2,
+        fixFeedbackRepo: fixFeedbackRepo2,
         profileStore: profileStore2,
         eventBus: eventBus2,
         containerManagerFactory: { get: vi.fn(() => containerManager) },

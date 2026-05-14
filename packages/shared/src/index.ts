@@ -262,6 +262,7 @@ export {
   sendMessageSchema,
   acDefinitionSchema,
   acTypeSchema,
+  acPolaritySchema,
 } from './schemas/pod.schema.js';
 
 export {

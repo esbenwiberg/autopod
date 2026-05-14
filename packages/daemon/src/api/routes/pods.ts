@@ -8,6 +8,7 @@ import {
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import type { EventRepository } from '../../pods/event-repository.js';
@@ -454,22 +455,34 @@ export function podRoutes(
     }
   });
 
-  // POST /pods/:podId/spawn-fix — manually force-spawn a fix pod for merge_pending or complete
+  // POST /pods/:podId/spawn-fix — queue a fix-feedback message for a pod's PR.
+  // Queue-driven: every call enqueues the message; the canonical fix pod is
+  // spawned/recycled by maybeSpawnFixSession and drains the queue when it runs.
+  const spawnFixBodySchema = z.object({
+    message: z.string().min(1).max(8000),
+  });
   app.post('/pods/:podId/spawn-fix', async (request, reply) => {
     const { podId } = request.params as { podId: string };
-    const body = (request.body ?? {}) as { userMessage?: string };
-    const userMessage =
-      typeof body.userMessage === 'string' && body.userMessage.trim()
-        ? body.userMessage.trim()
-        : undefined;
+
+    const parsed = spawnFixBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.flatten() };
+    }
+
     try {
-      await podManager.spawnFixSession(podId, userMessage);
+      const result = await podManager.requestFixSession(podId, parsed.data.message);
+      if (!result.ok) {
+        // parent is terminal — nothing to fix
+        reply.status(409);
+        return result;
+      }
       reply.status(202);
-      return { ok: true };
+      return result;
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);
-        return { error: err.message };
+        return { error: err.message, code: err.code };
       }
       throw err;
     }

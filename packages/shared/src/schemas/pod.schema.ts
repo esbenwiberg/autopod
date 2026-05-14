@@ -2,13 +2,19 @@ import { z } from 'zod';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
 
 export const acTypeSchema = z.enum(['none', 'api', 'web', 'cmd']);
+export const acPolaritySchema = z.enum(['expect-output', 'expect-no-output', 'exit-zero']);
 
-export const acDefinitionSchema = z.object({
-  type: acTypeSchema,
-  test: z.string().min(1).max(2_000),
-  pass: z.string().min(1).max(1_000),
-  fail: z.string().min(1).max(1_000),
-});
+const acBaseFields = {
+  outcome: z.string().min(1).max(200),
+  hint: z.string().max(500).optional(),
+};
+
+export const acDefinitionSchema = z.discriminatedUnion('type', [
+  z.object({ ...acBaseFields, type: z.literal('none') }),
+  z.object({ ...acBaseFields, type: z.literal('api') }),
+  z.object({ ...acBaseFields, type: z.literal('web') }),
+  z.object({ ...acBaseFields, type: z.literal('cmd'), polarity: acPolaritySchema.optional() }),
+]);
 
 export const createPodRequestSchema = z
   .object({

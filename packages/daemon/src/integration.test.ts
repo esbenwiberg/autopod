@@ -12,6 +12,7 @@ import {
   createEscalationRepository,
   createEventBus,
   createEventRepository,
+  createFixFeedbackRepository,
   createPodManager,
   createPodQueue,
   createPodRepository,
@@ -88,6 +89,7 @@ describe('Integration', () => {
     podRepo = createPodRepository(db);
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -187,6 +189,7 @@ describe('Integration', () => {
     podManager = createPodManager({
       podRepo,
       escalationRepo,
+      fixFeedbackRepo,
       profileStore,
       eventBus,
       containerManagerFactory: { get: vi.fn(() => containerManager) },

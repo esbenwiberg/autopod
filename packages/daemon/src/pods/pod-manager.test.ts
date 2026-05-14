@@ -35,6 +35,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
 import type { EventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
+import { createFixFeedbackRepository } from './fix-feedback-repository.js';
 import { type PodManagerDependencies, createPodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
@@ -230,6 +231,7 @@ interface TestContext {
   prManager: PrManager;
   runtime: Runtime;
   enqueuedSessions: string[];
+  fixFeedbackRepo: ReturnType<typeof createFixFeedbackRepository>;
   deps: PodManagerDependencies;
 }
 
@@ -243,6 +245,7 @@ function createTestContext(
   const podRepo = createPodRepository(db);
   const eventRepo = createEventRepository(db);
   const escalationRepo = createEscalationRepository(db);
+  const fixFeedbackRepo = createFixFeedbackRepository(db);
   const eventBus = createEventBus(eventRepo, logger);
 
   // ProfileStore mock that reads from DB
@@ -323,6 +326,7 @@ function createTestContext(
   const deps: PodManagerDependencies = {
     podRepo,
     escalationRepo,
+    fixFeedbackRepo,
     profileStore,
     eventBus,
     containerManagerFactory: { get: vi.fn(() => containerManager) },
@@ -349,6 +353,7 @@ function createTestContext(
     prManager,
     runtime,
     enqueuedSessions,
+    fixFeedbackRepo,
     deps,
   };
 }
@@ -2938,56 +2943,155 @@ describe('PodManager', () => {
   });
 
 
-  describe('spawnFixSession — userMessage delivery under cooldown', () => {
-    it('bypasses the 10-minute cooldown and delivers userMessage into the new fix pod task', async () => {
-      const ctx = createTestContext();
-      // PR status fetch — return a CHANGES_REQUESTED with a review comment so
-      // the build path emits a real fix task (not just headers).
-      (ctx.prManager.getPrStatus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        merged: false,
-        open: true,
-        blockReason: 'CHANGES_REQUESTED',
-        ciFailures: [],
-        reviewComments: [{ body: 'Please rename foo to bar.', path: null }],
-      });
-
-      const manager = createPodManager(ctx.deps);
+  describe('spawnFixSession / requestFixSession — queue-driven fix pods', () => {
+    /** Create a root pod and drive it to `merge_pending` with a PR. */
+    function mergePendingRoot(ctx: TestContext, manager: ReturnType<typeof createPodManager>) {
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'Original work' },
         'user-1',
       );
-      // Drive the pod into `complete` with a prUrl and an active cooldown
-      // (lastFixPodSpawnedAt = now would normally block any further spawn).
-      ctx.podRepo.update(pod.id, {
-        status: 'provisioning',
-        worktreePath: '/tmp/worktree/abc',
-        containerId: 'container-xyz',
-        startedAt: new Date().toISOString(),
-      });
       for (const status of [
+        'provisioning',
         'running',
         'validating',
         'validated',
         'approved',
         'merging',
-        'complete',
+        'merge_pending',
       ] as const) {
         ctx.podRepo.update(pod.id, { status });
       }
       ctx.podRepo.update(pod.id, {
         prUrl: 'https://github.com/org/repo/pull/42',
-        lastFixPodSpawnedAt: new Date().toISOString(),
+        worktreePath: '/tmp/worktree/abc',
       });
+      return manager.getSession(pod.id);
+    }
 
-      await manager.spawnFixSession(pod.id, 'please use option B');
+    it('spawns the canonical fix pod and enqueues the feedback message', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
 
-      // The fix pod is the one with linkedPodId === parent.id
-      const allPods = ctx.podRepo.list({});
-      const fixPod = allPods.find((p) => p.linkedPodId === pod.id);
-      expect(fixPod, 'cooldown should be bypassed and a fix pod created').toBeDefined();
-      expect(fixPod?.task).toContain('## Instructions from Reviewer');
-      expect(fixPod?.task).toContain('please use option B');
+      await manager.spawnFixSession(root.id, 'please use option B');
+
+      const fixPod = ctx.podRepo.list({}).find((p) => p.linkedPodId === root.id);
+      expect(fixPod, 'a fix pod should be created').toBeDefined();
+      expect(fixPod?.status).toBe('queued');
+      // Task is a placeholder — the real task is built from the drained queue
+      // when the fix pod transitions to `running`.
+      expect(fixPod?.task).toBe('[PR FIX] Awaiting queued feedback.');
       expect(ctx.enqueuedSessions).toContain(fixPod?.id);
+
+      // The message sits in the parent-keyed queue, not on the pod row.
+      expect(ctx.fixFeedbackRepo.count(root.id)).toBe(1);
+      expect(ctx.fixFeedbackRepo.peek(root.id)[0]?.message).toBe('please use option B');
+
+      // Audit trail attaches to the parent.
+      const reread = manager.getSession(root.id);
+      expect(reread.fixPodId).toBe(fixPod?.id);
+      expect(reread.prFixAttempts).toBe(1);
+    });
+
+    it('does not spawn a second fix pod while one is alive — just queues the message', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'first message');
+      await manager.spawnFixSession(root.id, 'second message');
+      await manager.spawnFixSession(root.id, 'third message');
+
+      const fixPods = ctx.podRepo.list({}).filter((p) => p.linkedPodId === root.id);
+      expect(fixPods, 'exactly one canonical fix pod').toHaveLength(1);
+      expect(ctx.fixFeedbackRepo.count(root.id)).toBe(3);
+      // prFixAttempts only bumps on the spawn, not on subsequent queue appends.
+      expect(manager.getSession(root.id).prFixAttempts).toBe(1);
+    });
+
+    it('recycles a terminal fix pod via complete → queued instead of spawning a new child', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'round one');
+      const firstFix = ctx.podRepo.list({}).find((p) => p.linkedPodId === root.id);
+      expect(firstFix).toBeDefined();
+      if (!firstFix) throw new Error('fix pod missing');
+
+      // Drain the queue (as processPod would) and drive the fix pod terminal.
+      ctx.fixFeedbackRepo.drain(root.id);
+      ctx.podRepo.update(firstFix.id, { status: 'complete' });
+
+      await manager.spawnFixSession(root.id, 'round two');
+
+      const fixPods = ctx.podRepo.list({}).filter((p) => p.linkedPodId === root.id);
+      expect(fixPods, 'same row recycled — still one fix pod').toHaveLength(1);
+      const recycled = fixPods[0];
+      expect(recycled?.id).toBe(firstFix.id);
+      expect(recycled?.status).toBe('queued');
+      expect(recycled?.fixIteration).toBe(1);
+      expect(ctx.fixFeedbackRepo.count(root.id)).toBe(1);
+      expect(manager.getSession(root.id).prFixAttempts).toBe(2);
+    });
+
+    it('fails the parent via requestFixSession when max PR fix attempts are exhausted', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+      // requestFixSession (the API path) does not bump the cap — unlike the
+      // operator-driven spawnFixSession — so the cap guard actually fires.
+      ctx.podRepo.update(root.id, { maxPrFixAttempts: 1, prFixAttempts: 1 });
+
+      const result = await manager.requestFixSession(root.id, 'one more please');
+
+      expect(result).toEqual({ ok: false, reason: 'parent_terminal' });
+      expect(manager.getSession(root.id).status).toBe('failed');
+      expect(ctx.podRepo.list({}).some((p) => p.linkedPodId === root.id)).toBe(false);
+    });
+
+    it('requestFixSession returns a structured queue state for the API', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      const first = await manager.requestFixSession(root.id, 'fix the lint');
+      expect(first.ok).toBe(true);
+      if (first.ok) {
+        expect(first.queued).toBe(true);
+        expect(first.queueLength).toBe(1);
+        expect(first.fixPodId).toBeTypeOf('string');
+      }
+
+      const second = await manager.requestFixSession(root.id, 'and the types');
+      expect(second).toMatchObject({ ok: true, queued: true, queueLength: 2 });
+      if (first.ok && second.ok) {
+        expect(second.fixPodId).toBe(first.fixPodId);
+      }
+    });
+
+    it('requestFixSession reports parent_terminal for a complete parent', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+      ctx.podRepo.update(root.id, { status: 'complete' });
+
+      const result = await manager.requestFixSession(root.id, 'too late');
+      expect(result).toEqual({ ok: false, reason: 'parent_terminal' });
+      // Nothing queued, no fix pod spawned.
+      expect(ctx.fixFeedbackRepo.count(root.id)).toBe(0);
+      expect(ctx.podRepo.list({}).some((p) => p.linkedPodId === root.id)).toBe(false);
+    });
+
+    it('spawnFixSession rejects a terminal parent with 409', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+      ctx.podRepo.update(root.id, { status: 'complete' });
+
+      await expect(manager.spawnFixSession(root.id)).rejects.toMatchObject({
+        statusCode: 409,
+      });
     });
   });
 
@@ -3189,7 +3293,7 @@ describe('PodManager', () => {
         'validated',
         'approved',
         'merging',
-        'complete',
+        'merge_pending',
       ] as const) {
         ctx.podRepo.update(stackedPod.id, { status });
       }
@@ -3227,7 +3331,7 @@ describe('PodManager', () => {
         'validated',
         'approved',
         'merging',
-        'complete',
+        'merge_pending',
       ] as const) {
         ctx.podRepo.update(standalone.id, { status });
       }

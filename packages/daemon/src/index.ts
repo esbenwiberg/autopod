@@ -33,6 +33,7 @@ import {
   createEscalationRepository,
   createEventBus,
   createEventRepository,
+  createFixFeedbackRepository,
   createMemoryRepository,
   createNudgeRepository,
   createPendingOverrideRepository,
@@ -197,6 +198,7 @@ const podRepo = createPodRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
 const nudgeRepo = createNudgeRepository(db);
+const fixFeedbackRepo = createFixFeedbackRepository(db);
 const validationRepo = createValidationRepository(db);
 const progressEventRepo = createProgressEventRepository(db);
 const memoryRepo = createMemoryRepository(db);
@@ -533,6 +535,7 @@ podManager = createPodManager({
   podRepo,
   escalationRepo,
   nudgeRepo,
+  fixFeedbackRepo,
   validationRepo,
   progressEventRepo,
   profileStore,

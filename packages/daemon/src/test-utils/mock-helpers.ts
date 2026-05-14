@@ -24,6 +24,8 @@ import type { EscalationRepository } from '../pods/escalation-repository.js';
 import { createEventBus } from '../pods/event-bus.js';
 import type { EventBus } from '../pods/event-bus.js';
 import { createEventRepository } from '../pods/event-repository.js';
+import { createFixFeedbackRepository } from '../pods/fix-feedback-repository.js';
+import type { FixFeedbackRepository } from '../pods/fix-feedback-repository.js';
 import { createNudgeRepository } from '../pods/nudge-repository.js';
 import type { NudgeRepository } from '../pods/nudge-repository.js';
 import type { PodManagerDependencies } from '../pods/pod-manager.js';
@@ -411,6 +413,7 @@ export interface TestContext {
   podRepo: PodRepository;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
+  fixFeedbackRepo: FixFeedbackRepository;
   eventBus: EventBus;
   profileStore: ProfileStore;
   containerManager: ContainerManager;
@@ -434,6 +437,7 @@ export function createTestContext(opts?: {
   const eventRepo = createEventRepository(db);
   const escalationRepo = createEscalationRepository(db);
   const nudgeRepo = createNudgeRepository(db);
+  const fixFeedbackRepo = createFixFeedbackRepository(db);
   const eventBus = createEventBus(eventRepo, logger);
   const profileStore = createMockProfileStore(db);
 
@@ -449,6 +453,7 @@ export function createTestContext(opts?: {
     podRepo,
     escalationRepo,
     nudgeRepo,
+    fixFeedbackRepo,
     profileStore,
     eventBus,
     containerManagerFactory: { get: vi.fn(() => containerManager) },
@@ -467,6 +472,7 @@ export function createTestContext(opts?: {
     podRepo,
     escalationRepo,
     nudgeRepo,
+    fixFeedbackRepo,
     eventBus,
     profileStore,
     containerManager,
