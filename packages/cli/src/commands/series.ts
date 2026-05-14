@@ -65,6 +65,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
       'single',
     )
     .option('--series-name <name>', 'Override series name (default: derived from folder name)')
+    .option('--auto-approve', 'Auto-approve each pod once it reaches validated — no human gate')
     .action(
       async (
         folder: string,
@@ -73,6 +74,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
           baseBranch?: string;
           prMode: string;
           seriesName?: string;
+          autoApprove?: boolean;
         },
       ) => {
         const client = getClient();
@@ -122,6 +124,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
             profile: opts.profile,
             baseBranch: opts.baseBranch,
             prMode,
+            autoApprove: opts.autoApprove ?? false,
             seriesDescription: seriesDescription || undefined,
             seriesDesign: seriesDesign || undefined,
           }),
@@ -130,6 +133,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         console.log(chalk.green(`\nSeries created: ${result.seriesId}\n`));
         console.log(`  Name:    ${result.seriesName}`);
         console.log(`  PR mode: ${prMode}`);
+        console.log(`  Auto-approve: ${opts.autoApprove ? 'yes' : 'no'}`);
         console.log('  Pods:\n');
 
         for (const pod of result.pods) {

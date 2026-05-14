@@ -36,6 +36,8 @@ export interface CreateSeriesRequest {
   profile: string;
   baseBranch?: string;
   prMode?: 'single' | 'stacked' | 'none';
+  /** Auto-approve each pod once it reaches `validated` — no human gate. */
+  autoApprove?: boolean;
   /** Series purpose (from `purpose.md`) — PR "Why" + `## Purpose` in CLAUDE.md. */
   seriesDescription?: string;
   /** Series design (from `design.md`) — `## Design` in CLAUDE.md. */
