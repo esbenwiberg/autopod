@@ -166,6 +166,16 @@ describe('DockerNetworkManager', () => {
       expect(script).toContain('--state ESTABLISHED,RELATED -j ACCEPT');
     });
 
+    it("restores Docker's embedded-DNS DNAT jump after flushing nat OUTPUT", async () => {
+      // Flushing nat OUTPUT drops the `-d 127.0.0.11 -j DOCKER_OUTPUT` jump
+      // Docker installs; without re-adding it, every hostname lookup fails.
+      for (const mode of ['allow-all', 'deny-all', 'restricted'] as const) {
+        const script = await manager.generateFirewallScript(['api.anthropic.com'], mode);
+        expect(script).toContain('iptables -t nat -L DOCKER_OUTPUT');
+        expect(script).toContain('iptables -t nat -A OUTPUT -d 127.0.0.11 -j DOCKER_OUTPUT');
+      }
+    });
+
     describe('allow-all mode', () => {
       it('has no REJECT rule', async () => {
         const script = await manager.generateFirewallScript([], 'allow-all');

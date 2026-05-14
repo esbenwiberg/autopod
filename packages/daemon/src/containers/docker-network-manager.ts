@@ -351,6 +351,15 @@ export class DockerNetworkManager {
     lines.push('iptables -F OUTPUT 2>/dev/null || true');
     lines.push('iptables -t nat -F OUTPUT 2>/dev/null || true');
     lines.push('');
+    // Flushing nat OUTPUT above drops the `-d 127.0.0.11 -j DOCKER_OUTPUT`
+    // jump Docker installs for its embedded DNS resolver. Without it,
+    // 127.0.0.11:53 resolves nothing and every hostname lookup in the
+    // container fails (EAI_AGAIN). Re-add the jump when the chain exists.
+    lines.push("# Restore Docker's embedded-DNS DNAT jump (flushed above)");
+    lines.push('if iptables -t nat -L DOCKER_OUTPUT >/dev/null 2>&1; then');
+    lines.push('  iptables -t nat -A OUTPUT -d 127.0.0.11 -j DOCKER_OUTPUT');
+    lines.push('fi');
+    lines.push('');
     lines.push('# Allow loopback');
     lines.push('iptables -A OUTPUT -o lo -j ACCEPT');
     lines.push('');
