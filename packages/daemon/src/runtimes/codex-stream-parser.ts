@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
+import { canonicalModelKey, computeCost } from '@autopod/shared';
 import type { AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 
@@ -42,7 +43,7 @@ interface CodexTokenUsageInfo {
 }
 
 const MAX_OUTPUT_LEN = 2000;
-const MAX_REASONING_LEN = 1000;
+const MAX_REASONING_LEN = 4000;
 
 function unwrap(env: CodexEnvelope): { type?: string; [key: string]: unknown } | null {
   if (env.msg && typeof env.msg === 'object') return env.msg as { type?: string };
@@ -80,8 +81,10 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
   const ts = tsOf(event);
 
   switch (msg.type) {
-    case 'session_configured':
-      return { type: 'status', timestamp: ts, message: 'Codex session ready' };
+    case 'session_configured': {
+      const sessionId = typeof msg.session_id === 'string' ? msg.session_id : undefined;
+      return { type: 'status', timestamp: ts, message: 'Codex session ready', ...(sessionId !== undefined && { sessionId }) };
+    }
 
     case 'turn_started':
       return { type: 'status', timestamp: ts, message: 'Codex turn started' };
@@ -95,7 +98,14 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
     case 'agent_reasoning': {
       const text = truncate(msg.text, MAX_REASONING_LEN);
       if (!text) return null;
-      return { type: 'status', timestamp: ts, message: `Reasoning: ${text}` };
+      return { type: 'reasoning', timestamp: ts, text, isRaw: false };
+    }
+
+    case 'agent_reasoning_raw_content': {
+      const raw = typeof msg.text === 'string' ? msg.text : typeof msg.content === 'string' ? msg.content : undefined;
+      const text = truncate(raw, MAX_REASONING_LEN);
+      if (!text) return null;
+      return { type: 'reasoning', timestamp: ts, text, isRaw: true };
     }
 
     case 'exec_command_begin': {
@@ -226,14 +236,16 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
     // half-formed output.
     case 'token_count':
     case 'turn_complete':
+    case 'patch_apply_end': // yields one file_change per file — handled in parse()
       return null;
 
     // High-frequency or interactive variants we deliberately ignore. Listing
     // them explicitly so unknown-type logging stays useful.
     case 'agent_message_delta':
     case 'agent_reasoning_delta':
-    case 'agent_reasoning_raw_content':
     case 'agent_reasoning_raw_content_delta':
+    case 'patch_apply_begin':
+    case 'patch_apply_updated':
     case 'exec_command_output_delta':
     case 'exec_approval_request':
     case 'apply_patch_approval_request':
@@ -270,6 +282,7 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
 async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIterable<AgentEvent> {
   const rl = createInterface({ input: stream });
   let latestUsage: CodexTokenUsage | undefined;
+  let latestModel: string | null = null;
 
   for await (const line of rl) {
     const trimmed = line.trim();
@@ -290,10 +303,29 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
     const msg = unwrap(env);
     if (!msg || typeof msg.type !== 'string') continue;
 
+    // Capture model from the session-init event so costUsd can be computed at turn_complete.
+    if (msg.type === 'session_configured' && typeof msg.model === 'string') {
+      latestModel = msg.model;
+    }
+
     if (msg.type === 'token_count') {
       const info = msg.info as CodexTokenUsageInfo | undefined;
       const usage = info?.total_token_usage ?? info?.last_token_usage;
       if (usage) latestUsage = usage;
+      continue;
+    }
+
+    if (msg.type === 'patch_apply_end') {
+      const changes = msg.changes as Record<string, { type?: string }> | undefined;
+      if (changes && typeof changes === 'object') {
+        const ts = tsOf(env);
+        for (const [filePath, change] of Object.entries(changes)) {
+          const ct = change?.type;
+          const action: 'create' | 'modify' | 'delete' =
+            ct === 'create' ? 'create' : ct === 'delete' ? 'delete' : 'modify';
+          yield { type: 'file_change', timestamp: ts, path: filePath, action };
+        }
+      }
       continue;
     }
 
@@ -303,6 +335,22 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
           ? msg.last_agent_message
           : 'Codex turn complete';
       const ts = tsOf(env);
+      const inputTokens = latestUsage?.input_tokens ?? 0;
+      const outputTokens = latestUsage?.output_tokens ?? 0;
+      let costUsd: number | undefined;
+      if (latestModel !== null) {
+        const key = canonicalModelKey(latestModel);
+        if (key === null) {
+          logger.warn({
+            component: 'codex-stream-parser',
+            podId,
+            msg: `No pricing entry for model: ${latestModel}`,
+          });
+          costUsd = 0;
+        } else {
+          costUsd = computeCost(key, inputTokens, outputTokens);
+        }
+      }
       const completeEvent: AgentEvent = {
         type: 'complete',
         timestamp: ts,
@@ -313,6 +361,7 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
         ...(latestUsage?.output_tokens !== undefined && {
           totalOutputTokens: latestUsage.output_tokens,
         }),
+        ...(costUsd !== undefined && { costUsd }),
       };
       yield completeEvent;
       latestUsage = undefined;

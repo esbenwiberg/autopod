@@ -25,6 +25,23 @@ describe('CodexStreamParser', () => {
       expect(e).toMatchObject({ type: 'status', message: 'Codex session ready' });
     });
 
+    it('populates sessionId on session_configured when session_id is present', () => {
+      const e = CodexStreamParser.mapEvent(
+        { id: 's', msg: { type: 'session_configured', session_id: 'sess-abc-123' } },
+        'pod-1',
+      );
+      expect(e).toMatchObject({ type: 'status', sessionId: 'sess-abc-123' });
+    });
+
+    it('omits sessionId on session_configured when session_id is absent', () => {
+      const e = CodexStreamParser.mapEvent(
+        { id: 's', msg: { type: 'session_configured' } },
+        'pod-1',
+      );
+      // biome-ignore lint/suspicious/noExplicitAny: introspecting event in test
+      expect((e as any).sessionId).toBeUndefined();
+    });
+
     it('maps turn_started to a status event', () => {
       const e = CodexStreamParser.mapEvent({ id: 's', msg: { type: 'turn_started' } }, 'pod-1');
       expect(e).toMatchObject({ type: 'status', message: 'Codex turn started' });
@@ -46,26 +63,49 @@ describe('CodexStreamParser', () => {
       expect(e).toBeNull();
     });
 
-    it('maps agent_reasoning to a status event prefixed "Reasoning:"', () => {
+    it('maps agent_reasoning to a reasoning event', () => {
       const e = CodexStreamParser.mapEvent(
         { id: 's', msg: { type: 'agent_reasoning', text: 'Need to refactor X' } },
         'pod-1',
       );
-      expect(e).toMatchObject({
-        type: 'status',
-        message: expect.stringContaining('Reasoning: Need to refactor X'),
-      });
+      expect(e).toMatchObject({ type: 'reasoning', text: 'Need to refactor X', isRaw: false });
     });
 
-    it('truncates long agent_reasoning text', () => {
+    it('maps agent_reasoning with 500-char text — untruncated', () => {
+      const text = 'a'.repeat(500);
+      const e = CodexStreamParser.mapEvent(
+        { id: 's', msg: { type: 'agent_reasoning', text } },
+        'pod-1',
+      );
+      expect(e).toMatchObject({ type: 'reasoning', text, isRaw: false });
+    });
+
+    it('truncates agent_reasoning text over 4000 chars', () => {
       const e = CodexStreamParser.mapEvent(
         { id: 's', msg: { type: 'agent_reasoning', text: 'x'.repeat(5000) } },
         'pod-1',
       );
       // biome-ignore lint/suspicious/noExplicitAny: introspecting event in test
-      const message = (e as any).message as string;
-      // Reasoning prefix + truncation marker keeps it well under the original length
-      expect(message.length).toBeLessThan(2000);
+      const emitted = e as any;
+      expect(emitted.type).toBe('reasoning');
+      expect(emitted.text.length).toBe(4001); // 4000 chars + ellipsis char
+      expect(emitted.text.endsWith('…')).toBe(true);
+    });
+
+    it('maps agent_reasoning_raw_content to a reasoning event with isRaw:true', () => {
+      const e = CodexStreamParser.mapEvent(
+        { id: 's', msg: { type: 'agent_reasoning_raw_content', text: 'raw reasoning output' } },
+        'pod-1',
+      );
+      expect(e).toMatchObject({ type: 'reasoning', text: 'raw reasoning output', isRaw: true });
+    });
+
+    it('maps agent_reasoning_raw_content using content field when text is absent', () => {
+      const e = CodexStreamParser.mapEvent(
+        { id: 's', msg: { type: 'agent_reasoning_raw_content', content: 'raw via content field' } },
+        'pod-1',
+      );
+      expect(e).toMatchObject({ type: 'reasoning', isRaw: true });
     });
 
     it('maps exec_command_begin to a Bash tool_use carrying command + cwd', () => {
@@ -250,10 +290,13 @@ describe('CodexStreamParser', () => {
       for (const type of [
         'agent_message_delta',
         'agent_reasoning_delta',
+        'agent_reasoning_raw_content_delta',
         'exec_command_output_delta',
         'exec_approval_request',
         'apply_patch_approval_request',
         'thread_name_updated',
+        'patch_apply_begin',
+        'patch_apply_updated',
       ]) {
         expect(CodexStreamParser.mapEvent({ id: 's', msg: { type } }, 'pod-1')).toBeNull();
       }
@@ -420,6 +463,120 @@ describe('CodexStreamParser', () => {
         events.push(event);
       }
       expect(events).toHaveLength(2);
+    });
+
+    it('maps patch_apply_end single file (update) to one file_change event', async () => {
+      const stream = createMockStream([
+        envelope('patch_apply_end', { changes: { 'src/foo.ts': { type: 'update' } } }),
+        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+      ]);
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+      const fileChanges = events.filter((e) => e.type === 'file_change');
+      expect(fileChanges).toHaveLength(1);
+      expect(fileChanges[0]).toMatchObject({ type: 'file_change', path: 'src/foo.ts', action: 'modify' });
+    });
+
+    it('maps patch_apply_end multiple files with mixed actions', async () => {
+      const stream = createMockStream([
+        envelope('patch_apply_end', {
+          changes: {
+            'src/new.ts': { type: 'create' },
+            'src/mod.ts': { type: 'update' },
+            'src/old.ts': { type: 'delete' },
+          },
+        }),
+        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+      ]);
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+      const fileChanges = events.filter((e) => e.type === 'file_change');
+      expect(fileChanges).toHaveLength(3);
+      const byPath = Object.fromEntries(fileChanges.map((e) => [(e as { path: string }).path, (e as { action: string }).action]));
+      expect(byPath['src/new.ts']).toBe('create');
+      expect(byPath['src/mod.ts']).toBe('modify');
+      expect(byPath['src/old.ts']).toBe('delete');
+    });
+
+    it('patch_apply_begin and patch_apply_updated emit nothing', async () => {
+      const stream = createMockStream([
+        envelope('patch_apply_begin', { patch_id: 'p1' }),
+        envelope('patch_apply_updated', { patch_id: 'p1' }),
+        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+      ]);
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+      expect(events.filter((e) => e.type === 'file_change')).toHaveLength(0);
+      expect(events).toHaveLength(1); // only the complete event
+    });
+
+    it('computes costUsd at turn_complete from session_configured model and token_count', async () => {
+      const inputTokens = 1_000_000;
+      const outputTokens = 500_000;
+      const stream = createMockStream([
+        envelope('session_configured', { session_id: 'sess-1', model: 'gpt-5' }),
+        envelope('token_count', {
+          info: { total_token_usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
+        }),
+        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+      ]);
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+      const complete = events.find((e) => e.type === 'complete') as { costUsd?: number } | undefined;
+      expect(complete).toBeDefined();
+      // Use the actual helper so the test doesn't drift if pricing changes.
+      const { computeCost: cc } = await import('@autopod/shared');
+      const expected = cc('gpt-5', inputTokens, outputTokens);
+      expect(complete?.costUsd).toBeCloseTo(expected, 10);
+    });
+
+    it('omits costUsd at turn_complete when no session_configured preceded it', async () => {
+      const stream = createMockStream([
+        envelope('token_count', {
+          info: { total_token_usage: { input_tokens: 100, output_tokens: 50 } },
+        }),
+        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+      ]);
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+      const complete = events.find((e) => e.type === 'complete') as { costUsd?: number } | undefined;
+      // costUsd should be absent or 0 when the model is unknown
+      expect(complete?.costUsd == null || complete.costUsd === 0).toBe(true);
+    });
+
+    it('sets costUsd to 0 and warns when model is not in MODEL_PRICING', async () => {
+      const warnMessages: string[] = [];
+      const warnLogger = {
+        ...logger,
+        warn: (obj: { msg?: string }) => {
+          warnMessages.push(obj.msg ?? '');
+        },
+      };
+      const stream = createMockStream([
+        envelope('session_configured', { session_id: 'sess-2', model: 'unknown-model-xyz' }),
+        envelope('token_count', {
+          info: { total_token_usage: { input_tokens: 100, output_tokens: 50 } },
+        }),
+        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+      ]);
+      const events: AgentEvent[] = [];
+      // biome-ignore lint/suspicious/noExplicitAny: test logger coercion
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', warnLogger as any)) {
+        events.push(event);
+      }
+      const complete = events.find((e) => e.type === 'complete') as { costUsd?: number } | undefined;
+      expect(complete?.costUsd).toBe(0);
+      expect(warnMessages.some((m) => m.includes('unknown-model-xyz'))).toBe(true);
     });
   });
 });
