@@ -102,8 +102,7 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
     }
 
     case 'agent_reasoning_raw_content': {
-      const raw = typeof msg.text === 'string' ? msg.text : typeof msg.content === 'string' ? msg.content : undefined;
-      const text = truncate(raw, MAX_REASONING_LEN);
+      const text = truncate(msg.text, MAX_REASONING_LEN) ?? truncate(msg.content, MAX_REASONING_LEN);
       if (!text) return null;
       return { type: 'reasoning', timestamp: ts, text, isRaw: true };
     }
@@ -303,7 +302,6 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
     const msg = unwrap(env);
     if (!msg || typeof msg.type !== 'string') continue;
 
-    // Capture model from the session-init event so costUsd can be computed at turn_complete.
     if (msg.type === 'session_configured' && typeof msg.model === 'string') {
       latestModel = msg.model;
     }
@@ -317,7 +315,7 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
 
     if (msg.type === 'patch_apply_end') {
       const changes = msg.changes as Record<string, { type?: string }> | undefined;
-      if (changes && typeof changes === 'object') {
+      if (changes) {
         const ts = tsOf(env);
         for (const [filePath, change] of Object.entries(changes)) {
           const ct = change?.type;
@@ -335,8 +333,8 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
           ? msg.last_agent_message
           : 'Codex turn complete';
       const ts = tsOf(env);
-      const inputTokens = latestUsage?.input_tokens ?? 0;
-      const outputTokens = latestUsage?.output_tokens ?? 0;
+      const inputTokens = latestUsage?.input_tokens;
+      const outputTokens = latestUsage?.output_tokens;
       let costUsd: number | undefined;
       if (latestModel !== null) {
         const key = canonicalModelKey(latestModel);
@@ -348,19 +346,15 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
           });
           costUsd = 0;
         } else {
-          costUsd = computeCost(key, inputTokens, outputTokens);
+          costUsd = computeCost(key, inputTokens ?? 0, outputTokens ?? 0);
         }
       }
       const completeEvent: AgentEvent = {
         type: 'complete',
         timestamp: ts,
         result,
-        ...(latestUsage?.input_tokens !== undefined && {
-          totalInputTokens: latestUsage.input_tokens,
-        }),
-        ...(latestUsage?.output_tokens !== undefined && {
-          totalOutputTokens: latestUsage.output_tokens,
-        }),
+        ...(inputTokens !== undefined && { totalInputTokens: inputTokens }),
+        ...(outputTokens !== undefined && { totalOutputTokens: outputTokens }),
         ...(costUsd !== undefined && { costUsd }),
       };
       yield completeEvent;
