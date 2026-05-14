@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import type { AgentErrorEvent, AgentEvent, AgentStatusEvent } from '@autopod/shared';
+import type { AgentErrorEvent, AgentEvent, AgentStatusEvent, SpawnConfig } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -56,7 +56,10 @@ function createMockPodRepo(codexSessionId: string | null = null): PodRepository 
     list: vi.fn(() => []),
     listNonTerminal: vi.fn(() => []),
     countByStatusAndProfile: vi.fn(() => 0),
-    getStats: vi.fn(() => ({ total: 0, byStatus: {} as ReturnType<PodRepository['getStats']>['byStatus'] })),
+    getStats: vi.fn(() => ({
+      total: 0,
+      byStatus: {} as ReturnType<PodRepository['getStats']>['byStatus'],
+    })),
     getPodsDependingOn: vi.fn(() => []),
     getPodsBySeries: vi.fn(() => []),
     listNonTerminalPodIds: vi.fn(() => []),
@@ -173,7 +176,8 @@ describe('CodexRuntime', () => {
       expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
 
       // Real args to execStreaming still contain the full task
-      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1] as string[];
       expect(execArgs).toContain(bigStr);
     });
 
@@ -347,7 +351,8 @@ describe('CodexRuntime', () => {
         (c) =>
           typeof c[0] === 'object' &&
           c[0] !== null &&
-          (c[0] as Record<string, unknown>).msg === 'Resuming codex with follow-up message in container',
+          (c[0] as Record<string, unknown>).msg ===
+            'Resuming codex with follow-up message in container',
       );
       expect(resumeCall).toBeDefined();
       const logObj = resumeCall![0] as Record<string, unknown>;
@@ -356,7 +361,8 @@ describe('CodexRuntime', () => {
       expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
 
       // Real args to execStreaming still contain the full message
-      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1] as string[];
       expect(execArgs).toContain(bigStr);
     });
 
@@ -476,7 +482,8 @@ describe('CodexRuntime', () => {
         /* consume */
       }
 
-      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1] as string[];
       expect(execArgs).toContain('map-session-id');
       expect(execArgs).not.toContain('db-session-id');
     });
@@ -502,6 +509,268 @@ describe('CodexRuntime', () => {
       const cm = createMockContainerManager(handle);
       const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
       await runtime.abort('nonexistent');
+    });
+
+    it('clears the mcpServersBySession entry for the aborted pod', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      (runtime as any).handles.set('sess-1', handle);
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      (runtime as any).mcpServersBySession.set('sess-1', [
+        { name: 'escalation', url: 'http://h/mcp' },
+      ]);
+
+      await runtime.abort('sess-1');
+
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      expect((runtime as any).mcpServersBySession.has('sess-1')).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // writeMcpConfig
+  // ---------------------------------------------------------------------------
+
+  describe('writeMcpConfig', () => {
+    type WriteMcp = (containerId: string, mcpServers: SpawnConfig['mcpServers']) => Promise<void>;
+
+    function callWriteMcpConfig(runtime: CodexRuntime): WriteMcp {
+      return (runtime as unknown as { writeMcpConfig: WriteMcp }).writeMcpConfig.bind(runtime);
+    }
+
+    function lastWrittenContent(cm: ContainerManager): string {
+      const calls = (cm.writeFile as ReturnType<typeof vi.fn>).mock.calls;
+      const last = calls[calls.length - 1];
+      return last?.[2] as string;
+    }
+
+    it('writes a streamable HTTP entry to ~/.codex/config.toml', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)('c1', [
+        {
+          name: 'escalation',
+          url: 'http://host.docker.internal:3100/mcp/abc',
+          headers: { Authorization: 'Bearer tok123' },
+        },
+      ]);
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c1',
+        '/home/autopod/.codex/config.toml',
+        expect.any(String),
+      );
+
+      const written = lastWrittenContent(cm);
+      expect(written).toContain('[mcp_servers.escalation]');
+      expect(written).toContain('url = "http://host.docker.internal:3100/mcp/abc"');
+      expect(written).toContain('http_headers = { Authorization = "Bearer tok123" }');
+      // HTTP entries must not emit stdio fields.
+      expect(written).not.toContain('command =');
+    });
+
+    it('emits stdio entries with command/args/env (not url)', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)('c1', [
+        {
+          type: 'stdio',
+          name: 'serena',
+          command: 'serena',
+          args: ['--project', '/workspace'],
+        },
+        {
+          type: 'stdio',
+          name: 'roslyn-codelens',
+          command: 'roslyn-codelens-mcp',
+          env: { LOG_LEVEL: 'info' },
+        },
+      ]);
+
+      const written = lastWrittenContent(cm);
+      expect(written).toContain('[mcp_servers.serena]');
+      expect(written).toContain('command = "serena"');
+      expect(written).toContain('args = ["--project", "/workspace"]');
+      expect(written).toContain('[mcp_servers.roslyn-codelens]');
+      expect(written).toContain('command = "roslyn-codelens-mcp"');
+      expect(written).toContain('env = { LOG_LEVEL = "info" }');
+      expect(written).not.toContain('url =');
+      expect(written).not.toContain('http_headers =');
+    });
+
+    it('mixes http and stdio entries in the same config file', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)('c1', [
+        { name: 'escalation', url: 'http://h/mcp' },
+        { type: 'stdio', name: 'serena', command: 'serena' },
+      ]);
+
+      const written = lastWrittenContent(cm);
+      expect(written).toContain('[mcp_servers.escalation]');
+      expect(written).toContain('url = "http://h/mcp"');
+      expect(written).toContain('[mcp_servers.serena]');
+      expect(written).toContain('command = "serena"');
+    });
+
+    it('quotes server names that contain TOML-reserved characters', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)('c1', [{ name: 'name.with.dots', url: 'http://h/mcp' }]);
+
+      const written = lastWrittenContent(cm);
+      expect(written).toContain('[mcp_servers."name.with.dots"]');
+    });
+
+    it('escapes double quotes and backslashes in string values', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)('c1', [
+        {
+          name: 'escalation',
+          url: 'http://h/mcp',
+          headers: { 'X-Quote': 'a"b\\c' },
+        },
+      ]);
+
+      const written = lastWrittenContent(cm);
+      expect(written).toContain('X-Quote = "a\\"b\\\\c"');
+    });
+
+    it('does not write a config when mcpServers is empty', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)('c1', []);
+
+      expect(cm.writeFile).not.toHaveBeenCalled();
+    });
+
+    it('does not write a config when mcpServers is undefined', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)('c1', undefined);
+
+      expect(cm.writeFile).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // spawn / resume MCP wiring
+  // ---------------------------------------------------------------------------
+
+  describe('spawn / resume MCP wiring', () => {
+    it('writes MCP config and stores servers in the session map on spawn', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      const iter = runtime.spawn({
+        podId: 'sess-1',
+        task: 'do thing',
+        model: 'gpt-5-codex',
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+        mcpServers: [{ name: 'escalation', url: 'http://h/mcp' }],
+      });
+
+      // Start consuming so spawn() advances past the writeMcpConfig + execStreaming call.
+      const consume = (async () => {
+        for await (const _ of iter) {
+          // drain
+        }
+      })();
+      (handle as unknown as { finish: (c?: number) => void }).finish(0);
+      await consume;
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c1',
+        '/home/autopod/.codex/config.toml',
+        expect.stringContaining('[mcp_servers.escalation]'),
+      );
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      const stored = (runtime as any).mcpServersBySession.get('sess-1');
+      expect(stored).toEqual([{ name: 'escalation', url: 'http://h/mcp' }]);
+    });
+
+    it('re-writes MCP config from the stored map on resume', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      // Simulate a prior spawn that populated the map.
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      (runtime as any).mcpServersBySession.set('sess-1', [
+        { name: 'escalation', url: 'http://h/mcp' },
+      ]);
+
+      const iter = runtime.resume('sess-1', 'continue', 'c2', {});
+
+      const consume = (async () => {
+        for await (const _ of iter) {
+          // drain
+        }
+      })();
+      (handle as unknown as { finish: (c?: number) => void }).finish(0);
+      await consume;
+
+      // writeFile should target c2 (the new container) with the same config shape.
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c2',
+        '/home/autopod/.codex/config.toml',
+        expect.stringContaining('[mcp_servers.escalation]'),
+      );
+    });
+
+    it('resume skips writeFile entirely when no servers were stored', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      const iter = runtime.resume('sess-1', 'continue', 'c2', {});
+
+      const consume = (async () => {
+        for await (const _ of iter) {
+          // drain
+        }
+      })();
+      (handle as unknown as { finish: (c?: number) => void }).finish(0);
+      await consume;
+
+      expect(cm.writeFile).not.toHaveBeenCalled();
+    });
+
+    it('suspend preserves the mcpServersBySession entry', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      (runtime as any).handles.set('sess-1', handle);
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      (runtime as any).mcpServersBySession.set('sess-1', [
+        { name: 'escalation', url: 'http://h/mcp' },
+      ]);
+
+      await runtime.suspend('sess-1');
+
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      expect((runtime as any).mcpServersBySession.has('sess-1')).toBe(true);
     });
   });
 });
