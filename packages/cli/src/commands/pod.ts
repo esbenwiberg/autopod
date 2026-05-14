@@ -724,6 +724,9 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
             `${ts} ${chalk.blue.bold(`[progress ${inner.currentPhase}/${inner.totalPhases}]`)} ${inner.phase} — ${inner.description}`,
           );
           break;
+        case 'reasoning':
+          console.log(`${ts} ${chalk.dim.italic(`[reasoning${inner.isRaw ? ' raw' : ''}]`)} ${chalk.dim(truncate(inner.text, 500))}`);
+          break;
         default:
           console.log(`${ts} ${chalk.dim(JSON.stringify(inner))}`);
       }
