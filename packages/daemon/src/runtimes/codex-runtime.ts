@@ -58,7 +58,6 @@ export class CodexRuntime implements Runtime {
 
     const enriched = (async function* captureSessionId(): AsyncIterable<AgentEvent> {
       for await (const event of CodexStreamParser.parse(handle.stdout, podId, logger)) {
-        // Capture session ID from session_configured status events for resume support
         if (event.type === 'status' && event.sessionId) {
           codexSessionIds.set(podId, event.sessionId);
         }

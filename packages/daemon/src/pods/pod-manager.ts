@@ -6225,16 +6225,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Cleanup per-pod conversation-history dirs on the host. Best
         // effort — if they linger they just waste a few KB of disk per pod.
-        if (pod.runtime === 'claude') {
-          await cleanupClaudeState(podId).catch((err) => {
-            logger.warn({ err, podId }, 'Failed to cleanup Claude state dir');
-          });
-        }
-        if (pod.runtime === 'codex') {
-          await cleanupCodexState(podId).catch((err) => {
-            logger.warn({ err, podId }, 'Failed to cleanup Codex state dir');
-          });
-        }
+        const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
+          claude: cleanupClaudeState,
+          codex: cleanupCodexState,
+        };
+        await runtimeStateDirs[pod.runtime]?.(podId)?.catch((err) => {
+          logger.warn({ err, podId }, `Failed to cleanup ${pod.runtime} state dir`);
+        });
       };
 
       await Promise.race([
@@ -7927,16 +7924,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             logger.warn({ err, podId }, 'Failed to cleanup worktree during delete');
           }
         }
-        if (pod.runtime === 'claude') {
-          await cleanupClaudeState(podId).catch((err) => {
-            logger.warn({ err, podId }, 'Failed to cleanup Claude state dir during delete');
-          });
-        }
-        if (pod.runtime === 'codex') {
-          await cleanupCodexState(podId).catch((err) => {
-            logger.warn({ err, podId }, 'Failed to cleanup Codex state dir during delete');
-          });
-        }
+        const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
+          claude: cleanupClaudeState,
+          codex: cleanupCodexState,
+        };
+        await runtimeStateDirs[pod.runtime]?.(podId)?.catch((err) => {
+          logger.warn({ err, podId }, `Failed to cleanup ${pod.runtime} state dir during delete`);
+        });
       };
 
       await Promise.race([
