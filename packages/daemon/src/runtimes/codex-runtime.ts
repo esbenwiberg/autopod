@@ -1,3 +1,4 @@
+import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -8,6 +9,32 @@ import {
   withIdleLivenessProbe,
   withPostCompleteGrace,
 } from './stream-grace.js';
+
+/** Path inside the container where Codex reads its config (including MCP servers). */
+const MCP_CONFIG_PATH = `${CONTAINER_HOME_DIR}/.codex/config.toml`;
+
+const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
+
+function escapeTomlString(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function tomlKey(k: string): string {
+  return TOML_BARE_KEY.test(k) ? k : `"${escapeTomlString(k)}"`;
+}
+
+function tomlStringVal(s: string): string {
+  return `"${escapeTomlString(s)}"`;
+}
+
+function tomlArrayVal(values: string[]): string {
+  return `[${values.map(tomlStringVal).join(', ')}]`;
+}
+
+function tomlInlineTable(obj: Record<string, string>): string {
+  const entries = Object.entries(obj).map(([k, v]) => `${tomlKey(k)} = ${tomlStringVal(v)}`);
+  return `{ ${entries.join(', ')} }`;
+}
 
 /**
  * Codex CLI runtime adapter.
@@ -21,6 +48,8 @@ export class CodexRuntime implements Runtime {
   private handles = new Map<string, StreamingExecResult>();
   /** Maps autopod podId → Codex session ID for in-memory resume shortcut. */
   readonly codexSessionIds = new Map<string, string>();
+  /** Maps autopod podId → MCP servers so resume() can re-write the config into the new container. */
+  private mcpServersBySession = new Map<string, SpawnConfig['mcpServers']>();
   private logger: Logger;
   private containerManager: ContainerManager;
   private podRepo: PodRepository;
@@ -32,6 +61,11 @@ export class CodexRuntime implements Runtime {
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    // Write Codex's config.toml so the CLI picks up escalation + profile MCP servers
+    // from disk. Codex reads `~/.codex/config.toml` automatically — no flag required.
+    await this.writeMcpConfig(config.containerId, config.mcpServers);
+    this.mcpServersBySession.set(config.podId, config.mcpServers);
+
     const args = this.buildSpawnArgs(config);
     const safeSpawnArgs = args.map((a, i) => (i === 1 ? `<task: ${a.length} bytes>` : a));
 
@@ -116,6 +150,11 @@ export class CodexRuntime implements Runtime {
     containerId: string,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
+    // Re-write the Codex config into the (potentially new) container before launching codex.
+    // Crash recovery spawns a fresh container that has no config file on disk; without this
+    // re-write the agent loses access to escalation and profile MCP tools after recovery.
+    await this.writeMcpConfig(containerId, this.mcpServersBySession.get(podId));
+
     // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
     const sessionId =
       this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
@@ -188,6 +227,7 @@ export class CodexRuntime implements Runtime {
 
     await handle.kill();
     this.handles.delete(podId);
+    this.mcpServersBySession.delete(podId);
   }
 
   async suspend(podId: string): Promise<void> {
@@ -214,5 +254,50 @@ export class CodexRuntime implements Runtime {
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
     return ['exec', config.task, '--model', config.model, '--full-auto', '--json'];
+  }
+
+  /**
+   * Write Codex's config.toml inside the container with the requested MCP servers.
+   *
+   * Codex reads `~/.codex/config.toml` automatically on every invocation, so no CLI
+   * flag is needed. The bind-mount in pod-manager.ts attaches `~/.codex/sessions`
+   * only, leaving `config.toml` in the container's writable layer (which is what we
+   * want — recovery into a fresh container needs the file re-written).
+   *
+   * HTTP entries emit `url` + optional `http_headers`; stdio entries emit
+   * `command` + optional `args` / `env`. Server names are quoted defensively
+   * since the table key has to round-trip whatever the profile chose.
+   */
+  private async writeMcpConfig(
+    containerId: string,
+    mcpServers: SpawnConfig['mcpServers'],
+  ): Promise<void> {
+    if (!mcpServers || mcpServers.length === 0) return;
+
+    const sections: string[] = [];
+    for (const server of mcpServers) {
+      const lines: string[] = [`[mcp_servers.${tomlKey(server.name)}]`];
+      if (server.type === 'stdio') {
+        lines.push(`command = ${tomlStringVal(server.command)}`);
+        if (server.args && server.args.length > 0) {
+          lines.push(`args = ${tomlArrayVal(server.args)}`);
+        }
+        if (server.env && Object.keys(server.env).length > 0) {
+          lines.push(`env = ${tomlInlineTable(server.env)}`);
+        }
+      } else {
+        lines.push(`url = ${tomlStringVal(server.url)}`);
+        if (server.headers && Object.keys(server.headers).length > 0) {
+          lines.push(`http_headers = ${tomlInlineTable(server.headers)}`);
+        }
+      }
+      sections.push(lines.join('\n'));
+    }
+
+    await this.containerManager.writeFile(
+      containerId,
+      MCP_CONFIG_PATH,
+      `${sections.join('\n\n')}\n`,
+    );
   }
 }
