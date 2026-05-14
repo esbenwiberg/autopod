@@ -105,7 +105,11 @@ describe('CodexStreamParser', () => {
         { id: 's', msg: { type: 'agent_reasoning_raw_content', content: 'raw via content field' } },
         'pod-1',
       );
-      expect(e).toMatchObject({ type: 'reasoning', isRaw: true });
+      expect(e).toMatchObject({
+        type: 'reasoning',
+        text: 'raw via content field',
+        isRaw: true,
+      });
     });
 
     it('maps exec_command_begin to a Bash tool_use carrying command + cwd', () => {
