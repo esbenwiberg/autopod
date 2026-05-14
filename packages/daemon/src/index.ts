@@ -397,7 +397,7 @@ if (docker) {
 
 const runtimeRegistry = createRuntimeRegistry([
   new ClaudeRuntime(logger, containerManager),
-  new CodexRuntime(logger, containerManager),
+  new CodexRuntime(logger, containerManager, podRepo),
   new CopilotRuntime(logger, containerManager),
 ]);
 const hostBrowserRunner = createHostBrowserRunner(logger);

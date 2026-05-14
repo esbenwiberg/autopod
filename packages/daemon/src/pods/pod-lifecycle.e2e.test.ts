@@ -513,10 +513,17 @@ describe('Pod Lifecycle E2E', () => {
       });
     });
 
-    it('persists Claude pod ID from status event', async () => {
+    it('persists Claude pod ID from status event sessionId field', async () => {
       const runtime = createMockRuntime({
         spawn: vi.fn(async function* () {
-          yield statusEvent('Claude pod initialized (cs-abc123)');
+          // The claude-stream-parser now sets event.sessionId (brief 03);
+          // pod-manager reads that field instead of regex-parsing the message.
+          yield {
+            type: 'status' as const,
+            timestamp: new Date().toISOString(),
+            message: 'Claude pod initialized (cs-abc123)',
+            sessionId: 'cs-abc123',
+          };
           yield completeEvent('Done');
         } as () => AsyncIterable<AgentEvent>),
       });
@@ -851,6 +858,65 @@ describe('Pod Lifecycle E2E', () => {
       const command = (gitConfigCall as unknown[])[1] as string[];
       expect(command[2]).toContain("'developer@autopod.local'");
       expect(command[2]).toContain("'Developer'");
+    });
+  });
+
+  describe('Session ID persistence from event.sessionId', () => {
+    it('persists codexSessionId from AgentStatusEvent.sessionId for Codex pods', async () => {
+      const ctx = createTestContext();
+      insertTestProfile(ctx.db, { name: 'codex-profile', runtime: 'codex' });
+
+      const runtime = createMockRuntime({
+        spawn: async function* () {
+          yield {
+            type: 'status' as const,
+            timestamp: new Date().toISOString(),
+            message: 'Codex session configured (sess-codex-abc)',
+            sessionId: 'sess-codex-abc',
+          };
+          yield completeEvent();
+        },
+      });
+      ctx.deps.runtimeRegistry = { get: vi.fn(() => runtime) };
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'codex-profile', task: 'Do something', skipValidation: true },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+
+      const updated = ctx.podRepo.getOrThrow(pod.id);
+      expect(updated.codexSessionId).toBe('sess-codex-abc');
+      expect(updated.claudeSessionId).toBeNull();
+    });
+
+    it('persists claudeSessionId from AgentStatusEvent.sessionId for Claude pods', async () => {
+      const ctx = createTestContext();
+
+      const runtime = createMockRuntime({
+        spawn: async function* () {
+          yield {
+            type: 'status' as const,
+            timestamp: new Date().toISOString(),
+            message: 'Claude pod initialized (sess-claude-xyz)',
+            sessionId: 'sess-claude-xyz',
+          };
+          yield completeEvent();
+        },
+      });
+      ctx.deps.runtimeRegistry = { get: vi.fn(() => runtime) };
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do something', skipValidation: true },
+        'user-1',
+      );
+      await manager.processPod(pod.id);
+
+      const updated = ctx.podRepo.getOrThrow(pod.id);
+      expect(updated.claudeSessionId).toBe('sess-claude-xyz');
+      expect(updated.codexSessionId).toBeNull();
     });
   });
 });

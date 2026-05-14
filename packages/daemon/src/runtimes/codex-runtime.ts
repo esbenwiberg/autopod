@@ -1,6 +1,7 @@
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
+import type { PodRepository } from '../pods/pod-repository.js';
 import { CodexStreamParser } from './codex-stream-parser.js';
 import {
   awaitExitCodeBounded,
@@ -18,12 +19,16 @@ export class CodexRuntime implements Runtime {
   readonly type = 'codex' as const;
 
   private handles = new Map<string, StreamingExecResult>();
+  /** Maps autopod podId → Codex session ID for in-memory resume shortcut. */
+  readonly codexSessionIds = new Map<string, string>();
   private logger: Logger;
   private containerManager: ContainerManager;
+  private podRepo: PodRepository;
 
-  constructor(logger: Logger, containerManager: ContainerManager) {
+  constructor(logger: Logger, containerManager: ContainerManager, podRepo: PodRepository) {
     this.logger = logger;
     this.containerManager = containerManager;
+    this.podRepo = podRepo;
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
@@ -47,9 +52,23 @@ export class CodexRuntime implements Runtime {
 
     this.handles.set(config.podId, handle);
 
+    const codexSessionIds = this.codexSessionIds;
+    const podId = config.podId;
+    const logger = this.logger;
+
+    const enriched = (async function* captureSessionId(): AsyncIterable<AgentEvent> {
+      for await (const event of CodexStreamParser.parse(handle.stdout, podId, logger)) {
+        // Capture session ID from session_configured status events for resume support
+        if (event.type === 'status' && event.sessionId) {
+          codexSessionIds.set(podId, event.sessionId);
+        }
+        yield event;
+      }
+    })();
+
     try {
       yield* withPostCompleteGrace(
-        withIdleLivenessProbe(CodexStreamParser.parse(handle.stdout, config.podId, this.logger), {
+        withIdleLivenessProbe(enriched, {
           streams: [handle.stdout, handle.stderr],
           runtimeName: 'codex-runtime',
           podId: config.podId,
@@ -98,17 +117,29 @@ export class CodexRuntime implements Runtime {
     containerId: string,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
-    // Codex CLI doesn't have native pod resumption.
-    // We pass the message as a follow-up task in full-auto mode.
-    const args = ['exec', message, '--full-auto', '--json'];
-    const safeResumeArgs = args.map((a, i) => (i === 1 ? `<task: ${a.length} bytes>` : a));
+    // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
+    const sessionId =
+      this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
+
+    const args = sessionId
+      ? ['exec', 'resume', sessionId, message, '--json']
+      : ['exec', message, '--full-auto', '--json'];
+
+    // Redact the message from logs: index 3 with a session ID, index 1 without.
+    const messageIndex = sessionId ? 3 : 1;
+    const safeResumeArgs = args.map((a, i) =>
+      i === messageIndex ? `<task: ${a.length} bytes>` : a,
+    );
 
     this.logger.info({
       component: 'codex-runtime',
       podId,
       containerId,
+      sessionId: sessionId ?? null,
       args: safeResumeArgs,
-      msg: 'Resuming codex with follow-up message in container',
+      msg: sessionId
+        ? 'Resuming codex session in container'
+        : 'Resuming codex with follow-up message in container',
     });
 
     const shimPath = '/run/autopod/agent-shim.sh';
@@ -179,6 +210,7 @@ export class CodexRuntime implements Runtime {
 
     await handle.kill();
     this.handles.delete(podId);
+    // NOTE: codexSessionIds is NOT deleted — session survives suspend for resume
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {

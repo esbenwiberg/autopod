@@ -1,8 +1,9 @@
 import { PassThrough } from 'node:stream';
-import type { AgentErrorEvent, AgentEvent } from '@autopod/shared';
+import type { AgentErrorEvent, AgentEvent, AgentStatusEvent } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
+import type { PodRepository } from '../pods/pod-repository.js';
 import { CodexRuntime } from './codex-runtime.js';
 
 const logger = pino({ level: 'silent' });
@@ -46,6 +47,23 @@ function createMockContainerManager(handle: StreamingExecResult): ContainerManag
   };
 }
 
+function createMockPodRepo(codexSessionId: string | null = null): PodRepository {
+  return {
+    insert: vi.fn(),
+    getOrThrow: vi.fn(() => ({ codexSessionId }) as ReturnType<PodRepository['getOrThrow']>),
+    update: vi.fn(),
+    delete: vi.fn(),
+    list: vi.fn(() => []),
+    listNonTerminal: vi.fn(() => []),
+    countByStatusAndProfile: vi.fn(() => 0),
+    getStats: vi.fn(() => ({ total: 0, byStatus: {} as ReturnType<PodRepository['getStats']>['byStatus'] })),
+    getPodsDependingOn: vi.fn(() => []),
+    getPodsBySeries: vi.fn(() => []),
+    listNonTerminalPodIds: vi.fn(() => []),
+    listTerminalPodsCompletedBefore: vi.fn(() => []),
+  };
+}
+
 describe('CodexRuntime', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -55,7 +73,7 @@ describe('CodexRuntime', () => {
     it('builds correct args from config', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
       // biome-ignore lint/suspicious/noExplicitAny: accessing private method in test
       const args = (runtime as any).buildSpawnArgs({
         podId: 'abc123',
@@ -73,7 +91,7 @@ describe('CodexRuntime', () => {
     it('calls execStreaming and yields events from stdout', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
       setTimeout(() => {
         (handle.stdout as PassThrough).write(
@@ -124,7 +142,7 @@ describe('CodexRuntime', () => {
 
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
       setTimeout(() => {
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
@@ -162,7 +180,7 @@ describe('CodexRuntime', () => {
     it('yields error event on non-zero exit code', async () => {
       const handle = createMockHandle({ exitCode: 1 });
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
       setTimeout(() => {
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
@@ -200,7 +218,7 @@ describe('CodexRuntime', () => {
       try {
         const handle = createMockHandle();
         const cm = createMockContainerManager(handle);
-        const runtime = new CodexRuntime(logger, cm);
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
         setTimeout(() => {
           (handle.stdout as PassThrough).write(
@@ -250,7 +268,7 @@ describe('CodexRuntime', () => {
     it('cleans up handle tracking after completion', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
       setTimeout(() => {
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
@@ -271,16 +289,50 @@ describe('CodexRuntime', () => {
       // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
       expect((runtime as any).handles.has('track-test')).toBe(false);
     });
+
+    it('populates codexSessionIds map from AgentStatusEvent.sessionId during spawn', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      setTimeout(() => {
+        // Emit a session_configured status event with sessionId set
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            id: '1',
+            msg: { type: 'session_configured', session_id: 'sess-abc-123', model: 'gpt-4o' },
+          })}\n`,
+        );
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ id: '2', msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'Done' } })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 10);
+
+      for await (const _ of runtime.spawn({
+        podId: 'map-test',
+        task: 'test',
+        model: 'gpt-4o',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        /* consume */
+      }
+
+      expect(runtime.codexSessionIds.get('map-test')).toBe('sess-abc-123');
+    });
   });
 
   describe('resume', () => {
-    it('redacts large message in resume log args', async () => {
+    it('redacts large message in resume log args (no session ID — full-auto path)', async () => {
       const bigStr = 'X'.repeat(50_000);
       const infoSpy = vi.spyOn(logger, 'info');
 
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo(null));
 
       setTimeout(() => {
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
@@ -308,10 +360,10 @@ describe('CodexRuntime', () => {
       expect(execArgs).toContain(bigStr);
     });
 
-    it('calls execStreaming with message as task in full-auto mode', async () => {
+    it('calls execStreaming with message as task in full-auto mode when no session ID', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo(null));
 
       setTimeout(() => {
         (handle.stdout as PassThrough).write(
@@ -347,13 +399,94 @@ describe('CodexRuntime', () => {
       expect(events).toHaveLength(1);
       expect(events[0]?.type).toBe('complete');
     });
+
+    it('uses exec resume subcommand when pod has codexSessionId in DB', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const mockRepo = createMockPodRepo('session-from-db-xyz');
+      const runtime = new CodexRuntime(logger, cm, mockRepo);
+
+      setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 10);
+
+      for await (const _ of runtime.resume('pod-abc', 'continue the task', 'container-123')) {
+        /* consume */
+      }
+
+      expect(cm.execStreaming).toHaveBeenCalledWith(
+        'container-123',
+        [
+          '/run/autopod/agent-shim.sh',
+          'codex',
+          'exec',
+          'resume',
+          'session-from-db-xyz',
+          'continue the task',
+          '--json',
+        ],
+        expect.any(Object),
+      );
+    });
+
+    it('uses exec resume subcommand when pod has sessionId in in-memory map', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      // DB returns null but the in-memory map has the session ID
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo(null));
+      runtime.codexSessionIds.set('pod-xyz', 'in-memory-session-id');
+
+      setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 10);
+
+      for await (const _ of runtime.resume('pod-xyz', 'continue', 'container-123')) {
+        /* consume */
+      }
+
+      expect(cm.execStreaming).toHaveBeenCalledWith(
+        'container-123',
+        [
+          '/run/autopod/agent-shim.sh',
+          'codex',
+          'exec',
+          'resume',
+          'in-memory-session-id',
+          'continue',
+          '--json',
+        ],
+        expect.any(Object),
+      );
+    });
+
+    it('in-memory map takes priority over DB session ID', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo('db-session-id'));
+      runtime.codexSessionIds.set('pod-priority', 'map-session-id');
+
+      setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 10);
+
+      for await (const _ of runtime.resume('pod-priority', 'continue', 'container-123')) {
+        /* consume */
+      }
+
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      expect(execArgs).toContain('map-session-id');
+      expect(execArgs).not.toContain('db-session-id');
+    });
   });
 
   describe('abort', () => {
     it('calls handle.kill() for the tracked pod', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
       // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
       (runtime as any).handles.set('sess-1', handle);
 
@@ -367,7 +500,7 @@ describe('CodexRuntime', () => {
     it('is a no-op when no handle is tracked', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
-      const runtime = new CodexRuntime(logger, cm);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
       await runtime.abort('nonexistent');
     });
   });
