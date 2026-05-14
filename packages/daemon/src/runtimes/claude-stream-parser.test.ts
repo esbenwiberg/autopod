@@ -1,4 +1,6 @@
+import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
+import type { AgentEvent } from '@autopod/shared';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
 
 // Actual event shapes captured from `claude --output-format stream-json --verbose`
@@ -6,6 +8,17 @@ const POD_ID = 'test-pod';
 
 function fakeLogger() {
   return { debug: () => {}, info: () => {}, warn: () => {} } as unknown as import('pino').Logger;
+}
+
+/** Drive parse() over a sequence of NDJSON events, collecting all emitted AgentEvents. */
+async function collectFromEvents(...events: object[]): Promise<AgentEvent[]> {
+  const ndjson = events.map((e) => JSON.stringify(e)).join('\n');
+  const stream = Readable.from([ndjson]);
+  const results: AgentEvent[] = [];
+  for await (const ev of ClaudeStreamParser.parse(stream, POD_ID, fakeLogger())) {
+    results.push(ev);
+  }
+  return results;
 }
 
 describe('ClaudeStreamParser.mapEvent', () => {
@@ -22,6 +35,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
     expect(result).toMatchObject({
       type: 'status',
       message: 'Claude pod initialized (abc-123)',
+      sessionId: 'abc-123',
     });
   });
 
@@ -35,93 +49,6 @@ describe('ClaudeStreamParser.mapEvent', () => {
       type: 'status',
       message: 'Claude pod initialized',
     });
-  });
-
-  it('maps assistant text content to status event', () => {
-    const event = {
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'Hello from Claude' }],
-      },
-    };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({ type: 'status', message: 'Hello from Claude' });
-  });
-
-  it('skips assistant thinking blocks', () => {
-    const event = {
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'thinking', thinking: 'Let me think...' }],
-      },
-    };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toBeNull();
-  });
-
-  it('maps assistant tool_use (non-file) to tool_use event', () => {
-    const event = {
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [
-          {
-            type: 'tool_use',
-            id: 'toolu_01',
-            name: 'Bash',
-            input: { command: 'echo hello' },
-          },
-        ],
-      },
-    };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({
-      type: 'tool_use',
-      tool: 'Bash',
-      input: { command: 'echo hello' },
-    });
-  });
-
-  it('maps assistant Edit tool_use to file_change modify event', () => {
-    const event = {
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [
-          {
-            type: 'tool_use',
-            name: 'Edit',
-            input: { file_path: '/workspace/src/foo.ts', old_string: 'a', new_string: 'b' },
-          },
-        ],
-      },
-    };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({
-      type: 'file_change',
-      path: '/workspace/src/foo.ts',
-      action: 'modify',
-    });
-  });
-
-  it('maps assistant Write tool_use to file_change create event', () => {
-    const event = {
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [
-          {
-            type: 'tool_use',
-            name: 'Write',
-            input: { file_path: '/workspace/new.ts', content: '// hi' },
-          },
-        ],
-      },
-    };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({ type: 'file_change', action: 'create' });
   });
 
   it('maps user tool_result to tool_use event with stdout output', () => {
@@ -280,10 +207,130 @@ describe('ClaudeStreamParser.mapEvent', () => {
     const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toBeNull();
   });
+});
 
-  it('returns null for assistant with no content', () => {
-    const event = { type: 'assistant', message: { role: 'assistant', content: [] } };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
+describe('ClaudeStreamParser.mapContentBlock', () => {
+  const TS = '2026-01-01T00:00:00.000Z';
+
+  it('emits reasoning event for thinking blocks', () => {
+    const block = { type: 'thinking', thinking: 'Let me think...' };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toMatchObject({ type: 'reasoning', text: 'Let me think...', isRaw: false });
+  });
+
+  it('does not emit a reasoning event for empty thinking text', () => {
+    const block = { type: 'thinking', thinking: '' };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
     expect(result).toBeNull();
+  });
+
+  it('does not emit a reasoning event when thinking field is absent', () => {
+    const block = { type: 'thinking' };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toBeNull();
+  });
+
+  it('maps text block to status event', () => {
+    const block = { type: 'text', text: 'Hello from Claude' };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toMatchObject({ type: 'status', message: 'Hello from Claude' });
+  });
+
+  it('maps tool_use block (non-file) to tool_use event', () => {
+    const block = {
+      type: 'tool_use',
+      id: 'toolu_01',
+      name: 'Bash',
+      input: { command: 'echo hello' },
+    };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toMatchObject({
+      type: 'tool_use',
+      tool: 'Bash',
+      input: { command: 'echo hello' },
+    });
+  });
+
+  it('maps Edit tool_use block to file_change modify event', () => {
+    const block = {
+      type: 'tool_use',
+      name: 'Edit',
+      input: { file_path: '/workspace/src/foo.ts', old_string: 'a', new_string: 'b' },
+    };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toMatchObject({
+      type: 'file_change',
+      path: '/workspace/src/foo.ts',
+      action: 'modify',
+    });
+  });
+
+  it('maps Write tool_use block to file_change create event', () => {
+    const block = {
+      type: 'tool_use',
+      name: 'Write',
+      input: { file_path: '/workspace/new.ts', content: '// hi' },
+    };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toMatchObject({ type: 'file_change', action: 'create' });
+  });
+
+  it('returns null for unrecognised block types', () => {
+    const block = { type: 'image', source: { type: 'base64', data: '...' } };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toBeNull();
+  });
+});
+
+describe('ClaudeStreamParser.parse — assistant multi-block', () => {
+  it('emits one reasoning event for a thinking-only content array', async () => {
+    const events = await collectFromEvents({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Let me think...' }],
+      },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'reasoning', text: 'Let me think...', isRaw: false });
+  });
+
+  it('emits reasoning then status for a mixed thinking+text content array', async () => {
+    const events = await collectFromEvents({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'My reasoning here' },
+          { type: 'text', text: 'My answer' },
+        ],
+      },
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: 'reasoning', text: 'My reasoning here' });
+    expect(events[1]).toMatchObject({ type: 'status', message: 'My answer' });
+  });
+
+  it('emits no events for an assistant message with an empty content array', async () => {
+    const events = await collectFromEvents({
+      type: 'assistant',
+      message: { role: 'assistant', content: [] },
+    });
+    expect(events).toHaveLength(0);
+  });
+
+  it('skips empty thinking blocks without emitting', async () => {
+    const events = await collectFromEvents({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '' },
+          { type: 'text', text: 'Only text' },
+        ],
+      },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'status', message: 'Only text' });
   });
 });

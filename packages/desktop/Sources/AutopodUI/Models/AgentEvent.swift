@@ -13,7 +13,7 @@ public enum AgentEventType: String, Sendable {
     case error        // AgentErrorEvent — errors with fatal flag
     case complete     // AgentCompleteEvent — task completion with token/cost info
     case taskSummary = "task_summary" // AgentTaskSummaryEvent — final task summary with deviations
-    case output       // Agent text output / reasoning
+    case reasoning    // AgentReasoningEvent — agent reasoning / thinking
 
     public var label: String {
         switch self {
@@ -27,7 +27,7 @@ public enum AgentEventType: String, Sendable {
         case .error:      "Error"
         case .complete:    "Done"
         case .taskSummary: "Summary"
-        case .output:      "Output"
+        case .reasoning:   "Reasoning"
         }
     }
 
@@ -43,7 +43,7 @@ public enum AgentEventType: String, Sendable {
         case .error:      "exclamationmark.triangle"
         case .complete:    "checkmark.circle"
         case .taskSummary: "doc.text.below.ecg"
-        case .output:      "text.quote"
+        case .reasoning:   "text.quote"
         }
     }
 
@@ -59,7 +59,7 @@ public enum AgentEventType: String, Sendable {
         case .error:      .red
         case .complete:    .green
         case .taskSummary: .indigo
-        case .output:      .secondary
+        case .reasoning:   .secondary
         }
     }
 
@@ -73,7 +73,7 @@ public enum AgentEventType: String, Sendable {
         switch self {
         case .status, .fileChange, .escalation, .plan, .progress, .error, .complete, .taskSummary:
             return true
-        case .toolUse, .toolResult, .output:
+        case .toolUse, .toolResult, .reasoning:
             return false
         }
     }

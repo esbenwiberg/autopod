@@ -84,9 +84,50 @@ export class ClaudeStreamParser {
         continue;
       }
 
+      if (event.type === 'assistant') {
+        const ts = new Date().toISOString();
+        const content = event.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            const mapped = ClaudeStreamParser.mapContentBlock(block, ts);
+            if (mapped) yield mapped;
+          }
+        }
+        continue;
+      }
+
       const mapped = ClaudeStreamParser.mapEvent(event, podId, logger);
       if (mapped) yield mapped;
     }
+  }
+
+  /**
+   * Map a single assistant content block to an AgentEvent.
+   *
+   * Handles: thinking → AgentReasoningEvent, text → AgentStatusEvent,
+   * tool_use → AgentFileChangeEvent or AgentToolUseEvent.
+   */
+  static mapContentBlock(block: ClaudeStreamContentBlock, ts: string): AgentEvent | null {
+    if (block.type === 'thinking' && block.thinking) {
+      return { type: 'reasoning', timestamp: ts, text: block.thinking, isRaw: false };
+    }
+    if (block.type === 'text' && block.text) {
+      return { type: 'status', timestamp: ts, message: block.text.slice(0, 2000) };
+    }
+    if (block.type === 'tool_use' && block.name) {
+      if (FILE_CHANGE_TOOLS.has(block.name)) {
+        const input = block.input ?? {};
+        const filePath = (input.file_path ?? input.path ?? 'unknown') as string;
+        return {
+          type: 'file_change',
+          timestamp: ts,
+          path: filePath,
+          action: block.name === 'Write' ? 'create' : 'modify',
+        };
+      }
+      return { type: 'tool_use', timestamp: ts, tool: block.name, input: block.input ?? {} };
+    }
+    return null;
   }
 
   /**
@@ -94,8 +135,7 @@ export class ClaudeStreamParser {
    *
    * Event mapping:
    * - system (subtype init)    → AgentStatusEvent (captures session_id)
-   * - assistant (text content) → AgentStatusEvent
-   * - assistant (tool_use)     → AgentFileChangeEvent or AgentToolUseEvent
+   * - assistant                → handled by parse() via mapContentBlock (not here)
    * - tool_result              → AgentToolUseEvent with output
    * - result                   → AgentCompleteEvent
    * - error                    → AgentErrorEvent
@@ -110,45 +150,8 @@ export class ClaudeStreamParser {
             type: 'status',
             timestamp: ts,
             message: `Claude pod initialized${event.session_id ? ` (${event.session_id})` : ''}`,
+            sessionId: event.session_id,
           };
-        }
-        return null;
-      }
-
-      case 'assistant': {
-        // Content is nested under event.message.content (not top-level event.content)
-        const content = event.message?.content;
-        if (!content || !Array.isArray(content)) return null;
-
-        // Process the first meaningful content block (skip 'thinking' blocks)
-        for (const block of content) {
-          if (block.type === 'text' && block.text) {
-            return {
-              type: 'status',
-              timestamp: ts,
-              message: block.text.slice(0, 2000),
-            };
-          }
-
-          if (block.type === 'tool_use' && block.name) {
-            if (FILE_CHANGE_TOOLS.has(block.name)) {
-              const input = block.input ?? {};
-              const filePath = (input.file_path ?? input.path ?? 'unknown') as string;
-              return {
-                type: 'file_change',
-                timestamp: ts,
-                path: filePath,
-                action: block.name === 'Write' ? 'create' : 'modify',
-              };
-            }
-
-            return {
-              type: 'tool_use',
-              timestamp: ts,
-              tool: block.name,
-              input: block.input ?? {},
-            };
-          }
         }
         return null;
       }

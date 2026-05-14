@@ -50,12 +50,23 @@ export type AgentEvent =
   | AgentEscalationEvent
   | AgentPlanEvent
   | AgentProgressEvent
-  | AgentTaskSummaryEvent;
+  | AgentTaskSummaryEvent
+  | AgentReasoningEvent;
 
 export interface AgentStatusEvent {
   type: 'status';
   timestamp: string;
   message: string;
+  /** Populated when this status event represents a runtime session-ready emission. */
+  sessionId?: string;
+}
+
+export interface AgentReasoningEvent {
+  type: 'reasoning';
+  timestamp: string;
+  text: string;
+  /** true for Codex agent_reasoning_raw_content (full raw); false/undefined for summary reasoning. */
+  isRaw?: boolean;
 }
 
 export interface AgentToolUseEvent {

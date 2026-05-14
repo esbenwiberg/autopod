@@ -75,7 +75,7 @@ export function createTestDb(): Database.Database {
 
 export function insertTestProfile(
   db: Database.Database,
-  overrides: { name?: string; maxValidationAttempts?: number } = {},
+  overrides: { name?: string; maxValidationAttempts?: number; runtime?: string } = {},
 ) {
   const name = overrides.name ?? 'test-profile';
   const maxValidationAttempts = overrides.maxValidationAttempts ?? 3;
@@ -102,7 +102,7 @@ export function insertTestProfile(
     validationPages: '[]',
     maxValidationAttempts,
     defaultModel: 'opus',
-    defaultRuntime: 'claude',
+    defaultRuntime: overrides.runtime ?? 'claude',
     escalationConfig: JSON.stringify({
       askHuman: true,
       askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },

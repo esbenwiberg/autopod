@@ -86,6 +86,7 @@ import {
 } from '../providers/index.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
+import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-store.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
@@ -3732,10 +3733,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ...sidecarEnv,
         };
 
-        // Per-pod Claude conversation-history directory. Bind-mounted at
-        // `~/.claude/projects/` inside the container so `--resume <session_id>`
-        // works across container respawns (sleep/wake, crash recovery). Only
-        // wired for Claude — codex/copilot respawn fresh without state.
+        // Per-pod conversation-history directories. Bind-mounted into the container
+        // so session state survives container respawns (sleep/wake, crash recovery).
+        // Wired for Claude and Codex; Copilot still respawns fresh.
         let claudeStateDir: string | null = null;
         if (pod.runtime === 'claude') {
           try {
@@ -3744,6 +3744,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             logger.warn(
               { err, podId },
               'Failed to create Claude state dir — resume across container respawns will fail',
+            );
+          }
+        }
+
+        let codexStateDir: string | null = null;
+        if (pod.runtime === 'codex') {
+          try {
+            codexStateDir = await ensureCodexStateDir(podId);
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to create Codex state dir — resume across container respawns will fail',
             );
           }
         }
@@ -3760,6 +3772,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
               ...(claudeStateDir
                 ? [{ host: claudeStateDir, container: `${CONTAINER_HOME_DIR}/.claude/projects` }]
+                : []),
+              ...(codexStateDir
+                ? [{ host: codexStateDir, container: `${CONTAINER_HOME_DIR}/.codex/sessions` }]
                 : []),
             ],
             networkName,
@@ -4829,8 +4844,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               });
             }
           })();
+        } else if (isRecovery && pod.runtime === 'codex' && pod.codexSessionId) {
+          // Codex crash recovery: continue the existing session
+          emitStatus('Resuming Codex pod…');
+          // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
+          const codexContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
+          events = runtime.resume(podId, codexContinuationPrompt, containerId, secretEnv);
         } else if (isRecovery) {
-          // Non-Claude runtime or no claudeSessionId — fresh spawn with recovery context
+          // Non-Claude/Codex runtime or no session ID — fresh spawn with recovery context
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
           let recoveryTask = await buildRecoveryTask(pod, worktreePath!);
           // For non-Claude runtimes recovering after host wake, append a postscript so the
@@ -4996,12 +5017,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 deviations: event.deviations,
               },
             });
-          } else if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
-            // Persist claude pod ID to DB for pause/resume survival across daemon restarts
-            const match = event.message.match(/\(([^)]+)\)$/);
-            if (match?.[1]) {
-              podRepo.update(podId, { claudeSessionId: match[1] });
-            }
+          } else if (event.type === 'status' && event.sessionId) {
+            // Persist session ID to DB for pause/resume survival across daemon restarts
+            const sessionPod = podRepo.getOrThrow(podId);
+            const sessionUpdate: PodUpdates = {};
+            if (sessionPod.runtime === 'claude') sessionUpdate.claudeSessionId = event.sessionId;
+            else if (sessionPod.runtime === 'codex') sessionUpdate.codexSessionId = event.sessionId;
+            if (Object.keys(sessionUpdate).length > 0) podRepo.update(podId, sessionUpdate);
           } else if (event.type === 'complete') {
             // Accumulate token counts and cost cumulatively across all runs in this pod
             const currentSession = podRepo.getOrThrow(podId);
@@ -6201,13 +6223,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           podRepo.update(podId, { worktreePath: null });
         }
 
-        // Cleanup per-pod Claude conversation-history dir on the host. Best
-        // effort — if it lingers it just wastes a few KB of disk per pod.
-        if (pod.runtime === 'claude') {
-          await cleanupClaudeState(podId).catch((err) => {
-            logger.warn({ err, podId }, 'Failed to cleanup Claude state dir');
-          });
-        }
+        // Cleanup per-pod conversation-history dirs on the host. Best
+        // effort — if they linger they just waste a few KB of disk per pod.
+        const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
+          claude: cleanupClaudeState,
+          codex: cleanupCodexState,
+        };
+        await runtimeStateDirs[pod.runtime]?.(podId)?.catch((err) => {
+          logger.warn({ err, podId }, `Failed to cleanup ${pod.runtime} state dir`);
+        });
       };
 
       await Promise.race([
@@ -7900,11 +7924,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             logger.warn({ err, podId }, 'Failed to cleanup worktree during delete');
           }
         }
-        if (pod.runtime === 'claude') {
-          await cleanupClaudeState(podId).catch((err) => {
-            logger.warn({ err, podId }, 'Failed to cleanup Claude state dir during delete');
-          });
-        }
+        const runtimeStateDirs: Partial<Record<string, (id: string) => Promise<void>>> = {
+          claude: cleanupClaudeState,
+          codex: cleanupCodexState,
+        };
+        await runtimeStateDirs[pod.runtime]?.(podId)?.catch((err) => {
+          logger.warn({ err, podId }, `Failed to cleanup ${pod.runtime} state dir during delete`);
+        });
       };
 
       await Promise.race([

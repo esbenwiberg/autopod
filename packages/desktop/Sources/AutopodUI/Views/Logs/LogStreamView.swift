@@ -101,7 +101,7 @@ public struct LogStreamView: View {
                 // Type filter pills
                 ForEach([
                     AgentEventType.status, .toolUse, .fileChange,
-                    .escalation, .plan, .progress, .error, .output,
+                    .escalation, .plan, .progress, .error, .reasoning,
                 ], id: \.rawValue) { type in
                     filterPill(type)
                 }

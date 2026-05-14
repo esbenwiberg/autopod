@@ -120,6 +120,7 @@ export interface Pod {
   } | null;
   acceptanceCriteria: AcDefinition[] | null;
   claudeSessionId: string | null;
+  codexSessionId: string | null;
   /**
    * Orthogonal axes describing how this pod is driven and where its output
    * goes. Replaces the legacy `outputMode` enum.

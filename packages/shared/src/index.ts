@@ -127,6 +127,7 @@ export type {
   AgentPlanEvent,
   AgentProgressEvent,
   AgentTaskSummaryEvent,
+  AgentReasoningEvent,
 } from './types/runtime.js';
 
 export type {

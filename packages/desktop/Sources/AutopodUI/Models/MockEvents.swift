@@ -22,10 +22,10 @@ public enum MockEvents: Sendable {
         add(8,    .toolUse,    "Read src/routes/index.ts", "Read 142 lines", toolName: "Read")
         add(12,   .toolUse,    "Read src/routes/users.ts", "Read 89 lines", toolName: "Read")
         add(15,   .toolUse,    "Grep \"router\" in src/", "Found 14 matches across 8 files", toolName: "Grep")
-        add(20,   .output,     "The API uses Express with a modular router pattern. Each route file exports a router instance...")
+        add(20,   .reasoning,"The API uses Express with a modular router pattern. Each route file exports a router instance...")
         add(25,   .progress,   "Phase 2/10: Planning implementation")
         add(28,   .plan,       "Refactor API to controller pattern", "1. Create base controller class\n2. Migrate route handlers\n3. Add DI container\n4. Write unit tests\n5. Integration tests")
-        add(30,   .output,     "I'll refactor the API to use a controller pattern with dependency injection. This will make testing easier.")
+        add(30,   .reasoning,     "I'll refactor the API to use a controller pattern with dependency injection. This will make testing easier.")
         add(45,   .progress,   "Phase 3/10: Creating controller base class")
         add(48,   .toolUse,    "Write src/controllers/base.ts", "Created new file, 45 lines", toolName: "Write")
         add(50,   .fileChange, "Created src/controllers/base.ts", "+45 lines")
@@ -77,7 +77,7 @@ public enum MockEvents: Sendable {
         add(20,   .toolUse,    "Read src/utils/perf.ts", "Read 210 lines")
         add(40,   .progress,      "Phase 2/10: Profiling bottleneck")
         add(50,   .toolUse,    "Bash: npm run benchmark", "Running performance benchmark...")
-        add(70,   .output,     "The bottleneck is in the serialization layer. Each response serializes nested objects redundantly.")
+        add(70,   .reasoning,     "The bottleneck is in the serialization layer. Each response serializes nested objects redundantly.")
         add(80,   .progress,      "Phase 3/10: Implementing fix")
         add(90,   .toolUse,    "Edit src/utils/perf.ts", "Added memoized serializer")
         add(95,   .fileChange, "Modified src/utils/perf.ts", "+22 -5 lines")
@@ -99,7 +99,7 @@ public enum MockEvents: Sendable {
             AgentEvent(id: 201, timestamp: base.addingTimeInterval(4), type: .status, summary: "Container ready"),
             AgentEvent(id: 202, timestamp: base.addingTimeInterval(10), type: .progress, summary: "Phase 1/10: Understanding requirements"),
             AgentEvent(id: 203, timestamp: base.addingTimeInterval(20), type: .toolUse, summary: "Read src/auth/config.ts", detail: "Read 45 lines"),
-            AgentEvent(id: 204, timestamp: base.addingTimeInterval(30), type: .output, summary: "The codebase doesn't have any OAuth implementation yet. I need to decide on a provider strategy."),
+            AgentEvent(id: 204, timestamp: base.addingTimeInterval(30), type: .reasoning, summary: "The codebase doesn't have any OAuth implementation yet. I need to decide on a provider strategy."),
             AgentEvent(id: 205, timestamp: base.addingTimeInterval(35), type: .escalation, summary: "Escalation: Which OAuth provider should I use — Google, GitHub, or both?", detail: "Agent needs human input to proceed with authentication strategy"),
         ]
     }()

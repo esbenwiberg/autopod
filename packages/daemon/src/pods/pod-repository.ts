@@ -126,6 +126,7 @@ export interface PodUpdates {
     totalPhases: number;
   } | null;
   claudeSessionId?: string | null;
+  codexSessionId?: string | null;
   acceptanceCriteria?: AcDefinition[] | null;
   recoveryWorktreePath?: string | null;
   reworkReason?: string | null;
@@ -337,6 +338,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     progress: row.progress ? JSON.parse(row.progress as string) : null,
     acceptanceCriteria: parseAcceptanceCriteria(row.acceptance_criteria),
     claudeSessionId: (row.claude_session_id as string) ?? null,
+    codexSessionId: (row.codex_session_id as string) ?? null,
     options: readPodFromRow(row),
     outputMode: (row.output_mode as OutputMode) ?? 'pr',
     baseBranch: (row.base_branch as string) ?? null,
@@ -614,6 +616,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.claudeSessionId !== undefined) {
         setClauses.push('claude_session_id = @claudeSessionId');
         params.claudeSessionId = changes.claudeSessionId;
+      }
+      if (changes.codexSessionId !== undefined) {
+        setClauses.push('codex_session_id = @codexSessionId');
+        params.codexSessionId = changes.codexSessionId;
       }
       if (changes.acceptanceCriteria !== undefined) {
         setClauses.push('acceptance_criteria = @acceptanceCriteria');
