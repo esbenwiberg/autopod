@@ -246,6 +246,23 @@ describe('DockerNetworkManager', () => {
         expect(script).toContain('iptables -A OUTPUT -m owner --uid-owner haproxy -j ACCEPT');
       });
 
+      it('accepts the REDIRECT-ed traffic by destination before the final REJECT', async () => {
+        // The REDIRECT rewrites dst to 127.0.0.1:8443 but the packet keeps its
+        // original output interface (eth0) at filter-OUTPUT time, so the `-o lo`
+        // accept never matches it. Without a destination-matched accept it hits
+        // the final REJECT and the agent gets ECONNREFUSED.
+        const script = await manager.generateFirewallScript(['api.anthropic.com']);
+        expect(script).toContain('iptables -A OUTPUT -p tcp -d 127.0.0.1 --dport 8443 -j ACCEPT');
+        const acceptIdx = script.indexOf(
+          'iptables -A OUTPUT -p tcp -d 127.0.0.1 --dport 8443 -j ACCEPT',
+        );
+        const rejectIdx = script.indexOf(
+          'iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable',
+        );
+        expect(acceptIdx).toBeGreaterThan(-1);
+        expect(acceptIdx).toBeLessThan(rejectIdx);
+      });
+
       it('starts HAProxy and reloads with -sf if a PID file is present', async () => {
         const script = await manager.generateFirewallScript(['api.anthropic.com']);
         expect(script).toContain(

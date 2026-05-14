@@ -482,7 +482,17 @@ export class DockerNetworkManager {
     lines.push('# Allow HAProxy itself to reach upstream (it runs as haproxy uid)');
     lines.push('iptables -A OUTPUT -m owner --uid-owner haproxy -j ACCEPT');
     lines.push('');
-    lines.push('# Allow the REDIRECT-ed traffic to land on HAProxy (loopback already accepts).');
+    // REDIRECT rewrites the packet's destination to 127.0.0.1:HAPROXY_LISTEN_PORT
+    // in nat OUTPUT, but at filter-OUTPUT time the packet still carries its
+    // original output interface (eth0) — so the earlier `-o lo` ACCEPT rule
+    // does NOT match it. Without an explicit accept for the redirected
+    // destination it falls through to the final REJECT and the agent sees
+    // ECONNREFUSED. Match on the rewritten destination instead of the interface.
+    lines.push('# Allow the REDIRECT-ed traffic to reach HAProxy on loopback');
+    lines.push(
+      `iptables -A OUTPUT -p tcp -d 127.0.0.1 --dport ${HAPROXY_LISTEN_PORT} -j ACCEPT`,
+    );
+    lines.push('');
     lines.push('# Reject everything else outbound.');
     lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');
     lines.push('');
