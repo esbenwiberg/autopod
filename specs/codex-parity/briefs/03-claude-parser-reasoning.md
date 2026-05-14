@@ -4,7 +4,7 @@ depends_on: [01-establish-shared-contracts]
 acceptance_criteria:
   - type: cmd
     outcome: claude parser emits reasoning event for thinking blocks
-    hint: grep -nE "type: 'reasoning'" packages/daemon/src/runtimes/claude-stream-parser.ts
+    hint: "grep -nE \"type: 'reasoning'\" packages/daemon/src/runtimes/claude-stream-parser.ts"
     polarity: expect-output
   - type: cmd
     outcome: claude parser populates sessionId on init status emission

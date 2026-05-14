@@ -3,7 +3,7 @@ title: "Establish shared contracts for Codex parity"
 acceptance_criteria:
   - type: cmd
     outcome: AgentReasoningEvent variant exists in shared runtime types
-    hint: grep -nE "type: 'reasoning'" packages/shared/src/types/runtime.ts
+    hint: "grep -nE \"type: 'reasoning'\" packages/shared/src/types/runtime.ts"
     polarity: expect-output
   - type: cmd
     outcome: AgentStatusEvent carries optional sessionId field

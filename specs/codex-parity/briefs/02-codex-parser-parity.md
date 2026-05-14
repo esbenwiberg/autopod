@@ -12,7 +12,7 @@ acceptance_criteria:
     polarity: expect-output
   - type: cmd
     outcome: codex parser emits reasoning event variant
-    hint: grep -nE "type: 'reasoning'" packages/daemon/src/runtimes/codex-stream-parser.ts
+    hint: "grep -nE \"type: 'reasoning'\" packages/daemon/src/runtimes/codex-stream-parser.ts"
     polarity: expect-output
   - type: cmd
     outcome: codex parser populates sessionId on session_configured status emission
