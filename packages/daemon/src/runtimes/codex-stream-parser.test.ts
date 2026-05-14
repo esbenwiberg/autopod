@@ -476,7 +476,11 @@ describe('CodexStreamParser', () => {
       }
       const fileChanges = events.filter((e) => e.type === 'file_change');
       expect(fileChanges).toHaveLength(1);
-      expect(fileChanges[0]).toMatchObject({ type: 'file_change', path: 'src/foo.ts', action: 'modify' });
+      expect(fileChanges[0]).toMatchObject({
+        type: 'file_change',
+        path: 'src/foo.ts',
+        action: 'modify',
+      });
     });
 
     it('maps patch_apply_end multiple files with mixed actions', async () => {
@@ -496,7 +500,9 @@ describe('CodexStreamParser', () => {
       }
       const fileChanges = events.filter((e) => e.type === 'file_change');
       expect(fileChanges).toHaveLength(3);
-      const byPath = Object.fromEntries(fileChanges.map((e) => [(e as { path: string }).path, (e as { action: string }).action]));
+      const byPath = Object.fromEntries(
+        fileChanges.map((e) => [(e as { path: string }).path, (e as { action: string }).action]),
+      );
       expect(byPath['src/new.ts']).toBe('create');
       expect(byPath['src/mod.ts']).toBe('modify');
       expect(byPath['src/old.ts']).toBe('delete');
@@ -530,7 +536,9 @@ describe('CodexStreamParser', () => {
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
         events.push(event);
       }
-      const complete = events.find((e) => e.type === 'complete') as { costUsd?: number } | undefined;
+      const complete = events.find((e) => e.type === 'complete') as
+        | { costUsd?: number }
+        | undefined;
       expect(complete).toBeDefined();
       // Use the actual helper so the test doesn't drift if pricing changes.
       const { computeCost: cc } = await import('@autopod/shared');
@@ -549,7 +557,9 @@ describe('CodexStreamParser', () => {
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
         events.push(event);
       }
-      const complete = events.find((e) => e.type === 'complete') as { costUsd?: number } | undefined;
+      const complete = events.find((e) => e.type === 'complete') as
+        | { costUsd?: number }
+        | undefined;
       // costUsd should be absent or 0 when the model is unknown
       expect(complete?.costUsd == null || complete.costUsd === 0).toBe(true);
     });
@@ -574,7 +584,9 @@ describe('CodexStreamParser', () => {
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', warnLogger as any)) {
         events.push(event);
       }
-      const complete = events.find((e) => e.type === 'complete') as { costUsd?: number } | undefined;
+      const complete = events.find((e) => e.type === 'complete') as
+        | { costUsd?: number }
+        | undefined;
       expect(complete?.costUsd).toBe(0);
       expect(warnMessages.some((m) => m.includes('unknown-model-xyz'))).toBe(true);
     });

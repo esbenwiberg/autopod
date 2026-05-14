@@ -82,8 +82,8 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
 
   switch (msg.type) {
     case 'session_configured': {
-      const sessionId = typeof msg.session_id === 'string' ? msg.session_id : undefined;
-      return { type: 'status', timestamp: ts, message: 'Codex session ready', ...(sessionId !== undefined && { sessionId }) };
+      const base = { type: 'status' as const, timestamp: ts, message: 'Codex session ready' };
+      return typeof msg.session_id === 'string' ? { ...base, sessionId: msg.session_id } : base;
     }
 
     case 'turn_started':
@@ -102,7 +102,8 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
     }
 
     case 'agent_reasoning_raw_content': {
-      const text = truncate(msg.text, MAX_REASONING_LEN) ?? truncate(msg.content, MAX_REASONING_LEN);
+      const text =
+        truncate(msg.text, MAX_REASONING_LEN) ?? truncate(msg.content, MAX_REASONING_LEN);
       if (!text) return null;
       return { type: 'reasoning', timestamp: ts, text, isRaw: true };
     }
