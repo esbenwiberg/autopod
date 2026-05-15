@@ -84,6 +84,19 @@ describe('FixFeedbackRepository', () => {
     expect(peeked[0]!.message).toBe('after-drain');
   });
 
+  it('peekLatest returns the most recently enqueued row; null when empty', () => {
+    expect(repo.peekLatest(podId)).toBeNull();
+
+    repo.enqueue(podId, 'first');
+    repo.enqueue(podId, 'second');
+    repo.enqueue(podId, 'third');
+
+    expect(repo.peekLatest(podId)?.message).toBe('third');
+
+    repo.drain(podId);
+    expect(repo.peekLatest(podId)).toBeNull();
+  });
+
   it('concurrent simulation: interleaved enqueue and drain are consistent', () => {
     const allMessages: string[] = [];
     const drainedMessages: string[] = [];

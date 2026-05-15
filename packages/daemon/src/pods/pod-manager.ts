@@ -1299,6 +1299,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     isTerminalState(status) || status === 'failed';
 
   /**
+   * A fix pod is recyclable when it has nothing left in flight to drive a new
+   * iteration into. Beyond the terminal states, `merge_pending` counts too:
+   * the fix pod pushed its fix, but the PR is still failing (otherwise the
+   * parent's poller would not be calling us). The pushed fix didn't work, so
+   * the row is fair game to recycle for another attempt with fresh feedback.
+   */
+  const isFixPodRecyclable = (status: PodStatus): boolean =>
+    isFixCycleTerminal(status) || status === 'merge_pending';
+
+  /**
    * Ensures the canonical fix pod for a parent PR is alive and queued.
    *
    * Queue-driven: callers MUST `fixFeedbackRepo.enqueue(parentId, message)`
@@ -1337,13 +1347,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return;
     }
 
-    // Guard: a fix pod is already alive. The queue already holds the new
-    // message; the running iteration drains it on completion-and-recycle.
+    // Guard: a fix pod is already alive AND making progress. The queue already
+    // holds the new message; the running iteration drains it on
+    // completion-and-recycle. A fix pod in `merge_pending` is the exception:
+    // its pushed fix didn't unblock the PR, so we treat it as recyclable
+    // (see `isFixPodRecyclable`) rather than waiting indefinitely for a state
+    // change that won't come on its own.
     let recycleCandidate: Pod | null = null;
     if (parent.fixPodId) {
       try {
         const fix = podRepo.getOrThrow(parent.fixPodId);
-        if (!isFixCycleTerminal(fix.status)) {
+        if (!isFixPodRecyclable(fix.status)) {
           logger.debug(
             { podId: parentSessionId, fixPodId: parent.fixPodId },
             'Fix pod already active — message queued for next iteration',
@@ -1392,6 +1406,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (recycleCandidate) {
       const fixPodId = recycleCandidate.id;
       const newIteration = (recycleCandidate.fixIteration ?? 0) + 1;
+
+      // Terminal-state fix pods already had their merge poller stopped and
+      // container reaped on the way in. A `merge_pending` fix pod, by contrast,
+      // still has a live poller (60s interval) and may have left a container
+      // behind — clean both up before flipping the row back to `queued` so the
+      // poller's next tick doesn't observe the transition mid-flight.
+      if (recycleCandidate.status === 'merge_pending') {
+        stopMergePolling(fixPodId);
+        await cleanupContainer(recycleCandidate, 'fix-pod-recycle');
+      }
 
       transition(recycleCandidate, 'queued', {
         containerId: null,
@@ -1682,9 +1706,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // canonical fix pod is alive to drain it. The queue carries the
         // content so the drain at fix-pod start can build the task from a
         // minimal status (see processPod).
+        //
+        // Idempotency: a stuck PR re-emits the same failure signature on every
+        // 60s tick. Without this guard the queue grows unboundedly (~one row
+        // per minute) until the fix pod finally recycles — we've seen it hit
+        // 391 rows across ~46h. Skip the enqueue when the latest queued summary
+        // is byte-identical to the one we'd add. A new failure signature still
+        // gets through.
         if (status.ciFailures.length > 0 || status.reviewComments.length > 0) {
           const summary = buildActionableFailureSummary(status, profile);
-          fixFeedbackRepo.enqueue(podId, summary);
+          const latest = fixFeedbackRepo.peekLatest(podId);
+          if (latest?.message !== summary) {
+            fixFeedbackRepo.enqueue(podId, summary);
+          }
           await maybeSpawnFixSession(podId, status);
         } else {
           // PR is clean — actively re-attempt the merge so the poller is not

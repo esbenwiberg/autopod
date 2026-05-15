@@ -3035,6 +3035,33 @@ describe('PodManager', () => {
       expect(manager.getSession(root.id).prFixAttempts).toBe(2);
     });
 
+    it('recycles a merge_pending fix pod whose pushed fix did not unblock the PR', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'round one');
+      const firstFix = ctx.podRepo.list({}).find((p) => p.linkedPodId === root.id);
+      if (!firstFix) throw new Error('fix pod missing');
+
+      // Fix pod ran, drained the queue, pushed its fix, and is now sitting in
+      // merge_pending waiting for the PR to merge — but the PR is still
+      // failing CI, so a new feedback summary lands and triggers recycling.
+      ctx.fixFeedbackRepo.drain(root.id);
+      ctx.podRepo.update(firstFix.id, { status: 'merge_pending' });
+
+      await manager.spawnFixSession(root.id, 'round two — still broken');
+
+      const fixPods = ctx.podRepo.list({}).filter((p) => p.linkedPodId === root.id);
+      expect(fixPods, 'same row recycled — no second fix pod row').toHaveLength(1);
+      const recycled = fixPods[0];
+      expect(recycled?.id).toBe(firstFix.id);
+      expect(recycled?.status).toBe('queued');
+      expect(recycled?.fixIteration).toBe(1);
+      expect(ctx.fixFeedbackRepo.count(root.id)).toBe(1);
+      expect(manager.getSession(root.id).prFixAttempts).toBe(2);
+    });
+
     it('fails the parent via requestFixSession when max PR fix attempts are exhausted', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

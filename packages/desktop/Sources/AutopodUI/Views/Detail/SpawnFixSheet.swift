@@ -83,8 +83,14 @@ struct SpawnFixSheet: View {
         }
 
         if response.ok {
-            let position = response.queueLength ?? 1
-            toastText = "Queued · position \(position)"
+            // queueLength is the count of unread feedback messages buffered for
+            // the fix pod — NOT a queue position. A backlog >1 means an earlier
+            // run hasn't drained yet; the fix pod will pick them all up on its
+            // next run.
+            let backlog = response.queueLength ?? 1
+            toastText = backlog > 1
+                ? "Queued · backlog \(backlog) message\(backlog == 1 ? "" : "s")"
+                : "Queued for fix pod"
             try? await Task.sleep(nanoseconds: 900_000_000)
             isPresented = false
         } else if response.reason == "parent_terminal" {

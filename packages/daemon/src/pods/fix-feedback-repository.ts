@@ -7,6 +7,7 @@ export type { FixFeedback };
 export interface FixFeedbackRepository {
   enqueue(podId: string, message: string): FixFeedback;
   peek(podId: string): FixFeedback[];
+  peekLatest(podId: string): FixFeedback | null;
   drain(podId: string): FixFeedback[];
   count(podId: string): number;
 }
@@ -36,6 +37,19 @@ export function createFixFeedbackRepository(db: Database.Database): FixFeedbackR
            ORDER BY created_at ASC`,
         )
         .all(podId) as FixFeedback[];
+    },
+
+    peekLatest(podId: string): FixFeedback | null {
+      const row = db
+        .prepare(
+          `SELECT id, pod_id AS podId, message, created_at AS createdAt
+           FROM pending_fix_feedback
+           WHERE pod_id = ?
+           ORDER BY created_at DESC
+           LIMIT 1`,
+        )
+        .get(podId) as FixFeedback | undefined;
+      return row ?? null;
     },
 
     drain(podId: string): FixFeedback[] {
