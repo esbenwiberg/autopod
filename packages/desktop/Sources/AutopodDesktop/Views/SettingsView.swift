@@ -8,6 +8,7 @@ enum SettingsSection: Hashable {
     case connections
     case profiles
     case notifications
+    case logs
     case about
 
     var label: String {
@@ -15,6 +16,7 @@ enum SettingsSection: Hashable {
         case .connections:   "Connections"
         case .profiles:      "Profiles"
         case .notifications: "Notifications"
+        case .logs:          "Logs"
         case .about:         "About"
         }
     }
@@ -24,6 +26,7 @@ enum SettingsSection: Hashable {
         case .connections:   "server.rack"
         case .profiles:      "person.crop.rectangle.stack"
         case .notifications: "bell"
+        case .logs:          "text.line.last.and.arrowtriangle.forward"
         case .about:         "info.circle"
         }
     }
@@ -118,7 +121,7 @@ public struct SettingsView: View {
 
     private var settingsSidebar: some View {
         VStack(spacing: 1) {
-            ForEach([SettingsSection.connections, .profiles, .notifications], id: \.self) { section in
+            ForEach([SettingsSection.connections, .profiles, .notifications, .logs], id: \.self) { section in
                 sidebarRow(section)
             }
             Spacer()
@@ -164,6 +167,7 @@ public struct SettingsView: View {
         case .connections:   connectionsContent
         case .profiles:      profilesContent
         case .notifications: notificationsContent
+        case .logs:          logsContent
         case .about:         aboutContent
         }
     }
@@ -292,6 +296,39 @@ public struct SettingsView: View {
             Text("Notifications require macOS permission in System Settings.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+        }
+        .padding(20)
+    }
+
+    // MARK: - Logs
+
+    @AppStorage("logs.showReasoning") private var showReasoning = false
+
+    private var logsContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Logs")
+                .font(.title3.weight(.semibold))
+            Text("Control which events appear in the pod log viewer.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Show reasoning / thinking events", isOn: $showReasoning)
+                Text("Agents emit step-by-step reasoning that's hidden by default. Turn on to see it in the log viewer.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
+
+            Spacer()
         }
         .padding(20)
     }

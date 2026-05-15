@@ -29,15 +29,26 @@ public struct LogStreamView: View {
     @State private var expandedEventId: Int?
     @State private var showCopiedFeedback = false
     @State private var isNearBottom = true
+    @AppStorage("logs.showReasoning") private var showReasoning = false
 
     private var filteredEvents: [AgentEvent] {
         events.filter { event in
             // Always filter tool_result noise (same as CLI)
             !event.type.isNoise
+            && (showReasoning || event.type != .reasoning)
             && (activeFilters.isEmpty || activeFilters.contains(event.type))
             && (searchText.isEmpty || event.summary.localizedCaseInsensitiveContains(searchText)
                 || (event.detail?.localizedCaseInsensitiveContains(searchText) ?? false))
         }
+    }
+
+    private var filterPillTypes: [AgentEventType] {
+        var types: [AgentEventType] = [
+            .status, .toolUse, .fileChange,
+            .escalation, .plan, .progress, .error,
+        ]
+        if showReasoning { types.append(.reasoning) }
+        return types
     }
 
     public var body: some View {
@@ -99,10 +110,7 @@ public struct LogStreamView: View {
                 Spacer()
 
                 // Type filter pills
-                ForEach([
-                    AgentEventType.status, .toolUse, .fileChange,
-                    .escalation, .plan, .progress, .error, .reasoning,
-                ], id: \.rawValue) { type in
+                ForEach(filterPillTypes, id: \.rawValue) { type in
                     filterPill(type)
                 }
             }

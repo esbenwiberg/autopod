@@ -374,7 +374,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   // ap logs
   async function logsAction(
     id: string,
-    opts: { build?: boolean; follow?: boolean },
+    opts: { build?: boolean; follow?: boolean; showReasoning?: boolean },
   ): Promise<void> {
     const client = getClient();
     const resolvedId = await resolvePodId(client, id);
@@ -396,7 +396,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           // Skip subscribe/unsubscribe confirmations
           if (['subscribed', 'unsubscribed', 'subscribed_all', 'error'].includes(event.type))
             return;
-          formatLogEvent(event as SystemEvent);
+          formatLogEvent(event as SystemEvent, { showReasoning: opts.showReasoning });
         } catch {
           // Ignore malformed messages
         }
@@ -427,6 +427,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .description('Show pod logs')
     .option('--build', 'Show build logs instead of agent logs')
     .option('-f, --follow', 'Follow log output in real-time via WebSocket')
+    .option('--show-reasoning', 'Include agent reasoning / thinking events (hidden by default)')
     .action(logsAction);
 
   // ap pause
@@ -571,6 +572,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .description('Show pod logs')
     .option('--build', 'Show build logs instead of agent logs')
     .option('-f, --follow', 'Follow log output in real-time via WebSocket')
+    .option('--show-reasoning', 'Include agent reasoning / thinking events (hidden by default)')
     .action(logsAction);
   podGroup
     .command('show <id>')
@@ -663,7 +665,10 @@ function formatTimestamp(ts: string): string {
   }
 }
 
-function formatLogEvent(event: SystemEvent & { type: string }): void {
+function formatLogEvent(
+  event: SystemEvent & { type: string },
+  opts: { showReasoning?: boolean } = {},
+): void {
   const ts =
     'timestamp' in event ? formatTimestamp((event as { timestamp: string }).timestamp) : '';
 
@@ -725,7 +730,10 @@ function formatLogEvent(event: SystemEvent & { type: string }): void {
           );
           break;
         case 'reasoning':
-          console.log(`${ts} ${chalk.dim.italic(`[reasoning${inner.isRaw ? ' raw' : ''}]`)} ${chalk.dim(truncate(inner.text, 500))}`);
+          if (!opts.showReasoning) break;
+          console.log(
+            `${ts} ${chalk.dim.italic(`[reasoning${inner.isRaw ? ' raw' : ''}]`)} ${chalk.dim(truncate(inner.text, 500))}`,
+          );
           break;
         default:
           console.log(`${ts} ${chalk.dim(JSON.stringify(inner))}`);
