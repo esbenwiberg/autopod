@@ -28,6 +28,20 @@ Body`;
     expect(body).toBe('Body text');
   });
 
+  it('throws BriefParseError when AC "hint" is mangled into an object', () => {
+    // A shell-command hint with unescaped quotes makes YAML collapse `hint`
+    // and the following `polarity` key into one mapping.
+    const content = `---
+acceptance_criteria:
+  - type: cmd
+    outcome: reasoning event variant exists
+    hint: {grep -nE "type":"reasoning",
+    polarity: expect-output}
+---
+Body`;
+    expect(() => parseBriefFrontmatter(content)).toThrow('AC field "hint" must be a string');
+  });
+
   it('parses structured acceptance_criteria with v2 shape from frontmatter', () => {
     const content =
       '---\nacceptance_criteria:\n  - type: api\n    outcome: GET /health returns 200\n    hint: GET /api/health\n---\nBody\n';

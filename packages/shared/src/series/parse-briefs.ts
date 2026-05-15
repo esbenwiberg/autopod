@@ -94,23 +94,38 @@ export function parseBriefFrontmatter(content: string): {
 const LEGACY_AC_KEYS = ['test', 'pass', 'fail'] as const;
 
 /**
- * Validate that no AC item uses legacy v1 keys (test/pass/fail).
+ * Validate AC items from brief frontmatter:
+ * - no legacy v1 keys (test/pass/fail)
+ * - `hint`, when present, is a string — not an object. A shell-command hint
+ *   with unescaped quotes (e.g. `grep -nE "type":"reasoning"`) makes the YAML
+ *   parser collapse `hint` and the following key into a single mapping. Caught
+ *   here, the whole object lands in the DB and crashes every client that
+ *   decodes the pod's ACs.
  * Throws BriefParseError with the offending field name and best-effort line number.
  */
 function validateAcItems(acs: AcDefinition[], yamlText: string): void {
   const lines = yamlText.split('\n');
+  const lineOf = (key: string): number | undefined => {
+    const i = lines.findIndex((l) => new RegExp(`^\\s+${key}\\s*:`).test(l));
+    return i >= 0 ? i + 1 : undefined;
+  };
   for (const ac of acs) {
     const obj = ac as unknown as Record<string, unknown>;
     for (const key of LEGACY_AC_KEYS) {
       if (key in obj) {
-        // Find the line number of the offending key in the YAML block (1-based).
-        const lineIndex = lines.findIndex((l) => new RegExp(`^\\s+${key}\\s*:`).test(l));
-        const line = lineIndex >= 0 ? lineIndex + 1 : undefined;
         throw new BriefParseError(
           `AC field "${key}" is not allowed in v2 schema — use "outcome" (was "test") or "hint" and remove "pass"/"fail". Found in acceptance_criteria item.`,
-          line,
+          lineOf(key),
         );
       }
+    }
+    if ('hint' in obj && obj.hint != null && typeof obj.hint !== 'string') {
+      throw new BriefParseError(
+        'AC field "hint" must be a string. A shell command with unescaped quotes ' +
+          '(e.g. grep -nE "type":"reasoning") makes YAML parse it as an object — ' +
+          'wrap the hint in single quotes.',
+        lineOf('hint'),
+      );
     }
   }
 }

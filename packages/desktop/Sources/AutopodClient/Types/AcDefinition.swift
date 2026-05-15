@@ -50,4 +50,24 @@ public struct AcDefinition: Codable, Sendable, Hashable, Identifiable {
   private enum CodingKeys: String, CodingKey {
     case type, outcome, hint, polarity
   }
+
+  /// Lenient decode: an unknown `polarity` string degrades to `nil`, and a
+  /// non-string `hint` degrades to `nil`, rather than failing the whole row.
+  /// Historically neither field was validated on write, so stale rows can carry
+  /// values outside the current schema — an unknown polarity (e.g. "pass-on-200"
+  /// from earlier spec drafts) or a `hint` that a brief's YAML parser mangled
+  /// into an object when the shell command contained unescaped quotes. One bad
+  /// AC should not blank the entire pod list.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    self.id = UUID()
+    self.type = try c.decode(AcType.self, forKey: .type)
+    self.outcome = try c.decode(String.self, forKey: .outcome)
+    self.hint = (try? c.decodeIfPresent(String.self, forKey: .hint)) ?? nil
+    if let raw = try c.decodeIfPresent(String.self, forKey: .polarity) {
+      self.polarity = AcPolarity(rawValue: raw)
+    } else {
+      self.polarity = nil
+    }
+  }
 }
