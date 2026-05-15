@@ -4,7 +4,7 @@ description: >
   Decomposes a large feature into a series-ready spec folder for `ap series create`.
   Runs a continuous interview-plus-research loop with one question per turn,
   scanning the codebase between answers, until every coverage dimension is green.
-  Then writes `specs/<name>/` with `purpose.md`, `design.md`, `briefs/`, and any
+  Then writes `specs/[name]/` with `purpose.md`, `design.md`, `briefs/`, and any
   new ADRs into the repo-level `docs/decisions/`.
   Use when the task spans 3+ modules or 4+ hours of work.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit, Agent, AskUserQuestion

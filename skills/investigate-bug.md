@@ -2,7 +2,7 @@
 name: investigate-bug
 description: >
   Diagnoses a bug through a short interview-plus-codescan loop, then writes
-  `investigations/<slug>/bug.md` (gitignored) with symptom, root cause, blast
+  `investigations/[slug]/bug.md` (gitignored) with symptom, root cause, blast
   radius, and fix proposal. Ends by offering to promote the workspace pod to
   auto mode to execute the fix.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit, Agent, AskUserQuestion
