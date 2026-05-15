@@ -47,23 +47,31 @@ async function run() {
 
   const results = [];
 
-  for (const pageDef of CONFIG.pages) {
+  // DNS failures are expected in network-restricted containers — don't
+  // count them as application errors.
+  const DNS_NOISE = /net::ERR_NAME_NOT_RESOLVED/;
+
+  // React dev-mode emits informational warnings via console.error with a
+  // "Warning: " prefix. These are not runtime failures — filter them out
+  // so smoke checks don't fail on pre-existing React housekeeping noise.
+  const REACT_DEV_WARNING = /^Warning: /;
+
+  // Errors that indicate the dev server transiently closed connections
+  // (commonly: Vite cold-start dep optimization closes inflight sockets
+  // when esbuild finishes pre-bundling). Retrying once after a short
+  // pause is the documented mitigation — by the second nav the dep
+  // graph is cached.
+  const TRANSIENT_NET_ERROR = /net::(ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_NETWORK_CHANGED|ERR_ABORTED|ERR_HTTP2_PROTOCOL_ERROR|ERR_EMPTY_RESPONSE)/;
+
+  async function loadPageOnce(pageDef) {
     const context = await browser.newContext({ locale: 'en-US' });
     const page = await context.newPage();
 
     const consoleErrors = [];
+    const failedRequests = [];
     const MAX_ERRORS = CONFIG.maxConsoleErrors;
     let totalErrorBytes = 0;
     const MAX_ERROR_BYTES = 10240;
-
-    // DNS failures are expected in network-restricted containers — don't
-    // count them as application errors.
-    const DNS_NOISE = /net::ERR_NAME_NOT_RESOLVED/;
-
-    // React dev-mode emits informational warnings via console.error with a
-    // "Warning: " prefix. These are not runtime failures — filter them out
-    // so smoke checks don't fail on pre-existing React housekeeping noise.
-    const REACT_DEV_WARNING = /^Warning: /;
 
     page.on('console', (msg) => {
       if (msg.type() === 'error' && consoleErrors.length < MAX_ERRORS && totalErrorBytes < MAX_ERROR_BYTES) {
@@ -83,11 +91,27 @@ async function run() {
       }
     });
 
+    // Capture failed network requests with their URL + error reason so we
+    // can tell "ERR_CONNECTION_CLOSED on /bundle.js" from "DNS failure on
+    // some CDN". The console listener above only gets Chromium's opaque
+    // "Failed to load resource" line which doesn't include the URL.
+    page.on('requestfailed', (req) => {
+      const errorText = req.failure()?.errorText ?? 'unknown';
+      if (DNS_NOISE.test(errorText)) return;
+      if (failedRequests.length < MAX_ERRORS && totalErrorBytes < MAX_ERROR_BYTES) {
+        const line = req.url().slice(0, 400) + ' — ' + errorText.slice(0, 100);
+        failedRequests.push({ url: req.url(), errorText });
+        consoleErrors.push('Request failed: ' + line);
+        totalErrorBytes += line.length;
+      }
+    });
+
     const url = CONFIG.baseUrl + pageDef.path;
     const startTime = Date.now();
     let status = 'pass';
     const assertions = [];
     let screenshotPath = '';
+    let navError = null;
 
     try {
       await page.goto(url, { timeout: CONFIG.navigationTimeout, waitUntil: 'domcontentloaded' });
@@ -117,26 +141,66 @@ async function run() {
         status = 'fail';
       }
 
-      results.push({
+      await context.close();
+      return {
         path: pageDef.path,
         status,
         screenshotPath,
         consoleErrors,
         assertions,
         loadTime,
-      });
+        failedRequests,
+      };
     } catch (err) {
-      results.push({
+      navError = err;
+      await context.close().catch(() => {});
+      return {
         path: pageDef.path,
         status: 'fail',
         screenshotPath,
-        consoleErrors: [...consoleErrors, 'Navigation failed: ' + String(err).slice(0, 500)],
+        consoleErrors: [...consoleErrors, 'Navigation failed: ' + String(navError).slice(0, 500)],
         assertions,
         loadTime: Date.now() - startTime,
-      });
+        failedRequests,
+        navError: String(navError).slice(0, 500),
+      };
+    }
+  }
+
+  function hasTransientNetError(result) {
+    if (result.navError && TRANSIENT_NET_ERROR.test(result.navError)) return true;
+    for (const r of result.failedRequests || []) {
+      if (TRANSIENT_NET_ERROR.test(r.errorText)) return true;
+    }
+    return false;
+  }
+
+  for (const pageDef of CONFIG.pages) {
+    let result = await loadPageOnce(pageDef);
+
+    // Vite (and similar dev servers) close inflight sockets when esbuild
+    // finishes dep pre-bundling mid-page-load. A single retry after a
+    // short pause clears it — by then deps are cached.
+    if (result.status === 'fail' && hasTransientNetError(result)) {
+      const firstFailedCount = (result.failedRequests || []).length;
+      const firstNavError = result.navError;
+      await new Promise((r) => setTimeout(r, 3000));
+      const retry = await loadPageOnce(pageDef);
+      // Annotate so we can see in logs that a retry happened, regardless
+      // of outcome.
+      retry.retried = true;
+      retry.firstAttempt = {
+        failedRequestCount: firstFailedCount,
+        navError: firstNavError,
+      };
+      result = retry;
     }
 
-    await context.close();
+    // Drop the internal failedRequests array from the surfaced result —
+    // the URLs are already inlined into consoleErrors. Keep the result
+    // shape backward-compatible with parsePageResults().
+    delete result.failedRequests;
+    results.push(result);
   }
 
   await browser.close();
