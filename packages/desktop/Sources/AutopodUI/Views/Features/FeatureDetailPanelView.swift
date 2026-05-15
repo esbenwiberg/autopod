@@ -161,6 +161,14 @@ public struct FeatureDetailPanelView: View {
             diagramCard("Event Flow") { monitoringEventDiagram }
         case .memoryStore:
             diagramCard("Scope Hierarchy") { memoryStoreDiagram }
+        case .seriesWorkflows:
+            diagramCard("PR Modes") { seriesWorkflowDiagram }
+        case .scheduledJobs:
+            diagramCard("Scheduler Tick") { scheduledJobDiagram }
+        case .issueWatcher:
+            diagramCard("Watch Loop") { issueWatcherDiagram }
+        case .analyticsDashboard:
+            diagramCard("Fleet Dashboards") { analyticsDashboardDiagram }
         }
     }
 
@@ -540,6 +548,118 @@ public struct FeatureDetailPanelView: View {
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 2)
+        }
+    }
+
+    // MARK: - Series workflow diagram
+
+    private var seriesWorkflowDiagram: some View {
+        VStack(spacing: 6) {
+            injectionRow("arrow.triangle.branch", "Single", "All pods share one branch — siblings serialized", .purple)
+            injectionRow("square.stack.3d.up", "Stacked", "One PR per pod — parent merges before child starts", .blue)
+            injectionRow("tray.and.arrow.up", "None", "Branches pushed for manual review", .gray)
+        }
+    }
+
+    // MARK: - Scheduled job diagram
+
+    private var scheduledJobDiagram: some View {
+        VStack(spacing: 6) {
+            stepChain([
+                ("clock.arrow.circlepath", "Tick (1m)", .blue),
+                ("calendar.badge.clock", "Compare nextRunAt", .cyan),
+                ("shippingbox", "Spawn Pod", .purple),
+                ("arrow.clockwise", "Update nextRunAt", .green),
+            ])
+            Text("Missed windows on restart → catchupPending · manual trigger bypasses schedule")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+        }
+    }
+
+    // MARK: - Issue watcher diagram
+
+    private var issueWatcherDiagram: some View {
+        VStack(spacing: 6) {
+            stepChain([
+                ("magnifyingglass", "Poll (60s)", .blue),
+                ("tag.fill", "Label Found", .orange),
+                ("eye.trianglebadge.exclamationmark", "Sanitize", .red),
+                ("shippingbox", "Spawn Pod", .purple),
+                ("arrow.triangle.swap", "Swap Label", .cyan),
+                ("bubble.left.fill", "Comment", .green),
+            ])
+            Text("PII stripped + injection quarantined · GitHub + ADO")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+        }
+    }
+
+    // MARK: - Analytics dashboard diagram
+
+    private var analyticsDashboardDiagram: some View {
+        let dashboards: [(String, String, Color)] = [
+            ("dollarsign.circle", "Cost", .green),
+            ("chart.line.downtrend.xyaxis", "Reliability", .blue),
+            ("speedometer", "Throughput", .cyan),
+            ("exclamationmark.shield", "Safety", .red),
+            ("star.circle", "Quality", .purple),
+            ("bubble.left.and.exclamationmark.bubble.right", "Escalations", .orange),
+        ]
+        return VStack(spacing: 6) {
+            FeatureFlowLayout(spacing: 4) {
+                ForEach(dashboards, id: \.1) { icon, name, color in
+                    HStack(spacing: 3) {
+                        Image(systemName: icon)
+                            .font(.system(size: 8))
+                            .foregroundStyle(color)
+                        Text(name)
+                            .font(.system(size: 9).weight(.medium))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(color.opacity(0.06))
+                    .foregroundStyle(color.opacity(0.8))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+            }
+            Text("Terminal cohort · configurable window (default 30d, max 365)")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+        }
+    }
+
+    // MARK: - Step chain
+
+    private func stepChain(_ steps: [(String, String, Color)]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                    HStack(spacing: 0) {
+                        VStack(spacing: 3) {
+                            Image(systemName: step.0)
+                                .font(.system(size: 10))
+                                .foregroundStyle(step.2)
+                                .frame(width: 22, height: 22)
+                                .background(step.2.opacity(0.1))
+                                .clipShape(Circle())
+                            Text(step.1)
+                                .font(.system(size: 9).weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        if index < steps.count - 1 {
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 7))
+                                .foregroundStyle(.quaternary)
+                                .padding(.horizontal, 3)
+                                .padding(.bottom, 14)
+                        }
+                    }
+                }
+            }
         }
     }
 

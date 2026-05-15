@@ -773,6 +773,20 @@ public struct PreviewStatus: Decodable, Sendable {
   public let restartCount: Int
   public let lastError: String?
   public let previewUrl: String?
+
+  public init(
+    running: Bool,
+    reachable: Bool,
+    restartCount: Int,
+    lastError: String?,
+    previewUrl: String?
+  ) {
+    self.running = running
+    self.reachable = reachable
+    self.restartCount = restartCount
+    self.lastError = lastError
+    self.previewUrl = previewUrl
+  }
 }
 
 struct HistoryWorkspaceBody: Codable {

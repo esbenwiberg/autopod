@@ -73,6 +73,13 @@ public enum PodStatus: String, Sendable {
         default: false
         }
     }
+
+    public var isTerminal: Bool {
+        switch self {
+        case .complete, .killed, .failed: true
+        default: false
+        }
+    }
 }
 
 // MARK: - Supporting types
