@@ -1574,10 +1574,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           if (!rebaseResult.alreadyUpToDate) {
-            await worktreeManager.pushBranch(worktreePath, branch, { force: true });
+            await worktreeManager.pushBranch(worktreePath, branch, {
+              force: true,
+              pat: selectGitPat(profile),
+            });
             emitActivityStatus(podId, 'Rebased fix branch pushed');
           } else {
-            await worktreeManager.pushBranch(worktreePath, branch);
+            await worktreeManager.pushBranch(worktreePath, branch, {
+              pat: selectGitPat(profile),
+            });
             emitActivityStatus(podId, 'Fix branch pushed');
           }
         });
@@ -1773,7 +1778,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 return;
               }
               if (!result.alreadyUpToDate) {
-                await worktreeManager.pushBranch(worktreePath, branch, { force: true });
+                await worktreeManager.pushBranch(worktreePath, branch, {
+                  force: true,
+                  pat: selectGitPat(profile),
+                });
                 logger.info(
                   { podId, baseBranch },
                   'Merge poller: rebased stale branch and force-pushed onto latest base',
@@ -1781,7 +1789,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             });
           } catch (err) {
-            logger.debug({ err, podId }, 'Merge poller self-heal rebase failed');
+            logger.warn({ err, podId }, 'Merge poller self-heal rebase/push failed');
+            emitActivityStatus(
+              podId,
+              `Self-heal rebase failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       } catch (err) {
@@ -5798,14 +5810,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Fix pods make commits in the container but rely on the agent to push.
           // Push explicitly here before attempting to complete the PR so any local
           // commits the agent forgot (or failed) to push are flushed to the remote.
+          // Pass the PAT so we don't depend on the in-memory cache, which is
+          // evicted whenever any sibling worktree on the same bare repo is
+          // cleaned up (local-worktree-manager.ts cleanup()).
           try {
-            await worktreeManager.pushBranch(worktreePath, branch);
+            await worktreeManager.pushBranch(worktreePath, branch, {
+              pat: selectGitPat(approveProfile),
+            });
             emitActivityStatus(podId, 'Branch pushed');
           } catch (pushErr) {
+            const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
+            const blockReason = `Push to origin failed: ${reason}`;
             logger.warn(
               { err: pushErr, podId },
-              'Pre-merge push failed — proceeding with rebase attempt',
+              'Pre-merge push failed — entering merge_pending instead of merging stale origin',
             );
+            return { kind: 'merge_pending', blockReason };
           }
 
           // Pre-merge rebase onto latest origin/<base>. Catches conflicts
@@ -5840,13 +5860,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // date) since we already pushed above.
           if (!rebaseResult.alreadyUpToDate) {
             try {
-              await worktreeManager.pushBranch(worktreePath, branch, { force: true });
+              await worktreeManager.pushBranch(worktreePath, branch, {
+                force: true,
+                pat: selectGitPat(approveProfile),
+              });
               emitActivityStatus(podId, 'Rebased branch pushed');
             } catch (pushErr) {
+              const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
+              const blockReason = `Force-push after rebase failed: ${reason}`;
               logger.warn(
                 { err: pushErr, podId },
-                'Force-push after rebase failed — proceeding with merge attempt anyway',
+                'Force-push after rebase failed — entering merge_pending instead of merging stale origin',
               );
+              return { kind: 'merge_pending', blockReason };
             }
           }
 
