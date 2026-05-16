@@ -75,11 +75,7 @@
       "pull_request_id": { "type": "number", "required": true, "description": "Pull request ID" }
     },
     "response": {
-      "fields": [
-        "changeEntries.item.path",
-        "changeEntries.changeType",
-        "changeEntries.item.gitObjectType"
-      ]
+      "fields": ["item.path", "changeType", "item.gitObjectType"]
     }
   }
 ]

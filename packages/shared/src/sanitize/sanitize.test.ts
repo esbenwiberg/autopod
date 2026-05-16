@@ -294,6 +294,77 @@ describe('sanitizeDeep', () => {
       expect(result.custom_field).toBe('[REDACTED]');
       expect(result.safe).toBe('visible');
     });
+
+    it('redacts dotted-path entries by structural match through nested objects', () => {
+      // Regression: the matcher used to compare only the last key segment, so
+      // dotted entries like `createdBy.displayName` could never trigger. After
+      // the fix, structural suffix matching kicks in.
+      const obj = {
+        createdBy: { displayName: 'Alice', uniqueName: 'alice@corp.com' },
+        title: 'Some PR',
+      };
+      const result = sanitizeDeep(obj, strictConfig, [
+        'createdBy.displayName',
+        'createdBy.uniqueName',
+      ]) as typeof obj;
+      expect(result.createdBy.displayName).toBe('[REDACTED]');
+      expect(result.createdBy.uniqueName).toBe('[REDACTED]');
+      expect(result.title).toBe('Some PR');
+    });
+
+    it('scoped dotted paths only redact the matching parent', () => {
+      // `createdBy.displayName` must NOT bleed into `closedBy.displayName`.
+      const obj = {
+        createdBy: { displayName: 'Alice' },
+        closedBy: { displayName: 'Bob' },
+      };
+      const result = sanitizeDeep(obj, strictConfig, ['createdBy.displayName']) as typeof obj;
+      expect(result.createdBy.displayName).toBe('[REDACTED]');
+      expect(result.closedBy.displayName).toBe('Bob');
+    });
+
+    it('dotted paths match inside array elements (no index in the path)', () => {
+      // `reviewers.displayName` should redact `displayName` on every element
+      // of the `reviewers` array, regardless of element position.
+      const obj = {
+        reviewers: [
+          { displayName: 'Alice', vote: 10 },
+          { displayName: 'Bob', vote: 5 },
+        ],
+      };
+      const result = sanitizeDeep(obj, strictConfig, ['reviewers.displayName']) as typeof obj;
+      expect(result.reviewers[0]?.displayName).toBe('[REDACTED]');
+      expect(result.reviewers[0]?.vote).toBe(10);
+      expect(result.reviewers[1]?.displayName).toBe('[REDACTED]');
+      expect(result.reviewers[1]?.vote).toBe(5);
+    });
+
+    it('dotted entry matches a literal flat-dotted key (e.g. pickFields output)', () => {
+      // pickFields produces keys like `"comments.content"` (a single string with
+      // a dot in it) when projecting through arrays. A redact entry of
+      // `comments.content` should still nuke that flat key.
+      const obj = { 'comments.content': ['something private'] };
+      const result = sanitizeDeep(obj, strictConfig, ['comments.content']) as Record<
+        string,
+        unknown
+      >;
+      expect(result['comments.content']).toBe('[REDACTED]');
+    });
+
+    it('dotted entries do not match shorter or unrelated paths', () => {
+      const obj = {
+        displayName: 'Top-level display',
+        author: { name: 'Carol' },
+      };
+      const result = sanitizeDeep(obj, strictConfig, [
+        'createdBy.displayName',
+        'author.email',
+      ]) as typeof obj;
+      // Top-level displayName has no `createdBy.` prefix — must survive
+      expect(result.displayName).toBe('Top-level display');
+      // author.name is not in the redact list — must survive
+      expect(result.author.name).toBe('Carol');
+    });
   });
 
   describe('mixed deep structure with redact fields', () => {

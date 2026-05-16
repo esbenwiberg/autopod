@@ -39,28 +39,70 @@ export function sanitize(text: string, config: DataSanitizationConfig): string {
   return result;
 }
 
+interface RedactMatcher {
+  /** Bare key names that match anywhere (e.g. 'email', 'token'). */
+  bareSet: Set<string>;
+  /** Dotted entries, pre-split for structural suffix matching against the walk path. */
+  dottedEntries: Array<{ joined: string; parts: string[] }>;
+}
+
+function buildMatcher(extraRedactFields: string[] | undefined): RedactMatcher {
+  const bareSet = new Set<string>();
+  const dottedEntries: Array<{ joined: string; parts: string[] }> = [];
+  for (const entry of [...REDACT_FIELD_NAMES, ...(extraRedactFields ?? [])]) {
+    if (entry.includes('.')) {
+      dottedEntries.push({ joined: entry, parts: entry.split('.') });
+    } else {
+      bareSet.add(entry);
+    }
+  }
+  return { bareSet, dottedEntries };
+}
+
+function shouldRedact(path: readonly string[], matcher: RedactMatcher): boolean {
+  const last = path[path.length - 1];
+  if (last === undefined) return false;
+  if (matcher.bareSet.has(last)) return true;
+  for (const entry of matcher.dottedEntries) {
+    // Literal match against a flat-dotted key (e.g. pickFields output `"comments.content"`).
+    if (entry.joined === last) return true;
+    // Structural suffix match against nested traversal (e.g. ['createdBy','displayName']).
+    if (entry.parts.length > path.length) continue;
+    let ok = true;
+    for (let i = 0; i < entry.parts.length; i++) {
+      if (path[path.length - entry.parts.length + i] !== entry.parts[i]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
 /**
  * Deep-sanitize an object tree: walk all string values and apply PII sanitization.
- * Also redacts known sensitive field names entirely.
+ * Also redacts known sensitive field names entirely. Dotted entries in
+ * `extraRedactFields` (e.g. `createdBy.displayName`) match by structural suffix —
+ * nested keys aligning with the dotted segments are redacted, regardless of how
+ * deep the parent path goes. Array indices are NOT part of the matched path.
  */
 export function sanitizeDeep(
   obj: unknown,
   config: DataSanitizationConfig,
   extraRedactFields?: string[],
 ): unknown {
-  const redactFieldSet = new Set([...REDACT_FIELD_NAMES, ...(extraRedactFields ?? [])]);
-
-  return walk(obj, config, redactFieldSet);
+  return walk(obj, config, buildMatcher(extraRedactFields), []);
 }
 
 function walk(
   value: unknown,
   config: DataSanitizationConfig,
-  redactFields: Set<string>,
-  currentKey?: string,
+  matcher: RedactMatcher,
+  path: readonly string[],
 ): unknown {
-  // If the current key is a redact-target, nuke the whole value
-  if (currentKey && redactFields.has(currentKey)) {
+  // If the current path is a redact-target, nuke the whole value
+  if (shouldRedact(path, matcher)) {
     return REDACTED_VALUE;
   }
 
@@ -69,13 +111,15 @@ function walk(
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => walk(item, config, redactFields));
+    // Array indices intentionally do not extend the path — dotted redact entries
+    // describe structure, not element position.
+    return value.map((item) => walk(item, config, matcher, path));
   }
 
   if (value !== null && typeof value === 'object') {
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
-      result[key] = walk(val, config, redactFields, key);
+      result[key] = walk(val, config, matcher, [...path, key]);
     }
     return result;
   }

@@ -39,7 +39,9 @@ export interface HandlerConfig {
 
 /**
  * Extract fields from a response object based on a whitelist.
- * Supports dot-notation (e.g. 'fields.System.Title').
+ * Supports dot-notation, including array traversal:
+ *   'fields.System.Title' on { fields: { 'System.Title': 'x' } } → 'x'
+ *   'comments.content'    on { comments: [{ content: 'a' }, { content: 'b' }] } → ['a', 'b']
  */
 export function pickFields(obj: unknown, fields: string[]): Record<string, unknown> {
   if (!obj || typeof obj !== 'object') return {};
@@ -54,7 +56,20 @@ export function pickFields(obj: unknown, fields: string[]): Record<string, unkno
   return result;
 }
 
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+function getNestedValue(obj: Record<string, unknown> | unknown[], path: string): unknown {
+  // Array at the current level: project the path across each element.
+  // Skips elements where the path resolves to undefined so the output array
+  // doesn't include holes the agent has to defensively guard against.
+  if (Array.isArray(obj)) {
+    const projected: unknown[] = [];
+    for (const item of obj) {
+      if (item === null || typeof item !== 'object') continue;
+      const v = getNestedValue(item as Record<string, unknown>, path);
+      if (v !== undefined) projected.push(v);
+    }
+    return projected;
+  }
+
   // Try exact key first (handles keys with dots like 'System.Title')
   if (path in obj) return obj[path];
 
@@ -70,7 +85,7 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
     return undefined;
   }
 
-  return getNestedValue(child as Record<string, unknown>, tail);
+  return getNestedValue(child as Record<string, unknown> | unknown[], tail);
 }
 
 /**

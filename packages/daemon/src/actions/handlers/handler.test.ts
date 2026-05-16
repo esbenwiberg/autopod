@@ -39,6 +39,40 @@ describe('pickFields', () => {
   it('handles empty fields array', () => {
     expect(pickFields({ a: 1 }, [])).toEqual({});
   });
+
+  it('projects through arrays for paths like `array.field`', () => {
+    // Regression: getNestedValue used to treat arrays as plain objects, so
+    // `comments.content` on { comments: [...] } silently returned undefined
+    // and the field was dropped from the output entirely.
+    const obj = {
+      id: 1,
+      comments: [
+        { content: 'first', author: { name: 'a' } },
+        { content: 'second', author: { name: 'b' } },
+      ],
+    };
+    expect(pickFields(obj, ['id', 'comments.content', 'comments.author.name'])).toEqual({
+      id: 1,
+      'comments.content': ['first', 'second'],
+      'comments.author.name': ['a', 'b'],
+    });
+  });
+
+  it('skips array elements where the path resolves to undefined', () => {
+    const obj = {
+      comments: [{ content: 'has it' }, { other: 'missing content' }, { content: 'also has it' }],
+    };
+    expect(pickFields(obj, ['comments.content'])).toEqual({
+      'comments.content': ['has it', 'also has it'],
+    });
+  });
+
+  it('omits array-projected field entirely when no element matches', () => {
+    const obj = { comments: [{ a: 1 }, { b: 2 }] };
+    // Result is an empty array — still a defined value, so the key appears.
+    // Consumers can distinguish "no matches" (empty array) from "field absent".
+    expect(pickFields(obj, ['comments.content'])).toEqual({ 'comments.content': [] });
+  });
 });
 
 describe('pickFieldsArray', () => {

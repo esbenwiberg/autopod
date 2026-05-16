@@ -324,6 +324,64 @@ describe('createAdoHandler', () => {
     expect(result).toHaveLength(1);
   });
 
+  it('ado_read_pr_threads surfaces comment bodies when whitelisted', async () => {
+    // Regression: pickFields previously stripped `comments.*` paths because
+    // getNestedValue did not traverse arrays. Reviewers' comment text was
+    // silently dropped, leaving fix-pods blind to what the reviewer asked for.
+    const threadsData = {
+      value: [
+        {
+          id: 1,
+          status: 'active',
+          threadContext: { filePath: '/src/foo.ts' },
+          comments: [
+            {
+              content: 'This needs a null check',
+              commentType: 'text',
+              publishedDate: '2025-01-01',
+              author: { displayName: 'Reviewer A', uniqueName: 'a@example.com' },
+            },
+            {
+              content: 'Agreed',
+              commentType: 'text',
+              publishedDate: '2025-01-02',
+              author: { displayName: 'Reviewer B', uniqueName: 'b@example.com' },
+            },
+          ],
+        },
+      ],
+    };
+    vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse(threadsData));
+
+    const handler = createAdoHandler({
+      logger,
+      getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
+    });
+
+    const result = (await handler.execute(
+      makeAction('ado_read_pr_threads', [
+        'id',
+        'status',
+        'threadContext',
+        'comments.content',
+        'comments.commentType',
+        'comments.publishedDate',
+      ]),
+      { org: 'myorg', project: 'myproject', repo: 'myrepo', pull_request_id: 10 },
+    )) as Array<Record<string, unknown>>;
+
+    expect(result).toHaveLength(1);
+    const thread = result[0];
+    expect(thread).toBeDefined();
+    expect(thread?.id).toBe(1);
+    expect(thread?.['comments.content']).toEqual(['This needs a null check', 'Agreed']);
+    expect(thread?.['comments.commentType']).toEqual(['text', 'text']);
+    expect(thread?.['comments.publishedDate']).toEqual(['2025-01-01', '2025-01-02']);
+    // author.* was not whitelisted — must not appear in any form
+    expect(JSON.stringify(thread)).not.toContain('Reviewer A');
+    expect(JSON.stringify(thread)).not.toContain('a@example.com');
+  });
+
   it('ado_read_pr_changes fetches iterations then last iteration changes', async () => {
     const iterationsData = { value: [{ id: 1 }, { id: 2 }, { id: 3 }] };
     const changesData = {
@@ -342,10 +400,10 @@ describe('createAdoHandler', () => {
       getSecret: (ref) => (ref === 'ADO_PAT' ? 'ado-token' : undefined),
     });
 
-    const result = await handler.execute(
-      makeAction('ado_read_pr_changes', ['changeEntries.item.path', 'changeEntries.changeType']),
+    const result = (await handler.execute(
+      makeAction('ado_read_pr_changes', ['item.path', 'changeType']),
       { org: 'myorg', project: 'myproject', repo: 'myrepo', pull_request_id: 5 },
-    );
+    )) as Array<Record<string, unknown>>;
 
     // Verify iterations URL
     const firstUrl = vi.mocked(global.fetch).mock.calls[0][0] as string;
@@ -355,8 +413,11 @@ describe('createAdoHandler', () => {
     const secondUrl = vi.mocked(global.fetch).mock.calls[1][0] as string;
     expect(secondUrl).toContain('/iterations/3/changes');
 
-    expect(Array.isArray(result)).toBe(true);
     expect(result).toHaveLength(2);
+    expect(result[0]?.['item.path']).toBe('/src/index.ts');
+    expect(result[0]?.changeType).toBe('edit');
+    expect(result[1]?.['item.path']).toBe('/src/utils.ts');
+    expect(result[1]?.changeType).toBe('add');
   });
 
   it('ado_read_pr_changes returns empty for no iterations', async () => {
