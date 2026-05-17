@@ -2,6 +2,7 @@ import type {
   AcDefinition,
   AgentMode,
   ExecutionTarget,
+  SpecContract,
   NetworkPolicyMode,
   OutputMode,
   OutputTarget,
@@ -43,6 +44,7 @@ export interface NewPod {
   maxValidationAttempts: number;
   skipValidation: boolean;
   acceptanceCriteria?: AcDefinition[] | null;
+  contract?: SpecContract | null;
   /** New-style pod options. If omitted, derived from `outputMode`. */
   options?: PodOptions;
   /** Legacy field — still persisted for wire back-compat. */
@@ -128,6 +130,7 @@ export interface PodUpdates {
   claudeSessionId?: string | null;
   codexSessionId?: string | null;
   acceptanceCriteria?: AcDefinition[] | null;
+  contract?: SpecContract | null;
   recoveryWorktreePath?: string | null;
   reworkReason?: string | null;
   reworkCount?: number;
@@ -337,6 +340,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     plan: row.plan ? JSON.parse(row.plan as string) : null,
     progress: row.progress ? JSON.parse(row.progress as string) : null,
     acceptanceCriteria: parseAcceptanceCriteria(row.acceptance_criteria),
+    contract: row.contract ? (JSON.parse(row.contract as string) as SpecContract) : null,
     claudeSessionId: (row.claude_session_id as string) ?? null,
     codexSessionId: (row.codex_session_id as string) ?? null,
     options: readPodFromRow(row),
@@ -451,7 +455,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       db.prepare(`
         INSERT INTO pods (
           id, profile_name, task, status, model, runtime, execution_target, branch,
-          user_id, creator_email, creator_name, max_validation_attempts, skip_validation, acceptance_criteria,
+          user_id, creator_email, creator_name, max_validation_attempts, skip_validation, acceptance_criteria, contract,
           output_mode, agent_mode, output_target, validate, promotable,
           base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, scheduled_job_id,
@@ -460,7 +464,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           require_sidecars, auto_approve, disable_ask_human
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
-          @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @acceptanceCriteria,
+          @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @acceptanceCriteria, @contract,
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
           @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @scheduledJobId,
@@ -483,6 +487,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         maxValidationAttempts: pod.maxValidationAttempts,
         skipValidation: pod.skipValidation ? 1 : 0,
         acceptanceCriteria: pod.acceptanceCriteria ? JSON.stringify(pod.acceptanceCriteria) : null,
+        contract: pod.contract ? JSON.stringify(pod.contract) : null,
         outputMode: legacyOutputMode,
         agentMode: podOpts.agentMode,
         outputTarget: podOpts.output,
@@ -625,6 +630,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('acceptance_criteria = @acceptanceCriteria');
         params.acceptanceCriteria =
           changes.acceptanceCriteria !== null ? JSON.stringify(changes.acceptanceCriteria) : null;
+      }
+      if (changes.contract !== undefined) {
+        setClauses.push('contract = @contract');
+        params.contract = changes.contract !== null ? JSON.stringify(changes.contract) : null;
       }
       if (changes.lastHeartbeatAt !== undefined) {
         setClauses.push('last_heartbeat_at = @lastHeartbeatAt');

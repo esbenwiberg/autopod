@@ -310,14 +310,15 @@ public struct CreateSessionSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
 
-                    // AC from file (optional)
+                    // Legacy AC from file (optional). Contract-based specs are
+                    // created through the series flow or CLI --spec path.
                     if !isInteractive {
-                        formSection("AC File Path (optional)") {
+                        formSection("Legacy AC File Path (optional)") {
                             HStack(spacing: 6) {
                                 Image(systemName: "doc.text")
                                     .foregroundStyle(.tertiary)
                                     .font(.system(size: 11))
-                                TextField("e.g. specs/auth-ac.md", text: $acFromPath)
+                                TextField("legacy specs/auth-ac.md", text: $acFromPath)
                                     .textFieldStyle(.plain)
                                     .font(.system(.callout, design: .monospaced))
                             }
@@ -327,9 +328,9 @@ public struct CreateSessionSheet: View {
                         }
                     }
 
-                    // Acceptance criteria (manual — only for worker/artifact, and only if no AC file)
+                    // Legacy acceptance criteria (manual — only for worker/artifact, and only if no AC file)
                     if !isInteractive && acFromPath.isEmpty {
-                    formSection("Acceptance Criteria") {
+                    formSection("Legacy Acceptance Criteria") {
                         VStack(alignment: .leading, spacing: 6) {
                             if showBulkImport {
                                 TextEditor(text: $bulkText)

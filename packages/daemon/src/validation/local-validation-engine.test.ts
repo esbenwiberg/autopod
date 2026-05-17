@@ -891,7 +891,7 @@ describe('buildReviewPrompt', () => {
   it('renders DIFF VERIFICATION REQUIRED section when noneAcCriteria is provided', () => {
     const noneAcs = ['Scheduler runs on startup', 'ConsecutiveFailureCount increments on failure'];
     const prompt = buildReviewPrompt(baseConfig, undefined, noneAcs);
-    expect(prompt).toContain('ACCEPTANCE CRITERIA — DIFF VERIFICATION REQUIRED');
+    expect(prompt).toContain('REQUIREMENTS — DIFF VERIFICATION REQUIRED');
     expect(prompt).toContain('Scheduler runs on startup');
     expect(prompt).toContain('ConsecutiveFailureCount increments on failure');
     expect(prompt).toContain('YOU ARE THE ONLY CHECK');
@@ -906,7 +906,7 @@ describe('buildReviewPrompt', () => {
     const prompt = buildReviewPrompt(config, undefined, noneAcs);
     expect(prompt).toContain('ACCEPTANCE CRITERIA — AUTO-VERIFIED');
     expect(prompt).toContain('POST /api/jobs returns 201');
-    expect(prompt).toContain('ACCEPTANCE CRITERIA — DIFF VERIFICATION REQUIRED');
+    expect(prompt).toContain('REQUIREMENTS — DIFF VERIFICATION REQUIRED');
     expect(prompt).toContain('Scheduler runs on startup');
     // The auto-verified section should NOT include the none AC
     const autoSectionMatch = prompt.match(/AUTO-VERIFIED[\s\S]*?DIFF VERIFICATION/);
@@ -942,7 +942,7 @@ describe('buildReviewPrompt', () => {
     };
     const noneAcs = ['Scheduler runs on startup'];
     const prompt = buildReviewPrompt(config, undefined, noneAcs);
-    expect(prompt).toContain('Include ONLY the "DIFF VERIFICATION REQUIRED" criteria');
+    expect(prompt).toContain('Include ONLY the "DIFF VERIFICATION REQUIRED" requirements');
     expect(prompt).toContain('Do NOT include auto-verified');
   });
 });
@@ -1858,18 +1858,21 @@ describe('startAppStabilityMonitor — regression guard', () => {
   it('fires onCrash after 2 consecutive fetch failures', async () => {
     vi.useFakeTimers();
     let fetchCallCount = 0;
-    vi.stubGlobal('fetch', vi.fn(async () => {
-      fetchCallCount++;
-      throw new Error('ECONNREFUSED');
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        fetchCallCount++;
+        throw new Error('ECONNREFUSED');
+      }),
+    );
 
     const onCrash = vi.fn();
     startAppStabilityMonitor('http://127.0.0.1:9003/health', onCrash);
 
     // Advance past initial delay + 2 poll intervals (5s each)
-    await vi.advanceTimersByTimeAsync(5_100);  // initial delay
-    await vi.advanceTimersByTimeAsync(5_100);  // poll 1 failure
-    await vi.advanceTimersByTimeAsync(5_100);  // poll 2 failure → crash
+    await vi.advanceTimersByTimeAsync(5_100); // initial delay
+    await vi.advanceTimersByTimeAsync(5_100); // poll 1 failure
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 failure → crash
 
     expect(onCrash).toHaveBeenCalledTimes(1);
     vi.useRealTimers();

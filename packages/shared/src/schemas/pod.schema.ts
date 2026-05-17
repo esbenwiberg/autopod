@@ -16,6 +16,42 @@ export const acDefinitionSchema = z.discriminatedUnion('type', [
   z.object({ ...acBaseFields, type: z.literal('cmd'), polarity: acPolaritySchema.optional() }),
 ]);
 
+const contractScenarioFields: Record<string, z.ZodTypeAny> = {
+  id: z.string().min(1).max(128),
+  given: z.array(z.string().min(1)).min(1),
+  when: z.array(z.string().min(1)).min(1),
+};
+const scenarioThenKey = 'then';
+contractScenarioFields[scenarioThenKey] = z.array(z.string().min(1)).min(1);
+const contractScenarioSchema = z.object(contractScenarioFields);
+
+const requiredFactSchema = z.object({
+  id: z.string().min(1).max(128),
+  proves: z.array(z.string().min(1).max(128)).min(1),
+  kind: z.string().min(1).max(64),
+  artifact: z.object({
+    path: z.string().min(1).max(500),
+    change: z.enum(['create', 'update', 'touch']),
+  }),
+  command: z.string().min(1).max(1000),
+});
+
+const humanReviewSchema = z.object({
+  id: z.string().min(1).max(128),
+  covers: z.array(z.string().min(1).max(128)).min(1),
+  criterion: z.string().min(1).max(500),
+  reason: z.string().min(1).max(500),
+});
+
+export const specContractSchema = z.object({
+  contractVersion: z.literal(1),
+  title: z.string().min(1).max(200),
+  dependsOn: z.array(z.string().min(1).max(128)),
+  scenarios: z.array(contractScenarioSchema).min(1),
+  requiredFacts: z.array(requiredFactSchema),
+  humanReview: z.array(humanReviewSchema),
+});
+
 export const createPodRequestSchema = z
   .object({
     profileName: z.string().min(1).max(64),
@@ -39,6 +75,7 @@ export const createPodRequestSchema = z
       .optional(),
     skipValidation: z.boolean().optional(),
     acceptanceCriteria: z.array(acDefinitionSchema).optional(),
+    contract: specContractSchema.optional(),
     options: partialPodOptionsSchema.optional(),
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),
     baseBranch: z

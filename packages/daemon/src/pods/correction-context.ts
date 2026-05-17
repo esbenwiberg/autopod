@@ -14,6 +14,7 @@ export interface CorrectionContext {
     | 'health'
     | 'smoke'
     | 'ac_validation'
+    | 'fact_validation'
     | 'task_review';
   validationResult: ValidationResult;
   previousDiff: string;
@@ -128,6 +129,7 @@ export function determineFailedStep(result: ValidationResult): CorrectionContext
   const hasPageFailure = result.smoke.pages.some((p) => p.status === 'fail');
   if (hasPageFailure) return 'smoke';
   if (result.acValidation?.status === 'fail') return 'ac_validation';
+  if (result.factValidation?.status === 'fail') return 'fact_validation';
   return 'task_review';
 }
 

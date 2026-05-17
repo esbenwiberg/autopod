@@ -18,6 +18,8 @@ export interface TaskSummary {
   how?: string;
   /** Deviations from the original plan, if any */
   deviations: DeviationItem[];
+  /** Agent-reported fact evidence. Validator re-runs commands; this is context only. */
+  factEvidence?: FactEvidence[];
 }
 
 /** Reviewer's assessment of reported (and detected) deviations. */
@@ -31,3 +33,4 @@ export interface DeviationsAssessment {
   /** Deviations the reviewer detected in the diff that were NOT disclosed by the agent */
   undisclosedDeviations: string[];
 }
+import type { FactEvidence } from './contract.js';

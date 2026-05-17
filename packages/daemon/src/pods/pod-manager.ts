@@ -13,6 +13,7 @@ import type {
   DaemonConfig,
   EscalationRequest,
   ExecutionTarget,
+  FactValidationResult,
   HealthResult,
   HistoryQuery,
   InjectedMcpServer,
@@ -2625,6 +2626,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           eventBus.emit({ ...base, pageResults: phaseResult as PageResult[] });
         } else if (phase === 'ac') {
           eventBus.emit({ ...base, acResult: phaseResult as AcValidationResult | null });
+        } else if (phase === 'facts') {
+          eventBus.emit({ ...base, factResult: phaseResult as FactValidationResult | null });
         } else if (phase === 'review') {
           eventBus.emit({ ...base, reviewResult: phaseResult as TaskReviewResult | null });
         }
@@ -3094,6 +3097,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             maxValidationAttempts: profile.maxValidationAttempts ?? 3,
             skipValidation,
             acceptanceCriteria: request.acceptanceCriteria ?? null,
+            contract: request.contract ?? null,
             options: resolvedPod,
             outputMode: effectiveOutputMode,
             baseBranch: request.baseBranch ?? null,
@@ -6944,6 +6948,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
           reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
           acceptanceCriteria: pod.acceptanceCriteria ?? undefined,
+          contract: pod.contract ?? undefined,
           codeReviewSkill,
           commitLog: commitLog || undefined,
           plan: pod.plan ?? undefined,
@@ -7637,6 +7642,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
               reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
               acceptanceCriteria: pod.acceptanceCriteria ?? undefined,
+              contract: pod.contract ?? undefined,
               codeReviewSkill,
               commitLog: commitLog || undefined,
               plan: pod.plan ?? undefined,

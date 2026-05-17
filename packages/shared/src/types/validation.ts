@@ -20,6 +20,7 @@ export interface ValidationResult {
   lint?: LintResult;
   sast?: SastResult;
   acValidation?: AcValidationResult | null;
+  factValidation?: FactValidationResult | null;
   /**
    * Machine-readable reason when acValidation is null. Lets the UI distinguish
    * "skipped because earlier phases failed" from "skipped because no criteria
@@ -122,6 +123,22 @@ export interface AcValidationResult {
   model: string;
 }
 
+export interface FactCheckResult {
+  factId: string;
+  proves: string[];
+  artifactPath: string;
+  command: string;
+  passed: boolean;
+  reasoning: string;
+  stdout?: string;
+  stderr?: string;
+}
+
+export interface FactValidationResult {
+  status: 'pass' | 'fail' | 'skip';
+  results: FactCheckResult[];
+}
+
 export interface RequirementsCheckItem {
   criterion: string;
   met: boolean;
@@ -147,7 +164,7 @@ export interface TaskReviewResult {
 export interface ValidationFinding {
   /** Stable ID: 'ac:<hash>' | 'review:<hash>' | 'req:<hash>' */
   id: string;
-  source: 'ac_validation' | 'task_review' | 'requirements_check';
+  source: 'ac_validation' | 'fact_validation' | 'task_review' | 'requirements_check';
   /** Human-readable description of the finding */
   description: string;
   /** Reviewer reasoning (for AC checks) */

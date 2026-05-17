@@ -1,6 +1,8 @@
-import type { AgentActivityEvent, Pod, PodStatus, SystemEvent } from '@autopod/shared';
-import chalk from 'chalk';
 import { existsSync, readFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import type { AgentActivityEvent, Pod, PodStatus, SystemEvent } from '@autopod/shared';
+import { parseBriefs } from '@autopod/shared';
+import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { formatDurationFromDates, formatStatus } from '../output/colors.js';
@@ -586,6 +588,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .command('create <profile> [task]')
     .description('Create a new pod (task inline or via --file)')
     .option('-f, --file <path>', 'read task from a file (mutually exclusive with inline task arg)')
+    .option('--spec <folder>', 'read contract-based spec folder (brief.md + contract.yaml)')
     .option('-m, --model <model>', 'AI model to use')
     .option('-r, --runtime <runtime>', 'runtime (claude | codex)')
     .option('-b, --branch <branch>', 'target branch name')
@@ -605,6 +608,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         task: string | undefined,
         opts: {
           file?: string;
+          spec?: string;
           model?: string;
           runtime?: string;
           branch?: string;
@@ -615,12 +619,29 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           sidecar: string[];
         },
       ) => {
-        if (opts.file && task) {
-          podGroup.error('provide either [task] or --file, not both');
+        if ([opts.file, opts.spec, task].filter(Boolean).length > 1) {
+          podGroup.error('provide only one of [task], --file, or --spec');
         }
 
         let resolvedTask: string;
-        if (opts.file) {
+        let contract: import('@autopod/shared').SpecContract | undefined;
+        if (opts.spec) {
+          const specRoot = resolve(opts.spec);
+          const briefPath = join(specRoot, 'brief.md');
+          const contractPath = join(specRoot, 'contract.yaml');
+          if (!existsSync(briefPath)) podGroup.error(`brief not found: ${briefPath}`);
+          if (!existsSync(contractPath)) podGroup.error(`contract not found: ${contractPath}`);
+          const [brief] = parseBriefs([
+            {
+              filename: basename(specRoot),
+              content: readFileSync(briefPath, 'utf8'),
+              contractContent: readFileSync(contractPath, 'utf8'),
+            },
+          ]);
+          if (!brief?.contract) podGroup.error(`contract could not be parsed: ${contractPath}`);
+          resolvedTask = brief.task;
+          contract = brief.contract;
+        } else if (opts.file) {
           if (!existsSync(opts.file)) podGroup.error(`file not found: ${opts.file}`);
           resolvedTask = readFileSync(opts.file, 'utf8').trim();
           if (!resolvedTask) podGroup.error('file is empty');
@@ -636,6 +657,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           client.createSession({
             profileName: profile,
             task: resolvedTask,
+            contract,
             model: opts.model,
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
             branch: opts.branch,

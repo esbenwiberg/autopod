@@ -80,19 +80,39 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         const client = getClient();
         const { specRoot, briefsDir } = resolveSpecLayout(folder);
 
-        // Read brief files sorted by numeric prefix.
-        let briefFilenames: string[];
+        // Read contract-based brief folders sorted by numeric prefix. Fall back to
+        // flat markdown files only so the parser can emit its hard-cutover error.
+        let briefFiles: Array<{ filename: string; content: string; contractContent?: string }>;
         try {
-          briefFilenames = readdirSync(briefsDir)
-            .filter((f) => extname(f) === '.md')
+          const entries = readdirSync(briefsDir);
+          const briefDirs = entries
+            .filter((f) => {
+              const full = join(briefsDir, f);
+              return statSync(full).isDirectory() && existsSync(join(full, 'brief.md'));
+            })
             .sort((a, b) => numericPrefix(a) - numericPrefix(b));
+          if (briefDirs.length > 0) {
+            briefFiles = briefDirs.map((dirname) => ({
+              filename: dirname,
+              content: readFileSync(join(briefsDir, dirname, 'brief.md'), 'utf-8'),
+              contractContent: readFileSync(join(briefsDir, dirname, 'contract.yaml'), 'utf-8'),
+            }));
+          } else {
+            briefFiles = entries
+              .filter((f) => extname(f) === '.md')
+              .sort((a, b) => numericPrefix(a) - numericPrefix(b))
+              .map((filename) => ({
+                filename,
+                content: readFileSync(join(briefsDir, filename), 'utf-8'),
+              }));
+          }
         } catch {
           console.error(chalk.red(`Cannot read briefs folder: ${briefsDir}`));
           process.exit(1);
         }
 
-        if (briefFilenames.length === 0) {
-          console.error(chalk.red(`No .md brief files found in ${briefsDir}`));
+        if (briefFiles.length === 0) {
+          console.error(chalk.red(`No contract brief folders found in ${briefsDir}`));
           process.exit(1);
         }
 
@@ -102,11 +122,6 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
 
         const seriesName = opts.seriesName ?? inferSeriesName(specRoot);
         const prMode = opts.prMode as 'single' | 'stacked' | 'none';
-
-        const briefFiles = briefFilenames.map((filename) => ({
-          filename,
-          content: readFileSync(join(briefsDir, filename), 'utf-8'),
-        }));
 
         // `context_files` paths in brief frontmatter are resolved relative to
         // the spec root so a brief can pull in `decisions/...` or files at

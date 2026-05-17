@@ -5,6 +5,7 @@ import type { AgentEvent } from './runtime.js';
 import type {
   AcValidationResult,
   BuildResult,
+  FactValidationResult,
   HealthResult,
   LintResult,
   PageResult,
@@ -22,6 +23,7 @@ export type ValidationPhase =
   | 'health'
   | 'pages'
   | 'ac'
+  | 'facts'
   | 'review';
 
 export type SystemEvent =
@@ -111,6 +113,7 @@ export interface ValidationPhaseCompletedEvent {
   healthResult?: HealthResult;
   pageResults?: PageResult[];
   acResult?: AcValidationResult | null;
+  factResult?: FactValidationResult | null;
   reviewResult?: TaskReviewResult | null;
 }
 

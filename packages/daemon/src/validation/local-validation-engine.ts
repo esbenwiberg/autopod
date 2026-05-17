@@ -7,6 +7,8 @@ import type {
   AcType,
   AcValidationResult,
   DeviationsAssessment,
+  FactCheckResult,
+  FactValidationResult,
   HealthResult,
   PageResult,
   TaskReviewResult,
@@ -339,7 +341,27 @@ export function createLocalValidationEngine(
             .filter((r) => r.validationType === 'none')
             .map((r) => r.criterion) ?? [];
 
-        // ── Phase 8: AI Task Review ────────────────────────────────────
+        // ── Phase 8: Required Facts ────────────────────────────────────
+        // Contract facts are the post-merge survival layer: concrete artifacts
+        // and commands the validator can execute without model interpretation.
+        checkAbort();
+        let factValidation: FactValidationResult | null;
+        let factsStatus: 'pass' | 'fail' | 'skip';
+        if (skipPhases.includes('facts')) {
+          factValidation = { status: 'skip', results: [] };
+          factsStatus = 'skip';
+        } else {
+          callbacks?.onPhaseStarted?.('facts');
+          if (tier1Pass && config.contract?.requiredFacts.length)
+            onProgress?.('Checking required facts…');
+          factValidation = tier1Pass
+            ? await runFactValidation(containerManager, config, log)
+            : { status: 'skip', results: [] };
+          factsStatus = factValidation.status;
+        }
+        callbacks?.onPhaseCompleted?.('facts', factsStatus, factValidation);
+
+        // ── Phase 9: AI Task Review ────────────────────────────────────
         checkAbort();
         let taskReview: TaskReviewResult | null;
         let reviewSkipReason: string | undefined;
@@ -348,12 +370,15 @@ export function createLocalValidationEngine(
           taskReview = null;
           reviewSkipReason = 'Skipped by profile configuration';
           reviewSkipKind = 'profile-skip';
-        } else if (!tier1Pass) {
+        } else if (!tier1Pass || factsStatus === 'fail') {
           // Don't burn AI tokens reviewing code that doesn't build, lint, or
-          // pass tests — the agent will rewrite it on the next attempt.
+          // pass tests/facts — the agent will rewrite it on the next attempt.
           callbacks?.onPhaseStarted?.('review');
           taskReview = null;
-          reviewSkipReason = 'Skipped — earlier validation phases failed';
+          reviewSkipReason =
+            factsStatus === 'fail'
+              ? 'Skipped — required facts failed'
+              : 'Skipped — earlier validation phases failed';
           reviewSkipKind = 'upstream-failed';
         } else {
           callbacks?.onPhaseStarted?.('review');
@@ -389,7 +414,7 @@ export function createLocalValidationEngine(
           taskReview === null ? 'skip' : taskReview.status === 'fail' ? 'fail' : 'pass';
         callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
-        // ── Phase 9: Overall result ────────────────────────────────────
+        // ── Phase 10: Overall result ───────────────────────────────────
         const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
         const healthOk = healthResult.status === 'pass' || healthResult.status === 'skip';
         const smokeStatus =
@@ -398,6 +423,7 @@ export function createLocalValidationEngine(
             : ('fail' as const);
 
         const acFailed = acValidation !== null && acValidation.status === 'fail';
+        const factsFailed = factValidation !== null && factValidation.status === 'fail';
         // Timeouts and infra errors during review are not code quality failures.
         // Only treat review as a blocker when it returns an actual opinion (pass/fail).
         // `Review timed out:` is set by runTaskReview when it catches a
@@ -407,6 +433,7 @@ export function createLocalValidationEngine(
         const overall =
           tier1Pass &&
           !acFailed &&
+          !factsFailed &&
           ((taskReview === null && !isReviewBlocker) || taskReview?.status === 'pass')
             ? ('pass' as const)
             : ('fail' as const);
@@ -427,6 +454,7 @@ export function createLocalValidationEngine(
           lint: lintResult,
           sast: sastResult,
           acValidation,
+          factValidation,
           acSkipReason,
           taskReview,
           reviewSkipReason,
@@ -764,6 +792,123 @@ async function runTests(
     stdout: result.stdout.slice(0, 50_000),
     stderr: result.stderr.slice(0, 50_000),
   };
+}
+
+// ── Required facts phase ───────────────────────────────────────────────────
+
+async function runFactValidation(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  log?: Logger,
+): Promise<FactValidationResult> {
+  const facts = config.contract?.requiredFacts ?? [];
+  if (facts.length === 0) {
+    log?.info('no required facts configured, skipping fact validation');
+    return { status: 'skip', results: [] };
+  }
+
+  const cwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
+  const results: FactCheckResult[] = [];
+
+  for (const fact of facts) {
+    const artifactPath = normalizeContractPath(fact.artifact.path);
+    const artifactChanged = diffMentionsPath(config.diff, artifactPath);
+    const artifactExists = await artifactExistsInContainer(
+      containerManager,
+      config,
+      artifactPath,
+      log,
+    );
+
+    let commandResult: { stdout: string; stderr: string; exitCode: number } | null = null;
+    let commandError: string | undefined;
+    try {
+      commandResult = await containerManager.execInContainer(
+        config.containerId,
+        ['sh', '-c', fact.command],
+        {
+          cwd,
+          timeout: config.testTimeout ?? 600_000,
+          ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+        },
+      );
+    } catch (err) {
+      const partial = (err as { partialOutput?: string })?.partialOutput;
+      commandError = err instanceof Error ? err.message : String(err);
+      commandResult = {
+        stdout: partial ?? '',
+        stderr: commandError,
+        exitCode: 124,
+      };
+    }
+
+    const commandPassed = commandResult.exitCode === 0;
+    const passed = artifactExists && artifactChanged && commandPassed;
+    const failedReasons = [
+      artifactExists ? null : `artifact ${artifactPath} does not exist`,
+      artifactChanged ? null : `artifact ${artifactPath} was not changed in this diff`,
+      commandPassed ? null : `command exited ${commandResult.exitCode}`,
+    ].filter((reason): reason is string => reason !== null);
+
+    results.push({
+      factId: fact.id,
+      proves: fact.proves,
+      artifactPath,
+      command: fact.command,
+      passed,
+      reasoning: passed
+        ? `Fact ${fact.id} passed: ${artifactPath} exists, was changed, and command exited 0.`
+        : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`,
+      stdout: commandResult.stdout.slice(0, 20_000),
+      stderr: commandResult.stderr.slice(0, 20_000),
+    });
+  }
+
+  const status = results.every((r) => r.passed) ? ('pass' as const) : ('fail' as const);
+  log?.info(
+    { status, passed: results.filter((r) => r.passed).length, total: results.length },
+    'fact validation complete',
+  );
+  return { status, results };
+}
+
+async function artifactExistsInContainer(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  artifactPath: string,
+  log?: Logger,
+): Promise<boolean> {
+  try {
+    const result = await containerManager.execInContainer(
+      config.containerId,
+      ['sh', '-c', `test -e ${shellQuote(`/workspace/${artifactPath}`)}`],
+      { cwd: '/workspace', timeout: 10_000 },
+    );
+    return result.exitCode === 0;
+  } catch (err) {
+    log?.warn({ err, artifactPath }, 'required fact artifact existence check failed');
+    return false;
+  }
+}
+
+function normalizeContractPath(path: string): string {
+  return path.replace(/^\/+/, '').replace(/^\.\//, '');
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function diffMentionsPath(diff: string, path: string): boolean {
+  const normalized = normalizeContractPath(path);
+  return diff
+    .split('\n')
+    .some(
+      (line) =>
+        line === `+++ b/${normalized}` ||
+        line === `--- a/${normalized}` ||
+        line.startsWith(`diff --git a/${normalized} b/${normalized}`),
+    );
 }
 
 // ── Lint phase ──────────────────────────────────────────────────────────────
@@ -2420,12 +2565,19 @@ export function buildReviewPrompt(
   noneAcCriteria: string[] = [],
 ): string {
   const allAcs = config.acceptanceCriteria ?? [];
+  const contract = config.contract;
+  const humanReviewCriteria =
+    contract?.humanReview.map(
+      (item) =>
+        `[human_review:${item.id}] covers ${item.covers.join(', ')} — ${item.criterion} Reason: ${item.reason}`,
+    ) ?? [];
+  const diffReviewCriteria = [...noneAcCriteria, ...humanReviewCriteria];
 
   // ACs already verified by the automated harness (api + web-ui)
   const autoVerifiedAcs = allAcs.filter((ac) => !noneAcCriteria.includes(ac.outcome));
 
   // For backward-compat: we still need acList as a boolean signal for step numbering
-  const acList = allAcs.length > 0 ? true : null;
+  const acList = allAcs.length > 0 || diffReviewCriteria.length > 0 ? true : null;
 
   const autoSection =
     autoVerifiedAcs.length > 0
@@ -2433,9 +2585,25 @@ export function buildReviewPrompt(
       : '';
 
   const noneSection =
-    noneAcCriteria.length > 0
-      ? `\n## ACCEPTANCE CRITERIA — DIFF VERIFICATION REQUIRED\nThe following criteria cannot be tested via HTTP or browser. YOU ARE THE ONLY CHECK. Examine the diff carefully and assess each one:\n${noneAcCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n')}\n\nFor each criterion above include it in "requirementsCheck" with:\n- met=true  — diff clearly implements this\n- met=false — implementation is absent or clearly wrong\n\nBenefit of the doubt: if the diff is ambiguous or you can't confirm, default to met=true. Only fail when you have clear evidence of absence or incorrectness.\n`
+    diffReviewCriteria.length > 0
+      ? `\n## REQUIREMENTS — DIFF VERIFICATION REQUIRED\nThe following requirements cannot be reduced to the deterministic fact commands alone. YOU ARE THE ONLY CHECK. Examine the diff carefully and assess each one:\n${diffReviewCriteria.map((criterion, i) => `${i + 1}. ${criterion}`).join('\n')}\n\nFor each requirement above include it in "requirementsCheck" with:\n- met=true  — diff clearly implements this\n- met=false — implementation is absent or clearly wrong\n\nBenefit of the doubt: if the diff is ambiguous or you can't confirm, default to met=true. Only fail when you have clear evidence of absence or incorrectness.\n`
       : '';
+
+  const contractSection = contract
+    ? `\n## EXECUTABLE CONTRACT\n\nTitle: ${contract.title}\n\nScenarios:\n${contract.scenarios
+        .map(
+          (scenario) =>
+            `- ${scenario.id}\n  Given: ${scenario.given.join(' / ')}\n  When: ${scenario.when.join(' / ')}\n  Then: ${scenario.then.join(' / ')}`,
+        )
+        .join('\n')}\n\nRequired facts already executed by the validator:\n${contract.requiredFacts
+        .map(
+          (fact) =>
+            `- ${fact.id} proves ${fact.proves.join(', ')} via ${fact.artifact.change} ${fact.artifact.path}: \`${fact.command}\``,
+        )
+        .join('\n') || '- none'}\n\nHuman review items:\n${contract.humanReview
+        .map((item) => `- ${item.id} covers ${item.covers.join(', ')}: ${item.criterion}`)
+        .join('\n') || '- none'}\n`
+    : '';
 
   const planSection = config.plan
     ? `\n## ORIGINAL PLAN\n\nSummary: ${config.plan.summary}\n\nSteps:\n${config.plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n`
@@ -2451,6 +2619,15 @@ export function buildReviewPrompt(
               )
               .join('\n')}`
           : '\nNo deviations from plan reported.'
+      }\n${
+        config.taskSummary.factEvidence?.length
+          ? `\nAgent-reported fact evidence:\n${config.taskSummary.factEvidence
+              .map(
+                (evidence) =>
+                  `- ${evidence.factId}: ${evidence.result} via \`${evidence.command}\` (${evidence.artifactPath})${evidence.notes ? ` — ${evidence.notes}` : ''}`,
+              )
+              .join('\n')}\n`
+          : ''
       }\n`
     : '';
 
@@ -2505,7 +2682,7 @@ ${repoRulesSection}
 ## TASK
 
 ${config.task}
-${autoSection}${noneSection}${planSection}${taskSummarySection}${briefScopeSection}
+${contractSection}${autoSection}${noneSection}${planSection}${taskSummarySection}${briefScopeSection}
 ${commitLogSection}${contextSection}## DIFF
 
 ${config.diff}
@@ -2513,17 +2690,17 @@ ${overridesSection}
 ## INSTRUCTIONS
 
 ${
-  noneAcCriteria.length > 0
+  diffReviewCriteria.length > 0
     ? `### Step 1: Requirements check
 
-For each criterion in the "ACCEPTANCE CRITERIA — DIFF VERIFICATION REQUIRED" section above, examine the diff carefully and assess whether it is implemented. These are YOUR responsibility — they cannot be tested any other way.
+For each item in the "REQUIREMENTS — DIFF VERIFICATION REQUIRED" section above, examine the diff carefully and assess whether it is implemented. These are YOUR responsibility because they require judgement beyond deterministic command execution.
 
 - met=true  — diff clearly implements this criterion
 - met=false — implementation is absent or clearly wrong
 - Benefit of the doubt: if the diff is ambiguous or you can't tell, default to met=true. Only fail when you have clear evidence of absence or incorrectness.
 - Add a brief note explaining your assessment.
 
-Do NOT include auto-verified criteria in requirementsCheck.
+Do NOT include auto-verified acceptance criteria or required fact commands in requirementsCheck.
 
 `
     : acList
@@ -2596,7 +2773,7 @@ Respond ONLY with a JSON object — no markdown fences, no extra text:
 {
   "status": "pass" | "fail" | "uncertain",
   "reasoning": "one or two sentence summary of the overall assessment",
-  ${noneAcCriteria.length > 0 ? '"requirementsCheck": [\n    // Include ONLY the "DIFF VERIFICATION REQUIRED" criteria. Do NOT include auto-verified ones.\n    { "criterion": "...", "met": true|false, "note": "optional" }\n  ],\n  ' : acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["[SEVERITY] short description — each entry MUST be a plain string, not an object. Format: \\"[HIGH] Missing null check in foo()\\". Allowed severities: MEDIUM, HIGH, CRITICAL. Omit anything below medium."]
+  ${diffReviewCriteria.length > 0 ? '"requirementsCheck": [\n    // Include ONLY the "DIFF VERIFICATION REQUIRED" requirements. Do NOT include auto-verified criteria or required facts.\n    { "criterion": "...", "met": true|false, "note": "optional" }\n  ],\n  ' : acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["[SEVERITY] short description — each entry MUST be a plain string, not an object. Format: \\"[HIGH] Missing null check in foo()\\". Allowed severities: MEDIUM, HIGH, CRITICAL. Omit anything below medium."]
 }
 
 Status rules:

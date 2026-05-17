@@ -1,7 +1,8 @@
 import { parseDocument as parseYamlDocument } from 'yaml';
+import { parseSpecContract } from '../contract.js';
 import { BriefParseError } from '../errors.js';
-import { parseAcList } from '../parse-ac-list.js';
 import type { AcDefinition } from '../types/ac.js';
+import type { SpecContract } from '../types/contract.js';
 
 /**
  * YAML frontmatter shape for a brief markdown file. All fields are optional —
@@ -47,6 +48,7 @@ export interface ParsedBrief {
   title: string;
   task: string;
   dependsOn: string[];
+  contract?: SpecContract;
   acceptanceCriteria?: AcDefinition[];
   /** Files this brief expects to modify (advisory). */
   touches?: string[];
@@ -62,6 +64,8 @@ export interface BriefFile {
   filename: string;
   /** File contents as a UTF-8 string. */
   content: string;
+  /** Optional sibling contract.yaml contents for contract-based specs. */
+  contractContent?: string;
 }
 
 /**
@@ -87,6 +91,10 @@ export function parseBriefFrontmatter(content: string): {
   }
   if (frontmatter.acceptance_criteria) {
     validateAcItems(frontmatter.acceptance_criteria, yamlText);
+    throw new BriefParseError(
+      'acceptance_criteria frontmatter is no longer supported for runnable specs — use contract.yaml scenarios and required_facts.',
+      lineOfFrontmatterKey(yamlText, 'acceptance_criteria'),
+    );
   }
   return { frontmatter, body: (match[2] ?? '').trim() };
 }
@@ -128,6 +136,12 @@ function validateAcItems(acs: AcDefinition[], yamlText: string): void {
       );
     }
   }
+}
+
+function lineOfFrontmatterKey(yamlText: string, key: string): number | undefined {
+  const lines = yamlText.split('\n');
+  const i = lines.findIndex((l) => new RegExp(`^\\s*${key}\\s*:`).test(l));
+  return i >= 0 ? i + 1 : undefined;
 }
 
 /**
@@ -183,12 +197,19 @@ export function parseBriefs(
 ): ParsedBrief[] {
   // Pre-parse every file once so dependency resolution can look up titles
   // without re-reading anything.
-  type Pre = { frontmatter: BriefFrontmatter; body: string; title: string };
+  type Pre = {
+    frontmatter: BriefFrontmatter;
+    body: string;
+    title: string;
+    contract?: SpecContract;
+  };
   const pre = new Map<string, Pre>();
   for (const f of files) {
     const { frontmatter, body } = parseBriefFrontmatter(f.content);
-    const title = frontmatter.title ?? f.filename.replace(/^\d+-/, '').replace(/\.md$/, '');
-    pre.set(f.filename, { frontmatter, body, title });
+    const contract = f.contractContent ? parseSpecContract(f.contractContent) : undefined;
+    const title =
+      contract?.title ?? frontmatter.title ?? f.filename.replace(/^\d+-/, '').replace(/\.md$/, '');
+    pre.set(f.filename, { frontmatter, body, title, contract });
   }
 
   return files.map((f, i) => {
@@ -201,7 +222,7 @@ export function parseBriefs(
         acceptanceCriteria: undefined,
       };
     }
-    const { frontmatter, body, title } = entry;
+    const { frontmatter, body, title, contract } = entry;
 
     // Per-brief `context_files` are optional supplementary reads — load each
     // and prepend to the brief body. Series-level shared docs are handled
@@ -216,7 +237,7 @@ export function parseBriefs(
     const task = contextParts.length > 0 ? `${contextParts.join('\n\n')}\n\n---\n\n${body}` : body;
 
     // Resolve explicit `depends_on` values to brief titles.
-    const explicitDeps = (frontmatter.depends_on ?? []).map((dep) => {
+    const explicitDeps = (contract?.dependsOn ?? frontmatter.depends_on ?? []).map((dep) => {
       const depFile = files.find((x) => x.filename.startsWith(dep) || x.filename === `${dep}.md`);
       return depFile ? (pre.get(depFile.filename)?.title ?? dep) : dep;
     });
@@ -234,14 +255,13 @@ export function parseBriefs(
 
     // YAML frontmatter acceptance_criteria takes priority; fall back to parsing
     // the markdown ## Acceptance Criteria section if no frontmatter ACs are set.
-    let acceptanceCriteria: AcDefinition[] | undefined = frontmatter.acceptance_criteria;
-    if (!acceptanceCriteria) {
+    const acceptanceCriteria: AcDefinition[] | undefined = undefined;
+    if (!contract) {
       const mdSection = extractMarkdownAcSection(body);
       if (mdSection) {
-        acceptanceCriteria = parseAcList(mdSection).map((outcome) => ({
-          type: 'none' as const,
-          outcome,
-        }));
+        throw new BriefParseError(
+          'Markdown Acceptance Criteria sections are no longer supported for runnable specs — use contract.yaml scenarios and required_facts.',
+        );
       }
     }
 
@@ -256,6 +276,7 @@ export function parseBriefs(
       title,
       task,
       dependsOn,
+      contract,
       acceptanceCriteria,
       touches,
       doesNotTouch,

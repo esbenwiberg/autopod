@@ -19,7 +19,11 @@ it('type: web AC cannot carry polarity (TS rejects at compile time)', () => {
 
 it('type: api AC cannot carry polarity (TS rejects at compile time)', () => {
   // @ts-expect-error polarity is not allowed on non-cmd types
-  const _ac: AcDefinition = { type: 'api', outcome: 'endpoint returns 200', polarity: 'expect-output' };
+  const _ac: AcDefinition = {
+    type: 'api',
+    outcome: 'endpoint returns 200',
+    polarity: 'expect-output',
+  };
 });
 
 it('type: none AC without hint or polarity compiles', () => {
@@ -123,75 +127,32 @@ Body`;
 });
 
 // ---------------------------------------------------------------------------
-// parseBriefFrontmatter — happy path (v2 shape)
+// parseBriefFrontmatter — contract cutover
 // ---------------------------------------------------------------------------
 
-describe('parseBriefFrontmatter happy path (v2 shape)', () => {
-  it('parses a brief with one AC of each type', () => {
+describe('parseBriefFrontmatter contract cutover', () => {
+  it('rejects acceptance_criteria frontmatter', () => {
     const content = `---
 acceptance_criteria:
-  - type: none
-    outcome: TypeScript compiles without errors
   - type: api
     outcome: POST /pods returns 201 with body.id
     hint: POST /api/pods
-  - type: web
-    outcome: /pr-dashboard renders with the header bar
-    hint: /pr-dashboard
-  - type: cmd
-    outcome: legacy keys removed from shared types
-    hint: grep -n 'pass:\\|fail:' packages/shared/src/types/ac.ts
-    polarity: expect-no-output
 ---
 Body`;
-    const { frontmatter } = parseBriefFrontmatter(content);
-    const acs = frontmatter.acceptance_criteria;
-    expect(acs).toHaveLength(4);
-
-    expect(acs?.[0]?.type).toBe('none');
-    expect(acs?.[0]?.outcome).toBe('TypeScript compiles without errors');
-
-    expect(acs?.[1]?.type).toBe('api');
-    expect(acs?.[1]?.outcome).toBe('POST /pods returns 201 with body.id');
-    expect(acs?.[1]?.hint).toBe('POST /api/pods');
-
-    expect(acs?.[2]?.type).toBe('web');
-    expect(acs?.[2]?.outcome).toBe('/pr-dashboard renders with the header bar');
-    expect(acs?.[2]?.hint).toBe('/pr-dashboard');
-
-    const cmdAc = acs?.[3];
-    expect(cmdAc?.type).toBe('cmd');
-    expect(cmdAc?.outcome).toBe('legacy keys removed from shared types');
-    if (cmdAc?.type === 'cmd') {
-      expect(cmdAc.polarity).toBe('expect-no-output');
-    }
+    expect(() => parseBriefFrontmatter(content)).toThrow(
+      'acceptance_criteria frontmatter is no longer supported',
+    );
   });
 
-  it('accepts AC without hint (hint is optional)', () => {
+  it('parses normal scope frontmatter without ACs', () => {
     const content = `---
-acceptance_criteria:
-  - type: none
-    outcome: build exits cleanly
+title: Add durable contract facts
+touches:
+  - packages/shared/src/contract.ts
 ---
 Body`;
     const { frontmatter } = parseBriefFrontmatter(content);
-    expect(frontmatter.acceptance_criteria?.[0]?.outcome).toBe('build exits cleanly');
-    expect(frontmatter.acceptance_criteria?.[0]?.hint).toBeUndefined();
-  });
-
-  it('accepts cmd AC without polarity (polarity is optional)', () => {
-    const content = `---
-acceptance_criteria:
-  - type: cmd
-    outcome: tests pass
-    hint: npx pnpm test
----
-Body`;
-    const { frontmatter } = parseBriefFrontmatter(content);
-    const ac = frontmatter.acceptance_criteria?.[0];
-    expect(ac?.type).toBe('cmd');
-    if (ac?.type === 'cmd') {
-      expect(ac.polarity).toBeUndefined();
-    }
+    expect(frontmatter.title).toBe('Add durable contract facts');
+    expect(frontmatter.acceptance_criteria).toBeUndefined();
   });
 });

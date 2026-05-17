@@ -2,6 +2,7 @@ import type {
   AcCheckResult,
   AcDefinition,
   PreSubmitReviewSnapshot,
+  SpecContract,
   TaskSummary,
   ValidationOverride,
   ValidationPhase,
@@ -42,6 +43,7 @@ export interface ValidationEngineConfig {
   /** SAST phase timeout in ms. Default 300_000 (5 min). */
   sastTimeout?: number;
   acceptanceCriteria?: AcDefinition[];
+  contract?: SpecContract;
   /** Repo-specific review rules loaded from e.g. skills/code-review.md in the worktree */
   codeReviewSkill?: string;
   /** Git commit log between base branch and HEAD (one-line format) */

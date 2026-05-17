@@ -3,6 +3,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import {
   type AcDefinition,
   AutopodError,
+  type SpecContract,
   generateId,
   numericPrefix,
   parseBriefs,
@@ -18,6 +19,7 @@ interface ParsedBrief {
   task: string;
   dependsOn: string[];
   acceptanceCriteria?: AcDefinition[];
+  contract?: SpecContract;
   /** Per-brief advisory list of files this pod expects to modify. */
   touches?: string[];
   /** Per-brief advisory list of files this pod should not modify. */
@@ -80,6 +82,34 @@ function readSpecDoc(specRoot: string, name: string): string {
   } catch {
     return '';
   }
+}
+
+function readBriefFiles(briefsDir: string): Array<{
+  filename: string;
+  content: string;
+  contractContent?: string;
+}> {
+  const entries = readdirSync(briefsDir);
+  const briefDirs = entries
+    .filter((entry) => {
+      const full = join(briefsDir, entry);
+      return statSync(full).isDirectory() && existsSync(join(full, 'brief.md'));
+    })
+    .sort((a, b) => numericPrefix(a) - numericPrefix(b));
+  if (briefDirs.length > 0) {
+    return briefDirs.map((dirname) => ({
+      filename: dirname,
+      content: readFileSync(join(briefsDir, dirname, 'brief.md'), 'utf-8'),
+      contractContent: readFileSync(join(briefsDir, dirname, 'contract.yaml'), 'utf-8'),
+    }));
+  }
+  return entries
+    .filter((f) => extname(f) === '.md')
+    .sort((a, b) => numericPrefix(a) - numericPrefix(b))
+    .map((filename) => ({
+      filename,
+      content: readFileSync(join(briefsDir, filename), 'utf-8'),
+    }));
 }
 
 export function seriesRoutes(
@@ -164,6 +194,7 @@ export function seriesRoutes(
             doesNotTouch: brief.doesNotTouch,
             prMode,
             acceptanceCriteria: brief.acceptanceCriteria,
+            contract: brief.contract,
             options: { agentMode: 'auto', output },
             // Per-brief sidecars (e.g. Dagger engine for a pipeline-wiring pod).
             // Validated against the profile's sidecar config + trustedSource
@@ -241,24 +272,17 @@ export function seriesRoutes(
 
     const { specRoot, briefsDir } = resolveSpecLayout(folderPath);
 
-    let filenames: string[];
+    let briefFiles: Array<{ filename: string; content: string; contractContent?: string }>;
     try {
-      filenames = readdirSync(briefsDir)
-        .filter((f) => extname(f) === '.md')
-        .sort((a, b) => numericPrefix(a) - numericPrefix(b));
+      briefFiles = readBriefFiles(briefsDir);
     } catch {
       reply.status(400);
       return { error: `Cannot read briefs folder: ${briefsDir}` };
     }
-    if (filenames.length === 0) {
+    if (briefFiles.length === 0) {
       reply.status(400);
-      return { error: `No .md brief files found in ${briefsDir}` };
+      return { error: `No contract brief folders found in ${briefsDir}` };
     }
-
-    const briefFiles = filenames.map((filename) => ({
-      filename,
-      content: readFileSync(join(briefsDir, filename), 'utf-8'),
-    }));
 
     const seriesDescription = readSpecDoc(specRoot, 'purpose.md');
     const seriesDesign = readSpecDoc(specRoot, 'design.md');

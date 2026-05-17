@@ -15,7 +15,7 @@ public struct ValidationOverrideResponse: Codable, Sendable {
 
 public struct ValidationFindingResponse: Codable, Sendable {
   public let id: String
-  public let source: String  // "ac_validation" | "task_review" | "requirements_check"
+  public let source: String  // "ac_validation" | "fact_validation" | "task_review" | "requirements_check"
   public let description: String
   public let reasoning: String?
 }
@@ -41,6 +41,7 @@ public struct ValidationResponse: Codable, Sendable {
   public let lint: LintResultResponse?
   public let sast: SastResultResponse?
   public let acValidation: AcValidationResponse?
+  public let factValidation: FactValidationResponse?
   /// Machine-readable skip reason when acValidation is null. Lets the UI tell
   /// "skipped because earlier phases failed" apart from "no criteria configured".
   /// Values: "upstream-failed" | "profile-skip" | "health-failed" | "no-criteria".
@@ -150,6 +151,36 @@ public struct AcCheckResponse: Codable, Sendable {
     screenshot = try c.decodeIfPresent(ScreenshotRefResponse.self, forKey: .screenshot)
     reasoning = try c.decode(String.self, forKey: .reasoning)
     validationType = try c.decodeIfPresent(String.self, forKey: .validationType)
+  }
+}
+
+// MARK: - Fact Validation
+
+public struct FactValidationResponse: Codable, Sendable {
+  public let status: String
+  public let results: [FactCheckResponse]
+}
+
+public struct FactCheckResponse: Codable, Sendable {
+  public let factId: String
+  public let proves: [String]
+  public let artifactPath: String
+  public let command: String
+  public let passed: Bool
+  public let reasoning: String
+  public let stdout: String?
+  public let stderr: String?
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    factId = try c.decode(String.self, forKey: .factId)
+    proves = try c.decode([String].self, forKey: .proves)
+    artifactPath = try c.decode(String.self, forKey: .artifactPath)
+    command = try c.decode(String.self, forKey: .command)
+    passed = try decodeBoolOrInt(c, key: .passed)
+    reasoning = try c.decode(String.self, forKey: .reasoning)
+    stdout = try c.decodeIfPresent(String.self, forKey: .stdout)
+    stderr = try c.decodeIfPresent(String.self, forKey: .stderr)
   }
 }
 

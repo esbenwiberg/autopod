@@ -1,3 +1,5 @@
+import type { FactEvidence } from './contract.js';
+
 export type RuntimeType = 'claude' | 'codex' | 'copilot';
 
 export interface Runtime {
@@ -137,4 +139,6 @@ export interface AgentTaskSummaryEvent {
   }>;
   /** Agent's self-verification status for each acceptance criterion. */
   acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>;
+  /** Agent-reported evidence for required executable facts. */
+  factEvidence?: FactEvidence[];
 }

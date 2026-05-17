@@ -11,6 +11,7 @@ import type {
   ActionResponse,
   EscalationRequest,
   EscalationResponse,
+  FactEvidence,
   MemoryEntry,
   MemoryScope,
   PimActivationConfig,
@@ -247,6 +248,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
       how?: string,
       acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>,
+      factEvidence?: FactEvidence[],
     ): void {
       podManager.touchHeartbeat(podId);
       // Lock taskSummary on first write. Validation failures loop the same
@@ -263,6 +265,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           podId,
           deviationCount: deviations.length,
           acChecklistCount: acChecklist?.length ?? 0,
+          factEvidenceCount: factEvidence?.length ?? 0,
           actualSummary: actualSummary.slice(0, 100),
           preservedExistingSummary: summaryAlreadySet,
         },
@@ -272,7 +275,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       );
       const updates: Parameters<typeof podRepo.update>[1] = {};
       if (!summaryAlreadySet) {
-        updates.taskSummary = { actualSummary, how, deviations };
+        updates.taskSummary = { actualSummary, how, deviations, factEvidence };
+      } else if (factEvidence != null && existing.taskSummary) {
+        updates.taskSummary = { ...existing.taskSummary, factEvidence };
       }
       if (acChecklist != null) {
         updates.acSelfReport = acChecklist;
@@ -290,6 +295,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           how,
           deviations,
           acChecklist,
+          factEvidence,
           timestamp: new Date().toISOString(),
         },
       });

@@ -110,6 +110,8 @@ public struct ValidationTab: View {
       return .skipped
     case .ac:
       return switch c.acValidation { case true: .passed; case false: .failed; default: .skipped }
+    case .facts:
+      return switch c.factValidation { case true: .passed; case false: .failed; default: .skipped }
     case .review:
       return switch c.review { case true: .passed; case false: .failed; default: .skipped }
     }
@@ -130,6 +132,10 @@ public struct ValidationTab: View {
         let count = p.acTotalCount
         if p.ac.status == .running { return "running…" }
         return count > 0 ? "\(count) criteria" : nil
+      case .facts:
+        let count = p.factTotalCount
+        if p.facts.status == .running { return "running…" }
+        return count > 0 ? "\(count) facts" : nil
       default:
         if let dur = p.state(for: phase).duration {
           return formatDuration(dur)
@@ -144,6 +150,8 @@ public struct ValidationTab: View {
         return c.pages.map { "\($0.count) pages" }
       case .ac:
         return c.acChecks.map { "\($0.count) criteria" }
+      case .facts:
+        return c.factChecks.map { "\($0.count) facts" }
       default:
         return nil
       }
@@ -364,6 +372,7 @@ public struct ValidationTab: View {
       case .health:  healthDetail
       case .pages:   pagesDetail
       case .ac:      acDetail
+      case .facts:   factsDetail
       case .review:  reviewDetail
       }
     } else {
@@ -614,6 +623,90 @@ public struct ValidationTab: View {
       }
       correctionMessageBlock
     }
+  }
+
+  @ViewBuilder
+  private var factsDetail: some View {
+    let status = phaseStatus(.facts)
+    let factChecks: [FactCheckDetail]? = progress?.factChecks ?? checks?.factChecks
+
+    VStack(alignment: .leading, spacing: 12) {
+      phaseStatusRow(status: status, passLabel: "Required facts passed",
+                     failLabel: "Required facts failed", skipLabel: "No required facts configured")
+      if let contract = pod.contract {
+        contractSummary(contract)
+      }
+      if let factChecks, !factChecks.isEmpty {
+        VStack(alignment: .leading, spacing: 8) {
+          ForEach(Array(factChecks.enumerated()), id: \.offset) { _, check in
+            factCheckRow(check)
+          }
+        }
+      }
+      correctionMessageBlock
+    }
+  }
+
+  @ViewBuilder
+  private func contractSummary(_ contract: SpecContractResponse) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(contract.title)
+        .font(.caption.weight(.semibold))
+      Text("\(contract.scenarios.count) scenarios · \(contract.requiredFacts.count) required facts · \(contract.humanReview.count) review checks")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+    .padding(10)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(nsColor: .controlBackgroundColor))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+  }
+
+  @ViewBuilder
+  private func factCheckRow(_ check: FactCheckDetail) -> some View {
+    let statusColor: Color = check.passed ? .green : .red
+    HStack(alignment: .top, spacing: 0) {
+      Rectangle()
+        .fill(statusColor.opacity(0.7))
+        .frame(width: 3)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
+          Image(systemName: check.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+            .font(.system(size: 13))
+            .foregroundStyle(statusColor)
+            .padding(.top, 1)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(check.factId)
+              .font(.callout.weight(.medium))
+            Text(check.artifactPath)
+              .font(.system(.caption2, design: .monospaced))
+              .foregroundStyle(.secondary)
+          }
+          Spacer(minLength: 4)
+          triageBadge("fact")
+        }
+        Text(check.command)
+          .font(.system(.caption2, design: .monospaced))
+          .foregroundStyle(.secondary)
+          .textSelection(.enabled)
+        Text(check.reasoning)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+          .padding(.horizontal, 8)
+          .padding(.vertical, 6)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+          .clipShape(RoundedRectangle(cornerRadius: 4))
+        if let stderr = check.stderr, !stderr.isEmpty {
+          outputBlock(title: "Fact Error Output", text: stderr, expanded: .constant(false), color: .red)
+        }
+      }
+      .padding(10)
+    }
+    .background(Color(nsColor: .controlBackgroundColor))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(statusColor.opacity(0.15), lineWidth: 1))
   }
 
   @ViewBuilder

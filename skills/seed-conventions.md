@@ -1,21 +1,21 @@
 ---
-name: seed-facts
+name: seed-conventions
 description: >
-  Seeds docs/facts/ for a repo by synthesising three sources: scan-history
+  Seeds docs/conventions/ for a repo by synthesising three sources: scan-history
   candidates (if available), existing ADRs, and codebase conventions visible
   in CLAUDE.md and source patterns. Proposes each candidate to the user one
-  at a time, then writes approved ones as fact-NNN-*.md files and regenerates
-  the index. Use when setting up the facts corpus for the first time, or to
+  at a time, then writes approved ones as convention-NNN-*.md files and regenerates
+  the index. Use when setting up the conventions corpus for the first time, or to
   fill gaps after /scan-history.
 allowed-tools: Read, Bash, Glob, Grep, Write, AskUserQuestion
 ---
 
-# /seed-facts
+# /seed-conventions
 
-Populate `docs/facts/` from real signals in this repo rather than guessing.
+Populate `docs/conventions/` from real signals in this repo rather than guessing.
 Works from three sources in order of reliability:
 
-1. **`docs/facts/_candidates.md`** — output of `/scan-history` (highest signal:
+1. **`docs/conventions/_candidates.md`** — output of `/scan-history` (highest signal:
    real questions from real sessions)
 2. **`docs/decisions/`** — existing ADRs often contain soft conventions buried
    in their Consequences sections that never warranted their own ADR
@@ -28,7 +28,7 @@ Works from three sources in order of reliability:
 
 Read in parallel:
 
-- `docs/facts/_candidates.md` if it exists (from `/scan-history`)
+- `docs/conventions/_candidates.md` if it exists (from `/scan-history`)
 - Every file in `docs/decisions/` — specifically the **Consequences** and
   **Decision** sections, looking for soft conventions, not just the headline
   decision
@@ -46,22 +46,22 @@ Read in parallel:
 From everything gathered, build a candidate list. For each candidate:
 
 - State it as a declarative sentence ("We use X", "New Y always go in Z")
-- Assign a topic from `docs/facts/README.md`'s taxonomy
+- Assign a topic from `docs/conventions/README.md`'s taxonomy
 - Note the source (ADR ID, CLAUDE.md section, codebase pattern, scan-history)
-- Decide: fact or not?
+- Decide: convention or not?
   - Skip if it's already obvious from the code structure
-  - Skip if it's covered by an ADR (ADRs outrank facts)
+  - Skip if it's covered by an ADR (ADRs outrank conventions)
   - Skip if it's feature-specific (not recurring)
   - Keep if a planning agent would otherwise have to ask about it
 
-Aim for 5–15 facts on a first seeding. Quality over quantity.
+Aim for 5–15 conventions on a first seeding. Quality over quantity.
 
 ### 3 — Review with user, one at a time
 
 For each candidate, present it using `AskUserQuestion` with these options:
 
 ```
-Candidate fact:
+Candidate convention:
   Title: <declarative statement>
   Topics: <topics>
   Body: "<rule>. <rationale in one sentence>."
@@ -75,20 +75,20 @@ the reworded version before writing.
 
 Do not batch candidates — one per turn.
 
-### 4 — Write approved facts
+### 4 — Write approved conventions
 
 For each accepted or reworded candidate:
 
-1. Determine the next available fact number:
+1. Determine the next available convention number:
    ```bash
-   ls docs/facts/fact-*.md 2>/dev/null | grep -oE 'fact-[0-9]+' | \
+   ls docs/conventions/convention-*.md 2>/dev/null | grep -oE 'convention-[0-9]+' | \
      sort -t- -k2 -n | tail -1 | grep -oE '[0-9]+' || echo "000"
    ```
    Increment by one. Never reuse a number.
 
 2. Derive a short slug from the title (lowercase, hyphens, max 5 words).
 
-3. Write `docs/facts/fact-NNN-<slug>.md`:
+3. Write `docs/conventions/convention-NNN-<slug>.md`:
 
    ```markdown
    ---
@@ -104,18 +104,18 @@ For each accepted or reworded candidate:
    ```bash
    ./scripts/generate-knowledge-index.sh
    ```
-   Confirm the new entry appears in `docs/facts/index.md` before moving to
+   Confirm the new entry appears in `docs/conventions/index.md` before moving to
    the next candidate.
 
 ### 5 — Final summary
 
 After all candidates are processed, show:
-- Facts written: N (list their filenames)
+- Conventions written: N (list their filenames)
 - Candidates skipped: N (brief reason for each)
 - Run `./scripts/generate-knowledge-index.sh` one final time
-- Show the resulting `docs/facts/index.md` to the user
+- Show the resulting `docs/conventions/index.md` to the user
 
-## What makes a good fact
+## What makes a good convention
 
 **Good** — would save the planning agent from asking:
 - "We use `npx pnpm` — pnpm is not globally installed"
@@ -136,5 +136,5 @@ from facts vs which still go to the user. Any question that goes to the user
 and gets a policy-type answer is a gap — add a fact for it after the session.
 
 The corpus grows organically from real planning sessions. `/scan-history` +
-`/seed-facts` are the bootstrap; plan-feature usage is the steady-state
+`/seed-conventions` is the bootstrap; plan-feature usage is the steady-state
 growth mechanism.

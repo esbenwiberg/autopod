@@ -1,5 +1,6 @@
 import type { AcDefinition } from './ac.js';
 import type { OutputMode } from './actions.js';
+import type { SpecContract } from './contract.js';
 import type { EscalationRequest } from './escalation.js';
 import type { PodOptions } from './pod-options.js';
 import type { ExecutionTarget, NetworkPolicyMode, PimGroupConfig, Profile } from './profile.js';
@@ -119,6 +120,7 @@ export interface Pod {
     totalPhases: number;
   } | null;
   acceptanceCriteria: AcDefinition[] | null;
+  contract?: SpecContract | null;
   claudeSessionId: string | null;
   codexSessionId: string | null;
   /**
@@ -365,6 +367,7 @@ export interface CreatePodRequest {
   branchPrefix?: string;
   skipValidation?: boolean;
   acceptanceCriteria?: AcDefinition[];
+  contract?: SpecContract;
   /**
    * Per-pod override of the profile's pod options. Each field is
    * independently overridable — `{agentMode:'interactive'}` keeps the

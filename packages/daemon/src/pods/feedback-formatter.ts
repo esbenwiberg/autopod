@@ -156,6 +156,24 @@ function formatValidationFailure(input: ValidationFeedback): string {
     }
   }
 
+  // Required fact failures
+  if (result.factValidation && result.factValidation.status === 'fail') {
+    const failed = result.factValidation.results.filter((r) => !r.passed);
+    if (failed.length > 0) {
+      lines.push('### Required Fact Failures');
+      for (const check of failed) {
+        lines.push(`**${check.factId}** (\`${check.artifactPath}\`):`);
+        lines.push(`- ${check.reasoning}`);
+        if (check.stderr) {
+          lines.push('```');
+          lines.push(check.stderr.slice(0, 5_000));
+          lines.push('```');
+        }
+      }
+      lines.push('');
+    }
+  }
+
   // Unmet "none" ACs surfaced by the AI reviewer
   if (result.taskReview?.requirementsCheck) {
     const unmetNoneAcs = result.taskReview.requirementsCheck.filter((r) => !r.met);
@@ -193,7 +211,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     result.taskReview === null
   ) {
     lines.push(
-      'Note: acceptance-criteria checks and AI code review were skipped because earlier validation phases failed. They will run automatically once the issues above are fixed.',
+      'Note: acceptance-criteria checks, required facts, and AI code review were skipped because earlier validation phases failed. They will run automatically once the issues above are fixed.',
     );
     lines.push('');
   }

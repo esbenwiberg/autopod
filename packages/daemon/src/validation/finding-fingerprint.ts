@@ -16,10 +16,17 @@ export function fingerprintText(text: string): string {
 
 /**
  * Builds a stable finding ID for a given source and text.
- * Format: 'ac:<hash>' | 'review:<hash>' | 'req:<hash>'
+ * Format: 'ac:<hash>' | 'fact:<hash>' | 'review:<hash>' | 'req:<hash>'
  */
 export function findingId(source: ValidationFinding['source'], text: string): string {
-  const prefix = source === 'ac_validation' ? 'ac' : source === 'task_review' ? 'review' : 'req';
+  const prefix =
+    source === 'ac_validation'
+      ? 'ac'
+      : source === 'fact_validation'
+        ? 'fact'
+        : source === 'task_review'
+          ? 'review'
+          : 'req';
   return `${prefix}:${fingerprintText(text)}`;
 }
 
@@ -39,6 +46,20 @@ export function extractFindings(result: ValidationResult): ValidationFinding[] {
           id: findingId('ac_validation', check.criterion),
           source: 'ac_validation',
           description: check.criterion,
+          reasoning: check.reasoning,
+        });
+      }
+    }
+  }
+
+  // Required fact failures
+  if (result.factValidation?.status === 'fail') {
+    for (const check of result.factValidation.results) {
+      if (!check.passed) {
+        findings.push({
+          id: findingId('fact_validation', check.factId),
+          source: 'fact_validation',
+          description: `${check.factId}: ${check.command}`,
           reasoning: check.reasoning,
         });
       }

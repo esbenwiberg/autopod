@@ -36,6 +36,7 @@ public struct RawSystemEvent: Codable, Sendable {
   public let healthResult: HealthResultResponse?
   public let pageResults: [PageResultResponse]?
   public let acResult: AcValidationResponse?
+  public let factResult: FactValidationResponse?
   public let reviewResult: TaskReviewResponse?
 
   // pod.escalation_created
@@ -71,6 +72,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
   case health
   case pages
   case ac
+  case facts
   case review
 
   public var displayName: String {
@@ -82,6 +84,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
     case .health: return "Health"
     case .pages: return "Pages"
     case .ac: return "AC"
+    case .facts: return "Facts"
     case .review: return "Review"
     }
   }
@@ -100,6 +103,7 @@ public struct ValidationPhaseResult: Sendable {
   public let healthResult: HealthResultResponse?
   public let pageResults: [PageResultResponse]?
   public let acResult: AcValidationResponse?
+  public let factResult: FactValidationResponse?
   public let reviewResult: TaskReviewResponse?
 
   init(from raw: RawSystemEvent) {
@@ -111,6 +115,7 @@ public struct ValidationPhaseResult: Sendable {
     healthResult = raw.healthResult
     pageResults = raw.pageResults
     acResult = raw.acResult
+    factResult = raw.factResult
     reviewResult = raw.reviewResult
   }
 }
@@ -269,6 +274,7 @@ public struct AgentEventResponse: Codable, Sendable {
   // task_summary
   public let actualSummary: String?
   public let deviations: [DeviationResponse]?
+  public let factEvidence: [FactEvidenceResponse]?
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -296,5 +302,6 @@ public struct AgentEventResponse: Codable, Sendable {
     totalPhases = try c.decodeIfPresent(Int.self, forKey: .totalPhases)
     actualSummary = try c.decodeIfPresent(String.self, forKey: .actualSummary)
     deviations = try c.decodeIfPresent([DeviationResponse].self, forKey: .deviations)
+    factEvidence = try c.decodeIfPresent([FactEvidenceResponse].self, forKey: .factEvidence)
   }
 }

@@ -298,6 +298,11 @@ public struct CreateSeriesSheet: View {
                 return (b.title, s)
             }
         )
+        let factsByTitle: [String: Int] = Dictionary(
+            uniqueKeysWithValues: briefs.map { b in
+                (b.title, b.contract?.requiredFacts.count ?? 0)
+            }
+        )
         let edges = layout.edges.map {
             PipelineEdgeCanvas.EdgeStyle(from: $0.from, to: $0.to, color: .accentColor)
         }
@@ -313,7 +318,8 @@ public struct CreateSeriesSheet: View {
                 ForEach(layout.nodes, id: \.id) { node in
                     briefNode(
                         title: node.id,
-                        sidecars: sidecarsByTitle[node.id] ?? []
+                        sidecars: sidecarsByTitle[node.id] ?? [],
+                        factCount: factsByTitle[node.id] ?? 0
                     )
                     .frame(width: metrics.nodeWidth, height: metrics.nodeHeight)
                     .position(x: node.position.x, y: node.position.y)
@@ -328,12 +334,22 @@ public struct CreateSeriesSheet: View {
     /// is orange-tinted — a quiet "privileged container will spawn here"
     /// signal for reviewers before they click Create.
     @ViewBuilder
-    private func briefNode(title: String, sidecars: [String]) -> some View {
+    private func briefNode(title: String, sidecars: [String], factCount: Int) -> some View {
         VStack(spacing: 3) {
             Text(title)
                 .font(.caption)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
+            if factCount > 0 {
+                Text("\(factCount) facts")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.green)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.green.opacity(0.12))
+                    .clipShape(Capsule())
+            }
             if !sidecars.isEmpty {
                 Text("🛠 \(sidecars.joined(separator: ", "))")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))

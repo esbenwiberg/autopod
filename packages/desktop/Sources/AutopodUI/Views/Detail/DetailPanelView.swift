@@ -1046,6 +1046,15 @@ public struct DetailPanelView: View {
     }
 
     private var tabBar: some View {
+        ViewThatFits(in: .horizontal) {
+            tabBarContent(compact: false)
+            tabBarContent(compact: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private func tabBarContent(compact: Bool) -> some View {
         HStack(spacing: 4) {
             ForEach(visibleTabs, id: \.self) { tab in
                 let isSelected = selectedTab == tab
@@ -1061,11 +1070,14 @@ public struct DetailPanelView: View {
                     HStack(spacing: 5) {
                         Image(systemName: tab.icon)
                             .font(.system(size: 11))
-                        Text(tab.label)
-                            .font(.system(.subheadline).weight(isSelected ? .semibold : .regular))
+                        if !compact {
+                            Text(tab.label)
+                                .font(.system(.subheadline).weight(isSelected ? .semibold : .regular))
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
                     }
                     .foregroundStyle(isSelected ? .primary : isDisabled ? .tertiary : .secondary)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, compact ? 8 : 12)
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
@@ -1074,12 +1086,10 @@ public struct DetailPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isDisabled)
-                .help(disabledHelp)
+                .help(isDisabled ? disabledHelp : tab.label)
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
     }
 
     // MARK: - Placeholder tabs

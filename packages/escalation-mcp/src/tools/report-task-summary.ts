@@ -1,3 +1,4 @@
+import type { FactEvidence } from '@autopod/shared';
 import type { PodBridge } from '../pod-bridge.js';
 
 export interface ReportTaskSummaryInput {
@@ -10,6 +11,7 @@ export interface ReportTaskSummaryInput {
     reason: string;
   }>;
   acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>;
+  factEvidence?: FactEvidence[];
 }
 
 export async function reportTaskSummary(
@@ -23,6 +25,7 @@ export async function reportTaskSummary(
     input.deviations,
     input.how,
     input.acChecklist,
+    input.factEvidence,
   );
   const deviationCount = input.deviations.length;
   const deviationNote =
@@ -32,5 +35,8 @@ export async function reportTaskSummary(
   const acNote = input.acChecklist?.length
     ? ` ${input.acChecklist.filter((c) => c.verified).length}/${input.acChecklist.length} acceptance criteria self-verified.`
     : '';
-  return `Task summary registered. ${deviationNote}${acNote} The reviewer will assess any deviations.`;
+  const factNote = input.factEvidence?.length
+    ? ` ${input.factEvidence.length} fact evidence item${input.factEvidence.length === 1 ? '' : 's'} recorded.`
+    : '';
+  return `Task summary registered. ${deviationNote}${acNote}${factNote} The reviewer will assess any deviations.`;
 }

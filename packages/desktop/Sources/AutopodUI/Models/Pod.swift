@@ -165,6 +165,25 @@ public struct AcCheckDetail: Sendable {
     }
 }
 
+public struct FactCheckDetail: Sendable {
+    public let factId: String
+    public let proves: [String]
+    public let artifactPath: String
+    public let command: String
+    public let passed: Bool
+    public let reasoning: String
+    public let stdout: String?
+    public let stderr: String?
+    public init(
+        factId: String, proves: [String], artifactPath: String, command: String,
+        passed: Bool, reasoning: String, stdout: String? = nil, stderr: String? = nil
+    ) {
+        self.factId = factId; self.proves = proves; self.artifactPath = artifactPath
+        self.command = command; self.passed = passed; self.reasoning = reasoning
+        self.stdout = stdout; self.stderr = stderr
+    }
+}
+
 public struct RequirementCheckDetail: Sendable {
     public let criterion: String
     public let met: Bool
@@ -199,6 +218,8 @@ public struct ValidationChecks: Sendable {
     public let pages: [PageDetail]?
     public let acValidation: Bool?
     public let acChecks: [AcCheckDetail]?
+    public let factValidation: Bool?
+    public let factChecks: [FactCheckDetail]?
     public let requirementsCheck: [RequirementCheckDetail]?
     public let taskReviewScreenshots: [ScreenshotRef]?
     /// Smoke-page screenshots surfaced on the Summary tab as proof-of-work (independent of pass/fail).
@@ -219,6 +240,8 @@ public struct ValidationChecks: Sendable {
         pages: [PageDetail]? = nil,
         acValidation: Bool? = nil,
         acChecks: [AcCheckDetail]? = nil,
+        factValidation: Bool? = nil,
+        factChecks: [FactCheckDetail]? = nil,
         requirementsCheck: [RequirementCheckDetail]? = nil,
         taskReviewScreenshots: [ScreenshotRef]? = nil,
         proofOfWorkScreenshots: [ScreenshotRef]? = nil,
@@ -236,6 +259,7 @@ public struct ValidationChecks: Sendable {
         self.acSkipReason = acSkipReason
         self.healthCheck = healthCheck; self.pages = pages
         self.acValidation = acValidation; self.acChecks = acChecks
+        self.factValidation = factValidation; self.factChecks = factChecks
         self.requirementsCheck = requirementsCheck
         self.taskReviewScreenshots = taskReviewScreenshots
         self.proofOfWorkScreenshots = proofOfWorkScreenshots
@@ -244,7 +268,7 @@ public struct ValidationChecks: Sendable {
 
     public var allPassed: Bool {
         smoke && (tests ?? true) && (lint ?? true) && (sast ?? true)
-        && (review ?? true) && (acValidation ?? true)
+        && (review ?? true) && (acValidation ?? true) && (factValidation ?? true)
     }
 }
 
@@ -314,6 +338,7 @@ public struct ValidationProgress: Sendable {
     public var health: ValidationPhaseState
     public var pages: ValidationPhaseState
     public var ac: ValidationPhaseState
+    public var facts: ValidationPhaseState
     public var review: ValidationPhaseState
 
     // Phase result data (populated on completion, used by detail panel)
@@ -324,11 +349,13 @@ public struct ValidationProgress: Sendable {
     public var healthDetail: HealthCheckDetail?
     public var pageDetails: [PageDetail]?
     public var acChecks: [AcCheckDetail]?
+    public var factChecks: [FactCheckDetail]?
     public var reviewDetail: ReviewPhaseDetail?
 
     // Counts for chip sub-labels
     public var pageCount: Int
     public var acTotalCount: Int
+    public var factTotalCount: Int
 
     // The currently running phase (drives auto-selection in the chip row)
     public var activePhase: ValidationPhase?
@@ -338,8 +365,8 @@ public struct ValidationProgress: Sendable {
         return ValidationProgress(
             attempt: attempt,
             build: idle, test: idle, lint: idle, sast: idle,
-            health: idle, pages: idle, ac: idle, review: idle,
-            pageCount: 0, acTotalCount: 0
+            health: idle, pages: idle, ac: idle, facts: idle, review: idle,
+            pageCount: 0, acTotalCount: 0, factTotalCount: 0
         )
     }
 
@@ -352,6 +379,7 @@ public struct ValidationProgress: Sendable {
         case .health:  return health
         case .pages:   return pages
         case .ac:      return ac
+        case .facts:   return facts
         case .review:  return review
         }
     }
@@ -367,6 +395,7 @@ public struct ValidationProgress: Sendable {
         case .health:  health  = s
         case .pages:   pages   = s
         case .ac:      ac      = s
+        case .facts:   facts   = s
         case .review:  review  = s
         }
     }
@@ -428,6 +457,16 @@ public struct ValidationProgress: Sendable {
                     validationType: check.validationType
                 )
             }
+        case .facts:
+            facts = ValidationPhaseState(status: ps)
+            factTotalCount = result.factResult?.results.count ?? 0
+            factChecks = result.factResult?.results.map { check in
+                FactCheckDetail(
+                    factId: check.factId, proves: check.proves, artifactPath: check.artifactPath,
+                    command: check.command, passed: check.passed, reasoning: check.reasoning,
+                    stdout: check.stdout, stderr: check.stderr
+                )
+            }
         case .review:
             review = ValidationPhaseState(status: ps)
             if let r = result.reviewResult {
@@ -483,8 +522,13 @@ public struct DeviationItem: Sendable {
 public struct TaskSummary: Sendable {
     public let actualSummary: String
     public let deviations: [DeviationItem]
-    public init(actualSummary: String, deviations: [DeviationItem]) {
+    public let factEvidence: [FactEvidenceResponse]?
+    public init(
+        actualSummary: String, deviations: [DeviationItem],
+        factEvidence: [FactEvidenceResponse]? = nil
+    ) {
         self.actualSummary = actualSummary; self.deviations = deviations
+        self.factEvidence = factEvidence
     }
 }
 
@@ -509,6 +553,8 @@ public struct Pod: Identifiable, Sendable {
     public var acFrom: String?
     /// Acceptance criteria (loaded from acFrom or manual input)
     public var acceptanceCriteria: [AcDefinition]?
+    /// Executable contract for contract-based pods.
+    public var contract: SpecContractResponse?
 
     public var diffStats: DiffStats?
     public var escalationQuestion: String?
@@ -644,6 +690,7 @@ public struct Pod: Identifiable, Sendable {
         baseBranch: String? = nil,
         acFrom: String? = nil,
         acceptanceCriteria: [AcDefinition]? = nil,
+        contract: SpecContractResponse? = nil,
         diffStats: DiffStats? = nil,
         escalationQuestion: String? = nil,
         escalationOptions: [String]? = nil,
@@ -691,6 +738,7 @@ public struct Pod: Identifiable, Sendable {
         self.model = model; self.startedAt = startedAt; self.runningAt = runningAt; self.updatedAt = updatedAt
         self.baseBranch = baseBranch
         self.acFrom = acFrom; self.acceptanceCriteria = acceptanceCriteria
+        self.contract = contract
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
         self.escalationOptions = escalationOptions; self.escalationType = escalationType
         self.validationChecks = validationChecks; self.validationProgress = validationProgress; self.prUrl = prUrl

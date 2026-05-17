@@ -4,7 +4,7 @@ description: >
   Decomposes a large feature into a series-ready spec folder for `ap series create`.
   Runs a continuous interview-plus-research loop with one question per turn,
   scanning the codebase between answers, until every coverage dimension is green.
-  Then writes `specs/[name]/` with `purpose.md`, `design.md`, `briefs/`, and any
+  Then writes `specs/<name>/` with `purpose.md`, `design.md`, `briefs/`, and any
   new ADRs into the repo-level `docs/decisions/`.
   Use when the task spans 3+ modules or 4+ hours of work.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit, Agent, AskUserQuestion
@@ -44,7 +44,7 @@ scan codebase again → ask ONE question → wait → ... → exit test passes �
 - If the codebase already answers a question, don't ask — cite the finding
   and move on.
 - **If a fact or ADR answers a question, don't ask — cite it and move on.**
-  Before forming any question, scan the loaded facts and ADRs for a match.
+  Before forming any question, scan the loaded conventions and ADRs for a match.
   If found, mark the dimension green and note the source inline
   (e.g. `📋 fact-003`, `📋 ADR-012`). Only escalate to the user when no
   fact, ADR, or codebase evidence covers it.
@@ -79,7 +79,7 @@ Before asking anything, scan for 3–5 minutes:
    d. From both indexes, identify which ADRs and conventions are relevant to
       this feature. Read only those full files — not every entry.
    Prior decisions are baseline knowledge; conventions are pre-answered questions.
-6. Are there CLAUDE.md sections, READMEs, or pinned docs the executor will
+6. Are there AGENTS.md sections, READMEs, or pinned docs the executor will
    need? Note them; they go into `design.md` → Reference reading.
 
 Present a 3–5 bullet summary of findings. Ask the first question. Stop.
@@ -137,10 +137,21 @@ justification) before writing.
 10. **Cross-pod contracts** — Types, interfaces, API shapes, DB columns that
     cross brief boundaries. Owner per contract.
     → `design.md` → Contracts
-11. **UX flows** *(only when feature is user-facing)* — Entrypoint → states
-    (loading / empty / error) → exits. Component list if a new screen.
-    → `design.md` → UX flows
-12. **Reference reading** — Existing ADRs, CLAUDE.md sections, READMEs, and
+11. **UX flows + wireframes** *(only when feature is user-facing)* — Entrypoint →
+    states (loading / empty / error) → exits. Component list if a new screen.
+
+    **Wireframe gate:** When the feature introduces a new screen OR significantly
+    rearranges an existing surface (new panels, changed column structure, new
+    persistent UI elements), produce an ASCII wireframe as part of clearing this
+    dimension. **Show-and-ask, not ask-then-produce** — draw the wireframe inline,
+    then ask "Does this match your vision?" Iterate until the user explicitly signs
+    off. The approved wireframe is a blocking gate: the show-back cannot be
+    greenlit until it carries an approved wireframe for every affected screen.
+    A feature that modifies a user-visible layout without an approved wireframe is
+    red in the coverage assessment — not amber, not N/A.
+
+    → `design.md` → UX flows (approved wireframe inline under each affected flow)
+12. **Reference reading** — Existing ADRs, AGENTS.md sections, READMEs, and
     code patterns the executor should consult. Capture what you read during
     the scan, not at write time.
     → `design.md` → Reference reading
@@ -318,6 +329,11 @@ For every brief you're about to write, confirm you can name:
   Test expectations + the diff reviewer for anchoring.
 - The dependency graph, without guessing
 
+For web-facing features, confirm that every new or significantly rearranged
+screen has an approved wireframe from the interview loop. No wireframe = red.
+A wireframe produced at write-time (not during the loop) = red. A wireframe
+that the user hasn't explicitly signed off on = amber.
+
 Verify the **outcome → AC link with type discipline**:
 - "visible" / "renders" / "user sees" → linked AC must be `type: web`
 - "endpoint returns" / "responds" / "stores" → `type: api` (or `web`)
@@ -374,8 +390,13 @@ Collapse to single column under ~1040px viewport.
 - Group briefs by gate. A *gate* is a set of briefs at the same
   dependency depth that may run concurrently. Render each gate as a
   panel with a label like `Gate 2 · parallel · 3 briefs depend on 01`.
-  Within a parallel gate, place sibling briefs side by side. Render an
-  `↓` arrow between gates to show sequential dependency.
+  **Stack briefs vertically inside a gate — never render parallel
+  siblings as side-by-side columns.** Brief bodies are dense (Task
+  paragraph, Touches with full paths, AC groups, Full draft markdown)
+  and column layouts force line-wrap-per-word; the `<pre>` for the
+  draft markdown is unreadable below ~600px. The `parallel` signal
+  lives in the gate label, not in the column layout. Render an `↓`
+  arrow between gates to show sequential dependency.
 - Each brief is a `<details>` element (HTML's native collapsible) with
   a colored left-border halo:
   - **green** — clean: no open question, no theatre risk.
@@ -406,10 +427,39 @@ Collapse to single column under ~1040px viewport.
     that issue. The selected pill is filled with the accent color;
     unselected pills are outlined and muted. Selection state feeds the
     reply composer (see Interactivity).
+  - Full draft markdown — a collapsed `<details>` revealing the
+    complete `briefs/NN-*.md` content as it will be written, including
+    YAML frontmatter and every body section (Task, Touches, Does not
+    touch, Constraints, Test expectations, Wrap-up). Summary line shows
+    the destination path
+    (e.g. `specs/<feature>/briefs/02-expose-screenshots-api.md`) so the
+    user can see exactly where the file lands. Inside the panel, a
+    `Copy draft` button writes the `<pre>` contents to the clipboard
+    via `navigator.clipboard.writeText(...)`. On `file://` browsers
+    that block the clipboard API, fall back to selecting the `<pre>`
+    contents with `Range` + `Selection` so the user can hit `cmd+c`.
+    Render in a monospaced `<pre>` with `max-height: 480px` +
+    `overflow: auto` so a long brief doesn't blow out the card.
+    Briefs are not on disk yet at this stage — this panel is the
+    user's only way to read the actual contract before greenlight.
+    The structured panels above remain the primary review surface;
+    the raw draft is for verification, not for replacing review.
 
 **Side rail (right column, sticky):**
 
 Order top-down by attention priority:
+
+- `Wireframes (N)` *(only when at least one screen is new or rearranged)* —
+  One `<details>` per affected screen. Summary line: screen name + approval
+  status chip (Approved / Needs revision / Pending). Body: the ASCII wireframe
+  in a `<pre>` block with `font-family: ui-monospace` and a light border.
+  Below the wireframe, two resolution pills (radio-group semantics):
+  `Approved as-is` and `Needs revision`. Default state: neither selected
+  (Pending). When `Needs revision` is selected, a small inline textarea
+  appears for the user to note what to change — its value is included in
+  the reply composer output. A feature whose any wireframe is Pending or
+  Needs revision must surface as a cross-cutting issue blocking greenlight.
+  Auto-expand the first wireframe `<details>`; collapse the rest.
 
 - `Cross-cutting issues (N)` — issues that aren't bound to a single
   brief: success-signal-not-linked, parallel-touch conflicts on shared
@@ -424,8 +474,29 @@ Order top-down by attention priority:
   Decision, Consequences (split into Easier `+` / Harder `−` /
   Committed-to `⚙`), Alternatives rejected. Source path at the bottom.
   Auto-expand the first ADR; collapse the rest.
-- `ADRs reused (N)` — short list, ID + title only. Empty-state
-  ("No prior ADRs constrain this spec.") is fine.
+- `ADRs reused (N)` — each row shows ID, title, and the file path
+  (`docs/decisions/ADR-NNN-*.md`) in mono on a second line. Path text
+  is `user-select: all` so a single click selects it for copy-paste.
+  Rows are NOT styled as hyperlinks — `file://` browsers refuse
+  cross-protocol links anyway, and `cmd+click` in supported terminals
+  works on plain monospace paths. Empty-state ("No prior ADRs constrain
+  this spec.") is fine.
+- `Source material (N)` — the markdown the planner actually read while
+  filling out coverage. Three collapsible subsections, each a `<details>`:
+  - `📋 Conventions cited` — every `convention-NNN` referenced during the loop.
+    Row = id + title + path (`docs/conventions/convention-NNN-*.md`). Open by
+    default.
+  - `📚 Reference reading` — AGENTS.md sections, READMEs, and code
+    pointers captured during the opening scan (dimension #12). Row =
+    title + path. Collapsed by default.
+  - `🧩 Skills the executor will invoke` — local `.Codex/skills/*`
+    skills that any brief expects the agent to run. Row = title + path.
+    Collapsed by default. Omit the subsection entirely if zero skills
+    are cited.
+  Lead the panel with a one-line hint: "Markdown the planner read while
+  filling out coverage. Paths are selectable — copy into your editor to
+  verify." Skip the panel entirely if all three subsections would be
+  empty.
 - `Coverage` — counts by status (covered / amber / red), ADR counts,
   brief counts (clean / open question / red). One-line source summary
   at the bottom (e.g. "11 dims by codebase scan, 3 by user answer, 1
@@ -457,16 +528,47 @@ the blue accent when selected.
   `.selected` class on the clicked pill and removes it from the other
   pills inside the same `.actions` container (radio-group semantics
   per issue). State lives in DOM only; no persistence.
-- **Reply composer** — a sticky bar pinned to the bottom-right
-  showing `Selected: N / M issues  [Copy reply]`. `M` is the total
-  count of issues (per-brief + cross-cutting); `N` updates live as
-  pills are selected. The button is disabled while `N == 0`.
-  Clicking `Copy reply` assembles a structured reply from the
-  selections and writes it to the clipboard via
-  `navigator.clipboard.writeText(...)`. Show a brief inline toast
-  (`Copied — paste into your terminal`) on success; fall back to a
-  visible `<textarea>` with the text pre-selected if the clipboard
-  API is unavailable (some `file://` browsers refuse it).
+- **Reply composer** — this is the load-bearing review surface. The
+  whole point of the rich show-back is that the reviewer's pill
+  selections survive into the reply. A static instruction panel
+  (`Type one of: green light / redo X / push back …`) is **not** a
+  reply composer — it has no DOM link to the pills, so every
+  resolution the reviewer just clicked gets dropped on the floor.
+  Treat it as a bug if your generated HTML reaches the user without
+  the markup below.
+
+  **MUST render** — the panel MUST be a `<details class="reply-composer"
+  data-composer="reply">` element containing all four:
+
+  1. A `<summary>` showing `Reply composer · N/M selected`, where `N`
+     and `M` are live-updated by the interactivity script.
+  2. A `<textarea class="reply-text">` whose value is rebuilt from
+     the selected pills every time selection changes, following the
+     Reply template below verbatim.
+  3. A `<button class="copy-reply">Copy reply</button>` that calls
+     `navigator.clipboard.writeText(textarea.value)` on click.
+  4. A `<div class="reply-toast" hidden>` for the success toast.
+
+  Lives **inside the side rail as its last panel**, NOT as a
+  `position: fixed` floating overlay. The rail is already
+  `position: sticky; top: 24px; max-height: calc(100vh - 48px);
+  overflow: auto;` so the composer at the rail's bottom stays
+  visible as the user scrolls and never floats over the brief grid
+  or the Coverage list. Use `position: sticky; bottom: 0` on the
+  composer's outer element so it stays anchored to the rail's
+  visible bottom even when the rail's internal content scrolls past
+  it. Default `open` state: closed when `N == 0`, opens
+  automatically when the first pill is selected. This is the
+  "collapse-when-empty" behavior — a reviewer scanning the plan
+  never has the composer's full body eating rail space until they
+  actually start resolving an issue. `M` is the total count of
+  issues (per-brief + cross-cutting); `N` updates live as pills are
+  selected. The `Copy reply` button is disabled while `N == 0` (the
+  user can still type `green light` in the terminal directly). Show
+  a brief inline toast (`Copied — paste into your terminal`) on
+  success; fall back to making the `<textarea>` selected and
+  instructing the user to `cmd+c` if the clipboard API is
+  unavailable (some `file://` browsers refuse it).
 
 **Reply template** — the assembled clipboard text MUST follow this
 exact shape so the planner can parse it deterministically:
@@ -486,6 +588,22 @@ Issue labels match the heading rendered in the callout — no
 abbreviation, no reformatting. The user can edit the text after
 pasting; the structure exists to make the common case (accept all
 defaults) one keystroke.
+
+**Self-check before declaring the show-back done.** After writing
+`.autopod/review/exit-checklist.html`, grep the file and verify all
+four markers are present. If any is missing, the show-back is
+broken — fix the markup and rewrite the file before printing the
+path:
+
+```bash
+grep -c 'class="reply-composer"' .autopod/review/exit-checklist.html  # must be ≥ 1
+grep -c 'class="reply-text"'     .autopod/review/exit-checklist.html  # must be ≥ 1
+grep -c 'class="copy-reply"'     .autopod/review/exit-checklist.html  # must be ≥ 1
+grep -c 'data-composer="reply"'  .autopod/review/exit-checklist.html  # must be ≥ 1
+```
+
+If any of those return `0`, you wrote a static instruction panel
+instead of the composer. Regenerate before continuing.
 
 #### 3. Print the path and ask for greenlight
 
@@ -521,8 +639,12 @@ specs/<feature-name>/
 ├── purpose.md       ← why, who, success signal, non-goals, glossary, reversibility
 ├── design.md        ← seams, contracts, UX flows, file map, reference reading, decisions list
 ├── briefs/
-│   ├── 01-<verb>-<noun>.md
-│   ├── 02-<verb>-<noun>.md
+│   ├── 01-<verb>-<noun>/
+│   │   ├── brief.md
+│   │   └── contract.yaml
+│   ├── 02-<verb>-<noun>/
+│   │   ├── brief.md
+│   │   └── contract.yaml
 │   └── ...
 └── handovers/       ← runtime artifact; pods write here, not /plan-feature
 
@@ -536,7 +658,7 @@ Run order: `ap series create specs/<feature-name>/` (or
 `ap series create specs/<feature-name>/briefs/` — both work).
 
 Both `purpose.md` and `design.md` are auto-loaded by the daemon and
-rendered as `## Purpose` and `## Design` sections in every pod's CLAUDE.md.
+rendered as `## Purpose` and `## Design` sections in every pod's AGENTS.md.
 Briefs do NOT need to list them via `context_files` — they're injected.
 
 ### purpose.md
@@ -622,7 +744,24 @@ export interface PodEvent {
 
 ## UX flows    ← OMIT when feature has no user-facing surface
 Entrypoint → states → exits. Loading / empty / error states. Component list
-if a new screen. Not mockups. One short flow per surface.
+if a new screen. One short flow per surface.
+
+For each new screen or significantly rearranged surface, include the ASCII
+wireframe approved during the planning loop. Example:
+
+```
+┌──────────────────────────────────────────┐
+│  Nav bar                                 │
+├────────────┬─────────────────────────────┤
+│  Sidebar   │  Panel title                │
+│  item 1    │  ┌──────────────────────┐  │
+│  item 2 ●  │  │  Content area        │  │
+│            │  └──────────────────────┘  │
+└────────────┴─────────────────────────────┘
+```
+
+The wireframe here is the approved contract for layout; the flow prose
+above it is the state/transition contract. Both are required for new screens.
 
 ## Reference reading
 Pointers into existing docs and code patterns the executor should consult
@@ -633,7 +772,7 @@ write time. Each entry is a path + one line on why it matters.
   feature reuses.
 - `docs/decisions/ADR-019-events-hmac.md` — events are HMAC-signed; new
   events must respect this.
-- `CLAUDE.md` "Pod Lifecycle" section — state machine the new state
+- `AGENTS.md` "Pod Lifecycle" section — state machine the new state
   transitions must fit into.
 
 ## Decisions
@@ -675,22 +814,17 @@ opening scan so prior decisions inform every plan.
 
 ### briefs/ — per-pod tasks
 
-Filenames: `NN-<verb>-<noun>.md` (e.g. `01-add-events-types.md`,
-`02-wire-events-api.md`, `03-render-events-list.md`). Numeric prefix sets
-default execution order; same number means the daemon may run them in
-parallel.
+Each pod is a folder: `NN-<verb>-<noun>/brief.md` plus
+`NN-<verb>-<noun>/contract.yaml` (e.g.
+`01-add-events-types/brief.md`, `02-wire-events-api/contract.yaml`).
+Numeric prefix sets default execution order; same number means the daemon may
+run them in parallel.
 
-#### Frontmatter (YAML)
+#### brief.md frontmatter (YAML)
 
 ```yaml
 ---
 title: "Add events API endpoints"
-depends_on: [01-types]
-acceptance_criteria:
-  - { type: api, test: "POST /api/v2/events with valid body", pass: "201 with body.id (uuid)", fail: "non-201 or missing id" }
-  - { type: api, test: "GET /api/v2/events?since=now", pass: "200 with body.events array", fail: "non-200 or missing field" }
-  - { type: web, test: "navigate /events and click first row", pass: "detail panel renders with event title", fail: "no panel or no title" }
-  - { type: cmd, test: "rg -l 'OldEventEmitter' packages/daemon/src", pass: "no matches", fail: "any match means a caller still uses the deleted symbol" }
 touches:
   - packages/daemon/src/pods/events-repository.ts
   - packages/daemon/src/db/migrations/    # directory shorthand — anything under here
@@ -700,54 +834,52 @@ require_sidecars: [dagger]   # only when needed
 ---
 ```
 
-A brief that genuinely cannot be validated by `api`, `web`, or `cmd` (e.g.
-it only adds a TypeScript interface, only flips a JSON migration flag, or
-only edits CLI / desktop code with no inspectable surface) should ship
-with **zero** `acceptance_criteria` entries. The Test expectations body
-section + the validation pipeline + the diff reviewer do the anchoring
-instead. Do not pad the frontmatter with `none`-typed entries — they are
-no-ops and create false confidence. And do not stuff the redundant
-build/test commands the pipeline already runs into `cmd` either; the
-banlist forces those back to `none`.
+Do not put `depends_on` or `acceptance_criteria` in `brief.md`.
+Dependency and proof data live in `contract.yaml`.
 
 Field rules:
 
 - `title` — verb-led to match filename convention.
-- `depends_on` — filenames or stems of earlier briefs.
-- `acceptance_criteria` — every entry must be a real automated check the
-  validation engine actually runs. Three types fire:
-  - `api` — single HTTP call (or short create-then-read chain) against
-    the running container. The harness has no role-impersonation, so an
-    endpoint behind `[Authorize]`/`RequiresUserType(<role>)` will 401 —
-    don't write `api` ACs for those paths; either point at an
-    unauthenticated endpoint that observes the same state, or use a
-    `cmd` AC instead.
-  - `web` — browser DOM check via `validate_in_browser` (only when the
-    profile has a web UI; downgraded to `none` otherwise).
-  - `cmd` — narrow shell check inside the container (typically `rg` /
-    `grep` / a tiny one-liner) for things `api`/`web` cannot observe:
-    a symbol stopped existing, a config flag flipped, a generated file
-    exists, a registration line is present. Banlist: `pnpm build`,
-    `pnpm test`, `dotnet build`, `dotnet test`, `npm test`, `tsc`,
-    `eslint`, `biome`, `cargo build`, `cargo test`, `make` — these are
-    force-classified to `none` because the pipeline already runs build
-    + tests; restating them is theatre.
-
-  `type: none` exists but is a no-op for pass/fail determination — the
-  engine auto-marks it `passed: true` and excludes it from gating
-  (`local-validation-engine.ts:1442-1480`). Any banned build/test/lint
-  command is force-classified to `none` by `isCommandLikeAc()`
-  regardless of declared type.
-
-  When no `api`, `web`, or `cmd` check applies, leave `acceptance_criteria`
-  out entirely. ACs are observable behavioural assertions, never "the
-  code compiles" (the pipeline checks that anyway) and never "looks
-  correct".
 - `touches` / `does_not_touch` — **advisory, not enforced**. The reviewer
   flags deviations as discussion items, never as failures. Use directory
   shorthand (path ending in `/`) to mean "anything under this directory".
   Use explicit file paths otherwise — no globs.
 - `require_sidecars` — only when a brief needs a specific sidecar.
+
+#### contract.yaml
+
+```yaml
+contract_version: 1
+title: "Add events API endpoints"
+depends_on: [01-types]
+scenarios:
+  - id: create-event
+    given:
+      - "a valid event payload"
+    when:
+      - "the client creates an event"
+    then:
+      - "the API persists the event and returns its id"
+required_facts:
+  - id: fact-create-event-api
+    proves: [create-event]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/events.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- events.test.ts
+human_review: []
+```
+
+Rules:
+
+- `depends_on` — filenames or stems of earlier brief folders.
+- `scenarios` — Given/When/Then behavior in business/domain language.
+- `required_facts` — each fact must name a durable artifact and a narrow
+  command that proves one or more scenarios. Do not use generic pipeline
+  commands like `pnpm test`, `pnpm build`, or `npx pnpm lint`.
+- `human_review` — only for judgement that cannot honestly become an
+  executable fact yet.
 
 #### Body
 
@@ -871,10 +1003,59 @@ loop was not done.
 - Linking external CSS / fonts / scripts in the show-back HTML. The
   artifact must work offline, opened directly via `file://`. No CDN,
   no Google Fonts, no Tailwind play-CDN, no Alpine via unpkg.
+- Rendering parallel-gate briefs as side-by-side columns
+  (`grid-template-columns: 1fr 1fr 1fr`). Brief bodies are too dense
+  to read in ~30%-width columns — Task paragraphs wrap every two
+  words, Touches paths overflow, and the `<pre>` for the Full draft
+  markdown is unreadable. Stack vertically inside the gate panel; the
+  gate label already carries the `parallel` signal.
+- Rendering the reply composer as a `position: fixed; bottom; right`
+  floating overlay. It will sit on top of the lower half of the side
+  rail (typically the Coverage panel) and obscure content the user
+  needs to read. Live it inside the rail as the last panel, sticky to
+  the rail's bottom, collapsed when zero pills are selected.
+- Replacing the Reply composer with a static `Type one of:
+  green light / redo X / push back on …` text panel — the
+  "instruction-block fallback". It looks similar at a glance but has
+  no DOM link to the resolution pills above it, so every selection
+  the reviewer just clicked is silently discarded when they reply.
+  This is the same failure mode as printing the markdown checklist
+  back into the terminal: a review surface that doesn't carry the
+  reviewer's input forward is theatre. The required markup is
+  enumerated in the Reply composer section — `<details
+  class="reply-composer" data-composer="reply">` with a
+  `.reply-text` textarea and a `.copy-reply` button. Run the
+  self-check greps before printing the path.
 - Committing `.autopod/review/exit-checklist.html` to the repo. The
   directory is gitignored; it's a transient review artifact, not a
   deliverable. (The `SAMPLE-*.html` reference file is the only
   exception.)
+- Substituting the raw "Full draft markdown" panel for the structured
+  AC / theatre / success-signal-link panels in a brief card. The
+  structured panels are what catch theatre risk; the raw draft is for
+  verification, not for replacing review. If you drop the structured
+  panels and only render the draft, every theatre check goes silent.
+- Writing draft briefs to disk during the loop (e.g. to a transient
+  `.autopod/review/briefs-draft/` location) so the user can read them
+  before greenlight. Briefs live in the planner's head until greenlight
+  — surface their content via the inline "Full draft markdown" panel,
+  not via a parallel file tree that has to be cleaned up on iteration.
+- Omitting the path on `ADRs reused` rows or on `Source material`
+  rows. The whole point of the panel is "show me the file I can open
+  to verify." A title without a path is a citation the user can't
+  follow.
+- Skipping the wireframe for a new screen or significantly rearranged surface.
+  The user cannot greenlight layout they haven't seen. The wireframe is a
+  blocking gate, not a nice-to-have.
+- Producing the wireframe at write-time instead of during the interview loop.
+  The wireframe IS a question — it surfaces layout assumptions the user must
+  validate before greenlight. A wireframe the user never saw is not approved.
+- Asking "what should it look like?" instead of drawing it and asking "does
+  this match?" The user can't sign off on a question; they can only sign off
+  on a proposal. Show-and-ask, not ask-then-produce.
+- Putting wireframes only in briefs. Wireframes belong in design.md → UX flows
+  (auto-injected into every pod's context). A brief-local wireframe is invisible
+  to parallel pods touching the same surface.
 - ACs that require human judgment ("looks good", "feels right").
 - Wrapping build / test / lint commands as ACs (`pnpm build`,
   `dotnet test`, `tsc`, `biome`, `cargo build`, `make`) —

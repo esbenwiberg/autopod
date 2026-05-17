@@ -312,6 +312,51 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
+  if (pod.contract) {
+    lines.push('## Contract');
+    lines.push('');
+    lines.push(
+      'This pod is governed by an executable contract. Scenarios describe behavior; required facts are durable proof artifacts the daemon will verify after you finish; human review items are judgement checks for the reviewer.',
+    );
+    lines.push('');
+    lines.push(`Title: ${pod.contract.title}`);
+    lines.push('');
+    if (pod.contract.scenarios.length > 0) {
+      lines.push('### Scenarios');
+      lines.push('');
+      for (const scenario of pod.contract.scenarios) {
+        lines.push(`- \`${scenario.id}\``);
+        lines.push(`  - Given: ${scenario.given.join(' / ')}`);
+        lines.push(`  - When: ${scenario.when.join(' / ')}`);
+        lines.push(`  - Then: ${scenario.then.join(' / ')}`);
+      }
+      lines.push('');
+    }
+    if (pod.contract.requiredFacts.length > 0) {
+      lines.push('### Required Facts');
+      lines.push('');
+      lines.push(
+        'You must create or update these artifacts and make their commands pass. The validator re-runs each command independently after merge-work validation starts.',
+      );
+      lines.push('');
+      for (const fact of pod.contract.requiredFacts) {
+        lines.push(`- \`${fact.id}\` proves ${fact.proves.join(', ')}`);
+        lines.push(`  - Artifact: ${fact.artifact.change} \`${fact.artifact.path}\``);
+        lines.push(`  - Command: \`${fact.command}\``);
+      }
+      lines.push('');
+    }
+    if (pod.contract.humanReview.length > 0) {
+      lines.push('### Human Review');
+      lines.push('');
+      for (const item of pod.contract.humanReview) {
+        lines.push(`- \`${item.id}\` covers ${item.covers.join(', ')}: ${item.criterion}`);
+        lines.push(`  - Reason: ${item.reason}`);
+      }
+      lines.push('');
+    }
+  }
+
   if (pod.acceptanceCriteria && pod.acceptanceCriteria.length > 0) {
     lines.push('## Acceptance Criteria');
     lines.push('');
@@ -549,6 +594,13 @@ export function generateSystemInstructions(
         'discrepancies with the automated validator are surfaced to the reviewer.',
     );
   }
+  if (pod.contract?.requiredFacts.length) {
+    lines.push(
+      '   - `factEvidence`: include one entry per required fact from `contract.yaml`. ' +
+        'Record the artifact path, command, and whether your local run passed, failed, or was not run. ' +
+        'The daemon still re-runs every command independently; this self-report helps reviewers understand your verification path.',
+    );
+  }
   lines.push(
     '   Transparency is rewarded — the independent reviewer will see your deviations and assess ' +
       'whether they were justified. A well-reasoned deviation is better than silently skipping a step.',
@@ -697,6 +749,7 @@ export function generateSystemInstructions(
   lines.push(
     '- **Validation also runs after you finish**: the system independently re-runs build, tests, ' +
       'health checks, smoke tests, and AC validation as a safety net. ' +
+      'For contract-based pods, it also verifies every required fact command from `contract.yaml`. ' +
       'Always run the pre-completion checks listed in Guidelines first — failures caught there are ' +
       'cheap; failures caught after will loop you back with correction feedback. ' +
       '`validate_in_browser` remains available for browser-based self-checks.',

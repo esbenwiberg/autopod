@@ -597,9 +597,11 @@ public struct MainView: View {
     // MARK: - Content toolbar
 
     private var contentToolbar: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(sidebarSelection.label)
                 .font(.headline)
+                .lineLimit(1)
+                .fixedSize()
             Text("\(filteredSessions.count)")
                 .font(.system(.caption2).weight(.semibold))
                 .padding(.horizontal, 6)
@@ -607,31 +609,75 @@ public struct MainView: View {
                 .background(.blue.opacity(0.1))
                 .foregroundStyle(.blue)
                 .clipShape(Capsule())
-            Spacer()
-            HStack(spacing: 4) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                TextField("Search pods", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.caption)
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Clear search")
-                }
+                .fixedSize()
+            Spacer(minLength: 8)
+            ViewThatFits(in: .horizontal) {
+                toolbarControls(compact: false)
+                toolbarControls(compact: true)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .frame(width: 200)
+            refreshButton
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func toolbarControls(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            searchField(compact: compact)
+            sortPicker(compact: compact)
+            if viewMode == .cards {
+                densityPicker(compact: compact)
+            }
+            viewModePicker
+        }
+        .fixedSize()
+    }
+
+    private func searchField(compact: Bool) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+            TextField("Search pods", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.caption)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(width: compact ? 120 : 200)
+    }
+
+    @ViewBuilder
+    private func sortPicker(compact: Bool) -> some View {
+        if compact {
+            Menu {
+                Picker("Sort", selection: $sortOrder) {
+                    ForEach(SortOrder.allCases, id: \.self) { order in
+                        Text(order.rawValue).tag(order)
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Sort: \(sortOrder.rawValue)")
+        } else {
             Picker("", selection: $sortOrder) {
                 ForEach(SortOrder.allCases, id: \.self) { order in
                     Text(order.rawValue).tag(order)
@@ -639,33 +685,54 @@ public struct MainView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 160)
-            if viewMode == .cards {
-                Picker("", selection: $cardDensity) {
+        }
+    }
+
+    @ViewBuilder
+    private func densityPicker(compact: Bool) -> some View {
+        if compact {
+            Menu {
+                Picker("Density", selection: $cardDensity) {
                     Text("Compact").tag(CardDensity.compact)
                     Text("Detailed").tag(CardDensity.detailed)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 150)
+            } label: {
+                Image(systemName: cardDensity == .compact ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                    .font(.system(size: 11))
             }
-            Picker("", selection: $viewMode) {
-                Image(systemName: "rectangle.grid.2x2").tag(ViewMode.cards)
-                Image(systemName: "list.bullet").tag(ViewMode.list)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Density: \(cardDensity == .compact ? "Compact" : "Detailed")")
+        } else {
+            Picker("", selection: $cardDensity) {
+                Text("Compact").tag(CardDensity.compact)
+                Text("Detailed").tag(CardDensity.detailed)
             }
             .pickerStyle(.segmented)
-            .frame(width: 80)
-            Button {
-                Task { await onRefresh?() }
-            } label: {
-                Image(systemName: isLoading ? "arrow.clockwise" : "arrow.clockwise")
-                    .rotationEffect(isLoading ? .degrees(360) : .zero)
-                    .animation(isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isLoading)
-            }
-            .buttonStyle(.borderless)
-            .help("Refresh pods (⌘R)")
-            .disabled(isLoading)
+            .frame(width: 150)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+    }
+
+    private var viewModePicker: some View {
+        Picker("", selection: $viewMode) {
+            Image(systemName: "rectangle.grid.2x2").tag(ViewMode.cards)
+            Image(systemName: "list.bullet").tag(ViewMode.list)
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 80)
+    }
+
+    private var refreshButton: some View {
+        Button {
+            Task { await onRefresh?() }
+        } label: {
+            Image(systemName: isLoading ? "arrow.clockwise" : "arrow.clockwise")
+                .rotationEffect(isLoading ? .degrees(360) : .zero)
+                .animation(isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isLoading)
+        }
+        .buttonStyle(.borderless)
+        .help("Refresh pods (⌘R)")
+        .disabled(isLoading)
     }
 
     // MARK: - Series pipeline (above the fleet grid when a series is selected)

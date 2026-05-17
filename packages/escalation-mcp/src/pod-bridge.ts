@@ -3,6 +3,7 @@ import type {
   ActionResponse,
   EscalationRequest,
   EscalationResponse,
+  FactEvidence,
   MemoryEntry,
   MemoryScope,
   ScreenshotRef,
@@ -33,6 +34,7 @@ export interface PodBridge {
     deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
     how?: string,
     acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>,
+    factEvidence?: FactEvidence[],
   ): void;
   consumeMessages(podId: string): { hasMessage: boolean; message?: string };
   /** Check if an action requires human approval before execution */

@@ -1231,6 +1231,49 @@ export class LocalWorktreeManager implements WorktreeManager {
         .filter(Boolean)
         .map((full) => ({ full, base: full.split('/').pop() ?? full }));
 
+      const dirEntries = entries.filter((e) => !e.base.includes('.'));
+      const folderFiles: Array<{ filename: string; content: string; contractContent?: string }> = [];
+      for (const entry of dirEntries) {
+        try {
+          const [{ stdout: brief }, { stdout: contract }] = await Promise.all([
+            git(['show', `${treeRef}:${entry.full}/brief.md`], {
+              cwd: bareRepoPath,
+              maxBuffer: 2 * 1024 * 1024,
+            }),
+            git(['show', `${treeRef}:${entry.full}/contract.yaml`], {
+              cwd: bareRepoPath,
+              maxBuffer: 2 * 1024 * 1024,
+            }),
+          ]);
+          folderFiles.push({
+            filename: entry.base,
+            content: brief,
+            contractContent: contract,
+          });
+        } catch {
+          // Not a contract brief folder; fall back to the legacy flat-file path.
+        }
+      }
+      if (folderFiles.length > 0) {
+        const readDoc = async (docPath: string): Promise<string> => {
+          try {
+            const { stdout } = await git(['show', `${treeRef}:${docPath}`], {
+              cwd: bareRepoPath,
+              maxBuffer: 2 * 1024 * 1024,
+            });
+            return stdout.trim();
+          } catch {
+            return '';
+          }
+        };
+        return {
+          relPath: trimmedRelPath,
+          files: folderFiles,
+          purposeMd: await readDoc(`${specRootPath}/purpose.md`),
+          designMd: await readDoc(`${specRootPath}/design.md`),
+        };
+      }
+
       // Top-level .md files only; exclude well-known non-brief docs that may
       // sit alongside briefs in flat layouts.
       const NON_BRIEF_DOCS = new Set(['purpose.md', 'design.md', 'context.md']);

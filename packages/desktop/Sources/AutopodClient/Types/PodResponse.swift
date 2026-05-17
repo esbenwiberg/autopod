@@ -85,6 +85,7 @@ public struct SessionResponse: Codable, Sendable {
   public let plan: PlanResponse?
   public let progress: ProgressResponse?
   public let acceptanceCriteria: [AcDefinition]?
+  public let contract: SpecContractResponse?
   public let claudeSessionId: String?
   public let outputMode: String
   public let pod: PodConfigResponse?
@@ -155,7 +156,7 @@ public struct SessionResponse: Codable, Sendable {
     case lastValidationResult, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
-    case mergeBlockReason, plan, progress, acceptanceCriteria, claudeSessionId
+    case mergeBlockReason, plan, progress, acceptanceCriteria, contract, claudeSessionId
     case outputMode
     case pod = "options"
     case baseBranch, acFrom, recoveryWorktreePath, lastHeartbeatAt
@@ -206,6 +207,7 @@ public struct DeviationResponse: Codable, Sendable {
 public struct TaskSummaryResponse: Codable, Sendable {
   public let actualSummary: String
   public let deviations: [DeviationResponse]
+  public let factEvidence: [FactEvidenceResponse]?
 }
 
 // MARK: - Nested types
@@ -304,6 +306,7 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var branch: String?
   public var skipValidation: Bool?
   public var acceptanceCriteria: [AcDefinition]?
+  public var contract: SpecContractResponse?
   public var outputMode: String?
   public var pod: PodConfigRequest?
   public var baseBranch: String?
@@ -330,6 +333,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     branch: String? = nil,
     skipValidation: Bool? = nil,
     acceptanceCriteria: [AcDefinition]? = nil,
+    contract: SpecContractResponse? = nil,
     outputMode: String? = nil,
     pod: PodConfigRequest? = nil,
     baseBranch: String? = nil,
@@ -351,6 +355,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.branch = branch
     self.skipValidation = skipValidation
     self.acceptanceCriteria = acceptanceCriteria
+    self.contract = contract
     self.outputMode = outputMode
     self.pod = pod
     self.baseBranch = baseBranch
@@ -369,7 +374,7 @@ public struct CreateSessionRequest: Codable, Sendable {
   // struct keeps the local name `pod` for readability. Remap on the wire.
   private enum CodingKeys: String, CodingKey {
     case profileName, task, model, runtime, executionTarget, branch
-    case skipValidation, acceptanceCriteria, outputMode
+    case skipValidation, acceptanceCriteria, contract, outputMode
     case pod = "options"
     case baseBranch, branchPrefix, acFrom, linkedSessionId, pimGroups
     case dependsOnPodIds, seriesId, seriesName, requireSidecars
@@ -400,6 +405,7 @@ public struct ParsedBriefResponse: Codable, Sendable {
   public let task: String
   public let dependsOn: [String]
   public let acceptanceCriteria: [AcDefinition]?
+  public let contract: SpecContractResponse?
   /// Per-brief sidecar requests (e.g. `["dagger"]`). Surfaced on the DAG
   /// preview so reviewers can see which pods will spawn privileged sidecars
   /// before submitting. Nil/empty = no sidecars.
@@ -410,12 +416,14 @@ public struct ParsedBriefResponse: Codable, Sendable {
     task: String,
     dependsOn: [String],
     acceptanceCriteria: [AcDefinition]? = nil,
+    contract: SpecContractResponse? = nil,
     requireSidecars: [String]? = nil
   ) {
     self.title = title
     self.task = task
     self.dependsOn = dependsOn
     self.acceptanceCriteria = acceptanceCriteria
+    self.contract = contract
     self.requireSidecars = requireSidecars
   }
 }

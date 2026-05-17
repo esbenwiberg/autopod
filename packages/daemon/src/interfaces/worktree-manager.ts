@@ -199,7 +199,7 @@ export interface BranchFolderContents {
   /** The relative path that was read (normalized). */
   relPath: string;
   /** Brief files under the path's `briefs/` subfolder (or the path itself if flat). */
-  files: Array<{ filename: string; content: string }>;
+  files: Array<{ filename: string; content: string; contractContent?: string }>;
   /** Contents of `purpose.md` at the spec root, or '' if not present. */
   purposeMd: string;
   /** Contents of `design.md` at the spec root, or '' if not present. */

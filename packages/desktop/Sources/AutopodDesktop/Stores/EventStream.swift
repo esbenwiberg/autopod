@@ -279,7 +279,11 @@ public final class EventStream {
         }
         podStore.updateTaskSummary(
           podId,
-          summary: TaskSummary(actualSummary: actualSummary, deviations: deviations)
+          summary: TaskSummary(
+            actualSummary: actualSummary,
+            deviations: deviations,
+            factEvidence: event.factEvidence
+          )
         )
       }
 

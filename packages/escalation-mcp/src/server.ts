@@ -156,6 +156,25 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe(
           'Self-verification status for each acceptance criterion. Include one entry per criterion. Use verified: false if you were unable to check it.',
         ),
+      factEvidence: z
+        .array(
+          z.object({
+            factId: z.string().describe('The required fact id from contract.yaml'),
+            artifactPath: z.string().describe('The artifact path that enforces the fact'),
+            command: z.string().describe('The command used to verify the fact'),
+            result: z
+              .enum(['passed', 'failed', 'not-run'])
+              .describe('Whether the fact command passed, failed, or was not run by the agent'),
+            notes: z
+              .string()
+              .optional()
+              .describe('Short note explaining the result or why it was not run'),
+          }),
+        )
+        .optional()
+        .describe(
+          'Evidence for each required fact in contract.yaml. The daemon re-runs commands independently; this is the agent self-report.',
+        ),
     },
     async (input) => {
       const response = await reportTaskSummary(podId, input, bridge);

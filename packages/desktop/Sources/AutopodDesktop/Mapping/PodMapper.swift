@@ -141,6 +141,14 @@ public enum PodMapper {
           validationType: r.validationType
         )
       }
+      let factValidation: Bool? = v.factValidation.flatMap { $0.status == "skip" ? nil : ($0.status == "pass") }
+      let factChecks: [FactCheckDetail]? = v.factValidation?.results.map { r in
+        FactCheckDetail(
+          factId: r.factId, proves: r.proves, artifactPath: r.artifactPath,
+          command: r.command, passed: r.passed, reasoning: r.reasoning,
+          stdout: r.stdout, stderr: r.stderr
+        )
+      }
       let requirementsCheck: [RequirementCheckDetail]? = v.taskReview?.requirementsCheck?.map { r in
         RequirementCheckDetail(criterion: r.criterion, met: r.met, note: r.note)
       }
@@ -181,6 +189,8 @@ public enum PodMapper {
         pages: pages,
         acValidation: acValidation,
         acChecks: acChecks,
+        factValidation: factValidation,
+        factChecks: factChecks,
         requirementsCheck: requirementsCheck,
         taskReviewScreenshots: taskReviewScreenshots,
         proofOfWorkScreenshots: proofOfWorkScreenshots,
@@ -233,7 +243,8 @@ public enum PodMapper {
         actualSummary: ts.actualSummary,
         deviations: ts.deviations.map {
           DeviationItem(step: $0.step, planned: $0.planned, actual: $0.actual, reason: $0.reason)
-        }
+        },
+        factEvidence: ts.factEvidence
       )
     }()
 
@@ -279,6 +290,7 @@ public enum PodMapper {
       baseBranch: response.baseBranch,
       acFrom: response.acFrom,
       acceptanceCriteria: response.acceptanceCriteria,
+      contract: response.contract,
       diffStats: diffStats,
       escalationQuestion: escalationQuestion,
       escalationOptions: escalationOptions,

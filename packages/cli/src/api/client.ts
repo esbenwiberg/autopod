@@ -14,6 +14,7 @@ import type {
   PodStatus,
   Profile,
   ScheduledJob,
+  SpecContract,
   UpdateScheduledJobRequest,
   ValidationResult,
   WatchedIssue,
@@ -26,6 +27,7 @@ export interface CreateSeriesRequest {
     task: string;
     dependsOn: string[];
     acceptanceCriteria?: AcDefinition[];
+    contract?: SpecContract;
     /** Per-brief advisory list of files this pod expects to modify. */
     touches?: string[];
     /** Per-brief advisory list of files this pod should not modify. */

@@ -1,5 +1,14 @@
 // Types
 export type { AcType, AcDefinition, AcPolarity } from './types/ac.js';
+export type {
+  ContractScenario,
+  FactArtifactChange,
+  FactEvidence,
+  HumanReviewItem,
+  RequiredFact,
+  SpecContract,
+} from './types/contract.js';
+export { parseSpecContract, validateSpecContract } from './contract.js';
 
 export type {
   PhaseTokenUsage,
