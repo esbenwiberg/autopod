@@ -2722,7 +2722,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
     }
 
-    const baseBranch = profile.defaultBranch ?? 'main';
+    const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
     const pat = selectGitPat(profile);
     try {
       await worktreeManager.mergeBranch({
@@ -5497,8 +5497,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const prManager = prManagerFactory ? prManagerFactory(profile) : null;
               if (prManager) {
                 emitActivityStatus(podId, 'Creating PR…');
-                const baseBranch = profile.defaultBranch ?? 'main';
                 const refreshed = podRepo.getOrThrow(podId);
+                const baseBranch = refreshed.baseBranch ?? profile.defaultBranch ?? 'main';
                 const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: validated above
                   worktreePath: refreshed.worktreePath!,
@@ -5962,7 +5962,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'No PR found — creating PR before merging…');
         try {
           const retryProfile = profileStore.get(pod.profileName);
-          const retryDefaultBranch = retryProfile.defaultBranch ?? 'main';
+          const retryDefaultBranch = pod.baseBranch ?? retryProfile.defaultBranch ?? 'main';
           await worktreeManager.mergeBranch({
             worktreePath: pod.worktreePath,
             // Push the feature branch up so the PR can be opened against retryDefaultBranch.
@@ -6890,7 +6890,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // use the full branch diff (computed earlier) for accurate PR sizing.
         emitActivityStatus(podId, 'Computing diff…');
         const diffSinceCommit = pod.startCommitSha ?? undefined;
-        const validationDefaultBranch = profile.defaultBranch ?? 'main';
+        const validationDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
         const [diff, commitLog] = pod.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(
@@ -7321,7 +7321,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: passDefaultBranch,
+                  baseBranch: s2.baseBranch ?? passDefaultBranch,
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
@@ -7587,7 +7587,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           throw err;
         }
 
-        const revalDefaultBranch = profile.defaultBranch ?? 'main';
+        const revalDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
         const [diff, commitLog] = pod.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(
@@ -7780,7 +7780,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: revalDefaultBranch,
+                  baseBranch: s2.baseBranch ?? revalDefaultBranch,
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
