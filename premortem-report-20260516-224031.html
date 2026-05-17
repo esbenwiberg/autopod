@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Premortem Report — ACs to Durable Facts</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0e1a;
+      --panel: #111827;
+      --panel-2: #172033;
+      --text: #eef4ff;
+      --muted: #9fb0cc;
+      --line: #26344f;
+      --red: #ff647c;
+      --amber: #f7b955;
+      --blue: #64b5ff;
+      --green: #6fe3a2;
+      --violet: #a58bff;
+      --cyan: #63d8e6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    main {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 40px 0 56px;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 24px;
+      margin-bottom: 28px;
+    }
+    .eyebrow {
+      color: var(--cyan);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 8px 0 10px;
+      font-size: clamp(32px, 5vw, 58px);
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+    h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    p { margin: 0 0 12px; }
+    .subtitle {
+      max-width: 850px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      min-width: 0;
+    }
+    .wide { grid-column: span 2; }
+    .full { grid-column: 1 / -1; }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 8px;
+    }
+    .big {
+      font-size: 20px;
+      font-weight: 760;
+      line-height: 1.25;
+    }
+    ul, ol {
+      margin: 8px 0 0;
+      padding-left: 21px;
+    }
+    li { margin: 7px 0; }
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .failure-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .failure {
+      border-top: 4px solid var(--accent);
+    }
+    .meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .badge {
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+      color: var(--accent);
+      border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .muted { color: var(--muted); }
+    .section { margin-top: 34px; }
+    footer {
+      margin-top: 38px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      padding-top: 18px;
+      font-size: 13px;
+    }
+    @media (max-width: 860px) {
+      main { width: min(100% - 28px, 1180px); padding-top: 28px; }
+      .grid, .failure-grid { grid-template-columns: 1fr; }
+      .wide { grid-column: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Premortem report</div>
+      <h1>ACs to Durable Facts</h1>
+      <p class="subtitle">Premise: it is 6 months from now, Autopod moved from acceptance criteria as temporary pod gates to executable facts as repo memory, and the effort failed.</p>
+      <div class="pill-row">
+        <span class="pill">6 failure agents</span>
+        <span class="pill">Autopod specs</span>
+        <span class="pill">Facts-first workflow</span>
+        <span class="pill">Generated 2026-05-16 22:40</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <article class="card">
+        <div class="label">Most Likely Failure</div>
+        <p class="big">Facts become a new brief section, not a merge-enforced repo artifact.</p>
+        <p class="muted">Autopod already has several AC surfaces. Adding vocabulary is easier than changing merge behavior.</p>
+      </article>
+      <article class="card">
+        <div class="label">Most Dangerous Failure</div>
+        <p class="big">Low-quality facts create false confidence.</p>
+        <p class="muted">A bad test can preserve implementation details while missing the behavior the original AC cared about.</p>
+      </article>
+      <article class="card">
+        <div class="label">Hidden Assumption</div>
+        <p class="big">Executable does not automatically mean durable truth.</p>
+        <p class="muted">A fact needs CI enforcement, behavior ownership, and intent-preserving review.</p>
+      </article>
+      <article class="card wide">
+        <div class="label">Revised Plan</div>
+        <ol>
+          <li>Define one canonical contract: ACs are pre-merge probes, test expectations are package-owned tests, durable facts are merge-enforced artifacts, and human-review-only is an explicit exception.</li>
+          <li>Use Given/When/Then only for multi-step behavior, state machines, workflows, and ambiguous rules.</li>
+          <li>Require every behavioral AC to map to a changed durable artifact or a human-review-only exception.</li>
+          <li>Prefer co-located package tests over external probes for state machines, parsers, repositories, validation, profiles, and CLI behavior.</li>
+          <li>Pilot on daemon behavior briefs before expanding to desktop, integrations, and ops workflows.</li>
+        </ol>
+      </article>
+      <article class="card">
+        <div class="label">Single Most Important Revision</div>
+        <p class="big">Make “durable fact” a merge rule, not a writing style.</p>
+        <p class="muted">The pod should list artifact paths or explicitly explain why a criterion remains human-review-only.</p>
+      </article>
+    </section>
+
+    <section class="section card full">
+      <h2>Pre-Launch Checklist</h2>
+      <ul>
+        <li>Update `/prep`, `/plan-feature`, CLI/issue watcher parsing, desktop labels, and validation docs with one vocabulary.</li>
+        <li>Add a final-summary or PR requirement mapping each behavioral AC to a durable artifact path or `human_review_only` reason.</li>
+        <li>Reject generic `run tests`, snapshots, fixture-only assertions, and private-structure tests as durable facts.</li>
+        <li>Measure 10 pods: brief size, prep time, strengthened tests, human-review-only exceptions, and weak-fact review rejections.</li>
+        <li>Start with daemon/package tests before expanding to desktop and external integrations.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Failure Modes</h2>
+      <div class="failure-grid">
+        <article class="card failure" style="--accent: var(--red)">
+          <div class="meta"><span class="badge">High likelihood</span><span class="badge">High severity</span></div>
+          <h3>1. Renamed ACs Without a Merge Gate</h3>
+          <p>“Facts-first” exists mostly as vocabulary. Briefs and PR bodies mention durable facts, but merges still proceed when mappings are aspirational.</p>
+          <p><strong>Assumption:</strong> better structure changes merge behavior without an enforceable gate.</p>
+          <p><strong>Warning signs:</strong> fact mappings in prose with no changed test or invariant; reviews accept verbal confirmation.</p>
+        </article>
+
+        <article class="card failure" style="--accent: var(--amber)">
+          <div class="meta"><span class="badge">Medium likelihood</span><span class="badge">Medium severity</span></div>
+          <h3>2. Ceremony Without Better Tests</h3>
+          <p>Every AC blooms into Given/When/Then, durable mapping, exceptions, and validation notes. Briefs get heavier while tests stay flat.</p>
+          <p><strong>Assumption:</strong> explicit prose naturally becomes durable tests.</p>
+          <p><strong>Warning signs:</strong> brief size and prep time rise 30%+, but strengthened tests per pod do not.</p>
+        </article>
+
+        <article class="card failure" style="--accent: var(--blue)">
+          <div class="meta"><span class="badge">High likelihood</span><span class="badge">High severity</span></div>
+          <h3>3. Facts Live Too Far From Code</h3>
+          <p>`api`, `web`, and `cmd` probes catch surface behavior but miss the lower-level invariants that keep the repo sane.</p>
+          <p><strong>Assumption:</strong> external validation probes can stand in for behavior-owned tests.</p>
+          <p><strong>Warning signs:</strong> new probes land without changes to co-located `*.test.ts` files.</p>
+        </article>
+
+        <article class="card failure" style="--accent: var(--violet)">
+          <div class="meta"><span class="badge">Medium likelihood</span><span class="badge">High severity</span></div>
+          <h3>4. Low-Quality Facts Create False Memory</h3>
+          <p>Agents generate brittle snapshots, mock call-order assertions, and fixture checks that satisfy the shape of a fact without protecting intent.</p>
+          <p><strong>Assumption:</strong> agents reliably translate behavior into meaningful tests without quality gates.</p>
+          <p><strong>Warning signs:</strong> tests assert DOM structure, private helpers, or exact blobs and rarely fail under seeded regressions.</p>
+        </article>
+
+        <article class="card failure" style="--accent: var(--green)">
+          <div class="meta"><span class="badge">Medium likelihood</span><span class="badge">Medium severity</span></div>
+          <h3>5. Boundaries Resist Simple Fact Conversion</h3>
+          <p>Desktop UX, external integrations, auth, notifications, and ops workflows do not fit cleanly into stable repo-local checks.</p>
+          <p><strong>Assumption:</strong> most meaningful behavior can be translated into repo-owned executable facts without losing context.</p>
+          <p><strong>Warning signs:</strong> more than 25-30% of behavioral ACs become human-review-only or fake checks.</p>
+        </article>
+
+        <article class="card failure" style="--accent: var(--cyan)">
+          <div class="meta"><span class="badge">High likelihood</span><span class="badge">Medium severity</span></div>
+          <h3>6. Split-Brained Schema and Tooling</h3>
+          <p>Briefs, desktop forms, issue watcher parsing, CLI `--ac-from`, validation, and skills adopt different meanings for AC, scenario, fact, and test expectation.</p>
+          <p><strong>Assumption:</strong> better terms converge the ecosystem without one canonical contract at every boundary.</p>
+          <p><strong>Warning signs:</strong> the same requirement round-trips as AC, scenario, fact, and test expectation with semantic loss.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      Premortemed: Autopod migration from AC-only pod gates toward durable executable facts as repo memory. Full transcript: premortem-transcript-20260516-224031.md.
+    </footer>
+  </main>
+</body>
+</html>
