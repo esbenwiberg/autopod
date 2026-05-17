@@ -206,6 +206,7 @@ public struct MainView: View {
     @State private var viewMode: ViewMode = .cards
     @State private var cardDensity: CardDensity = .detailed
     @State private var sortOrder: SortOrder = .created
+    @State private var searchText: String = ""
     @State private var selectedFeature: FeatureCategory?
     @State private var selectedAnalyticsCard: AnalyticsCardKind?
     @State private var requestedDetailTab: DetailTab?
@@ -233,11 +234,27 @@ public struct MainView: View {
 
     private var filteredSessions: [Pod] {
         let filtered = Self.filterPods(pods, for: sidebarSelection)
-        return filtered.sorted { a, b in
+        let searched = Self.searchPods(filtered, query: searchText)
+        return searched.sorted { a, b in
             switch sortOrder {
             case .created:    a.startedAt > b.startedAt
             case .lastActive: a.updatedAt > b.updatedAt
             }
+        }
+    }
+
+    /// Filters pods by a free-text query. Matches against the pod's name (id),
+    /// brief title, task description, profile, and series name so users can find
+    /// pods by anything they'd recognise on the card. Empty query is a no-op.
+    static func searchPods(_ pods: [Pod], query: String) -> [Pod] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return pods }
+        return pods.filter { pod in
+            pod.id.localizedCaseInsensitiveContains(trimmed)
+                || (pod.briefTitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
+                || pod.task.localizedCaseInsensitiveContains(trimmed)
+                || pod.profileName.localizedCaseInsensitiveContains(trimmed)
+                || (pod.seriesName?.localizedCaseInsensitiveContains(trimmed) ?? false)
         }
     }
 
@@ -591,6 +608,30 @@ public struct MainView: View {
                 .foregroundStyle(.blue)
                 .clipShape(Capsule())
             Spacer()
+            HStack(spacing: 4) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                TextField("Search pods", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.caption)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear search")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(width: 200)
             Picker("", selection: $sortOrder) {
                 ForEach(SortOrder.allCases, id: \.self) { order in
                     Text(order.rawValue).tag(order)
