@@ -329,7 +329,7 @@ public final class EventStream {
   }
 
   private func mapAgentEvent(_ response: AgentEventResponse, id: Int) -> AgentEvent {
-    var type = AgentEventType(rawValue: response.type) ?? .output
+    var type = AgentEventType(rawValue: response.type) ?? .reasoning
     // tool_result events arrive as {type: "tool_use", tool: "tool_result"} from the stream parser
     if type == .toolUse && response.tool == "tool_result" {
       type = .toolResult
