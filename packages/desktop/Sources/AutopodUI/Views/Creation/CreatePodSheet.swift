@@ -32,10 +32,6 @@ public struct CreateSessionSheet: View {
     @State private var validate: Bool = true
     @State private var baseBranch = ""
     @State private var branchPrefix = ""
-    @State private var acFromPath = ""
-    @State private var criteria: [AcDefinition] = [AcDefinition()]
-    @State private var showBulkImport = false
-    @State private var bulkText = ""
     @State private var pimGroups: [PimGroupRequest] = []
     @State private var showAdvanced = false
     @State private var showInteractiveRefRepos = false
@@ -310,98 +306,6 @@ public struct CreateSessionSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
 
-                    // Legacy criteria from file (optional). Contract-based specs are
-                    // created through the series flow or CLI --spec path.
-                    if !isInteractive {
-                        formSection("Legacy Criteria File Path (optional)") {
-                            HStack(spacing: 6) {
-                                Image(systemName: "doc.text")
-                                    .foregroundStyle(.tertiary)
-                                    .font(.system(size: 11))
-                                TextField("legacy specs/auth-ac.md", text: $acFromPath)
-                                    .textFieldStyle(.plain)
-                                    .font(.system(.callout, design: .monospaced))
-                            }
-                            .padding(8)
-                            .background(Color(nsColor: .controlBackgroundColor))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                    }
-
-                    // Legacy criteria (manual — only for worker/artifact, and only if no file)
-                    if !isInteractive && acFromPath.isEmpty {
-                    formSection("Legacy Criteria") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            if showBulkImport {
-                                TextEditor(text: $bulkText)
-                                    .font(.system(.callout, design: .monospaced))
-                                    .frame(minHeight: 100, maxHeight: 180)
-                                    .padding(6)
-                                    .background(Color(nsColor: .controlBackgroundColor))
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-                                    )
-                                    .overlay(alignment: .topLeading) {
-                                        if bulkText.isEmpty {
-                                            Text("Paste your list here...\n- Item one\n- Item two")
-                                                .font(.system(.callout, design: .monospaced))
-                                                .foregroundStyle(.tertiary)
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 12)
-                                                .allowsHitTesting(false)
-                                        }
-                                    }
-                                HStack(spacing: 8) {
-                                    Button("Import") {
-                                        let parsed = Self.parseAcList(bulkText)
-                                        if !parsed.isEmpty {
-                                            criteria = parsed.map { AcDefinition.fromString($0) }
-                                        }
-                                        bulkText = ""
-                                        showBulkImport = false
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .controlSize(.small)
-                                    .disabled(bulkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                    Button("Cancel") {
-                                        bulkText = ""
-                                        showBulkImport = false
-                                    }
-                                    .controlSize(.small)
-                                }
-                            } else {
-                                ForEach($criteria) { $c in
-                                    criterionRow($c)
-                                }
-                                HStack(spacing: 12) {
-                                    Button {
-                                        criteria.append(AcDefinition())
-                                    } label: {
-                                        Label("Add criterion", systemImage: "plus")
-                                            .font(.caption)
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .foregroundStyle(.blue)
-                                    Button {
-                                        showBulkImport = true
-                                    } label: {
-                                        Label("Paste list", systemImage: "doc.on.clipboard")
-                                            .font(.caption)
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .foregroundStyle(.blue)
-                                }
-                            }
-                        }
-                    }
-
-                    Text("Optional — helps the agent validate its own work")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    } // end if !isInteractive
-
                     // Advanced options — agent-mode only. Reference Repos lives top-level
                     // for interactive pods; PIM is agent-only and would leave an empty
                     // disclosure in interactive mode. Dagger sidecar attachment is
@@ -504,7 +408,6 @@ public struct CreateSessionSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(isInteractive ? "Create Workspace" : "Create Pod") {
                     Task {
-                        let ac = criteria.filter { !$0.outcome.trimmingCharacters(in: .whitespaces).isEmpty }
                         let model = modelText.trimmingCharacters(in: .whitespacesAndNewlines)
                         let pim = pimGroups.filter { !$0.groupId.isEmpty }
                         let pod = PodConfigRequest(
@@ -521,10 +424,10 @@ public struct CreateSessionSheet: View {
                         let trimmedPrefix = branchPrefix.trimmingCharacters(in: .whitespaces)
                         _ = await actions.createPod(
                             selectedProfile, task, model.isEmpty ? nil : model,
-                            pod, ac.isEmpty ? nil : ac,
+                            pod, nil,
                             baseBranch.isEmpty ? nil : baseBranch,
                             trimmedPrefix.isEmpty ? nil : trimmedPrefix,
-                            acFromPath.isEmpty ? nil : acFromPath,
+                            nil,
                             pim.isEmpty ? nil : pim,
                             nil,
                             refs.isEmpty ? nil : refs
@@ -540,97 +443,6 @@ public struct CreateSessionSheet: View {
         }
         .frame(minWidth: 480, maxWidth: 480, minHeight: 580)
         .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    @ViewBuilder
-    private func criterionRow(_ binding: Binding<AcDefinition>) -> some View {
-        let c = binding.wrappedValue
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                // Type picker
-                Picker("", selection: binding.type) {
-                    ForEach(AcDefinition.AcType.allCases, id: \.self) { t in
-                        Text(t.label).tag(t)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 90)
-                .controlSize(.small)
-
-                // Outcome — always shown
-                TextField("What should be true after this lands?", text: binding.outcome)
-                    .textFieldStyle(.plain)
-                    .font(.callout)
-
-                if criteria.count > 1, let idx = criteria.firstIndex(where: { $0.id == c.id }) {
-                    Button {
-                        criteria.remove(at: idx)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                            .foregroundStyle(.red.opacity(0.6))
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            if c.type != .none {
-                HStack(spacing: 6) {
-                    Image(systemName: "link").foregroundStyle(.secondary).font(.system(size: 9))
-                    TextField(
-                        hintPlaceholder(for: c.type),
-                        text: Binding(
-                            get: { binding.wrappedValue.hint ?? "" },
-                            set: { binding.wrappedValue.hint = $0.isEmpty ? nil : $0 }
-                        )
-                    )
-                    .textFieldStyle(.plain)
-                    .font(.caption)
-                }
-            }
-            if c.type == .cmd {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.branch").foregroundStyle(.secondary).font(.system(size: 9))
-                    Picker(
-                        "Polarity",
-                        selection: Binding(
-                            get: { binding.wrappedValue.polarity ?? .exitZero },
-                            set: { binding.wrappedValue.polarity = $0 }
-                        )
-                    ) {
-                        Text("Exit code 0").tag(AcDefinition.AcPolarity.exitZero)
-                        Text("Expect output").tag(AcDefinition.AcPolarity.expectOutput)
-                        Text("Expect no output").tag(AcDefinition.AcPolarity.expectNoOutput)
-                    }
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .pickerStyle(.menu)
-                }
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-    }
-
-    private func hintPlaceholder(for type: AcDefinition.AcType) -> String {
-        switch type {
-        case .web:  "Page path or selector — e.g. /pr-dashboard"
-        case .api:  "Endpoint — e.g. GET /api/pods"
-        case .cmd:  "Shell command — e.g. grep foo bar.ts"
-        case .none: ""
-        }
-    }
-
-    /// Parse a newline-separated list, stripping common prefixes (`- `, `1. `, `a) `, etc.).
-    static func parseAcList(_ text: String) -> [String] {
-        // Mirrors packages/shared/src/parse-ac-list.ts
-        let prefix = /^(?:[-*]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|[a-zA-Z][.)]\s+)/
-        return text
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .map { $0.replacing(prefix, with: "") }
-            .filter { !$0.isEmpty }
     }
 
     /// Reference Repos picker — same UI used for both interactive (inside its

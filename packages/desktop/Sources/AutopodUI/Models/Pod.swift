@@ -168,18 +168,29 @@ public struct AcCheckDetail: Sendable {
 public struct FactCheckDetail: Sendable {
     public let factId: String
     public let proves: [String]
+    public let kind: String?
     public let artifactPath: String
     public let command: String
     public let passed: Bool
+    public let status: String?
+    public let exitCode: Int?
+    public let durationMs: Int?
+    public let artifact: FactEvidenceArtifactResponse?
+    public let attachments: [FactEvidenceAttachmentResponse]?
     public let reasoning: String
     public let stdout: String?
     public let stderr: String?
     public init(
-        factId: String, proves: [String], artifactPath: String, command: String,
-        passed: Bool, reasoning: String, stdout: String? = nil, stderr: String? = nil
+        factId: String, proves: [String], kind: String? = nil, artifactPath: String, command: String,
+        passed: Bool, status: String? = nil, exitCode: Int? = nil, durationMs: Int? = nil,
+        artifact: FactEvidenceArtifactResponse? = nil,
+        attachments: [FactEvidenceAttachmentResponse]? = nil,
+        reasoning: String, stdout: String? = nil, stderr: String? = nil
     ) {
-        self.factId = factId; self.proves = proves; self.artifactPath = artifactPath
-        self.command = command; self.passed = passed; self.reasoning = reasoning
+        self.factId = factId; self.proves = proves; self.kind = kind; self.artifactPath = artifactPath
+        self.command = command; self.passed = passed; self.status = status; self.exitCode = exitCode
+        self.durationMs = durationMs; self.artifact = artifact; self.attachments = attachments
+        self.reasoning = reasoning
         self.stdout = stdout; self.stderr = stderr
     }
 }
@@ -462,8 +473,10 @@ public struct ValidationProgress: Sendable {
             factTotalCount = result.factResult?.results.count ?? 0
             factChecks = result.factResult?.results.map { check in
                 FactCheckDetail(
-                    factId: check.factId, proves: check.proves, artifactPath: check.artifactPath,
-                    command: check.command, passed: check.passed, reasoning: check.reasoning,
+                    factId: check.factId, proves: check.proves, kind: check.kind,
+                    artifactPath: check.artifactPath, command: check.command, passed: check.passed,
+                    status: check.status, exitCode: check.exitCode, durationMs: check.durationMs,
+                    artifact: check.artifact, attachments: check.attachments, reasoning: check.reasoning,
                     stdout: check.stdout, stderr: check.stderr
                 )
             }

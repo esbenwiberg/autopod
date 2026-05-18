@@ -9,6 +9,7 @@ export type {
   SpecContract,
 } from './types/contract.js';
 export { parseSpecContract, validateSpecContract } from './contract.js';
+export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
 
 export type {
   PhaseTokenUsage,

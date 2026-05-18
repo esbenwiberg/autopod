@@ -324,7 +324,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             "13+ MCP tools injected into agent containers enable structured escalation: ask a human, consult AI, report plans/progress/blockers, self-validate in browser, and manage persistent memories."
         case .validationPipeline:
-            "8-phase validation: build → test → health → Playwright smoke → legacy criteria → required facts → AI review → overall. Supports interrupt, per-finding overrides, proof-of-work screenshots, review_required state, and tiered correction feedback."
+            "7-phase validation: build → test → health → Playwright smoke → required facts → AI review → overall. Supports interrupt, per-finding overrides, proof-of-work evidence, review_required state, and tiered correction feedback."
         case .profileManagement:
             "Profiles define stack templates, credentials, network policies, registries, skills, and MCP servers. Versioned, inheritable, snapshotted at pod creation. Supports local Docker or ACI execution."
         case .realTimeMonitoring:
@@ -367,7 +367,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .multiRuntime:         "Pluggable runtimes with streaming parsers and pod persistence"
         case .actionControlPlane:   "8 groups, 22 actions — gated with injection detection, PII redaction, and PIM support"
         case .escalationSystem:     "13+ MCP tools: human escalation, AI consultation, memory, browser self-validation"
-        case .validationPipeline:   "8-phase pipeline: build, test, health, smoke, legacy criteria, facts, AI review, overall + interrupt + overrides + proof-of-work screenshots"
+        case .validationPipeline:   "7-phase pipeline: build, test, health, smoke, facts, AI review, overall + interrupt + overrides + proof-of-work evidence"
         case .profileManagement:    "Versioned + snapshotted profiles, 11 stacks, 4 providers, local/ACI, inheritance + injection"
         case .realTimeMonitoring:   "9 event types, 30-day replay, PII-safe broadcast"
         case .memoryStore:          "3-scoped persistent knowledge: suggest → approve → inject into CLAUDE.md"
@@ -393,7 +393,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             "An MCP server injected into every agent container provides 13+ tools for structured agent-human communication. Agents can ask humans (blocking), consult other AIs (rate-limited), report blockers (auto-pauses after threshold), submit plans and progress, report task summaries with deviations, check for operator messages, self-validate in browser, and manage persistent memories. The validate_in_browser tool generates Playwright scripts dynamically, executes them on the host, and captures screenshots as base64 PNGs. Memory tools (memory_suggest, memory_list, memory_read, memory_search) enable agents to build and query accumulated knowledge. Dynamic action tools are registered per profile."
         case .validationPipeline:
-            "An 8-phase validation pipeline runs after the agent completes: Build → Test → Health Check → Smoke (Playwright) → Legacy Criteria → Required Facts → AI Task Review → Overall Decision. Each phase gates the next. The AI reviewer receives tiered context: the diff, original task, contract, and findings from all prior attempts. Failed validations trigger automatic retries with structured correction feedback. When maxValidationAttempts is exhausted, the pod moves to review_required instead of failing. Humans can interrupt in-flight validation, queue per-finding overrides that are merged before the next pass, extend attempt counts, or create a linked workspace for manual fixes."
+            "A 7-phase validation pipeline runs after the agent completes: Build → Test → Health Check → Smoke (Playwright) → Required Facts → AI Task Review → Overall Decision. Each phase gates the next. The AI reviewer receives tiered context: the diff, original task, contract, and findings from all prior attempts. Failed validations trigger automatic retries with structured correction feedback. When maxValidationAttempts is exhausted, the pod moves to review_required instead of failing. Humans can interrupt in-flight validation, queue per-finding overrides that are merged before the next pass, extend attempt counts, or create a linked workspace for manual fixes."
         case .profileManagement:
             "Profiles encode everything needed to run a pod: stack template, execution target (local Docker or ACI), model provider (Anthropic, MAX/PRO, Foundry, Copilot), network policy, output mode, branchPrefix, workerProfile, PIM groups, and all injections. Each update auto-increments a version counter. Pods snapshot the full resolved profile at creation for auditability. Inheritance chains (up to 5 levels) with special merge logic for skills, MCP servers, CLAUDE.md sections, smoke pages, and registries. The system-instructions-generator builds a complete CLAUDE.md with approved memories, priority-sorted sections, dynamic content fetches, and PII sanitization."
         case .realTimeMonitoring:
@@ -455,7 +455,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             "The MCP server registers tools at container startup. Blocking tools (ask_human, report_blocker, validate_in_browser) use PendingRequests — a Promise-based map where the agent awaits resolution. The daemon resolves via API when a human responds. For validate_in_browser: an LLM generates a Playwright ESM script → written to /tmp/autopod-browser-check.mjs → executed via node → results parsed from stdout markers → screenshots collected from /tmp/autopod-browser-checks/check-{n}.png as base64."
         case .validationPipeline:
-            "Eight sequential phases with gating: (1) Build, (2) Test, (3) Health Check, (4) Smoke, (5) Legacy Criteria, (6) Required Facts from contract.yaml, (7) AI Task Review, (8) Overall. Interrupt aborts via AbortController and returns partial results. Per-finding overrides are flushed from PendingOverrideRepository before each pass. review_required is entered when retries are exhausted."
+            "Seven sequential phases with gating: (1) Build, (2) Test, (3) Health Check, (4) Smoke, (5) Required Facts from contract.yaml, (6) AI Task Review, (7) Overall. Interrupt aborts via AbortController and returns partial results. Per-finding overrides are flushed from PendingOverrideRepository before each pass. review_required is entered when retries are exhausted."
         case .profileManagement:
             "Profile resolution: inheritance chain walked (max 5 levels), fields merged with special logic for arrays/objects. Skills resolved from GitHub APIs or local files (Promise.allSettled, failures logged and skipped). Registry injection generates .npmrc and NuGet.Config with immediate validation (npm config list / dotnet nuget list source). MCP server URLs rewritten to daemon proxy endpoints. AGENTS.md built from: task → contract → injected sections (priority-sorted, dynamic-fetched) → MCP tools → skills → workflow requirements."
         case .realTimeMonitoring:
@@ -551,11 +551,10 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "Phase 2 — Test: runs profile.testCommand (default timeout 600s), requires build pass",
                 "Phase 3 — Health Check: polls healthCheckUrl for HTTP 200, configurable timeout",
                 "Phase 4 — Smoke: Playwright scripts from smokePages, runs on daemon host, captures screenshots + console errors",
-                "Phase 5 — Legacy Criteria: existing criteria still run for older pods",
-                "Phase 6 — Required Facts: contract.yaml commands verify durable proof artifacts",
-                "Phase 7 — AI Task Review: reviewer model checks diff + original task + prior findings (tiered context)",
-                "Phase 8 — Overall: pass only if all required phases pass, strictly binary",
-                "Proof-of-work screenshots: every validation pass captures PNGs per smoke page, legacy criterion, and AI review, accessible via GET /pods/:id/screenshots",
+                "Phase 5 — Required Facts: contract.yaml commands verify durable proof artifacts and store evidence",
+                "Phase 6 — AI Task Review: reviewer model checks diff + original task + prior findings (tiered context)",
+                "Phase 7 — Overall: pass only if all required phases pass, strictly binary",
+                "Proof-of-work evidence: every fact command stores exit code, duration, output excerpts, artifact hashes, and optional attachments",
                 "Agent self-validation: validate_in_browser MCP tool during development",
                 "Retry loop: correction feedback + diff injected into agent, up to maxValidationAttempts (default 3)",
                 "review_required: entered when retries exhausted — extend-attempts, fix-manually, or reject",

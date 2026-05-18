@@ -819,9 +819,13 @@ async function runFactValidation(
       artifactPath,
       log,
     );
+    const artifactHash = artifactExists
+      ? await artifactHashInContainer(containerManager, config, artifactPath, log)
+      : undefined;
 
     let commandResult: { stdout: string; stderr: string; exitCode: number } | null = null;
     let commandError: string | undefined;
+    const commandStart = Date.now();
     try {
       commandResult = await containerManager.execInContainer(
         config.containerId,
@@ -841,6 +845,7 @@ async function runFactValidation(
         exitCode: 124,
       };
     }
+    const durationMs = Date.now() - commandStart;
 
     const commandPassed = commandResult.exitCode === 0;
     const passed = artifactExists && artifactChanged && commandPassed;
@@ -853,9 +858,21 @@ async function runFactValidation(
     results.push({
       factId: fact.id,
       proves: fact.proves,
+      kind: fact.kind,
       artifactPath,
       command: fact.command,
       passed,
+      status: passed ? 'pass' : 'fail',
+      exitCode: commandResult.exitCode,
+      durationMs,
+      artifact: {
+        path: artifactPath,
+        change: fact.artifact.change,
+        exists: artifactExists,
+        changed: artifactChanged,
+        ...(artifactHash ? { hash: artifactHash } : {}),
+      },
+      attachments: [],
       reasoning: passed
         ? `Fact ${fact.id} passed: ${artifactPath} exists, was changed, and command exited 0.`
         : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`,
@@ -888,6 +905,31 @@ async function artifactExistsInContainer(
   } catch (err) {
     log?.warn({ err, artifactPath }, 'required fact artifact existence check failed');
     return false;
+  }
+}
+
+async function artifactHashInContainer(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  artifactPath: string,
+  log?: Logger,
+): Promise<string | undefined> {
+  try {
+    const quoted = shellQuote(`/workspace/${artifactPath}`);
+    const result = await containerManager.execInContainer(
+      config.containerId,
+      [
+        'sh',
+        '-c',
+        `if command -v sha256sum >/dev/null 2>&1; then sha256sum ${quoted} | awk '{print $1}'; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 ${quoted} | awk '{print $1}'; fi`,
+      ],
+      { cwd: '/workspace', timeout: 10_000 },
+    );
+    const hash = result.stdout.trim().split(/\s+/)[0];
+    return result.exitCode === 0 && hash ? hash : undefined;
+  } catch (err) {
+    log?.warn({ err, artifactPath }, 'required fact artifact hash check failed');
+    return undefined;
   }
 }
 

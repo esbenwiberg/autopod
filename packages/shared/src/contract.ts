@@ -3,12 +3,23 @@ import { BriefParseError } from './errors.js';
 import type {
   ContractScenario,
   FactArtifactChange,
+  FactKind,
   HumanReviewItem,
   RequiredFact,
   SpecContract,
 } from './types/contract.js';
 
 const ARTIFACT_CHANGES = new Set<FactArtifactChange>(['create', 'update', 'touch']);
+const FACT_KINDS = new Set<FactKind>([
+  'unit-test',
+  'integration-test',
+  'contract-test',
+  'browser-test',
+  'typecheck',
+  'lint-rule',
+  'smoke-script',
+  'custom-command',
+]);
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -33,7 +44,8 @@ function asStringArray(value: unknown, label: string): string[] {
 
 function optionalStringArray(value: unknown, label: string): string[] {
   if (value == null) return [];
-  return asStringArray(value, label);
+  if (!Array.isArray(value)) throw new BriefParseError(`${label} must be a list`);
+  return value.map((item, i) => asString(item, `${label}[${i}]`));
 }
 
 function parseScenario(value: unknown, index: number): ContractScenario {
@@ -55,10 +67,16 @@ function parseRequiredFact(value: unknown, index: number): RequiredFact {
       `required_facts[${index}].artifact.change must be one of create, update, touch`,
     );
   }
+  const kind = asString(obj.kind, `required_facts[${index}].kind`);
+  if (!FACT_KINDS.has(kind as FactKind)) {
+    throw new BriefParseError(
+      `required_facts[${index}].kind must be one of ${Array.from(FACT_KINDS).join(', ')}`,
+    );
+  }
   return {
     id: asString(obj.id, `required_facts[${index}].id`),
     proves: asStringArray(obj.proves, `required_facts[${index}].proves`),
-    kind: asString(obj.kind, `required_facts[${index}].kind`),
+    kind: kind as FactKind,
     artifact: {
       path: asString(artifact.path, `required_facts[${index}].artifact.path`),
       change: change as FactArtifactChange,

@@ -164,9 +164,15 @@ public struct FactValidationResponse: Codable, Sendable {
 public struct FactCheckResponse: Codable, Sendable {
   public let factId: String
   public let proves: [String]
+  public let kind: String?
   public let artifactPath: String
   public let command: String
   public let passed: Bool
+  public let status: String?
+  public let exitCode: Int?
+  public let durationMs: Int?
+  public let artifact: FactEvidenceArtifactResponse?
+  public let attachments: [FactEvidenceAttachmentResponse]?
   public let reasoning: String
   public let stdout: String?
   public let stderr: String?
@@ -175,13 +181,33 @@ public struct FactCheckResponse: Codable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     factId = try c.decode(String.self, forKey: .factId)
     proves = try c.decode([String].self, forKey: .proves)
+    kind = try c.decodeIfPresent(String.self, forKey: .kind)
     artifactPath = try c.decode(String.self, forKey: .artifactPath)
     command = try c.decode(String.self, forKey: .command)
     passed = try decodeBoolOrInt(c, key: .passed)
+    status = try c.decodeIfPresent(String.self, forKey: .status)
+    exitCode = try c.decodeIfPresent(Int.self, forKey: .exitCode)
+    durationMs = try c.decodeIfPresent(Int.self, forKey: .durationMs)
+    artifact = try c.decodeIfPresent(FactEvidenceArtifactResponse.self, forKey: .artifact)
+    attachments = try c.decodeIfPresent([FactEvidenceAttachmentResponse].self, forKey: .attachments)
     reasoning = try c.decode(String.self, forKey: .reasoning)
     stdout = try c.decodeIfPresent(String.self, forKey: .stdout)
     stderr = try c.decodeIfPresent(String.self, forKey: .stderr)
   }
+}
+
+public struct FactEvidenceArtifactResponse: Codable, Sendable, Hashable {
+  public let path: String
+  public let change: String?
+  public let exists: Bool
+  public let changed: Bool
+  public let hash: String?
+}
+
+public struct FactEvidenceAttachmentResponse: Codable, Sendable, Hashable {
+  public let kind: String
+  public let path: String
+  public let label: String?
 }
 
 // MARK: - Task Review

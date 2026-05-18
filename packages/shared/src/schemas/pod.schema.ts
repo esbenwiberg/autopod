@@ -28,7 +28,16 @@ const contractScenarioSchema = z.object(contractScenarioFields);
 const requiredFactSchema = z.object({
   id: z.string().min(1).max(128),
   proves: z.array(z.string().min(1).max(128)).min(1),
-  kind: z.string().min(1).max(64),
+  kind: z.enum([
+    'unit-test',
+    'integration-test',
+    'contract-test',
+    'browser-test',
+    'typecheck',
+    'lint-rule',
+    'smoke-script',
+    'custom-command',
+  ]),
   artifact: z.object({
     path: z.string().min(1).max(500),
     change: z.enum(['create', 'update', 'touch']),

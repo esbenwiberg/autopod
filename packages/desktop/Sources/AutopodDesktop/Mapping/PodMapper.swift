@@ -144,8 +144,10 @@ public enum PodMapper {
       let factValidation: Bool? = v.factValidation.flatMap { $0.status == "skip" ? nil : ($0.status == "pass") }
       let factChecks: [FactCheckDetail]? = v.factValidation?.results.map { r in
         FactCheckDetail(
-          factId: r.factId, proves: r.proves, artifactPath: r.artifactPath,
-          command: r.command, passed: r.passed, reasoning: r.reasoning,
+          factId: r.factId, proves: r.proves, kind: r.kind, artifactPath: r.artifactPath,
+          command: r.command, passed: r.passed, status: r.status, exitCode: r.exitCode,
+          durationMs: r.durationMs, artifact: r.artifact, attachments: r.attachments,
+          reasoning: r.reasoning,
           stdout: r.stdout, stderr: r.stderr
         )
       }

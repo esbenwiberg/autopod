@@ -43,8 +43,16 @@ public struct ValidationTab: View {
 
   private var progress: ValidationProgress? { pod.validationProgress }
 
+  private var displayedPhases: [ValidationPhase] {
+    ValidationPhase.allCases.filter { $0 != .ac }
+  }
+
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
-  private var displayPhase: ValidationPhase? { selectedPhase ?? progress?.activePhase }
+  private var displayPhase: ValidationPhase? {
+    if let selectedPhase { return selectedPhase }
+    let active = progress?.activePhase
+    return active == .ac ? nil : active
+  }
 
   /// Combined ordered screenshot set for lightbox navigation: smoke → legacy → review.
   /// Derived from whichever source is live (progress from events, or final checks).
@@ -345,7 +353,7 @@ public struct ValidationTab: View {
     let hasAnyData = progress != nil || checks != nil
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
-        ForEach(ValidationPhase.allCases, id: \.self) { phase in
+        ForEach(displayedPhases, id: \.self) { phase in
           PhaseChip(
             phase: phase,
             state: hasAnyData ? phaseState(phase) : ValidationPhaseState(status: .notStarted),
@@ -635,12 +643,11 @@ public struct ValidationTab: View {
       phaseStatusRow(status: status, passLabel: "Required facts passed",
                      failLabel: "Required facts failed", skipLabel: "No required facts configured")
       if let contract = pod.contract {
-        contractSummary(contract)
-      }
-      if let factChecks, !factChecks.isEmpty {
+        contractDetail(contract, factChecks: factChecks)
+      } else if let factChecks, !factChecks.isEmpty {
         VStack(alignment: .leading, spacing: 8) {
           ForEach(Array(factChecks.enumerated()), id: \.offset) { _, check in
-            factCheckRow(check)
+            factEvidenceCard(check)
           }
         }
       }
@@ -649,13 +656,68 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
-  private func contractSummary(_ contract: SpecContractResponse) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text(contract.title)
+  private func contractDetail(
+    _ contract: SpecContractResponse,
+    factChecks: [FactCheckDetail]?
+  ) -> some View {
+    let evidenceByFact = Dictionary(uniqueKeysWithValues: (factChecks ?? []).map { ($0.factId, $0) })
+    VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(contract.title)
+          .font(.callout.weight(.semibold))
+        Text("\(contract.scenarios.count) scenarios · \(contract.requiredFacts.count) required facts · \(contract.humanReview.count) review checks")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+
+      if !contract.scenarios.isEmpty {
+        CollapsibleSection(title: "Scenarios", icon: "list.bullet.rectangle", initiallyExpanded: true) {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(contract.scenarios, id: \.id) { scenario in
+              scenarioCard(scenario)
+            }
+          }
+        }
+      }
+
+      if !contract.requiredFacts.isEmpty {
+        CollapsibleSection(title: "Required Facts", icon: "checkmark.seal", initiallyExpanded: true) {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(contract.requiredFacts, id: \.id) { fact in
+              requiredFactCard(fact, evidence: evidenceByFact[fact.id])
+            }
+          }
+        }
+      }
+
+      if !contract.humanReview.isEmpty {
+        CollapsibleSection(title: "Human Review", icon: "person.crop.circle.badge.questionmark", initiallyExpanded: false) {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(contract.humanReview, id: \.id) { item in
+              VStack(alignment: .leading, spacing: 4) {
+                Text(item.id).font(.caption.weight(.semibold))
+                Text(item.criterion).font(.caption)
+                Text(item.reason).font(.caption2).foregroundStyle(.secondary)
+              }
+              .padding(10)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(Color(nsColor: .controlBackgroundColor))
+              .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+          }
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func scenarioCard(_ scenario: ContractScenarioResponse) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(scenario.id)
         .font(.caption.weight(.semibold))
-      Text("\(contract.scenarios.count) scenarios · \(contract.requiredFacts.count) required facts · \(contract.humanReview.count) review checks")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
+      scenarioLines("Given", scenario.given)
+      scenarioLines("When", scenario.when)
+      scenarioLines("Then", scenario.then)
     }
     .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -664,7 +726,70 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
-  private func factCheckRow(_ check: FactCheckDetail) -> some View {
+  private func scenarioLines(_ label: String, _ lines: [String]) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text(label.uppercased())
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+      ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+        Text("• \(line)")
+          .font(.caption)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func requiredFactCard(_ fact: RequiredFactResponse, evidence: FactCheckDetail?) -> some View {
+    let evidenceColor: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(alignment: .top, spacing: 8) {
+        Image(systemName: evidence == nil ? "clock" : (evidence?.passed == true ? "checkmark.circle.fill" : "xmark.circle.fill"))
+          .font(.system(size: 13))
+          .foregroundStyle(evidenceColor)
+          .padding(.top, 1)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(fact.id)
+            .font(.callout.weight(.medium))
+          Text(fact.kind)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        Spacer(minLength: 4)
+        factBadge(evidence == nil ? "awaiting evidence" : "evidence")
+      }
+      Text("proves \(fact.proves.joined(separator: ", "))")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+      Text(fact.artifact.path)
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+      Text(fact.command)
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+      if let evidence {
+        factEvidenceBody(evidence)
+      } else {
+        Text("Awaiting evidence from Autopod validator.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 8)
+          .padding(.vertical, 6)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+          .clipShape(RoundedRectangle(cornerRadius: 4))
+      }
+    }
+    .padding(10)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(nsColor: .controlBackgroundColor))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+  }
+
+  @ViewBuilder
+  private func factEvidenceCard(_ check: FactCheckDetail) -> some View {
     let statusColor: Color = check.passed ? .green : .red
     HStack(alignment: .top, spacing: 0) {
       Rectangle()
@@ -679,35 +804,73 @@ public struct ValidationTab: View {
           VStack(alignment: .leading, spacing: 2) {
             Text(check.factId)
               .font(.callout.weight(.medium))
+            Text(check.kind ?? "fact")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.secondary)
             Text(check.artifactPath)
               .font(.system(.caption2, design: .monospaced))
               .foregroundStyle(.secondary)
           }
           Spacer(minLength: 4)
-          triageBadge("fact")
+          factBadge("evidence")
         }
-        Text(check.command)
-          .font(.system(.caption2, design: .monospaced))
-          .foregroundStyle(.secondary)
-          .textSelection(.enabled)
-        Text(check.reasoning)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-          .padding(.horizontal, 8)
-          .padding(.vertical, 6)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
-          .clipShape(RoundedRectangle(cornerRadius: 4))
-        if let stderr = check.stderr, !stderr.isEmpty {
-          outputBlock(title: "Fact Error Output", text: stderr, expanded: .constant(false), color: .red)
-        }
+        factEvidenceBody(check)
       }
       .padding(10)
     }
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(statusColor.opacity(0.15), lineWidth: 1))
+  }
+
+  @ViewBuilder
+  private func factEvidenceBody(_ check: FactCheckDetail) -> some View {
+    HStack(spacing: 8) {
+      if let exitCode = check.exitCode {
+        Text("exit \(exitCode)")
+      }
+      if let durationMs = check.durationMs {
+        Text(formatDuration(durationMs))
+      }
+      if let artifact = check.artifact {
+        Text(artifact.exists ? "artifact exists" : "artifact missing")
+        Text(artifact.changed ? "changed" : "unchanged")
+      }
+    }
+    .font(.caption2)
+    .foregroundStyle(.secondary)
+    Text(check.command)
+      .font(.system(.caption2, design: .monospaced))
+      .foregroundStyle(.secondary)
+      .textSelection(.enabled)
+    if let hash = check.artifact?.hash {
+      Text("sha256:\(hash)")
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.tertiary)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .textSelection(.enabled)
+    }
+    Text(check.reasoning)
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 6)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+      .clipShape(RoundedRectangle(cornerRadius: 4))
+    if let attachments = check.attachments, !attachments.isEmpty {
+      ForEach(Array(attachments.enumerated()), id: \.offset) { _, attachment in
+        Text("\(attachment.kind): \(attachment.path)")
+          .font(.system(.caption2, design: .monospaced))
+          .foregroundStyle(.secondary)
+          .textSelection(.enabled)
+      }
+    }
+    if let stderr = check.stderr, !stderr.isEmpty {
+      outputBlock(title: "Fact Error Output", text: stderr, expanded: .constant(false), color: .red)
+    }
   }
 
   @ViewBuilder
@@ -1181,6 +1344,15 @@ public struct ValidationTab: View {
       .padding(.horizontal, 5).padding(.vertical, 2)
       .background(color.opacity(0.12))
       .foregroundStyle(color)
+      .clipShape(Capsule())
+  }
+
+  private func factBadge(_ label: String) -> some View {
+    Text(label)
+      .font(.system(.caption2, design: .monospaced))
+      .padding(.horizontal, 5).padding(.vertical, 2)
+      .background(Color.secondary.opacity(0.12))
+      .foregroundStyle(.secondary)
       .clipShape(Capsule())
   }
 

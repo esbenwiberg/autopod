@@ -265,6 +265,13 @@ required_facts:
 human_review: []
 ```
 
+Allowed `kind` values: `unit-test`, `integration-test`, `contract-test`,
+`browser-test`, `typecheck`, `lint-rule`, `smoke-script`, `custom-command`.
+For web-visible behavior, prefer `browser-test` with a durable Playwright or
+equivalent browser test artifact. The worker creates/updates the proof artifact;
+Autopod runs the command and writes attempt-scoped `evidence.yaml`. Never ask the
+worker to author evidence directly.
+
 #### Body
 
 Required sections, in this order:

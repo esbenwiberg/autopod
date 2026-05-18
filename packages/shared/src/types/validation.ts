@@ -126,12 +126,30 @@ export interface AcValidationResult {
 export interface FactCheckResult {
   factId: string;
   proves: string[];
+  kind?: string;
   artifactPath: string;
   command: string;
   passed: boolean;
+  status?: 'pass' | 'fail';
+  exitCode?: number;
+  durationMs?: number;
+  artifact?: {
+    path: string;
+    change?: string;
+    exists: boolean;
+    changed: boolean;
+    hash?: string;
+  };
+  attachments?: FactEvidenceAttachment[];
   reasoning: string;
   stdout?: string;
   stderr?: string;
+}
+
+export interface FactEvidenceAttachment {
+  kind: 'screenshot' | 'trace' | 'video' | 'report' | 'log' | 'artifact';
+  path: string;
+  label?: string;
 }
 
 export interface FactValidationResult {

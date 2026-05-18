@@ -1,4 +1,13 @@
 export type FactArtifactChange = 'create' | 'update' | 'touch';
+export type FactKind =
+  | 'unit-test'
+  | 'integration-test'
+  | 'contract-test'
+  | 'browser-test'
+  | 'typecheck'
+  | 'lint-rule'
+  | 'smoke-script'
+  | 'custom-command';
 
 export interface ContractScenario {
   id: string;
@@ -10,7 +19,7 @@ export interface ContractScenario {
 export interface RequiredFact {
   id: string;
   proves: string[];
-  kind: string;
+  kind: FactKind;
   artifact: {
     path: string;
     change: FactArtifactChange;
