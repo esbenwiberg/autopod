@@ -25,6 +25,7 @@ export type {
   QualityTrend,
   FixFeedback,
   SpawnFixResponse,
+  UpdateFromBaseResponse,
 } from './types/pod.js';
 
 export type {

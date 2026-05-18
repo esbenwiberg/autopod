@@ -559,3 +559,9 @@ export interface FixFeedback {
 export type SpawnFixResponse =
   | { ok: true; queued: boolean; queueLength: number; fixPodId: string | null }
   | { ok: false; reason: 'parent_terminal' };
+
+export type UpdateFromBaseResponse =
+  | { ok: true; action: 'queued_after_abort' }
+  | { ok: true; action: 'already_up_to_date'; baseBranch: string }
+  | { ok: true; action: 'rebased'; baseBranch: string; validation: 'started' }
+  | { ok: false; action: 'conflict'; baseBranch: string; conflicts: string[] };
