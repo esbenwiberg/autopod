@@ -942,7 +942,7 @@ public struct ProfileEditorView: View {
                 .labelsHidden()
                 .frame(width: 130)
             }
-            fieldRow("Reviewer Model", help: "Model used for AC validation and task review. Sonnet is sufficient for automated checks.") {
+            fieldRow("Reviewer Model", help: "Model used for legacy criteria validation and task review. Sonnet is sufficient for automated checks.") {
                 Picker("", selection: $profile.reviewerModel) {
                     Text("Sonnet").tag("sonnet")
                     Text("Opus").tag("opus")

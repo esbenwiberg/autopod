@@ -167,7 +167,7 @@ public enum ProfileOverrideCatalog {
             key: "reviewerModel",
             label: "Reviewer Model",
             section: .agent,
-            help: "Model used for AC validation and task review. Defaults to Default Model."
+            help: "Model used for legacy criteria validation and task review. Defaults to Default Model."
         ),
         .init(
             key: "defaultRuntime",

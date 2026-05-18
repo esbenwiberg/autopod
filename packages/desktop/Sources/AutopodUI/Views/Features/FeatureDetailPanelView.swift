@@ -234,7 +234,7 @@ public struct FeatureDetailPanelView: View {
             ("testtube.2", "Test", .cyan),
             ("heart.text.clipboard", "Health", .teal),
             ("globe", "Smoke", .green),
-            ("checklist", "AC", .mint),
+            ("checklist", "Legacy", .mint),
             ("brain.head.profile", "AI Review", .purple),
             ("checkmark.seal", "Overall", .green),
         ]

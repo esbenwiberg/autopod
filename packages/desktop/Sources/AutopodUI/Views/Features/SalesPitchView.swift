@@ -320,7 +320,7 @@ public struct SalesPitchView: View {
                 icon: "checkmark.shield.fill",
                 color: .green,
                 title: "Trust Nothing, Verify Everything",
-                body: "8-phase validation pipeline: build, test, health check, Playwright smoke, legacy AC, required facts, AI review — proof-of-work screenshots at every phase. Interrupt in-flight validation, dismiss recurring false positives, or grant more attempts.",
+                body: "8-phase validation pipeline: build, test, health check, Playwright smoke, legacy criteria, required facts, AI review — proof-of-work screenshots at every phase. Interrupt in-flight validation, dismiss recurring false positives, or grant more attempts.",
                 tags: ["Playwright", "Screenshots", "LLM Review", "Auto-Retry"]
             ),
             SellingPoint(

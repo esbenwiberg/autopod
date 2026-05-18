@@ -129,7 +129,7 @@ public struct SastResultResponse: Codable, Sendable {
   public let duration: Int
 }
 
-// MARK: - AC Validation
+// MARK: - Legacy Criteria Validation
 
 public struct AcValidationResponse: Codable, Sendable {
   public let status: String

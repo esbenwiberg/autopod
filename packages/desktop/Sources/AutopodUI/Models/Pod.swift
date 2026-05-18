@@ -212,7 +212,7 @@ public struct ValidationChecks: Sendable {
     public let reviewSkipReason: String?
     /// Machine-readable kind paired with reviewSkipReason — see backend ValidationResult.
     public let reviewSkipKind: String?
-    /// Machine-readable reason when AC was skipped — see backend ValidationResult.
+    /// Machine-readable reason when legacy criteria validation was skipped — see backend ValidationResult.
     public let acSkipReason: String?
     public let healthCheck: HealthCheckDetail?
     public let pages: [PageDetail]?
@@ -549,7 +549,7 @@ public struct Pod: Identifiable, Sendable {
 
     /// Base branch this pod was forked from (workspace handoff)
     public var baseBranch: String?
-    /// Path to AC file loaded from repo (workspace handoff)
+    /// Path to legacy criteria file loaded from repo (workspace handoff)
     public var acFrom: String?
     /// Acceptance criteria (loaded from acFrom or manual input)
     public var acceptanceCriteria: [AcDefinition]?

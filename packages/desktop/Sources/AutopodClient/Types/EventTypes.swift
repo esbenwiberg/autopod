@@ -83,7 +83,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
     case .sast: return "SAST"
     case .health: return "Health"
     case .pages: return "Pages"
-    case .ac: return "AC"
+    case .ac: return "Legacy"
     case .facts: return "Facts"
     case .review: return "Review"
     }

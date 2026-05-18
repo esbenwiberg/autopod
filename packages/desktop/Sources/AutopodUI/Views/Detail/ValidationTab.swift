@@ -46,7 +46,7 @@ public struct ValidationTab: View {
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
   private var displayPhase: ValidationPhase? { selectedPhase ?? progress?.activePhase }
 
-  /// Combined ordered screenshot set for lightbox navigation: smoke → ac → review.
+  /// Combined ordered screenshot set for lightbox navigation: smoke → legacy → review.
   /// Derived from whichever source is live (progress from events, or final checks).
   private var screenshotSet: [ScreenshotRef] {
     let pageShots = (progress?.pageDetails ?? checks?.pages ?? []).compactMap { $0.screenshot }
@@ -131,7 +131,7 @@ public struct ValidationTab: View {
       case .ac:
         let count = p.acTotalCount
         if p.ac.status == .running { return "running…" }
-        return count > 0 ? "\(count) criteria" : nil
+        return count > 0 ? "\(count) legacy" : nil
       case .facts:
         let count = p.factTotalCount
         if p.facts.status == .running { return "running…" }
@@ -149,7 +149,7 @@ public struct ValidationTab: View {
       case .pages:
         return c.pages.map { "\($0.count) pages" }
       case .ac:
-        return c.acChecks.map { "\($0.count) criteria" }
+        return c.acChecks.map { "\($0.count) legacy" }
       case .facts:
         return c.factChecks.map { "\($0.count) facts" }
       default:
@@ -377,7 +377,8 @@ public struct ValidationTab: View {
       }
     } else {
       let criteria = pod.acceptanceCriteria ?? []
-      // AC list always visible when pod has criteria, regardless of validation state
+      // Legacy criteria list stays visible when older pods have criteria,
+      // regardless of validation state.
       if !criteria.isEmpty {
         acListSection(criteria: criteria, acChecks: progress?.acChecks ?? checks?.acChecks)
       }
@@ -608,8 +609,8 @@ public struct ValidationTab: View {
     let criteria = pod.acceptanceCriteria
 
     VStack(alignment: .leading, spacing: 12) {
-      phaseStatusRow(status: status, passLabel: "All criteria verified",
-                     failLabel: "Some criteria failed",
+      phaseStatusRow(status: status, passLabel: "Legacy checks verified",
+                     failLabel: "Legacy checks failed",
                      skipLabel: acSkipLabel(reason: checks?.acSkipReason))
       if let criteria, !criteria.isEmpty {
         acListSection(criteria: criteria, acChecks: acChecks)
@@ -946,16 +947,16 @@ public struct ValidationTab: View {
     }
   }
 
-  /// Label for the AC chip when status is .skipped, derived from the backend's
+  /// Label for the legacy criteria chip when status is .skipped, derived from the backend's
   /// machine-readable `acSkipReason` so the UI can distinguish "tier-1 failed"
   /// from "no criteria configured" instead of showing a generic message.
   private func acSkipLabel(reason: String?) -> String {
     switch reason {
     case "upstream-failed": return "Skipped — earlier validation phases failed"
-    case "profile-skip": return "AC validation disabled by profile"
+    case "profile-skip": return "Legacy criteria validation disabled by profile"
     case "health-failed": return "Skipped — health check failed"
-    case "no-criteria": return "No acceptance criteria configured"
-    default: return "AC validation skipped"
+    case "no-criteria": return "No legacy criteria configured"
+    default: return "Legacy criteria validation skipped"
     }
   }
 
@@ -1069,10 +1070,10 @@ public struct ValidationTab: View {
     let firing = firingCount(criteria, acChecks)
     let total = criteria.count
     let title: String = total == 0
-      ? "Acceptance Criteria (0)"
+      ? "Legacy Criteria (0)"
       : (firing == total
-          ? "Acceptance Criteria (\(total))"
-          : "Acceptance Criteria (\(firing) firing / \(total))")
+          ? "Legacy Criteria (\(total))"
+          : "Legacy Criteria (\(firing) firing / \(total))")
     CollapsibleSection(
       title: title,
       icon: "checklist",
@@ -1089,7 +1090,7 @@ public struct ValidationTab: View {
         if total > 0 && firing == 0 {
           HStack(alignment: .top, spacing: 6) {
             Image(systemName: "info.circle").font(.system(size: 10))
-            Text("No firing checks — every criterion is `none` (build/test/grep commands and undeclared types are no-ops). Pass/fail falls back to the diff reviewer + pipeline build/test.")
+            Text("No firing legacy checks — every criterion is `none` (build/test/grep commands and undeclared types are no-ops). Pass/fail falls back to required facts, the diff reviewer, and pipeline build/test.")
               .font(.caption2)
               .fixedSize(horizontal: false, vertical: true)
           }
@@ -1108,10 +1109,10 @@ public struct ValidationTab: View {
     }
   }
 
-  /// True when this AC actually gates pass/fail in the validation engine.
+  /// True when this legacy criterion actually gates pass/fail in the validation engine.
   /// Mirrors `local-validation-engine.ts` — `api`, `web`, and `cmd` types fire.
   /// Any criterion classified to `none` post-execution is decorative (the
-  /// banlist demotes shell-command ACs that look like build/test/lint to none).
+  /// banlist demotes shell-command criteria that look like build/test/lint to none).
   private func acIsFiring(_ criterion: AcDefinition, _ result: AcCheckDetail?) -> Bool {
     if let v = result?.validationType {
       return v == "api" || v == "web-ui" || v == "cmd"

@@ -57,7 +57,7 @@ public struct AcDefinition: Codable, Sendable, Hashable, Identifiable {
   /// values outside the current schema — an unknown polarity (e.g. "pass-on-200"
   /// from earlier spec drafts) or a `hint` that a brief's YAML parser mangled
   /// into an object when the shell command contained unescaped quotes. One bad
-  /// AC should not blank the entire pod list.
+  /// Legacy criteria should not blank the entire pod list.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     self.id = UUID()
