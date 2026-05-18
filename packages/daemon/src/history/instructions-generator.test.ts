@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { generateHistoryInstructions } from './instructions-generator.js';
+import {
+  generateHistoryInstructions,
+  getHistoryInstructionTarget,
+} from './instructions-generator.js';
 
 describe('instructions-generator', () => {
-  it('generates CLAUDE.md with dataset stats', () => {
+  it('generates runtime instructions with dataset stats', () => {
     const result = generateHistoryInstructions({
       totalSessions: 47,
       byStatus: { complete: 32, failed: 8, killed: 7 },
@@ -36,9 +39,32 @@ describe('instructions-generator', () => {
     });
 
     expect(result).toContain('recurring failure patterns');
-    expect(result).toContain('CLAUDE.md');
+    expect(result).toContain('agent-instruction improvements');
     expect(result).toContain('skill');
     expect(result).toContain('token waste');
+  });
+
+  it('uses Codex instruction targets when requested', () => {
+    const target = getHistoryInstructionTarget('codex');
+    const result = generateHistoryInstructions(
+      {
+        totalSessions: 3,
+        byStatus: { complete: 3 },
+        totalCost: 1.25,
+      },
+      target,
+    );
+
+    expect(target.path).toBe('/workspace/AGENTS.md');
+    expect(result).toContain('You are Codex');
+    expect(result).toContain('Suggested AGENTS.md addition');
+  });
+
+  it('keeps Claude instruction targets for Claude profiles', () => {
+    const target = getHistoryInstructionTarget('claude');
+
+    expect(target.path).toBe('/workspace/CLAUDE.md');
+    expect(target.agentName).toBe('Claude Code');
   });
 
   it('handles zero pods gracefully', () => {

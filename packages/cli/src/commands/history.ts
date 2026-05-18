@@ -4,6 +4,12 @@ import type { AutopodClient } from '../api/client.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
 
+function historyInstructionPath(runtime: string): string {
+  if (runtime === 'codex') return '/workspace/AGENTS.md';
+  if (runtime === 'copilot') return '/workspace/.github/copilot-instructions.md';
+  return '/workspace/CLAUDE.md';
+}
+
 /**
  * Parse a relative duration string (e.g. "7d", "30d", "2w") into an ISO date string.
  * Also accepts ISO dates directly.
@@ -71,7 +77,11 @@ export function registerHistoryCommands(program: Command, getClient: () => Autop
         console.log(chalk.dim('  /history/history.db         SQLite database with pod data'));
         console.log(chalk.dim('  /history/summary.md         Overview and stats'));
         console.log(chalk.dim('  /history/analysis-guide.md  Example queries and analysis tips'));
-        console.log(chalk.dim('  /workspace/CLAUDE.md        Instructions for Claude Code'));
+        console.log(
+          chalk.dim(
+            `  ${historyInstructionPath(pod.runtime).padEnd(27)} Runtime-native instructions`,
+          ),
+        );
       },
     );
 }

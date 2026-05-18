@@ -68,7 +68,10 @@ import {
 } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import { createHistoryExporter } from '../history/history-exporter.js';
-import { generateHistoryInstructions } from '../history/instructions-generator.js';
+import {
+  generateHistoryInstructions,
+  getHistoryInstructionTarget,
+} from '../history/instructions-generator.js';
 import { getBaseImage } from '../images/dockerfile-generator.js';
 import type {
   ContainerManager,
@@ -4279,11 +4282,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 analysisGuide,
               );
 
-              const instructions = generateHistoryInstructions(stats);
-              await containerManager.writeFile(containerId, '/workspace/CLAUDE.md', instructions);
+              const instructionTarget = getHistoryInstructionTarget(pod.runtime);
+              if (instructionTarget.path.includes('/.github/')) {
+                await containerManager.execInContainer(
+                  containerId,
+                  ['mkdir', '-p', '/workspace/.github'],
+                  { timeout: 5_000 },
+                );
+              }
+              const instructions = generateHistoryInstructions(stats, instructionTarget);
+              await containerManager.writeFile(containerId, instructionTarget.path, instructions);
 
               logger.info(
-                { podId, exportedSessions: stats.totalSessions },
+                {
+                  podId,
+                  exportedSessions: stats.totalSessions,
+                  instructionPath: instructionTarget.path,
+                },
                 'History data exported to workspace container',
               );
             } catch (err) {

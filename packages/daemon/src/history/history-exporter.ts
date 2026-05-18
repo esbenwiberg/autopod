@@ -594,8 +594,8 @@ WHERE task_summary IS NOT NULL
 
 ## What to Look For
 
-1. **Recurring build errors**: Same error across multiple pods → update CLAUDE.md with build fix guidance
-2. **Frequent escalations**: Same question asked repeatedly → document the answer in CLAUDE.md or create a skill
+1. **Recurring build errors**: Same error across multiple pods → update agent instructions with build fix guidance
+2. **Frequent escalations**: Same question asked repeatedly → document the answer in agent instructions or create a skill
 3. **Validation rework loops**: Sessions that fail validation multiple times on the same issue → add clearer acceptance criteria
 4. **High-cost failures**: Expensive pods that ultimately fail → investigate if task scope is too ambitious
 5. **Agent deviations**: Frequent plan deviations → improve task descriptions or system instructions
@@ -604,7 +604,7 @@ WHERE task_summary IS NOT NULL
 ## Recommendations Format
 
 When you find a pattern, suggest one of:
-- **CLAUDE.md update**: Specific text to add/change in the project's CLAUDE.md
+- **Agent-instruction update**: Specific text to add/change in AGENTS.md, CLAUDE.md, or profile instructions
 - **Skill idea**: A reusable slash command that could prevent the issue
 - **Profile config change**: Adjustments to validation, build commands, or acceptance criteria
 - **Task description improvement**: How to write better task descriptions
