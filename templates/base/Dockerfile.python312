@@ -46,6 +46,11 @@ RUN chown autopod:autopod /workspace
 
 USER autopod
 
+# pip --user is the only install location available to the non-root agent —
+# put its bin dir on PATH so user-installed CLIs (alembic, pytest plugins, etc.)
+# are reachable from the validator's non-interactive `sh -c` exec.
+ENV PATH="/home/autopod/.local/bin:$PATH"
+
 ENV TURBO_CACHE_DIR=/tmp/.turbo
 ENV npm_config_nodedir=/usr/local
 RUN echo "nodedir=/usr/local" >> /home/autopod/.npmrc

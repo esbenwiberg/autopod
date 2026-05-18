@@ -67,6 +67,10 @@ USER autopod
 # PGDATA defaults to a tmp dir so an agent's agent-serve.sh can `initdb -D $PGDATA`
 # and `pg_ctl -D $PGDATA start` without writing into the image layer or /workspace.
 ENV PATH="/usr/lib/postgresql/17/bin:$PATH"
+# pip --user is the only install location available to the non-root agent —
+# put its bin dir on PATH so user-installed CLIs (alembic, pytest plugins, etc.)
+# are reachable from the validator's non-interactive `sh -c` exec.
+ENV PATH="/home/autopod/.local/bin:$PATH"
 ENV PGDATA=/tmp/pgdata
 
 # Allow bare imports of globally installed packages (e.g. playwright in validation
