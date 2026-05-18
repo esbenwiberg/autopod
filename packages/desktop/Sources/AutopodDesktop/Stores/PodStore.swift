@@ -253,7 +253,10 @@ public final class PodStore {
 
   public func markValidationPhaseCompleted(_ podId: String, phase: ValidationPhase, result: ValidationPhaseResult) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
-    pods[index].validationProgress?.markCompleted(phase, result: result)
+    let baseURL = api?.baseURL
+    pods[index].validationProgress?.markCompleted(phase, result: result) { dto in
+      PodMapper.mapScreenshotRef(dto, baseURL: baseURL)
+    }
   }
 
   public func setPrUrl(_ podId: String, url: URL) {

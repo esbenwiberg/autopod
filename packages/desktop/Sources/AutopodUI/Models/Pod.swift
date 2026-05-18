@@ -411,7 +411,11 @@ public struct ValidationProgress: Sendable {
         }
     }
 
-    public mutating func markCompleted(_ phase: ValidationPhase, result: ValidationPhaseResult) {
+    public mutating func markCompleted(
+        _ phase: ValidationPhase,
+        result: ValidationPhaseResult,
+        resolveScreenshot: (ScreenshotRefResponse?) -> ScreenshotRef? = { _ in nil }
+    ) {
         let ps: PhaseStatus = result.phaseStatus == "pass" ? .passed
             : result.phaseStatus == "fail" ? .failed
             : .skipped
@@ -455,7 +459,7 @@ public struct ValidationProgress: Sendable {
                         )
                     },
                     loadTime: page.loadTime,
-                    screenshot: nil  // populated after REST refresh; no baseURL available in event stream
+                    screenshot: resolveScreenshot(page.screenshot)
                 )
             }
         case .ac:
@@ -464,7 +468,7 @@ public struct ValidationProgress: Sendable {
             acChecks = result.acResult?.results.map { check in
                 AcCheckDetail(
                     criterion: check.criterion, passed: check.passed,
-                    reasoning: check.reasoning, screenshot: nil,  // populated after REST refresh
+                    reasoning: check.reasoning, screenshot: resolveScreenshot(check.screenshot),
                     validationType: check.validationType
                 )
             }
@@ -488,7 +492,7 @@ public struct ValidationProgress: Sendable {
                     requirementsCheck: r.requirementsCheck?.map { rc in
                         RequirementCheckDetail(criterion: rc.criterion, met: rc.met, note: rc.note)
                     },
-                    screenshots: []  // populated after REST refresh; no baseURL available in event stream
+                    screenshots: r.screenshots.compactMap { resolveScreenshot($0) }
                 )
             }
         }
