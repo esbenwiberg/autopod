@@ -62,7 +62,7 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   ],
   review_required: ['running', 'validating', 'validated', 'killing', 'queued'],
   approved: ['merging'],
-  merging: ['complete', 'merge_pending'],
+  merging: ['complete', 'merge_pending', 'validated'],
   // A fix pod that pushed a non-working fix sits in merge_pending; new failure
   // signals or a manual spawn recycle it back to `queued` to take another shot.
   merge_pending: ['complete', 'failed', 'killing', 'queued'],

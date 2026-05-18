@@ -1,4 +1,12 @@
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +68,80 @@ const SYSTEM_TOP_LEVEL_DIRS = new Set([
   'srv',
   'opt',
 ]);
+
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isExcludedTopLevel(relPath: string, excludes?: string[]): boolean {
+  const topLevel = relPath.split('/')[0];
+  return Boolean(topLevel && excludes?.includes(topLevel));
+}
+
+function removeStaleSyncStagingDirs(hostPath: string): void {
+  for (const entry of readdirSync(hostPath)) {
+    if (entry.startsWith('.autopod-sync-') || entry.startsWith('.autopod-extract-')) {
+      rmSync(join(hostPath, entry), { recursive: true, force: true });
+    }
+  }
+}
+
+function collectRelativeEntries(
+  root: string,
+  excludes?: string[],
+  skipTopLevel?: string,
+): string[] {
+  const entries: string[] = [];
+
+  function walk(relativeDir: string): void {
+    const absoluteDir = relativeDir ? join(root, relativeDir) : root;
+    for (const dirent of readdirSync(absoluteDir, { withFileTypes: true })) {
+      const relPath = relativeDir ? `${relativeDir}/${dirent.name}` : dirent.name;
+      const topLevel = relPath.split('/')[0];
+      if (topLevel === skipTopLevel || isExcludedTopLevel(relPath, excludes)) {
+        continue;
+      }
+      entries.push(relPath);
+      if (dirent.isDirectory() && !dirent.isSymbolicLink()) {
+        walk(relPath);
+      }
+    }
+  }
+
+  walk('');
+  return entries;
+}
+
+function mirrorStagedDirectory(
+  stagingPath: string,
+  hostPath: string,
+  excludes?: string[],
+  stagingBase?: string,
+): void {
+  for (const entry of readdirSync(stagingPath)) {
+    cpSync(join(stagingPath, entry), join(hostPath, entry), {
+      recursive: true,
+      force: true,
+      errorOnExist: false,
+      dereference: false,
+      preserveTimestamps: true,
+    });
+  }
+
+  const hostEntries = collectRelativeEntries(hostPath, excludes, stagingBase).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const relPath of hostEntries) {
+    if (!pathExists(join(stagingPath, relPath))) {
+      rmSync(join(hostPath, relPath), { recursive: true, force: true });
+    }
+  }
+}
 
 interface DockerContainerManagerOptions {
   docker?: Dockerode;
@@ -416,62 +498,68 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
 
-    // Clear host directory contents before extracting (mirrors exec-based sync behaviour),
-    // skipping any entries that are in the excludes list.
-    for (const entry of readdirSync(hostPath)) {
-      if (!excludes?.includes(entry)) {
-        rmSync(join(hostPath, entry), { recursive: true, force: true });
-      }
-    }
+    mkdirSync(hostPath, { recursive: true });
+    removeStaleSyncStagingDirs(hostPath);
+    const stagingBase = `.autopod-extract-${process.pid}-${Date.now()}`;
+    const stagingPath = join(hostPath, stagingBase);
+    mkdirSync(stagingPath, { recursive: true });
 
     // Tar entries are prefixed with the basename of containerPath (e.g. "workspace/")
     const prefix = `${basename(containerPath)}/`;
     const extract = tar.extract();
 
-    return new Promise<void>((resolve, reject) => {
-      extract.on('entry', (header, stream, next) => {
-        const rel = header.name.startsWith(prefix) ? header.name.slice(prefix.length) : header.name;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        extract.on('entry', (header, stream, next) => {
+          const rel = header.name.startsWith(prefix)
+            ? header.name.slice(prefix.length)
+            : header.name;
 
-        if (!rel) {
-          // Root directory entry itself — skip
-          stream.resume();
-          stream.on('end', next);
-          return;
-        }
+          if (!rel) {
+            // Root directory entry itself — skip
+            stream.resume();
+            stream.on('end', next);
+            return;
+          }
 
-        // Skip entries that match an excluded top-level name
-        const topLevel = rel.split('/')[0];
-        if (topLevel && excludes?.includes(topLevel)) {
-          stream.resume();
-          stream.on('end', next);
-          return;
-        }
+          // Skip entries that match an excluded top-level name
+          const topLevel = rel.split('/')[0];
+          if (topLevel && excludes?.includes(topLevel)) {
+            stream.resume();
+            stream.on('end', next);
+            return;
+          }
 
-        const fullPath = join(hostPath, rel);
+          const fullPath = join(stagingPath, rel);
 
-        if (header.type === 'directory') {
-          mkdirSync(fullPath, { recursive: true });
-          stream.resume();
-          stream.on('end', next);
-        } else {
-          mkdirSync(dirname(fullPath), { recursive: true });
-          const chunks: Buffer[] = [];
-          stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-          stream.on('end', () => {
-            try {
-              writeFileSync(fullPath, Buffer.concat(chunks));
-              next();
-            } catch (err) {
-              reject(err);
-            }
-          });
-          stream.on('error', reject);
-        }
+          if (header.type === 'directory') {
+            mkdirSync(fullPath, { recursive: true });
+            stream.resume();
+            stream.on('end', next);
+          } else {
+            mkdirSync(dirname(fullPath), { recursive: true });
+            const chunks: Buffer[] = [];
+            stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+            stream.on('end', () => {
+              try {
+                writeFileSync(fullPath, Buffer.concat(chunks));
+                next();
+              } catch (err) {
+                reject(err);
+              }
+            });
+            stream.on('error', reject);
+          }
+        });
+        extract.on('finish', resolve);
+        extract.on('error', reject);
+        (archiveStream as NodeJS.ReadableStream).pipe(extract);
       });
-      extract.on('finish', resolve);
-      extract.on('error', reject);
-      (archiveStream as NodeJS.ReadableStream).pipe(extract);
-    });
+
+      mirrorStagedDirectory(stagingPath, hostPath, excludes, stagingBase);
+    } finally {
+      rmSync(stagingPath, { recursive: true, force: true });
+    }
   }
 
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
@@ -538,7 +626,10 @@ export class DockerContainerManager implements ContainerManager {
       exitCode = inspection.ExitCode ?? 1;
     } catch (err: unknown) {
       if (err instanceof DockerCallTimeoutError) {
-        this.logger.warn({ containerId, command: safeCommand }, 'exec.inspect timed out — assuming exit code 1');
+        this.logger.warn(
+          { containerId, command: safeCommand },
+          'exec.inspect timed out — assuming exit code 1',
+        );
       } else {
         throw err;
       }

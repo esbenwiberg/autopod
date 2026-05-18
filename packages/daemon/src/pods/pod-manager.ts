@@ -590,6 +590,14 @@ function warnIfSinglePrSeriesMissingSeriesMeta(pod: Pod, logger: Logger): void {
   );
 }
 
+function resolvePrBaseBranch(pod: Pod, profile: Profile): string {
+  const fallback = profile.defaultBranch ?? 'main';
+  const candidate = pod.baseBranch ?? fallback;
+  if (candidate !== pod.branch) return candidate;
+  if (fallback !== pod.branch) return fallback;
+  return pod.branch === 'main' ? candidate : 'main';
+}
+
 /** Merge new overrides into existing ones, deduplicating by findingId (latest wins). */
 function mergeOverrides(
   existing: ValidationOverride[],
@@ -1616,9 +1624,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         status: 'complete',
         model: completed.model,
         runtime: completed.runtime,
-        duration: completed.startedAt
-          ? Date.now() - new Date(completed.startedAt).getTime()
-          : null,
+        duration: completed.startedAt ? Date.now() - new Date(completed.startedAt).getTime() : null,
         filesChanged: completed.filesChanged,
         createdAt: completed.createdAt,
       },
@@ -2222,21 +2228,42 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // Sync files back, excluding .git so the host gitlink is never overwritten.
-      // `set -e` aborts on rm failure (so we never end up with an emptied destination
-      // and no replacement). Piping the second find into xargs (instead of `find -exec
-      // cp \;`) propagates per-file cp failures as a non-zero exit — find-exec swallows
-      // them and returns 0 even if every cp died, which previously left the host
-      // worktree as `.git`-only and tripped the deletion guard with thousands of
-      // phantom deletions.
-      const syncResult = await cm.execInContainer(
-        containerId,
+      //
+      // Important: never clear the host worktree before the replacement is complete.
+      // Docker Desktop / VirtioFS stalls can kill an exec halfway through. The old
+      // clear-then-copy sequence left the host tree partially empty, which `git add -A`
+      // interpreted as thousands of deletions. This is copy-first/delete-after:
+      //  1. Copy /workspace into a staging dir inside the bind mount.
+      //  2. Copy the staged content over the host worktree.
+      //  3. Delete host paths that are absent from the complete staged copy.
+      const syncStagingPrefix = `.autopod-sync-${podId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      const syncScript = [
+        'set -eu',
+        "find /mnt/worktree -mindepth 1 -maxdepth 1 \\( -name '.autopod-sync-*' -o -name '.autopod-extract-*' \\) -exec rm -rf {} +",
+        `STAGING="/mnt/worktree/${syncStagingPrefix}-$$"`,
+        'STAGING_BASE=$(basename "$STAGING")',
+        'trap \'rm -rf "$STAGING"\' EXIT INT TERM',
+        'rm -rf "$STAGING"',
+        'mkdir -p "$STAGING"',
+        'workspace_count=$(find /workspace -mindepth 1 -maxdepth 1 ! -name .git | wc -l | tr -d " ")',
+        'find /workspace -mindepth 1 -maxdepth 1 ! -name .git -exec cp -a {} "$STAGING/" \\;',
+        'staging_count=$(find "$STAGING" -mindepth 1 -maxdepth 1 | wc -l | tr -d " ")',
+        'test "$workspace_count" = "$staging_count"',
+        'cp -a "$STAGING/." /mnt/worktree/',
+        'cd /mnt/worktree',
         [
-          'sh',
-          '-c',
-          "set -e; find /mnt/worktree -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +; find /workspace -mindepth 1 -maxdepth 1 ! -name '.git' -print0 | xargs -0 -r -I{} cp -a {} /mnt/worktree/",
-        ],
-        { timeout: 120_000 },
-      );
+          'find . -mindepth 1 -depth',
+          "! -path './.git'",
+          "! -path './.git/*'",
+          '! -path "./$STAGING_BASE"',
+          '! -path "./$STAGING_BASE/*"',
+          '-exec sh -c \'staging=$1; shift; for p do rel=${p#./}; if [ ! -e "$staging/$rel" ] && [ ! -L "$staging/$rel" ]; then rm -rf -- "$p"; fi; done\' sh "$STAGING" {} +',
+        ].join(' '),
+        'rm -rf "$STAGING"',
+      ].join('; ');
+      const syncResult = await cm.execInContainer(containerId, ['sh', '-c', syncScript], {
+        timeout: 120_000,
+      });
       if (syncResult.exitCode !== 0) {
         throw new Error(
           `Workspace sync-back command failed (exit ${syncResult.exitCode}): ${syncResult.stderr.trim() || syncResult.stdout.trim()}`,
@@ -2703,6 +2730,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return true;
   }
 
+  function parkOnWorktreeSyncFailure(podId: string, reason: string): void {
+    try {
+      podRepo.update(podId, { worktreeCompromised: true });
+    } catch (updateErr) {
+      logger.warn({ err: updateErr, podId }, 'Failed to persist worktreeCompromised flag');
+    }
+    emitActivityStatus(
+      podId,
+      `${reason} Recover the worktree before retrying validation or PR creation.`,
+    );
+    const current = podRepo.getOrThrow(podId);
+    if (current.status === 'running' || current.status === 'validating') {
+      transition(current, 'failed');
+    }
+  }
+
   /**
    * Shared push-then-open-PR flow used by both `retryCreatePr` (post-complete) and
    * `resumePod` (post-failure). Caller is responsible for the status preconditions
@@ -2728,7 +2771,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
     }
 
-    const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+    const baseBranch = resolvePrBaseBranch(pod, profile);
     const pat = selectGitPat(profile);
     try {
       await worktreeManager.mergeBranch({
@@ -5310,6 +5353,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // as agent work. Push failure here is the canary for /workspace/.git diverging from
       // the host bare's branch tip — see syncWorkspaceBack for context.
       const safeAutoCommit = syncSucceeded && agentCommitsPushed;
+      if (!syncSucceeded) {
+        parkOnWorktreeSyncFailure(
+          podId,
+          'Workspace sync failed before auto-commit — validation blocked.',
+        );
+        return;
+      }
       if (pod.worktreePath) {
         const profileForCommit = profileStore.get(pod.profileName);
         try {
@@ -5348,15 +5398,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   { err: retryErr, podId },
                   'Commit after worktree recovery also failed',
                 );
-                handleDeletionGuardError(podId, retryErr);
+                if (handleDeletionGuardError(podId, retryErr)) {
+                  const compromised = podRepo.getOrThrow(podId);
+                  if (compromised.status === 'running') {
+                    transition(compromised, 'failed');
+                  }
+                  return;
+                }
               }
             } else {
               logger.error({ err, podId }, 'Auto-commit blocked by deletion safety guard');
-              handleDeletionGuardError(podId, err);
+              if (handleDeletionGuardError(podId, err)) {
+                const compromised = podRepo.getOrThrow(podId);
+                if (compromised.status === 'running') {
+                  transition(compromised, 'failed');
+                }
+                return;
+              }
             }
           } else {
             logger.error({ err, podId }, 'Auto-commit blocked by deletion safety guard');
-            handleDeletionGuardError(podId, err);
+            if (handleDeletionGuardError(podId, err)) {
+              const compromised = podRepo.getOrThrow(podId);
+              if (compromised.status === 'running') {
+                transition(compromised, 'failed');
+              }
+              return;
+            }
           }
         }
 
@@ -5517,7 +5585,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               if (prManager) {
                 emitActivityStatus(podId, 'Creating PR…');
                 const refreshed = podRepo.getOrThrow(podId);
-                const baseBranch = refreshed.baseBranch ?? profile.defaultBranch ?? 'main';
+                const baseBranch = resolvePrBaseBranch(refreshed, profile);
                 const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: validated above
                   worktreePath: refreshed.worktreePath!,
@@ -5979,12 +6047,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options?.output !== 'branch') {
         // PR creation failed during validation — retry it now
         emitActivityStatus(podId, 'No PR found — creating PR before merging…');
+        let retryPrUrl: string | null = null;
         try {
           const retryProfile = profileStore.get(pod.profileName);
-          const retryDefaultBranch = pod.baseBranch ?? retryProfile.defaultBranch ?? 'main';
           await worktreeManager.mergeBranch({
             worktreePath: pod.worktreePath,
-            // Push the feature branch up so the PR can be opened against retryDefaultBranch.
+            // Push the feature branch up so the PR can be opened against the resolved base.
             targetBranch: pod.branch,
             // Pass the PAT explicitly — approval retry runs post-container, so the
             // in-memory PAT cache may be cold after a daemon restart.
@@ -6002,7 +6070,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             worktreePath: pod.worktreePath!,
             repoUrl: retryProfile.repoUrl ?? undefined,
             branch: pod.branch,
-            baseBranch: retryDefaultBranch,
+            baseBranch: resolvePrBaseBranch(pod, retryProfile),
             podId,
             task: pod.task,
             profileName: pod.profileName,
@@ -6021,6 +6089,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             securityFindings: getLatestPushFindings(podId),
           });
           const newPrUrl = createResult.url;
+          retryPrUrl = newPrUrl;
           if (createResult.usedFallback) {
             const which = createResult.narrativeUsedFallback
               ? createResult.titleUsedFallback
@@ -6062,9 +6131,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         } catch (err) {
           logger.error({ err, podId }, 'Failed to create/merge PR during approval');
-          if (!handleDeletionGuardError(podId, err)) {
-            emitActivityStatus(podId, 'PR creation failed — branch is pushed but no PR was merged');
+          if (handleDeletionGuardError(podId, err)) {
+            transition(s2, 'validated');
+            return;
           }
+          const message = err instanceof Error ? err.message : String(err);
+          if (retryPrUrl) {
+            const blockReason = `Merge after PR creation failed: ${message}`;
+            emitActivityStatus(podId, `Merge pending: ${blockReason}`);
+            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
+            startMergePolling(podId);
+            return;
+          }
+          emitActivityStatus(podId, 'PR creation failed — pod returned to validated');
+          transition(s2, 'validated');
+          return;
         }
       } else if (pod.worktreePath) {
         // Fallback: no PR manager configured — push branch directly
@@ -6767,6 +6848,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const pod = podRepo.getOrThrow(podId);
       const force = options?.force ?? false;
 
+      if (pod.worktreeCompromised) {
+        emitActivityStatus(
+          podId,
+          'Validation blocked — recover the worktree before retrying validation.',
+        );
+        throw new AutopodError(
+          `Pod ${podId} worktree is compromised — recover it before validation`,
+          'WORKTREE_COMPROMISED',
+          409,
+        );
+      }
+
       // When force-reworking from a terminal state, re-provision the pod from scratch
       // instead of trying to restart a potentially stale container. Docker Desktop's VirtioFS
       // mounts can break after long idle periods, making the old container unreachable.
@@ -6900,6 +6993,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace before validation');
           }
+        }
+        if (!validationSyncOk) {
+          parkOnWorktreeSyncFailure(
+            podId,
+            'Workspace sync failed before validation — validation blocked.',
+          );
+          return;
         }
 
         // Get the actual diff and commit log for AI task review.
@@ -7281,9 +7381,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 parkOnCredentialFailure(podId, err);
                 return;
               }
-              if (!handleDeletionGuardError(podId, err)) {
-                throw err;
+              if (handleDeletionGuardError(podId, err)) {
+                const compromised = podRepo.getOrThrow(podId);
+                if (compromised.status === 'validating') {
+                  transition(compromised, 'failed');
+                }
+                return;
               }
+              throw err;
             }
 
             // Re-compute diff stats now that auto-commit has run.
@@ -7341,7 +7446,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: s2.baseBranch ?? passDefaultBranch,
+                  baseBranch: resolvePrBaseBranch(s2, profile),
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
@@ -7801,7 +7906,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: s2.baseBranch ?? revalDefaultBranch,
+                  baseBranch: resolvePrBaseBranch(s2, profile),
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,

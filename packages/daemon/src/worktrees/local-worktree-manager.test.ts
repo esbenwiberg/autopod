@@ -801,6 +801,28 @@ describe('LocalWorktreeManager', () => {
       expect(calls).toContain('checkout -- .');
     });
 
+    it('removes leftover Autopod sync staging dirs before deciding whether restore is safe', async () => {
+      mockStatusSequence(
+        [' D src/index.ts', '?? .autopod-sync-spatial-meerkat-1234/'],
+        [' D src/index.ts'],
+      );
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess');
+
+      expect(result.restored).toBe(true);
+      expect(result.restoredCount).toBe(1);
+      expect(fsRmMock).toHaveBeenCalledWith(
+        '/tmp/worktree/sess/.autopod-sync-spatial-meerkat-1234',
+        {
+          recursive: true,
+          force: true,
+        },
+      );
+
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      expect(calls).toContain('checkout -- .');
+    });
+
     it('returns success without the final checkout when restoring .gitignore alone leaves a clean tree', async () => {
       // Edge case: the only deletion HEAD-tracked was .gitignore, and every
       // other dirty entry was a previously-ignored artifact unmasked by it.

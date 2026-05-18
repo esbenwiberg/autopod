@@ -26,6 +26,7 @@ import {
 } from './diff-utils.js';
 
 const execFileAsync = promisify(execFile);
+const AUTOPOD_SYNC_STAGING_PREFIXES = ['.autopod-sync-', '.autopod-extract-'] as const;
 
 /**
  * Thrown when `commitPendingChanges` refuses to commit because the number of staged deletions
@@ -228,6 +229,35 @@ function categorizePorcelainRecords(records: string[]): {
     }
   }
   return { deletions, blockers };
+}
+
+function getAutopodSyncStagingPath(record: string): string | null {
+  if (record.slice(0, 2) !== '??') return null;
+  const pathPart = record.slice(3).replace(/\/$/, '');
+  const topLevel = pathPart.split('/')[0];
+  if (!topLevel || !AUTOPOD_SYNC_STAGING_PREFIXES.some((prefix) => topLevel.startsWith(prefix))) {
+    return null;
+  }
+  return topLevel;
+}
+
+async function removeAutopodSyncStagingRecords(
+  worktreePath: string,
+  records: string[],
+): Promise<boolean> {
+  const stagingPaths = new Set<string>();
+  for (const record of records) {
+    const stagingPath = getAutopodSyncStagingPath(record);
+    if (stagingPath) stagingPaths.add(stagingPath);
+  }
+  if (stagingPaths.size === 0) return false;
+
+  await Promise.all(
+    [...stagingPaths].map((stagingPath) =>
+      fs.rm(path.join(worktreePath, stagingPath), { recursive: true, force: true }),
+    ),
+  );
+  return true;
 }
 
 export interface LocalWorktreeManagerConfig {
@@ -841,6 +871,9 @@ export class LocalWorktreeManager implements WorktreeManager {
     //   '??' → untracked.
     //   Anything else (' M', 'M ', 'A ', 'R ', 'U?', etc.) means real work might be present.
     let records = await collectPorcelainRecords(worktreePath);
+    if (await removeAutopodSyncStagingRecords(worktreePath, records)) {
+      records = await collectPorcelainRecords(worktreePath);
+    }
 
     if (records.length === 0) {
       // Clean tree means the worktree already matches HEAD — semantically

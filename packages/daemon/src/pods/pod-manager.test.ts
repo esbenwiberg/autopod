@@ -165,6 +165,8 @@ function createMockWorktreeManager(): WorktreeManager {
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),
     commitFiles: vi.fn(async () => {}),
+    commitPendingChanges: vi.fn(async () => false),
+    commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
     pushBranch: vi.fn(async () => {}),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
     getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
@@ -891,6 +893,36 @@ describe('PodManager', () => {
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
         expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
       );
+    });
+
+    it('returns to validated when approval-time PR creation retry fails', async () => {
+      const ctx = createTestContext();
+      (ctx.prManager.createPr as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('gh auth failed'),
+      );
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        filesChanged: 1,
+      });
+
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((e) => events.push(e));
+
+      await manager.approveSession(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('validated');
+      expect(result.prUrl).toBeNull();
+      expect(result.completedAt).toBeNull();
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'pod.completed' }));
     });
 
     it('falls back to branch push when no prUrl and no prManager', async () => {
@@ -2940,8 +2972,22 @@ describe('PodManager', () => {
         }),
       );
     });
-  });
 
+    it('falls back to profile default branch when stored baseBranch equals feature branch', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = await setupCompletePodForRetry(ctx);
+      ctx.podRepo.update(pod.id, { baseBranch: pod.branch });
+
+      await manager.retryCreatePr(pod.id);
+
+      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branch: pod.branch,
+          baseBranch: 'main',
+        }),
+      );
+    });
+  });
 
   describe('spawnFixSession / requestFixSession — queue-driven fix pods', () => {
     /** Create a root pod and drive it to `merge_pending` with a PR. */
@@ -3410,9 +3456,7 @@ describe('PodManager', () => {
       expect(ctx.prManager.createPr).not.toHaveBeenCalled();
     });
 
-    it('still flags worktreeCompromised (not failed) on DeletionGuardError', async () => {
-      // The deletion guard has its own quarantine path — keep that behavior
-      // intact instead of regressing to plain "failed".
+    it('parks as failed on DeletionGuardError instead of validating compromised work', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new DeletionGuardError(2000, 100),
@@ -3433,10 +3477,63 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       expect(result.worktreeCompromised).toBe(true);
-      // Guard caught the error: no rethrow, validation pass path continues.
-      // The pod still reaches `validated` (no PR though, since createPr was
-      // not invoked because the push failed).
-      expect(result.status).toBe('validated');
+      expect(result.status).toBe('failed');
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it('stops worker completion before validation when auto-commit hits the deletion guard', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      (
+        ctx.worktreeManager.commitPendingChangesWithGeneratedMessage as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(new DeletionGuardError(1405, 0));
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+      (ctx.containerManager.getStatus as ReturnType<typeof vi.fn>).mockResolvedValueOnce('stopped');
+
+      await manager.handleCompletion(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.worktreeCompromised).toBe(true);
+      expect(result.status).toBe('failed');
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    });
+
+    it('stops worker completion before auto-commit when workspace sync fails', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('docker exec failed'),
+      );
+      (
+        ctx.containerManager.extractDirectoryFromContainer as ReturnType<typeof vi.fn>
+      ).mockRejectedValue(new Error('archive fallback failed'));
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.handleCompletion(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.worktreeCompromised).toBe(true);
+      expect(result.status).toBe('failed');
+      expect(ctx.worktreeManager.commitPendingChangesWithGeneratedMessage).not.toHaveBeenCalled();
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
     });
   });
 
@@ -4084,10 +4181,7 @@ describe('PodManager', () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
 
-        const pod = manager.createSession(
-          { profileName: 'test-profile', task: 'stale' },
-          'user-1',
-        );
+        const pod = manager.createSession({ profileName: 'test-profile', task: 'stale' }, 'user-1');
         const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
         ctx.podRepo.update(pod.id, {
           status: 'provisioning',
@@ -4114,10 +4208,7 @@ describe('PodManager', () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
 
-        const pod = manager.createSession(
-          { profileName: 'test-profile', task: 'stale' },
-          'user-1',
-        );
+        const pod = manager.createSession({ profileName: 'test-profile', task: 'stale' }, 'user-1');
         const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
         ctx.podRepo.update(pod.id, {
           status: 'provisioning',
@@ -4160,10 +4251,7 @@ describe('PodManager', () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
 
-        const pod = manager.createSession(
-          { profileName: 'test-profile', task: 'stale' },
-          'user-1',
-        );
+        const pod = manager.createSession({ profileName: 'test-profile', task: 'stale' }, 'user-1');
         // lastAgentEventAt is 4 h ago; startedAt also stale so the watchdog's
         // max(primary) reference is still old even after 65 s of fake-time advance.
         const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
@@ -4204,10 +4292,7 @@ describe('PodManager', () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
 
-        const pod = manager.createSession(
-          { profileName: 'test-profile', task: 'stale' },
-          'user-1',
-        );
+        const pod = manager.createSession({ profileName: 'test-profile', task: 'stale' }, 'user-1');
         const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
         ctx.podRepo.update(pod.id, {
           status: 'provisioning',
@@ -4259,10 +4344,7 @@ describe('PodManager', () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
 
-        const pod = manager.createSession(
-          { profileName: 'test-profile', task: 'stale' },
-          'user-1',
-        );
+        const pod = manager.createSession({ profileName: 'test-profile', task: 'stale' }, 'user-1');
         const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
         ctx.podRepo.update(pod.id, {
           status: 'provisioning',
@@ -4719,7 +4801,12 @@ describe('wake recovery — wake-correction postscript', () => {
 
     const manager = createPodManager(ctx.deps);
     const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Build the widget', runtime: 'codex', skipValidation: true },
+      {
+        profileName: 'test-profile',
+        task: 'Build the widget',
+        runtime: 'codex',
+        skipValidation: true,
+      },
       'user-1',
     );
 
@@ -4778,7 +4865,12 @@ describe('wake recovery — wake-correction postscript', () => {
 
     const manager = createPodManager(ctx.deps);
     const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Build the widget', runtime: 'codex', skipValidation: true },
+      {
+        profileName: 'test-profile',
+        task: 'Build the widget',
+        runtime: 'codex',
+        skipValidation: true,
+      },
       'user-1',
     );
 

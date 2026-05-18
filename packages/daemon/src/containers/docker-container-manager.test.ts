@@ -1,3 +1,14 @@
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
@@ -562,6 +573,55 @@ describe('DockerContainerManager', () => {
     });
   });
 
+  describe('extractDirectoryFromContainer()', () => {
+    let hostPath: string;
+
+    beforeEach(() => {
+      hostPath = mkdtempSync(join(tmpdir(), 'autopod-extract-test-'));
+    });
+
+    afterEach(() => {
+      rmSync(hostPath, { recursive: true, force: true });
+    });
+
+    it('extracts through a staging directory, preserves excludes, and deletes stale files after extraction', async () => {
+      mkdirSync(join(hostPath, '.git'), { recursive: true });
+      writeFileSync(join(hostPath, '.git', 'HEAD'), 'ref: refs/heads/test\n');
+      writeFileSync(join(hostPath, 'stale.txt'), 'old');
+      mkdirSync(join(hostPath, 'dir'), { recursive: true });
+      writeFileSync(join(hostPath, 'dir', 'stale-nested.txt'), 'old');
+
+      container.getArchive.mockResolvedValue(
+        await createTarStreamFromEntries([
+          ['workspace/file.txt', 'new'],
+          ['workspace/dir/fresh.txt', 'fresh'],
+          ['workspace/.git/HEAD', 'container git should be ignored'],
+        ]),
+      );
+
+      await manager.extractDirectoryFromContainer('abc123', '/workspace', hostPath, ['.git']);
+
+      expect(readFileSync(join(hostPath, 'file.txt'), 'utf-8')).toBe('new');
+      expect(readFileSync(join(hostPath, 'dir', 'fresh.txt'), 'utf-8')).toBe('fresh');
+      expect(readFileSync(join(hostPath, '.git', 'HEAD'), 'utf-8')).toBe('ref: refs/heads/test\n');
+      expect(existsSync(join(hostPath, 'stale.txt'))).toBe(false);
+      expect(existsSync(join(hostPath, 'dir', 'stale-nested.txt'))).toBe(false);
+      expect(readdirAutopodStaging(hostPath)).toEqual([]);
+    });
+
+    it('leaves the host directory untouched when archive extraction cannot start', async () => {
+      writeFileSync(join(hostPath, 'existing.txt'), 'keep me');
+      container.getArchive.mockRejectedValue(new Error('docker socket unavailable'));
+
+      await expect(
+        manager.extractDirectoryFromContainer('abc123', '/workspace', hostPath, ['.git']),
+      ).rejects.toThrow('docker socket unavailable');
+
+      expect(readFileSync(join(hostPath, 'existing.txt'), 'utf-8')).toBe('keep me');
+      expect(readdirAutopodStaging(hostPath)).toEqual([]);
+    });
+  });
+
   // ─── execInContainer() ──────────────────────────────────
 
   describe('execInContainer()', () => {
@@ -960,8 +1020,8 @@ describe('DockerContainerManager', () => {
       const cmd = ['/run/autopod/agent-shim.sh', 'claude', '--flag', bigStr];
       await manager.execInContainer('abc123', cmd);
 
-      const logCall = warnSpy.mock.calls.find((c) =>
-        typeof c[1] === 'string' && c[1].includes('exec.inspect timed out'),
+      const logCall = warnSpy.mock.calls.find(
+        (c) => typeof c[1] === 'string' && c[1].includes('exec.inspect timed out'),
       );
       expect(logCall).toBeDefined();
       const logObj = logCall![0] as Record<string, unknown>;
@@ -980,6 +1040,24 @@ async function createTarStream(filename: string, content: string): Promise<NodeJ
   p.entry({ name: filename }, content);
   p.finalize();
   return p;
+}
+
+async function createTarStreamFromEntries(
+  entries: Array<[filename: string, content: string]>,
+): Promise<NodeJS.ReadableStream> {
+  const { pack } = await import('tar-stream');
+  const p = pack();
+  for (const [filename, content] of entries) {
+    p.entry({ name: filename }, content);
+  }
+  p.finalize();
+  return p;
+}
+
+function readdirAutopodStaging(hostPath: string): string[] {
+  return readdirSync(hostPath).filter(
+    (entry) => entry.startsWith('.autopod-sync-') || entry.startsWith('.autopod-extract-'),
+  );
 }
 
 async function readTarEntries(
