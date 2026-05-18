@@ -22,6 +22,11 @@ export function stripModeOnlyChanges(diff: string): string {
 }
 
 export const DIFF_EXCLUDE_PATHSPECS: readonly string[] = [
+  // Daemon-injected code-intel caches. These are runtime state, not user changes.
+  ':(exclude).serena',
+  ':(exclude).serena/**',
+  ':(exclude).roslyn-codelens',
+  ':(exclude).roslyn-codelens/**',
   ':(exclude)pnpm-lock.yaml',
   ':(exclude)package-lock.json',
   ':(exclude)yarn.lock',

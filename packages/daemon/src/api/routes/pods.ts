@@ -11,23 +11,33 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
+import {
+  type EscalationsAnalyticsScope,
+  computeEscalationsAnalytics,
+} from '../../pods/escalations-aggregator.js';
 import type { EventRepository } from '../../pods/event-repository.js';
 import type { PodManager } from '../../pods/index.js';
+import { computeModelsAnalytics } from '../../pods/models-aggregator.js';
 import type { PendingOverrideRepository } from '../../pods/pending-override-repository.js';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
-import { computeEscalationsAnalytics } from '../../pods/escalations-aggregator.js';
-import { computeModelsAnalytics } from '../../pods/models-aggregator.js';
+import { computeQualitySignals } from '../../pods/quality-signals.js';
+import { computeReliabilityAnalytics } from '../../pods/reliability-aggregator.js';
 import {
   computeSafetyAnalytics,
   runAndPersistAuditChainVerification,
 } from '../../pods/safety-aggregator.js';
-import { computeQualitySignals } from '../../pods/quality-signals.js';
-import { computeReliabilityAnalytics } from '../../pods/reliability-aggregator.js';
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
 import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
+
+function parseEscalationsScope(query: Record<string, unknown>): EscalationsAnalyticsScope | null {
+  const raw = query.scope;
+  if (raw === undefined) return 'interactive';
+  if (raw === 'interactive' || raw === 'scheduled' || raw === 'all') return raw;
+  return null;
+}
 
 export function podRoutes(
   app: FastifyInstance,
@@ -288,7 +298,15 @@ export function podRoutes(
       reply.status(400);
       return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
     }
-    return computeEscalationsAnalytics(db, days);
+    const scope = parseEscalationsScope(request.query as Record<string, unknown>);
+    if (scope === null) {
+      reply.status(400);
+      return {
+        error: 'scope must be one of interactive, scheduled, all',
+        code: 'invalid_scope',
+      };
+    }
+    return computeEscalationsAnalytics(db, days, { scope });
   });
 
   // GET /pods/analytics/safety — trailing-window guardrail-fire totals, quarantine histogram,
@@ -694,14 +712,10 @@ export function podRoutes(
   });
 
   // GET /pods/:podId/preview/status — poll supervisor + reachability (pod-token auth)
-  app.get(
-    '/pods/:podId/preview/status',
-    { config: { auth: 'pod-token' } },
-    async (request) => {
-      const { podId } = request.params as { podId: string };
-      return podManager.previewStatus(podId);
-    },
-  );
+  app.get('/pods/:podId/preview/status', { config: { auth: 'pod-token' } }, async (request) => {
+    const { podId } = request.params as { podId: string };
+    return podManager.previewStatus(podId);
+  });
 
   // DELETE /pods/:podId — delete a terminal pod
   app.delete('/pods/:podId', async (request, reply) => {

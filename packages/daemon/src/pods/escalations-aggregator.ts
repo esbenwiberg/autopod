@@ -1,3 +1,13 @@
+import type {
+  AskHumanTtr,
+  AskHumanTtrBucket,
+  BlockerPattern,
+  EscalationsAnalyticsResponse,
+  EscalationsSummary,
+  PerProfileEscalation,
+} from '@autopod/shared';
+import type Database from 'better-sqlite3';
+
 /**
  * Escalations analytics aggregator.
  * Pure function: takes a SQLite handle and a trailing window in days,
@@ -7,12 +17,12 @@
  *
  * TERMINAL cohort:
  *   output_mode != 'workspace' AND status IN ('complete','killed','failed')
- *   AND completed_at >= datetime('now', '-' || @days || ' days')
+ *   AND completed_at >= datetime('now', '-' || @days || ' days') AND scope filter
  *   Used for: summary.selfRecoveryRate denominator, humanAttentionPodCount,
  *   humanAttentionCount, askAiCount, perProfile[].
  *
- * ESCALATION_WINDOW cohort (no pod-cohort restriction):
- *   escalations.created_at >= datetime('now', '-' || @days || ' days')
+ * ESCALATION_WINDOW cohort (scope-filtered, but no terminal/status restriction):
+ *   escalations.created_at >= datetime('now', '-' || @days || ' days') AND scope filter
  *   Used for: dailyHumanCountSparkline, askHumanTtr.buckets[], askHumanTtr.openCount,
  *   blockerPatterns[].
  *
@@ -24,31 +34,60 @@
  * selfRecoveryRateDelta.value is an ABSOLUTE fraction (0.05 = +5pp).
  * Desktop should format as pp, not %.
  */
-import type Database from 'better-sqlite3';
-import type {
-  AskHumanTtr,
-  AskHumanTtrBucket,
-  BlockerPattern,
-  EscalationsAnalyticsResponse,
-  EscalationsSummary,
-  PerProfileEscalation,
-} from '@autopod/shared';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const HUMAN_ATTENTION_SQL = `('ask_human','report_blocker','validation_override','action_approval')`;
 
-const TTR_BUCKET_LABELS = ['<1m', '1–5m', '5–15m', '15m–1h', '1–4h', '4–12h', '12–24h', '>24h'] as const;
+const TTR_BUCKET_LABELS = [
+  '<1m',
+  '1–5m',
+  '5–15m',
+  '15m–1h',
+  '1–4h',
+  '4–12h',
+  '12–24h',
+  '>24h',
+] as const;
 // Right-exclusive boundaries in seconds. Index i: bucket label[i] covers [boundaries[i-1], boundaries[i]).
 const TTR_BOUNDARIES = [60, 300, 900, 3600, 14400, 43200, 86400];
+
+export type EscalationsAnalyticsScope = 'interactive' | 'scheduled' | 'all';
+
+export interface EscalationsAnalyticsOptions {
+  /**
+   * interactive: on-demand/workspace-created pods only (scheduled_job_id IS NULL)
+   * scheduled: pods spawned by scheduled jobs only
+   * all: no scheduled-job filter
+   */
+  scope?: EscalationsAnalyticsScope;
+}
 
 // ── Cohort clause helpers ──────────────────────────────────────────────────────
 
 // keep in sync with: reliability-aggregator.ts terminalCohortWhere()
-function terminalCohortWhere(): string {
-  return `output_mode != 'workspace'
-    AND status IN ('complete', 'killed', 'failed')
-    AND completed_at >= datetime('now', '-' || @days || ' days')`;
+function podScopeWhere(scope: EscalationsAnalyticsScope, alias?: string): string {
+  const prefix = alias ? `${alias}.` : '';
+  switch (scope) {
+    case 'interactive':
+      return `${prefix}scheduled_job_id IS NULL`;
+    case 'scheduled':
+      return `${prefix}scheduled_job_id IS NOT NULL`;
+    case 'all':
+      return '1 = 1';
+  }
+}
+
+function escalationScopeWhere(scope: EscalationsAnalyticsScope): string {
+  return `pod_id IN (SELECT id FROM pods WHERE ${podScopeWhere(scope)})`;
+}
+
+function terminalCohortWhere(scope: EscalationsAnalyticsScope, alias?: string): string {
+  const prefix = alias ? `${alias}.` : '';
+  return `${prefix}output_mode != 'workspace'
+    AND ${prefix}status IN ('complete', 'killed', 'failed')
+    AND ${prefix}completed_at >= datetime('now', '-' || @days || ' days')
+    AND ${podScopeWhere(scope, alias)}`;
 }
 
 // ── Math helpers ──────────────────────────────────────────────────────────────
@@ -73,10 +112,13 @@ function bucketTtrSeconds(secs: number): number {
 export function computeEscalationsAnalytics(
   db: Database.Database,
   days: number,
+  options: EscalationsAnalyticsOptions = {},
 ): EscalationsAnalyticsResponse {
+  const scope = options.scope ?? 'interactive';
+
   // ── Terminal cohort ─────────────────────────────────────────────────────────
   const { cohortSize } = db
-    .prepare(`SELECT COUNT(*) AS cohortSize FROM pods WHERE ${terminalCohortWhere()}`)
+    .prepare(`SELECT COUNT(*) AS cohortSize FROM pods WHERE ${terminalCohortWhere(scope)}`)
     .get({ days }) as { cohortSize: number };
 
   // ── Summary: humanAttentionPodCount, humanAttentionCount, askAiCount ────────
@@ -88,7 +130,7 @@ export function computeEscalationsAnalytics(
          COUNT(CASE WHEN type IN ${HUMAN_ATTENTION_SQL} THEN 1 END) AS humanAttentionCount,
          COUNT(CASE WHEN type = 'ask_ai' THEN 1 END) AS askAiCount
        FROM escalations
-       WHERE pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
+       WHERE pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere(scope)})`,
     )
     .get({ days }) as {
     humanAttentionPodCount: number;
@@ -108,6 +150,7 @@ export function computeEscalationsAnalytics(
        FROM escalations
        WHERE type IN ${HUMAN_ATTENTION_SQL}
          AND created_at >= datetime('now', '-' || @days || ' days')
+         AND ${escalationScopeWhere(scope)}
        GROUP BY day`,
     )
     .all({ days }) as Array<{ day: string; count: number }>;
@@ -131,7 +174,8 @@ export function computeEscalationsAnalytics(
        WHERE p.output_mode != 'workspace'
          AND p.status IN ('complete', 'killed', 'failed')
          AND p.completed_at >= datetime('now', '-' || @priorDays || ' days')
-         AND p.completed_at <  datetime('now', '-' || @days || ' days')`,
+         AND p.completed_at <  datetime('now', '-' || @days || ' days')
+         AND ${podScopeWhere(scope, 'p')}`,
     )
     .get({ priorDays: days * 2, days }) as {
     cohortSize: number;
@@ -158,7 +202,8 @@ export function computeEscalationsAnalytics(
        FROM escalations
        WHERE type = 'ask_human'
          AND created_at >= datetime('now', '-' || @days || ' days')
-         AND resolved_at IS NOT NULL`,
+         AND resolved_at IS NOT NULL
+         AND ${escalationScopeWhere(scope)}`,
     )
     .all({ days }) as Array<{ seconds: number }>;
 
@@ -177,7 +222,8 @@ export function computeEscalationsAnalytics(
       `SELECT COUNT(*) AS count FROM escalations
        WHERE type = 'ask_human'
          AND created_at >= datetime('now', '-' || @days || ' days')
-         AND resolved_at IS NULL`,
+         AND resolved_at IS NULL
+         AND ${escalationScopeWhere(scope)}`,
     )
     .get({ days }) as { count: number };
 
@@ -202,7 +248,7 @@ export function computeEscalationsAnalytics(
          COUNT(DISTINCT CASE WHEN e.type IN ${HUMAN_ATTENTION_SQL} THEN p.id END) AS escalatedCount
        FROM pods p
        LEFT JOIN escalations e ON e.pod_id = p.id
-       WHERE ${terminalCohortWhere()}
+       WHERE ${terminalCohortWhere(scope, 'p')}
        GROUP BY p.profile_name`,
     )
     .all({ days }) as Array<{ profileName: string; podCount: number; escalatedCount: number }>;
@@ -245,6 +291,7 @@ export function computeEscalationsAnalytics(
        FROM escalations
        WHERE type = 'report_blocker'
          AND created_at >= datetime('now', '-' || @days || ' days')
+         AND ${escalationScopeWhere(scope)}
          AND json_extract(payload, '$.description') IS NOT NULL
          AND length(trim(json_extract(payload, '$.description'))) > 0
        GROUP BY description
@@ -259,6 +306,7 @@ export function computeEscalationsAnalytics(
      WHERE type = 'report_blocker'
        AND trim(json_extract(payload, '$.description')) = @description
        AND created_at >= datetime('now', '-' || @days || ' days')
+       AND ${escalationScopeWhere(scope)}
      GROUP BY pod_id
      ORDER BY MAX(created_at) DESC
      LIMIT 10`,

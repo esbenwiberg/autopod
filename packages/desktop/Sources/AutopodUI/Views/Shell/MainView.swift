@@ -597,6 +597,32 @@ public struct MainView: View {
     // MARK: - Content toolbar
 
     private var contentToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                toolbarTitle
+                Spacer(minLength: 8)
+                searchField(width: 200)
+                toolbarControls(compact: false)
+                refreshButton
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    toolbarTitle
+                    Spacer(minLength: 8)
+                    refreshButton
+                }
+                HStack(spacing: 8) {
+                    searchField(width: nil)
+                    toolbarControls(compact: true)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var toolbarTitle: some View {
         HStack(spacing: 8) {
             Text(sidebarSelection.label)
                 .font(.headline)
@@ -610,21 +636,12 @@ public struct MainView: View {
                 .foregroundStyle(.blue)
                 .clipShape(Capsule())
                 .fixedSize()
-            Spacer(minLength: 8)
-            ViewThatFits(in: .horizontal) {
-                toolbarControls(compact: false)
-                toolbarControls(compact: true)
-            }
-            refreshButton
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
     @ViewBuilder
     private func toolbarControls(compact: Bool) -> some View {
         HStack(spacing: 8) {
-            searchField(compact: compact)
             sortPicker(compact: compact)
             if viewMode == .cards {
                 densityPicker(compact: compact)
@@ -634,7 +651,7 @@ public struct MainView: View {
         .fixedSize()
     }
 
-    private func searchField(compact: Bool) -> some View {
+    private func searchField(width: CGFloat?) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
@@ -658,7 +675,8 @@ public struct MainView: View {
         .padding(.vertical, 4)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .frame(width: compact ? 120 : 200)
+        .frame(width: width)
+        .frame(maxWidth: width == nil ? .infinity : nil)
     }
 
     @ViewBuilder

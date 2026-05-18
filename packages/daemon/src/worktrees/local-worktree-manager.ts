@@ -514,15 +514,21 @@ export class LocalWorktreeManager implements WorktreeManager {
         }
 
         // Committed changes: base..HEAD
-        const { stdout: committedStat } = await git(['diff', '--stat', base, 'HEAD'], {
-          cwd: worktreePath,
-        });
+        const { stdout: committedStat } = await git(
+          ['diff', '--stat', base, 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
+          {
+            cwd: worktreePath,
+          },
+        );
         const committed = this.parseDiffStats(committedStat);
 
         // Uncommitted changes: working tree vs HEAD (staged + unstaged)
-        const { stdout: uncommittedStat } = await git(['diff', '--stat', 'HEAD'], {
-          cwd: worktreePath,
-        });
+        const { stdout: uncommittedStat } = await git(
+          ['diff', '--stat', 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
+          {
+            cwd: worktreePath,
+          },
+        );
         const uncommitted = this.parseDiffStats(uncommittedStat);
 
         return {
@@ -533,7 +539,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       }
 
       // Fallback: uncommitted changes only (legacy behaviour)
-      const { stdout } = await git(['diff', '--stat', 'HEAD'], {
+      const { stdout } = await git(['diff', '--stat', 'HEAD', ...DIFF_EXCLUDE_PATHSPECS], {
         cwd: worktreePath,
       });
 
@@ -1232,7 +1238,8 @@ export class LocalWorktreeManager implements WorktreeManager {
         .map((full) => ({ full, base: full.split('/').pop() ?? full }));
 
       const dirEntries = entries.filter((e) => !e.base.includes('.'));
-      const folderFiles: Array<{ filename: string; content: string; contractContent?: string }> = [];
+      const folderFiles: Array<{ filename: string; content: string; contractContent?: string }> =
+        [];
       for (const entry of dirEntries) {
         try {
           const [{ stdout: brief }, { stdout: contract }] = await Promise.all([

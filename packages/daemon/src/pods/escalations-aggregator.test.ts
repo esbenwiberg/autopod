@@ -1,6 +1,10 @@
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import {
+  createTestDb,
+  insertTestProfile,
+  insertTestScheduledJob,
+} from '../test-utils/mock-helpers.js';
 import { computeEscalationsAnalytics } from './escalations-aggregator.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -14,6 +18,7 @@ interface InsertPodOpts {
   createdAt?: string;
   outputMode?: string;
   profileName?: string;
+  scheduledJobId?: string | null;
 }
 
 function insertPod(db: Database.Database, opts: InsertPodOpts = {}): string {
@@ -24,12 +29,12 @@ function insertPod(db: Database.Database, opts: InsertPodOpts = {}): string {
       id, profile_name, task, status, model, runtime, execution_target, branch,
       user_id, max_validation_attempts, skip_validation,
       output_mode, agent_mode, output_target, validate, promotable,
-      created_at, started_at, completed_at, rework_count
+      created_at, started_at, completed_at, rework_count, scheduled_job_id
     ) VALUES (
       @id, @profileName, 'task', @status, 'claude-opus-4-7', 'claude', 'local', 'branch-1',
       'user-1', 3, 0,
       @outputMode, 'auto', 'pr', 1, 0,
-      @createdAt, @createdAt, @completedAt, 0
+      @createdAt, @createdAt, @completedAt, 0, @scheduledJobId
     )
   `).run({
     id,
@@ -38,6 +43,7 @@ function insertPod(db: Database.Database, opts: InsertPodOpts = {}): string {
     outputMode: opts.outputMode ?? 'pr',
     createdAt: opts.createdAt ?? now,
     completedAt: opts.completedAt !== undefined ? opts.completedAt : now,
+    scheduledJobId: opts.scheduledJobId ?? null,
   });
   return id;
 }
@@ -342,9 +348,7 @@ describe('computeEscalationsAnalytics', () => {
     expect(smallRow!.rate).toBeCloseTo(0.6);
 
     // Sorted by rate DESC: small(0.6), A(0.5), B(0.25)
-    const profilesWithData = rows.filter((r) =>
-      ['<small profiles>', 'A', 'B'].includes(r.profile),
-    );
+    const profilesWithData = rows.filter((r) => ['<small profiles>', 'A', 'B'].includes(r.profile));
     expect(profilesWithData[0]!.profile).toBe('<small profiles>');
     expect(profilesWithData[1]!.profile).toBe('A');
     expect(profilesWithData[2]!.profile).toBe('B');
@@ -465,6 +469,48 @@ describe('computeEscalationsAnalytics', () => {
     expect(result.blockerPatterns[0]!.description).toBe('Workspace blocker');
   });
 
+  it('blocker patterns exclude scheduled-job pods by default', () => {
+    insertTestScheduledJob(db, { id: 'job-1' });
+    const scheduledPodId = insertPod(db, { id: 'scheduled-pod', scheduledJobId: 'job-1' });
+    const interactivePodId = insertPod(db, { id: 'interactive-pod' });
+    insertEscalation(db, {
+      podId: scheduledPodId,
+      type: 'report_blocker',
+      payload: { description: 'Scheduled findings digest' },
+    });
+    insertEscalation(db, {
+      podId: interactivePodId,
+      type: 'report_blocker',
+      payload: { description: 'Real blocker' },
+    });
+
+    const result = computeEscalationsAnalytics(db, 30);
+
+    expect(result.blockerPatterns).toHaveLength(1);
+    expect(result.blockerPatterns[0]!.description).toBe('Real blocker');
+  });
+
+  it('scope can include only scheduled-job blocker patterns', () => {
+    insertTestScheduledJob(db, { id: 'job-1' });
+    const scheduledPodId = insertPod(db, { id: 'scheduled-pod', scheduledJobId: 'job-1' });
+    const interactivePodId = insertPod(db, { id: 'interactive-pod' });
+    insertEscalation(db, {
+      podId: scheduledPodId,
+      type: 'report_blocker',
+      payload: { description: 'Scheduled findings digest' },
+    });
+    insertEscalation(db, {
+      podId: interactivePodId,
+      type: 'report_blocker',
+      payload: { description: 'Real blocker' },
+    });
+
+    const result = computeEscalationsAnalytics(db, 30, { scope: 'scheduled' });
+
+    expect(result.blockerPatterns).toHaveLength(1);
+    expect(result.blockerPatterns[0]!.description).toBe('Scheduled findings digest');
+  });
+
   // ── Sparkline not cohort-restricted ────────────────────────────────────────
 
   it('dailyHumanCountSparkline includes workspace-pod escalations; humanAttentionCount excludes them', () => {
@@ -476,10 +522,7 @@ describe('computeEscalationsAnalytics', () => {
     expect(result.summary.cohortSize).toBe(0);
     expect(result.summary.humanAttentionCount).toBe(0);
     // But sparkline sees the escalation
-    const totalSparkline = result.summary.dailyHumanCountSparkline.reduce(
-      (s, d) => s + d.count,
-      0,
-    );
+    const totalSparkline = result.summary.dailyHumanCountSparkline.reduce((s, d) => s + d.count, 0);
     expect(totalSparkline).toBe(1);
   });
 

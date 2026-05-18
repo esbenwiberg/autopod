@@ -63,6 +63,48 @@ describe('filterOutOfDiffFindings', () => {
     expect(result.droppedCount).toBe(0);
   });
 
+  it('drops daemon tooling cache findings even when the cache path appears in the diff', () => {
+    const diff = [
+      'diff --git a/.serena/project.yml b/.serena/project.yml',
+      '--- a/.serena/project.yml',
+      '+++ b/.serena/project.yml',
+      '@@ -1 +0,0 @@',
+      '-generated cache',
+    ].join('\n');
+    const issues = [
+      '[CRITICAL] Agent committed changes to `.serena/project.yml` despite read-only audit instructions',
+    ];
+
+    const result = filterOutOfDiffFindings(issues, diff);
+
+    expect(result.issues).toEqual([]);
+    expect(result.droppedCount).toBe(1);
+  });
+
+  it('keeps mixed findings that cite a real diff path alongside daemon tooling cache paths', () => {
+    const diff = [
+      'diff --git a/src/index.ts b/src/index.ts',
+      '--- a/src/index.ts',
+      '+++ b/src/index.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      'diff --git a/.serena/project.yml b/.serena/project.yml',
+      '--- a/.serena/project.yml',
+      '+++ b/.serena/project.yml',
+      '@@ -1 +0,0 @@',
+      '-generated cache',
+    ].join('\n');
+    const issues = [
+      '[HIGH] src/index.ts and .serena/project.yml reveal the generated route is broken',
+    ];
+
+    const result = filterOutOfDiffFindings(issues, diff);
+
+    expect(result.issues).toEqual(issues);
+    expect(result.droppedCount).toBe(0);
+  });
+
   it('keeps findings that cite an in-diff path by basename only', () => {
     const issues = ['[MEDIUM] package-lock.json: SHA-1 integrity downgrade'];
     const result = filterOutOfDiffFindings(issues, DIFF_TWO_FILES);

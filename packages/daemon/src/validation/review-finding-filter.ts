@@ -3,6 +3,13 @@ import { parseDiffFilePaths } from './review-context-builder.js';
 
 const DIFF_TRUNCATION_MARKER = '⚠ DIFF TRUNCATED:';
 
+const NON_REVIEWABLE_PATH_PREFIXES = ['.serena/', '.roslyn-codelens/'];
+
+function isNonReviewablePath(token: string): boolean {
+  const cleaned = token.replace(/[.,;:)\]`]+$/, '').replace(/^`+/, '');
+  return NON_REVIEWABLE_PATH_PREFIXES.some((prefix) => cleaned.startsWith(prefix));
+}
+
 /**
  * Extensions we consider "code-y" enough that a bare basename like `Foo.cs`
  * is treated as a file-path citation (not e.g. a version number or URL host).
@@ -164,8 +171,15 @@ export function filterOutOfDiffFindings(issues: string[], diff: string): FilterR
       continue;
     }
 
+    if (codePaths.every(isNonReviewablePath)) {
+      droppedCount++;
+      if (droppedExamples.length < 5) droppedExamples.push(issue);
+      continue;
+    }
+
     const referencesDiff = codePaths.some((c) => {
       const cleaned = c.replace(/[.,;:)\]]+$/, '');
+      if (isNonReviewablePath(cleaned)) return false;
       if (allowed.has(cleaned)) return true;
       const base = cleaned.split('/').pop();
       return !!base && allowed.has(base);

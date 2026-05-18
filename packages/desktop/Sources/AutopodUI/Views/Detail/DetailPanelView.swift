@@ -1047,54 +1047,114 @@ public struct DetailPanelView: View {
 
     private var tabBar: some View {
         ViewThatFits(in: .horizontal) {
-            tabBarContent(compact: false)
-            tabBarContent(compact: true)
+            tabBarRow(showLabels: true)
+                .fixedSize(horizontal: true, vertical: false)
+            tabBarRow(showLabels: false)
+                .fixedSize(horizontal: true, vertical: false)
+            tabBarFlow
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
 
-    private func tabBarContent(compact: Bool) -> some View {
+    private func tabBarRow(showLabels: Bool) -> some View {
         HStack(spacing: 4) {
             ForEach(visibleTabs, id: \.self) { tab in
-                let isSelected = selectedTab == tab
-                let isDisabled = (tab == .terminal && !isTerminalAvailable) || (tab == .markdown && !isMarkdownAvailable)
-                let disabledHelp: String = {
-                    if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace pods" }
-                    if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer becomes available once the pod has a workspace" }
-                    return ""
-                }()
-                Button {
-                    selectedTab = tab
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 11))
-                        if !compact {
-                            Text(tab.label)
-                                .font(.system(.subheadline).weight(isSelected ? .semibold : .regular))
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                    }
-                    .foregroundStyle(isSelected ? .primary : isDisabled ? .tertiary : .secondary)
-                    .padding(.horizontal, compact ? 8 : 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(isSelected ? Color.white.opacity(0.08) : .clear)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(isDisabled)
-                .help(isDisabled ? disabledHelp : tab.label)
+                tabButton(tab, showLabel: showLabels)
             }
-            Spacer(minLength: 0)
         }
+    }
+
+    private var tabBarFlow: some View {
+        DetailTabFlowLayout(spacing: 4) {
+            ForEach(visibleTabs, id: \.self) { tab in
+                tabButton(tab, showLabel: true)
+            }
+        }
+    }
+
+    private func tabButton(_ tab: DetailTab, showLabel: Bool) -> some View {
+        let isSelected = selectedTab == tab
+        let isDisabled = (tab == .terminal && !isTerminalAvailable) || (tab == .markdown && !isMarkdownAvailable)
+        let disabledHelp: String = {
+            if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace pods" }
+            if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer becomes available once the pod has a workspace" }
+            return ""
+        }()
+
+        return Button {
+            selectedTab = tab
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 11))
+                    .frame(width: 14)
+                if showLabel {
+                    Text(tab.label)
+                        .font(.system(.subheadline).weight(isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .foregroundStyle(isSelected ? .primary : isDisabled ? .tertiary : .secondary)
+            .padding(.horizontal, showLabel ? 12 : 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? Color.white.opacity(0.08) : .clear)
+            )
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(isDisabled ? disabledHelp : tab.label)
     }
 
     // MARK: - Placeholder tabs
 
 
+}
+
+private struct DetailTabFlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth, x > 0 {
+                y += rowHeight + spacing
+                x = 0
+                rowHeight = 0
+            }
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+
+        return CGSize(width: proposal.width ?? x, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                y += rowHeight + spacing
+                x = bounds.minX
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+    }
 }
 
 // MARK: - Worktree-compromised banner

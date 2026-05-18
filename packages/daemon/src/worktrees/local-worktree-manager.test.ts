@@ -275,6 +275,33 @@ describe('LocalWorktreeManager', () => {
       expect(result).toEqual({ filesChanged: 1, linesAdded: 2, linesRemoved: 0 });
     });
 
+    it('passes exclude pathspecs to stat diffs', async () => {
+      const capturedArgs: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          capturedArgs.push([...args]);
+          if (args.join(' ').includes('merge-base')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await manager.getDiffStats('/tmp/worktree/sess', 'main');
+
+      const statDiffs = capturedArgs.filter((a) => a[0] === 'diff' && a.includes('--stat'));
+      expect(statDiffs).toHaveLength(2);
+      for (const args of statDiffs) {
+        expect(args).toContain(':(exclude).serena');
+        expect(args).toContain(':(exclude).serena/**');
+        expect(args).toContain(':(exclude).roslyn-codelens');
+        expect(args).toContain(':(exclude).roslyn-codelens/**');
+      }
+    });
+
     it('returns zeros when git diff fails', async () => {
       execFileMock.mockImplementation(
         (_file: string, _args: string[], arg3: unknown, arg4?: unknown) => {
@@ -422,6 +449,10 @@ describe('LocalWorktreeManager', () => {
       const diffCalls = capturedArgs.filter((a) => a[0] === 'diff');
       expect(diffCalls.length).toBeGreaterThan(0);
       for (const args of diffCalls) {
+        expect(args).toContain(':(exclude).serena');
+        expect(args).toContain(':(exclude).serena/**');
+        expect(args).toContain(':(exclude).roslyn-codelens');
+        expect(args).toContain(':(exclude).roslyn-codelens/**');
         expect(args).toContain(':(exclude)pnpm-lock.yaml');
         expect(args).toContain(':(exclude)go.sum');
         expect(args).toContain(':(exclude)*.min.js');
