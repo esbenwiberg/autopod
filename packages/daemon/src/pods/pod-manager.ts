@@ -5900,12 +5900,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (pod.branch) {
             try {
               const noChangeUseForce = forceWithLeaseAllowances.has(podId);
-              if (noChangeUseForce) forceWithLeaseAllowances.delete(podId);
               if (noChangeUseForce) {
                 await worktreeManager.pushBranch(pod.worktreePath, pod.branch, { force: true });
               } else {
                 await worktreeManager.pushBranch(pod.worktreePath, pod.branch);
               }
+              forceWithLeaseAllowances.delete(podId);
             } catch (err) {
               logger.warn(
                 { err, podId },
@@ -5974,12 +5974,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // evicted whenever any sibling worktree on the same bare repo is
           // cleaned up (local-worktree-manager.ts cleanup()).
           const prePushUseForce = forceWithLeaseAllowances.has(podId);
-          if (prePushUseForce) forceWithLeaseAllowances.delete(podId);
           try {
             await worktreeManager.pushBranch(worktreePath, branch, {
               pat: selectGitPat(approveProfile),
               ...(prePushUseForce ? { force: true } : {}),
             });
+            forceWithLeaseAllowances.delete(podId);
             emitActivityStatus(podId, 'Branch pushed');
           } catch (pushErr) {
             const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);

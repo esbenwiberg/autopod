@@ -5113,6 +5113,56 @@ describe('updateFromBase', () => {
     expect(triggerSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('alreadyUpToDate after abort transitions pod to failed without starting follow-up validation', async () => {
+    const ctx = createTestContext({ overall: 'fail' });
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: true,
+      rebased: true,
+      conflicts: [],
+    });
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'ctr-1',
+      worktreePath: '/tmp/wt',
+      validationAttempts: 0,
+    });
+
+    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => {
+      await manager.updateFromBase(pod.id);
+      return {
+        podId: pod.id,
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'fail' as const,
+          build: { status: 'fail' as const, output: 'fail', duration: 0 },
+          health: { status: 'fail' as const, url: '', responseCode: null, duration: 0 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'fail' as const,
+        duration: 0,
+      };
+    });
+
+    const triggerSpy = vi.spyOn(manager, 'triggerValidation');
+
+    await manager.triggerValidation(pod.id);
+    await new Promise((r) => setImmediate(r));
+
+    // The unwind ran the rebase but found nothing to update — pod parked in failed.
+    expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalled();
+    expect(manager.getSession(pod.id).status).toBe('failed');
+    // Only the original triggerValidation call — no follow-up scheduled.
+    expect(triggerSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('conflict after abort transitions validating pod to review_required', async () => {
     const ctx = createTestContext({ overall: 'fail' });
     vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
