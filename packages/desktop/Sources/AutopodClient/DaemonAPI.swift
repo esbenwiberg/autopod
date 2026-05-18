@@ -353,8 +353,9 @@ public actor DaemonAPI {
     return try await request("POST", "/pods/series/preview", body: body)
   }
 
-  /// Parse a brief folder living on a git branch (produced by `/prep` or an
-  /// interactive pod). Reads the files directly from the profile's bare repo.
+  /// Parse a contract-backed brief folder living on a git branch (produced by
+  /// `/plan-feature` or an interactive pod). Reads the files directly from the
+  /// profile's bare repo.
   public func previewSeriesOnBranch(
     profileName: String,
     branch: String,
@@ -795,4 +796,3 @@ struct HistoryWorkspaceBody: Codable {
   let since: String?
   let failuresOnly: Bool?
 }
-

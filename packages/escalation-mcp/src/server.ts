@@ -256,7 +256,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'validate_in_browser',
-    'Open a browser in your container to verify your work. URL must be localhost. Use this to check your changes against acceptance criteria before committing.',
+    'Open a browser in your container to verify web-visible behavior. URL must be localhost. Use this before committing when contract scenarios or required facts involve UI behavior.',
     {
       url: z
         .string()

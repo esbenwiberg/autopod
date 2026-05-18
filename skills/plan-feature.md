@@ -116,7 +116,7 @@ justification) before writing.
 2. **Outcome** — One sentence, observable change after this ships.
    → `purpose.md` → Outcome
 3. **Success signal** — How will we know it worked?
-   → `purpose.md` → Success signal (must be tied to a brief AC, see #14)
+   → `purpose.md` → Success signal (must be tied to a required fact, see #14)
 4. **Users / actors** — Who is affected? Who benefits?
    → `purpose.md` → Users
 5. **Non-goals** — Explicit fence. The most useful thing for keeping the
@@ -158,83 +158,41 @@ justification) before writing.
 13. **Pod sizing** — Is any brief's `Touches` list approaching 8 files? Then
     split. Rule of thumb: > 8 files = too big.
     → briefs/ structure
-14. **Acceptance criteria** — Per brief, only when a real automated check
-    validates the behaviour. The validation pipeline runs `buildCommand`
-    and the test suite automatically — **never list build/test/lint as
-    ACs**.
+14. **Required facts** — Per brief, name the durable executable proof
+    artifacts that must exist after the pod lands. The validation pipeline
+    already runs build/test/lint as top-level phases — **never list generic
+    build/test/lint commands as facts**.
 
-    **Core principle: an AC validates the OUTCOME, not the wiring.** Run
-    the test "would this AC still pass if the user can't see or use the
-    feature?" If yes, it's the wrong AC. File-exists / grep checks confirm
-    code was written; they do not confirm the feature works. They
-    corroborate; they never substitute for a behavioural check on a
-    user-visible outcome.
+    **Core principle: a required fact survives merge.** It must be a unit
+    test, integration test, contract test, browser smoke script, type-level
+    check, fixture assertion, or equivalent repo artifact that future CI can
+    keep running. The worker creates or updates the artifact; Autopod runs
+    the command and writes attempt-scoped `evidence.yaml`.
 
-    Three firing types exist:
-    - `api` — HTTP probe against the running container (single request
-      or short create-then-read chain). Don't use against endpoints
-      requiring a role the test harness can't impersonate (`[Authorize]`
-      / `RequiresUserType(<role>)`) — they 401.
-    - `web` — browser DOM check via `validate_in_browser` (only when
-      the profile has a web UI).
-    - `cmd` — arbitrary shell command in the validation container, gates
-      on exit code. For **structural / workspace-state** assertions:
-      file existence, ref removal, JSON/YAML flag values, single named
-      tests by filter. NOT for build / test / lint as a whole — those
-      patterns are banned and force-classified to `none`. NOT for
-      behavioural claims — those go to `api` / `web`.
+    Required fact kinds:
+    - `unit-test` — a named unit test or focused test file.
+    - `integration-test` — a test that crosses module/service boundaries.
+    - `contract-test` — API/schema/provider-consumer contract verification.
+    - `browser-test` — Playwright or smoke script that observes web-visible
+      behavior and can save screenshots/traces to `.autopod/evidence/<fact-id>/`.
+    - `typecheck` — a narrow type-level proof, not the whole repo typecheck.
+    - `lint-rule` — a named lint/static rule that catches the behavior.
+    - `smoke-script` — a small deterministic script.
+    - `custom-command` — last resort; keep it narrow and deterministic.
 
-    **Hard rule — user-visible outcomes require a `web` AC.** If the
-    brief modifies any user-facing surface (component, page, route,
-    visible string, layout) AND the profile has a web UI, at least one
-    AC must be `type: web` that asserts the observable from the success
-    signal. Structural `cmd` checks corroborate; they are never the only
-    validation. A frontend brief whose ACs are all `cmd` is broken by
-    definition — the user could ship a broken feature and every AC would
-    still pass.
+    **Hard rule — user-visible outcomes require a `browser-test` fact** when
+    the repo has a runnable web UI. Structural commands can corroborate, but
+    they cannot be the only proof for a visible UI change.
 
-    **Type discipline — match the AC type to the verb in the outcome:**
-    - "visible" / "renders" / "user sees" / "screen shows" → `type: web`
-    - "endpoint returns" / "responds with" / "stores X" → `type: api`
-      (or `web` for end-to-end)
-    - "symbol removed" / "file exists" / "flag flipped" / "ref deleted"
-      → `type: cmd`
-
-    A `cmd` AC linked to a "visible" outcome is structural theatre — the
-    feature can be broken with every AC green. Fix the AC type, or
-    re-frame the outcome to match what you can actually validate.
-
-    **Decompose fuzzy claims before writing ACs.** "X migrated to Y" /
+    **Decompose fuzzy claims before writing facts.** "X migrated to Y" /
     "X works with Y" / "X integrates with Y" / "Wire X into Y" should
-    expand into 2–5 concrete checks, each pinned to a single observable.
-    If a brief has one fuzzy bullet, the interview isn't done.
+    expand into 2–5 concrete facts, each pinned to a durable artifact and a
+    narrow command. If a brief has one fuzzy proof bullet, the interview
+    isn't done.
 
-    Example (backend): "auth migrated to new middleware" →
-    (a) `cmd: test -f Application/Auth/NewMw.cs`,
-    (b) `cmd: ! grep -r OldMw Api/`,
-    (c) `api: GET /api/protected without token → 401`,
-    (d) `api: with valid token → 200`,
-    (e) `cmd: grep '"auth": "migrated"' inventory.json`.
-
-    Example (UI wiring): "wire total row into Resource Planner frontend" →
-    (a) `web: navigate /resource-planner — total row visible below header
-        with one cell per period column`,
-    (b) `web: change the period filter — total row updates without full
-        page reload`,
-    (c) `cmd: grep -l 'RESOURCE_PLANNER_TOP_ROW' Client/src/.../queryKeys.ts`
-        (corroborates query key wired),
-    (d) `cmd: test -f Client/src/.../TopTotalRow.tsx` (corroborates new
-        component exists).
-    The `web` ACs validate the outcome; the `cmd` ACs corroborate the
-    wiring. Reverse the proportions and the brief is broken.
-
-    `type: none` exists but is a no-op — auto-passed and excluded from
-    gating. Use it only when the diff reviewer is the only possible
-    verification (rare). Prefer **zero ACs** + a thorough Test
-    expectations section over padding with `none`. The success signal
-    from #3 must be tied to a firing AC, or the success signal itself
-    must be rewritten until it is.
-    → briefs/*.md frontmatter
+    Use `human_review` only for judgment that cannot honestly become an
+    executable fact yet, and keep it narrow.
+    → briefs/*/contract.yaml
 15. **Hard-to-reverse decisions** — Anything surprising or with long-lived
     consequences. ADRs are written **per decision**, numbered globally in
     `docs/decisions/` (not per spec).
@@ -286,9 +244,9 @@ Sometimes neither the user nor the codebase can answer a dimension. Distinguish:
   should never ship. Keep interviewing or escalate to a decision-maker.
 - **Technical unknown** ("will this migration approach scale on the 50M-row
   table?", "does the ORM's bulk-insert support our type?") — make the
-  first brief a **spike**: a research/exploration brief whose ACs are
-  "produce a finding, commit it as a handover, gate the rest of the series
-  on the finding." Subsequent briefs depend on it.
+  first brief a **spike**: a research/exploration brief whose required facts
+  prove that the finding was captured as a handover artifact and that the
+  rest of the series is gated on it. Subsequent briefs depend on it.
 
 Ask explicitly when unsure: "is this a product unknown or a technical
 unknown?"
@@ -322,11 +280,9 @@ For every brief you're about to write, confirm you can name:
 - The files it must NOT touch (the `does_not_touch` list — both lists
   are advisory; reviewer adjudicates deviations)
 - The interfaces it must respect (cite the contract section in design.md)
-- The ACs it must satisfy — every AC must be `type: api` or `type: web`
-  and actually fire in the validation engine. Build + tests run
-  automatically via the pipeline; do NOT list them as ACs. If no
-  `api`/`web` check is possible for a brief, write zero ACs and lean on
-  Test expectations + the diff reviewer for anchoring.
+- The required facts it must satisfy — each fact must name a durable artifact
+  and a narrow command in `contract.yaml`. Build + tests run automatically via
+  the pipeline; do NOT list generic build/test/lint commands as facts.
 - The dependency graph, without guessing
 
 For web-facing features, confirm that every new or significantly rearranged
@@ -334,15 +290,17 @@ screen has an approved wireframe from the interview loop. No wireframe = red.
 A wireframe produced at write-time (not during the loop) = red. A wireframe
 that the user hasn't explicitly signed off on = amber.
 
-Verify the **outcome → AC link with type discipline**:
-- "visible" / "renders" / "user sees" → linked AC must be `type: web`
-- "endpoint returns" / "responds" / "stores" → `type: api` (or `web`)
-- "symbol removed" / "file exists" / "flag flipped" → `type: cmd`
+Verify the **outcome → fact link with type discipline**:
+- "visible" / "renders" / "user sees" → linked fact must be `browser-test`
+- "endpoint returns" / "responds" / "stores" → `integration-test`,
+  `contract-test`, or a narrow smoke script
+- "symbol removed" / "file exists" / "flag flipped" → narrow static,
+  type-level, or smoke-script fact
 
-Cite which brief's AC validates the success signal in `purpose.md`. If
-the AC type doesn't match the outcome verb, the loop is not done — fix
-the AC type, or re-frame the outcome to match what you can actually
-validate. A `cmd` AC linked to a "visible" outcome is theatre.
+Cite which brief's required fact validates the success signal in
+`purpose.md`. If the fact kind doesn't match the outcome verb, the loop is
+not done — fix the fact or re-frame the outcome to match what you can
+actually verify.
 
 #### 2. Render the show-back as HTML
 
@@ -392,33 +350,34 @@ Collapse to single column under ~1040px viewport.
   panel with a label like `Gate 2 · parallel · 3 briefs depend on 01`.
   **Stack briefs vertically inside a gate — never render parallel
   siblings as side-by-side columns.** Brief bodies are dense (Task
-  paragraph, Touches with full paths, AC groups, Full draft markdown)
+  paragraph, Touches with full paths, required facts, Full draft markdown)
   and column layouts force line-wrap-per-word; the `<pre>` for the
   draft markdown is unreadable below ~600px. The `parallel` signal
   lives in the gate label, not in the column layout. Render an `↓`
   arrow between gates to show sequential dependency.
 - Each brief is a `<details>` element (HTML's native collapsible) with
   a colored left-border halo:
-  - **green** — clean: no open question, no theatre risk.
-  - **amber** — has at least one open question or AC theatre risk.
+  - **green** — clean: no open question, no weak-proof risk.
+  - **amber** — has at least one open question or weak-proof risk.
   - **red** — has an unresolved blocking issue.
-- Brief summary (always visible): name, file count, AC-count breakdown
-  (e.g. "3 api · 1 cmd"), `depends_on` chip, halo count badge.
+- Brief summary (always visible): name, file count, required-fact count
+  breakdown (e.g. "1 browser-test · 2 integration-test"), `depends_on`
+  chip, halo count badge.
 - Brief expanded body, in this order:
   - Task — one paragraph (verbatim or paraphrased from the brief's
     `## Task` section).
   - Touches — file list; mark new files with a "new" badge.
-  - Acceptance criteria — **grouped** into:
-    - *Validates outcome* (api/web ACs that fire on the user-visible
-      outcome named by the success signal).
-    - *Corroborates wiring* (cmd ACs that catch structural regressions).
-    - *AC theatre risk* (any AC whose type mismatches its outcome verb,
-      or whose pass condition would still hold on a broken feature).
+  - Required facts — **grouped** into:
+    - *Validates outcome* (facts that verify the success signal).
+    - *Corroborates wiring* (structural facts that catch regressions but do
+      not prove the full behavior alone).
+    - *Weak-proof risk* (facts whose command could pass while the feature is
+      still broken, or whose artifact is not durable after merge).
   - Success-signal link — explicit
-    `success signal #N ←→ AC #M (type)` line with a ✓ or ⚠ verdict on
-    type-match.
-  - Broken-feature mirror — one-sentence answer to "would all ACs still
-    pass on a broken feature?" with ✓ or ⚠.
+    `success signal #N ←→ fact #M (kind)` line with a check or warning
+    verdict on type-match.
+  - Broken-feature mirror — one-sentence answer to "would all facts still
+    pass on a broken feature?" with a check or warning.
   - Per-brief issues (if any) — each rendered as an inline callout with
     a label, body, and 2–3 selectable resolution choices
     (e.g. `split as proposed`, `keep`, `counter-propose`). Choices are
@@ -505,11 +464,11 @@ Order top-down by attention priority:
 **Color semantics** — use consistently for borders, badges, bullets,
 and section headings:
 
-- green: dimension covered, AC validates outcome, ADR consequence
+- green: dimension covered, required fact validates outcome, ADR consequence
   "easier"
-- blue: api ACs, selected resolution pills (filled), reply-composer accent
-- amber: open question, AC corroborates wiring, deferred answer
-- red: unresolved/blocking, AC theatre risk, ADR consequence "harder"
+- blue: executable facts, selected resolution pills (filled), reply-composer accent
+- amber: open question, structural fact only, deferred answer
+- red: unresolved/blocking, weak-proof risk, ADR consequence "harder"
 - accent (purple/violet): ADRs, accepted decisions
 
 Resolution pills must NOT be styled as hyperlinks (no `<a>` underline,
@@ -623,10 +582,10 @@ review surface; printing the markdown defeats the point. Do NOT start
 writing the spec until the user replies `green light` (or an
 equivalent affirmation).
 
-If the user pushes back on any AC or spots a gap, treat that as a
-re-opened dimension and keep interviewing — do not negotiate the AC
-away. The ACs are the contract between the planner and the validation
-engine; getting them wrong means a green pipeline on a broken feature.
+If the user pushes back on any required fact or spots a gap, treat that as
+a re-opened dimension and keep interviewing — do not negotiate the proof
+away. Required facts are the contract between the planner and the validator;
+getting them wrong means a green pipeline on a broken feature.
 After re-interviewing, regenerate the HTML show-back at the same path
 (overwrite). Each iteration should produce fewer halos.
 
@@ -687,10 +646,11 @@ screenshot, a user action succeeding). State the observable only —
 **do not pre-bake the validation method.** "Total row visible in
 Resource Planner with correct per-period totals" is right; "validated
 by file existing, query key wired, unit tests" is wrong (that's already
-the AC's job, and it traps the planner into structural-only ACs that
-pass on a broken feature). The AC owns the validation method; the
-success signal owns the observable. At least one brief AC must validate
-this with a matching type — see exit-checklist type discipline.
+the required fact's job, and it traps the planner into structural-only
+facts that pass on a broken feature). The success signal owns the
+observable; required facts own the executable proof. At least one brief
+fact must validate this with a matching kind — see exit-checklist type
+discipline.
 
 ## Non-goals
 - Explicit fence item 1
@@ -911,11 +871,10 @@ lines and link to design.md rather than restating.
 
 ## Test expectations
 Which test files to add and what each covers, per behaviour (happy path,
-edge cases, error paths). Required for any brief that adds new code —
-this is the real anchor when the frontmatter has zero `api`/`web` ACs
-(which is most briefs, since most code is not behind an HTTP surface
-the test harness can probe). Skip only when the brief is pure config /
-docs / dependency bumps with no logic to test.
+edge cases, error paths). Required for any brief that adds new code — this
+supports the required facts and keeps the proof artifact meaningful. Skip
+only when the brief is pure config / docs / dependency bumps with no logic
+to test.
 ```
 
 Optional sections (include only when they add value):
@@ -945,8 +904,8 @@ Before finishing:
 3. Commit and push.
 ```
 
-`/simplify` is process, not an AC — that's why it's a wrap-up step. ACs
-remain about observable outcomes only.
+`/simplify` is process, not a required fact — that's why it's a wrap-up
+step. Required facts remain about observable outcomes only.
 
 #### What briefs should NOT contain
 
@@ -1040,10 +999,10 @@ loop was not done.
   deliverable. (The `SAMPLE-*.html` reference file is the only
   exception.)
 - Substituting the raw "Full draft markdown" panel for the structured
-  AC / theatre / success-signal-link panels in a brief card. The
-  structured panels are what catch theatre risk; the raw draft is for
+  facts / weak-proof / success-signal-link panels in a brief card. The
+  structured panels are what catch weak proof; the raw draft is for
   verification, not for replacing review. If you drop the structured
-  panels and only render the draft, every theatre check goes silent.
+  panels and only render the draft, every proof check goes silent.
 - Writing draft briefs to disk during the loop (e.g. to a transient
   `.autopod/review/briefs-draft/` location) so the user can read them
   before greenlight. Briefs live in the planner's head until greenlight
@@ -1065,29 +1024,20 @@ loop was not done.
 - Putting wireframes only in briefs. Wireframes belong in design.md → UX flows
   (auto-injected into every pod's context). A brief-local wireframe is invisible
   to parallel pods touching the same surface.
-- ACs that require human judgment ("looks good", "feels right").
-- Wrapping build / test / lint commands as ACs (`pnpm build`,
+- Required facts that require human judgment ("looks good", "feels right").
+- Wrapping build / test / lint commands as required facts (`pnpm build`,
   `dotnet test`, `tsc`, `biome`, `cargo build`, `make`) —
-  `isCommandLikeAc()` force-classifies them to `none`, which the
-  engine auto-passes and excludes from gating. The pipeline already
-  runs build + tests as its first phase; listing them as ACs is
-  duplication that creates false confidence. Use `cmd` only for
-  *narrow* checks the pipeline does not do (e.g. `rg -l 'OldSymbol'`
-  must return no matches).
-- Padding `acceptance_criteria` with `none`-typed entries when no
-  `api`/`web`/`cmd` check applies. Zero ACs + a thorough Test
-  expectations section is honest; an all-`none` AC list is theatre.
-- Writing an `api` AC against an endpoint behind `[Authorize]` /
-  `RequiresUserType(<role>)` — the harness has no role impersonation
-  and the request will 401. Either point the AC at an unauthenticated
-  endpoint that observes the same state, swap to a `cmd` AC that
-  observes the same change a different way (a config flag, a registered
-  route, a generated file), or skip the AC for that brief.
+  the pipeline already runs broad build/test/lint phases. Facts should be
+  narrow durable proofs the pipeline does not provide by itself.
+- Padding `human_review` with checks that could be executable facts. Human
+  review is for judgment only; durable behavior belongs in `required_facts`.
+- Writing a browser/API fact against a surface the harness cannot authenticate.
+  Instead, create a lower-level unit/integration/contract test artifact that
+  proves the same behavior.
 - Treating fuzzy claims like "auth migrated to new middleware" or
-  "feature X removed" as one AC. They aren't observable. Decompose
-  into 2–5 narrow `cmd` / `api` checks (new file exists, old symbol
-  has zero refs, new endpoint responds, inventory flag flipped) — or
-  drop the AC and rely on Test expectations + reviewer.
+  "feature X removed" as one required fact. Decompose into 2–5 durable
+  artifacts and narrow commands, or make the uncertainty explicit as a
+  human review check.
 - A brief whose `touches` list exceeds 8 files and not splitting it.
 - Writing ADRs in `specs/<feature>/decisions/` instead of repo-level
   `docs/decisions/` — they belong in the durable, globally-numbered home.
@@ -1096,21 +1046,20 @@ loop was not done.
 - Skipping ADRs for surprising decisions (the next agent will make wrong
   assumptions).
 - Mixing "what to build" with "how to build it" in the brief body.
-- Forgetting to tie the success signal to a specific brief AC.
+- Forgetting to tie the success signal to a specific required fact.
 - **Pre-baking the validation method into the success signal** ("validated
   by: file existing, query key wired, unit tests"). The success signal
-  states the observable; the AC owns the validation. Pre-baking commits
+  states the observable; required facts own the proof. Pre-baking commits
   the planner to whatever method appears in the clause — usually
-  structural-only — and traps every downstream brief into theatre ACs.
-- **All-`cmd` ACs on a brief that touches user-visible UI in a web-capable
-  profile.** Forbidden by the hard rule in dimension #14. At least one
-  `web` AC must observe the user-visible outcome; `cmd` checks
-  corroborate the wiring but never replace the behavioural check. If
-  every AC would still pass on a broken feature, the AC list is wrong.
-- **Type mismatch between outcome verb and AC type** — a "visible"
-  outcome linked to a `cmd` file-existence AC, an "endpoint returns"
-  outcome linked only to a grep. The AC type must match what the outcome
-  describes; if it doesn't, fix the AC or re-frame the outcome.
+  structural-only — and traps every downstream brief into weak facts.
+- **No `browser-test` fact on a brief that touches user-visible UI in a
+  web-capable profile.** Forbidden by the hard rule in dimension #14. At
+  least one browser fact must observe the user-visible outcome; structural
+  facts corroborate the wiring but never replace the behavioral check.
+- **Type mismatch between outcome verb and fact kind** — a "visible"
+  outcome linked only to a file-existence command, an "endpoint returns"
+  outcome linked only to a grep. The fact kind must match what the outcome
+  describes; if it doesn't, fix the fact or re-frame the outcome.
 
 ### Red-flag examples (what "not enough questions" looks like)
 
@@ -1124,16 +1073,16 @@ Rule of thumb: if you can summarize the feature in one sentence *after*
 the interview and it sounds identical to the user's original prompt, you
 didn't interview — you transcribed.
 
-### Red-flag examples (AC theatre)
+### Red-flag examples (weak facts)
 
-| Brief | Bad ACs (theatre) | Good ACs (validate the outcome) |
+| Brief | Bad facts (weak proof) | Good facts (validate the outcome) |
 |-------|-------------------|--------------------------------|
-| "Wire total row into Resource Planner frontend" (success signal: row visible with correct totals) | 3× `cmd`: `test -f TopTotalRow.tsx`, `grep RESOURCE_PLANNER_TOP_ROW queryKeys.ts`, `grep getResourcePlannerTotalRow ResourcePlannerGrid.tsx` — every check passes if the file exists and is imported, even when the user sees nothing. | 1–2× `web`: navigate to the page, assert the total row renders below the header with one cell per period and matches expected totals. Optional `cmd` to corroborate query-key wiring. |
-| "Add status badge to user list" (success signal: badge visible in row) | `cmd: test -f StatusBadge.tsx` + `cmd: grep StatusBadge UserList.tsx` | `web: navigate /users, each row contains a `[data-testid=status-badge]` element with text matching the user's status` |
-| "Migrate auth to new middleware" (success signal: protected routes still gated) | only `cmd: test -f NewMw.cs` | `cmd: ! grep -r OldMw Api/` + `api: GET /api/protected without token → 401` + `api: with valid token → 200` (cmd alone proves the file moved, not that auth still works) |
+| "Wire total row into Resource Planner frontend" (success signal: row visible with correct totals) | Only a file-existence command for `TopTotalRow.tsx` — it passes even when the user sees nothing. | `browser-test`: navigate to the page, assert the total row renders below the header with one cell per period and matches expected totals. Optional structural fact to corroborate query-key wiring. |
+| "Add status badge to user list" (success signal: badge visible in row) | Only grep for `StatusBadge` in `UserList.tsx`. | `browser-test`: navigate `/users`, each row contains a `[data-testid=status-badge]` element with text matching the user's status. |
+| "Migrate auth to new middleware" (success signal: protected routes still gated) | only a file-existence command for `NewMw.cs`. | `integration-test` or `contract-test`: protected route rejects an unauthenticated request and accepts a valid authenticated request; optional structural fact that old middleware has no refs. |
 
-Rule of thumb for ACs: imagine the agent shipped a broken feature. Would
-every AC still pass? If yes, the AC list is theatre — rewrite it before
+Rule of thumb for required facts: imagine the agent shipped a broken feature.
+Would every fact still pass? If yes, the fact set is weak — rewrite it before
 showing the green-light prompt.
 
 ---

@@ -2,8 +2,8 @@ import AppKit
 import AutopodClient
 import SwiftUI
 
-/// Sheet for launching a pod series from a folder of markdown briefs.
-/// Flow: pick folder → daemon parses briefs and returns the DAG → user
+/// Sheet for launching a pod series from a folder of contract-backed briefs.
+/// Flow: pick folder → daemon parses contracts and returns the DAG → user
 /// confirms profile / PR mode → submit.
 public struct CreateSeriesSheet: View {
     @Binding public var isPresented: Bool
@@ -173,7 +173,7 @@ public struct CreateSeriesSheet: View {
                     .disabled(isSubmitting)
             }
             if !folderPath.isEmpty {
-                Button(isPreviewing ? "Parsing…" : "Parse briefs") {
+                Button(isPreviewing ? "Parsing…" : "Preview series") {
                     Task { await runPreview() }
                 }
                 .disabled(isPreviewing || isSubmitting)
@@ -183,7 +183,7 @@ public struct CreateSeriesSheet: View {
 
     private var onBranchFields: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Reads briefs directly from the Base branch above. Useful when `/prep` wrote briefs to `specs/<feature>/briefs/` on a branch, or when stacking on an interactive pod's work.")
+            Text("Reads contract-backed briefs from the Base branch above. Use `specs/<feature>/briefs/` from `/plan-feature`, where each brief folder contains `brief.md` and `contract.yaml`.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -196,7 +196,7 @@ public struct CreateSeriesSheet: View {
             }
 
             if !baseBranch.isEmpty && !branchPath.isEmpty && !selectedProfile.isEmpty {
-                Button(isPreviewing ? "Parsing…" : "Parse briefs") {
+                Button(isPreviewing ? "Parsing…" : "Preview series") {
                     Task { await runPreview() }
                 }
                 .disabled(isPreviewing || isSubmitting)
@@ -234,8 +234,8 @@ public struct CreateSeriesSheet: View {
         }()
         guard let response else {
             let fallback = briefSource == .localFolder
-                ? "Could not parse briefs from that folder."
-                : "Could not parse briefs from \(branchPath) on \(baseBranch). Check the profile has access and the path exists on the branch."
+                ? "Could not parse contract-backed briefs from that folder."
+                : "Could not parse contract-backed briefs from \(branchPath) on \(baseBranch). Check the branch has the new layout: one folder per pod, each with brief.md and contract.yaml."
             errorMessage = actions.lastPreviewError() ?? fallback
             preview = nil
             return
@@ -444,7 +444,7 @@ public struct CreateSeriesSheet: View {
                     if briefSource == .onBranch { preview = nil }
                 }
             if briefSource == .onBranch {
-                Text("The series stacks on this branch, and briefs are read from the path below on this branch.")
+                Text("The series stacks on this branch, and contract-backed briefs are read from the path below on this branch.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

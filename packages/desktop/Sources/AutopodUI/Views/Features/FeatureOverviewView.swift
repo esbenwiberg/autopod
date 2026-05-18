@@ -332,7 +332,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .memoryStore:
             "Agents suggest persistent knowledge scoped globally, per-profile, or per-pod. Humans approve. Approved memories are injected into future pods' CLAUDE.md automatically."
         case .seriesWorkflows:
-            "Multi-pod DAG workflows with dependency chains. Briefs are YAML-frontmatter markdown files — specify depends_on, touches, and ACs. Three PR modes: single (shared branch), stacked (one PR per pod), or none."
+            "Multi-pod DAG workflows with dependency chains. Each pod has brief.md for task context and contract.yaml for dependencies, scenarios, required facts, and human review checks. Three PR modes: single (shared branch), stacked (one PR per pod), or none."
         case .scheduledJobs:
             "Cron-triggered pods for recurring tasks — nightly security audits, weekly dependency upgrades, regression sweeps. DB-driven scheduler with catchup recovery and manual trigger support."
         case .issueWatcher:
@@ -371,7 +371,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .profileManagement:    "Versioned + snapshotted profiles, 11 stacks, 4 providers, local/ACI, inheritance + injection"
         case .realTimeMonitoring:   "9 event types, 30-day replay, PII-safe broadcast"
         case .memoryStore:          "3-scoped persistent knowledge: suggest → approve → inject into CLAUDE.md"
-        case .seriesWorkflows:      "YAML-frontmatter briefs, DAG dependency resolution, fan-in, 3 PR modes"
+        case .seriesWorkflows:      "Contract-backed briefs, DAG dependency resolution, fan-in, 3 PR modes"
         case .scheduledJobs:        "DB-driven cron scheduler, catchup on restart, manual trigger, enable/disable"
         case .issueWatcher:         "Label-triggered pod spawning for GitHub + ADO, lifecycle comments, PII-safe quarantine"
         case .analyticsDashboard:   "6 fleet dashboards: cost, reliability funnel, throughput, safety, quality, escalations"
@@ -405,7 +405,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .scheduledJobs:
             "Cron-scheduled pods stored in the database with cron expressions, profile references, and task descriptions. The daemon evaluates nextRunAt on each scheduler tick and spawns pods when the window elapses. On restart, jobs with missed windows are flagged catchupPending — operators review and decide whether to run or skip each one. Jobs can also be triggered manually regardless of schedule."
         case .issueWatcher:
-            "Daemon polls GitHub and ADO issues every 60 seconds on profiles with issueWatcherEnabled. When a trigger label is found, the issue title+body+ACs are sanitized (PII stripped, injection quarantine applied) and a pod is spawned. The trigger label is replaced with autopod:in-progress. Agent escalations are posted as issue comments. On pod completion, the label updates to autopod:done or autopod:failed and a summary comment is posted."
+            "Daemon polls GitHub and ADO issues every 60 seconds on profiles with issueWatcherEnabled. When a trigger label is found, the issue title and body are sanitized (PII stripped, injection quarantine applied) and a pod is spawned. The trigger label is replaced with autopod:in-progress. Agent escalations are posted as issue comments. On pod completion, the label updates to autopod:done or autopod:failed and a summary comment is posted."
         case .analyticsDashboard:
             "Six fleet analytics dashboards, each queryable over a configurable time window (default 30 days, max 365). Cost tracks spend by phase (agent_initial, agent_rework, review, plan_eval) and by profile+model, with top-10 sessions and waste (killed/failed). Reliability tracks first-pass rate, funnel drop-offs by band, and per-stage failure rates. Throughput tracks pods/day, MTTM, and time-in-status percentiles. Safety tracks PII+injection events, quarantine score histogram, network policy distribution, and audit chain integrity. Quality tracks composite scores (0–100) per pod. Escalations track counts by type and profile."
         }
@@ -463,11 +463,11 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .memoryStore:
             "Agent calls memory_suggest MCP tool with scope + content → daemon creates a pending memory record with SHA-256 hash (deduplication). Human approves via PATCH /memory/:id → status transitions to approved. On provisioning, system-instructions-generator queries approved memories for the pod's scope (global, profile-matched, pod-matched) and injects them into CLAUDE.md as a 'Team Knowledge' section. memory_list/read/search tools let the agent query the store at runtime. REST: GET/POST/PATCH/DELETE /memory."
         case .seriesWorkflows:
-            "POST /pods/series parses briefs (YAML frontmatter), resolves the dependency DAG topologically, and spawns pods in order. In single mode, non-root pods wait for their parent to complete then commit to the same branch — siblings serialized even when the DAG allows fan-out. In stacked mode, each pod has its own PR and waits for the parent PR to merge before starting. depends_on uses title matching → pod ID; missing titles error at parse time. context_files are resolved relative to the spec root and attached to the pod's CLAUDE.md."
+            "POST /pods/series parses contract-backed briefs, resolves the dependency DAG topologically, and spawns pods in order. In single mode, non-root pods wait for their parent to complete then commit to the same branch — siblings serialized even when the DAG allows fan-out. In stacked mode, each pod has its own PR and waits for the parent PR to merge before starting. contract.yaml depends_on uses brief folder stems; missing dependencies error at parse time. context_files are resolved relative to the spec root and attached to the pod's AGENTS.md."
         case .scheduledJobs:
             "Scheduler tick runs every minute; compares nextRunAt (stored per job) to now(). When a job fires, it spawns a pod with the stored profileName + task, then updates nextRunAt to the next cron window. On daemon startup, jobs where nextRunAt is in the past are marked catchupPending=true. The /scheduled-jobs/:id/catchup endpoint triggers the missed run immediately; the DELETE variant skips it. Manual trigger via POST /scheduled-jobs/:id/trigger fires regardless of schedule and does not update nextRunAt."
         case .issueWatcher:
-            "Poll loop: every 60s, query each watched profile's issue provider for issues with the trigger label. For each new hit: sanitize title+body+ACs via processContent (quarantine + PII redact), check (provider, issueId, profile) uniqueness, spawn pod, swap label to <prefix>:in-progress, post 'pod started' comment. On pod status change events: update DB status, swap label to <prefix>:done or <prefix>:failed, post outcome comment. ask_human escalations post the question as an issue comment and await reply."
+            "Poll loop: every 60s, query each watched profile's issue provider for issues with the trigger label. For each new hit: sanitize title+body via processContent (quarantine + PII redact), check (provider, issueId, profile) uniqueness, spawn pod, swap label to <prefix>:in-progress, post 'pod started' comment. On pod status change events: update DB status, swap label to <prefix>:done or <prefix>:failed, post outcome comment. ask_human escalations post the question as an issue comment and await reply."
         case .analyticsDashboard:
             "All analytics queries operate on a terminal cohort: non-workspace pods with final status (complete, killed, failed) that completed within the requested window. Cost aggregation groups token usage by phase key (phase_type + attempt_index), joins to model pricing JSON for USD conversion. Reliability funnel counts pods that reached each band, computing drop-off between adjacent bands. Throughput buckets completion timestamps by day. Safety joins safety_events + action_audit tables for dual-source threat counts. Quality reads pre-computed quality_scores table. All endpoints return HTTP 400 for invalid days, HTTP 503 if data is unavailable."
         }
@@ -607,9 +607,9 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             ]
         case .seriesWorkflows:
             [
-                "Brief format: YAML frontmatter (title, task, depends_on, touches, does_not_touch, acceptance_criteria, context_files) in any .md file under briefs/",
-                "Spec folder: briefs/ required, purpose.md + design.md optional — injected into every pod's CLAUDE.md",
-                "DAG resolution: topological sort via Kahn's algorithm, fan-in via depends_on title references",
+                "Brief format: one folder per pod under briefs/, with brief.md for task context and contract.yaml for depends_on, scenarios, required_facts, and human_review",
+                "Spec folder: briefs/ required, purpose.md + design.md optional — injected into every pod's AGENTS.md",
+                "DAG resolution: topological sort via Kahn's algorithm, fan-in via contract.yaml depends_on folder-stem references",
                 "PR mode single: all pods share one branch, siblings serialized; only final pod creates PR",
                 "PR mode stacked: each pod gets its own PR; non-root pods wait for parent PR to merge",
                 "PR mode none: pods push branches only, no PRs created",
@@ -637,9 +637,9 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "Poll interval: 60s; iterates all enabled profiles, queries each issue provider",
                 "Label routing: bare label → this profile; 'autopod:name' → route to profile 'name' (same repo only)",
                 "Label suffix 'artifact' → force outputMode: artifact on spawned pod",
-                "Safety quarantine: title+body+ACs passed through processContent (PII redact + injection check) before storage",
+                "Safety quarantine: issue title + body passed through processContent (PII redact + injection check) before storage",
                 "Duplicate guard: (provider, issueId, profile) uniqueness check before spawning",
-                "Pod spawn: task = sanitized issue title + body; ACs extracted from issue body markers",
+                "Pod spawn: task = sanitized issue title + body; durable proof comes from contract-backed specs when launched from a spec folder",
                 "Label swap: trigger label removed, '<prefix>:in-progress' label added",
                 "Comment on start: 'autopod pod <id> started for this issue'",
                 "ask_human escalation: question posted as issue comment, awaits reply",
