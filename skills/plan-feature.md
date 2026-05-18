@@ -884,6 +884,9 @@ Rules:
   equivalent browser test artifact. The worker creates/updates the proof artifact;
   Autopod runs the command and writes attempt-scoped `evidence.yaml`. Never ask
   the worker to author evidence directly.
+  Browser/report facts may write attachments under
+  `.autopod/evidence/<fact-id>/`; Autopod records those paths as screenshots,
+  traces, videos, reports, logs, or generic artifacts in `evidence.yaml`.
 - `human_review` — only for judgement that cannot honestly become an
   executable fact yet.
 

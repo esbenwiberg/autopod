@@ -848,6 +848,7 @@ async function runFactValidation(
     const durationMs = Date.now() - commandStart;
 
     const commandPassed = commandResult.exitCode === 0;
+    const attachments = await collectFactAttachments(containerManager, config, fact.id, log);
     const passed = artifactExists && artifactChanged && commandPassed;
     const failedReasons = [
       artifactExists ? null : `artifact ${artifactPath} does not exist`,
@@ -872,7 +873,7 @@ async function runFactValidation(
         changed: artifactChanged,
         ...(artifactHash ? { hash: artifactHash } : {}),
       },
-      attachments: [],
+      attachments,
       reasoning: passed
         ? `Fact ${fact.id} passed: ${artifactPath} exists, was changed, and command exited 0.`
         : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`,
@@ -906,6 +907,47 @@ async function artifactExistsInContainer(
     log?.warn({ err, artifactPath }, 'required fact artifact existence check failed');
     return false;
   }
+}
+
+async function collectFactAttachments(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  factId: string,
+  log?: Logger,
+): Promise<FactCheckResult['attachments']> {
+  try {
+    const evidenceDir = `.autopod/evidence/${factId}`;
+    const result = await containerManager.execInContainer(
+      config.containerId,
+      [
+        'sh',
+        '-c',
+        `if [ -d ${shellQuote(`/workspace/${evidenceDir}`)} ]; then find ${shellQuote(`/workspace/${evidenceDir}`)} -type f | sed 's#^/workspace/##' | head -100; fi`,
+      ],
+      { cwd: '/workspace', timeout: 10_000 },
+    );
+    if (result.exitCode !== 0) return [];
+    return result.stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((path) => ({ kind: attachmentKindForPath(path), path }));
+  } catch (err) {
+    log?.warn({ err, factId }, 'required fact attachment collection failed');
+    return [];
+  }
+}
+
+function attachmentKindForPath(path: string): NonNullable<FactCheckResult['attachments']>[number]['kind'] {
+  const lower = path.toLowerCase();
+  if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp')) {
+    return 'screenshot';
+  }
+  if (lower.endsWith('.zip')) return 'trace';
+  if (lower.endsWith('.webm') || lower.endsWith('.mp4')) return 'video';
+  if (lower.endsWith('.xml') || lower.endsWith('.json') || lower.endsWith('.html')) return 'report';
+  if (lower.endsWith('.log') || lower.endsWith('.txt')) return 'log';
+  return 'artifact';
 }
 
 async function artifactHashInContainer(
