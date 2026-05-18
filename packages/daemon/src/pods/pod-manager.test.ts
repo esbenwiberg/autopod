@@ -5235,4 +5235,14 @@ describe('updateFromBase', () => {
       statusCode: 400,
     });
   });
+
+  it('compromised worktree returns WORKTREE_COMPROMISED 409', async () => {
+    const ctx = createTestContext();
+    const { manager, pod } = setupParkedPod(ctx, 'failed', { worktreeCompromised: true });
+
+    await expect(manager.updateFromBase(pod.id)).rejects.toMatchObject({
+      code: 'WORKTREE_COMPROMISED',
+      statusCode: 409,
+    });
+  });
 });
