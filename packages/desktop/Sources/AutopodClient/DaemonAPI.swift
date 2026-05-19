@@ -532,6 +532,55 @@ public actor DaemonAPI {
 
   // MARK: - Validation
 
+  public func updateFromBase(_ id: String) async throws -> UpdateFromBaseResponse {
+    let path = "/pods/\(id)/update-from-base"
+    var components = URLComponents(
+      url: baseURL.appendingPathComponent(path),
+      resolvingAgainstBaseURL: false
+    )!
+    guard let url = components.url else {
+      throw DaemonError.networkError("Invalid URL: \(path)")
+    }
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    req.setValue("application/json", forHTTPHeaderField: "Accept")
+    req.timeoutInterval = 30
+    let data: Data
+    let response: URLResponse
+    do {
+      (data, response) = try await pod.data(for: req)
+    } catch {
+      throw DaemonError.networkError(error.localizedDescription)
+    }
+    guard let http = response as? HTTPURLResponse else {
+      throw DaemonError.networkError("Non-HTTP response")
+    }
+    switch http.statusCode {
+    case 200, 201:
+      do { return try decoder.decode(UpdateFromBaseResponse.self, from: data) }
+      catch { throw DaemonError.decodingError("\(error)") }
+    case 409:
+      // 409 is either a typed conflict result or an INVALID_STATE error.
+      if let result = try? decoder.decode(UpdateFromBaseResponse.self, from: data),
+         result.action == "conflict" {
+        return result
+      }
+      let msg = String(data: data, encoding: .utf8) ?? "Invalid state"
+      throw DaemonError.serverError(409, msg)
+    case 400:
+      let msg = String(data: data, encoding: .utf8) ?? "Bad request"
+      throw DaemonError.badRequest(msg)
+    case 401:
+      throw DaemonError.unauthorized(decodeErrorMessage(data))
+    case 404:
+      throw DaemonError.notFound(path)
+    default:
+      let msg = String(data: data, encoding: .utf8) ?? "Unknown error"
+      throw DaemonError.serverError(http.statusCode, msg)
+    }
+  }
+
   public func interruptValidation(podId: String) async throws {
     let _: EmptyResponse = try await request("POST", "/pods/\(podId)/interrupt-validation")
   }
@@ -795,4 +844,18 @@ struct HistoryWorkspaceBody: Codable {
   let limit: Int?
   let since: String?
   let failuresOnly: Bool?
+}
+
+/// Response from POST /pods/:id/update-from-base.
+/// The conflict outcome arrives as HTTP 409 but is decoded as a typed result
+/// (not an error) when `action == "conflict"`. All other 409s are INVALID_STATE.
+public struct UpdateFromBaseResponse: Codable, Sendable {
+  public let ok: Bool
+  /// One of: "queued_after_abort" | "already_up_to_date" | "rebased" | "conflict"
+  public let action: String
+  public let baseBranch: String?
+  /// "started" when the daemon kicked off a follow-up validation run.
+  public let validation: String?
+  /// Non-empty only when action == "conflict".
+  public let conflicts: [String]?
 }
