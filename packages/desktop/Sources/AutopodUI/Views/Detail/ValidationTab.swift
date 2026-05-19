@@ -35,6 +35,7 @@ public struct ValidationTab: View {
   @State private var overrideReason: String = ""
   @State private var overrideGuidance: String = ""
   @State private var dismissedFindingIds: Set<String> = []
+  @State private var isPreSubmitExpanded = false
   // Lightbox state — one instance at the tab level; thumbnails write into these
   @State private var lightboxRefs: [ScreenshotRef] = []
   @State private var lightboxIndex: Int = 0
@@ -626,9 +627,6 @@ public struct ValidationTab: View {
         }
         if reviewIssueCount > 0 {
           summaryChip(label: "Findings", value: "\(reviewIssueCount)", color: .red)
-        }
-        if let verdict = pod.preSubmitReview {
-          summaryChip(label: "Pre-submit", value: verdict.status.rawValue, color: preSubmitTint(for: verdict.status))
         }
       }
     }
@@ -1406,6 +1404,10 @@ public struct ValidationTab: View {
     let skipKind: String? = displayedChecks?.reviewSkipKind
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? displayedChecks?.requirementsCheck
     let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
+    let issueTexts = issues.isEmpty
+      ? displayedChecks?.reviewFindings?.map(\.description) ?? []
+      : issues
+    let findingItems = reviewFindingItems(from: issueTexts)
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(
@@ -1414,57 +1416,19 @@ public struct ValidationTab: View {
         failLabel: "Review flagged issues",
         skipLabel: reviewSkipLabel(kind: skipKind, reason: skipReason)
       )
-      if let verdict = pod.preSubmitReview {
-        preSubmitReviewCard(verdict)
-      }
-      if let reasoning, !reasoning.isEmpty {
+      if findingItems.isEmpty, let reasoning, !reasoning.isEmpty {
         Text(reasoning)
           .font(.caption)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
       }
-      if !issues.isEmpty {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Issues")
+      if !findingItems.isEmpty {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Review Findings")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
-          ForEach(Array(issues.enumerated()), id: \.offset) { idx, issue in
-            let findingId = displayedChecks?.reviewFindings?.first(where: { $0.description == issue })?.id
-              ?? "review-issue-\(idx)"
-            let isDismissed = dismissedFindingIds.contains(findingId)
-              || (displayedChecks?.dismissedFindingIds.contains(findingId) ?? false)
-            HStack(alignment: .top, spacing: 6) {
-              Image(systemName: isDismissed ? "checkmark.circle.fill" : "exclamationmark.triangle")
-                .font(.system(size: 9))
-                .foregroundStyle(isDismissed ? .green : .red)
-                .padding(.top, 2)
-              Text(issue)
-                .font(.caption)
-                .foregroundStyle(isDismissed ? .secondary : .primary)
-                .strikethrough(isDismissed)
-              Spacer()
-              if isDismissed {
-                Text("Dismissed")
-                  .font(.caption2)
-                  .foregroundStyle(.secondary)
-              } else {
-                Button("Dismiss") {
-                  // Always reset to dismiss when opening — don't leak guidance state from prior use
-                  overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = ""
-                  overridePopoverFindingId = findingId
-                }
-                .font(.caption2)
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .popover(isPresented: Binding(
-                  get: { overridePopoverFindingId == findingId },
-                  set: { if !$0 { overridePopoverFindingId = nil } }
-                )) {
-                  overridePopover(findingId: findingId, description: issue)
-                }
-              }
-            }
-            .opacity(isDismissed ? 0.6 : 1)
+          ForEach(findingItems) { item in
+            reviewFindingRow(item)
           }
         }
       }
@@ -1500,6 +1464,9 @@ public struct ValidationTab: View {
         }
       }
       correctionMessageBlock
+      if let verdict = pod.preSubmitReview {
+        preSubmitReviewDisclosure(verdict)
+      }
     }
   }
 
@@ -1574,54 +1541,251 @@ public struct ValidationTab: View {
     }
   }
 
-  private func preSubmitReviewCard(_ verdict: PreSubmitReviewSnapshot) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 8) {
-        Image(systemName: preSubmitIcon(for: verdict.status))
-          .foregroundStyle(preSubmitTint(for: verdict.status))
-        Text("Pre-submit Review")
-          .font(.callout.weight(.semibold))
-        Spacer()
-        Text(verdict.status.rawValue.uppercased())
-          .font(.system(.caption2, design: .monospaced).weight(.semibold))
-          .padding(.horizontal, 7)
-          .padding(.vertical, 3)
-          .background(preSubmitTint(for: verdict.status).opacity(0.14), in: Capsule())
-          .foregroundStyle(preSubmitTint(for: verdict.status))
-        Text(verdict.model)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-      }
+  private func reviewFindingItems(from issues: [String]) -> [ReviewFindingItem] {
+    issues.enumerated().map { idx, issue in
+      let findingId = displayedChecks?.reviewFindings?.first(where: { $0.description == issue })?.id
+        ?? "review-issue-\(idx)"
+      let parsed = parseReviewIssue(issue)
+      return ReviewFindingItem(
+        id: findingId,
+        original: issue,
+        severity: parsed.severity,
+        title: parsed.title,
+        detail: parsed.detail,
+        location: parsed.location
+      )
+    }
+  }
 
-      if !verdict.reasoning.isEmpty {
-        Text(verdict.reasoning)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-          .textSelection(.enabled)
-      }
+  private func parseReviewIssue(_ issue: String) -> ReviewFindingItem {
+    var text = issue.trimmingCharacters(in: .whitespacesAndNewlines)
+    let severity: String?
 
-      if !verdict.issues.isEmpty {
+    if text.hasPrefix("["), let end = text.firstIndex(of: "]") {
+      let rawSeverity = String(text[text.index(after: text.startIndex)..<end])
+      severity = rawSeverity.uppercased()
+      text = String(text[text.index(after: end)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    } else {
+      severity = nil
+    }
+
+    let location = extractReviewLocation(from: text)
+    let titleAndDetail = splitReviewTitleAndDetail(text)
+
+    return ReviewFindingItem(
+      id: "",
+      original: issue,
+      severity: severity,
+      title: cleanReviewText(titleAndDetail.title),
+      detail: titleAndDetail.detail.map(cleanReviewText),
+      location: location.map(cleanReviewText)
+    )
+  }
+
+  private func splitReviewTitleAndDetail(_ text: String) -> (title: String, detail: String?) {
+    let separators = [" \u{2014} ", " -- ", " - "]
+    for separator in separators {
+      if let range = text.range(of: separator) {
+        let title = String(text[..<range.lowerBound])
+        let detail = String(text[range.upperBound...])
+        return (
+          title.trimmingCharacters(in: .whitespacesAndNewlines),
+          detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+      }
+    }
+    return (text.trimmingCharacters(in: .whitespacesAndNewlines), nil)
+  }
+
+  private func extractReviewLocation(from text: String) -> String? {
+    let backtickParts = text.split(separator: "`", omittingEmptySubsequences: false)
+    for idx in stride(from: 1, to: backtickParts.count, by: 2) {
+      let candidate = String(backtickParts[idx])
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if isReviewLocationCandidate(candidate) {
+        return trimReviewLocation(candidate)
+      }
+    }
+
+    for rawWord in text.split(whereSeparator: { $0.isWhitespace }) {
+      let candidate = String(rawWord)
+        .trimmingCharacters(in: CharacterSet(charactersIn: ".,;()[]`'\""))
+      if isReviewLocationCandidate(candidate) {
+        return trimReviewLocation(candidate)
+      }
+    }
+
+    return nil
+  }
+
+  private func isReviewLocationCandidate(_ text: String) -> Bool {
+    let extensions = [
+      ".swift", ".ts", ".tsx", ".js", ".jsx", ".cs", ".css", ".scss", ".html", ".mjs", ".cjs",
+    ]
+    return extensions.contains { text.contains($0) }
+  }
+
+  private func trimReviewLocation(_ text: String) -> String {
+    var location = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let codeStart = location.range(of: ": `") {
+      location = String(location[..<codeStart.lowerBound])
+    }
+    while location.last == ":" || location.last == "." || location.last == "," {
+      location.removeLast()
+    }
+    return location
+  }
+
+  private func cleanReviewText(_ text: String) -> String {
+    text.replacingOccurrences(of: "`", with: "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  @ViewBuilder
+  private func reviewFindingRow(_ item: ReviewFindingItem) -> some View {
+    let isDismissed = dismissedFindingIds.contains(item.id)
+      || (displayedChecks?.dismissedFindingIds.contains(item.id) ?? false)
+    let tint = isDismissed ? Color.green : reviewSeverityTint(item.severity)
+
+    VStack(alignment: .leading, spacing: 9) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: isDismissed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(tint)
+          .padding(.top, 2)
+
         VStack(alignment: .leading, spacing: 6) {
-          ForEach(Array(verdict.issues.enumerated()), id: \.offset) { _, issue in
-            HStack(alignment: .top, spacing: 7) {
-              Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(preSubmitTint(for: verdict.status))
-                .padding(.top, 2)
-              Text(issue)
-                .font(.caption)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+          HStack(spacing: 6) {
+            if let severity = item.severity {
+              Text(severity)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(tint.opacity(0.12), in: Capsule())
             }
+            Text(item.title)
+              .font(.callout.weight(.semibold))
+              .foregroundStyle(isDismissed ? .secondary : .primary)
+              .strikethrough(isDismissed)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+
+          if let detail = item.detail, !detail.isEmpty {
+            Text(detail)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .strikethrough(isDismissed)
+              .fixedSize(horizontal: false, vertical: true)
+              .textSelection(.enabled)
+          }
+
+          if let location = item.location, !location.isEmpty {
+            Text(location)
+              .font(.system(.caption2, design: .monospaced))
+              .foregroundStyle(.tertiary)
+              .lineLimit(1)
+              .truncationMode(.middle)
+              .textSelection(.enabled)
+          }
+        }
+
+        Spacer(minLength: 8)
+
+        if isDismissed {
+          Text("Dismissed")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        } else {
+          Button("Dismiss") {
+            // Always reset to dismiss when opening — don't leak guidance state from prior use
+            overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = ""
+            overridePopoverFindingId = item.id
+          }
+          .font(.caption2)
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+          .popover(isPresented: Binding(
+            get: { overridePopoverFindingId == item.id },
+            set: { if !$0 { overridePopoverFindingId = nil } }
+          )) {
+            overridePopover(findingId: item.id, description: item.original)
           }
         }
       }
     }
     .padding(12)
-    .background(preSubmitTint(for: verdict.status).opacity(0.06))
+    .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(preSubmitTint(for: verdict.status).opacity(0.16), lineWidth: 1))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(0.18), lineWidth: 1))
+    .opacity(isDismissed ? 0.65 : 1)
+  }
+
+  private func reviewSeverityTint(_ severity: String?) -> Color {
+    switch severity?.lowercased() {
+    case "critical", "high": .red
+    case "medium": .orange
+    case "low": .yellow
+    default: .red
+    }
+  }
+
+  @ViewBuilder
+  private func preSubmitReviewDisclosure(_ verdict: PreSubmitReviewSnapshot) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Button {
+        withAnimation(.easeOut(duration: 0.15)) {
+          isPreSubmitExpanded.toggle()
+        }
+      } label: {
+        HStack(spacing: 6) {
+          Image(systemName: isPreSubmitExpanded ? "chevron.down" : "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .frame(width: 12)
+          Image(systemName: preSubmitIcon(for: verdict.status))
+            .font(.system(size: 11))
+            .foregroundStyle(preSubmitTint(for: verdict.status))
+          Text("Agent pre-submit review: \(verdict.status.rawValue) · \(verdict.model)")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+          Spacer()
+        }
+      }
+      .buttonStyle(.plain)
+
+      if isPreSubmitExpanded {
+        VStack(alignment: .leading, spacing: 8) {
+          if !verdict.reasoning.isEmpty {
+            Text(verdict.reasoning)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+              .textSelection(.enabled)
+          }
+
+          if !verdict.issues.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+              ForEach(Array(verdict.issues.enumerated()), id: \.offset) { _, issue in
+                HStack(alignment: .top, spacing: 6) {
+                  Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(preSubmitTint(for: verdict.status))
+                    .padding(.top, 2)
+                  Text(cleanReviewText(issue))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                }
+              }
+            }
+          }
+        }
+        .padding(.leading, 18)
+      }
+    }
+    .padding(.top, 2)
   }
 
   private func preSubmitIcon(for status: PreSubmitReviewSnapshot.Status) -> String {
@@ -1882,6 +2046,15 @@ public struct ValidationTab: View {
     if ms < 1000 { return "\(ms)ms" }
     return String(format: "%.1fs", Double(ms) / 1000.0)
   }
+}
+
+private struct ReviewFindingItem: Identifiable {
+  let id: String
+  let original: String
+  let severity: String?
+  let title: String
+  let detail: String?
+  let location: String?
 }
 
 // MARK: - PhaseChip
